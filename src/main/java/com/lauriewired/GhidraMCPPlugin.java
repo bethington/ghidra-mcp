@@ -3,6 +3,7 @@ package com.lauriewired;
 import ghidra.framework.plugintool.Plugin;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.address.GlobalNamespace;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.MemoryBlock;
@@ -62,15 +63,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
     status = PluginStatus.RELEASED,
     packageName = ghidra.app.DeveloperPluginPackage.NAME,
     category = PluginCategoryNames.ANALYSIS,
-    shortDescription = "HTTP server plugin",
-    description = "Starts an embedded HTTP server to expose program data. Port configurable via Tool Options."
+    shortDescription = "GhidraMCP v1.1.2 - HTTP server plugin",
+    description = "GhidraMCP v1.1.2 - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
+                  "Provides 57+ endpoints for reverse engineering automation. Port configurable via Tool Options. " +
+                  "Features: function analysis, decompilation, symbol management, cross-references, and label operations."
 )
 public class GhidraMCPPlugin extends Plugin {
 
     private HttpServer server;
     private static final String OPTION_CATEGORY_NAME = "GhidraMCP HTTP Server";
     private static final String PORT_OPTION_NAME = "Server Port";
-    private static final int DEFAULT_PORT = 8080;
+    private static final int DEFAULT_PORT = 8089;
 
     public GhidraMCPPlugin(PluginTool tool) {
         super(tool);
@@ -331,6 +334,39 @@ public class GhidraMCPPlugin extends Plugin {
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             sendResponse(exchange, getFunctionXrefs(name, offset, limit));
+        });
+
+        server.createContext("/function_labels", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String name = qparams.get("name");
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 20);
+            sendResponse(exchange, getFunctionLabels(name, offset, limit));
+        });
+
+        server.createContext("/rename_label", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String address = params.get("address");
+            String oldName = params.get("old_name");
+            String newName = params.get("new_name");
+            String result = renameLabel(address, oldName, newName);
+            sendResponse(exchange, result);
+        });
+
+        server.createContext("/function_jump_targets", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String name = qparams.get("name");
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 100);
+            sendResponse(exchange, getFunctionJumpTargets(name, offset, limit));
+        });
+
+        server.createContext("/create_label", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String address = params.get("address");
+            String name = params.get("name");
+            String result = createLabel(address, name);
+            sendResponse(exchange, result);
         });
 
         server.createContext("/strings", exchange -> {
@@ -1635,6 +1671,283 @@ public class GhidraMCPPlugin extends Plugin {
         exchange.sendResponseHeaders(200, bytes.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(bytes);
+        }
+    }
+
+    /**
+     * Get labels within a specific function by name
+     */
+    public String getFunctionLabels(String functionName, int offset, int limit) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        SymbolTable symbolTable = program.getSymbolTable();
+        FunctionManager functionManager = program.getFunctionManager();
+        
+        // Find the function by name
+        Function function = null;
+        for (Function f : functionManager.getFunctions(true)) {
+            if (f.getName().equals(functionName)) {
+                function = f;
+                break;
+            }
+        }
+        
+        if (function == null) {
+            return "Function not found: " + functionName;
+        }
+
+        AddressSetView functionBody = function.getBody();
+        SymbolIterator symbols = symbolTable.getSymbolIterator();
+        int count = 0;
+        int skipped = 0;
+
+        while (symbols.hasNext() && count < limit) {
+            Symbol symbol = symbols.next();
+            
+            // Check if symbol is within the function's address range
+            if (symbol.getSymbolType() == SymbolType.LABEL && 
+                functionBody.contains(symbol.getAddress())) {
+                
+                if (skipped < offset) {
+                    skipped++;
+                    continue;
+                }
+                
+                if (sb.length() > 0) {
+                    sb.append("\n");
+                }
+                sb.append("Address: ").append(symbol.getAddress().toString())
+                  .append(", Name: ").append(symbol.getName())
+                  .append(", Source: ").append(symbol.getSource().toString());
+                count++;
+            }
+        }
+
+        if (sb.length() == 0) {
+            return "No labels found in function: " + functionName;
+        }
+        
+        return sb.toString();
+    }
+
+    /**
+     * Rename a label at the specified address
+     */
+    public String renameLabel(String addressStr, String oldName, String newName) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        try {
+            Address address = program.getAddressFactory().getAddress(addressStr);
+            if (address == null) {
+                return "Invalid address: " + addressStr;
+            }
+
+            SymbolTable symbolTable = program.getSymbolTable();
+            Symbol[] symbols = symbolTable.getSymbols(address);
+            
+            // Find the specific symbol with the old name
+            Symbol targetSymbol = null;
+            for (Symbol symbol : symbols) {
+                if (symbol.getName().equals(oldName) && symbol.getSymbolType() == SymbolType.LABEL) {
+                    targetSymbol = symbol;
+                    break;
+                }
+            }
+            
+            if (targetSymbol == null) {
+                return "Label not found: " + oldName + " at address " + addressStr;
+            }
+
+            // Check if new name already exists at this address
+            for (Symbol symbol : symbols) {
+                if (symbol.getName().equals(newName) && symbol.getSymbolType() == SymbolType.LABEL) {
+                    return "Label with name '" + newName + "' already exists at address " + addressStr;
+                }
+            }
+
+            // Perform the rename
+            int transactionId = program.startTransaction("Rename Label");
+            try {
+                targetSymbol.setName(newName, SourceType.USER_DEFINED);
+                return "Successfully renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr;
+            } catch (Exception e) {
+                return "Error renaming label: " + e.getMessage();
+            } finally {
+                program.endTransaction(transactionId, true);
+            }
+
+        } catch (Exception e) {
+            return "Error processing request: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Get all jump target addresses from a function's disassembly
+     */
+    public String getFunctionJumpTargets(String functionName, int offset, int limit) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        FunctionManager functionManager = program.getFunctionManager();
+        
+        // Find the function by name
+        Function function = null;
+        for (Function f : functionManager.getFunctions(true)) {
+            if (f.getName().equals(functionName)) {
+                function = f;
+                break;
+            }
+        }
+        
+        if (function == null) {
+            return "Function not found: " + functionName;
+        }
+
+        AddressSetView functionBody = function.getBody();
+        Listing listing = program.getListing();
+        Set<Address> jumpTargets = new HashSet<>();
+        
+        // Iterate through all instructions in the function
+        InstructionIterator instructions = listing.getInstructions(functionBody, true);
+        while (instructions.hasNext()) {
+            Instruction instr = instructions.next();
+            
+            // Check if this is a jump instruction
+            if (instr.getFlowType().isJump()) {
+                // Get all reference addresses from this instruction
+                Reference[] references = instr.getReferencesFrom();
+                for (Reference ref : references) {
+                    Address targetAddr = ref.getToAddress();
+                    // Only include targets within the function or program space
+                    if (targetAddr != null && program.getMemory().contains(targetAddr)) {
+                        jumpTargets.add(targetAddr);
+                    }
+                }
+                
+                // Also check for fall-through addresses for conditional jumps
+                if (instr.getFlowType().isConditional()) {
+                    Address fallThroughAddr = instr.getFallThrough();
+                    if (fallThroughAddr != null) {
+                        jumpTargets.add(fallThroughAddr);
+                    }
+                }
+            }
+        }
+
+        // Convert to sorted list and apply pagination
+        List<Address> sortedTargets = new ArrayList<>(jumpTargets);
+        Collections.sort(sortedTargets);
+        
+        int count = 0;
+        int skipped = 0;
+        
+        for (Address target : sortedTargets) {
+            if (count >= limit) break;
+            
+            if (skipped < offset) {
+                skipped++;
+                continue;
+            }
+            
+            if (sb.length() > 0) {
+                sb.append("\n");
+            }
+            
+            // Add context about what's at this address
+            String context = "";
+            Function targetFunc = functionManager.getFunctionContaining(target);
+            if (targetFunc != null) {
+                context = " (in " + targetFunc.getName() + ")";
+            } else {
+                // Check if there's a label at this address
+                Symbol symbol = program.getSymbolTable().getPrimarySymbol(target);
+                if (symbol != null) {
+                    context = " (" + symbol.getName() + ")";
+                }
+            }
+            
+            sb.append(target.toString()).append(context);
+            count++;
+        }
+
+        if (sb.length() == 0) {
+            return "No jump targets found in function: " + functionName;
+        }
+        
+        return sb.toString();
+    }
+
+    /**
+     * Create a new label at the specified address
+     */
+    public String createLabel(String addressStr, String labelName) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "Address is required";
+        }
+        
+        if (labelName == null || labelName.isEmpty()) {
+            return "Label name is required";
+        }
+
+        try {
+            Address address = program.getAddressFactory().getAddress(addressStr);
+            if (address == null) {
+                return "Invalid address: " + addressStr;
+            }
+
+            SymbolTable symbolTable = program.getSymbolTable();
+            
+            // Check if a label with this name already exists at this address
+            Symbol[] existingSymbols = symbolTable.getSymbols(address);
+            for (Symbol symbol : existingSymbols) {
+                if (symbol.getName().equals(labelName) && symbol.getSymbolType() == SymbolType.LABEL) {
+                    return "Label '" + labelName + "' already exists at address " + addressStr;
+                }
+            }
+            
+            // Check if the label name is already used elsewhere (optional warning)
+            SymbolIterator existingLabels = symbolTable.getSymbolIterator(labelName, true);
+            if (existingLabels.hasNext()) {
+                Symbol existingSymbol = existingLabels.next();
+                if (existingSymbol.getSymbolType() == SymbolType.LABEL) {
+                    // Allow creation but warn about duplicate name
+                    Msg.warn(this, "Label name '" + labelName + "' already exists at address " + 
+                            existingSymbol.getAddress() + ". Creating duplicate at " + addressStr);
+                }
+            }
+
+            // Create the label
+            int transactionId = program.startTransaction("Create Label");
+            try {
+                Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
+                if (newSymbol != null) {
+                    return "Successfully created label '" + labelName + "' at address " + addressStr;
+                } else {
+                    return "Failed to create label '" + labelName + "' at address " + addressStr;
+                }
+            } catch (Exception e) {
+                return "Error creating label: " + e.getMessage();
+            } finally {
+                program.endTransaction(transactionId, true);
+            }
+
+        } catch (Exception e) {
+            return "Error processing request: " + e.getMessage();
         }
     }
 

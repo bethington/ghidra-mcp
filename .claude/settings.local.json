@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ide__executeCode",
+      "Bash(python:*)",
+      "Bash(mvn clean:*)",
+      "Bash(powershell:*)",
+      "Bash(mvn test:*)",
+      "Bash(unzip:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

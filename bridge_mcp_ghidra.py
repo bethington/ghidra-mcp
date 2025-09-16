@@ -14,7 +14,7 @@ from urllib.parse import urljoin
 
 from mcp.server.fastmcp import FastMCP
 
-DEFAULT_GHIDRA_SERVER = "http://127.0.0.1:8080/"
+DEFAULT_GHIDRA_SERVER = "http://127.0.0.1:8089/"
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,40 @@ def rename_data(address: str, new_name: str) -> str:
     Rename a data label at the specified address.
     """
     return safe_post("renameData", {"address": address, "newName": new_name})
+
+@mcp.tool()
+def get_function_labels(name: str, offset: int = 0, limit: int = 20) -> list:
+    """
+    Get all labels within the specified function by name.
+    
+    Args:
+        name: Function name to search for labels within
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of labels to return (default: 20)
+        
+    Returns:
+        List of labels found within the specified function
+    """
+    return safe_get("function_labels", {"name": name, "offset": offset, "limit": limit})
+
+@mcp.tool()
+def rename_label(address: str, old_name: str, new_name: str) -> str:
+    """
+    Rename an existing label at the specified address.
+    
+    Args:
+        address: Target address in hex format (e.g., "0x1400010a0")
+        old_name: Current label name to rename
+        new_name: New name for the label
+        
+    Returns:
+        Success/failure message
+    """
+    return safe_post("rename_label", {
+        "address": address, 
+        "old_name": old_name, 
+        "new_name": new_name
+    })
 
 @mcp.tool()
 def list_segments(offset: int = 0, limit: int = 100) -> list:
@@ -286,6 +320,44 @@ def list_strings(offset: int = 0, limit: int = 2000, filter: str = None) -> list
     if filter:
         params["filter"] = filter
     return safe_get("strings", params)
+
+@mcp.tool()
+def get_function_jump_target_addresses(name: str, offset: int = 0, limit: int = 100) -> list:
+    """
+    Get all jump target addresses from a function's disassembly.
+    
+    This tool analyzes the disassembly of a specified function and extracts all addresses
+    that are targets of conditional and unconditional jump instructions (JMP, JE, JNE, JZ, etc.).
+    
+    Args:
+        name: Function name to analyze for jump targets
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of jump targets to return (default: 100)
+        
+    Returns:
+        List of jump target addresses found in the function's disassembly
+    """
+    return safe_get("function_jump_targets", {"name": name, "offset": offset, "limit": limit})
+
+@mcp.tool()
+def create_label(address: str, name: str) -> str:
+    """
+    Create a new label at the specified address.
+    
+    This tool creates a user-defined label at the given address. The label will be
+    visible in Ghidra's Symbol Tree and can be used for navigation and reference.
+    
+    Args:
+        address: Target address in hex format (e.g., "0x1400010a0")
+        name: Name for the new label
+        
+    Returns:
+        Success/failure message
+    """
+    return safe_post("create_label", {
+        "address": address, 
+        "name": name
+    })
 
 def main():
     parser = argparse.ArgumentParser(description="MCP server for Ghidra")

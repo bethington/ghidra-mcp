@@ -61,7 +61,7 @@ To set up Claude Desktop as a Ghidra MCP client, go to `Claude` -> `Settings` ->
       "args": [
         "/ABSOLUTE_PATH_TO/bridge_mcp_ghidra.py",
         "--ghidra-server",
-        "http://127.0.0.1:8080/"
+        "http://127.0.0.1:8089/"
       ]
     }
   }
@@ -73,13 +73,13 @@ Alternatively, edit this file directly:
 /Users/YOUR_USER/Library/Application Support/Claude/claude_desktop_config.json
 ```
 
-The server IP and port are configurable and should be set to point to the target Ghidra instance. If not set, both will default to localhost:8080.
+The server IP and port are configurable and should be set to point to the target Ghidra instance. If not set, both will default to localhost:8089.
 
 ## Example 2: Cline
 To use GhidraMCP with [Cline](https://cline.bot), this requires manually running the MCP server as well. First run the following command:
 
 ```
-python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081 --ghidra-server http://127.0.0.1:8080/
+python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081 --ghidra-server http://127.0.0.1:8089/
 ```
 
 The only *required* argument is the transport. If all other arguments are unspecified, they will default to the above. Once the MCP server is running, open up Cline and select `MCP Servers` at the top.
