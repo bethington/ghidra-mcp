@@ -359,6 +359,169 @@ def create_label(address: str, name: str) -> str:
         "name": name
     })
 
+@mcp.tool()
+def get_function_callees(name: str, offset: int = 0, limit: int = 100) -> list:
+    """
+    Get all functions called by the specified function (callees).
+    
+    This tool analyzes a function and returns all functions that it calls directly.
+    Useful for understanding what functionality a function depends on.
+    
+    Args:
+        name: Function name to analyze for callees
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of callees to return (default: 100)
+        
+    Returns:
+        List of functions called by the specified function
+    """
+    return safe_get("function_callees", {"name": name, "offset": offset, "limit": limit})
+
+@mcp.tool()
+def get_function_callers(name: str, offset: int = 0, limit: int = 100) -> list:
+    """
+    Get all functions that call the specified function (callers).
+    
+    This tool finds all functions that call the specified function, helping to
+    understand the function's usage throughout the program.
+    
+    Args:
+        name: Function name to find callers for
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of callers to return (default: 100)
+        
+    Returns:
+        List of functions that call the specified function
+    """
+    return safe_get("function_callers", {"name": name, "offset": offset, "limit": limit})
+
+@mcp.tool()
+def get_function_call_graph(name: str, depth: int = 2, direction: str = "both") -> list:
+    """
+    Get a call graph subgraph centered on the specified function.
+    
+    This tool generates a localized call graph showing the relationships between
+    a function and its callers/callees up to a specified depth.
+    
+    Args:
+        name: Function name to center the graph on
+        depth: Maximum depth to traverse (default: 2)
+        direction: Direction to traverse ("callers", "callees", "both")
+        
+    Returns:
+        List of call graph relationships in the format "caller -> callee"
+    """
+    return safe_get("function_call_graph", {"name": name, "depth": depth, "direction": direction})
+
+@mcp.tool()
+def get_full_call_graph(format: str = "edges", limit: int = 1000) -> list:
+    """
+    Get the complete call graph for the entire program.
+    
+    This tool generates a comprehensive call graph showing all function call
+    relationships in the program. Can be output in different formats.
+    
+    Args:
+        format: Output format ("edges", "adjacency", "dot", "mermaid")
+        limit: Maximum number of relationships to return (default: 1000)
+        
+    Returns:
+        Complete call graph in the specified format
+    """
+    return safe_get("full_call_graph", {"format": format, "limit": limit})
+
+@mcp.tool()
+def list_data_types(category: str = None, offset: int = 0, limit: int = 100) -> list:
+    """
+    List all data types available in the program with optional category filtering.
+    
+    This tool enumerates all data types defined in the program's data type manager,
+    including built-in types, user-defined structs, enums, and imported types.
+    
+    Args:
+        category: Optional category filter (e.g., "builtin", "struct", "enum", "pointer")
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of data types to return (default: 100)
+        
+    Returns:
+        List of data types with their names, categories, and sizes
+    """
+    params = {"offset": offset, "limit": limit}
+    if category:
+        params["category"] = category
+    return safe_get("list_data_types", params)
+
+@mcp.tool()
+def create_struct(name: str, fields: list) -> str:
+    """
+    Create a new structure data type with specified fields.
+    
+    This tool creates a custom structure definition that can be applied to memory
+    locations. Fields should be specified as a list of dictionaries with 'name',
+    'type', and optionally 'offset' keys.
+    
+    Args:
+        name: Name for the new structure
+        fields: List of field definitions, each with:
+                - name: Field name
+                - type: Field data type (e.g., "int", "char", "DWORD")
+                - offset: Optional explicit offset (auto-calculated if omitted)
+                
+    Returns:
+        Success/failure message with created structure details
+        
+    Example:
+        fields = [
+            {"name": "id", "type": "int"},
+            {"name": "name", "type": "char[32]"},
+            {"name": "flags", "type": "DWORD"}
+        ]
+    """
+    return safe_post("create_struct", {"name": name, "fields": fields})
+
+@mcp.tool()
+def create_enum(name: str, values: dict, size: int = 4) -> str:
+    """
+    Create a new enumeration data type with name-value pairs.
+    
+    This tool creates an enumeration type that can be applied to memory locations
+    to provide meaningful names for numeric values.
+    
+    Args:
+        name: Name for the new enumeration
+        values: Dictionary of name-value pairs (e.g., {"OPTION_A": 0, "OPTION_B": 1})
+        size: Size of the enum in bytes (1, 2, 4, or 8, default: 4)
+        
+    Returns:
+        Success/failure message with created enumeration details
+        
+    Example:
+        values = {"STATE_IDLE": 0, "STATE_RUNNING": 1, "STATE_STOPPED": 2}
+    """
+    return safe_post("create_enum", {"name": name, "values": values, "size": size})
+
+@mcp.tool()
+def apply_data_type(address: str, type_name: str, clear_existing: bool = True) -> str:
+    """
+    Apply a specific data type at the given memory address.
+    
+    This tool applies a data type definition to a memory location, which helps
+    in interpreting the raw bytes as structured data during analysis.
+    
+    Args:
+        address: Target address in hex format (e.g., "0x1400010a0")
+        type_name: Name of the data type to apply (e.g., "int", "MyStruct", "DWORD")
+        clear_existing: Whether to clear existing data/code at the address (default: True)
+        
+    Returns:
+        Success/failure message with details about the applied data type
+    """
+    return safe_post("apply_data_type", {
+        "address": address, 
+        "type_name": type_name,
+        "clear_existing": clear_existing
+    })
+
 def main():
     parser = argparse.ArgumentParser(description="MCP server for Ghidra")
     parser.add_argument("--ghidra-server", type=str, default=DEFAULT_GHIDRA_SERVER,

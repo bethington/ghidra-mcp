@@ -369,6 +369,68 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         });
 
+        server.createContext("/function_callees", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String name = qparams.get("name");
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 100);
+            sendResponse(exchange, getFunctionCallees(name, offset, limit));
+        });
+
+        server.createContext("/function_callers", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String name = qparams.get("name");
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 100);
+            sendResponse(exchange, getFunctionCallers(name, offset, limit));
+        });
+
+        server.createContext("/function_call_graph", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String name = qparams.get("name");
+            int depth = parseIntOrDefault(qparams.get("depth"), 2);
+            String direction = qparams.getOrDefault("direction", "both");
+            sendResponse(exchange, getFunctionCallGraph(name, depth, direction));
+        });
+
+        server.createContext("/full_call_graph", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String format = qparams.getOrDefault("format", "edges");
+            int limit = parseIntOrDefault(qparams.get("limit"), 1000);
+            sendResponse(exchange, getFullCallGraph(format, limit));
+        });
+
+        server.createContext("/list_data_types", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String category = qparams.get("category");
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 100);
+            sendResponse(exchange, listDataTypes(category, offset, limit));
+        });
+
+        server.createContext("/create_struct", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String name = params.get("name");
+            String fieldsJson = params.get("fields");
+            sendResponse(exchange, createStruct(name, fieldsJson));
+        });
+
+        server.createContext("/create_enum", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String name = params.get("name");
+            String valuesJson = params.get("values");
+            int size = parseIntOrDefault(params.get("size"), 4);
+            sendResponse(exchange, createEnum(name, valuesJson, size));
+        });
+
+        server.createContext("/apply_data_type", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String address = params.get("address");
+            String typeName = params.get("type_name");
+            boolean clearExisting = Boolean.parseBoolean(params.getOrDefault("clear_existing", "true"));
+            sendResponse(exchange, applyDataType(address, typeName, clearExisting));
+        });
+
         server.createContext("/strings", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
@@ -1946,6 +2008,787 @@ public class GhidraMCPPlugin extends Plugin {
                 program.endTransaction(transactionId, true);
             }
 
+        } catch (Exception e) {
+            return "Error processing request: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Get all functions called by the specified function (callees)
+     */
+    public String getFunctionCallees(String functionName, int offset, int limit) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        FunctionManager functionManager = program.getFunctionManager();
+        
+        // Find the function by name
+        Function function = null;
+        for (Function f : functionManager.getFunctions(true)) {
+            if (f.getName().equals(functionName)) {
+                function = f;
+                break;
+            }
+        }
+        
+        if (function == null) {
+            return "Function not found: " + functionName;
+        }
+
+        Set<Function> callees = new HashSet<>();
+        AddressSetView functionBody = function.getBody();
+        Listing listing = program.getListing();
+        ReferenceManager refManager = program.getReferenceManager();
+        
+        // Iterate through all instructions in the function
+        InstructionIterator instructions = listing.getInstructions(functionBody, true);
+        while (instructions.hasNext()) {
+            Instruction instr = instructions.next();
+            
+            // Check if this is a call instruction
+            if (instr.getFlowType().isCall()) {
+                // Get all reference addresses from this instruction
+                Reference[] references = refManager.getReferencesFrom(instr.getAddress());
+                for (Reference ref : references) {
+                    if (ref.getReferenceType().isCall()) {
+                        Address targetAddr = ref.getToAddress();
+                        Function targetFunc = functionManager.getFunctionAt(targetAddr);
+                        if (targetFunc != null) {
+                            callees.add(targetFunc);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Convert to sorted list and apply pagination
+        List<Function> sortedCallees = new ArrayList<>(callees);
+        sortedCallees.sort((f1, f2) -> f1.getName().compareTo(f2.getName()));
+        
+        int count = 0;
+        int skipped = 0;
+        
+        for (Function callee : sortedCallees) {
+            if (count >= limit) break;
+            
+            if (skipped < offset) {
+                skipped++;
+                continue;
+            }
+            
+            if (sb.length() > 0) {
+                sb.append("\n");
+            }
+            
+            sb.append(String.format("%s @ %s", callee.getName(), callee.getEntryPoint()));
+            count++;
+        }
+
+        if (sb.length() == 0) {
+            return "No callees found for function: " + functionName;
+        }
+        
+        return sb.toString();
+    }
+
+    /**
+     * Get all functions that call the specified function (callers)
+     */
+    public String getFunctionCallers(String functionName, int offset, int limit) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        FunctionManager functionManager = program.getFunctionManager();
+        
+        // Find the function by name
+        Function targetFunction = null;
+        for (Function f : functionManager.getFunctions(true)) {
+            if (f.getName().equals(functionName)) {
+                targetFunction = f;
+                break;
+            }
+        }
+        
+        if (targetFunction == null) {
+            return "Function not found: " + functionName;
+        }
+
+        Set<Function> callers = new HashSet<>();
+        ReferenceManager refManager = program.getReferenceManager();
+        
+        // Get all references to this function's entry point
+        ReferenceIterator refIter = refManager.getReferencesTo(targetFunction.getEntryPoint());
+        while (refIter.hasNext()) {
+            Reference ref = refIter.next();
+            if (ref.getReferenceType().isCall()) {
+                Address fromAddr = ref.getFromAddress();
+                Function callerFunc = functionManager.getFunctionContaining(fromAddr);
+                if (callerFunc != null) {
+                    callers.add(callerFunc);
+                }
+            }
+        }
+
+        // Convert to sorted list and apply pagination
+        List<Function> sortedCallers = new ArrayList<>(callers);
+        sortedCallers.sort((f1, f2) -> f1.getName().compareTo(f2.getName()));
+        
+        int count = 0;
+        int skipped = 0;
+        
+        for (Function caller : sortedCallers) {
+            if (count >= limit) break;
+            
+            if (skipped < offset) {
+                skipped++;
+                continue;
+            }
+            
+            if (sb.length() > 0) {
+                sb.append("\n");
+            }
+            
+            sb.append(String.format("%s @ %s", caller.getName(), caller.getEntryPoint()));
+            count++;
+        }
+
+        if (sb.length() == 0) {
+            return "No callers found for function: " + functionName;
+        }
+        
+        return sb.toString();
+    }
+
+    /**
+     * Get a call graph subgraph centered on the specified function
+     */
+    public String getFunctionCallGraph(String functionName, int depth, String direction) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        FunctionManager functionManager = program.getFunctionManager();
+        
+        // Find the function by name
+        Function rootFunction = null;
+        for (Function f : functionManager.getFunctions(true)) {
+            if (f.getName().equals(functionName)) {
+                rootFunction = f;
+                break;
+            }
+        }
+        
+        if (rootFunction == null) {
+            return "Function not found: " + functionName;
+        }
+
+        Set<String> visited = new HashSet<>();
+        Map<String, Set<String>> callGraph = new HashMap<>();
+        
+        // Build call graph based on direction
+        if ("callees".equals(direction) || "both".equals(direction)) {
+            buildCallGraphCallees(rootFunction, depth, visited, callGraph, functionManager);
+        }
+        
+        if ("callers".equals(direction) || "both".equals(direction)) {
+            visited.clear(); // Reset for callers traversal
+            buildCallGraphCallers(rootFunction, depth, visited, callGraph, functionManager);
+        }
+
+        // Format output as edges
+        for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+            String caller = entry.getKey();
+            for (String callee : entry.getValue()) {
+                if (sb.length() > 0) {
+                    sb.append("\n");
+                }
+                sb.append(caller).append(" -> ").append(callee);
+            }
+        }
+
+        if (sb.length() == 0) {
+            return "No call graph relationships found for function: " + functionName;
+        }
+        
+        return sb.toString();
+    }
+
+    /**
+     * Helper method to build call graph for callees (what this function calls)
+     */
+    private void buildCallGraphCallees(Function function, int depth, Set<String> visited, 
+                                     Map<String, Set<String>> callGraph, FunctionManager functionManager) {
+        if (depth <= 0 || visited.contains(function.getName())) {
+            return;
+        }
+        
+        visited.add(function.getName());
+        Set<String> callees = new HashSet<>();
+        
+        // Find callees of this function
+        AddressSetView functionBody = function.getBody();
+        Listing listing = getCurrentProgram().getListing();
+        ReferenceManager refManager = getCurrentProgram().getReferenceManager();
+        
+        InstructionIterator instructions = listing.getInstructions(functionBody, true);
+        while (instructions.hasNext()) {
+            Instruction instr = instructions.next();
+            
+            if (instr.getFlowType().isCall()) {
+                Reference[] references = refManager.getReferencesFrom(instr.getAddress());
+                for (Reference ref : references) {
+                    if (ref.getReferenceType().isCall()) {
+                        Address targetAddr = ref.getToAddress();
+                        Function targetFunc = functionManager.getFunctionAt(targetAddr);
+                        if (targetFunc != null) {
+                            callees.add(targetFunc.getName());
+                            // Recursively build graph for callees
+                            buildCallGraphCallees(targetFunc, depth - 1, visited, callGraph, functionManager);
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (!callees.isEmpty()) {
+            callGraph.put(function.getName(), callees);
+        }
+    }
+
+    /**
+     * Helper method to build call graph for callers (what calls this function)
+     */
+    private void buildCallGraphCallers(Function function, int depth, Set<String> visited, 
+                                     Map<String, Set<String>> callGraph, FunctionManager functionManager) {
+        if (depth <= 0 || visited.contains(function.getName())) {
+            return;
+        }
+        
+        visited.add(function.getName());
+        ReferenceManager refManager = getCurrentProgram().getReferenceManager();
+        
+        // Find callers of this function
+        ReferenceIterator refIter = refManager.getReferencesTo(function.getEntryPoint());
+        while (refIter.hasNext()) {
+            Reference ref = refIter.next();
+            if (ref.getReferenceType().isCall()) {
+                Address fromAddr = ref.getFromAddress();
+                Function callerFunc = functionManager.getFunctionContaining(fromAddr);
+                if (callerFunc != null) {
+                    String callerName = callerFunc.getName();
+                    callGraph.computeIfAbsent(callerName, k -> new HashSet<>()).add(function.getName());
+                    // Recursively build graph for callers
+                    buildCallGraphCallers(callerFunc, depth - 1, visited, callGraph, functionManager);
+                }
+            }
+        }
+    }
+
+    /**
+     * Get the complete call graph for the entire program
+     */
+    public String getFullCallGraph(String format, int limit) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        FunctionManager functionManager = program.getFunctionManager();
+        ReferenceManager refManager = program.getReferenceManager();
+        Listing listing = program.getListing();
+        
+        Map<String, Set<String>> callGraph = new HashMap<>();
+        int relationshipCount = 0;
+        
+        // Build complete call graph
+        for (Function function : functionManager.getFunctions(true)) {
+            if (relationshipCount >= limit) {
+                break;
+            }
+            
+            String functionName = function.getName();
+            Set<String> callees = new HashSet<>();
+            
+            // Find all functions called by this function
+            AddressSetView functionBody = function.getBody();
+            InstructionIterator instructions = listing.getInstructions(functionBody, true);
+            
+            while (instructions.hasNext() && relationshipCount < limit) {
+                Instruction instr = instructions.next();
+                
+                if (instr.getFlowType().isCall()) {
+                    Reference[] references = refManager.getReferencesFrom(instr.getAddress());
+                    for (Reference ref : references) {
+                        if (ref.getReferenceType().isCall()) {
+                            Address targetAddr = ref.getToAddress();
+                            Function targetFunc = functionManager.getFunctionAt(targetAddr);
+                            if (targetFunc != null) {
+                                callees.add(targetFunc.getName());
+                                relationshipCount++;
+                                if (relationshipCount >= limit) {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if (!callees.isEmpty()) {
+                callGraph.put(functionName, callees);
+            }
+        }
+
+        // Format output based on requested format
+        if ("dot".equals(format)) {
+            sb.append("digraph CallGraph {\n");
+            sb.append("  rankdir=TB;\n");
+            sb.append("  node [shape=box];\n");
+            for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+                String caller = entry.getKey().replace("\"", "\\\"");
+                for (String callee : entry.getValue()) {
+                    callee = callee.replace("\"", "\\\"");
+                    sb.append("  \"").append(caller).append("\" -> \"").append(callee).append("\";\n");
+                }
+            }
+            sb.append("}");
+        } else if ("mermaid".equals(format)) {
+            sb.append("graph TD\n");
+            for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+                String caller = entry.getKey().replace(" ", "_");
+                for (String callee : entry.getValue()) {
+                    callee = callee.replace(" ", "_");
+                    sb.append("  ").append(caller).append(" --> ").append(callee).append("\n");
+                }
+            }
+        } else if ("adjacency".equals(format)) {
+            for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+                if (sb.length() > 0) {
+                    sb.append("\n");
+                }
+                sb.append(entry.getKey()).append(": ");
+                sb.append(String.join(", ", entry.getValue()));
+            }
+        } else { // Default "edges" format
+            for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+                String caller = entry.getKey();
+                for (String callee : entry.getValue()) {
+                    if (sb.length() > 0) {
+                        sb.append("\n");
+                    }
+                    sb.append(caller).append(" -> ").append(callee);
+                }
+            }
+        }
+
+        if (sb.length() == 0) {
+            return "No call relationships found in the program";
+        }
+        
+        return sb.toString();
+    }
+
+    /**
+     * List all data types available in the program with optional category filtering
+     */
+    public String listDataTypes(String category, int offset, int limit) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        DataTypeManager dtm = program.getDataTypeManager();
+        List<String> dataTypes = new ArrayList<>();
+        
+        // Get all data types from the manager
+        Iterator<DataType> allTypes = dtm.getAllDataTypes();
+        while (allTypes.hasNext()) {
+            DataType dt = allTypes.next();
+            
+            // Apply category filter if specified
+            if (category != null && !category.isEmpty()) {
+                String dtCategory = getCategoryName(dt);
+                if (!dtCategory.toLowerCase().contains(category.toLowerCase())) {
+                    continue;
+                }
+            }
+            
+            // Format: name | category | size | path
+            String categoryName = getCategoryName(dt);
+            int size = dt.getLength();
+            String sizeStr = (size > 0) ? String.valueOf(size) : "variable";
+            
+            dataTypes.add(String.format("%s | %s | %s bytes | %s", 
+                dt.getName(), categoryName, sizeStr, dt.getPathName()));
+        }
+        
+        // Apply pagination
+        String result = paginateList(dataTypes, offset, limit);
+        
+        if (result.isEmpty()) {
+            return "No data types found" + (category != null ? " for category: " + category : "");
+        }
+        
+        return result;
+    }
+
+    /**
+     * Helper method to get category name for a data type
+     */
+    private String getCategoryName(DataType dt) {
+        if (dt.getCategoryPath() == null) {
+            return "builtin";
+        }
+        String categoryPath = dt.getCategoryPath().getPath();
+        if (categoryPath.isEmpty() || categoryPath.equals("/")) {
+            return "builtin";
+        }
+        
+        // Extract the last part of the category path
+        String[] parts = categoryPath.split("/");
+        return parts[parts.length - 1].toLowerCase();
+    }
+
+    /**
+     * Create a new structure data type with specified fields
+     */
+    public String createStruct(String name, String fieldsJson) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+        
+        if (name == null || name.isEmpty()) {
+            return "Structure name is required";
+        }
+        
+        if (fieldsJson == null || fieldsJson.isEmpty()) {
+            return "Fields JSON is required";
+        }
+
+        try {
+            // Parse the fields JSON (simplified parsing for basic structure)
+            // Expected format: [{"name":"field1","type":"int"},{"name":"field2","type":"char"}]
+            List<FieldDefinition> fields = parseFieldsJson(fieldsJson);
+            
+            if (fields.isEmpty()) {
+                return "No valid fields provided";
+            }
+
+            DataTypeManager dtm = program.getDataTypeManager();
+            
+            // Check if struct already exists
+            DataType existingType = dtm.getDataType("/" + name);
+            if (existingType != null) {
+                return "Structure with name '" + name + "' already exists";
+            }
+
+            // Create the structure
+            int txId = program.startTransaction("Create Structure: " + name);
+            try {
+                ghidra.program.model.data.StructureDataType struct = 
+                    new ghidra.program.model.data.StructureDataType(name, 0);
+                
+                int currentOffset = 0;
+                for (FieldDefinition field : fields) {
+                    DataType fieldType = resolveDataType(dtm, field.type);
+                    if (fieldType == null) {
+                        return "Unknown field type: " + field.type;
+                    }
+                    
+                    // Use explicit offset if provided, otherwise use current offset
+                    int offset = (field.offset >= 0) ? field.offset : currentOffset;
+                    
+                    struct.replaceAtOffset(offset, fieldType, fieldType.getLength(), 
+                                         field.name, "");
+                    
+                    currentOffset = Math.max(currentOffset, offset + fieldType.getLength());
+                }
+                
+                // Add the structure to the data type manager
+                DataType createdStruct = dtm.addDataType(struct, null);
+                
+                program.endTransaction(txId, true);
+                
+                return "Successfully created structure '" + name + "' with " + fields.size() + 
+                       " fields, total size: " + createdStruct.getLength() + " bytes";
+                       
+            } catch (Exception e) {
+                program.endTransaction(txId, false);
+                return "Error creating structure: " + e.getMessage();
+            }
+            
+        } catch (Exception e) {
+            return "Error parsing fields JSON: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Helper class for field definitions
+     */
+    private static class FieldDefinition {
+        String name;
+        String type;
+        int offset = -1; // -1 means auto-calculate
+        
+        FieldDefinition(String name, String type) {
+            this.name = name;
+            this.type = type;
+        }
+        
+        FieldDefinition(String name, String type, int offset) {
+            this.name = name;
+            this.type = type;
+            this.offset = offset;
+        }
+    }
+
+    /**
+     * Parse fields JSON into FieldDefinition objects
+     */
+    private List<FieldDefinition> parseFieldsJson(String fieldsJson) {
+        List<FieldDefinition> fields = new ArrayList<>();
+        
+        try {
+            // Remove outer brackets and whitespace
+            String content = fieldsJson.trim();
+            if (content.startsWith("[")) {
+                content = content.substring(1);
+            }
+            if (content.endsWith("]")) {
+                content = content.substring(0, content.length() - 1);
+            }
+            
+            // Split by field objects (simple parsing)
+            String[] fieldStrings = content.split("\\},\\s*\\{");
+            
+            for (String fieldStr : fieldStrings) {
+                // Clean up braces
+                fieldStr = fieldStr.replace("{", "").replace("}", "").trim();
+                
+                String name = null;
+                String type = null;
+                int offset = -1;
+                
+                // Parse key-value pairs
+                String[] pairs = fieldStr.split(",");
+                for (String pair : pairs) {
+                    String[] keyValue = pair.split(":");
+                    if (keyValue.length == 2) {
+                        String key = keyValue[0].trim().replace("\"", "");
+                        String value = keyValue[1].trim().replace("\"", "");
+                        
+                        switch (key) {
+                            case "name":
+                                name = value;
+                                break;
+                            case "type":
+                                type = value;
+                                break;
+                            case "offset":
+                                try {
+                                    offset = Integer.parseInt(value);
+                                } catch (NumberFormatException e) {
+                                    // Ignore invalid offset
+                                }
+                                break;
+                        }
+                    }
+                }
+                
+                if (name != null && type != null) {
+                    fields.add(new FieldDefinition(name, type, offset));
+                }
+            }
+        } catch (Exception e) {
+            // Return empty list on parse error
+        }
+        
+        return fields;
+    }
+
+    /**
+     * Create a new enumeration data type with name-value pairs
+     */
+    public String createEnum(String name, String valuesJson, int size) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+        
+        if (name == null || name.isEmpty()) {
+            return "Enumeration name is required";
+        }
+        
+        if (valuesJson == null || valuesJson.isEmpty()) {
+            return "Values JSON is required";
+        }
+        
+        if (size != 1 && size != 2 && size != 4 && size != 8) {
+            return "Invalid size. Must be 1, 2, 4, or 8 bytes";
+        }
+
+        try {
+            // Parse the values JSON
+            Map<String, Long> values = parseValuesJson(valuesJson);
+            
+            if (values.isEmpty()) {
+                return "No valid enum values provided";
+            }
+
+            DataTypeManager dtm = program.getDataTypeManager();
+            
+            // Check if enum already exists
+            DataType existingType = dtm.getDataType("/" + name);
+            if (existingType != null) {
+                return "Enumeration with name '" + name + "' already exists";
+            }
+
+            // Create the enumeration
+            int txId = program.startTransaction("Create Enumeration: " + name);
+            try {
+                ghidra.program.model.data.EnumDataType enumDt = 
+                    new ghidra.program.model.data.EnumDataType(name, size);
+                
+                for (Map.Entry<String, Long> entry : values.entrySet()) {
+                    enumDt.add(entry.getKey(), entry.getValue());
+                }
+                
+                // Add the enumeration to the data type manager
+                dtm.addDataType(enumDt, null);
+                
+                program.endTransaction(txId, true);
+                
+                return "Successfully created enumeration '" + name + "' with " + values.size() + 
+                       " values, size: " + size + " bytes";
+                       
+            } catch (Exception e) {
+                program.endTransaction(txId, false);
+                return "Error creating enumeration: " + e.getMessage();
+            }
+            
+        } catch (Exception e) {
+            return "Error parsing values JSON: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Parse values JSON into name-value pairs
+     */
+    private Map<String, Long> parseValuesJson(String valuesJson) {
+        Map<String, Long> values = new LinkedHashMap<>();
+        
+        try {
+            // Remove outer braces and whitespace
+            String content = valuesJson.trim();
+            if (content.startsWith("{")) {
+                content = content.substring(1);
+            }
+            if (content.endsWith("}")) {
+                content = content.substring(0, content.length() - 1);
+            }
+            
+            // Split by commas (simple parsing)
+            String[] pairs = content.split(",");
+            
+            for (String pair : pairs) {
+                String[] keyValue = pair.split(":");
+                if (keyValue.length == 2) {
+                    String key = keyValue[0].trim().replace("\"", "");
+                    String valueStr = keyValue[1].trim();
+                    
+                    try {
+                        Long value = Long.parseLong(valueStr);
+                        values.put(key, value);
+                    } catch (NumberFormatException e) {
+                        // Skip invalid values
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // Return empty map on parse error
+        }
+        
+        return values;
+    }
+
+    /**
+     * Apply a specific data type at the given memory address
+     */
+    public String applyDataType(String addressStr, String typeName, boolean clearExisting) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+        
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "Address is required";
+        }
+        
+        if (typeName == null || typeName.isEmpty()) {
+            return "Data type name is required";
+        }
+
+        try {
+            Address address = program.getAddressFactory().getAddress(addressStr);
+            if (address == null) {
+                return "Invalid address: " + addressStr;
+            }
+            
+            DataTypeManager dtm = program.getDataTypeManager();
+            DataType dataType = resolveDataType(dtm, typeName);
+            
+            if (dataType == null) {
+                return "Unknown data type: " + typeName;
+            }
+            
+            Listing listing = program.getListing();
+            
+            // Check if address is in a valid memory block
+            if (!program.getMemory().contains(address)) {
+                return "Address is not in program memory: " + addressStr;
+            }
+
+            int txId = program.startTransaction("Apply Data Type: " + typeName);
+            try {
+                // Clear existing code/data if requested
+                if (clearExisting) {
+                    CodeUnit existingCU = listing.getCodeUnitAt(address);
+                    if (existingCU != null) {
+                        listing.clearCodeUnits(address, 
+                            address.add(Math.max(dataType.getLength() - 1, 0)), false);
+                    }
+                }
+                
+                // Apply the data type
+                Data data = listing.createData(address, dataType);
+                
+                program.endTransaction(txId, true);
+                
+                String result = "Successfully applied data type '" + typeName + "' at " + 
+                               addressStr + " (size: " + dataType.getLength() + " bytes)";
+                
+                // Add value information if available
+                if (data != null && data.getValue() != null) {
+                    result += "\nValue: " + data.getValue().toString();
+                }
+                
+                return result;
+                
+            } catch (Exception e) {
+                program.endTransaction(txId, false);
+                return "Error applying data type: " + e.getMessage();
+            }
+            
         } catch (Exception e) {
             return "Error processing request: " + e.getMessage();
         }
