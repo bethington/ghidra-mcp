@@ -9,7 +9,7 @@ if not exist "lib" mkdir lib
 
 :: Set source directory - use parameter if provided, otherwise use default
 if "%~1"=="" (
-    set GHIDRA_DIR=F:\ghidra_11.4.2_PUBLIC
+    set GHIDRA_DIR=F:\ghidra_11.4.2
     echo Using default Ghidra directory: !GHIDRA_DIR!
 ) else (
     set GHIDRA_DIR=%~1

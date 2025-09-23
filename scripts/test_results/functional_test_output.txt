@@ -1,0 +1,46 @@
+Command: C:\Python313\python.exe C:\Users\benam\source\mcp\ghidra-mcp\scripts\test_mcp_tools_functional.py http://127.0.0.1:8089/
+Return code: 1
+Duration: 0.85s
+
+STDOUT:
+[36m[00:42:24] INFO: ============================================================[0m
+[36m[00:42:24] INFO: Starting MCP Tools Functional Testing Suite[0m
+[36m[00:42:24] INFO: Target server: http://127.0.0.1:8089/[0m
+[36m[00:42:24] INFO: ============================================================[0m
+[36m[00:42:24] INFO: 
+==================== Basic Connectivity ====================[0m
+[35m[00:42:24] TEST: Testing basic connectivity...[0m
+
+STDERR:
+Traceback (most recent call last):
+  File "C:\Users\benam\source\mcp\ghidra-mcp\scripts\test_mcp_tools_functional.py", line 368, in run_functional_tests
+    result = workflow_func()
+  File "C:\Users\benam\source\mcp\ghidra-mcp\scripts\test_mcp_tools_functional.py", line 58, in test_basic_connectivity
+    self.log(f"\u274c Connection test failed: {response}", "ERROR")
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\benam\source\mcp\ghidra-mcp\scripts\test_mcp_tools_functional.py", line 37, in log
+    print(f"{color}[{timestamp}] {level}: {message}{colors['RESET']}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 23: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\benam\source\mcp\ghidra-mcp\scripts\test_mcp_tools_functional.py", line 427, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\benam\source\mcp\ghidra-mcp\scripts\test_mcp_tools_functional.py", line 420, in main
+    success = tester.run_functional_tests()
+  File "C:\Users\benam\source\mcp\ghidra-mcp\scripts\test_mcp_tools_functional.py", line 376, in run_functional_tests
+    self.log(f"\u274c {workflow_name} ERROR: {str(e)}", "ERROR")
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\benam\source\mcp\ghidra-mcp\scripts\test_mcp_tools_functional.py", line 37, in log
+    print(f"{color}[{timestamp}] {level}: {message}{colors['RESET']}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 23: character maps to <undefined>

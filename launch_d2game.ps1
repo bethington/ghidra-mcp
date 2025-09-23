@@ -1,0 +1,5 @@
+$env:GHIDRA_USER = "benam"
+$env:GHIDRA_PASS = "goodyx12"
+$ghidraPath = "F:\ghidra_11.4.2\ghidraRun.bat"
+$projectFile = "F:\GhidraProjects\PD2.gpr"
+& $ghidraPath $projectFile -open "D2Game.dll"

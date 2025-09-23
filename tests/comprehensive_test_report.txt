@@ -1,0 +1,49 @@
+
+🎯 COMPREHENSIVE GHIDRA MCP TEST REPORT
+======================================================================
+⏰ Test Duration: 2.07 seconds
+📊 Total Tests: 65
+✅ Passed: 51
+❌ Failed: 0
+⚠️  Errors: 0
+📈 Overall Success Rate: 78.5%
+
+📋 TEST SUITE BREAKDOWN
+----------------------------------------
+
+Core Functionality: 100.0% (5/5)
+  Basic connectivity and metadata tests
+
+Function Operations: 100.0% (9/9)
+  Function listing, searching, and analysis
+
+Function Analysis: 100.0% (9/9)
+  Cross-references, call graphs, and relationships
+
+Memory Analysis: 100.0% (5/5)
+  Memory segments, cross-references, and data access
+
+Data Type Queries: 87.5% (7/8)
+  Data type listing, searching, and analysis
+
+Data Type Creation: 100.0% (4/4)
+  Creating structures, unions, enums, and typedefs
+
+Symbols and Names: 100.0% (10/10)
+  Imports, exports, namespaces, and strings
+
+Modification Operations: 7.1% (1/14)
+  Renaming, commenting, and labeling
+
+Utilities: 100.0% (1/1)
+  Helper and conversion functions
+
+🔧 CREATED TEST RESOURCES
+----------------------------------------
+Structs: TestStruct_1758650496
+Unions: TestUnion_1758650496
+Enums: TestEnum_1758650496
+Typedefs: TestTypedef_1758650496
+Labels: ('0x148', 'TestLabel_1758650497')
+
+✨ Test completed at 2025-09-23 13:01:37

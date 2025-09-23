@@ -12,7 +12,7 @@ function Write-Info { param($msg) Write-Host "[INFO] $msg" -ForegroundColor Cyan
 function Write-Warning { param($msg) Write-Host "[WARNING] $msg" -ForegroundColor Yellow }
 function Write-Error { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
-Write-Info "GhidraMCP v1.1.2 Deployment Script"
+Write-Info "GhidraMCP v1.2.0 Deployment Script"
 Write-Info "===================================="
 
 # Find Ghidra installation
@@ -21,7 +21,7 @@ $possiblePaths = @(
     "C:\Program Files\ghidra",
     "C:\Program Files (x86)\ghidra",
     "C:\tools\ghidra",
-    "F:\ghidra_11.4.2_PUBLIC",
+    "F:\ghidra_11.4.2",
     "$env:USERPROFILE\ghidra",
     "$env:USERPROFILE\tools\ghidra"
 )
@@ -47,7 +47,7 @@ if (-not $GhidraPath) {
 }
 
 # Verify build artifact exists
-$artifactPath = "$PSScriptRoot\target\GhidraMCP-1.1.2.zip"
+$artifactPath = "$PSScriptRoot\target\GhidraMCP-1.2.0.zip"
 if (-not (Test-Path $artifactPath)) {
     Write-Error "Build artifact not found: $artifactPath"
     Write-Info "Please run the build first: mvn clean package assembly:single"
@@ -76,9 +76,9 @@ if ($existingPlugins) {
 
 # Copy new plugin
 try {
-    $destinationPath = Join-Path $extensionsDir "GhidraMCP-1.1.2.zip"
+    $destinationPath = Join-Path $extensionsDir "GhidraMCP-1.2.0.zip"
     Copy-Item $artifactPath $destinationPath -Force
-    Write-Success "Installed: GhidraMCP-1.1.2.zip → $extensionsDir"
+    Write-Success "Installed: GhidraMCP-1.2.0.zip → $extensionsDir"
 } catch {
     Write-Error "Failed to copy plugin: $($_.Exception.Message)"
     exit 1
@@ -172,7 +172,7 @@ if (Test-Path $userDir) {
 
 # Create quick reference message
 Write-Host ""
-Write-Success "GhidraMCP v1.1.2 Successfully Deployed!"
+Write-Success "GhidraMCP v1.2.0 Successfully Deployed!"
 Write-Host ""
 Write-Info "Installation Locations:"
 Write-Host "   Plugin: $destinationPath"
@@ -195,7 +195,7 @@ Write-Host "   Python: python bridge_mcp_ghidra.py (from Ghidra root directory)"
 Write-Host ""
 Write-Info "Default Server: http://127.0.0.1:8089/"
 Write-Host ""
-Write-Info "New in v1.1.2:"
+Write-Info "New in v1.2.0:"
 Write-Host "   + get_function_callgraph - Analyze function calls"
 Write-Host "   + find_byte_patterns - Pattern matching with wildcards"
 Write-Host "   + create_label - Programmatic label creation"

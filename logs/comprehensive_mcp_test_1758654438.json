@@ -1,0 +1,243 @@
+{
+  "timestamp": 1758654438.0886273,
+  "total_tests": 26,
+  "successful_tests": 26,
+  "failed_tests": 0,
+  "success_rate": 100.0,
+  "results": [
+    {
+      "endpoint": "/check_connection",
+      "method": "GET",
+      "description": "Check MCP connection",
+      "success": true,
+      "duration": 0.022734880447387695,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/get_metadata",
+      "method": "GET",
+      "description": "Get program metadata",
+      "success": true,
+      "duration": 0.014714479446411133,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/get_entry_points",
+      "method": "GET",
+      "description": "Get entry points",
+      "success": true,
+      "duration": 0.3039677143096924,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/functions?limit=10",
+      "method": "GET",
+      "description": "List functions",
+      "success": true,
+      "duration": 0.03162336349487305,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/searchFunctions?searchTerm=main&limit=5",
+      "method": "GET",
+      "description": "Search functions",
+      "success": true,
+      "duration": 0.020380496978759766,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/decompile_function/main",
+      "method": "GET",
+      "description": "Decompile function",
+      "success": true,
+      "duration": 0.0016498565673828125,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/function_xrefs/main",
+      "method": "GET",
+      "description": "Get function cross-refs",
+      "success": true,
+      "duration": 0.01432037353515625,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/function_callers/main",
+      "method": "GET",
+      "description": "Get function callers",
+      "success": true,
+      "duration": 0.031533002853393555,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/function_callees/main",
+      "method": "GET",
+      "description": "Get function callees",
+      "success": true,
+      "duration": 0.014139413833618164,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/function_call_graph/main",
+      "method": "GET",
+      "description": "Get call graph",
+      "success": true,
+      "duration": 0.02730584144592285,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/segments",
+      "method": "GET",
+      "description": "List memory segments",
+      "success": true,
+      "duration": 0.016811132431030273,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/get_function_by_address/0x034c1000",
+      "method": "GET",
+      "description": "Get function by address",
+      "success": true,
+      "duration": 0.015277624130249023,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/disassemble_function/0x034c1000",
+      "method": "GET",
+      "description": "Disassemble function",
+      "success": true,
+      "duration": 0.015203475952148438,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/xrefs_to/0x034c1000",
+      "method": "GET",
+      "description": "Get cross-refs to address",
+      "success": true,
+      "duration": 0.0021657943725585938,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/xrefs_from/0x034c1000",
+      "method": "GET",
+      "description": "Get cross-refs from address",
+      "success": true,
+      "duration": 0.012250661849975586,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/data_types?limit=10",
+      "method": "GET",
+      "description": "List data types",
+      "success": true,
+      "duration": 0.40372157096862793,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/search_data_types?pattern=int&limit=5",
+      "method": "GET",
+      "description": "Search data types",
+      "success": true,
+      "duration": 0.002735137939453125,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/create_struct",
+      "method": "POST",
+      "description": "Create structure",
+      "success": true,
+      "duration": 0.02280902862548828,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/create_union",
+      "method": "POST",
+      "description": "Create union",
+      "success": true,
+      "duration": 0.041985273361206055,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/create_enum",
+      "method": "POST",
+      "description": "Create enumeration",
+      "success": true,
+      "duration": 0.003700733184814453,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/imports?limit=10",
+      "method": "GET",
+      "description": "List imports",
+      "success": true,
+      "duration": 0.009478330612182617,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/exports?limit=10",
+      "method": "GET",
+      "description": "List exports",
+      "success": true,
+      "duration": 0.42020726203918457,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/strings?limit=10",
+      "method": "GET",
+      "description": "List strings",
+      "success": true,
+      "duration": 0.10572600364685059,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/namespaces?limit=10",
+      "method": "GET",
+      "description": "List namespaces",
+      "success": true,
+      "duration": 0.11065292358398438,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/create_label",
+      "method": "POST",
+      "description": "Create label",
+      "success": true,
+      "duration": 0.01756143569946289,
+      "response_code": 200,
+      "error_message": ""
+    },
+    {
+      "endpoint": "/convert_number/123",
+      "method": "GET",
+      "description": "Convert number",
+      "success": true,
+      "duration": 0.01474452018737793,
+      "response_code": 200,
+      "error_message": ""
+    }
+  ]
+}

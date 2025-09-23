@@ -1,0 +1,863 @@
+{
+  "timestamp": "2025-09-23 01:19:30",
+  "server_url": "http://127.0.0.1:8089/",
+  "total_tests": 58,
+  "passed_tests": 35,
+  "failed_tests": 23,
+  "success_rate": 60.3448275862069,
+  "test_results": [
+    {
+      "tool_name": "list_functions",
+      "endpoint": "functions",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 2.19,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "offset": 0,
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "list_classes",
+      "endpoint": "classes",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 216.33,
+      "response_length": 56,
+      "response_preview": "ADVAPI32.DLL\nD2CMP.DLL\nD2COMMON.DLL\nD2GAME.DLL\nD2GFX.DLL",
+      "params": {
+        "offset": 0,
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "list_segments",
+      "endpoint": "segments",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 1.57,
+      "response_length": 137,
+      "response_preview": "Headers: 6fab0000 - 6fab0fff\n.text: 6fab1000 - 6fb7dfff\n.rdata: 6fb7e000 - 6fb8afff\n.data: 6fb8b000 - 6fbd4adb\n.rsrc: 6fbd5000 - 6fbd5fff",
+      "params": {
+        "offset": 0,
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "list_imports",
+      "endpoint": "imports",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 5.6,
+      "response_length": 174,
+      "response_preview": "SetStdHandle -> EXTERNAL:00000001\nFlushFileBuffers -> EXTERNAL:00000002\nGetStringTypeA -> EXTERNAL:00000003\nGetStringTypeW -> EXTERNAL:00000004\nGetCPInfo -> EXTERNAL:00000005",
+      "params": {
+        "offset": 0,
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "list_exports",
+      "endpoint": "exports",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 242.84,
+      "response_length": 122,
+      "response_preview": "entry -> 6fab45f6\nOrdinal_10003 -> 6fac08c0\nOrdinal_10004 -> 6fafbe70\nQueryInterface -> 6fafbe70\nOrdinal_10002 -> 6fb12de0",
+      "params": {
+        "offset": 0,
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "list_namespaces",
+      "endpoint": "namespaces",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 112.4,
+      "response_length": 56,
+      "response_preview": "ADVAPI32.DLL\nD2CMP.DLL\nD2COMMON.DLL\nD2GAME.DLL\nD2GFX.DLL",
+      "params": {
+        "offset": 0,
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "list_methods",
+      "endpoint": "methods",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 22.54,
+      "response_length": 119,
+      "response_preview": "DeleteObjectMemory\nEmptyStubFunction\ncleanup_exception_data_structures\noffset_linked_list_insert\nProcessDualLinkCleanup",
+      "params": {
+        "offset": 0,
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "list_data_items",
+      "endpoint": "data",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 601.97,
+      "response_length": 129,
+      "response_preview": "6fab0000: IMAGE_DOS_HEADER_6fab0000 = \n6fab0080: (unnamed) = \n6fab0108: (unnamed) = \n6fab0200: (unnamed) = \n6fab0228: (unnamed) =",
+      "params": {
+        "offset": 0,
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "list_strings",
+      "endpoint": "strings",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 31.5,
+      "response_length": 108,
+      "response_preview": "6fb7f163: \"oCorExitProcess\"\n6fb7f174: \"mscoree.dll\"\n6fb7f29e: \"null)\"\n6fb7f2ac: \"(null)\"\n6fb7f4d8: \"FlsFree\"",
+      "params": {
+        "offset": 0,
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_current_address",
+      "endpoint": "get_current_address",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 2.1,
+      "response_length": 8,
+      "response_preview": "6fb3d600",
+      "params": {},
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_current_function",
+      "endpoint": "get_current_function",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 2.69,
+      "response_length": 91,
+      "response_preview": "Function: FUN_6fb3d600 at 6fb3d600\nSignature: undefined __stdcall FUN_6fb3d600(int param_1)",
+      "params": {},
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_function_by_address",
+      "endpoint": "get_function_by_address",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 1.51,
+      "response_length": 37,
+      "response_preview": "No function found at address 0x401000",
+      "params": {
+        "address": "0x401000"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "list_globals",
+      "endpoint": "list_globals",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 1.25,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "offset": 0,
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_entry_points",
+      "endpoint": "get_entry_points",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 2.52,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {},
+      "expected_success": true
+    },
+    {
+      "tool_name": "decompile_function",
+      "endpoint": "decompile",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 298.2,
+      "response_length": 18,
+      "response_preview": "Function not found",
+      "params": {
+        "name": "main"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "decompile_function_by_address",
+      "endpoint": "decompile_function",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 2.0,
+      "response_length": 51,
+      "response_preview": "No function found at or containing address 0x401000",
+      "params": {
+        "address": "0x401000"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "disassemble_function",
+      "endpoint": "disassemble_function",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 1.3,
+      "response_length": 51,
+      "response_preview": "No function found at or containing address 0x401000",
+      "params": {
+        "address": "0x401000"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_function_callees",
+      "endpoint": "function_callees",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 12.09,
+      "response_length": 24,
+      "response_preview": "Function not found: main",
+      "params": {
+        "name": "main",
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_function_callers",
+      "endpoint": "function_callers",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 12.36,
+      "response_length": 24,
+      "response_preview": "Function not found: main",
+      "params": {
+        "name": "main",
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_function_call_graph",
+      "endpoint": "function_call_graph",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 13.5,
+      "response_length": 24,
+      "response_preview": "Function not found: main",
+      "params": {
+        "name": "main",
+        "depth": 2
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_function_jump_target_addresses",
+      "endpoint": "function_jump_target_addresses",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 1.45,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "name": "main",
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_function_xrefs",
+      "endpoint": "function_xrefs",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 13.41,
+      "response_length": 37,
+      "response_preview": "No references found to function: main",
+      "params": {
+        "name": "main",
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_xrefs_to",
+      "endpoint": "xrefs_to",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 2.56,
+      "response_length": 0,
+      "response_preview": "",
+      "params": {
+        "address": "0x401000",
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_xrefs_from",
+      "endpoint": "xrefs_from",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 1.58,
+      "response_length": 0,
+      "response_preview": "",
+      "params": {
+        "address": "0x401000",
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_full_call_graph",
+      "endpoint": "full_call_graph",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 36.54,
+      "response_length": 414,
+      "response_preview": "GetEngineState -> Ordinal_10175\nGetItemBaseValue -> Ordinal_10750\nFreeDynamicModules -> FreeDynamicModules\nFindEntityAtPosition -> Ordinal_10383\nget_sound_data_size -> Ordinal_10867\nWardenClientDelete",
+      "params": {
+        "format": "edges",
+        "limit": 10
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "rename_function",
+      "endpoint": "rename_function",
+      "method": "POST",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 1.31,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "old_name": "test_old",
+        "new_name": "test_new"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "rename_function_by_address",
+      "endpoint": "rename_function_by_address",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 8.05,
+      "response_length": 25,
+      "response_preview": "Failed to rename function",
+      "params": {
+        "function_address": "0x401000",
+        "new_name": "test_renamed"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "create_label",
+      "endpoint": "create_label",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 109.82,
+      "response_length": 63,
+      "response_preview": "Successfully created label 'test_label_mcp' at address 0x401000",
+      "params": {
+        "address": "0x401000",
+        "name": "test_label_mcp"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "rename_label",
+      "endpoint": "rename_label",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 4.24,
+      "response_length": 87,
+      "response_preview": "Successfully renamed label from 'test_label_mcp' to 'renamed_label' at address 0x401000",
+      "params": {
+        "address": "0x401000",
+        "old_name": "test_label_mcp",
+        "new_name": "renamed_label"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "set_disassembly_comment",
+      "endpoint": "set_disassembly_comment",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 278.36,
+      "response_length": 24,
+      "response_preview": "Comment set successfully",
+      "params": {
+        "address": "0x401000",
+        "comment": "Test comment from MCP tools test"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "set_decompiler_comment",
+      "endpoint": "set_decompiler_comment",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 101.36,
+      "response_length": 24,
+      "response_preview": "Comment set successfully",
+      "params": {
+        "address": "0x401000",
+        "comment": "Test comment from MCP tools test"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "set_function_prototype",
+      "endpoint": "set_function_prototype",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 119.83,
+      "response_length": 78,
+      "response_preview": "Failed to set function prototype: Could not find function at address: 0x401000",
+      "params": {
+        "function_address": "0x401000",
+        "prototype": "int test_function(int param1, char* param2)"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "set_local_variable_type",
+      "endpoint": "set_local_variable_type",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 16.78,
+      "response_length": 121,
+      "response_preview": "Setting variable type: test_var to float in function at 0x401000\n\nFound type: /float\n\nResult: Failed to set variable type",
+      "params": {
+        "function_address": "0x401000",
+        "variable_name": "test_var",
+        "new_type": "float"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "rename_variable",
+      "endpoint": "rename_variable",
+      "method": "POST",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 3.82,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "function_name": "main",
+        "old_name": "old_var",
+        "new_name": "new_var"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "rename_data",
+      "endpoint": "rename_data",
+      "method": "POST",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 2.63,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "address": "0x401000",
+        "new_name": "renamed_data"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "rename_global_variable",
+      "endpoint": "rename_global_variable",
+      "method": "POST",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 2.16,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "old_name": "old_global",
+        "new_name": "new_global"
+      },
+      "expected_success": false
+    },
+    {
+      "tool_name": "list_data_types",
+      "endpoint": "list_data_types",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 7.79,
+      "response_length": 598,
+      "response_preview": "__ehstate_t | ehdata.h | 4 bytes | /ehdata.h/__ehstate_t\n__lc_time_data | crtdefs.h | 356 bytes | /crtdefs.h/__lc_time_data\n__lc_time_data * | crtdefs.h | 4 bytes | /crtdefs.h/__lc_time_data *\n_CONTEX",
+      "params": {
+        "offset": 0,
+        "limit": 10
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "create_struct",
+      "endpoint": "create_struct",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 8.41,
+      "response_length": 82,
+      "response_preview": "Successfully created structure 'TestStruct_MCP' with 2 fields, total size: 8 bytes",
+      "params": {
+        "name": "TestStruct_MCP",
+        "fields": "[{\"name\":\"id\",\"type\":\"int\"},{\"name\":\"value\",\"type\":\"float\"}]"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "create_enum",
+      "endpoint": "create_enum",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 6.18,
+      "response_length": 76,
+      "response_preview": "Successfully created enumeration 'TestEnum_MCP' with 2 values, size: 4 bytes",
+      "params": {
+        "name": "TestEnum_MCP",
+        "values": "{\"OPTION_A\": 0, \"OPTION_B\": 1}",
+        "size": 4
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "apply_data_type",
+      "endpoint": "apply_data_type",
+      "method": "POST",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 2.39,
+      "response_length": 42,
+      "response_preview": "Address is not in program memory: 0x401000",
+      "params": {
+        "address": "0x401000",
+        "type_name": "int"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_analyze_data_types",
+      "endpoint": "analyze_data_types",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 1.83,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "address": "0x401000",
+        "depth": 1
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_create_union",
+      "endpoint": "create_union",
+      "method": "POST",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 3.79,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "name": "TestUnion_MCP",
+        "fields": "[{\"name\":\"as_int\",\"type\":\"int\"},{\"name\":\"as_float\",\"type\":\"float\"}]"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_get_type_size",
+      "endpoint": "get_type_size",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 3.47,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "type_name": "int"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_get_struct_layout",
+      "endpoint": "get_struct_layout",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 2.29,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "struct_name": "TestStruct_MCP"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_auto_create_struct",
+      "endpoint": "auto_create_struct",
+      "method": "POST",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 4.73,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "address": "0x401000",
+        "size": 16,
+        "name": "AutoStruct_MCP"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_get_enum_values",
+      "endpoint": "get_enum_values",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 2.69,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "enum_name": "TestEnum_MCP"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_create_typedef",
+      "endpoint": "create_typedef",
+      "method": "POST",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 2.93,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "name": "MyInt",
+        "base_type": "int"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_clone_data_type",
+      "endpoint": "clone_data_type",
+      "method": "POST",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 3.28,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "source_type": "int",
+        "new_name": "ClonedInt"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_validate_data_type",
+      "endpoint": "validate_data_type",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 3.86,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "address": "0x401000",
+        "type_name": "int"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "search_functions_by_name",
+      "endpoint": "searchFunctions",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 58.5,
+      "response_length": 28,
+      "response_preview": "No functions matching 'main'",
+      "params": {
+        "query": "main",
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_function_labels",
+      "endpoint": "function_labels",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 58.41,
+      "response_length": 24,
+      "response_preview": "Function not found: main",
+      "params": {
+        "name": "main",
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_search_data_types",
+      "endpoint": "search_data_types",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 1.98,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "pattern": "int",
+        "limit": 5
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "check_connection",
+      "endpoint": "methods",
+      "method": "GET",
+      "success": true,
+      "status_code": 200,
+      "duration_ms": 68.55,
+      "response_length": 2255,
+      "response_preview": "DeleteObjectMemory\nEmptyStubFunction\ncleanup_exception_data_structures\noffset_linked_list_insert\nProcessDualLinkCleanup\nProcessLinkedListCleanupLoop\nGetDataTableEntryByIndex\nGetNestedTableEntryByDoubl",
+      "params": {},
+      "expected_success": true
+    },
+    {
+      "tool_name": "get_metadata",
+      "endpoint": "get_metadata",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 1.86,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {},
+      "expected_success": true
+    },
+    {
+      "tool_name": "convert_number",
+      "endpoint": "convert_number",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 1.81,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "text": "123",
+        "size": 4
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_export_data_types",
+      "endpoint": "export_data_types",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 1.86,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "format": "c",
+        "category": "builtin"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "mcp_ghidra_import_data_types",
+      "endpoint": "import_data_types",
+      "method": "POST",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 2.02,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "source": "struct test { int x; float y; };",
+        "format": "c"
+      },
+      "expected_success": true
+    },
+    {
+      "tool_name": "read_memory",
+      "endpoint": "readMemory",
+      "method": "GET",
+      "success": false,
+      "status_code": 404,
+      "duration_ms": 2.37,
+      "response_length": 60,
+      "response_preview": "HTTP 404: <h1>404 Not Found</h1>No context found for request",
+      "params": {
+        "address": "0x401000",
+        "size": 16
+      },
+      "expected_success": true
+    }
+  ]
+}

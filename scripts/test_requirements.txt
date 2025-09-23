@@ -1,0 +1,30 @@
+# Test dependencies for MCP Tools Test Suite
+# Install with: pip install -r test_requirements.txt
+
+# Core testing framework
+pytest>=7.0.0
+
+# HTTP requests library
+requests>=2.25.0
+
+# JSON pretty printing and manipulation
+jsonschema>=4.0.0
+
+# Test reporting
+pytest-html>=3.1.0
+pytest-json-report>=1.5.0
+
+# Coverage analysis (optional)
+pytest-cov>=4.0.0
+
+# Timeout handling
+pytest-timeout>=2.1.0
+
+# Parallel test execution (optional)
+pytest-xdist>=3.0.0
+
+# Better test output formatting
+pytest-sugar>=0.9.0
+
+# Test discovery and execution
+pytest-mock>=3.10.0
