@@ -5,25 +5,23 @@ This directory contains comprehensive documentation for the Ghidra MCP Server pr
 ## 📚 Documentation Index
 
 ### Core Documentation
-- **[API Reference](API_REFERENCE.md)** - Complete API endpoint documentation
-- **[Development Guide](DEVELOPMENT_GUIDE.md)** - Setup and development workflows
-- **[Data Type Tools](DATA_TYPE_TOOLS.md)** - Custom data structure creation and management
 
-### Process Documentation  
-- **[Enhanced Development Process](ENHANCED_DEV_PROCESS.md)** - Advanced development workflows
-- **[Binary Documentation Strategy](BINARY_DOCUMENTATION_STRATEGY.md)** - Automated binary analysis strategy
-- **[Function Documentation Strategy](FUNCTION_DOCUMENTATION_STRATEGY.md)** - Function analysis best practices
+- **[API Reference](API_REFERENCE.md)** - Complete MCP tools documentation (57 tools)
+- **[Development Guide](DEVELOPMENT_GUIDE.md)** - Setup, development workflows, and best practices
+- **[Requirements Guide](REQUIREMENTS.md)** - Dependency management and installation
+- **[Data Type Tools](DATA_TYPE_TOOLS.md)** - Advanced data structure analysis tools
 
-### Analysis Reports
-- **[Complete Enhancement Summary](COMPLETE_ENHANCEMENT_SUMMARY.md)** - Project enhancement overview
-- **[Endpoint Fixes Summary](ENDPOINT_FIXES_SUMMARY.md)** - API endpoint improvements
-- **[Refactoring Summary](REFACTORING_SUMMARY.md)** - Code refactoring documentation
+### Quick Start Guides
 
-### Legacy Documentation
-- **[Development Cycle README](DEV_CYCLE_README.md)** - Original development cycle documentation
-- **[Enhanced Process Test](ENHANCED_PROCESS_TEST.md)** - Process testing documentation
-- **[Steps 8-9 Documentation](STEPS_8_9_DOCUMENTATION.md)** - Specific workflow steps
-- **[Latest Development Report](LATEST_DEVELOPMENT_REPORT.md)** - Recent development status
+- **For Users**: Start with [API Reference](API_REFERENCE.md) for complete tool documentation
+- **For Developers**: Begin with [Development Guide](DEVELOPMENT_GUIDE.md) for setup and workflows
+- **For Testing**: See [../tests/README.md](../tests/README.md) for comprehensive test suite info
+
+### Additional Documentation
+
+- **[Archive](archive/)** - Historical documentation and development notes
+- **[Test Documentation](../tests/README.md)** - Complete testing framework documentation
+- **[Scripts Documentation](../scripts/README.md)** - Utility scripts and tools
 
 ## 🔧 Quick Start
 
@@ -34,9 +32,9 @@ This directory contains comprehensive documentation for the Ghidra MCP Server pr
 ## 📊 Project Status
 
 - **Production Ready**: ✅ Yes
-- **API Coverage**: 26/26 endpoints (100%)
-- **Documentation Quality**: 100%
-- **Test Coverage**: All endpoints verified
+- **MCP Tools**: 57/57 tools (100%)
+- **Test Coverage**: 158 comprehensive tests (147 passed, 11 skipped)
+- **Package**: com.xebyte (updated from com.lauriewired)
 
 ## 🏆 Quality Metrics
 

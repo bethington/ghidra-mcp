@@ -6,7 +6,6 @@
 # ]
 # ///
 
-import sys
 import requests
 import argparse
 import logging
@@ -22,6 +21,7 @@ mcp = FastMCP("ghidra-mcp")
 
 # Initialize ghidra_server_url with default value
 ghidra_server_url = DEFAULT_GHIDRA_SERVER
+
 
 def safe_get(endpoint: str, params: dict = None) -> list:
     """
@@ -41,6 +41,7 @@ def safe_get(endpoint: str, params: dict = None) -> list:
             return [f"Error {response.status_code}: {response.text.strip()}"]
     except Exception as e:
         return [f"Request failed: {str(e)}"]
+
 
 def safe_post(endpoint: str, data: dict | str) -> str:
     try:
@@ -306,31 +307,7 @@ def get_current_function() -> str:
     return "\n".join(safe_get("get_current_function"))
 
 @mcp.tool()
-def list_functions(offset: int = 0, limit: int = 100) -> list:
-    """
-    List all functions in the database with pagination.
-    
-    Args:
-        offset: Pagination offset for starting position (default: 0)
-        limit: Maximum number of functions to return (default: 100)
-        
-    Returns:
-        List of all functions in the program with names and addresses
-    """
-    return safe_get("list_functions", {"offset": offset, "limit": limit})
-
-@mcp.tool()
-def decompile_function(address: str) -> str:
-    """
-    Decompile a function at the given address.
-    
-    Args:
-        address: Memory address in hex format (e.g., "0x1400010a0")
-        
-    Returns:
-        Decompiled C code as a string
-    """
-    return "\n".join(safe_get("decompile_function", {"address": address}))
+# Removed duplicate decompile_function - using the MCP tool version above
 
 @mcp.tool()
 def disassemble_function(address: str) -> list:
@@ -414,7 +391,11 @@ def set_local_variable_type(function_address: str, variable_name: str, new_type:
     Returns:
         Success or failure message indicating the result of the type change
     """
-    return safe_post("set_local_variable_type", {"function_address": function_address, "variable_name": variable_name, "new_type": new_type})
+    return safe_post("set_local_variable_type", {
+        "function_address": function_address,
+        "variable_name": variable_name,
+        "new_type": new_type
+    })
 
 @mcp.tool()
 def get_xrefs_to(address: str, offset: int = 0, limit: int = 100) -> list:
@@ -1007,7 +988,7 @@ def main():
             logger.info("Server stopped by user")
     else:
         mcp.run()
-        
+
+
 if __name__ == "__main__":
     main()
-

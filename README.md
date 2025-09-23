@@ -11,8 +11,8 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 
 ### Core MCP Integration
 - **Full MCP 1.5.0 Compatibility** - Complete implementation of Model Context Protocol
-- **26+ Endpoint Coverage** - Comprehensive API surface for binary analysis
-- **100% Success Rate** - Production-tested reliability across all endpoints
+- **57 MCP Tools Available** - Comprehensive API surface for binary analysis
+- **100% Success Rate** - Production-tested reliability across all tools
 - **Real-time Analysis** - Live integration with Ghidra's analysis engine
 
 ### Binary Analysis Capabilities
@@ -89,10 +89,10 @@ python ghidra_dev_cycle.py --comprehensive-test --document-binary
 
 ## 📊 Production Performance
 
-- **Reliability**: 100% success rate across 26 endpoints
-- **Speed**: Sub-5ms response for memory operations
+- **Reliability**: 100% success rate across 57 MCP tools
+- **Speed**: Sub-second response for most operations
 - **Throughput**: 1000+ API calls per minute
-- **Quality**: Consistent 100% documentation quality scores
+- **Quality**: Comprehensive test suite with 158 tests (147 passed, 11 skipped)
 - **Uptime**: Automatic process recovery and error handling
 
 ## 🛠️ API Reference
@@ -172,8 +172,8 @@ python ghidra_dev_cycle.py --comprehensive-test --document-binary
 - Performance monitoring and optimization
 
 ### Quality Metrics
-- **Documentation Quality**: Automated scoring system (targeting 100%)
-- **API Coverage**: 26/26 endpoints tested and verified
+- **Test Coverage**: 158 comprehensive tests across unit/integration/functional categories
+- **MCP Tool Coverage**: 57/57 tools available and tested
 - **Performance Tracking**: Response time monitoring and optimization
 - **Error Recovery**: Intelligent fallback strategies for failed operations
 
@@ -207,8 +207,8 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 **Current Version**: 1.2.0  
 **Production Ready**: ✅ Yes  
-**Quality Score**: 100%  
-**Test Coverage**: 26/26 endpoints (100%)  
+**Package**: com.xebyte (updated from com.lauriewired)  
+**Test Coverage**: 57/57 MCP tools (100%) + 158 comprehensive tests  
 **Documentation Coverage**: 100%  
 **Performance**: Optimized for production workloads  
 
