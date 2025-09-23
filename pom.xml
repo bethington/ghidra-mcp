@@ -1,13 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <groupId>com.lauriewired</groupId>
+    <groupId>com.xebyte</groupId>
     <artifactId>GhidraMCP</artifactId>
     <packaging>jar</packaging>
     <version>1.2.0</version>
-    <name>GhidraMCP</name>
-    <url>http://maven.apache.org</url>
+    <name>Ghidra MCP Server</name>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform</description>
+    <url>https://github.com/bethington/ghidra-mcp</url>
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <ghidra.version>11.4.2</ghidra.version>
+    </properties>
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+    <developers>
+        <developer>
+            <id>bethington</id>
+            <name>Project Maintainer</name>
+            <url>https://github.com/bethington</url>
+        </developer>
+    </developers>
+    <scm>
+        <connection>scm:git:git://github.com/bethington/ghidra-mcp.git</connection>
+        <developerConnection>scm:git:ssh://github.com:bethington/ghidra-mcp.git</developerConnection>
+        <url>http://github.com/bethington/ghidra-mcp/tree/main</url>
+    </scm>
     <dependencies>
         <!-- Ghidra JARs as system-scoped dependencies -->
         <dependency>
@@ -74,11 +101,6 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
-    <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
     <build>
         <plugins>
             <!-- Maven Compiler Plugin -->

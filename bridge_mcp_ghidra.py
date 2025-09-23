@@ -33,7 +33,7 @@ def safe_get(endpoint: str, params: dict = None) -> list:
     url = urljoin(ghidra_server_url, endpoint)
 
     try:
-        response = requests.get(url, params=params, timeout=5)
+        response = requests.get(url, params=params, timeout=30)
         response.encoding = 'utf-8'
         if response.ok:
             return response.text.splitlines()
@@ -46,9 +46,9 @@ def safe_post(endpoint: str, data: dict | str) -> str:
     try:
         url = urljoin(ghidra_server_url, endpoint)
         if isinstance(data, dict):
-            response = requests.post(url, data=data, timeout=5)
+            response = requests.post(url, data=data, timeout=30)
         else:
-            response = requests.post(url, data=data.encode("utf-8"), timeout=5)
+            response = requests.post(url, data=data.encode("utf-8"), timeout=30)
         response.encoding = 'utf-8'
         if response.ok:
             return response.text.strip()
@@ -689,7 +689,7 @@ def check_connection() -> str:
         Connection status message
     """
     try:
-        response = requests.get(urljoin(ghidra_server_url, "check_connection"), timeout=3)
+        response = requests.get(urljoin(ghidra_server_url, "check_connection"), timeout=30)
         if response.ok:
             return response.text.strip()
         else:

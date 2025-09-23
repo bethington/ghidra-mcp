@@ -111,7 +111,7 @@ server.createContext("/readMemory", exchange -> {
 
 ## Files Modified
 
-1. **`src/main/java/com/lauriewired/GhidraMCPPlugin.java`**:
+1. **`src/main/java/com/xebyte/GhidraMCPPlugin.java`**:
    - Added 6 endpoint aliases (lines ~580-600)
    - Implemented readMemory method (lines ~3860-3900)
    - Added readMemory endpoint registration
