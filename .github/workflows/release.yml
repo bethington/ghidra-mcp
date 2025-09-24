@@ -102,8 +102,28 @@ jobs:
         echo "Preparing release artifacts..."
         mkdir -p release
         
+        # List what's in target directory for debugging
+        echo "Contents of target directory:"
+        ls -la target/
+        
         # Copy main plugin ZIP (the version should match the tag)
-        cp target/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip release/ || cp target/GhidraMCP-*.zip release/
+        if [ -f "target/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip" ]; then
+          echo "Copying versioned zip: GhidraMCP-${{ steps.version.outputs.VERSION }}.zip"
+          cp target/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip release/
+        elif [ -f "target/GhidraMCP.zip" ]; then
+          echo "Copying non-versioned zip: GhidraMCP.zip -> GhidraMCP-${{ steps.version.outputs.VERSION }}.zip"
+          cp target/GhidraMCP.zip release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip
+        else
+          echo "Looking for any zip file in target..."
+          ZIP_FILE=$(find target/ -name "*.zip" | head -1)
+          if [ -n "$ZIP_FILE" ]; then
+            echo "Found zip file: $ZIP_FILE"
+            cp "$ZIP_FILE" release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip
+          else
+            echo "ERROR: No zip file found in target directory!"
+            exit 1
+          fi
+        fi
         
         # Copy Python MCP bridge
         cp bridge_mcp_ghidra.py release/

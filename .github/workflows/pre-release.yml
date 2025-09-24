@@ -103,8 +103,28 @@ jobs:
         echo "Preparing pre-release artifacts..."
         mkdir -p release
         
-        # Find and copy ZIP files
-        find target -name "GhidraMCP-*.zip" -exec cp {} release/ \;
+        # List what's in target directory for debugging
+        echo "Contents of target directory:"
+        ls -la target/
+        
+        # Copy main plugin ZIP with robust error handling
+        if [ -f "target/GhidraMCP-${VERSION}.zip" ]; then
+          echo "Copying versioned zip: GhidraMCP-${VERSION}.zip"
+          cp target/GhidraMCP-${VERSION}.zip release/
+        elif [ -f "target/GhidraMCP.zip" ]; then
+          echo "Copying non-versioned zip: GhidraMCP.zip -> GhidraMCP-${VERSION}.zip"
+          cp target/GhidraMCP.zip release/GhidraMCP-${VERSION}.zip
+        else
+          echo "Looking for any zip file in target..."
+          ZIP_FILE=$(find target/ -name "*.zip" | head -1)
+          if [ -n "$ZIP_FILE" ]; then
+            echo "Found zip file: $ZIP_FILE"
+            cp "$ZIP_FILE" release/GhidraMCP-${VERSION}.zip
+          else
+            echo "ERROR: No zip file found in target directory!"
+            exit 1
+          fi
+        fi
         
         # Copy essential files
         cp bridge_mcp_ghidra.py release/
