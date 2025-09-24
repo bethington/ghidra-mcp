@@ -178,6 +178,17 @@ jobs:
         
         echo "Release artifacts prepared:"
         ls -la release/
+        
+        # Verify the main zip file is present
+        if [ -f "release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip" ]; then
+          echo "✅ Main plugin zip confirmed: release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip"
+          ls -la "release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip"
+        else
+          echo "❌ ERROR: Main plugin zip not found in release directory!"
+          echo "Contents of release directory:"
+          ls -la release/
+          exit 1
+        fi
 
     - name: Generate release notes
       id: release_notes
@@ -246,17 +257,35 @@ jobs:
         **Full Changelog:** https://github.com/bethington/ghidra-mcp/compare/v1.1.0...v${{ steps.version.outputs.VERSION }}
         EOF
 
+    - name: Debug release files
+      run: |
+        echo "=== DEBUG: Files that will be uploaded to release ==="
+        echo "Main plugin zip:"
+        ls -la release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip || echo "❌ ZIP NOT FOUND"
+        
+        echo "All release files:"
+        find release/ -type f -exec ls -la {} \;
+        
+        echo "File checksums:"
+        find release/ -type f -exec sha256sum {} \;
+
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.TAG }}
         name: "GhidraMCP ${{ steps.version.outputs.VERSION }}"
         body_path: release_notes.md
         files: |
-          release/*
+          release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip
+          release/bridge_mcp_ghidra.py
+          release/requirements.txt
+          release/README.md
+          release/INSTALLATION.md
+          release/copy-ghidra-libs.bat
         draft: false
         prerelease: false
         generate_release_notes: true
+        fail_on_unmatched_files: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
