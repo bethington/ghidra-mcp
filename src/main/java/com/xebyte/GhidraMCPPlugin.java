@@ -309,12 +309,13 @@ public class GhidraMCPPlugin extends Plugin {
         });
 
         server.createContext("/set_function_prototype", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String functionAddress = params.get("function_address");
-            String prototype = params.get("prototype");
+            Map<String, Object> params = parseJsonParams(exchange);
+            String functionAddress = (String) params.get("function_address");
+            String prototype = (String) params.get("prototype");
+            String callingConvention = (String) params.get("calling_convention");
 
             // Call the set prototype function and get detailed result
-            PrototypeResult result = setFunctionPrototype(functionAddress, prototype);
+            PrototypeResult result = setFunctionPrototype(functionAddress, prototype, callingConvention);
 
             if (result.isSuccess()) {
                 // Even with successful operations, include any warning messages for debugging
@@ -625,16 +626,16 @@ public class GhidraMCPPlugin extends Plugin {
         });
 
         server.createContext("/create_typedef", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String name = params.get("name");
-            String baseType = params.get("base_type");
+            Map<String, Object> params = parseJsonParams(exchange);
+            String name = (String) params.get("name");
+            String baseType = (String) params.get("base_type");
             sendResponse(exchange, createTypedef(name, baseType));
         });
 
         server.createContext("/clone_data_type", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String sourceType = params.get("source_type");
-            String newName = params.get("new_name");
+            Map<String, Object> params = parseJsonParams(exchange);
+            String sourceType = (String) params.get("source_type");
+            String newName = (String) params.get("new_name");
             sendResponse(exchange, cloneDataType(sourceType, newName));
         });
 
@@ -653,10 +654,89 @@ public class GhidraMCPPlugin extends Plugin {
         });
 
         server.createContext("/import_data_types", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String source = params.get("source");
-            String format = params.getOrDefault("format", "c");
+            Map<String, Object> params = parseJsonParams(exchange);
+            String source = (String) params.get("source");
+            String format = (String) params.getOrDefault("format", "c");
             sendResponse(exchange, importDataTypes(source, format));
+        });
+
+        // New data structure management endpoints
+        server.createContext("/delete_data_type", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String typeName = (String) params.get("type_name");
+            sendResponse(exchange, deleteDataType(typeName));
+        });
+
+        server.createContext("/modify_struct_field", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String structName = (String) params.get("struct_name");
+            String fieldName = (String) params.get("field_name");
+            String newType = (String) params.get("new_type");
+            String newName = (String) params.get("new_name");
+            sendResponse(exchange, modifyStructField(structName, fieldName, newType, newName));
+        });
+
+        server.createContext("/add_struct_field", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String structName = (String) params.get("struct_name");
+            String fieldName = (String) params.get("field_name");
+            String fieldType = (String) params.get("field_type");
+            Object offsetObj = params.get("offset");
+            int offset = (offsetObj instanceof Integer) ? (Integer) offsetObj : -1;
+            sendResponse(exchange, addStructField(structName, fieldName, fieldType, offset));
+        });
+
+        server.createContext("/remove_struct_field", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String structName = params.get("struct_name");
+            String fieldName = params.get("field_name");
+            sendResponse(exchange, removeStructField(structName, fieldName));
+        });
+
+        server.createContext("/create_array_type", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String baseType = (String) params.get("base_type");
+            Object lengthObj = params.get("length");
+            int length = (lengthObj instanceof Integer) ? (Integer) lengthObj : 1;
+            String name = (String) params.get("name");
+            sendResponse(exchange, createArrayType(baseType, length, name));
+        });
+
+        server.createContext("/create_pointer_type", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String baseType = params.get("base_type");
+            String name = params.get("name");
+            sendResponse(exchange, createPointerType(baseType, name));
+        });
+
+        server.createContext("/create_data_type_category", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String categoryPath = params.get("category_path");
+            sendResponse(exchange, createDataTypeCategory(categoryPath));
+        });
+
+        server.createContext("/move_data_type_to_category", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String typeName = params.get("type_name");
+            String categoryPath = params.get("category_path");
+            sendResponse(exchange, moveDataTypeToCategory(typeName, categoryPath));
+        });
+
+        server.createContext("/list_data_type_categories", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 100);
+            sendResponse(exchange, listDataTypeCategories(offset, limit));
+        });
+
+        server.createContext("/create_function_signature", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String name = (String) params.get("name");
+            String returnType = (String) params.get("return_type");
+            Object parametersObj = params.get("parameters");
+            String parametersJson = (parametersObj instanceof String) ? (String) parametersObj : 
+                                   (parametersObj != null ? parametersObj.toString() : null);
+            sendResponse(exchange, createFunctionSignature(name, returnType, parametersJson));
         });
 
         // Memory reading endpoint
@@ -1302,6 +1382,13 @@ public class GhidraMCPPlugin extends Plugin {
      * Set a function's prototype with proper error handling using ApplyFunctionSignatureCmd
      */
     private PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype) {
+        return setFunctionPrototype(functionAddrStr, prototype, null);
+    }
+
+    /**
+     * Set a function's prototype with calling convention support
+     */
+    private PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype, String callingConvention) {
         // Input validation
         Program program = getCurrentProgram();
         if (program == null) return new PrototypeResult(false, "No program loaded");
@@ -1317,7 +1404,7 @@ public class GhidraMCPPlugin extends Plugin {
 
         try {
             SwingUtilities.invokeAndWait(() -> 
-                applyFunctionPrototype(program, functionAddrStr, prototype, success, errorMessage));
+                applyFunctionPrototype(program, functionAddrStr, prototype, callingConvention, success, errorMessage));
         } catch (InterruptedException | InvocationTargetException e) {
             String msg = "Failed to set function prototype on Swing thread: " + e.getMessage();
             errorMessage.append(msg);
@@ -1331,7 +1418,7 @@ public class GhidraMCPPlugin extends Plugin {
      * Helper method that applies the function prototype within a transaction
      */
     private void applyFunctionPrototype(Program program, String functionAddrStr, String prototype, 
-                                       AtomicBoolean success, StringBuilder errorMessage) {
+                                       String callingConvention, AtomicBoolean success, StringBuilder errorMessage) {
         try {
             // Get the address and function
             Address addr = program.getAddressFactory().getAddress(functionAddrStr);
@@ -1350,7 +1437,7 @@ public class GhidraMCPPlugin extends Plugin {
             addPrototypeComment(program, func, prototype);
 
             // Use ApplyFunctionSignatureCmd to parse and apply the signature
-            parseFunctionSignatureAndApply(program, addr, prototype, success, errorMessage);
+            parseFunctionSignatureAndApply(program, addr, prototype, callingConvention, success, errorMessage);
 
         } catch (Exception e) {
             String msg = "Error setting function prototype: " + e.getMessage();
@@ -1380,7 +1467,7 @@ public class GhidraMCPPlugin extends Plugin {
      * Parse and apply the function signature with error handling
      */
     private void parseFunctionSignatureAndApply(Program program, Address addr, String prototype,
-                                              AtomicBoolean success, StringBuilder errorMessage) {
+                                              String callingConvention, AtomicBoolean success, StringBuilder errorMessage) {
         // Use ApplyFunctionSignatureCmd to parse and apply the signature
         int txProto = program.startTransaction("Set function prototype");
         try {
@@ -1414,6 +1501,10 @@ public class GhidraMCPPlugin extends Plugin {
             boolean cmdResult = cmd.applyTo(program, new ConsoleTaskMonitor());
 
             if (cmdResult) {
+                // Apply calling convention if specified
+                if (callingConvention != null && !callingConvention.isEmpty()) {
+                    applyCallingConvention(program, addr, callingConvention, errorMessage);
+                }
                 success.set(true);
                 Msg.info(this, "Successfully applied function signature");
             } else {
@@ -1427,6 +1518,59 @@ public class GhidraMCPPlugin extends Plugin {
             Msg.error(this, msg, e);
         } finally {
             program.endTransaction(txProto, success.get());
+        }
+    }
+
+    /**
+     * Apply calling convention to a function
+     */
+    private void applyCallingConvention(Program program, Address addr, String callingConvention, StringBuilder errorMessage) {
+        try {
+            Function func = getFunctionForAddress(program, addr);
+            if (func == null) {
+                errorMessage.append("Could not find function to set calling convention");
+                return;
+            }
+
+            // Get the program's calling convention manager
+            ghidra.program.model.lang.CompilerSpec compilerSpec = program.getCompilerSpec();
+            ghidra.program.model.lang.PrototypeModel callingConv = null;
+            
+            // Get all available calling conventions
+            ghidra.program.model.lang.PrototypeModel[] available = compilerSpec.getCallingConventions();
+            
+            // Try to find matching calling convention by name
+            String targetName = callingConvention.toLowerCase();
+            for (ghidra.program.model.lang.PrototypeModel model : available) {
+                String modelName = model.getName().toLowerCase();
+                if (modelName.equals(targetName) || 
+                    modelName.equals("__" + targetName) ||
+                    modelName.replace("__", "").equals(targetName.replace("__", ""))) {
+                    callingConv = model;
+                    break;
+                }
+            }
+            
+            if (callingConv != null) {
+                func.setCallingConvention(callingConv.getName());
+                Msg.info(this, "Set calling convention to: " + callingConv.getName());
+            } else {
+                String msg = "Unknown calling convention: " + callingConvention;
+                errorMessage.append(msg);
+                Msg.warn(this, msg);
+                
+                // List available calling conventions for debugging
+                StringBuilder availList = new StringBuilder("Available: ");
+                for (ghidra.program.model.lang.PrototypeModel model : available) {
+                    availList.append(model.getName()).append(", ");
+                }
+                Msg.info(this, availList.toString());
+            }
+            
+        } catch (Exception e) {
+            String msg = "Error setting calling convention: " + e.getMessage();
+            errorMessage.append(msg);
+            Msg.error(this, msg, e);
         }
     }
 
@@ -3882,7 +4026,22 @@ public class GhidraMCPPlugin extends Plugin {
                 int tx = program.startTransaction("Create typedef");
                 try {
                     DataTypeManager dtm = program.getDataTypeManager();
-                    DataType base = findDataTypeByNameInAllCategories(dtm, baseType);
+                    DataType base = null;
+                    
+                    // Handle pointer syntax (e.g., "UnitAny *")
+                    if (baseType.endsWith(" *") || baseType.endsWith("*")) {
+                        String baseTypeName = baseType.replace(" *", "").replace("*", "").trim();
+                        DataType baseDataType = findDataTypeByNameInAllCategories(dtm, baseTypeName);
+                        if (baseDataType != null) {
+                            base = new PointerDataType(baseDataType);
+                        } else {
+                            result.append("Base type not found for pointer: ").append(baseTypeName);
+                            return;
+                        }
+                    } else {
+                        // Regular type lookup
+                        base = findDataTypeByNameInAllCategories(dtm, baseType);
+                    }
 
                     if (base == null) {
                         result.append("Base type not found: ").append(baseType);
@@ -4208,6 +4367,539 @@ public class GhidraMCPPlugin extends Plugin {
         }
         
         return obj.toString();
+    }
+
+    // ===================================================================================
+    // NEW DATA STRUCTURE MANAGEMENT METHODS
+    // ===================================================================================
+
+    /**
+     * Delete a data type from the program
+     */
+    private String deleteDataType(String typeName) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+        if (typeName == null || typeName.isEmpty()) return "Type name is required";
+
+        AtomicBoolean success = new AtomicBoolean(false);
+        StringBuilder result = new StringBuilder();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Delete data type");
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    DataType dataType = findDataTypeByNameInAllCategories(dtm, typeName);
+
+                    if (dataType == null) {
+                        result.append("Data type not found: ").append(typeName);
+                        return;
+                    }
+
+                    // Check if type is in use (simplified check)
+                    // Note: Ghidra will prevent deletion if type is in use during remove operation
+
+                    boolean deleted = dtm.remove(dataType, null);
+                    if (deleted) {
+                        result.append("Data type '").append(typeName).append("' deleted successfully");
+                        success.set(true);
+                    } else {
+                        result.append("Failed to delete data type '").append(typeName).append("'");
+                    }
+
+                } catch (Exception e) {
+                    result.append("Error deleting data type: ").append(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (InterruptedException | InvocationTargetException e) {
+            result.append("Failed to execute data type deletion on Swing thread: ").append(e.getMessage());
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Modify a field in an existing structure
+     */
+    private String modifyStructField(String structName, String fieldName, String newType, String newName) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+        if (structName == null || structName.isEmpty()) return "Structure name is required";
+        if (fieldName == null || fieldName.isEmpty()) return "Field name is required";
+
+        AtomicBoolean success = new AtomicBoolean(false);
+        StringBuilder result = new StringBuilder();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Modify struct field");
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    DataType dataType = findDataTypeByNameInAllCategories(dtm, structName);
+
+                    if (dataType == null) {
+                        result.append("Structure not found: ").append(structName);
+                        return;
+                    }
+
+                    if (!(dataType instanceof Structure)) {
+                        result.append("Data type '").append(structName).append("' is not a structure");
+                        return;
+                    }
+
+                    Structure struct = (Structure) dataType;
+                    DataTypeComponent[] components = struct.getDefinedComponents();
+                    DataTypeComponent targetComponent = null;
+
+                    // Find the field to modify
+                    for (DataTypeComponent component : components) {
+                        if (fieldName.equals(component.getFieldName())) {
+                            targetComponent = component;
+                            break;
+                        }
+                    }
+
+                    if (targetComponent == null) {
+                        result.append("Field '").append(fieldName).append("' not found in structure '").append(structName).append("'");
+                        return;
+                    }
+
+                    // If new type is specified, change the field type
+                    if (newType != null && !newType.isEmpty()) {
+                        DataType newDataType = resolveDataType(dtm, newType);
+                        if (newDataType == null) {
+                            result.append("New data type not found: ").append(newType);
+                            return;
+                        }
+                        struct.replace(targetComponent.getOrdinal(), newDataType, newDataType.getLength());
+                    }
+
+                    // If new name is specified, change the field name
+                    if (newName != null && !newName.isEmpty()) {
+                        targetComponent = struct.getComponent(targetComponent.getOrdinal()); // Refresh component
+                        targetComponent.setFieldName(newName);
+                    }
+
+                    result.append("Successfully modified field '").append(fieldName).append("' in structure '").append(structName).append("'");
+                    success.set(true);
+
+                } catch (Exception e) {
+                    result.append("Error modifying struct field: ").append(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (InterruptedException | InvocationTargetException e) {
+            result.append("Failed to execute struct field modification on Swing thread: ").append(e.getMessage());
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Add a new field to an existing structure
+     */
+    private String addStructField(String structName, String fieldName, String fieldType, int offset) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+        if (structName == null || structName.isEmpty()) return "Structure name is required";
+        if (fieldName == null || fieldName.isEmpty()) return "Field name is required";
+        if (fieldType == null || fieldType.isEmpty()) return "Field type is required";
+
+        AtomicBoolean success = new AtomicBoolean(false);
+        StringBuilder result = new StringBuilder();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Add struct field");
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    DataType dataType = findDataTypeByNameInAllCategories(dtm, structName);
+
+                    if (dataType == null) {
+                        result.append("Structure not found: ").append(structName);
+                        return;
+                    }
+
+                    if (!(dataType instanceof Structure)) {
+                        result.append("Data type '").append(structName).append("' is not a structure");
+                        return;
+                    }
+
+                    Structure struct = (Structure) dataType;
+                    DataType newFieldType = resolveDataType(dtm, fieldType);
+                    if (newFieldType == null) {
+                        result.append("Field data type not found: ").append(fieldType);
+                        return;
+                    }
+
+                    if (offset >= 0) {
+                        // Add at specific offset
+                        struct.insertAtOffset(offset, newFieldType, newFieldType.getLength(), fieldName, null);
+                    } else {
+                        // Add at end
+                        struct.add(newFieldType, fieldName, null);
+                    }
+
+                    result.append("Successfully added field '").append(fieldName).append("' to structure '").append(structName).append("'");
+                    success.set(true);
+
+                } catch (Exception e) {
+                    result.append("Error adding struct field: ").append(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (InterruptedException | InvocationTargetException e) {
+            result.append("Failed to execute struct field addition on Swing thread: ").append(e.getMessage());
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Remove a field from an existing structure
+     */
+    private String removeStructField(String structName, String fieldName) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+        if (structName == null || structName.isEmpty()) return "Structure name is required";
+        if (fieldName == null || fieldName.isEmpty()) return "Field name is required";
+
+        AtomicBoolean success = new AtomicBoolean(false);
+        StringBuilder result = new StringBuilder();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Remove struct field");
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    DataType dataType = findDataTypeByNameInAllCategories(dtm, structName);
+
+                    if (dataType == null) {
+                        result.append("Structure not found: ").append(structName);
+                        return;
+                    }
+
+                    if (!(dataType instanceof Structure)) {
+                        result.append("Data type '").append(structName).append("' is not a structure");
+                        return;
+                    }
+
+                    Structure struct = (Structure) dataType;
+                    DataTypeComponent[] components = struct.getDefinedComponents();
+                    int targetOrdinal = -1;
+
+                    // Find the field to remove
+                    for (DataTypeComponent component : components) {
+                        if (fieldName.equals(component.getFieldName())) {
+                            targetOrdinal = component.getOrdinal();
+                            break;
+                        }
+                    }
+
+                    if (targetOrdinal == -1) {
+                        result.append("Field '").append(fieldName).append("' not found in structure '").append(structName).append("'");
+                        return;
+                    }
+
+                    struct.delete(targetOrdinal);
+                    result.append("Successfully removed field '").append(fieldName).append("' from structure '").append(structName).append("'");
+                    success.set(true);
+
+                } catch (Exception e) {
+                    result.append("Error removing struct field: ").append(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (InterruptedException | InvocationTargetException e) {
+            result.append("Failed to execute struct field removal on Swing thread: ").append(e.getMessage());
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Create an array data type
+     */
+    private String createArrayType(String baseType, int length, String name) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+        if (baseType == null || baseType.isEmpty()) return "Base type is required";
+        if (length <= 0) return "Array length must be positive";
+
+        AtomicBoolean success = new AtomicBoolean(false);
+        StringBuilder result = new StringBuilder();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Create array type");
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    DataType baseDataType = resolveDataType(dtm, baseType);
+                    
+                    if (baseDataType == null) {
+                        result.append("Base data type not found: ").append(baseType);
+                        return;
+                    }
+
+                    ArrayDataType arrayType = new ArrayDataType(baseDataType, length, baseDataType.getLength());
+                    
+                    if (name != null && !name.isEmpty()) {
+                        arrayType.setName(name);
+                    }
+                    
+                    DataType addedType = dtm.addDataType(arrayType, DataTypeConflictHandler.REPLACE_HANDLER);
+                    
+                    result.append("Successfully created array type: ").append(addedType.getName())
+                          .append(" (").append(baseType).append("[").append(length).append("])");
+                    success.set(true);
+
+                } catch (Exception e) {
+                    result.append("Error creating array type: ").append(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (InterruptedException | InvocationTargetException e) {
+            result.append("Failed to execute array type creation on Swing thread: ").append(e.getMessage());
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Create a pointer data type
+     */
+    private String createPointerType(String baseType, String name) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+        if (baseType == null || baseType.isEmpty()) return "Base type is required";
+
+        AtomicBoolean success = new AtomicBoolean(false);
+        StringBuilder result = new StringBuilder();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Create pointer type");
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    DataType baseDataType = null;
+                    
+                    if ("void".equals(baseType)) {
+                        baseDataType = dtm.getDataType("/void");
+                        if (baseDataType == null) {
+                            baseDataType = VoidDataType.dataType;
+                        }
+                    } else {
+                        baseDataType = resolveDataType(dtm, baseType);
+                    }
+                    
+                    if (baseDataType == null) {
+                        result.append("Base data type not found: ").append(baseType);
+                        return;
+                    }
+
+                    PointerDataType pointerType = new PointerDataType(baseDataType);
+                    
+                    if (name != null && !name.isEmpty()) {
+                        pointerType.setName(name);
+                    }
+                    
+                    DataType addedType = dtm.addDataType(pointerType, DataTypeConflictHandler.REPLACE_HANDLER);
+                    
+                    result.append("Successfully created pointer type: ").append(addedType.getName())
+                          .append(" (").append(baseType).append("*)");
+                    success.set(true);
+
+                } catch (Exception e) {
+                    result.append("Error creating pointer type: ").append(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (InterruptedException | InvocationTargetException e) {
+            result.append("Failed to execute pointer type creation on Swing thread: ").append(e.getMessage());
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Create a new data type category
+     */
+    private String createDataTypeCategory(String categoryPath) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+        if (categoryPath == null || categoryPath.isEmpty()) return "Category path is required";
+
+        try {
+            DataTypeManager dtm = program.getDataTypeManager();
+            CategoryPath catPath = new CategoryPath(categoryPath);
+            Category category = dtm.createCategory(catPath);
+            
+            return "Successfully created category: " + category.getCategoryPathName();
+        } catch (Exception e) {
+            return "Error creating category: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Move a data type to a different category
+     */
+    private String moveDataTypeToCategory(String typeName, String categoryPath) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+        if (typeName == null || typeName.isEmpty()) return "Type name is required";
+        if (categoryPath == null || categoryPath.isEmpty()) return "Category path is required";
+
+        AtomicBoolean success = new AtomicBoolean(false);
+        StringBuilder result = new StringBuilder();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Move data type to category");
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    DataType dataType = findDataTypeByNameInAllCategories(dtm, typeName);
+
+                    if (dataType == null) {
+                        result.append("Data type not found: ").append(typeName);
+                        return;
+                    }
+
+                    CategoryPath catPath = new CategoryPath(categoryPath);
+                    Category category = dtm.createCategory(catPath);
+                    
+                    // Move the data type
+                    dataType.setCategoryPath(catPath);
+                    
+                    result.append("Successfully moved data type '").append(typeName)
+                          .append("' to category '").append(categoryPath).append("'");
+                    success.set(true);
+
+                } catch (Exception e) {
+                    result.append("Error moving data type: ").append(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (InterruptedException | InvocationTargetException e) {
+            result.append("Failed to execute data type move on Swing thread: ").append(e.getMessage());
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * List all data type categories
+     */
+    private String listDataTypeCategories(int offset, int limit) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+
+        try {
+            DataTypeManager dtm = program.getDataTypeManager();
+            List<String> categories = new ArrayList<>();
+            
+            // Get all categories recursively
+            addCategoriesRecursively(dtm.getRootCategory(), categories, "");
+            
+            return paginateList(categories, offset, limit);
+        } catch (Exception e) {
+            return "Error listing categories: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Helper method to recursively add categories
+     */
+    private void addCategoriesRecursively(Category category, List<String> categories, String parentPath) {
+        for (Category subCategory : category.getCategories()) {
+            String fullPath = parentPath.isEmpty() ? 
+                            subCategory.getName() : 
+                            parentPath + "/" + subCategory.getName();
+            categories.add(fullPath);
+            addCategoriesRecursively(subCategory, categories, fullPath);
+        }
+    }
+
+    /**
+     * Create a function signature data type
+     */
+    private String createFunctionSignature(String name, String returnType, String parametersJson) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+        if (name == null || name.isEmpty()) return "Function name is required";
+        if (returnType == null || returnType.isEmpty()) return "Return type is required";
+
+        AtomicBoolean success = new AtomicBoolean(false);
+        StringBuilder result = new StringBuilder();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Create function signature");
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    
+                    // Resolve return type
+                    DataType returnDataType = resolveDataType(dtm, returnType);
+                    if (returnDataType == null) {
+                        result.append("Return type not found: ").append(returnType);
+                        return;
+                    }
+
+                    // Create function definition
+                    FunctionDefinitionDataType funcDef = new FunctionDefinitionDataType(name);
+                    funcDef.setReturnType(returnDataType);
+
+                    // Parse parameters if provided
+                    if (parametersJson != null && !parametersJson.isEmpty()) {
+                        try {
+                            // Simple JSON parsing for parameters
+                            String[] paramPairs = parametersJson.replace("[", "").replace("]", "")
+                                                               .replace("{", "").replace("}", "")
+                                                               .split(",");
+                            
+                            for (String paramPair : paramPairs) {
+                                if (paramPair.trim().isEmpty()) continue;
+                                
+                                String[] parts = paramPair.split(":");
+                                if (parts.length >= 2) {
+                                    String paramType = parts[1].replace("\"", "").trim();
+                                    DataType paramDataType = resolveDataType(dtm, paramType);
+                                    if (paramDataType != null) {
+                                        funcDef.setArguments(new ParameterDefinition[] {
+                                            new ParameterDefinitionImpl(null, paramDataType, null)
+                                        });
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            // If JSON parsing fails, continue without parameters
+                            result.append("Warning: Could not parse parameters, continuing without them. ");
+                        }
+                    }
+
+                    DataType addedFuncDef = dtm.addDataType(funcDef, DataTypeConflictHandler.REPLACE_HANDLER);
+                    
+                    result.append("Successfully created function signature: ").append(addedFuncDef.getName());
+                    success.set(true);
+
+                } catch (Exception e) {
+                    result.append("Error creating function signature: ").append(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (InterruptedException | InvocationTargetException e) {
+            result.append("Failed to execute function signature creation on Swing thread: ").append(e.getMessage());
+        }
+
+        return result.toString();
     }
 
     @Override

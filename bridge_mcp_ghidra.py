@@ -9,12 +9,43 @@
 import requests
 import argparse
 import logging
-from urllib.parse import urljoin
+import time
+import re
+from urllib.parse import urljoin, urlparse
 
 from mcp.server.fastmcp import FastMCP
 
+# Performance optimization imports
+from functools import lru_cache, wraps
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 DEFAULT_GHIDRA_SERVER = "http://127.0.0.1:8089/"
 
+# Enhanced configuration and state management
+REQUEST_TIMEOUT = 30
+DEFAULT_PAGINATION_LIMIT = 100
+MAX_RETRIES = 3
+RETRY_BACKOFF_FACTOR = 0.5
+CACHE_SIZE = 256
+ENABLE_CACHING = True
+
+# Connection pooling for better performance
+session = requests.Session()
+retry_strategy = Retry(
+    total=MAX_RETRIES,
+    backoff_factor=RETRY_BACKOFF_FACTOR,
+    status_forcelist=[429, 500, 502, 503, 504],
+)
+adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=20, pool_maxsize=20)
+session.mount("http://", adapter)
+session.mount("https://", adapter)
+
+# Configure enhanced logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("ghidra-mcp")
@@ -22,41 +53,288 @@ mcp = FastMCP("ghidra-mcp")
 # Initialize ghidra_server_url with default value
 ghidra_server_url = DEFAULT_GHIDRA_SERVER
 
+# Enhanced error classes
+class GhidraConnectionError(Exception):
+    """Raised when connection to Ghidra server fails"""
+    pass
 
-def safe_get(endpoint: str, params: dict = None) -> list:
+class GhidraAnalysisError(Exception):
+    """Raised when Ghidra analysis operation fails"""
+    pass
+
+class GhidraValidationError(Exception):
+    """Raised when input validation fails"""
+    pass
+
+# Input validation patterns
+HEX_ADDRESS_PATTERN = re.compile(r'^0x[0-9a-fA-F]+$')
+FUNCTION_NAME_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+def validate_server_url(url: str) -> bool:
+    """Validate that the server URL is safe to use"""
+    try:
+        parsed = urlparse(url)
+        # Only allow HTTP/HTTPS protocols
+        if parsed.scheme not in ['http', 'https']:
+            return False
+        # Only allow local addresses for security
+        if parsed.hostname in ['localhost', '127.0.0.1', '::1']:
+            return True
+        # Allow private network ranges
+        if parsed.hostname and (
+            parsed.hostname.startswith('192.168.') or
+            parsed.hostname.startswith('10.') or
+            parsed.hostname.startswith('172.')
+        ):
+            return True
+        return False
+    except Exception:
+        return False
+
+def validate_hex_address(address: str) -> bool:
+    """Validate hexadecimal address format"""
+    if not address or not isinstance(address, str):
+        return False
+    return bool(HEX_ADDRESS_PATTERN.match(address))
+
+def validate_function_name(name: str) -> bool:
+    """Validate function name format"""
+    return bool(FUNCTION_NAME_PATTERN.match(name)) if name else False
+
+
+# Performance and caching utilities
+def cache_key(*args, **kwargs) -> str:
+    """Generate a cache key from function arguments."""
+    import json
+    import hashlib
+    key_data = {"args": args, "kwargs": kwargs}
+    return hashlib.md5(json.dumps(key_data, sort_keys=True, default=str).encode()).hexdigest()
+
+def cached_request(cache_duration=300):  # 5 minutes default
+    """Decorator to cache HTTP requests."""
+    def decorator(func):
+        cache = {}
+        
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if not ENABLE_CACHING:
+                return func(*args, **kwargs)
+                
+            key = cache_key(*args, **kwargs)
+            now = time.time()
+            
+            # Check cache
+            if key in cache:
+                result, timestamp = cache[key]
+                if now - timestamp < cache_duration:
+                    logger.debug(f"Cache hit for {func.__name__}")
+                    return result
+                else:
+                    del cache[key]  # Expired
+            
+            # Execute and cache
+            result = func(*args, **kwargs)
+            cache[key] = (result, now)
+            
+            # Simple cache cleanup (keep only most recent items)
+            if len(cache) > CACHE_SIZE:
+                oldest_key = min(cache.keys(), key=lambda k: cache[k][1])
+                del cache[oldest_key]
+                
+            return result
+        return wrapper
+    return decorator
+
+
+@cached_request(cache_duration=180)  # 3-minute cache for GET requests
+def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
     """
-    Perform a GET request with optional query parameters.
+    Perform a GET request with enhanced error handling and retry logic.
+    
+    Args:
+        endpoint: The API endpoint to call
+        params: Optional query parameters
+        retries: Number of retry attempts for server errors
+    
+    Returns:
+        List of strings representing the response
     """
     if params is None:
         params = {}
 
+    # Validate server URL for security
+    if not validate_server_url(ghidra_server_url):
+        logger.error(f"Invalid or unsafe server URL: {ghidra_server_url}")
+        return ["Error: Invalid server URL - only local addresses allowed"]
+
     url = urljoin(ghidra_server_url, endpoint)
 
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        response.encoding = 'utf-8'
-        if response.ok:
-            return response.text.splitlines()
-        else:
-            return [f"Error {response.status_code}: {response.text.strip()}"]
-    except Exception as e:
-        return [f"Request failed: {str(e)}"]
+    for attempt in range(retries):
+        try:
+            start_time = time.time()
+            response = session.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            response.encoding = 'utf-8'
+            duration = time.time() - start_time
+            
+            logger.info(f"Request to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries})")
+            
+            if response.ok:
+                return response.text.splitlines()
+            elif response.status_code == 404:
+                logger.warning(f"Endpoint not found: {endpoint}")
+                return [f"Endpoint not found: {endpoint}"]
+            elif response.status_code >= 500:
+                # Server error - retry with exponential backoff
+                if attempt < retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Server error {response.status_code}, retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Server error after {retries} attempts: {response.status_code}")
+                    raise GhidraConnectionError(f"Server error: {response.status_code}")
+            else:
+                logger.error(f"HTTP {response.status_code}: {response.text.strip()}")
+                return [f"Error {response.status_code}: {response.text.strip()}"]
+                
+        except requests.exceptions.Timeout:
+            logger.warning(f"Request timeout on attempt {attempt + 1}/{retries}")
+            if attempt < retries - 1:
+                continue
+            return [f"Timeout connecting to Ghidra server after {retries} attempts"]
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request failed: {str(e)}")
+            return [f"Request failed: {str(e)}"]
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return [f"Unexpected error: {str(e)}"]
+    
+    return ["Unexpected error in safe_get"]
 
 
-def safe_post(endpoint: str, data: dict | str) -> str:
-    try:
-        url = urljoin(ghidra_server_url, endpoint)
-        if isinstance(data, dict):
-            response = requests.post(url, data=data, timeout=30)
-        else:
-            response = requests.post(url, data=data.encode("utf-8"), timeout=30)
-        response.encoding = 'utf-8'
-        if response.ok:
-            return response.text.strip()
-        else:
-            return f"Error {response.status_code}: {response.text.strip()}"
-    except Exception as e:
-        return f"Request failed: {str(e)}"
+def safe_post_json(endpoint: str, data: dict, retries: int = 3) -> str:
+    """
+    Perform a JSON POST request with enhanced error handling and retry logic.
+    
+    Args:
+        endpoint: The API endpoint to call
+        data: Data to send as JSON
+        retries: Number of retry attempts for server errors
+    
+    Returns:
+        String response from the server
+    """
+    # Validate server URL for security  
+    if not validate_server_url(ghidra_server_url):
+        logger.error(f"Invalid or unsafe server URL: {ghidra_server_url}")
+        return "Error: Invalid server URL - only local addresses allowed"
+
+    url = urljoin(ghidra_server_url, endpoint)
+
+    for attempt in range(retries):
+        try:
+            start_time = time.time()
+            
+            logger.info(f"Sending JSON POST to {url} with data: {data}")
+            response = session.post(url, json=data, timeout=REQUEST_TIMEOUT)
+            
+            response.encoding = 'utf-8'
+            duration = time.time() - start_time
+            
+            logger.info(f"JSON POST to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries}), status: {response.status_code}")
+            
+            if response.ok:
+                return response.text.strip()
+            elif response.status_code == 404:
+                return f"Error: Endpoint {endpoint} not found"
+            elif response.status_code >= 500:
+                if attempt < retries - 1:  # Only log retry attempts for server errors
+                    logger.warning(f"Server error {response.status_code} on attempt {attempt + 1}, retrying...")
+                    time.sleep(1)  # Brief delay before retry
+                    continue
+                else:
+                    return f"Error: Server error {response.status_code} after {retries} attempts"
+            else:
+                return f"Error: HTTP {response.status_code} - {response.text}"
+                
+        except requests.RequestException as e:
+            if attempt < retries - 1:
+                logger.warning(f"Request failed on attempt {attempt + 1}, retrying: {e}")
+                time.sleep(1)
+                continue
+            else:
+                logger.error(f"Request failed after {retries} attempts: {e}")
+                return f"Error: Request failed - {str(e)}"
+
+    return "Error: Maximum retries exceeded"
+
+def safe_post(endpoint: str, data: dict | str, retries: int = 3) -> str:
+    """
+    Perform a POST request with enhanced error handling and retry logic.
+    
+    Args:
+        endpoint: The API endpoint to call
+        data: Data to send (dict or string)
+        retries: Number of retry attempts for server errors
+    
+    Returns:
+        String response from the server
+    """
+    # Validate server URL for security  
+    if not validate_server_url(ghidra_server_url):
+        logger.error(f"Invalid or unsafe server URL: {ghidra_server_url}")
+        return "Error: Invalid server URL - only local addresses allowed"
+
+    url = urljoin(ghidra_server_url, endpoint)
+
+    for attempt in range(retries):
+        try:
+            start_time = time.time()
+            
+            if isinstance(data, dict):
+                logger.info(f"Sending POST to {url} with form data: {data}")
+                response = session.post(url, data=data, timeout=REQUEST_TIMEOUT)
+            else:
+                logger.info(f"Sending POST to {url} with raw data: {data}")
+                response = session.post(url, data=data.encode("utf-8"), timeout=REQUEST_TIMEOUT)
+            
+            response.encoding = 'utf-8'
+            duration = time.time() - start_time
+            
+            logger.info(f"POST to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries}), status: {response.status_code}")
+            
+            if response.ok:
+                return response.text.strip()
+            elif response.status_code == 404:
+                logger.warning(f"Endpoint not found: {endpoint}")
+                return f"Endpoint not found: {endpoint}"
+            elif response.status_code >= 500:
+                # Server error - retry with exponential backoff
+                if attempt < retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Server error {response.status_code}, retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Server error after {retries} attempts: {response.status_code}")
+                    raise GhidraConnectionError(f"Server error: {response.status_code}")
+            else:
+                logger.error(f"HTTP {response.status_code}: {response.text.strip()}")
+                return f"Error {response.status_code}: {response.text.strip()}"
+                
+        except requests.exceptions.Timeout:
+            logger.warning(f"POST timeout on attempt {attempt + 1}/{retries}")
+            if attempt < retries - 1:
+                continue
+            return f"Timeout connecting to Ghidra server after {retries} attempts"
+        except requests.exceptions.RequestException as e:
+            logger.error(f"POST request failed: {str(e)}")
+            return f"Request failed: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in POST: {str(e)}")
+            return f"Unexpected error: {str(e)}"
+    
+    return "Unexpected error in safe_post"
 
 @mcp.tool()
 def list_functions(offset: int = 0, limit: int = 100) -> list:
@@ -365,18 +643,22 @@ def rename_function_by_address(function_address: str, new_name: str) -> str:
     return safe_post("rename_function_by_address", {"function_address": function_address, "new_name": new_name})
 
 @mcp.tool()
-def set_function_prototype(function_address: str, prototype: str) -> str:
+def set_function_prototype(function_address: str, prototype: str, calling_convention: str = None) -> str:
     """
-    Set a function's prototype.
+    Set a function's prototype and optionally its calling convention.
     
     Args:
         function_address: Memory address of the function in hex format (e.g., "0x1400010a0")
         prototype: Function prototype string (e.g., "int main(int argc, char* argv[])")
+        calling_convention: Optional calling convention (e.g., "__cdecl", "__stdcall", "__fastcall", "__thiscall")
         
     Returns:
         Success or failure message indicating the result of the prototype update
     """
-    return safe_post("set_function_prototype", {"function_address": function_address, "prototype": prototype})
+    data = {"function_address": function_address, "prototype": prototype}
+    if calling_convention:
+        data["callingConvention"] = calling_convention
+    return safe_post_json("set_function_prototype", data)
 
 @mcp.tool()
 def set_local_variable_type(function_address: str, variable_name: str, new_type: str) -> str:
@@ -410,6 +692,9 @@ def get_xrefs_to(address: str, offset: int = 0, limit: int = 100) -> list:
     Returns:
         List of references to the specified address
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+    
     return safe_get("xrefs_to", {"address": address, "offset": offset, "limit": limit})
 
 @mcp.tool()
@@ -616,7 +901,7 @@ def create_struct(name: str, fields: list) -> str:
             {"name": "flags", "type": "DWORD"}
         ]
     """
-    return safe_post("create_struct", {"name": name, "fields": fields})
+    return safe_post_json("create_struct", {"name": name, "fields": fields})
 
 @mcp.tool()
 def create_enum(name: str, values: dict, size: int = 4) -> str:
@@ -637,7 +922,7 @@ def create_enum(name: str, values: dict, size: int = 4) -> str:
     Example:
         values = {"STATE_IDLE": 0, "STATE_RUNNING": 1, "STATE_STOPPED": 2}
     """
-    return safe_post("create_enum", {"name": name, "values": values, "size": size})
+    return safe_post_json("create_enum", {"name": name, "values": values, "size": size})
 
 @mcp.tool()
 def apply_data_type(address: str, type_name: str, clear_existing: bool = True) -> str:
@@ -655,11 +940,16 @@ def apply_data_type(address: str, type_name: str, clear_existing: bool = True) -
     Returns:
         Success/failure message with details about the applied data type
     """
-    return safe_post("apply_data_type", {
+    logger.info(f"apply_data_type called with: address={address}, type_name={type_name}, clear_existing={clear_existing}")
+    data = {
         "address": address, 
         "type_name": type_name,
         "clear_existing": clear_existing
-    })
+    }
+    logger.info(f"Data being sent: {data}")
+    result = safe_post_json("apply_data_type", data)
+    logger.info(f"Result received: {result}")
+    return result
 
 @mcp.tool()
 def check_connection() -> str:
@@ -670,7 +960,7 @@ def check_connection() -> str:
         Connection status message
     """
     try:
-        response = requests.get(urljoin(ghidra_server_url, "check_connection"), timeout=30)
+        response = session.get(urljoin(ghidra_server_url, "check_connection"), timeout=REQUEST_TIMEOUT)
         if response.ok:
             return response.text.strip()
         else:
@@ -942,6 +1232,479 @@ def mcp_ghidra_import_data_types(source: str, format: str = "c") -> str:
         Import results and status
     """
     return safe_post("import_data_types", {"source": source, "format": format})
+
+# === NEW ENHANCED ENDPOINTS FOR MALWARE ANALYSIS ===
+
+@mcp.tool()
+def mcp_ghidra_detect_crypto_constants() -> list:
+    """
+    Identify cryptographic constants and algorithms in the binary.
+    Searches for known crypto constants like AES S-boxes, SHA constants, etc.
+    
+    Returns:
+        List of potential crypto constants with algorithm identification
+    """
+    return safe_get("detect_crypto_constants")
+
+@mcp.tool()
+def mcp_ghidra_search_byte_patterns(pattern: str, mask: str = None) -> list:
+    """
+    Search for byte patterns with optional masks (e.g., 'E8 ?? ?? ?? ??').
+    Useful for finding shellcode, API calls, or specific instruction sequences.
+    
+    Args:
+        pattern: Hexadecimal pattern to search for (e.g., "E8 ?? ?? ?? ??")
+        mask: Optional mask for wildcards (use ? for wildcards)
+        
+    Returns:
+        List of addresses where the pattern was found
+    """
+    params = {"pattern": pattern}
+    if mask:
+        params["mask"] = mask
+    return safe_get("search_byte_patterns", params)
+
+@mcp.tool()
+def mcp_ghidra_find_similar_functions(target_function: str, threshold: float = 0.8) -> list:
+    """
+    Find functions similar to target using structural analysis.
+    Uses control flow and instruction patterns to identify similar functions.
+    
+    Args:
+        target_function: Name of the function to compare against
+        threshold: Similarity threshold (0.0 to 1.0, higher = more similar)
+        
+    Returns:
+        List of similar functions with similarity scores
+    """
+    if not validate_function_name(target_function):
+        raise GhidraValidationError(f"Invalid function name: {target_function}")
+    
+    return safe_get("find_similar_functions", {
+        "target_function": target_function,
+        "threshold": threshold
+    })
+
+@mcp.tool()
+def mcp_ghidra_analyze_control_flow(function_name: str) -> dict:
+    """
+    Analyze control flow complexity, cyclomatic complexity, and basic blocks.
+    Provides detailed analysis of function complexity and structure.
+    
+    Args:
+        function_name: Name of the function to analyze
+        
+    Returns:
+        Dictionary with control flow analysis results
+    """
+    if not validate_function_name(function_name):
+        raise GhidraValidationError(f"Invalid function name: {function_name}")
+    
+    return safe_get("analyze_control_flow", {"function_name": function_name})
+
+@mcp.tool()
+def mcp_ghidra_find_anti_analysis_techniques() -> list:
+    """
+    Detect anti-analysis, anti-debugging, and evasion techniques.
+    Looks for common obfuscation and evasion patterns used by malware.
+    
+    Returns:
+        List of detected evasion techniques with locations and descriptions
+    """
+    return safe_get("find_anti_analysis_techniques")
+
+@mcp.tool()
+def mcp_ghidra_extract_iocs() -> dict:
+    """
+    Extract Indicators of Compromise (IOCs) from the binary.
+    Finds IP addresses, URLs, file paths, registry keys, and other artifacts.
+    
+    Returns:
+        Dictionary of IOCs organized by type (IPs, URLs, files, etc.)
+    """
+    return safe_get("extract_iocs")
+
+@mcp.tool()
+def mcp_ghidra_batch_decompile(function_names: list) -> dict:
+    """
+    Decompile multiple functions in a single request for better performance.
+    
+    Args:
+        function_names: List of function names to decompile
+        
+    Returns:
+        Dictionary mapping function names to their decompiled code
+    """
+    # Validate all function names
+    for name in function_names:
+        if not validate_function_name(name):
+            raise GhidraValidationError(f"Invalid function name: {name}")
+    
+    return safe_get("batch_decompile", {"functions": ",".join(function_names)})
+
+@mcp.tool()
+def mcp_ghidra_find_dead_code(function_name: str) -> list:
+    """
+    Identify potentially unreachable code blocks within a function.
+    Useful for finding hidden functionality or dead code elimination.
+    
+    Args:
+        function_name: Name of the function to analyze
+        
+    Returns:
+        List of potentially unreachable code blocks with addresses
+    """
+    if not validate_function_name(function_name):
+        raise GhidraValidationError(f"Invalid function name: {function_name}")
+    
+    return safe_get("find_dead_code", {"function_name": function_name})
+
+@mcp.tool()
+def mcp_ghidra_analyze_function_complexity(function_name: str) -> dict:
+    """
+    Calculate various complexity metrics for a function.
+    Includes cyclomatic complexity, lines of code, branch count, etc.
+    
+    Args:
+        function_name: Name of the function to analyze
+        
+    Returns:
+        Dictionary with complexity metrics
+    """
+    if not validate_function_name(function_name):
+        raise GhidraValidationError(f"Invalid function name: {function_name}")
+    
+    return safe_get("analyze_function_complexity", {"function_name": function_name})
+
+@mcp.tool()
+def mcp_ghidra_batch_rename_functions(renames: dict) -> dict:
+    """
+    Rename multiple functions atomically.
+    
+    Args:
+        renames: Dictionary mapping old names to new names
+        
+    Returns:
+        Dictionary with rename results and any errors
+    """
+    # Validate all function names
+    for old_name, new_name in renames.items():
+        if not validate_function_name(old_name):
+            raise GhidraValidationError(f"Invalid old function name: {old_name}")
+        if not validate_function_name(new_name):
+            raise GhidraValidationError(f"Invalid new function name: {new_name}")
+    
+    return safe_get("batch_rename_functions", {"renames": str(renames)})
+
+# === HIGH-VALUE MALWARE ANALYSIS FEATURES ===
+
+@mcp.tool()
+def mcp_ghidra_decrypt_strings_auto() -> list:
+    """
+    Automatically identify and attempt to decrypt common string obfuscation patterns.
+    Detects XOR encoding, Base64, ROT13, and simple stack strings.
+    
+    Returns:
+        List of decrypted strings with their locations and decryption method
+    """
+    return safe_get("decrypt_strings_auto")
+
+@mcp.tool()
+def mcp_ghidra_analyze_api_call_chains() -> dict:
+    """
+    Identify and visualize suspicious Windows API call sequences used by malware.
+    Detects patterns like process injection, persistence, and anti-analysis techniques.
+    
+    Returns:
+        Dictionary of detected API call patterns with threat assessment
+    """
+    return safe_get("analyze_api_call_chains")
+
+@mcp.tool()
+def mcp_ghidra_extract_iocs_with_context() -> dict:
+    """
+    Enhanced IOC extraction with analysis context and confidence scoring.
+    Provides context about where/how IOCs are used and categorizes them.
+    
+    Returns:
+        Dictionary of IOCs with context, confidence scores, and usage analysis
+    """
+    return safe_get("extract_iocs_with_context")
+
+@mcp.tool()
+def mcp_ghidra_detect_malware_behaviors() -> list:
+    """
+    Automatically detect common malware behaviors and techniques.
+    Analyzes code patterns to identify potential malicious functionality.
+    
+    Returns:
+        List of detected behaviors with confidence scores and evidence
+    """
+    return safe_get("detect_malware_behaviors")
+
+# ===================================================================================
+# NEW DATA STRUCTURE MANAGEMENT TOOLS
+# ===================================================================================
+
+@mcp.tool()
+def mcp_ghidra_delete_data_type(type_name: str) -> str:
+    """
+    Delete a data type from the program.
+    
+    This tool removes a data type (struct, enum, typedef, etc.) from the program's
+    data type manager. The type cannot be deleted if it's currently being used.
+    
+    Args:
+        type_name: Name of the data type to delete
+        
+    Returns:
+        Success or failure message with details
+    """
+    if not type_name or not isinstance(type_name, str):
+        raise GhidraValidationError("Type name is required and must be a string")
+    
+    return safe_post_json("delete_data_type", {"type_name": type_name})
+
+@mcp.tool()
+def mcp_ghidra_modify_struct_field(struct_name: str, field_name: str, new_type: str = None, new_name: str = None) -> str:
+    """
+    Modify a field in an existing structure.
+    
+    This tool allows changing the type and/or name of a field in an existing structure.
+    At least one of new_type or new_name must be provided.
+    
+    Args:
+        struct_name: Name of the structure to modify
+        field_name: Name of the field to modify
+        new_type: New data type for the field (optional)
+        new_name: New name for the field (optional)
+        
+    Returns:
+        Success or failure message with details
+    """
+    if not struct_name or not isinstance(struct_name, str):
+        raise GhidraValidationError("Structure name is required and must be a string")
+    if not field_name or not isinstance(field_name, str):
+        raise GhidraValidationError("Field name is required and must be a string")
+    if not new_type and not new_name:
+        raise GhidraValidationError("At least one of new_type or new_name must be provided")
+    
+    data = {
+        "struct_name": struct_name,
+        "field_name": field_name
+    }
+    if new_type:
+        data["new_type"] = new_type
+    if new_name:
+        data["new_name"] = new_name
+    
+    return safe_post_json("modify_struct_field", data)
+
+@mcp.tool()
+def mcp_ghidra_add_struct_field(struct_name: str, field_name: str, field_type: str, offset: int = -1) -> str:
+    """
+    Add a new field to an existing structure.
+    
+    This tool adds a new field to an existing structure at the specified offset
+    or at the end if no offset is provided.
+    
+    Args:
+        struct_name: Name of the structure to modify
+        field_name: Name of the new field
+        field_type: Data type of the new field
+        offset: Offset to insert the field at (-1 for end, default: -1)
+        
+    Returns:
+        Success or failure message with details
+    """
+    if not struct_name or not isinstance(struct_name, str):
+        raise GhidraValidationError("Structure name is required and must be a string")
+    if not field_name or not isinstance(field_name, str):
+        raise GhidraValidationError("Field name is required and must be a string")
+    if not field_type or not isinstance(field_type, str):
+        raise GhidraValidationError("Field type is required and must be a string")
+    
+    data = {
+        "struct_name": struct_name,
+        "field_name": field_name,
+        "field_type": field_type,
+        "offset": offset
+    }
+    
+    return safe_post_json("add_struct_field", data)
+
+@mcp.tool()
+def mcp_ghidra_remove_struct_field(struct_name: str, field_name: str) -> str:
+    """
+    Remove a field from an existing structure.
+    
+    This tool removes a field from an existing structure by name.
+    
+    Args:
+        struct_name: Name of the structure to modify
+        field_name: Name of the field to remove
+        
+    Returns:
+        Success or failure message with details
+    """
+    if not struct_name or not isinstance(struct_name, str):
+        raise GhidraValidationError("Structure name is required and must be a string")
+    if not field_name or not isinstance(field_name, str):
+        raise GhidraValidationError("Field name is required and must be a string")
+    
+    return safe_post_json("remove_struct_field", {
+        "struct_name": struct_name,
+        "field_name": field_name
+    })
+
+@mcp.tool()
+def mcp_ghidra_create_array_type(base_type: str, length: int, name: str = None) -> str:
+    """
+    Create an array data type.
+    
+    This tool creates a new array data type based on an existing base type
+    with the specified length.
+    
+    Args:
+        base_type: Name of the base data type for the array
+        length: Number of elements in the array
+        name: Optional name for the array type
+        
+    Returns:
+        Success or failure message with created array type details
+    """
+    if not base_type or not isinstance(base_type, str):
+        raise GhidraValidationError("Base type is required and must be a string")
+    if not isinstance(length, int) or length <= 0:
+        raise GhidraValidationError("Length must be a positive integer")
+    
+    data = {
+        "base_type": base_type,
+        "length": length
+    }
+    if name:
+        data["name"] = name
+    
+    return safe_post_json("create_array_type", data)
+
+@mcp.tool()
+def mcp_ghidra_create_pointer_type(base_type: str, name: str = None) -> str:
+    """
+    Create a pointer data type.
+    
+    This tool creates a new pointer data type pointing to the specified base type.
+    
+    Args:
+        base_type: Name of the base data type for the pointer
+        name: Optional name for the pointer type
+        
+    Returns:
+        Success or failure message with created pointer type details
+    """
+    if not base_type or not isinstance(base_type, str):
+        raise GhidraValidationError("Base type is required and must be a string")
+    
+    data = {"base_type": base_type}
+    if name:
+        data["name"] = name
+    
+    return safe_post_json("create_pointer_type", data)
+
+@mcp.tool()
+def mcp_ghidra_create_data_type_category(category_path: str) -> str:
+    """
+    Create a new data type category.
+    
+    This tool creates a new category for organizing data types.
+    
+    Args:
+        category_path: Path for the new category (e.g., "MyTypes" or "MyTypes/SubCategory")
+        
+    Returns:
+        Success or failure message with category creation details
+    """
+    if not category_path or not isinstance(category_path, str):
+        raise GhidraValidationError("Category path is required and must be a string")
+    
+    return safe_post_json("create_data_type_category", {"category_path": category_path})
+
+@mcp.tool()
+def mcp_ghidra_move_data_type_to_category(type_name: str, category_path: str) -> str:
+    """
+    Move a data type to a different category.
+    
+    This tool moves an existing data type to a specified category.
+    
+    Args:
+        type_name: Name of the data type to move
+        category_path: Target category path
+        
+    Returns:
+        Success or failure message with move operation details
+    """
+    if not type_name or not isinstance(type_name, str):
+        raise GhidraValidationError("Type name is required and must be a string")
+    if not category_path or not isinstance(category_path, str):
+        raise GhidraValidationError("Category path is required and must be a string")
+    
+    return safe_post_json("move_data_type_to_category", {
+        "type_name": type_name,
+        "category_path": category_path
+    })
+
+@mcp.tool()
+def mcp_ghidra_list_data_type_categories(offset: int = 0, limit: int = 100) -> str:
+    """
+    List all data type categories.
+    
+    This tool lists all available data type categories with pagination.
+    
+    Args:
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of categories to return (default: 100)
+        
+    Returns:
+        List of data type categories
+    """
+    if not isinstance(offset, int) or offset < 0:
+        raise GhidraValidationError("Offset must be a non-negative integer")
+    if not isinstance(limit, int) or limit <= 0:
+        raise GhidraValidationError("Limit must be a positive integer")
+    
+    return "\n".join(safe_get("list_data_type_categories", {
+        "offset": offset,
+        "limit": limit
+    }))
+
+@mcp.tool()
+def mcp_ghidra_create_function_signature(name: str, return_type: str, parameters: str = None) -> str:
+    """
+    Create a function signature data type.
+    
+    This tool creates a new function signature data type that can be used
+    for function pointers and type definitions.
+    
+    Args:
+        name: Name for the function signature
+        return_type: Return type of the function
+        parameters: Optional JSON string describing parameters (e.g., '[{"name": "param1", "type": "int"}]')
+        
+    Returns:
+        Success or failure message with function signature creation details
+    """
+    if not name or not isinstance(name, str):
+        raise GhidraValidationError("Function name is required and must be a string")
+    if not return_type or not isinstance(return_type, str):
+        raise GhidraValidationError("Return type is required and must be a string")
+    
+    data = {
+        "name": name,
+        "return_type": return_type
+    }
+    if parameters:
+        data["parameters"] = parameters
+    
+    return safe_post_json("create_function_signature", data)
 
 def main():
     parser = argparse.ArgumentParser(description="MCP server for Ghidra")
