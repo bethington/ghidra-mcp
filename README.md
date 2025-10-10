@@ -3,15 +3,15 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-11.4.2-green.svg)](https://ghidra-sre.org/)
-[![MCP Version](https://img.shields.io/badge/MCP-1.5.1-purple.svg)](https://modelcontextprotocol.io/)
+[![MCP Version](https://img.shields.io/badge/MCP-1.6.0-purple.svg)](https://modelcontextprotocol.io/)
 
 A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks.
 
 ## 🌟 Features
 
 ### Core MCP Integration
-- **Full MCP 1.5.1 Compatibility** - Complete implementation of Model Context Protocol
-- **101 MCP Tools Available** - Comprehensive API surface for binary analysis (91 implemented + 10 ROADMAP v2.0)
+- **Full MCP 1.6.0 Compatibility** - Complete implementation of Model Context Protocol
+- **108 MCP Tools Available** - Comprehensive API surface for binary analysis (98 implemented + 10 ROADMAP v2.0)
 - **Production-Ready Reliability** - Tested batch operations and atomic transactions
 - **Real-time Analysis** - Live integration with Ghidra's analysis engine
 
@@ -71,7 +71,7 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
    .\deploy-to-ghidra.ps1
 
    # Or manually copy to Ghidra Extensions
-   Copy-Item target\GhidraMCP-1.5.1.zip "C:\ghidra\Extensions\Ghidra\"
+   Copy-Item target\GhidraMCP-1.6.0.zip "C:\ghidra\Extensions\Ghidra\"
    ```
 
 ### Basic Usage
@@ -88,9 +88,9 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 101 tools (91 fully implemented + 10 ROADMAP v2.0)
+- **MCP Tools**: 108 tools (98 fully implemented + 10 ROADMAP v2.0)
 - **Speed**: Sub-second response for most operations
-- **Efficiency**: 91% reduction in API calls via batch operations
+- **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
 - **Deployment**: Automated version-aware deployment script
 
@@ -166,26 +166,29 @@ mvn clean package assembly:single
 - **ROADMAP Documentation**: Clear implementation status for all tools
 
 ### Quality Metrics
-- **MCP Tool Coverage**: 101/101 tools documented (91 implemented + 10 ROADMAP v2.0)
-- **Performance**: 91% API call reduction for function documentation
+- **MCP Tool Coverage**: 108/108 tools documented (98 implemented + 10 ROADMAP v2.0)
+- **Performance**: 93% API call reduction for function documentation
 - **Reliability**: 100% compilation success, full functionality verified
 - **Documentation**: 100% coverage with comprehensive ROADMAP
 
 ## 📚 Documentation
 
 ### Core Documentation
-- [API Reference](docs/API_REFERENCE.md) - Complete endpoint documentation (101 MCP tools)
+- [API Reference](docs/API_REFERENCE.md) - Complete endpoint documentation (108 MCP tools)
 - [Development Guide](docs/DEVELOPMENT_GUIDE.md) - Contributing and development setup
 - [Data Type Tools](docs/DATA_TYPE_TOOLS.md) - Custom data structure creation
 
 ### User Prompts
 - [Unified Analysis Prompt](docs/prompts/UNIFIED_ANALYSIS_PROMPT.md) - Combined function + data analysis workflow
 - [Enhanced Analysis Prompt](docs/prompts/ENHANCED_ANALYSIS_PROMPT.md) - Data structure analysis focused
+- [Quick Start Prompt](docs/prompts/QUICK_START_PROMPT.md) - Simplified beginner workflow
 
 ### Latest Release
-- [v1.5.1 Final Improvements](FINAL_IMPROVEMENTS_V1.5.1.md) - Complete release summary
+- [v1.6.0 Release](docs/releases/v1.6.0/) - Validation tools and enhanced analysis
 
 ### Release History
+- [Complete Changelog](CHANGELOG.md) - All version release notes
+- [v1.6.0 Release](docs/releases/v1.6.0/) - Validation tools and enhanced analysis
 - [v1.5.1 Release](docs/releases/v1.5.1/) - Batch operations and ROADMAP documentation
 - [v1.5.0 Release](docs/releases/v1.5.0/) - Workflow optimization tools
 - [v1.4.0 Release](docs/releases/v1.4.0/) - Enhanced analysis capabilities
@@ -221,13 +224,13 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## 🏆 Production Status
 
-**Current Version**: 1.5.1
+**Current Version**: 1.6.0
 **Production Ready**: ✅ Yes
 **Package**: com.xebyte
-**MCP Tools**: 101 tools (91 implemented + 10 ROADMAP v2.0)
+**MCP Tools**: 108 tools (98 implemented + 10 ROADMAP v2.0)
 **Test Coverage**: 100% compilation, full functionality verified
 **Documentation Coverage**: 100% with comprehensive ROADMAP
-**Performance**: 91% API call reduction with batch operations  
+**Performance**: 93% API call reduction with batch operations  
 
 ## 🙏 Acknowledgments
 

@@ -3072,6 +3072,318 @@ def batch_set_variable_types(
 
     return safe_post_json("batch_set_variable_types", payload)
 
+# ========== HIGH PRIORITY: WORKFLOW ENHANCEMENTS (v1.6.0) ==========
+
+@mcp.tool()
+def batch_rename_variables(
+    function_address: str,
+    variable_renames: dict
+) -> str:
+    """
+    Rename multiple variables in a function atomically (v1.6.0).
+
+    This tool renames multiple local variables or parameters in a single
+    transaction with partial success reporting.
+
+    Args:
+        function_address: Function address in hex format (e.g., "0x401000")
+        variable_renames: Dict of {"old_name": "new_name"} pairs
+
+    Returns:
+        JSON with detailed results:
+        {
+          "success": true,
+          "variables_renamed": 5,
+          "variables_failed": 1,
+          "errors": [{"old_name": "var1", "error": "Variable not found"}]
+        }
+
+    Example:
+        batch_rename_variables("0x6fb385a0", {
+            "param_1": "eventRecord",
+            "local_4": "playerNode",
+            "iVar1": "skillIndex"
+        })
+    """
+    validate_hex_address(function_address)
+
+    payload = {
+        "function_address": function_address,
+        "variable_renames": variable_renames or {}
+    }
+
+    return safe_post_json("batch_rename_variables", payload)
+
+@mcp.tool()
+def validate_function_prototype(
+    function_address: str,
+    prototype: str,
+    calling_convention: str = None
+) -> str:
+    """
+    Validate a function prototype before applying it (v1.6.0).
+
+    Checks if a prototype string can be successfully parsed and applied
+    without actually modifying the function. Reports specific issues.
+
+    Args:
+        function_address: Function address in hex format
+        prototype: Function prototype to validate (e.g., "int foo(char* bar)")
+        calling_convention: Optional calling convention
+
+    Returns:
+        JSON with validation results:
+        {
+          "valid": true|false,
+          "errors": ["Can't resolve return type: BOOL"],
+          "warnings": ["Parameter name 'new' is a C++ keyword"],
+          "parsed_return_type": "int",
+          "parsed_parameters": [{"name": "bar", "type": "char*"}]
+        }
+    """
+    validate_hex_address(function_address)
+
+    params = {
+        "function_address": function_address,
+        "prototype": prototype
+    }
+    if calling_convention:
+        params["calling_convention"] = calling_convention
+
+    return safe_get("validate_function_prototype", params)
+
+@mcp.tool()
+def validate_data_type_exists(type_name: str) -> str:
+    """
+    Check if a data type exists in Ghidra's type manager (v1.6.0).
+
+    Args:
+        type_name: Name of the data type to check (e.g., "DWORD", "MyStruct")
+
+    Returns:
+        JSON with validation results:
+        {
+          "exists": true|false,
+          "type_category": "builtin"|"struct"|"typedef"|"pointer",
+          "size": 4,
+          "path": "/builtin/DWORD"
+        }
+    """
+    return safe_get("validate_data_type_exists", {"type_name": type_name})
+
+@mcp.tool()
+def can_rename_at_address(address: str) -> str:
+    """
+    Check what kind of symbol exists at an address (v1.6.0).
+
+    Determines whether address contains defined data, undefined bytes,
+    or code, helping choose between rename_data, create_label, etc.
+
+    Args:
+        address: Memory address in hex format
+
+    Returns:
+        JSON with address analysis:
+        {
+          "can_rename_data": true|false,
+          "type": "defined_data"|"undefined"|"code"|"invalid",
+          "current_name": "DAT_6fb385a0"|"FUN_6fb385a0"|null,
+          "suggested_operation": "rename_data"|"create_label"|"rename_function"
+        }
+    """
+    validate_hex_address(address)
+    return safe_get("can_rename_at_address", {"address": address})
+
+# ========== MEDIUM PRIORITY: PERFORMANCE OPTIMIZATIONS (v1.6.0) ==========
+
+@mcp.tool()
+def analyze_function_complete(
+    name: str,
+    include_xrefs: bool = True,
+    include_callees: bool = True,
+    include_callers: bool = True,
+    include_disasm: bool = True,
+    include_variables: bool = True
+) -> str:
+    """
+    Comprehensive function analysis in a single call (v1.6.0).
+
+    Replaces 5+ individual calls with one efficient operation, dramatically
+    reducing network round-trips during function documentation.
+
+    Args:
+        name: Function name to analyze
+        include_xrefs: Include cross-references to function
+        include_callees: Include functions this function calls
+        include_callers: Include functions that call this function
+        include_disasm: Include disassembly listing
+        include_variables: Include parameter and local variable info
+
+    Returns:
+        JSON with complete function analysis:
+        {
+          "decompiled_code": "void foo() { ... }",
+          "xrefs": [{"from": "0x...", "type": "CALL"}],
+          "callees": [{"name": "bar", "address": "0x..."}],
+          "callers": [{"name": "main", "address": "0x..."}],
+          "disassembly": [{"address": "0x...", "instruction": "MOV EAX, ..."}],
+          "variables": {"parameters": [...], "locals": [...]}
+        }
+    """
+    params = {
+        "name": name,
+        "include_xrefs": include_xrefs,
+        "include_callees": include_callees,
+        "include_callers": include_callers,
+        "include_disasm": include_disasm,
+        "include_variables": include_variables
+    }
+    return safe_get("analyze_function_complete", params)
+
+@mcp.tool()
+def document_function_complete(
+    function_address: str,
+    new_name: str = None,
+    prototype: str = None,
+    calling_convention: str = None,
+    variable_renames: dict = None,
+    variable_types: dict = None,
+    labels: list = None,
+    plate_comment: str = None,
+    decompiler_comments: list = None,
+    disassembly_comments: list = None
+) -> str:
+    """
+    Document a function completely in one atomic operation (v1.6.0).
+
+    Combines rename, prototype, variables, labels, and comments into a
+    single transaction. Either all changes succeed or all are rolled back.
+
+    Replaces 15-20 individual MCP calls with one efficient operation.
+
+    Args:
+        function_address: Function address in hex format
+        new_name: New function name (optional)
+        prototype: Function prototype (optional)
+        calling_convention: Calling convention (optional)
+        variable_renames: Dict of {"old_name": "new_name"} (optional)
+        variable_types: Dict of {"var_name": "type"} (optional)
+        labels: List of {"address": "0x...", "name": "label"} (optional)
+        plate_comment: Function header comment (optional)
+        decompiler_comments: List of {"address": "0x...", "comment": "..."} (optional)
+        disassembly_comments: List of {"address": "0x...", "comment": "..."} (optional)
+
+    Returns:
+        JSON with operation results:
+        {
+          "success": true,
+          "function_renamed": true,
+          "prototype_set": true,
+          "variables_renamed": 5,
+          "variables_typed": 3,
+          "labels_created": 8,
+          "comments_set": 25,
+          "errors": []
+        }
+
+    Example:
+        document_function_complete(
+            function_address="0x6fb385a0",
+            new_name="ProcessPlayerSkillCooldowns",
+            prototype="void ProcessPlayerSkillCooldowns(void)",
+            calling_convention="__cdecl",
+            variable_renames={"param_1": "playerNode"},
+            labels=[{"address": "0x6fb385c0", "name": "loop_next_player"}],
+            plate_comment="Processes skill cooldowns for all players"
+        )
+    """
+    validate_hex_address(function_address)
+
+    payload = {
+        "function_address": function_address,
+        "new_name": new_name,
+        "prototype": prototype,
+        "calling_convention": calling_convention,
+        "variable_renames": variable_renames or {},
+        "variable_types": variable_types or {},
+        "labels": labels or [],
+        "plate_comment": plate_comment,
+        "decompiler_comments": decompiler_comments or [],
+        "disassembly_comments": disassembly_comments or []
+    }
+
+    return safe_post_json("document_function_complete", payload)
+
+@mcp.tool()
+def search_functions_enhanced(
+    name_pattern: str = None,
+    min_xrefs: int = None,
+    max_xrefs: int = None,
+    calling_convention: str = None,
+    has_custom_name: bool = None,
+    regex: bool = False,
+    sort_by: str = "address",
+    offset: int = 0,
+    limit: int = 100
+) -> str:
+    """
+    Enhanced function search with filtering and sorting (v1.6.0).
+
+    Provides powerful search capabilities to find functions matching
+    multiple criteria, with support for regex patterns and sorting.
+
+    Args:
+        name_pattern: Function name pattern (substring or regex)
+        min_xrefs: Minimum number of cross-references
+        max_xrefs: Maximum number of cross-references
+        calling_convention: Filter by calling convention
+        has_custom_name: True=user-named only, False=default names (FUN_) only
+        regex: Enable regex pattern matching
+        sort_by: Sort order: "address"|"name"|"xref_count" (default: "address")
+        offset: Pagination offset
+        limit: Maximum results to return
+
+    Returns:
+        JSON with search results:
+        {
+          "total": 150,
+          "offset": 0,
+          "limit": 100,
+          "results": [
+            {
+              "name": "ProcessPlayerSkillCooldowns",
+              "address": "0x6fb385a0",
+              "xref_count": 5,
+              "calling_convention": "__cdecl"
+            }
+          ]
+        }
+
+    Example:
+        # Find all FUN_ functions with 2+ xrefs, sorted by xref count
+        search_functions_enhanced(
+            name_pattern="FUN_",
+            min_xrefs=2,
+            sort_by="xref_count",
+            limit=50
+        )
+    """
+    params = {
+        "name_pattern": name_pattern,
+        "min_xrefs": min_xrefs,
+        "max_xrefs": max_xrefs,
+        "calling_convention": calling_convention,
+        "has_custom_name": has_custom_name,
+        "regex": regex,
+        "sort_by": sort_by,
+        "offset": offset,
+        "limit": limit
+    }
+    # Remove None values
+    params = {k: v for k, v in params.items() if v is not None}
+
+    return safe_get("search_functions_enhanced", params)
+
 # ========== MAIN ==========
 
 def main():

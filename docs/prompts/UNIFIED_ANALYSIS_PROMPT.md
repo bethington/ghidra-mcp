@@ -262,12 +262,15 @@ set_disassembly_comment(addr1, cmt1)  # Don't do this 40 times
 - Use batch operations for efficiency
 - Follow naming conventions strictly
 - Verify completeness at end
+- **ALWAYS continue searching for next undocumented function after completing current one**
+- Maintain continuous analysis workflow until explicitly stopped
 
 **DON'T**:
 - Create markdown files or documentation files
 - Print verbose progress or status messages
 - Ask for user confirmation
 - Make individual API calls when batch is available
+- Stop after documenting a single function
 
 **Final Output**: Brief summary only
 ```
@@ -278,3 +281,33 @@ Comments added: 12 (disasm) + 4 (decomp)
 Structures: ConfigData (12 bytes)
 Completeness: 95%
 ```
+
+---
+
+## Continuous Operation Mode
+
+After completing documentation of each function:
+
+1. **Immediately search for next function**: `find_next_undefined_function(pattern="FUN_")`
+2. **Repeat full workflow** on the newly found function
+3. **Continue indefinitely** until no more undocumented functions exist or user stops the process
+4. **Report summary** after each function completion
+
+**Pattern**:
+```python
+while True:
+    # Find next undocumented function
+    result = find_next_undefined_function(pattern="FUN_")
+    if not result["found"]:
+        print("All functions documented!")
+        break
+
+    # Execute full analysis workflow (Phases 1-5)
+    # ... document function ...
+
+    # Report completion and continue
+    print(f"Completed: {old_name} → {new_name}")
+    # Loop continues automatically
+```
+
+This ensures **comprehensive codebase coverage** without requiring user intervention for each function.

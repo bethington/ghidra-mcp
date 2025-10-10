@@ -1,11 +1,43 @@
-# Release Notes - Ghidra MCP Server v1.5.1
+# Changelog - Ghidra MCP Server
 
-**Release Date**: 2025-01-10
-**Status**: Production Ready ✅
+Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## 🎉 What's New
+## v1.6.0 - 2025-10-10
+
+### New Features
+- ✅ **7 New MCP Tools**: Validation, batch operations, and comprehensive analysis
+  - `validate_function_prototype` - Pre-flight validation for function prototypes
+  - `validate_data_type_exists` - Check if types exist before using them
+  - `can_rename_at_address` - Determine address type and suggest operations
+  - `batch_rename_variables` - Atomic multi-variable renaming with partial success
+  - `analyze_function_complete` - Single-call comprehensive analysis (5+ calls → 1)
+  - `document_function_complete` - Atomic all-in-one documentation (15-20 calls → 1)
+  - `search_functions_enhanced` - Advanced search with filtering, regex, sorting
+
+### Documentation
+- ✅ **Reorganized structure**: Created `docs/guides/`, `docs/releases/v1.6.0/`
+- ✅ **Renamed**: `RELEASE_NOTES.md` → `CHANGELOG.md`
+- ✅ **Moved utility scripts** to `tools/` directory
+- ✅ **Removed redundancy**: 8 files consolidated or archived
+- ✅ **New prompt**: `FUNCTION_DOCUMENTATION_WORKFLOW.md`
+
+### Performance
+- **93% API call reduction** for complete function documentation
+- **Atomic transactions** with rollback support
+- **Pre-flight validation** prevents errors before execution
+
+### Quality
+- **Implementation verification**: 99/108 Python tools (91.7%) have Java endpoints
+- **100% documentation coverage**: All 108 tools documented
+- **Professional structure**: Industry-standard organization
+
+**See**: [v1.6.0 Release Notes](docs/releases/v1.6.0/RELEASE_NOTES.md)
+
+---
+
+## v1.5.1 - 2025-01-10
 
 ### Critical Bug Fixes
 - ✅ **Fixed batch_set_comments JSON parsing error** - Eliminated ClassCastException that caused 90% of batch operation failures
