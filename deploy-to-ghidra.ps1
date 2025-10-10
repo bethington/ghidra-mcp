@@ -12,8 +12,24 @@ function Write-Info { param($msg) Write-Host "[INFO] $msg" -ForegroundColor Cyan
 function Write-Warning { param($msg) Write-Host "[WARNING] $msg" -ForegroundColor Yellow }
 function Write-Error { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
-Write-Info "GhidraMCP v1.5.0 Deployment Script"
-Write-Info "===================================="
+Write-Info "GhidraMCP Deployment Script"
+Write-Info "============================"
+
+# Detect version from pom.xml
+$pomPath = "$PSScriptRoot\pom.xml"
+if (Test-Path $pomPath) {
+    try {
+        [xml]$pom = Get-Content $pomPath
+        $version = $pom.project.version
+        Write-Success "Detected version: $version"
+    } catch {
+        Write-Warning "Could not parse version from pom.xml, using manual detection"
+        $version = $null
+    }
+} else {
+    Write-Warning "pom.xml not found, using manual version detection"
+    $version = $null
+}
 
 # Find Ghidra installation
 $possiblePaths = @(
@@ -46,15 +62,35 @@ if (-not $GhidraPath) {
     }
 }
 
-# Verify build artifact exists
-$artifactPath = "$PSScriptRoot\target\GhidraMCP-1.5.0.zip"
+# Find latest build artifact
+if ($version) {
+    $artifactPath = "$PSScriptRoot\target\GhidraMCP-$version.zip"
+} else {
+    # Auto-detect latest artifact if version not found
+    $artifacts = Get-ChildItem -Path "$PSScriptRoot\target" -Filter "GhidraMCP-*.zip" -ErrorAction SilentlyContinue |
+                 Sort-Object LastWriteTime -Descending
+
+    if ($artifacts) {
+        $artifactPath = $artifacts[0].FullName
+        # Extract version from filename
+        if ($artifacts[0].Name -match 'GhidraMCP-(.+)\.zip') {
+            $version = $Matches[1]
+        }
+        Write-Info "Auto-detected latest artifact: $($artifacts[0].Name)"
+    } else {
+        Write-Error "No build artifacts found in target/"
+        Write-Info "Please run the build first: mvn clean package assembly:single"
+        exit 1
+    }
+}
+
 if (-not (Test-Path $artifactPath)) {
     Write-Error "Build artifact not found: $artifactPath"
     Write-Info "Please run the build first: mvn clean package assembly:single"
     exit 1
 }
 
-Write-Success "Found build artifact: $artifactPath"
+Write-Success "Using artifact: $(Split-Path $artifactPath -Leaf) ($version)"
 
 # Find Ghidra Extensions directory
 $extensionsDir = "$GhidraPath\Extensions\Ghidra"
@@ -76,9 +112,10 @@ if ($existingPlugins) {
 
 # Copy new plugin
 try {
-    $destinationPath = Join-Path $extensionsDir "GhidraMCP-1.5.0.zip"
+    $artifactName = Split-Path $artifactPath -Leaf
+    $destinationPath = Join-Path $extensionsDir $artifactName
     Copy-Item $artifactPath $destinationPath -Force
-    Write-Success "Installed: GhidraMCP-1.5.0.zip → $extensionsDir"
+    Write-Success "Installed: $artifactName → $extensionsDir"
 } catch {
     Write-Error "Failed to copy plugin: $($_.Exception.Message)"
     exit 1
@@ -172,7 +209,7 @@ if (Test-Path $userDir) {
 
 # Create quick reference message
 Write-Host ""
-Write-Success "GhidraMCP v1.5.0 Successfully Deployed!"
+Write-Success "GhidraMCP v$version Successfully Deployed!"
 Write-Host ""
 Write-Info "Installation Locations:"
 Write-Host "   Plugin: $destinationPath"
@@ -185,7 +222,7 @@ Write-Host "1. Install Python dependencies: pip install -r requirements.txt"
 Write-Host "2. Start Ghidra"
 Write-Host "3. If plugin isn't automatically enabled:"
 Write-Host "      - Go to File > Configure..."
-Write-Host "      - Navigate to Miscellaneous > GhidraMCP"  
+Write-Host "      - Navigate to Miscellaneous > GhidraMCP"
 Write-Host "      - Check the checkbox to enable"
 Write-Host "      - Click OK and restart Ghidra"
 Write-Host ""
@@ -195,23 +232,28 @@ Write-Host "   Python: python bridge_mcp_ghidra.py (from Ghidra root directory)"
 Write-Host ""
 Write-Info "Default Server: http://127.0.0.1:8089/"
 Write-Host ""
-Write-Info "New in v1.5.0 - Workflow Optimization Tools (9 new tools):"
-Write-Host "   + batch_set_comments - Set multiple comments in one call (75% reduction)"
-Write-Host "   + set_plate_comment - Function header documentation"
-Write-Host "   + get_function_variables - List all parameters and locals"
-Write-Host "   + batch_rename_function_components - Atomic rename operations (67-80% reduction)"
-Write-Host "   + analyze_function_completeness - Automated quality verification"
-Write-Host "   + get_valid_data_types - Type system introspection"
-Write-Host "   + validate_data_type - Pre-flight type validation"
-Write-Host "   + suggest_data_type - AI-assisted type inference"
-Write-Host "   + batch_apply_data_types - Multiple type applications (80% reduction)"
+
+# Show version-specific release notes
+if ($version -match "1\.5\.1") {
+    Write-Info "New in v1.5.1 - Batch Operations & ROADMAP Documentation:"
+    Write-Host "   + batch_create_labels - Create labels in single atomic transaction"
+    Write-Host "   + Enhanced batch_set_comments - Fixed JSON parsing (90% error reduction)"
+    Write-Host "   + ROADMAP v2.0 - 10 tools clearly marked with implementation plans"
+    Write-Host "   + Performance: 91% API call reduction (57 → 5 calls per function)"
+    Write-Host "   + Documentation: Organized structure, comprehensive user prompts"
+    Write-Host ""
+    Write-Info "For full release notes, see: RELEASE_NOTES.md"
+} elseif ($version -match "1\.5\.0") {
+    Write-Info "New in v1.5.0 - Workflow Optimization Tools (9 new tools):"
+    Write-Host "   + batch_set_comments - Set multiple comments in one call"
+    Write-Host "   + set_plate_comment - Function header documentation"
+    Write-Host "   + get_function_variables - List all parameters and locals"
+    Write-Host "   + batch_rename_function_components - Atomic rename operations"
+    Write-Host "   + analyze_function_completeness - Automated quality verification"
+} else {
+    Write-Info "For release notes, see: docs/releases/v$version/"
+}
 Write-Host ""
-Write-Info "Performance Impact:"
-Write-Host "   - Reduces 15-20 API calls to 5-9 calls per function (40-55% reduction)"
-Write-Host "   - Enables previously impossible operations (plate comments)"
-Write-Host "   - Comprehensive type system documentation"
-Write-Host ""
-Write-Info "For detailed usage instructions, see: INSTALLATION.md"
 
 
 
