@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ghidra MCP Server is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It exposes 57+ MCP tools for binary analysis through a dual-layer architecture: a Java plugin running in Ghidra that provides REST endpoints, and a Python bridge that implements the MCP protocol.
+Ghidra MCP Server is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It exposes 101 MCP tools for binary analysis (91 implemented + 10 ROADMAP v2.0) through a dual-layer architecture: a Java plugin running in Ghidra that provides REST endpoints, and a Python bridge that implements the MCP protocol.
 
-**Current Version**: 1.2.0
+**Current Version**: 1.5.1
 **Package**: com.xebyte
 **Ghidra Version**: 11.4.2
 **Java Version**: 21 LTS
@@ -19,7 +19,7 @@ Ghidra MCP Server is a production-ready Model Context Protocol (MCP) server that
 1. **Ghidra Java Plugin** (`src/main/java/com/xebyte/GhidraMCPPlugin.java`)
    - Embedded HTTP server running on port 8089 (configurable)
    - Exposes Ghidra's reverse engineering API as REST endpoints
-   - Single-file plugin (~5000 lines) with 57+ endpoints
+   - Single-file plugin (~5000 lines) with 101 endpoints (91 implemented + 10 ROADMAP v2.0)
    - Handles function analysis, decompilation, symbols, data types, cross-references
 
 2. **Python MCP Bridge** (`bridge_mcp_ghidra.py`)
@@ -57,7 +57,7 @@ mvn clean package assembly:single
 
 This produces:
 - `target/GhidraMCP.jar` - The plugin JAR
-- `target/GhidraMCP-1.2.0.zip` - Ghidra extension package
+- `target/GhidraMCP-1.5.1.zip` - Ghidra extension package
 
 ### Testing
 
@@ -85,13 +85,19 @@ pytest tests/ --cov=src --cov-report=html
 
 ### Deployment to Ghidra
 
+Automated installation (recommended):
+```powershell
+# Windows - automatically detects version and Ghidra installation
+.\deploy-to-ghidra.ps1
+```
+
 Manual installation:
 ```bash
 # Option 1: Copy JAR to Ghidra extensions
 cp target/GhidraMCP.jar "<ghidra_install>/Extensions/Ghidra/"
 
 # Option 2: Install ZIP via Ghidra GUI
-# File → Install Extensions → Add Extension → Select GhidraMCP-1.2.0.zip
+# File → Install Extensions → Add Extension → Select GhidraMCP-1.5.1.zip
 ```
 
 ### Running the MCP Bridge
@@ -110,7 +116,7 @@ python bridge_mcp_ghidra.py --ghidra-server http://127.0.0.1:8089/
 ## Key Files and Structure
 
 ### Core Implementation
-- `bridge_mcp_ghidra.py` - Main MCP server (1757 lines, 57+ MCP tools)
+- `bridge_mcp_ghidra.py` - Main MCP server (101 MCP tools: 91 implemented + 10 ROADMAP v2.0)
 - `src/main/java/com/xebyte/GhidraMCPPlugin.java` - Ghidra plugin (all REST endpoints)
 - `pom.xml` - Maven build configuration with system-scoped Ghidra dependencies
 - `src/assembly/ghidra-extension.xml` - Assembly descriptor for ZIP packaging

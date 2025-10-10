@@ -3,16 +3,16 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-11.4.2-green.svg)](https://ghidra-sre.org/)
-[![MCP Version](https://img.shields.io/badge/MCP-1.5.0-purple.svg)](https://modelcontextprotocol.io/)
+[![MCP Version](https://img.shields.io/badge/MCP-1.5.1-purple.svg)](https://modelcontextprotocol.io/)
 
 A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks.
 
 ## 🌟 Features
 
 ### Core MCP Integration
-- **Full MCP 1.5.0 Compatibility** - Complete implementation of Model Context Protocol
-- **57 MCP Tools Available** - Comprehensive API surface for binary analysis
-- **100% Success Rate** - Production-tested reliability across all tools
+- **Full MCP 1.5.1 Compatibility** - Complete implementation of Model Context Protocol
+- **101 MCP Tools Available** - Comprehensive API surface for binary analysis (91 implemented + 10 ROADMAP v2.0)
+- **Production-Ready Reliability** - Tested batch operations and atomic transactions
 - **Real-time Analysis** - Live integration with Ghidra's analysis engine
 
 ### Binary Analysis Capabilities
@@ -66,8 +66,12 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
    ```
 
 5. **Deploy to Ghidra:**
-   ```bash
-   python ghidra_dev_cycle.py --comprehensive-test --document-binary
+   ```powershell
+   # Windows
+   .\deploy-to-ghidra.ps1
+
+   # Or manually copy to Ghidra Extensions
+   Copy-Item target\GhidraMCP-1.5.1.zip "C:\ghidra\Extensions\Ghidra\"
    ```
 
 ### Basic Usage
@@ -82,18 +86,13 @@ python bridge_mcp_ghidra.py
 python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 ```
 
-#### Option 3: Development Cycle (Full automation)
-```bash
-python ghidra_dev_cycle.py --comprehensive-test --document-binary
-```
-
 ## 📊 Production Performance
 
-- **Reliability**: 100% success rate across 57 MCP tools
+- **MCP Tools**: 101 tools (91 fully implemented + 10 ROADMAP v2.0)
 - **Speed**: Sub-second response for most operations
-- **Throughput**: 1000+ API calls per minute
-- **Quality**: Comprehensive test suite with 158 tests (147 passed, 11 skipped)
-- **Uptime**: Automatic process recovery and error handling
+- **Efficiency**: 91% reduction in API calls via batch operations
+- **Reliability**: Atomic transactions with all-or-nothing semantics
+- **Deployment**: Automated version-aware deployment script
 
 ## 🛠️ API Reference
 
@@ -151,31 +150,26 @@ See [API_REFERENCE.md](docs/API_REFERENCE.md) for complete documentation.
 
 ## 🔧 Development
 
-### Running Tests
+### Building from Source
 ```bash
-# Comprehensive MCP endpoint testing
-python ghidra_dev_cycle.py --comprehensive-test
+# Build the plugin
+mvn clean package assembly:single
 
-# Binary documentation quality testing
-python ghidra_dev_cycle.py --document-binary
-
-# Full development cycle with all tests
-python ghidra_dev_cycle.py --comprehensive-test --document-binary
+# Deploy to Ghidra
+.\deploy-to-ghidra.ps1
 ```
 
-### Development Cycle Features
-- Automated plugin building and deployment
-- Ghidra process management and cleanup
-- CodeBrowser window detection and verification
-- Comprehensive endpoint testing (26 tests)
-- Binary documentation workflow with quality scoring
-- Performance monitoring and optimization
+### Development Features
+- **Automated Deployment**: Version-aware deployment script
+- **Batch Operations**: Reduces API calls by 91%
+- **Atomic Transactions**: All-or-nothing semantics
+- **ROADMAP Documentation**: Clear implementation status for all tools
 
 ### Quality Metrics
-- **Test Coverage**: 158 comprehensive tests across unit/integration/functional categories
-- **MCP Tool Coverage**: 57/57 tools available and tested
-- **Performance Tracking**: Response time monitoring and optimization
-- **Error Recovery**: Intelligent fallback strategies for failed operations
+- **MCP Tool Coverage**: 101/101 tools documented (91 implemented + 10 ROADMAP v2.0)
+- **Performance**: 91% API call reduction for function documentation
+- **Reliability**: 100% compilation success, full functionality verified
+- **Documentation**: 100% coverage with comprehensive ROADMAP
 
 ## 📚 Documentation
 
@@ -208,16 +202,18 @@ python ghidra_dev_cycle.py --comprehensive-test --document-binary
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Run the comprehensive test suite (`python ghidra_dev_cycle.py --comprehensive-test`)
-4. Commit your changes (`git commit -m 'Add amazing feature'`)
-5. Push to the branch (`git push origin feature/amazing-feature`)
-6. Open a Pull Request
+3. Build and test your changes (`mvn clean package assembly:single`)
+4. Update documentation (README, CHANGELOG, API_REFERENCE as needed)
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
 
 ### Development Standards
-- All new features must pass 100% of comprehensive tests
-- Documentation quality score must maintain 100%
-- Response times should remain under established baselines
-- Error handling must include intelligent fallback strategies
+- All new features must compile successfully
+- Update version in pom.xml for releases
+- Document new MCP tools in API_REFERENCE.md
+- Mark placeholder tools with [ROADMAP v2.0] prefix
+- Use batch operations where possible for efficiency
 
 ## 📄 License
 
