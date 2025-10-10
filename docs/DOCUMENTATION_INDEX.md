@@ -4,10 +4,10 @@ Complete documentation index for the Ghidra MCP Server project.
 
 ## 📋 Current Documentation Status
 
-- **Version**: 1.2.0
-- **Package**: com.xebyte (updated from com.lauriewired)
-- **MCP Tools**: 57 tools available
-- **Test Coverage**: 158 tests (147 passed, 11 skipped)
+- **Version**: 1.5.1
+- **Package**: com.xebyte
+- **MCP Tools**: 101 tools (91 implemented + 10 ROADMAP v2.0)
+- **Build Status**: ✅ Production ready (GhidraMCP-1.5.1.zip)
 - **Documentation Coverage**: 100%
 
 ## 📚 Core Documentation
@@ -15,60 +15,63 @@ Complete documentation index for the Ghidra MCP Server project.
 | Document | Description | Status |
 |----------|-------------|--------|
 | [README.md](../README.md) | Main project overview and quick start | ✅ Current |
-| [API_REFERENCE.md](docs/API_REFERENCE.md) | Complete MCP tools documentation (57 tools) | ✅ Current |
-| [DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) | Setup, workflows, and best practices | ✅ Current |
-| [REQUIREMENTS.md](docs/REQUIREMENTS.md) | Dependency management and installation | ✅ Current |
-| [DATA_TYPE_TOOLS.md](docs/DATA_TYPE_TOOLS.md) | Advanced data structure analysis tools | ✅ Current |
+| [API_REFERENCE.md](API_REFERENCE.md) | Complete MCP tools documentation (101 tools) | ✅ Current |
+| [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md) | Setup, workflows, and best practices | ✅ Current |
+| [DATA_TYPE_TOOLS.md](DATA_TYPE_TOOLS.md) | Advanced data structure analysis tools | ✅ Current |
+| [CLAUDE.md](../CLAUDE.md) | AI assistant configuration and project guidance | ✅ Current |
 
 ## 📂 Directory Documentation
 
 | Directory | Documentation | Description |
 |-----------|---------------|-------------|
-| [docs/](docs/) | [README.md](docs/README.md) | Documentation overview and index |
-| [tests/](tests/) | [README.md](tests/README.md) | Comprehensive test suite (158 tests) |
-| [scripts/](scripts/) | [README.md](scripts/README.md) | Development and utility scripts |
-| [examples/](examples/) | [README.md](examples/README.md) | Usage examples and demonstrations |
-| [logs/](logs/) | [README.md](logs/README.md) | Development and execution logging |
-| [tools/](tools/) | [README.md](tools/README.md) | Custom tools and utilities |
+| [docs/prompts/](prompts/) | User analysis prompts | UNIFIED and ENHANCED analysis workflows |
+| [docs/releases/](releases/) | Release notes and changelogs | Version-specific documentation |
+| [docs/reports/](reports/) | Code reviews and evaluations | Historical analysis reports |
+| [docs/troubleshooting/](troubleshooting/) | Issue resolution guides | Plugin loading and common issues |
+| [docs/archive/](archive/) | Historical documentation | Superseded prompts and reports |
 
 ## 🗂️ Specialized Documentation
 
-### Configuration & Setup
-- [REQUIREMENTS.md](docs/REQUIREMENTS.md) - Python dependencies and environment setup
-- [CONFIGURATION_MIGRATION_GUIDE.md](scripts/CONFIGURATION_MIGRATION_GUIDE.md) - Configuration management
+### User Prompts & Workflows
+- [UNIFIED_ANALYSIS_PROMPT.md](prompts/UNIFIED_ANALYSIS_PROMPT.md) - Combined function + data analysis workflow
+- [ENHANCED_ANALYSIS_PROMPT.md](prompts/ENHANCED_ANALYSIS_PROMPT.md) - Advanced data structure analysis
 
-### Testing Documentation  
-- [Test Suite README](tests/README.md) - Complete testing framework (158 tests)
-- [TEST_SUITE_README.md](scripts/TEST_SUITE_README.md) - Additional testing utilities
+### Release Documentation
+- [v1.5.1 Release](releases/v1.5.1/) - Batch operations and ROADMAP documentation
+- [v1.5.0 Release](releases/v1.5.0/) - Workflow optimization tools
+- [v1.4.0 Release](releases/v1.4.0/) - Enhanced analysis capabilities
 
-### Historical Documentation
-- [Archive](docs/archive/) - Historical development documentation
-- [Archive README](docs/archive/README.md) - Archive contents and organization
+### Development Reports
+- [MCP_CODE_REVIEW_REPORT.md](reports/MCP_CODE_REVIEW_REPORT.md) - Comprehensive 101-tool review
+- [SESSION_EVALUATION_REPORT.md](reports/SESSION_EVALUATION_REPORT.md) - Function documentation workflow
+
+### Troubleshooting
+- [TROUBLESHOOTING_PLUGIN_LOAD.md](troubleshooting/TROUBLESHOOTING_PLUGIN_LOAD.md) - Plugin loading issues
 
 ## 🚀 Quick Navigation
 
 ### For Users
-1. **Start Here**: [README.md](../README.md) - Project overview
-2. **API Reference**: [API_REFERENCE.md](docs/API_REFERENCE.md) - All 57 MCP tools
-3. **Examples**: [examples/README.md](examples/README.md) - Usage examples
+1. **Start Here**: [README.md](../README.md) - Project overview and quick start
+2. **API Reference**: [API_REFERENCE.md](API_REFERENCE.md) - All 101 MCP tools
+3. **User Prompts**: [prompts/](prompts/) - Analysis workflows for reverse engineering
 
-### For Developers  
-1. **Development Guide**: [DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) - Setup and workflows
-2. **Test Documentation**: [tests/README.md](tests/README.md) - Testing framework
-3. **Scripts**: [scripts/README.md](scripts/README.md) - Development utilities
+### For Developers
+1. **Development Guide**: [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md) - Setup and workflows
+2. **CLAUDE.md**: [../CLAUDE.md](../CLAUDE.md) - AI assistant configuration
+3. **Deployment**: [deploy-to-ghidra.ps1](../deploy-to-ghidra.ps1) - Automated deployment
 
 ### For Contributors
-1. **Development Guide**: Setup, standards, and contribution process
-2. **Test Suite**: Comprehensive testing with 100% success rate
-3. **Documentation Standards**: Consistent formatting and best practices
+1. **Development Guide**: [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md) - Standards and process
+2. **Build System**: Maven-based with automated deployment
+3. **Documentation Standards**: 100% coverage with comprehensive ROADMAP
 
 ## 📊 Documentation Metrics
 
-- **Total Documentation Files**: 15+ current files
-- **API Coverage**: 57/57 MCP tools documented (100%)
-- **Test Documentation**: 158 tests documented
-- **Directory Coverage**: All directories have README files
-- **Archive Management**: Historical docs organized and archived
+- **Total Documentation Files**: 20+ current files
+- **API Coverage**: 101/101 MCP tools documented (100%)
+- **Build Artifacts**: GhidraMCP-1.5.1.zip (97 KB)
+- **Directory Coverage**: Organized docs/ structure with 5 subdirectories
+- **Archive Management**: Historical docs properly archived
 
 ## 🏆 Quality Standards
 
@@ -91,6 +94,7 @@ Documentation is maintained through:
 
 ---
 
-**Documentation Status**: ✅ Complete and Current  
-**Last Updated**: September 23, 2025  
-**Next Review**: December 23, 2025
+**Documentation Status**: ✅ Complete and Current
+**Version**: 1.5.1
+**Last Updated**: October 10, 2025
+**Next Review**: January 10, 2026
