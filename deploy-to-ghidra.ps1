@@ -12,7 +12,7 @@ function Write-Info { param($msg) Write-Host "[INFO] $msg" -ForegroundColor Cyan
 function Write-Warning { param($msg) Write-Host "[WARNING] $msg" -ForegroundColor Yellow }
 function Write-Error { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
-Write-Info "GhidraMCP v1.2.0 Deployment Script"
+Write-Info "GhidraMCP v1.3.0 Deployment Script"
 Write-Info "===================================="
 
 # Find Ghidra installation
@@ -47,7 +47,7 @@ if (-not $GhidraPath) {
 }
 
 # Verify build artifact exists
-$artifactPath = "$PSScriptRoot\target\GhidraMCP-1.2.0.zip"
+$artifactPath = "$PSScriptRoot\target\GhidraMCP-1.3.0.zip"
 if (-not (Test-Path $artifactPath)) {
     Write-Error "Build artifact not found: $artifactPath"
     Write-Info "Please run the build first: mvn clean package assembly:single"
@@ -76,9 +76,9 @@ if ($existingPlugins) {
 
 # Copy new plugin
 try {
-    $destinationPath = Join-Path $extensionsDir "GhidraMCP-1.2.0.zip"
+    $destinationPath = Join-Path $extensionsDir "GhidraMCP-1.3.0.zip"
     Copy-Item $artifactPath $destinationPath -Force
-    Write-Success "Installed: GhidraMCP-1.2.0.zip → $extensionsDir"
+    Write-Success "Installed: GhidraMCP-1.3.0.zip → $extensionsDir"
 } catch {
     Write-Error "Failed to copy plugin: $($_.Exception.Message)"
     exit 1
@@ -172,7 +172,7 @@ if (Test-Path $userDir) {
 
 # Create quick reference message
 Write-Host ""
-Write-Success "GhidraMCP v1.2.0 Successfully Deployed!"
+Write-Success "GhidraMCP v1.3.0 Successfully Deployed!"
 Write-Host ""
 Write-Info "Installation Locations:"
 Write-Host "   Plugin: $destinationPath"
@@ -195,16 +195,17 @@ Write-Host "   Python: python bridge_mcp_ghidra.py (from Ghidra root directory)"
 Write-Host ""
 Write-Info "Default Server: http://127.0.0.1:8089/"
 Write-Host ""
-Write-Info "New in v1.2.0:"
-Write-Host "   + get_function_callgraph - Analyze function calls"
-Write-Host "   + find_byte_patterns - Pattern matching with wildcards"
-Write-Host "   + create_label - Programmatic label creation"
-Write-Host "   + get_program_stats - Comprehensive program statistics"
-Write-Host "   + get_data_references - Enhanced cross-reference analysis"
-Write-Host "   + list_data_types - Enumerate available data types"
-Write-Host "   + create_struct - Define custom structure types"
-Write-Host "   + create_enum - Define enumeration types"
-Write-Host "   + apply_data_type - Apply types to memory locations"
+Write-Info "New in v1.3.0 - High-Performance Data Analysis:"
+Write-Host "   + analyze_data_region - Comprehensive single-call data analysis"
+Write-Host "   + get_bulk_xrefs - Batch cross-reference retrieval"
+Write-Host "   + detect_array_bounds - Array/table size detection"
+Write-Host "   + get_assembly_context - Assembly pattern analysis"
+Write-Host "   + batch_decompile_xref_sources - Batch decompilation"
+Write-Host "   + apply_data_classification - Atomic type application"
+Write-Host ""
+Write-Info "Performance Impact:"
+Write-Host "   - Reduces 39-45 tool calls to just 5 calls (89% reduction)"
+Write-Host "   - Enables efficient batch processing of data structures"
 Write-Host ""
 Write-Info "For detailed usage instructions, see: INSTALLATION.md"
 

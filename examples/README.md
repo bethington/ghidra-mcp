@@ -46,7 +46,7 @@ xrefs = get_function_xrefs("main")
 
 # Data structure analysis
 structs = list_data_types(category="struct")
-analysis = mcp_ghidra_analyze_data_types("0x401000", depth=2)
+analysis = analyze_data_types("0x401000", depth=2)
 ```
 
 ## 📚 Additional Resources

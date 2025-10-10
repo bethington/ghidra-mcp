@@ -16,7 +16,7 @@ The Ghidra MCP plugin now includes 12 specialized data type tools that enable:
 ### 1. analyze_data_types
 **Purpose**: Analyze data types at a given address with specified recursion depth
 
-**MCP Tool**: `mcp_ghidra_analyze_data_types(address: str, depth: int = 1)`
+**MCP Tool**: `analyze_data_types(address: str, depth: int = 1)`
 
 **Parameters**:
 - `address`: Target address in hex format (e.g., "0x1400010a0")
@@ -32,7 +32,7 @@ The Ghidra MCP plugin now includes 12 specialized data type tools that enable:
 ### 2. create_union
 **Purpose**: Create a new union data type with specified fields
 
-**MCP Tool**: `mcp_ghidra_create_union(name: str, fields: list)`
+**MCP Tool**: `create_union(name: str, fields: list)`
 
 **Parameters**:
 - `name`: Name for the new union
@@ -52,7 +52,7 @@ fields = [
 ### 3. get_type_size
 **Purpose**: Get size and alignment information for a data type
 
-**MCP Tool**: `mcp_ghidra_get_type_size(type_name: str)`
+**MCP Tool**: `get_data_type_size(type_name: str)`
 
 **Parameters**:
 - `type_name`: Name of the data type to query
@@ -67,7 +67,7 @@ fields = [
 ### 4. get_struct_layout
 **Purpose**: Get detailed layout of a structure including field offsets
 
-**MCP Tool**: `mcp_ghidra_get_struct_layout(struct_name: str)`
+**MCP Tool**: `get_struct_layout(struct_name: str)`
 
 **Parameters**:
 - `struct_name`: Name of the structure to analyze
@@ -82,7 +82,7 @@ fields = [
 ### 5. search_data_types
 **Purpose**: Search for data types by name pattern
 
-**MCP Tool**: `mcp_ghidra_search_data_types(pattern: str, offset: int = 0, limit: int = 100)`
+**MCP Tool**: `search_data_types(pattern: str, offset: int = 0, limit: int = 100)`
 
 **Parameters**:
 - `pattern`: Search pattern to match against data type names
@@ -99,7 +99,7 @@ fields = [
 ### 6. auto_create_struct
 **Purpose**: Automatically create a structure by analyzing memory layout
 
-**MCP Tool**: `mcp_ghidra_auto_create_struct(address: str, size: int, name: str)`
+**MCP Tool**: `auto_create_struct_from_memory(address: str, size: int, name: str)`
 
 **Parameters**:
 - `address`: Target address in hex format
@@ -116,7 +116,7 @@ fields = [
 ### 7. get_enum_values
 **Purpose**: Get all values and names in an enumeration
 
-**MCP Tool**: `mcp_ghidra_get_enum_values(enum_name: str)`
+**MCP Tool**: `get_enum_values(enum_name: str)`
 
 **Parameters**:
 - `enum_name`: Name of the enumeration to query
@@ -131,7 +131,7 @@ fields = [
 ### 8. create_typedef
 **Purpose**: Create a typedef (type alias) for an existing data type
 
-**MCP Tool**: `mcp_ghidra_create_typedef(name: str, base_type: str)`
+**MCP Tool**: `create_typedef(name: str, base_type: str)`
 
 **Parameters**:
 - `name`: Name for the new typedef
@@ -147,7 +147,7 @@ fields = [
 ### 9. clone_data_type
 **Purpose**: Clone/copy an existing data type with a new name
 
-**MCP Tool**: `mcp_ghidra_clone_data_type(source_type: str, new_name: str)`
+**MCP Tool**: `clone_data_type(source_type: str, new_name: str)`
 
 **Parameters**:
 - `source_type`: Name of the source data type to clone
@@ -163,7 +163,7 @@ fields = [
 ### 10. validate_data_type
 **Purpose**: Validate if a data type can be properly applied at a given address
 
-**MCP Tool**: `mcp_ghidra_validate_data_type(address: str, type_name: str)`
+**MCP Tool**: `validate_data_type(address: str, type_name: str)`
 
 **Parameters**:
 - `address`: Target address in hex format
@@ -179,7 +179,7 @@ fields = [
 ### 11. export_data_types
 **Purpose**: Export data types in various formats
 
-**MCP Tool**: `mcp_ghidra_export_data_types(format: str = "c", category: str = None)`
+**MCP Tool**: `export_data_types(format: str = "c", category: str = None)`
 
 **Parameters**:
 - `format`: Export format ("c", "json", "summary") - default: "c"
@@ -200,7 +200,7 @@ fields = [
 ### 12. import_data_types
 **Purpose**: Import data types from various sources (placeholder for future enhancement)
 
-**MCP Tool**: `mcp_ghidra_import_data_types(source: str, format: str = "c")`
+**MCP Tool**: `import_data_types(source: str, format: str = "c")`
 
 **Parameters**:
 - `source`: Source data containing type definitions
@@ -215,16 +215,16 @@ fields = [
 ### Basic Analysis Workflow
 ```python
 # 1. Search for interesting data types
-types = mcp_ghidra_search_data_types("Window")
+types = search_data_types("Window")
 
 # 2. Get detailed layout of a structure
-layout = mcp_ghidra_get_struct_layout("WindowStruct")
+layout = get_struct_layout("WindowStruct")
 
 # 3. Analyze data at a specific address
-analysis = mcp_ghidra_analyze_data_types("0x140001000", depth=3)
+analysis = analyze_data_types("0x140001000", depth=3)
 
 # 4. Validate before applying a type
-validation = mcp_ghidra_validate_data_type("0x140001000", "WindowStruct")
+validation = validate_data_type("0x140001000", "WindowStruct")
 ```
 
 ### Custom Type Creation
@@ -235,25 +235,25 @@ union_fields = [
     {"name": "as_double", "type": "double"},
     {"name": "as_long", "type": "long"}
 ]
-mcp_ghidra_create_union("DataUnion", union_fields)
+create_union("DataUnion", union_fields)
 
 # 2. Create a typedef for semantic clarity
-mcp_ghidra_create_typedef("ProcessID", "int")
+create_typedef("ProcessID", "int")
 
 # 3. Auto-generate structure from memory
-mcp_ghidra_auto_create_struct("0x140001000", 64, "InferredStruct")
+auto_create_struct_from_memory("0x140001000", 64, "InferredStruct")
 ```
 
 ### Documentation and Export
 ```python
 # Export all structures as C code
-c_code = mcp_ghidra_export_data_types("c", "struct")
+c_code = export_data_types("c", "struct")
 
 # Export specific category as JSON
-json_data = mcp_ghidra_export_data_types("json", "enum")
+json_data = export_data_types("json", "enum")
 
 # Get summary of all types
-summary = mcp_ghidra_export_data_types("summary")
+summary = export_data_types("summary")
 ```
 
 ## Implementation Details

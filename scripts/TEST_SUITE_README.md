@@ -88,15 +88,15 @@ pytest test_mcp_tools_unit.py -v
 - `create_struct` - Create new structure definition
 - `create_enum` - Create new enumeration
 - `apply_data_type` - Apply data type to memory location
-- `mcp_ghidra_analyze_data_types` - Analyze data types at address
-- `mcp_ghidra_create_union` - Create union data type
-- `mcp_ghidra_get_type_size` - Get size of data type
-- `mcp_ghidra_get_struct_layout` - Get structure field layout
-- `mcp_ghidra_auto_create_struct` - Auto-create struct from memory
-- `mcp_ghidra_get_enum_values` - Get enumeration values
-- `mcp_ghidra_create_typedef` - Create type alias
-- `mcp_ghidra_clone_data_type` - Clone existing data type
-- `mcp_ghidra_validate_data_type` - Validate data type application
+- `analyze_data_types` - Analyze data types at address
+- `create_union` - Create union data type
+- `get_data_type_size` - Get size of data type
+- `get_struct_layout` - Get structure field layout
+- `auto_create_struct_from_memory` - Auto-create struct from memory
+- `get_enum_values` - Get enumeration values
+- `create_typedef` - Create type alias
+- `clone_data_type` - Clone existing data type
+- `validate_data_type` - Validate data type application
 
 ### Modification Tools (11 tests)  
 - `rename_function` - Rename function by name
@@ -114,16 +114,16 @@ pytest test_mcp_tools_unit.py -v
 ### Search Tools (3 tests)
 - `search_functions_by_name` - Search functions by name pattern
 - `get_function_labels` - Get labels within function
-- `mcp_ghidra_search_data_types` - Search data types by pattern
+- `search_data_types` - Search data types by pattern
 
 ### Metadata Tools (3 tests)
 - `check_connection` - Test plugin connectivity
 - `get_metadata` - Get program metadata
-- `convert_number` - Convert number representations
+- `format_number_conversions` - Convert number representations
 
 ### Export Tools (2 tests)
-- `mcp_ghidra_export_data_types` - Export data types
-- `mcp_ghidra_import_data_types` - Import data types
+- `export_data_types` - Export data types
+- `import_data_types` - Import data types
 
 ### Memory Tools (1 test)
 - `read_memory` - Read memory at address

@@ -50,16 +50,16 @@ Successfully implemented **ALL** missing data structure management functionality
 ### MCP Bridge Tools (bridge_mcp_ghidra.py)
 ```python
 # NEW MCP TOOLS IMPLEMENTED:
-- mcp_ghidra_delete_data_type
-- mcp_ghidra_modify_struct_field  
-- mcp_ghidra_add_struct_field
-- mcp_ghidra_remove_struct_field
-- mcp_ghidra_create_array_type
-- mcp_ghidra_create_pointer_type
-- mcp_ghidra_create_data_type_category
-- mcp_ghidra_move_data_type_to_category
-- mcp_ghidra_list_data_type_categories
-- mcp_ghidra_create_function_signature
+- delete_data_type
+- modify_struct_field  
+- add_struct_field
+- remove_struct_field
+- create_array_type
+- create_pointer_type
+- create_data_type_category
+- move_data_type_to_category
+- list_data_type_categories
+- create_function_signature
 ```
 
 ## 🧪 COMPREHENSIVE TESTING RESULTS

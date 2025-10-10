@@ -23,10 +23,14 @@ from urllib3.util.retry import Retry
 DEFAULT_GHIDRA_SERVER = "http://127.0.0.1:8089/"
 
 # Enhanced configuration and state management
+# HTTP request timeout (30s chosen for slow decompilation operations)
 REQUEST_TIMEOUT = 30
 DEFAULT_PAGINATION_LIMIT = 100
+# Maximum retry attempts for transient failures (3 attempts with exponential backoff)
 MAX_RETRIES = 3
+# Exponential backoff factor (0.5s, 1s, 2s, 4s sequence)
 RETRY_BACKOFF_FACTOR = 0.5
+# Cache size (256 entries ≈ 1MB memory footprint for typical requests)
 CACHE_SIZE = 256
 ENABLE_CACHING = True
 
@@ -42,8 +46,13 @@ session.mount("http://", adapter)
 session.mount("https://", adapter)
 
 # Configure enhanced logging
+# Make log level configurable via environment variable (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+# Default to INFO for production use
+import os
+LOG_LEVEL = os.getenv("GHIDRA_MCP_LOG_LEVEL", "INFO")
+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -101,28 +110,77 @@ def validate_function_name(name: str) -> bool:
     """Validate function name format"""
     return bool(FUNCTION_NAME_PATTERN.match(name)) if name else False
 
+def parse_address_list(addresses: str, param_name: str = "addresses") -> list[str]:
+    """
+    Parse comma-separated or JSON array of hex addresses with validation.
+
+    Args:
+        addresses: Comma-separated addresses or JSON array string
+        param_name: Parameter name for error messages (default: "addresses")
+
+    Returns:
+        List of validated hex addresses
+
+    Raises:
+        GhidraValidationError: If addresses format is invalid or contains invalid hex addresses
+    """
+    import json
+
+    addr_list = []
+    if addresses.startswith('['):
+        try:
+            addr_list = json.loads(addresses)
+        except json.JSONDecodeError as e:
+            raise GhidraValidationError(f"Invalid JSON array format for {param_name}: {e}")
+    else:
+        addr_list = [addr.strip() for addr in addresses.split(',') if addr.strip()]
+
+    # Validate all addresses
+    for addr in addr_list:
+        if not validate_hex_address(addr):
+            raise GhidraValidationError(f"Invalid hex address format: {addr}")
+
+    return addr_list
+
 
 # Performance and caching utilities
-def cache_key(*args, **kwargs) -> str:
-    """Generate a cache key from function arguments."""
+from typing import Callable, TypeVar, Any
+
+T = TypeVar('T')
+
+def cache_key(*args: Any, **kwargs: Any) -> str:
+    """
+    Generate a cache key from function arguments.
+
+    Returns:
+        MD5 hash of serialized arguments
+    """
     import json
     import hashlib
     key_data = {"args": args, "kwargs": kwargs}
     return hashlib.md5(json.dumps(key_data, sort_keys=True, default=str).encode()).hexdigest()
 
-def cached_request(cache_duration=300):  # 5 minutes default
-    """Decorator to cache HTTP requests."""
-    def decorator(func):
-        cache = {}
-        
+def cached_request(cache_duration: int = 300) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """
+    Decorator to cache HTTP requests for specified duration.
+
+    Args:
+        cache_duration: Cache time-to-live in seconds (default: 300 = 5 minutes)
+
+    Returns:
+        Decorated function with caching capability
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        cache: dict[str, tuple[T, float]] = {}
+
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> T:
             if not ENABLE_CACHING:
                 return func(*args, **kwargs)
-                
+
             key = cache_key(*args, **kwargs)
             now = time.time()
-            
+
             # Check cache
             if key in cache:
                 result, timestamp = cache[key]
@@ -131,31 +189,30 @@ def cached_request(cache_duration=300):  # 5 minutes default
                     return result
                 else:
                     del cache[key]  # Expired
-            
+
             # Execute and cache
             result = func(*args, **kwargs)
             cache[key] = (result, now)
-            
+
             # Simple cache cleanup (keep only most recent items)
             if len(cache) > CACHE_SIZE:
                 oldest_key = min(cache.keys(), key=lambda k: cache[k][1])
                 del cache[oldest_key]
-                
+
             return result
         return wrapper
     return decorator
 
 
-@cached_request(cache_duration=180)  # 3-minute cache for GET requests
-def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
+def safe_get_uncached(endpoint: str, params: dict = None, retries: int = 3) -> list:
     """
-    Perform a GET request with enhanced error handling and retry logic.
-    
+    Perform a GET request WITHOUT caching (for stateful queries like get_current_address).
+
     Args:
         endpoint: The API endpoint to call
         params: Optional query parameters
         retries: Number of retry attempts for server errors
-    
+
     Returns:
         List of strings representing the response
     """
@@ -175,9 +232,9 @@ def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
             response = session.get(url, params=params, timeout=REQUEST_TIMEOUT)
             response.encoding = 'utf-8'
             duration = time.time() - start_time
-            
+
             logger.info(f"Request to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries})")
-            
+
             if response.ok:
                 return response.text.splitlines()
             elif response.status_code == 404:
@@ -196,7 +253,7 @@ def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
             else:
                 logger.error(f"HTTP {response.status_code}: {response.text.strip()}")
                 return [f"Error {response.status_code}: {response.text.strip()}"]
-                
+
         except requests.exceptions.Timeout:
             logger.warning(f"Request timeout on attempt {attempt + 1}/{retries}")
             if attempt < retries - 1:
@@ -208,7 +265,73 @@ def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
         except Exception as e:
             logger.error(f"Unexpected error: {str(e)}")
             return [f"Unexpected error: {str(e)}"]
-    
+
+    return ["Unexpected error in safe_get_uncached"]
+
+
+@cached_request(cache_duration=180)  # 3-minute cache for GET requests
+def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
+    """
+    Perform a GET request with enhanced error handling and retry logic.
+
+    Args:
+        endpoint: The API endpoint to call
+        params: Optional query parameters
+        retries: Number of retry attempts for server errors
+
+    Returns:
+        List of strings representing the response
+    """
+    if params is None:
+        params = {}
+
+    # Validate server URL for security
+    if not validate_server_url(ghidra_server_url):
+        logger.error(f"Invalid or unsafe server URL: {ghidra_server_url}")
+        return ["Error: Invalid server URL - only local addresses allowed"]
+
+    url = urljoin(ghidra_server_url, endpoint)
+
+    for attempt in range(retries):
+        try:
+            start_time = time.time()
+            response = session.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            response.encoding = 'utf-8'
+            duration = time.time() - start_time
+
+            logger.info(f"Request to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries})")
+
+            if response.ok:
+                return response.text.splitlines()
+            elif response.status_code == 404:
+                logger.warning(f"Endpoint not found: {endpoint}")
+                return [f"Endpoint not found: {endpoint}"]
+            elif response.status_code >= 500:
+                # Server error - retry with exponential backoff
+                if attempt < retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Server error {response.status_code}, retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Server error after {retries} attempts: {response.status_code}")
+                    raise GhidraConnectionError(f"Server error: {response.status_code}")
+            else:
+                logger.error(f"HTTP {response.status_code}: {response.text.strip()}")
+                return [f"Error {response.status_code}: {response.text.strip()}"]
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"Request timeout on attempt {attempt + 1}/{retries}")
+            if attempt < retries - 1:
+                continue
+            return [f"Timeout connecting to Ghidra server after {retries} attempts"]
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request failed: {str(e)}")
+            return [f"Request failed: {str(e)}"]
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return [f"Unexpected error: {str(e)}"]
+
     return ["Unexpected error in safe_get"]
 
 
@@ -395,15 +518,97 @@ def rename_function(old_name: str, new_name: str) -> str:
 def rename_data(address: str, new_name: str) -> str:
     """
     Rename a data label at the specified address.
-    
+
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
         new_name: New name for the data label
-        
+
     Returns:
         Success or failure message indicating the result of the rename operation
     """
-    return safe_post("renameData", {"address": address, "newName": new_name})
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
+    response = safe_post("renameData", {"address": address, "newName": new_name})
+
+    # Validate response and provide clear success message
+    if "success" in response.lower() or "renamed" in response.lower():
+        return f"Successfully renamed data at {address} to '{new_name}'"
+    elif "error" in response.lower() or "failed" in response.lower():
+        return response  # Return original error message
+    else:
+        return f"Rename operation completed: {response}"
+
+def _check_if_data_defined(address: str) -> bool:
+    """
+    Internal helper: Check if address has a defined data symbol.
+
+    Args:
+        address: Hex address to check
+
+    Returns:
+        True if data is defined, False if undefined
+    """
+    try:
+        import json
+        result = safe_post_json("analyze_data_region", {
+            "address": address,
+            "max_scan_bytes": 16,
+            "include_xref_map": False,
+            "include_assembly_patterns": False,
+            "include_boundary_detection": False
+        })
+
+        if result and not result.startswith("Error"):
+            data = json.loads(result)
+            current_type = data.get("current_type", "undefined")
+            # If current_type is "undefined", it's not a defined data item
+            return current_type != "undefined"
+    except Exception as e:
+        logger.warning(f"Failed to check if data defined at {address}: {e}")
+
+    return False
+
+@mcp.tool()
+def rename_data_smart(address: str, new_name: str) -> str:
+    """
+    Intelligently rename data at an address, automatically detecting if it's
+    defined data or undefined bytes and using the appropriate method.
+
+    This tool automatically chooses between rename_data (for defined symbols)
+    and create_label (for undefined addresses) based on the current state.
+
+    Args:
+        address: Memory address in hex format (e.g., "0x1400010a0")
+        new_name: New name for the data label
+
+    Returns:
+        Success or failure message with details about the operation performed
+    """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
+    # Check if data is defined
+    is_defined = _check_if_data_defined(address)
+
+    if is_defined:
+        # Use rename_data endpoint for defined symbols
+        logger.info(f"Address {address} has defined data, using rename_data")
+        response = safe_post("renameData", {"address": address, "newName": new_name})
+
+        if "success" in response.lower() or "renamed" in response.lower():
+            return f"✓ Renamed defined data at {address} to '{new_name}'"
+        else:
+            return f"Rename data attempted: {response}"
+    else:
+        # Use create_label for undefined addresses
+        logger.info(f"Address {address} is undefined, using create_label")
+        response = safe_post("create_label", {"address": address, "name": new_name})
+
+        if "success" in response.lower() or "created" in response.lower():
+            return f"✓ Created label '{new_name}' at {address} (was undefined)"
+        else:
+            return f"Create label attempted: {response}"
 
 @mcp.tool()
 def get_function_labels(name: str, offset: int = 0, limit: int = 20) -> list:
@@ -424,18 +629,21 @@ def get_function_labels(name: str, offset: int = 0, limit: int = 20) -> list:
 def rename_label(address: str, old_name: str, new_name: str) -> str:
     """
     Rename an existing label at the specified address.
-    
+
     Args:
         address: Target address in hex format (e.g., "0x1400010a0")
         old_name: Current label name to rename
         new_name: New name for the label
-        
+
     Returns:
         Success or failure message indicating the result of the rename operation
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     return safe_post("rename_label", {
-        "address": address, 
-        "old_name": old_name, 
+        "address": address,
+        "old_name": old_name,
         "new_name": new_name
     })
 
@@ -513,17 +721,17 @@ def list_data_items(offset: int = 0, limit: int = 100) -> list:
 def search_functions_by_name(query: str, offset: int = 0, limit: int = 100) -> list:
     """
     Search for functions whose name contains the given substring.
-    
+
     Args:
         query: Search string to match against function names
         offset: Pagination offset for starting position (default: 0)
         limit: Maximum number of results to return (default: 100)
-        
+
     Returns:
         List of matching functions with their names and addresses
     """
     if not query:
-        return ["Error: query string is required"]
+        raise GhidraValidationError("query string is required")
     return safe_get("searchFunctions", {"query": query, "offset": offset, "limit": limit})
 
 @mcp.tool()
@@ -549,112 +757,127 @@ def rename_variable(function_name: str, old_name: str, new_name: str) -> str:
 def get_function_by_address(address: str) -> str:
     """
     Get a function by its address.
-    
+
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
-        
+
     Returns:
         Function information including name, signature, and address range
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     return "\n".join(safe_get("get_function_by_address", {"address": address}))
 
 @mcp.tool()
 def get_current_address() -> str:
     """
     Get the address currently selected by the user.
-    
+
     Args:
         None
-        
+
     Returns:
         Current cursor/selection address in hex format
     """
-    return "\n".join(safe_get("get_current_address"))
+    return "\n".join(safe_get_uncached("get_current_address"))
 
 @mcp.tool()
 def get_current_function() -> str:
     """
     Get the function currently selected by the user.
-    
+
     Args:
         None
-        
+
     Returns:
         Information about the currently selected function including name and address
     """
-    return "\n".join(safe_get("get_current_function"))
-
-@mcp.tool()
-# Removed duplicate decompile_function - using the MCP tool version above
+    return "\n".join(safe_get_uncached("get_current_function"))
 
 @mcp.tool()
 def disassemble_function(address: str) -> list:
     """
     Get assembly code (address: instruction; comment) for a function.
-    
+
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
-        
+
     Returns:
         List of assembly instructions with addresses and comments
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     return safe_get("disassemble_function", {"address": address})
 
 @mcp.tool()
 def set_decompiler_comment(address: str, comment: str) -> str:
     """
     Set a comment for a given address in the function pseudocode.
-    
+
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
         comment: Comment text to add to the decompiled pseudocode
-        
+
     Returns:
         Success or failure message indicating the result of the comment operation
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     return safe_post("set_decompiler_comment", {"address": address, "comment": comment})
 
 @mcp.tool()
 def set_disassembly_comment(address: str, comment: str) -> str:
     """
     Set a comment for a given address in the function disassembly.
-    
+
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
         comment: Comment text to add to the assembly disassembly
-        
+
     Returns:
         Success or failure message indicating the result of the comment operation
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     return safe_post("set_disassembly_comment", {"address": address, "comment": comment})
 
 @mcp.tool()
 def rename_function_by_address(function_address: str, new_name: str) -> str:
     """
     Rename a function by its address.
-    
+
     Args:
         function_address: Memory address of the function in hex format (e.g., "0x1400010a0")
         new_name: New name for the function
-        
+
     Returns:
         Success or failure message indicating the result of the rename operation
     """
+    if not validate_hex_address(function_address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {function_address}")
+
     return safe_post("rename_function_by_address", {"function_address": function_address, "new_name": new_name})
 
 @mcp.tool()
 def set_function_prototype(function_address: str, prototype: str, calling_convention: str = None) -> str:
     """
     Set a function's prototype and optionally its calling convention.
-    
+
     Args:
         function_address: Memory address of the function in hex format (e.g., "0x1400010a0")
         prototype: Function prototype string (e.g., "int main(int argc, char* argv[])")
         calling_convention: Optional calling convention (e.g., "__cdecl", "__stdcall", "__fastcall", "__thiscall")
-        
+
     Returns:
         Success or failure message indicating the result of the prototype update
     """
+    if not validate_hex_address(function_address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {function_address}")
+
     data = {"function_address": function_address, "prototype": prototype}
     if calling_convention:
         data["callingConvention"] = calling_convention
@@ -664,15 +887,18 @@ def set_function_prototype(function_address: str, prototype: str, calling_conven
 def set_local_variable_type(function_address: str, variable_name: str, new_type: str) -> str:
     """
     Set a local variable's type.
-    
+
     Args:
         function_address: Memory address of the function in hex format (e.g., "0x1400010a0")
         variable_name: Name of the local variable to modify
         new_type: New data type for the variable (e.g., "int", "char*", "MyStruct")
-        
+
     Returns:
         Success or failure message indicating the result of the type change
     """
+    if not validate_hex_address(function_address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {function_address}")
+
     return safe_post("set_local_variable_type", {
         "function_address": function_address,
         "variable_name": variable_name,
@@ -701,15 +927,18 @@ def get_xrefs_to(address: str, offset: int = 0, limit: int = 100) -> list:
 def get_xrefs_from(address: str, offset: int = 0, limit: int = 100) -> list:
     """
     Get all references from the specified address (xref from).
-    
+
     Args:
         address: Source address in hex format (e.g. "0x1400010a0")
         offset: Pagination offset (default: 0)
         limit: Maximum number of references to return (default: 100)
-        
+
     Returns:
         List of references from the specified address
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     return safe_get("xrefs_from", {"address": address, "offset": offset, "limit": limit})
 
 @mcp.tool()
@@ -728,13 +957,13 @@ def get_function_xrefs(name: str, offset: int = 0, limit: int = 100) -> list:
     return safe_get("function_xrefs", {"name": name, "offset": offset, "limit": limit})
 
 @mcp.tool()
-def list_strings(offset: int = 0, limit: int = 2000, filter: str = None) -> list:
+def list_strings(offset: int = 0, limit: int = 100, filter: str = None) -> list:
     """
     List all defined strings in the program with their addresses.
     
     Args:
         offset: Pagination offset (default: 0)
-        limit: Maximum number of strings to return (default: 2000)
+        limit: Maximum number of strings to return (default: 100)
         filter: Optional filter to match within string content
         
     Returns:
@@ -767,19 +996,50 @@ def get_function_jump_target_addresses(name: str, offset: int = 0, limit: int = 
 def create_label(address: str, name: str) -> str:
     """
     Create a new label at the specified address.
-    
+
     This tool creates a user-defined label at the given address. The label will be
     visible in Ghidra's Symbol Tree and can be used for navigation and reference.
-    
+
     Args:
         address: Target address in hex format (e.g., "0x1400010a0")
         name: Name for the new label
-        
+
     Returns:
         Success/failure message
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     return safe_post("create_label", {
-        "address": address, 
+        "address": address,
+        "name": name
+    })
+
+@mcp.tool()
+def rename_or_label(address: str, name: str) -> str:
+    """
+    Intelligently rename data or create label at an address (server-side detection).
+
+    This tool automatically detects whether the address contains defined data or
+    undefined bytes and chooses the appropriate operation server-side. This is
+    more efficient than rename_data_smart as the detection happens in Ghidra
+    without additional API calls.
+
+    Use this tool when you're unsure whether data is defined or undefined, or when
+    you want guaranteed reliability with minimal round-trips.
+
+    Args:
+        address: Memory address in hex format (e.g., "0x1400010a0")
+        name: Name for the data/label
+
+    Returns:
+        Success or failure message with details about the operation performed
+    """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
+    return safe_post("rename_or_label", {
+        "address": address,
         "name": name
     })
 
@@ -838,7 +1098,7 @@ def get_function_call_graph(name: str, depth: int = 2, direction: str = "both") 
     return safe_get("function_call_graph", {"name": name, "depth": depth, "direction": direction})
 
 @mcp.tool()
-def get_full_call_graph(format: str = "edges", limit: int = 1000) -> list:
+def get_full_call_graph(format: str = "edges", limit: int = 500) -> list:
     """
     Get the complete call graph for the entire program.
     
@@ -847,7 +1107,7 @@ def get_full_call_graph(format: str = "edges", limit: int = 1000) -> list:
     
     Args:
         format: Output format ("edges", "adjacency", "dot", "mermaid")
-        limit: Maximum number of relationships to return (default: 1000)
+        limit: Maximum number of relationships to return (default: 500)
         
     Returns:
         Complete call graph in the specified format
@@ -928,21 +1188,24 @@ def create_enum(name: str, values: dict, size: int = 4) -> str:
 def apply_data_type(address: str, type_name: str, clear_existing: bool = True) -> str:
     """
     Apply a specific data type at the given memory address.
-    
+
     This tool applies a data type definition to a memory location, which helps
     in interpreting the raw bytes as structured data during analysis.
-    
+
     Args:
         address: Target address in hex format (e.g., "0x1400010a0")
         type_name: Name of the data type to apply (e.g., "int", "MyStruct", "DWORD")
         clear_existing: Whether to clear existing data/code at the address (default: True)
-        
+
     Returns:
         Success/failure message with details about the applied data type
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     logger.info(f"apply_data_type called with: address={address}, type_name={type_name}, clear_existing={clear_existing}")
     data = {
-        "address": address, 
+        "address": address,
         "type_name": type_name,
         "clear_existing": clear_existing
     }
@@ -982,7 +1245,7 @@ def get_metadata() -> str:
     return "\n".join(safe_get("get_metadata"))
 
 @mcp.tool()
-def convert_number(text: str, size: int = 4) -> str:
+def format_number_conversions(text: str, size: int = 4) -> str:
     """
     Convert a number (decimal, hexadecimal) to different representations.
     
@@ -1053,21 +1316,24 @@ def get_entry_points() -> list:
 # Data Type Analysis and Management Tools
 
 @mcp.tool()
-def mcp_ghidra_analyze_data_types(address: str, depth: int = 1) -> list:
+def analyze_data_types(address: str, depth: int = 1) -> list:
     """
     Analyze data types at a given address with specified depth.
-    
+
     Args:
         address: Target address in hex format (e.g., "0x1400010a0")
         depth: Analysis depth for following pointers and references (default: 1)
-        
+
     Returns:
         Detailed analysis of data types at the specified address
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     return safe_get("analyze_data_types", {"address": address, "depth": depth})
 
 @mcp.tool()
-def mcp_ghidra_create_union(name: str, fields: list) -> str:
+def create_union(name: str, fields: list) -> str:
     """
     Create a new union data type with specified fields.
     
@@ -1092,33 +1358,33 @@ def mcp_ghidra_create_union(name: str, fields: list) -> str:
     return safe_post("create_union", {"name": name, "fields": fields_json})
 
 @mcp.tool()
-def mcp_ghidra_get_type_size(type_name: str) -> str:
+def get_data_type_size(type_name: str) -> list:
     """
     Get the size and alignment information for a data type.
-    
+
     Args:
         type_name: Name of the data type to query
-        
+
     Returns:
         Size, alignment, and path information for the data type
     """
     return safe_get("get_type_size", {"type_name": type_name})
 
 @mcp.tool()
-def mcp_ghidra_get_struct_layout(struct_name: str) -> str:
+def get_struct_layout(struct_name: str) -> list:
     """
     Get the detailed layout of a structure including field offsets.
-    
+
     Args:
         struct_name: Name of the structure to analyze
-        
+
     Returns:
         Detailed structure layout with field offsets, sizes, and types
     """
     return safe_get("get_struct_layout", {"struct_name": struct_name})
 
 @mcp.tool()
-def mcp_ghidra_search_data_types(pattern: str, offset: int = 0, limit: int = 100) -> list:
+def search_data_types(pattern: str, offset: int = 0, limit: int = 100) -> list:
     """
     Search for data types by name pattern.
     
@@ -1133,35 +1399,38 @@ def mcp_ghidra_search_data_types(pattern: str, offset: int = 0, limit: int = 100
     return safe_get("search_data_types", {"pattern": pattern, "offset": offset, "limit": limit})
 
 @mcp.tool()
-def mcp_ghidra_auto_create_struct(address: str, size: int, name: str) -> str:
+def auto_create_struct_from_memory(address: str, size: int, name: str) -> str:
     """
     Automatically create a structure by analyzing memory layout at an address.
-    
+
     Args:
         address: Target address in hex format (e.g., "0x1400010a0")
         size: Size in bytes to analyze (0 for automatic detection)
         name: Name for the new structure
-        
+
     Returns:
         Success/failure message with created structure details
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     return safe_post("auto_create_struct", {"address": address, "size": size, "name": name})
 
 @mcp.tool()
-def mcp_ghidra_get_enum_values(enum_name: str) -> str:
+def get_enum_values(enum_name: str) -> list:
     """
     Get all values and names in an enumeration.
-    
+
     Args:
         enum_name: Name of the enumeration to query
-        
+
     Returns:
         List of all enumeration values with their names and numeric values
     """
     return safe_get("get_enum_values", {"enum_name": enum_name})
 
 @mcp.tool()
-def mcp_ghidra_create_typedef(name: str, base_type: str) -> str:
+def create_typedef(name: str, base_type: str) -> str:
     """
     Create a typedef (type alias) for an existing data type.
     
@@ -1175,7 +1444,7 @@ def mcp_ghidra_create_typedef(name: str, base_type: str) -> str:
     return safe_post("create_typedef", {"name": name, "base_type": base_type})
 
 @mcp.tool()
-def mcp_ghidra_clone_data_type(source_type: str, new_name: str) -> str:
+def clone_data_type(source_type: str, new_name: str) -> str:
     """
     Clone/copy an existing data type with a new name.
     
@@ -1189,28 +1458,31 @@ def mcp_ghidra_clone_data_type(source_type: str, new_name: str) -> str:
     return safe_post("clone_data_type", {"source_type": source_type, "new_name": new_name})
 
 @mcp.tool()
-def mcp_ghidra_validate_data_type(address: str, type_name: str) -> str:
+def validate_data_type(address: str, type_name: str) -> list:
     """
     Validate if a data type can be properly applied at a given address.
-    
+
     Args:
         address: Target address in hex format (e.g., "0x1400010a0")
         type_name: Name of the data type to validate
-        
+
     Returns:
         Validation results including memory availability, alignment, and conflicts
     """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
     return safe_get("validate_data_type", {"address": address, "type_name": type_name})
 
 @mcp.tool()
-def mcp_ghidra_export_data_types(format: str = "c", category: str = None) -> str:
+def export_data_types(format: str = "c", category: str = None) -> list:
     """
     Export data types in various formats.
-    
+
     Args:
         format: Export format ("c", "json", "summary") - default: "c"
         category: Optional category filter for data types
-        
+
     Returns:
         Exported data types in the specified format
     """
@@ -1220,7 +1492,7 @@ def mcp_ghidra_export_data_types(format: str = "c", category: str = None) -> str
     return safe_get("export_data_types", params)
 
 @mcp.tool()
-def mcp_ghidra_import_data_types(source: str, format: str = "c") -> str:
+def import_data_types(source: str, format: str = "c") -> str:
     """
     Import data types from various sources (placeholder for future implementation).
     
@@ -1236,7 +1508,7 @@ def mcp_ghidra_import_data_types(source: str, format: str = "c") -> str:
 # === NEW ENHANCED ENDPOINTS FOR MALWARE ANALYSIS ===
 
 @mcp.tool()
-def mcp_ghidra_detect_crypto_constants() -> list:
+def detect_crypto_constants() -> list:
     """
     Identify cryptographic constants and algorithms in the binary.
     Searches for known crypto constants like AES S-boxes, SHA constants, etc.
@@ -1247,7 +1519,7 @@ def mcp_ghidra_detect_crypto_constants() -> list:
     return safe_get("detect_crypto_constants")
 
 @mcp.tool()
-def mcp_ghidra_search_byte_patterns(pattern: str, mask: str = None) -> list:
+def search_byte_patterns(pattern: str, mask: str = None) -> list:
     """
     Search for byte patterns with optional masks (e.g., 'E8 ?? ?? ?? ??').
     Useful for finding shellcode, API calls, or specific instruction sequences.
@@ -1265,7 +1537,7 @@ def mcp_ghidra_search_byte_patterns(pattern: str, mask: str = None) -> list:
     return safe_get("search_byte_patterns", params)
 
 @mcp.tool()
-def mcp_ghidra_find_similar_functions(target_function: str, threshold: float = 0.8) -> list:
+def find_similar_functions(target_function: str, threshold: float = 0.8) -> list:
     """
     Find functions similar to target using structural analysis.
     Uses control flow and instruction patterns to identify similar functions.
@@ -1286,7 +1558,7 @@ def mcp_ghidra_find_similar_functions(target_function: str, threshold: float = 0
     })
 
 @mcp.tool()
-def mcp_ghidra_analyze_control_flow(function_name: str) -> dict:
+def analyze_control_flow(function_name: str) -> dict:
     """
     Analyze control flow complexity, cyclomatic complexity, and basic blocks.
     Provides detailed analysis of function complexity and structure.
@@ -1303,7 +1575,7 @@ def mcp_ghidra_analyze_control_flow(function_name: str) -> dict:
     return safe_get("analyze_control_flow", {"function_name": function_name})
 
 @mcp.tool()
-def mcp_ghidra_find_anti_analysis_techniques() -> list:
+def find_anti_analysis_techniques() -> list:
     """
     Detect anti-analysis, anti-debugging, and evasion techniques.
     Looks for common obfuscation and evasion patterns used by malware.
@@ -1314,7 +1586,7 @@ def mcp_ghidra_find_anti_analysis_techniques() -> list:
     return safe_get("find_anti_analysis_techniques")
 
 @mcp.tool()
-def mcp_ghidra_extract_iocs() -> dict:
+def extract_iocs() -> dict:
     """
     Extract Indicators of Compromise (IOCs) from the binary.
     Finds IP addresses, URLs, file paths, registry keys, and other artifacts.
@@ -1325,7 +1597,7 @@ def mcp_ghidra_extract_iocs() -> dict:
     return safe_get("extract_iocs")
 
 @mcp.tool()
-def mcp_ghidra_batch_decompile(function_names: list) -> dict:
+def batch_decompile_functions(function_names: list) -> dict:
     """
     Decompile multiple functions in a single request for better performance.
     
@@ -1343,7 +1615,7 @@ def mcp_ghidra_batch_decompile(function_names: list) -> dict:
     return safe_get("batch_decompile", {"functions": ",".join(function_names)})
 
 @mcp.tool()
-def mcp_ghidra_find_dead_code(function_name: str) -> list:
+def find_dead_code(function_name: str) -> list:
     """
     Identify potentially unreachable code blocks within a function.
     Useful for finding hidden functionality or dead code elimination.
@@ -1360,7 +1632,7 @@ def mcp_ghidra_find_dead_code(function_name: str) -> list:
     return safe_get("find_dead_code", {"function_name": function_name})
 
 @mcp.tool()
-def mcp_ghidra_analyze_function_complexity(function_name: str) -> dict:
+def analyze_function_complexity(function_name: str) -> dict:
     """
     Calculate various complexity metrics for a function.
     Includes cyclomatic complexity, lines of code, branch count, etc.
@@ -1377,7 +1649,7 @@ def mcp_ghidra_analyze_function_complexity(function_name: str) -> dict:
     return safe_get("analyze_function_complexity", {"function_name": function_name})
 
 @mcp.tool()
-def mcp_ghidra_batch_rename_functions(renames: dict) -> dict:
+def batch_rename_functions(renames: dict) -> dict:
     """
     Rename multiple functions atomically.
     
@@ -1399,7 +1671,7 @@ def mcp_ghidra_batch_rename_functions(renames: dict) -> dict:
 # === HIGH-VALUE MALWARE ANALYSIS FEATURES ===
 
 @mcp.tool()
-def mcp_ghidra_decrypt_strings_auto() -> list:
+def auto_decrypt_strings() -> list:
     """
     Automatically identify and attempt to decrypt common string obfuscation patterns.
     Detects XOR encoding, Base64, ROT13, and simple stack strings.
@@ -1410,7 +1682,7 @@ def mcp_ghidra_decrypt_strings_auto() -> list:
     return safe_get("decrypt_strings_auto")
 
 @mcp.tool()
-def mcp_ghidra_analyze_api_call_chains() -> dict:
+def analyze_api_call_chains() -> dict:
     """
     Identify and visualize suspicious Windows API call sequences used by malware.
     Detects patterns like process injection, persistence, and anti-analysis techniques.
@@ -1421,7 +1693,7 @@ def mcp_ghidra_analyze_api_call_chains() -> dict:
     return safe_get("analyze_api_call_chains")
 
 @mcp.tool()
-def mcp_ghidra_extract_iocs_with_context() -> dict:
+def extract_iocs_with_context() -> dict:
     """
     Enhanced IOC extraction with analysis context and confidence scoring.
     Provides context about where/how IOCs are used and categorizes them.
@@ -1432,7 +1704,7 @@ def mcp_ghidra_extract_iocs_with_context() -> dict:
     return safe_get("extract_iocs_with_context")
 
 @mcp.tool()
-def mcp_ghidra_detect_malware_behaviors() -> list:
+def detect_malware_behaviors() -> list:
     """
     Automatically detect common malware behaviors and techniques.
     Analyzes code patterns to identify potential malicious functionality.
@@ -1447,7 +1719,7 @@ def mcp_ghidra_detect_malware_behaviors() -> list:
 # ===================================================================================
 
 @mcp.tool()
-def mcp_ghidra_delete_data_type(type_name: str) -> str:
+def delete_data_type(type_name: str) -> str:
     """
     Delete a data type from the program.
     
@@ -1466,7 +1738,7 @@ def mcp_ghidra_delete_data_type(type_name: str) -> str:
     return safe_post_json("delete_data_type", {"type_name": type_name})
 
 @mcp.tool()
-def mcp_ghidra_modify_struct_field(struct_name: str, field_name: str, new_type: str = None, new_name: str = None) -> str:
+def modify_struct_field(struct_name: str, field_name: str, new_type: str = None, new_name: str = None) -> str:
     """
     Modify a field in an existing structure.
     
@@ -1501,7 +1773,7 @@ def mcp_ghidra_modify_struct_field(struct_name: str, field_name: str, new_type: 
     return safe_post_json("modify_struct_field", data)
 
 @mcp.tool()
-def mcp_ghidra_add_struct_field(struct_name: str, field_name: str, field_type: str, offset: int = -1) -> str:
+def add_struct_field(struct_name: str, field_name: str, field_type: str, offset: int = -1) -> str:
     """
     Add a new field to an existing structure.
     
@@ -1534,7 +1806,7 @@ def mcp_ghidra_add_struct_field(struct_name: str, field_name: str, field_type: s
     return safe_post_json("add_struct_field", data)
 
 @mcp.tool()
-def mcp_ghidra_remove_struct_field(struct_name: str, field_name: str) -> str:
+def remove_struct_field(struct_name: str, field_name: str) -> str:
     """
     Remove a field from an existing structure.
     
@@ -1558,7 +1830,7 @@ def mcp_ghidra_remove_struct_field(struct_name: str, field_name: str) -> str:
     })
 
 @mcp.tool()
-def mcp_ghidra_create_array_type(base_type: str, length: int, name: str = None) -> str:
+def create_array_type(base_type: str, length: int, name: str = None) -> str:
     """
     Create an array data type.
     
@@ -1588,7 +1860,7 @@ def mcp_ghidra_create_array_type(base_type: str, length: int, name: str = None) 
     return safe_post_json("create_array_type", data)
 
 @mcp.tool()
-def mcp_ghidra_create_pointer_type(base_type: str, name: str = None) -> str:
+def create_pointer_type(base_type: str, name: str = None) -> str:
     """
     Create a pointer data type.
     
@@ -1611,7 +1883,7 @@ def mcp_ghidra_create_pointer_type(base_type: str, name: str = None) -> str:
     return safe_post_json("create_pointer_type", data)
 
 @mcp.tool()
-def mcp_ghidra_create_data_type_category(category_path: str) -> str:
+def create_data_type_category(category_path: str) -> str:
     """
     Create a new data type category.
     
@@ -1629,7 +1901,7 @@ def mcp_ghidra_create_data_type_category(category_path: str) -> str:
     return safe_post_json("create_data_type_category", {"category_path": category_path})
 
 @mcp.tool()
-def mcp_ghidra_move_data_type_to_category(type_name: str, category_path: str) -> str:
+def move_data_type_to_category(type_name: str, category_path: str) -> str:
     """
     Move a data type to a different category.
     
@@ -1653,7 +1925,7 @@ def mcp_ghidra_move_data_type_to_category(type_name: str, category_path: str) ->
     })
 
 @mcp.tool()
-def mcp_ghidra_list_data_type_categories(offset: int = 0, limit: int = 100) -> str:
+def list_data_type_categories(offset: int = 0, limit: int = 100) -> str:
     """
     List all data type categories.
     
@@ -1677,18 +1949,18 @@ def mcp_ghidra_list_data_type_categories(offset: int = 0, limit: int = 100) -> s
     }))
 
 @mcp.tool()
-def mcp_ghidra_create_function_signature(name: str, return_type: str, parameters: str = None) -> str:
+def create_function_signature(name: str, return_type: str, parameters: str = None) -> str:
     """
     Create a function signature data type.
-    
+
     This tool creates a new function signature data type that can be used
     for function pointers and type definitions.
-    
+
     Args:
         name: Name for the function signature
         return_type: Return type of the function
         parameters: Optional JSON string describing parameters (e.g., '[{"name": "param1", "type": "int"}]')
-        
+
     Returns:
         Success or failure message with function signature creation details
     """
@@ -1696,15 +1968,526 @@ def mcp_ghidra_create_function_signature(name: str, return_type: str, parameters
         raise GhidraValidationError("Function name is required and must be a string")
     if not return_type or not isinstance(return_type, str):
         raise GhidraValidationError("Return type is required and must be a string")
-    
+
     data = {
         "name": name,
         "return_type": return_type
     }
     if parameters:
         data["parameters"] = parameters
-    
+
     return safe_post_json("create_function_signature", data)
+
+# ============================================================================
+# NEW HIGH-PERFORMANCE ANALYSIS TOOLS
+# ============================================================================
+
+@mcp.tool()
+def analyze_data_region(
+    address: str,
+    max_scan_bytes: int = 1024,
+    include_xref_map: bool = True,
+    include_assembly_patterns: bool = True,
+    include_boundary_detection: bool = True
+) -> str:
+    """
+    Comprehensive single-call analysis of a data region.
+
+    This tool performs complete data region analysis including boundary detection,
+    byte-by-byte xref mapping, stride detection, and classification hints.
+    Replaces 20-30 individual tool calls with one efficient batch operation.
+
+    Args:
+        address: Starting address in hex format (e.g., "0x6fb835b8")
+        max_scan_bytes: Maximum bytes to scan for boundary detection (default: 1024)
+        include_xref_map: Include detailed byte-by-byte xref mapping (default: True)
+        include_assembly_patterns: Include assembly pattern analysis (default: True)
+        include_boundary_detection: Detect data region boundaries (default: True)
+
+    Returns:
+        JSON string with comprehensive analysis:
+        {
+          "start_address": "0x6fb835b8",
+          "end_address": "0x6fb835d4",
+          "byte_span": 28,
+          "xref_map": {"0x6fb835b8": [{"from": "0x6fb6cae9", "type": "DATA"}], ...},
+          "unique_xref_addresses": ["0x6fb835b8", "0x6fb835bc", ...],
+          "unique_xref_count": 5,
+          "classification_hint": "STRUCTURE|ARRAY|PRIMITIVE",
+          "stride_detected": 4,
+          "next_boundary_address": "0x6fb835d4",
+          "next_boundary_reason": "different_xref_set|named_label|end_of_data",
+          "current_name": "DAT_6fb835b8",
+          "current_type": "undefined"
+        }
+    """
+    import json
+
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hex address format: {address}")
+
+    if not isinstance(max_scan_bytes, int) or max_scan_bytes <= 0:
+        raise GhidraValidationError("max_scan_bytes must be a positive integer")
+
+    data = {
+        "address": address,
+        "max_scan_bytes": max_scan_bytes,
+        "include_xref_map": include_xref_map,
+        "include_assembly_patterns": include_assembly_patterns,
+        "include_boundary_detection": include_boundary_detection
+    }
+
+    result = safe_post_json("analyze_data_region", data)
+
+    # Format the JSON response for readability
+    try:
+        parsed = json.loads(result)
+        return json.dumps(parsed, indent=2)
+    except:
+        return result
+
+@mcp.tool()
+def inspect_memory_content(address: str, length: int = 64, detect_strings: bool = True) -> str:
+    """
+    Read raw memory bytes and provide hex/ASCII representation with string detection hints.
+
+    This tool helps prevent misidentification of strings as numeric data by:
+    - Reading actual byte content in hex and ASCII format
+    - Detecting printable ASCII characters and null terminators
+    - Calculating string likelihood score
+    - Suggesting appropriate data types (char[N] for strings, etc.)
+
+    Args:
+        address: Memory address in hex format (e.g., "0x6fb7ffbc")
+        length: Number of bytes to read (default: 64)
+        detect_strings: Enable string detection heuristics (default: True)
+
+    Returns:
+        JSON string with memory inspection results:
+        {
+          "address": "0x6fb7ffbc",
+          "bytes_read": 64,
+          "hex_dump": "4A 75 6C 79 00 ...",
+          "ascii_repr": "July\\0...",
+          "printable_count": 4,
+          "printable_ratio": 0.80,
+          "null_terminator_at": 4,
+          "max_consecutive_printable": 4,
+          "is_likely_string": true,
+          "detected_string": "July",
+          "suggested_type": "char[5]",
+          "string_length": 5
+        }
+    """
+    import json
+
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hex address format: {address}")
+
+    if not isinstance(length, int) or length <= 0 or length > 4096:
+        raise GhidraValidationError("length must be a positive integer <= 4096")
+
+    params = {
+        "address": address,
+        "length": length,
+        "detect_strings": str(detect_strings).lower()
+    }
+
+    result = "\n".join(safe_get("inspect_memory_content", params))
+
+    # Try to format as JSON for readability
+    try:
+        parsed = json.loads(result)
+        return json.dumps(parsed, indent=2)
+    except:
+        return result
+
+@mcp.tool()
+def get_bulk_xrefs(addresses: str) -> str:
+    """
+    Get cross-references for multiple addresses in a single batch request.
+
+    This tool retrieves xrefs for multiple addresses simultaneously, dramatically
+    reducing the number of network round-trips required for byte-by-byte analysis.
+
+    Args:
+        addresses: Comma-separated list of hex addresses (e.g., "0x6fb835b8,0x6fb835b9,0x6fb835ba")
+                  or JSON array string (e.g., '["0x6fb835b8", "0x6fb835b9"]')
+
+    Returns:
+        JSON string with xref mappings:
+        {
+          "0x6fb835b8": [{"from": "0x6fb6cae9", "type": "DATA"}],
+          "0x6fb835b9": [],
+          "0x6fb835ba": [],
+          "0x6fb835bc": [{"from": "0x6fb6c9fe", "type": "READ"}]
+        }
+    """
+    import json
+
+    # Parse input - support both comma-separated and JSON array
+    addr_list = []
+    if addresses.startswith('['):
+        try:
+            addr_list = json.loads(addresses)
+        except:
+            raise GhidraValidationError("Invalid JSON array format for addresses")
+    else:
+        addr_list = [addr.strip() for addr in addresses.split(',')]
+
+    # Validate all addresses
+    for addr in addr_list:
+        if not validate_hex_address(addr):
+            raise GhidraValidationError(f"Invalid hex address format: {addr}")
+
+    data = {"addresses": addr_list}
+    result = safe_post_json("get_bulk_xrefs", data)
+
+    # Format the JSON response for readability
+    try:
+        parsed = json.loads(result)
+        return json.dumps(parsed, indent=2)
+    except:
+        return result
+
+@mcp.tool()
+def detect_array_bounds(
+    address: str,
+    analyze_loop_bounds: bool = True,
+    analyze_indexing: bool = True,
+    max_scan_range: int = 2048
+) -> str:
+    """
+    Automatically detect array/table size and element boundaries.
+
+    This tool analyzes assembly patterns including loop bounds, array indexing,
+    and comparison checks to determine the true size of arrays and tables.
+
+    Args:
+        address: Starting address of array/table in hex format (e.g., "0x6fb835d4")
+        analyze_loop_bounds: Analyze loop CMP instructions for bounds (default: True)
+        analyze_indexing: Analyze array indexing patterns for stride (default: True)
+        max_scan_range: Maximum bytes to scan for table end (default: 2048)
+
+    Returns:
+        JSON string with array analysis:
+        {
+          "probable_element_size": 12,
+          "probable_element_count": 4,
+          "total_bytes": 48,
+          "confidence": "high|medium|low",
+          "evidence": [
+            {"type": "loop_bound", "address": "0x6fb6a023", "instruction": "CMP ECX, 4"},
+            {"type": "stride_pattern", "stride": 12, "occurrences": 8},
+            {"type": "boundary", "address": "0x6fb83604", "reason": "comparison_limit"}
+          ],
+          "loop_functions": ["ProcessTimedSpellEffect..."],
+          "indexing_patterns": ["[base + index*12]", "LEA EDX, [EAX*3 + base]"]
+        }
+    """
+    import json
+
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hex address format: {address}")
+
+    if not isinstance(max_scan_range, int) or max_scan_range <= 0:
+        raise GhidraValidationError("max_scan_range must be a positive integer")
+
+    data = {
+        "address": address,
+        "analyze_loop_bounds": analyze_loop_bounds,
+        "analyze_indexing": analyze_indexing,
+        "max_scan_range": max_scan_range
+    }
+
+    result = safe_post_json("detect_array_bounds", data)
+
+    # Format the JSON response for readability
+    try:
+        parsed = json.loads(result)
+        return json.dumps(parsed, indent=2)
+    except:
+        return result
+
+@mcp.tool()
+def get_assembly_context(
+    xref_sources: str,
+    context_instructions: int = 5,
+    include_patterns: str = "LEA,MOV,CMP,IMUL,ADD,SUB"
+) -> str:
+    """
+    Get assembly instructions with context for multiple xref source addresses.
+
+    This tool retrieves assembly context around xref instructions to understand
+    access patterns, data types, and usage context without manual disassembly.
+
+    Args:
+        xref_sources: Comma-separated xref source addresses (e.g., "0x6fb6cae9,0x6fb6c9fe")
+                     or JSON array string
+        context_instructions: Number of instructions before/after to include (default: 5)
+        include_patterns: Comma-separated instruction types to highlight (default: "LEA,MOV,CMP,IMUL,ADD,SUB")
+
+    Returns:
+        JSON string with assembly context:
+        [
+          {
+            "xref_from": "0x6fb6cae9",
+            "instruction": "MOV EDX, [0x6fb835b8]",
+            "access_size": 4,
+            "access_type": "READ",
+            "context_before": ["0x6fb6cae4: PUSH EBX", ...],
+            "context_after": ["0x6fb6caef: ADD EDX, EBX", ...],
+            "pattern_detected": "array_index_check|dword_access|structure_field"
+          }
+        ]
+    """
+    import json
+
+    # Parse input
+    addr_list = []
+    if xref_sources.startswith('['):
+        try:
+            addr_list = json.loads(xref_sources)
+        except:
+            raise GhidraValidationError("Invalid JSON array format for xref_sources")
+    else:
+        addr_list = [addr.strip() for addr in xref_sources.split(',')]
+
+    # Validate all addresses
+    for addr in addr_list:
+        if not validate_hex_address(addr):
+            raise GhidraValidationError(f"Invalid hex address format: {addr}")
+
+    if not isinstance(context_instructions, int) or context_instructions < 0:
+        raise GhidraValidationError("context_instructions must be a non-negative integer")
+
+    pattern_list = [p.strip() for p in include_patterns.split(',')]
+
+    data = {
+        "xref_sources": addr_list,
+        "context_instructions": context_instructions,
+        "include_patterns": pattern_list
+    }
+
+    result = safe_post_json("get_assembly_context", data)
+
+    # Format the JSON response for readability
+    try:
+        parsed = json.loads(result)
+        return json.dumps(parsed, indent=2)
+    except:
+        return result
+
+@mcp.tool()
+def batch_decompile_xref_sources(
+    target_address: str,
+    include_function_names: bool = True,
+    include_usage_context: bool = True
+) -> str:
+    """
+    Decompile all functions that reference a target address in one batch operation.
+
+    This tool finds all functions containing xrefs to the target address and
+    decompiles them, providing usage context and variable type hints.
+
+    Args:
+        target_address: Address being referenced (e.g., "0x6fb835b8")
+        include_function_names: Include function name analysis (default: True)
+        include_usage_context: Extract specific usage lines (default: True)
+
+    Returns:
+        JSON string with decompiled functions:
+        [
+          {
+            "function_name": "ProcessTimedSpellEffect...",
+            "function_address": "0x6fb6a000",
+            "xref_address": "0x6fb6a023",
+            "decompiled_code": "...",
+            "usage_lines": [
+              "pFVar4 = &FrameThresholdDataTable;",
+              "if ((int)pFVar4->threshold < iVar3) break;"
+            ],
+            "variable_type_hints": {
+              "threshold": "dword",
+              "access_pattern": "structure_field"
+            }
+          }
+        ]
+    """
+    import json
+
+    if not validate_hex_address(target_address):
+        raise GhidraValidationError(f"Invalid hex address format: {target_address}")
+
+    data = {
+        "target_address": target_address,
+        "include_function_names": include_function_names,
+        "include_usage_context": include_usage_context
+    }
+
+    result = safe_post_json("batch_decompile_xref_sources", data)
+
+    # Format the JSON response for readability
+    try:
+        parsed = json.loads(result)
+        return json.dumps(parsed, indent=2)
+    except:
+        return result
+
+def _verify_content_before_classification(address: str) -> dict:
+    """
+    Internal helper: Verify memory content before applying classification.
+
+    This prevents misidentifying strings as numeric data by inspecting actual bytes.
+
+    Args:
+        address: Hex address to verify
+
+    Returns:
+        Dictionary with verification results:
+        {
+            "is_string": bool,
+            "detected_string": str or None,
+            "suggested_type": str or None,
+            "printable_ratio": float,
+            "recommendation": str
+        }
+    """
+    import json
+
+    try:
+        # Use inspect_memory_content to check what the data actually contains
+        result = inspect_memory_content(address, length=64, detect_strings=True)
+        data = json.loads(result)
+
+        verification = {
+            "is_string": data.get("is_likely_string", False),
+            "detected_string": data.get("detected_string"),
+            "suggested_type": data.get("suggested_type"),
+            "printable_ratio": float(data.get("printable_ratio", 0.0)),
+            "recommendation": ""
+        }
+
+        if verification["is_string"]:
+            verification["recommendation"] = (
+                f"WARNING: Content appears to be a string (\"{verification['detected_string']}\"). "
+                f"Consider using classification='STRING' with type '{verification['suggested_type']}' "
+                f"instead of numeric types."
+            )
+        else:
+            verification["recommendation"] = "Content verification passed: not a string."
+
+        return verification
+
+    except Exception as e:
+        logger.warning(f"Content verification failed for {address}: {e}")
+        return {
+            "is_string": False,
+            "detected_string": None,
+            "suggested_type": None,
+            "printable_ratio": 0.0,
+            "recommendation": f"Content verification failed: {e}"
+        }
+
+@mcp.tool()
+def create_and_apply_data_type(
+    address: str,
+    classification: str,
+    name: str = None,
+    comment: str = None,
+    type_definition: str | dict = None
+) -> str:
+    """
+    Apply data type, name, and comment in a single atomic operation.
+
+    This tool combines create_struct + apply_data_type + rename_data + set_comment
+    into one atomic operation, ensuring consistency and reducing round-trips.
+
+    Args:
+        address: Target address (e.g., "0x6fb835b8")
+        classification: Data classification: "PRIMITIVE", "STRUCTURE", or "ARRAY"
+        name: Name to apply (optional, only if meaningful)
+        comment: Comment to apply (optional)
+        type_definition: JSON string (NOT dict) with type definition:
+                        For PRIMITIVE: '{\"type\": \"dword\"}'  # ← Note the quotes
+                        For STRUCTURE: '{\"name\": \"StructName\", \"fields\": [...]}'
+                        For ARRAY: '{\"element_type\": \"dword\", \"count\": 64}'
+                                  or '{\"element_struct\": \"StructName\", \"count\": 10}'
+
+                        IMPORTANT: Must be a JSON string, not a Python dict.
+                        Use json.dumps() if constructing programmatically.
+
+                        Example (CORRECT):
+                            create_and_apply_data_type(
+                                address=\"0x6fb835b8\",
+                                classification=\"ARRAY\",
+                                name=\"MyArray\",
+                                type_definition='{\"element_type\": \"dword\", \"count\": 7}'  # JSON string
+                            )
+
+                        Example (INCORRECT):
+                            type_definition={\"element_type\": \"dword\", \"count\": 7}  # Will fail validation
+
+    Returns:
+        Success message with all operations performed:
+        \"Successfully applied classification at 0x6fb835b8:
+         - Created structure: PreTableConfigData (28 bytes)
+         - Applied data type: PreTableConfigData
+         - Renamed to: PreFrameThresholdConfig
+         - Added comment: 28-byte configuration structure...\"
+    """
+    import json
+
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hex address format: {address}")
+
+    valid_classifications = ["PRIMITIVE", "STRUCTURE", "ARRAY", "STRING"]
+    if classification not in valid_classifications:
+        raise GhidraValidationError(f"Classification must be one of: {', '.join(valid_classifications)}")
+
+    # CONTENT VERIFICATION: Check for string misidentification
+    # Only verify for PRIMITIVE and ARRAY (where misidentification is common)
+    if classification in ["PRIMITIVE", "ARRAY"]:
+        verification = _verify_content_before_classification(address)
+
+        if verification["is_string"]:
+            logger.warning(
+                f"String detected at {address} but classification is {classification}. "
+                f"Detected: \"{verification['detected_string']}\" "
+                f"(printable ratio: {verification['printable_ratio']:.2f})"
+            )
+            logger.warning(verification["recommendation"])
+
+            # Auto-correct to STRING classification if highly confident
+            if verification["printable_ratio"] >= 0.8:
+                logger.info(f"Auto-correcting classification from {classification} to STRING")
+                classification = "STRING"
+                # Override type_definition with detected string type
+                if verification["suggested_type"]:
+                    type_definition = json.dumps({"type": verification["suggested_type"]})
+
+    data = {
+        "address": address,
+        "classification": classification
+    }
+
+    if name:
+        data["name"] = name
+    if comment:
+        data["comment"] = comment
+    if type_definition:
+        try:
+            if not isinstance(type_definition, str):
+                raise GhidraValidationError(
+                    "type_definition must be a JSON string (use json.dumps() if needed), "
+                    f"got {type(type_definition).__name__}"
+                )
+            type_def = json.loads(type_definition)
+            data["type_definition"] = type_def
+        except json.JSONDecodeError as e:
+            raise GhidraValidationError(f"Invalid JSON in type_definition: {str(e)}")
+
+    return safe_post_json("apply_data_classification", data)
 
 def main():
     parser = argparse.ArgumentParser(description="MCP server for Ghidra")

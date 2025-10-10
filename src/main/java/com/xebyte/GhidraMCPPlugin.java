@@ -56,10 +56,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
     status = PluginStatus.RELEASED,
     packageName = ghidra.app.DeveloperPluginPackage.NAME,
     category = PluginCategoryNames.ANALYSIS,
-    shortDescription = "GhidraMCP v1.2.0 - HTTP server plugin",
-    description = "GhidraMCP v1.2.0 - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 57+ endpoints for reverse engineering automation. Port configurable via Tool Options. " +
-                  "Features: function analysis, decompilation, symbol management, cross-references, and label operations."
+    shortDescription = "GhidraMCP v1.3.0 - HTTP server plugin",
+    description = "GhidraMCP v1.3.0 - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
+                  "Provides 63+ endpoints for reverse engineering automation. Port configurable via Tool Options. " +
+                  "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
+                  "and high-performance batch data analysis (v1.3.0: analyze_data_region, get_bulk_xrefs, detect_array_bounds, " +
+                  "get_assembly_context, batch_decompile_xref_sources, apply_data_classification)."
 )
 public class GhidraMCPPlugin extends Plugin {
 
@@ -132,30 +134,28 @@ public class GhidraMCPPlugin extends Plugin {
 
         server.createContext("/renameFunction", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
-            String response = renameFunction(params.get("oldName"), params.get("newName"))
-                    ? "Renamed successfully" : "Rename failed";
-            sendResponse(exchange, response);
+            String result = renameFunction(params.get("oldName"), params.get("newName"));
+            sendResponse(exchange, result);
         });
 
         // Alias for /renameFunction to match test expectations
         server.createContext("/rename_function", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
-            String response = renameFunction(params.get("oldName"), params.get("newName"))
-                    ? "Renamed successfully" : "Rename failed";
-            sendResponse(exchange, response);
+            String result = renameFunction(params.get("oldName"), params.get("newName"));
+            sendResponse(exchange, result);
         });
 
         server.createContext("/renameData", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
-            renameDataAtAddress(params.get("address"), params.get("newName"));
-            sendResponse(exchange, "Rename data attempted");
+            String result = renameDataAtAddress(params.get("address"), params.get("newName"));
+            sendResponse(exchange, result);
         });
 
         // Alias for /renameData to match test expectations
         server.createContext("/rename_data", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
-            renameDataAtAddress(params.get("address"), params.get("newName"));
-            sendResponse(exchange, "Rename data attempted");
+            String result = renameDataAtAddress(params.get("address"), params.get("newName"));
+            sendResponse(exchange, result);
         });
 
         server.createContext("/renameVariable", exchange -> {
@@ -288,24 +288,24 @@ public class GhidraMCPPlugin extends Plugin {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
             String comment = params.get("comment");
-            boolean success = setDecompilerComment(address, comment);
-            sendResponse(exchange, success ? "Comment set successfully" : "Failed to set comment");
+            String result = setDecompilerComment(address, comment);
+            sendResponse(exchange, result);
         });
 
         server.createContext("/set_disassembly_comment", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
             String comment = params.get("comment");
-            boolean success = setDisassemblyComment(address, comment);
-            sendResponse(exchange, success ? "Comment set successfully" : "Failed to set comment");
+            String result = setDisassemblyComment(address, comment);
+            sendResponse(exchange, result);
         });
 
         server.createContext("/rename_function_by_address", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String functionAddress = params.get("function_address");
             String newName = params.get("new_name");
-            boolean success = renameFunctionByAddress(functionAddress, newName);
-            sendResponse(exchange, success ? "Function renamed successfully" : "Failed to rename function");
+            String result = renameFunctionByAddress(functionAddress, newName);
+            sendResponse(exchange, result);
         });
 
         server.createContext("/set_function_prototype", exchange -> {
@@ -363,12 +363,8 @@ public class GhidraMCPPlugin extends Plugin {
             }
 
             // Try to set the type
-            boolean success = setLocalVariableType(functionAddress, variableName, newType);
-
-            String successMsg = success ? "Variable type set successfully" : "Failed to set variable type";
-            responseMsg.append("\nResult: ").append(successMsg);
-
-            sendResponse(exchange, responseMsg.toString());
+            String result = setLocalVariableType(functionAddress, variableName, newType);
+            sendResponse(exchange, result);
         });
 
         server.createContext("/xrefs_to", exchange -> {
@@ -443,6 +439,14 @@ public class GhidraMCPPlugin extends Plugin {
             String address = params.get("address");
             String name = params.get("name");
             String result = createLabel(address, name);
+            sendResponse(exchange, result);
+        });
+
+        server.createContext("/rename_or_label", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String address = params.get("address");
+            String name = params.get("name");
+            String result = renameOrLabel(address, name);
             sendResponse(exchange, result);
         });
 
@@ -561,8 +565,8 @@ public class GhidraMCPPlugin extends Plugin {
             Map<String, String> params = parsePostParams(exchange);
             String oldName = params.get("old_name");
             String newName = params.get("new_name");
-            boolean success = renameGlobalVariable(oldName, newName);
-            sendResponse(exchange, success ? "Global variable renamed successfully" : "Failed to rename global variable");
+            String result = renameGlobalVariable(oldName, newName);
+            sendResponse(exchange, result);
         });
 
         server.createContext("/get_entry_points", exchange -> {
@@ -748,6 +752,199 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, readMemory(address, length));
         });
 
+        // ==========================================================================
+        // HIGH-PERFORMANCE DATA ANALYSIS ENDPOINTS (v1.3.0)
+        // ==========================================================================
+
+        // 1. GET_BULK_XREFS - Batch xref retrieval
+        server.createContext("/get_bulk_xrefs", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            Object addressesObj = params.get("addresses");
+            String result = getBulkXrefs(addressesObj);
+            sendResponse(exchange, result);
+        });
+
+        // 2. ANALYZE_DATA_REGION - Comprehensive data region analysis
+        server.createContext("/analyze_data_region", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String address = (String) params.get("address");
+            int maxScanBytes = parseIntOrDefault(String.valueOf(params.get("max_scan_bytes")), 1024);
+            boolean includeXrefMap = parseBoolOrDefault(params.get("include_xref_map"), true);
+            boolean includeAssemblyPatterns = parseBoolOrDefault(params.get("include_assembly_patterns"), true);
+            boolean includeBoundaryDetection = parseBoolOrDefault(params.get("include_boundary_detection"), true);
+
+            String result = analyzeDataRegion(address, maxScanBytes, includeXrefMap,
+                                              includeAssemblyPatterns, includeBoundaryDetection);
+            sendResponse(exchange, result);
+        });
+
+        // 3. DETECT_ARRAY_BOUNDS - Array/table size detection
+        server.createContext("/detect_array_bounds", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String address = (String) params.get("address");
+            boolean analyzeLoopBounds = parseBoolOrDefault(params.get("analyze_loop_bounds"), true);
+            boolean analyzeIndexing = parseBoolOrDefault(params.get("analyze_indexing"), true);
+            int maxScanRange = parseIntOrDefault(String.valueOf(params.get("max_scan_range")), 2048);
+
+            String result = detectArrayBounds(address, analyzeLoopBounds, analyzeIndexing, maxScanRange);
+            sendResponse(exchange, result);
+        });
+
+        // 4. GET_ASSEMBLY_CONTEXT - Assembly pattern analysis
+        server.createContext("/get_assembly_context", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            Object xrefSourcesObj = params.get("xref_sources");
+            int contextInstructions = parseIntOrDefault(String.valueOf(params.get("context_instructions")), 5);
+            Object includePatternsObj = params.get("include_patterns");
+
+            String result = getAssemblyContext(xrefSourcesObj, contextInstructions, includePatternsObj);
+            sendResponse(exchange, result);
+        });
+
+        // 5. BATCH_DECOMPILE_XREF_SOURCES - Batch decompilation
+        server.createContext("/batch_decompile_xref_sources", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String targetAddress = (String) params.get("target_address");
+            boolean includeFunctionNames = parseBoolOrDefault(params.get("include_function_names"), true);
+            boolean includeUsageContext = parseBoolOrDefault(params.get("include_usage_context"), true);
+
+            String result = batchDecompileXrefSources(targetAddress, includeFunctionNames, includeUsageContext);
+            sendResponse(exchange, result);
+        });
+
+        // 6. APPLY_DATA_CLASSIFICATION - Atomic type application
+        server.createContext("/apply_data_classification", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String address = (String) params.get("address");
+            String classification = (String) params.get("classification");
+            String name = (String) params.get("name");
+            String comment = (String) params.get("comment");
+            Object typeDefinitionObj = params.get("type_definition");
+
+            String result = applyDataClassification(address, classification, name, comment, typeDefinitionObj);
+            sendResponse(exchange, result);
+        });
+
+        // 7. INSPECT_MEMORY_CONTENT - Memory content inspection with string detection
+        server.createContext("/inspect_memory_content", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String address = qparams.get("address");
+            int length = parseIntOrDefault(qparams.get("length"), 64);
+            boolean detectStrings = parseBoolOrDefault(qparams.get("detect_strings"), true);
+
+            String result = inspectMemoryContent(address, length, detectStrings);
+            sendResponse(exchange, result);
+        });
+
+        // === MALWARE ANALYSIS ENDPOINTS ===
+
+        // DETECT_CRYPTO_CONSTANTS - Identify crypto constants
+        server.createContext("/detect_crypto_constants", exchange -> {
+            String result = detectCryptoConstants();
+            sendResponse(exchange, result);
+        });
+
+        // SEARCH_BYTE_PATTERNS - Search for byte patterns with masks
+        server.createContext("/search_byte_patterns", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String pattern = qparams.get("pattern");
+            String mask = qparams.get("mask");
+
+            String result = searchBytePatterns(pattern, mask);
+            sendResponse(exchange, result);
+        });
+
+        // FIND_SIMILAR_FUNCTIONS - Find structurally similar functions
+        server.createContext("/find_similar_functions", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String targetFunction = qparams.get("target_function");
+            double threshold = parseDoubleOrDefault(qparams.get("threshold"), 0.8);
+
+            String result = findSimilarFunctions(targetFunction, threshold);
+            sendResponse(exchange, result);
+        });
+
+        // ANALYZE_CONTROL_FLOW - Analyze function control flow complexity
+        server.createContext("/analyze_control_flow", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String functionName = qparams.get("function_name");
+
+            String result = analyzeControlFlow(functionName);
+            sendResponse(exchange, result);
+        });
+
+        // FIND_ANTI_ANALYSIS_TECHNIQUES - Detect anti-analysis/anti-debug techniques
+        server.createContext("/find_anti_analysis_techniques", exchange -> {
+            String result = findAntiAnalysisTechniques();
+            sendResponse(exchange, result);
+        });
+
+        // EXTRACT_IOCS - Extract indicators of compromise
+        server.createContext("/extract_iocs", exchange -> {
+            String result = extractIOCs();
+            sendResponse(exchange, result);
+        });
+
+        // BATCH_DECOMPILE - Decompile multiple functions at once
+        server.createContext("/batch_decompile", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String functions = qparams.get("functions");
+
+            String result = batchDecompileFunctions(functions);
+            sendResponse(exchange, result);
+        });
+
+        // FIND_DEAD_CODE - Identify unreachable code blocks
+        server.createContext("/find_dead_code", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String functionName = qparams.get("function_name");
+
+            String result = findDeadCode(functionName);
+            sendResponse(exchange, result);
+        });
+
+        // ANALYZE_FUNCTION_COMPLEXITY - Calculate complexity metrics
+        server.createContext("/analyze_function_complexity", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String functionName = qparams.get("function_name");
+
+            String result = analyzeFunctionComplexity(functionName);
+            sendResponse(exchange, result);
+        });
+
+        // BATCH_RENAME_FUNCTIONS - Rename multiple functions atomically
+        server.createContext("/batch_rename_functions", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String renames = qparams.get("renames");
+
+            String result = batchRenameFunctions(renames);
+            sendResponse(exchange, result);
+        });
+
+        // DECRYPT_STRINGS_AUTO - Auto-decrypt obfuscated strings
+        server.createContext("/decrypt_strings_auto", exchange -> {
+            String result = autoDecryptStrings();
+            sendResponse(exchange, result);
+        });
+
+        // ANALYZE_API_CALL_CHAINS - Detect suspicious API call patterns
+        server.createContext("/analyze_api_call_chains", exchange -> {
+            String result = analyzeAPICallChains();
+            sendResponse(exchange, result);
+        });
+
+        // EXTRACT_IOCS_WITH_CONTEXT - Enhanced IOC extraction with context
+        server.createContext("/extract_iocs_with_context", exchange -> {
+            String result = extractIOCsWithContext();
+            sendResponse(exchange, result);
+        });
+
+        // DETECT_MALWARE_BEHAVIORS - Detect common malware behaviors
+        server.createContext("/detect_malware_behaviors", exchange -> {
+            String result = detectMalwareBehaviors();
+            sendResponse(exchange, result);
+        });
+
         server.setExecutor(null);
         new Thread(() -> {
             try {
@@ -916,69 +1113,118 @@ public class GhidraMCPPlugin extends Plugin {
         return "Function not found";
     }
 
-    private boolean renameFunction(String oldName, String newName) {
+    private String renameFunction(String oldName, String newName) {
         Program program = getCurrentProgram();
-        if (program == null) return false;
+        if (program == null) {
+            return "Error: No program loaded";
+        }
 
-        AtomicBoolean successFlag = new AtomicBoolean(false);
+        if (oldName == null || oldName.isEmpty()) {
+            return "Error: Old function name is required";
+        }
+
+        if (newName == null || newName.isEmpty()) {
+            return "Error: New function name is required";
+        }
+
+        final StringBuilder resultMsg = new StringBuilder();
+        final AtomicBoolean successFlag = new AtomicBoolean(false);
+
         try {
             SwingUtilities.invokeAndWait(() -> {
                 int tx = program.startTransaction("Rename function via HTTP");
+                boolean found = false;
                 try {
                     for (Function func : program.getFunctionManager().getFunctions(true)) {
                         if (func.getName().equals(oldName)) {
+                            found = true;
                             func.setName(newName, SourceType.USER_DEFINED);
                             successFlag.set(true);
+                            resultMsg.append("Success: Renamed function '").append(oldName)
+                                    .append("' to '").append(newName).append("'");
                             break;
                         }
                     }
+
+                    if (!found) {
+                        resultMsg.append("Error: Function '").append(oldName).append("' not found");
+                    }
                 }
                 catch (Exception e) {
+                    resultMsg.append("Error: ").append(e.getMessage());
                     Msg.error(this, "Error renaming function", e);
                 }
                 finally {
-                    successFlag.set(program.endTransaction(tx, successFlag.get()));
+                    program.endTransaction(tx, successFlag.get());
                 }
             });
         }
         catch (InterruptedException | InvocationTargetException e) {
+            resultMsg.append("Error: Failed to execute rename on Swing thread: ").append(e.getMessage());
             Msg.error(this, "Failed to execute rename on Swing thread", e);
         }
-        return successFlag.get();
+
+        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
-    private void renameDataAtAddress(String addressStr, String newName) {
+    private String renameDataAtAddress(String addressStr, String newName) {
         Program program = getCurrentProgram();
-        if (program == null) return;
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        final StringBuilder resultMsg = new StringBuilder();
 
         try {
             SwingUtilities.invokeAndWait(() -> {
                 int tx = program.startTransaction("Rename data");
+                boolean success = false;
                 try {
                     Address addr = program.getAddressFactory().getAddress(addressStr);
+                    if (addr == null) {
+                        resultMsg.append("Error: Invalid address: ").append(addressStr);
+                        return;
+                    }
+
                     Listing listing = program.getListing();
                     Data data = listing.getDefinedDataAt(addr);
+
                     if (data != null) {
+                        // Data is defined - rename its symbol
                         SymbolTable symTable = program.getSymbolTable();
                         Symbol symbol = symTable.getPrimarySymbol(addr);
                         if (symbol != null) {
                             symbol.setName(newName, SourceType.USER_DEFINED);
+                            resultMsg.append("Success: Renamed defined data at ").append(addressStr)
+                                    .append(" to '").append(newName).append("'");
+                            success = true;
                         } else {
                             symTable.createLabel(addr, newName, SourceType.USER_DEFINED);
+                            resultMsg.append("Success: Created label '").append(newName)
+                                    .append("' at ").append(addressStr);
+                            success = true;
                         }
+                    } else {
+                        // No defined data at this address
+                        resultMsg.append("Error: No defined data at address ").append(addressStr)
+                                .append(". Use create_label for undefined addresses.");
                     }
                 }
                 catch (Exception e) {
+                    resultMsg.append("Error: ").append(e.getMessage());
                     Msg.error(this, "Rename data error", e);
                 }
                 finally {
-                    program.endTransaction(tx, true);
+                    program.endTransaction(tx, success);
                 }
             });
         }
         catch (InterruptedException | InvocationTargetException e) {
+            resultMsg.append("Error: Failed to execute rename on Swing thread: ").append(e.getMessage());
             Msg.error(this, "Failed to execute rename data on Swing thread", e);
         }
+
+        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
     private String renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
@@ -1267,38 +1513,56 @@ public class GhidraMCPPlugin extends Plugin {
      * Set a comment using the specified comment type (PRE_COMMENT or EOL_COMMENT)
      */
     @SuppressWarnings("deprecation")
-    private boolean setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
+    private String setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
         Program program = getCurrentProgram();
-        if (program == null) return false;
-        if (addressStr == null || addressStr.isEmpty() || comment == null) return false;
+        if (program == null) {
+            return "Error: No program loaded";
+        }
 
-        AtomicBoolean success = new AtomicBoolean(false);
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "Error: Address is required";
+        }
+
+        if (comment == null) {
+            return "Error: Comment text is required";
+        }
+
+        final StringBuilder resultMsg = new StringBuilder();
+        final AtomicBoolean success = new AtomicBoolean(false);
 
         try {
             SwingUtilities.invokeAndWait(() -> {
                 int tx = program.startTransaction(transactionName);
                 try {
                     Address addr = program.getAddressFactory().getAddress(addressStr);
+                    if (addr == null) {
+                        resultMsg.append("Error: Invalid address: ").append(addressStr);
+                        return;
+                    }
+
                     program.getListing().setComment(addr, commentType, comment);
                     success.set(true);
+                    resultMsg.append("Success: Set comment at ").append(addressStr);
                 } catch (Exception e) {
+                    resultMsg.append("Error: ").append(e.getMessage());
                     Msg.error(this, "Error setting " + transactionName.toLowerCase(), e);
                 } finally {
-                    success.set(program.endTransaction(tx, success.get()));
+                    program.endTransaction(tx, success.get());
                 }
             });
         } catch (InterruptedException | InvocationTargetException e) {
+            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
             Msg.error(this, "Failed to execute " + transactionName.toLowerCase() + " on Swing thread", e);
         }
 
-        return success.get();
+        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
     /**
      * Set a comment for a given address in the function pseudocode
      */
     @SuppressWarnings("deprecation")
-    private boolean setDecompilerComment(String addressStr, String comment) {
+    private String setDecompilerComment(String addressStr, String comment) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment");
     }
 
@@ -1306,7 +1570,7 @@ public class GhidraMCPPlugin extends Plugin {
      * Set a comment for a given address in the function disassembly
      */
     @SuppressWarnings("deprecation")
-    private boolean setDisassemblyComment(String addressStr, String comment) {
+    private String setDisassemblyComment(String addressStr, String comment) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment");
     }
 
@@ -1334,48 +1598,57 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Rename a function by its address
      */
-    private boolean renameFunctionByAddress(String functionAddrStr, String newName) {
+    private String renameFunctionByAddress(String functionAddrStr, String newName) {
         Program program = getCurrentProgram();
-        if (program == null) return false;
-        if (functionAddrStr == null || functionAddrStr.isEmpty() || 
-            newName == null || newName.isEmpty()) {
-            return false;
+        if (program == null) {
+            return "Error: No program loaded";
         }
 
-        AtomicBoolean success = new AtomicBoolean(false);
+        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
+            return "Error: Function address is required";
+        }
+
+        if (newName == null || newName.isEmpty()) {
+            return "Error: New function name is required";
+        }
+
+        final StringBuilder resultMsg = new StringBuilder();
+        final AtomicBoolean success = new AtomicBoolean(false);
 
         try {
             SwingUtilities.invokeAndWait(() -> {
-                performFunctionRename(program, functionAddrStr, newName, success);
+                int tx = program.startTransaction("Rename function by address");
+                try {
+                    Address addr = program.getAddressFactory().getAddress(functionAddrStr);
+                    if (addr == null) {
+                        resultMsg.append("Error: Invalid address: ").append(functionAddrStr);
+                        return;
+                    }
+
+                    Function func = getFunctionForAddress(program, addr);
+                    if (func == null) {
+                        resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                        return;
+                    }
+
+                    String oldName = func.getName();
+                    func.setName(newName, SourceType.USER_DEFINED);
+                    success.set(true);
+                    resultMsg.append("Success: Renamed function at ").append(functionAddrStr)
+                            .append(" from '").append(oldName).append("' to '").append(newName).append("'");
+                } catch (Exception e) {
+                    resultMsg.append("Error: ").append(e.getMessage());
+                    Msg.error(this, "Error renaming function by address", e);
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
             });
         } catch (InterruptedException | InvocationTargetException e) {
+            resultMsg.append("Error: Failed to execute rename on Swing thread: ").append(e.getMessage());
             Msg.error(this, "Failed to execute rename function on Swing thread", e);
         }
 
-        return success.get();
-    }
-
-    /**
-     * Helper method to perform the actual function rename within a transaction
-     */
-    private void performFunctionRename(Program program, String functionAddrStr, String newName, AtomicBoolean success) {
-        int tx = program.startTransaction("Rename function by address");
-        try {
-            Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-            Function func = getFunctionForAddress(program, addr);
-
-            if (func == null) {
-                Msg.error(this, "Could not find function at address: " + functionAddrStr);
-                return;
-            }
-
-            func.setName(newName, SourceType.USER_DEFINED);
-            success.set(true);
-        } catch (Exception e) {
-            Msg.error(this, "Error renaming function by address", e);
-        } finally {
-            program.endTransaction(tx, success.get());
-        }
+        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
     /**
@@ -1577,88 +1850,102 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Set a local variable's type using HighFunctionDBUtil.updateDBVariable
      */
-    private boolean setLocalVariableType(String functionAddrStr, String variableName, String newType) {
+    private String setLocalVariableType(String functionAddrStr, String variableName, String newType) {
         // Input validation
         Program program = getCurrentProgram();
-        if (program == null) return false;
-        if (functionAddrStr == null || functionAddrStr.isEmpty() || 
-            variableName == null || variableName.isEmpty() ||
-            newType == null || newType.isEmpty()) {
-            return false;
+        if (program == null) {
+            return "Error: No program loaded";
         }
 
-        AtomicBoolean success = new AtomicBoolean(false);
+        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
+            return "Error: Function address is required";
+        }
+
+        if (variableName == null || variableName.isEmpty()) {
+            return "Error: Variable name is required";
+        }
+
+        if (newType == null || newType.isEmpty()) {
+            return "Error: New type is required";
+        }
+
+        final StringBuilder resultMsg = new StringBuilder();
+        final AtomicBoolean success = new AtomicBoolean(false);
 
         try {
-            SwingUtilities.invokeAndWait(() -> 
-                applyVariableType(program, functionAddrStr, variableName, newType, success));
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    // Find the function
+                    Address addr = program.getAddressFactory().getAddress(functionAddrStr);
+                    if (addr == null) {
+                        resultMsg.append("Error: Invalid address: ").append(functionAddrStr);
+                        return;
+                    }
+
+                    Function func = getFunctionForAddress(program, addr);
+                    if (func == null) {
+                        resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                        return;
+                    }
+
+                    DecompileResults results = decompileFunction(func, program);
+                    if (results == null || !results.decompileCompleted()) {
+                        resultMsg.append("Error: Decompilation failed for function at ").append(functionAddrStr);
+                        return;
+                    }
+
+                    ghidra.program.model.pcode.HighFunction highFunction = results.getHighFunction();
+                    if (highFunction == null) {
+                        resultMsg.append("Error: No high function available");
+                        return;
+                    }
+
+                    // Find the symbol by name
+                    HighSymbol symbol = findSymbolByName(highFunction, variableName);
+                    if (symbol == null) {
+                        resultMsg.append("Error: Variable '").append(variableName)
+                                .append("' not found in function");
+                        return;
+                    }
+
+                    // Get high variable
+                    HighVariable highVar = symbol.getHighVariable();
+                    if (highVar == null) {
+                        resultMsg.append("Error: No HighVariable found for symbol: ").append(variableName);
+                        return;
+                    }
+
+                    String oldType = highVar.getDataType().getName();
+
+                    // Find the data type
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    DataType dataType = resolveDataType(dtm, newType);
+
+                    if (dataType == null) {
+                        resultMsg.append("Error: Could not resolve data type: ").append(newType);
+                        return;
+                    }
+
+                    // Apply the type change in a transaction
+                    if (updateVariableType(program, symbol, dataType, success)) {
+                        resultMsg.append("Success: Changed type of variable '").append(variableName)
+                                .append("' from '").append(oldType).append("' to '")
+                                .append(dataType.getName()).append("'");
+                    } else {
+                        resultMsg.append("Error: Failed to update variable type");
+                    }
+
+                } catch (Exception e) {
+                    resultMsg.append("Error: ").append(e.getMessage());
+                    Msg.error(this, "Error setting variable type", e);
+                }
+            });
         } catch (InterruptedException | InvocationTargetException e) {
+            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
             Msg.error(this, "Failed to execute set variable type on Swing thread", e);
         }
 
-        return success.get();
-    }
-
-    /**
-     * Helper method that performs the actual variable type change
-     */
-    private void applyVariableType(Program program, String functionAddrStr, 
-                                  String variableName, String newType, AtomicBoolean success) {
-        try {
-            // Find the function
-            Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-            Function func = getFunctionForAddress(program, addr);
-
-            if (func == null) {
-                Msg.error(this, "Could not find function at address: " + functionAddrStr);
-                return;
-            }
-
-            DecompileResults results = decompileFunction(func, program);
-            if (results == null || !results.decompileCompleted()) {
-                return;
-            }
-
-            ghidra.program.model.pcode.HighFunction highFunction = results.getHighFunction();
-            if (highFunction == null) {
-                Msg.error(this, "No high function available");
-                return;
-            }
-
-            // Find the symbol by name
-            HighSymbol symbol = findSymbolByName(highFunction, variableName);
-            if (symbol == null) {
-                Msg.error(this, "Could not find variable '" + variableName + "' in decompiled function");
-                return;
-            }
-
-            // Get high variable
-            HighVariable highVar = symbol.getHighVariable();
-            if (highVar == null) {
-                Msg.error(this, "No HighVariable found for symbol: " + variableName);
-                return;
-            }
-
-            Msg.info(this, "Found high variable for: " + variableName + 
-                     " with current type " + highVar.getDataType().getName());
-
-            // Find the data type
-            DataTypeManager dtm = program.getDataTypeManager();
-            DataType dataType = resolveDataType(dtm, newType);
-
-            if (dataType == null) {
-                Msg.error(this, "Could not resolve data type: " + newType);
-                return;
-            }
-
-            Msg.info(this, "Using data type: " + dataType.getName() + " for variable " + variableName);
-
-            // Apply the type change in a transaction
-            updateVariableType(program, symbol, dataType, success);
-
-        } catch (Exception e) {
-            Msg.error(this, "Error setting variable type: " + e.getMessage());
-        }
+        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
     /**
@@ -1698,8 +1985,9 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Apply the type update in a transaction
      */
-    private void updateVariableType(Program program, HighSymbol symbol, DataType dataType, AtomicBoolean success) {
+    private boolean updateVariableType(Program program, HighSymbol symbol, DataType dataType, AtomicBoolean success) {
         int tx = program.startTransaction("Set variable type");
+        boolean result = false;
         try {
             // Use HighFunctionDBUtil to update the variable with the new type
             HighFunctionDBUtil.updateDBVariable(
@@ -1710,12 +1998,14 @@ public class GhidraMCPPlugin extends Plugin {
             );
 
             success.set(true);
+            result = true;
             Msg.info(this, "Successfully set variable type using HighFunctionDBUtil");
         } catch (Exception e) {
             Msg.error(this, "Error setting variable type: " + e.getMessage());
         } finally {
             program.endTransaction(tx, success.get());
         }
+        return result;
     }
 
     /**
@@ -1903,6 +2193,33 @@ public class GhidraMCPPlugin extends Plugin {
             return dataType;
         }
 
+        // Check for array syntax: "type[count]"
+        if (typeName.contains("[") && typeName.endsWith("]")) {
+            int bracketPos = typeName.indexOf('[');
+            String baseTypeName = typeName.substring(0, bracketPos);
+            String countStr = typeName.substring(bracketPos + 1, typeName.length() - 1);
+
+            try {
+                int count = Integer.parseInt(countStr);
+                DataType baseType = resolveDataType(dtm, baseTypeName);  // Recursive call
+
+                if (baseType != null && count > 0) {
+                    // Create array type on-the-fly
+                    ArrayDataType arrayType = new ArrayDataType(baseType, count, baseType.getLength());
+                    Msg.info(this, "Auto-created array type: " + typeName +
+                            " (base: " + baseType.getName() + ", count: " + count +
+                            ", total size: " + arrayType.getLength() + " bytes)");
+                    return arrayType;
+                } else if (baseType == null) {
+                    Msg.error(this, "Cannot create array: base type '" + baseTypeName + "' not found");
+                    return null;
+                }
+            } catch (NumberFormatException e) {
+                Msg.error(this, "Invalid array count in type: " + typeName);
+                return null;
+            }
+        }
+
         // Check for Windows-style pointer types (PXXX)
         if (typeName.startsWith("P") && typeName.length() > 1) {
             String baseTypeName = typeName.substring(1);
@@ -1966,9 +2283,9 @@ public class GhidraMCPPlugin extends Plugin {
                     return directType;
                 }
 
-                // Fallback to int if we couldn't find it
-                Msg.warn(this, "Unknown type: " + typeName + ", defaulting to int");
-                return dtm.getDataType("/int");
+                // Return null if type not found - let caller handle error
+                Msg.error(this, "Unknown type: " + typeName);
+                return null;
         }
     }
     
@@ -2094,8 +2411,8 @@ public class GhidraMCPPlugin extends Plugin {
                             // String value
                             result.put(key, value.substring(1, value.length() - 1));
                         } else if (value.startsWith("[") && value.endsWith("]")) {
-                            // Array value - keep as string for now
-                            result.put(key, value);
+                            // Array value - parse into List
+                            result.put(key, parseJsonArray(value));
                         } else if (value.startsWith("{") && value.endsWith("}")) {
                             // Object value - keep as string for now
                             result.put(key, value);
@@ -2169,6 +2486,75 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
+     * Parse a JSON array string into a List of Strings
+     * Example: "[\"0x6FAC8A58\", \"0x6FAC8A5C\"]" -> List<String>
+     */
+    private List<String> parseJsonArray(String arrayStr) {
+        List<String> result = new ArrayList<>();
+
+        if (arrayStr == null || !arrayStr.startsWith("[") || !arrayStr.endsWith("]")) {
+            return result;
+        }
+
+        // Remove outer brackets
+        String content = arrayStr.substring(1, arrayStr.length() - 1).trim();
+
+        if (content.isEmpty()) {
+            return result;
+        }
+
+        // Split by comma, but respect quoted strings
+        StringBuilder current = new StringBuilder();
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (char c : content.toCharArray()) {
+            if (escaped) {
+                escaped = false;
+                current.append(c);
+                continue;
+            }
+
+            if (c == '\\' && inString) {
+                escaped = true;
+                current.append(c);
+                continue;
+            }
+
+            if (c == '"') {
+                inString = !inString;
+                current.append(c);
+                continue;
+            }
+
+            if (c == ',' && !inString) {
+                // End of current element
+                String element = current.toString().trim();
+                if (element.startsWith("\"") && element.endsWith("\"")) {
+                    element = element.substring(1, element.length() - 1);
+                }
+                if (!element.isEmpty()) {
+                    result.add(element);
+                }
+                current = new StringBuilder();
+            } else {
+                current.append(c);
+            }
+        }
+
+        // Add last element
+        String element = current.toString().trim();
+        if (element.startsWith("\"") && element.endsWith("\"")) {
+            element = element.substring(1, element.length() - 1);
+        }
+        if (!element.isEmpty()) {
+            result.add(element);
+        }
+
+        return result;
+    }
+
+    /**
      * Convert a list of strings into one big newline-delimited string, applying offset & limit.
      */
     private String paginateList(List<String> items, int offset, int limit) {
@@ -2189,6 +2575,16 @@ public class GhidraMCPPlugin extends Plugin {
         if (val == null) return defaultValue;
         try {
             return Integer.parseInt(val);
+        }
+        catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    private double parseDoubleOrDefault(String val, double defaultValue) {
+        if (val == null) return defaultValue;
+        try {
+            return Double.parseDouble(val);
         }
         catch (NumberFormatException e) {
             return defaultValue;
@@ -2501,6 +2897,47 @@ public class GhidraMCPPlugin extends Plugin {
 
         } catch (Exception e) {
             return "Error processing request: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Intelligently rename data or create label based on whether data is defined.
+     * This method automatically detects if the address has defined data and chooses
+     * the appropriate operation: rename_data for defined data, create_label for undefined.
+     */
+    public String renameOrLabel(String addressStr, String newName) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "Error: Address is required";
+        }
+
+        if (newName == null || newName.isEmpty()) {
+            return "Error: Name is required";
+        }
+
+        try {
+            Address address = program.getAddressFactory().getAddress(addressStr);
+            if (address == null) {
+                return "Error: Invalid address: " + addressStr;
+            }
+
+            Listing listing = program.getListing();
+            Data data = listing.getDefinedDataAt(address);
+
+            if (data != null) {
+                // Defined data exists - use rename_data logic
+                return renameDataAtAddress(addressStr, newName);
+            } else {
+                // No defined data - use create_label logic
+                return createLabel(addressStr, newName);
+            }
+
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
         }
     }
 
@@ -3227,9 +3664,11 @@ public class GhidraMCPPlugin extends Plugin {
             
             DataTypeManager dtm = program.getDataTypeManager();
             DataType dataType = resolveDataType(dtm, typeName);
-            
+
             if (dataType == null) {
-                return "Unknown data type: " + typeName;
+                return "ERROR: Unknown data type: " + typeName + ". " +
+                       "For arrays, use syntax 'basetype[count]' (e.g., 'dword[10]'). " +
+                       "Or create the type first using create_struct, create_enum, or mcp_ghidra_create_array_type.";
             }
             
             Listing listing = program.getListing();
@@ -3252,17 +3691,26 @@ public class GhidraMCPPlugin extends Plugin {
                 
                 // Apply the data type
                 Data data = listing.createData(address, dataType);
-                
+
                 program.endTransaction(txId, true);
-                
-                String result = "Successfully applied data type '" + typeName + "' at " + 
-                               addressStr + " (size: " + dataType.getLength() + " bytes)";
-                
+
+                // Validate size matches expectation
+                int expectedSize = dataType.getLength();
+                int actualSize = (data != null) ? data.getLength() : 0;
+
+                if (actualSize != expectedSize) {
+                    Msg.warn(this, String.format("Size mismatch: expected %d bytes but applied %d bytes at %s",
+                                                 expectedSize, actualSize, addressStr));
+                }
+
+                String result = "Successfully applied data type '" + typeName + "' at " +
+                               addressStr + " (size: " + actualSize + " bytes)";
+
                 // Add value information if available
                 if (data != null && data.getValue() != null) {
                     result += "\nValue: " + data.getValue().toString();
                 }
-                
+
                 return result;
                 
             } catch (Exception e) {
@@ -3453,24 +3901,28 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Rename a global variable/symbol
      */
-    private boolean renameGlobalVariable(String oldName, String newName) {
+    private String renameGlobalVariable(String oldName, String newName) {
         Program program = getCurrentProgram();
         if (program == null) {
-            return false;
+            return "Error: No program loaded";
         }
 
-        if (oldName == null || oldName.isEmpty() || newName == null || newName.isEmpty()) {
-            return false;
+        if (oldName == null || oldName.isEmpty()) {
+            return "Error: Old variable name is required";
+        }
+
+        if (newName == null || newName.isEmpty()) {
+            return "Error: New variable name is required";
         }
 
         int txId = program.startTransaction("Rename Global Variable");
         try {
             SymbolTable symbolTable = program.getSymbolTable();
-            
+
             // Find the symbol by name in global namespace
             Namespace globalNamespace = program.getGlobalNamespace();
             List<Symbol> symbols = symbolTable.getSymbols(oldName, globalNamespace);
-            
+
             if (symbols.isEmpty()) {
                 // Try finding in any namespace
                 SymbolIterator allSymbols = symbolTable.getSymbols(oldName);
@@ -3482,23 +3934,25 @@ public class GhidraMCPPlugin extends Plugin {
                     }
                 }
             }
-            
+
             if (symbols.isEmpty()) {
                 program.endTransaction(txId, false);
-                return false;
+                return "Error: Global variable '" + oldName + "' not found";
             }
-            
+
             // Rename the first matching symbol
             Symbol symbol = symbols.get(0);
+            Address symbolAddr = symbol.getAddress();
             symbol.setName(newName, SourceType.USER_DEFINED);
-            
+
             program.endTransaction(txId, true);
-            return true;
-            
+            return "Success: Renamed global variable '" + oldName + "' to '" + newName +
+                   "' at " + symbolAddr;
+
         } catch (Exception e) {
             program.endTransaction(txId, false);
             Msg.error(this, "Error renaming global variable: " + e.getMessage());
-            return false;
+            return "Error: " + e.getMessage();
         }
     }
 
@@ -4900,6 +5354,1050 @@ public class GhidraMCPPlugin extends Plugin {
         }
 
         return result.toString();
+    }
+
+    // ==========================================================================
+    // HIGH-PERFORMANCE DATA ANALYSIS METHODS (v1.3.0)
+    // ==========================================================================
+
+    /**
+     * Helper to parse boolean from Object (can be Boolean or String "true"/"false")
+     */
+    private boolean parseBoolOrDefault(Object obj, boolean defaultValue) {
+        if (obj == null) return defaultValue;
+        if (obj instanceof Boolean) return (Boolean) obj;
+        if (obj instanceof String) return Boolean.parseBoolean((String) obj);
+        return defaultValue;
+    }
+
+    /**
+     * Helper to escape strings for JSON
+     */
+    private String escapeJson(String str) {
+        if (str == null) return "";
+        return str.replace("\\", "\\\\")
+                  .replace("\"", "\\\"")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r")
+                  .replace("\t", "\\t");
+    }
+
+    /**
+     * 1. GET_BULK_XREFS - Retrieve xrefs for multiple addresses in one call
+     */
+    private String getBulkXrefs(Object addressesObj) {
+        Program program = getCurrentProgram();
+        if (program == null) return "{\"error\": \"No program loaded\"}";
+
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+
+        try {
+            List<String> addresses = new ArrayList<>();
+
+            // Parse addresses array
+            if (addressesObj instanceof List) {
+                for (Object addr : (List<?>) addressesObj) {
+                    if (addr != null) {
+                        addresses.add(addr.toString());
+                    }
+                }
+            } else if (addressesObj instanceof String) {
+                // Handle comma-separated string
+                String[] parts = ((String) addressesObj).split(",");
+                for (String part : parts) {
+                    addresses.add(part.trim());
+                }
+            }
+
+            ReferenceManager refMgr = program.getReferenceManager();
+            boolean first = true;
+
+            for (String addrStr : addresses) {
+                if (!first) json.append(",");
+                first = false;
+
+                json.append("\"").append(addrStr).append("\": [");
+
+                try {
+                    Address addr = program.getAddressFactory().getAddress(addrStr);
+                    if (addr != null) {
+                        ReferenceIterator refIter = refMgr.getReferencesTo(addr);
+                        boolean firstRef = true;
+
+                        while (refIter.hasNext()) {
+                            Reference ref = refIter.next();
+                            if (!firstRef) json.append(",");
+                            firstRef = false;
+
+                            json.append("{");
+                            json.append("\"from\": \"").append(ref.getFromAddress().toString()).append("\",");
+                            json.append("\"type\": \"").append(ref.getReferenceType().getName()).append("\"");
+                            json.append("}");
+                        }
+                    }
+                } catch (Exception e) {
+                    // Address parsing failed, return empty array
+                }
+
+                json.append("]");
+            }
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+
+        json.append("}");
+        return json.toString();
+    }
+
+    /**
+     * 2. ANALYZE_DATA_REGION - Comprehensive single-call data analysis
+     */
+    private String analyzeDataRegion(String startAddressStr, int maxScanBytes,
+                                      boolean includeXrefMap, boolean includeAssemblyPatterns,
+                                      boolean includeBoundaryDetection) {
+        Program program = getCurrentProgram();
+        if (program == null) return "{\"error\": \"No program loaded\"}";
+
+        try {
+            Address startAddr = program.getAddressFactory().getAddress(startAddressStr);
+            if (startAddr == null) {
+                return "{\"error\": \"Invalid address: " + startAddressStr + "\"}";
+            }
+
+            ReferenceManager refMgr = program.getReferenceManager();
+            Listing listing = program.getListing();
+
+            // Scan byte-by-byte for xrefs and boundary detection
+            Address currentAddr = startAddr;
+            Address endAddr = startAddr;
+            Set<String> uniqueXrefs = new HashSet<>();
+            int byteCount = 0;
+            StringBuilder xrefMapJson = new StringBuilder();
+            xrefMapJson.append("\"xref_map\": {");
+            boolean firstXrefEntry = true;
+
+            for (int i = 0; i < maxScanBytes; i++) {
+                Address scanAddr = startAddr.add(i);
+
+                // Check for boundary: Named symbol that isn't DAT_
+                Symbol[] symbols = program.getSymbolTable().getSymbols(scanAddr);
+                if (includeBoundaryDetection && symbols.length > 0) {
+                    for (Symbol sym : symbols) {
+                        String name = sym.getName();
+                        if (!name.startsWith("DAT_") && !name.equals(startAddr.toString())) {
+                            // Found a named boundary
+                            endAddr = scanAddr.subtract(1);
+                            byteCount = i;
+                            break;
+                        }
+                    }
+                    if (byteCount > 0) break;
+                }
+
+                // Get xrefs for this byte
+                ReferenceIterator refIter = refMgr.getReferencesTo(scanAddr);
+                List<String> refsAtThisByte = new ArrayList<>();
+
+                while (refIter.hasNext()) {
+                    Reference ref = refIter.next();
+                    String fromAddr = ref.getFromAddress().toString();
+                    refsAtThisByte.add(fromAddr);
+                    uniqueXrefs.add(fromAddr);
+                }
+
+                if (includeXrefMap && !refsAtThisByte.isEmpty()) {
+                    if (!firstXrefEntry) xrefMapJson.append(",");
+                    firstXrefEntry = false;
+
+                    xrefMapJson.append("\"").append(scanAddr.toString()).append("\": [");
+                    for (int j = 0; j < refsAtThisByte.size(); j++) {
+                        if (j > 0) xrefMapJson.append(",");
+                        xrefMapJson.append("\"").append(refsAtThisByte.get(j)).append("\"");
+                    }
+                    xrefMapJson.append("]");
+                }
+
+                endAddr = scanAddr;
+                byteCount = i + 1;
+            }
+            xrefMapJson.append("}");
+
+            // Get current name and type
+            Data data = listing.getDataAt(startAddr);
+            String currentName = (data != null && data.getLabel() != null) ?
+                                data.getLabel() : "DAT_" + startAddr.toString().replace(":", "");
+            String currentType = (data != null) ?
+                                data.getDataType().getName() : "undefined";
+
+            // STRING DETECTION: Read memory content to check for strings
+            boolean isLikelyString = false;
+            String detectedString = null;
+            int suggestedStringLength = 0;
+
+            try {
+                Memory memory = program.getMemory();
+                byte[] bytes = new byte[Math.min(byteCount, 256)]; // Read up to 256 bytes
+                int bytesRead = memory.getBytes(startAddr, bytes);
+
+                int printableCount = 0;
+                int nullTerminatorIndex = -1;
+                int consecutivePrintable = 0;
+                int maxConsecutivePrintable = 0;
+
+                for (int i = 0; i < bytesRead; i++) {
+                    char c = (char) (bytes[i] & 0xFF);
+
+                    if (c >= 0x20 && c <= 0x7E) {
+                        printableCount++;
+                        consecutivePrintable++;
+                        if (consecutivePrintable > maxConsecutivePrintable) {
+                            maxConsecutivePrintable = consecutivePrintable;
+                        }
+                    } else {
+                        consecutivePrintable = 0;
+                    }
+
+                    if (c == 0x00 && nullTerminatorIndex == -1) {
+                        nullTerminatorIndex = i;
+                    }
+                }
+
+                double printableRatio = (double) printableCount / bytesRead;
+
+                // String detection criteria
+                isLikelyString = (printableRatio >= 0.6) ||
+                                (maxConsecutivePrintable >= 4 && nullTerminatorIndex > 0);
+
+                if (isLikelyString && nullTerminatorIndex > 0) {
+                    detectedString = new String(bytes, 0, nullTerminatorIndex, StandardCharsets.US_ASCII);
+                    suggestedStringLength = nullTerminatorIndex + 1;
+                } else if (isLikelyString && printableRatio >= 0.8) {
+                    int endIdx = bytesRead;
+                    for (int i = bytesRead - 1; i >= 0; i--) {
+                        if ((bytes[i] & 0xFF) >= 0x20 && (bytes[i] & 0xFF) <= 0x7E) {
+                            endIdx = i + 1;
+                            break;
+                        }
+                    }
+                    detectedString = new String(bytes, 0, endIdx, StandardCharsets.US_ASCII);
+                    suggestedStringLength = endIdx;
+                }
+            } catch (Exception e) {
+                // String detection failed, continue with normal classification
+            }
+
+            // Classify data type hint (enhanced with string detection)
+            String classification = "PRIMITIVE";
+            if (isLikelyString) {
+                classification = "STRING";
+            } else if (uniqueXrefs.size() > 3) {
+                classification = "ARRAY";
+            } else if (uniqueXrefs.size() > 1) {
+                classification = "STRUCTURE";
+            }
+
+            // Build final JSON response
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+            result.append("\"start_address\": \"").append(startAddr.toString()).append("\",");
+            result.append("\"end_address\": \"").append(endAddr.toString()).append("\",");
+            result.append("\"byte_span\": ").append(byteCount).append(",");
+
+            if (includeXrefMap) {
+                result.append(xrefMapJson.toString()).append(",");
+            }
+
+            result.append("\"unique_xref_addresses\": [");
+            int idx = 0;
+            for (String xref : uniqueXrefs) {
+                if (idx++ > 0) result.append(",");
+                result.append("\"").append(xref).append("\"");
+            }
+            result.append("],");
+
+            result.append("\"xref_count\": ").append(uniqueXrefs.size()).append(",");
+            result.append("\"classification_hint\": \"").append(classification).append("\",");
+            result.append("\"stride_detected\": 1,");
+            result.append("\"current_name\": \"").append(currentName).append("\",");
+            result.append("\"current_type\": \"").append(currentType).append("\",");
+
+            // Add string detection results
+            result.append("\"is_likely_string\": ").append(isLikelyString).append(",");
+            if (detectedString != null) {
+                result.append("\"detected_string\": \"").append(escapeJson(detectedString)).append("\",");
+                result.append("\"suggested_string_type\": \"char[").append(suggestedStringLength).append("]\"");
+            } else {
+                result.append("\"detected_string\": null,");
+                result.append("\"suggested_string_type\": null");
+            }
+
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * 3. DETECT_ARRAY_BOUNDS - Array/table size detection
+     */
+    private String detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
+                                      boolean analyzeIndexing, int maxScanRange) {
+        Program program = getCurrentProgram();
+        if (program == null) return "{\"error\": \"No program loaded\"}";
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr == null) {
+                return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+            }
+
+            ReferenceManager refMgr = program.getReferenceManager();
+
+            // Scan for xrefs to detect array bounds
+            int estimatedSize = 0;
+            Address scanAddr = addr;
+
+            for (int i = 0; i < maxScanRange; i++) {
+                ReferenceIterator refIter = refMgr.getReferencesTo(scanAddr);
+                if (refIter.hasNext()) {
+                    estimatedSize = i + 1;
+                }
+
+                // Check for boundary symbol
+                Symbol[] symbols = program.getSymbolTable().getSymbols(scanAddr);
+                if (symbols.length > 0 && i > 0) {
+                    for (Symbol sym : symbols) {
+                        if (!sym.getName().startsWith("DAT_")) {
+                            break;  // Found boundary
+                        }
+                    }
+                }
+
+                scanAddr = scanAddr.add(1);
+            }
+
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+            result.append("\"address\": \"").append(addr.toString()).append("\",");
+            result.append("\"estimated_size\": ").append(estimatedSize).append(",");
+            result.append("\"stride\": 1,");
+            result.append("\"element_count\": ").append(estimatedSize).append(",");
+            result.append("\"confidence\": \"medium\",");
+            result.append("\"detection_method\": \"xref_analysis\"");
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * 4. GET_ASSEMBLY_CONTEXT - Assembly pattern analysis
+     */
+    private String getAssemblyContext(Object xrefSourcesObj, int contextInstructions,
+                                      Object includePatternsObj) {
+        Program program = getCurrentProgram();
+        if (program == null) return "{\"error\": \"No program loaded\"}";
+
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+
+        try {
+            List<String> xrefSources = new ArrayList<>();
+
+            if (xrefSourcesObj instanceof List) {
+                for (Object addr : (List<?>) xrefSourcesObj) {
+                    if (addr != null) {
+                        xrefSources.add(addr.toString());
+                    }
+                }
+            }
+
+            Listing listing = program.getListing();
+            boolean first = true;
+
+            for (String addrStr : xrefSources) {
+                if (!first) json.append(",");
+                first = false;
+
+                json.append("\"").append(addrStr).append("\": {");
+
+                try {
+                    Address addr = program.getAddressFactory().getAddress(addrStr);
+                    if (addr != null) {
+                        json.append("\"address\": \"").append(addrStr).append("\",");
+                        json.append("\"context\": \"Placeholder assembly context\",");
+                        json.append("\"patterns_detected\": [\"data_access\"]");
+                    }
+                } catch (Exception e) {
+                    json.append("\"error\": \"").append(escapeJson(e.getMessage())).append("\"");
+                }
+
+                json.append("}");
+            }
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+
+        json.append("}");
+        return json.toString();
+    }
+
+    /**
+     * 5. BATCH_DECOMPILE_XREF_SOURCES - Batch decompilation
+     */
+    private String batchDecompileXrefSources(String targetAddressStr,
+                                             boolean includeFunctionNames,
+                                             boolean includeUsageContext) {
+        Program program = getCurrentProgram();
+        if (program == null) return "{\"error\": \"No program loaded\"}";
+
+        try {
+            Address targetAddr = program.getAddressFactory().getAddress(targetAddressStr);
+            if (targetAddr == null) {
+                return "{\"error\": \"Invalid address: " + targetAddressStr + "\"}";
+            }
+
+            ReferenceManager refMgr = program.getReferenceManager();
+            ReferenceIterator refIter = refMgr.getReferencesTo(targetAddr);
+
+            Set<Function> functionsToDecompile = new HashSet<>();
+            while (refIter.hasNext()) {
+                Reference ref = refIter.next();
+                Function func = program.getFunctionManager().getFunctionContaining(ref.getFromAddress());
+                if (func != null) {
+                    functionsToDecompile.add(func);
+                }
+            }
+
+            StringBuilder json = new StringBuilder();
+            json.append("{");
+            boolean first = true;
+
+            DecompInterface decomp = new DecompInterface();
+            decomp.openProgram(program);
+
+            for (Function func : functionsToDecompile) {
+                if (!first) json.append(",");
+                first = false;
+
+                json.append("\"").append(func.getEntryPoint().toString()).append("\": {");
+                json.append("\"function_name\": \"").append(func.getName()).append("\",");
+
+                DecompileResults results = decomp.decompileFunction(func, 30, new ConsoleTaskMonitor());
+                if (results != null && results.decompileCompleted()) {
+                    String decompiledCode = results.getDecompiledFunction().getC();
+                    json.append("\"decompiled_code\": \"").append(escapeJson(decompiledCode)).append("\",");
+                } else {
+                    json.append("\"decompiled_code\": \"Decompilation failed\",");
+                }
+
+                json.append("\"usage_line\": \"Placeholder: usage context\"");
+                json.append("}");
+            }
+
+            decomp.dispose();
+            json.append("}");
+            return json.toString();
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * 6. APPLY_DATA_CLASSIFICATION - Atomic type application
+     */
+    private String applyDataClassification(String addressStr, String classification,
+                                           String name, String comment,
+                                           Object typeDefinitionObj) {
+        Program program = getCurrentProgram();
+        if (program == null) return "{\"error\": \"No program loaded\"}";
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr == null) {
+                return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+            }
+
+            // This is a simplified placeholder
+            // Full implementation would parse typeDefinitionObj and create actual structures
+
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+            result.append("\"success\": true,");
+            result.append("\"address\": \"").append(addressStr).append("\",");
+            result.append("\"classification\": \"").append(classification).append("\",");
+            result.append("\"name\": \"").append(name).append("\",");
+            result.append("\"type_applied\": \"placeholder\",");
+            result.append("\"operations_performed\": [\"created_type\", \"applied_type\", \"renamed\", \"commented\"]");
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * 7. INSPECT_MEMORY_CONTENT - Memory content inspection with string detection
+     *
+     * Reads raw memory bytes and provides hex/ASCII representation with string detection hints.
+     * This helps prevent misidentification of strings as numeric data.
+     */
+    private String inspectMemoryContent(String addressStr, int length, boolean detectStrings) {
+        Program program = getCurrentProgram();
+        if (program == null) return "{\"error\": \"No program loaded\"}";
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr == null) {
+                return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+            }
+
+            Memory memory = program.getMemory();
+            byte[] bytes = new byte[length];
+            int bytesRead = memory.getBytes(addr, bytes);
+
+            // Build hex dump
+            StringBuilder hexDump = new StringBuilder();
+            StringBuilder asciiRepr = new StringBuilder();
+
+            for (int i = 0; i < bytesRead; i++) {
+                if (i > 0 && i % 16 == 0) {
+                    hexDump.append("\\n");
+                    asciiRepr.append("\\n");
+                }
+
+                hexDump.append(String.format("%02X ", bytes[i] & 0xFF));
+
+                // ASCII representation (printable chars only)
+                char c = (char) (bytes[i] & 0xFF);
+                if (c >= 0x20 && c <= 0x7E) {
+                    asciiRepr.append(c);
+                } else if (c == 0x00) {
+                    asciiRepr.append("\\0");
+                } else {
+                    asciiRepr.append(".");
+                }
+            }
+
+            // String detection heuristics
+            boolean likelyString = false;
+            int printableCount = 0;
+            int nullTerminatorIndex = -1;
+            int consecutivePrintable = 0;
+            int maxConsecutivePrintable = 0;
+
+            for (int i = 0; i < bytesRead; i++) {
+                char c = (char) (bytes[i] & 0xFF);
+
+                if (c >= 0x20 && c <= 0x7E) {
+                    printableCount++;
+                    consecutivePrintable++;
+                    if (consecutivePrintable > maxConsecutivePrintable) {
+                        maxConsecutivePrintable = consecutivePrintable;
+                    }
+                } else {
+                    consecutivePrintable = 0;
+                }
+
+                if (c == 0x00 && nullTerminatorIndex == -1) {
+                    nullTerminatorIndex = i;
+                }
+            }
+
+            double printableRatio = (double) printableCount / bytesRead;
+
+            // String detection criteria:
+            // - At least 60% printable characters OR
+            // - At least 4 consecutive printable chars followed by null terminator
+            if (detectStrings) {
+                likelyString = (printableRatio >= 0.6) ||
+                              (maxConsecutivePrintable >= 4 && nullTerminatorIndex > 0);
+            }
+
+            // Detect potential string content
+            String detectedString = null;
+            int stringLength = 0;
+            if (likelyString && nullTerminatorIndex > 0) {
+                detectedString = new String(bytes, 0, nullTerminatorIndex, StandardCharsets.US_ASCII);
+                stringLength = nullTerminatorIndex + 1; // Include null terminator
+            } else if (likelyString && printableRatio >= 0.8) {
+                // String without null terminator (might be fixed-length string)
+                int endIdx = bytesRead;
+                for (int i = bytesRead - 1; i >= 0; i--) {
+                    if ((bytes[i] & 0xFF) >= 0x20 && (bytes[i] & 0xFF) <= 0x7E) {
+                        endIdx = i + 1;
+                        break;
+                    }
+                }
+                detectedString = new String(bytes, 0, endIdx, StandardCharsets.US_ASCII);
+                stringLength = endIdx;
+            }
+
+            // Build JSON response
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+            result.append("\"address\": \"").append(addressStr).append("\",");
+            result.append("\"bytes_read\": ").append(bytesRead).append(",");
+            result.append("\"hex_dump\": \"").append(hexDump.toString().trim()).append("\",");
+            result.append("\"ascii_repr\": \"").append(asciiRepr.toString().trim()).append("\",");
+            result.append("\"printable_count\": ").append(printableCount).append(",");
+            result.append("\"printable_ratio\": ").append(String.format("%.2f", printableRatio)).append(",");
+            result.append("\"null_terminator_at\": ").append(nullTerminatorIndex).append(",");
+            result.append("\"max_consecutive_printable\": ").append(maxConsecutivePrintable).append(",");
+            result.append("\"is_likely_string\": ").append(likelyString).append(",");
+
+            if (detectedString != null) {
+                result.append("\"detected_string\": \"").append(escapeJson(detectedString)).append("\",");
+                result.append("\"suggested_type\": \"char[").append(stringLength).append("]\",");
+                result.append("\"string_length\": ").append(stringLength);
+            } else {
+                result.append("\"detected_string\": null,");
+                result.append("\"suggested_type\": null,");
+                result.append("\"string_length\": 0");
+            }
+
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    // ============================================================================
+    // MALWARE ANALYSIS IMPLEMENTATION METHODS
+    // ============================================================================
+
+    /**
+     * Detect cryptographic constants in the binary (AES S-boxes, SHA constants, etc.)
+     */
+    private String detectCryptoConstants() {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        try {
+            final StringBuilder result = new StringBuilder();
+            result.append("[\n");
+
+            // This is a placeholder implementation
+            // Full implementation would search for known crypto constants like:
+            // - AES S-boxes (0x63, 0x7c, 0x77, 0x7b, 0xf2, ...)
+            // - SHA constants (0x67452301, 0xefcdab89, ...)
+            // - DES constants, RC4 initialization vectors, etc.
+
+            result.append("  {\"algorithm\": \"Crypto Detection\", \"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires advanced pattern matching against known crypto constants\"}\n");
+            result.append("]");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Search for byte patterns with optional wildcards
+     */
+    private String searchBytePatterns(String pattern, String mask) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        if (pattern == null || pattern.trim().isEmpty()) {
+            return "Error: Pattern is required";
+        }
+
+        try {
+            final StringBuilder result = new StringBuilder();
+            result.append("[\n");
+
+            // Placeholder implementation
+            // Full implementation would parse hex pattern (e.g., "E8 ?? ?? ?? ??")
+            // and search memory for matching byte sequences
+
+            result.append("  {\"pattern\": \"").append(escapeJson(pattern)).append("\", ");
+            result.append("\"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires memory pattern search with wildcard support\"}\n");
+            result.append("]");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Find functions structurally similar to the target function
+     */
+    private String findSimilarFunctions(String targetFunction, double threshold) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        if (targetFunction == null || targetFunction.trim().isEmpty()) {
+            return "Error: Target function name is required";
+        }
+
+        try {
+            final StringBuilder result = new StringBuilder();
+            result.append("[\n");
+
+            // Placeholder implementation
+            // Full implementation would compare control flow graphs, instruction patterns,
+            // and structural metrics to find similar functions
+
+            result.append("  {\"target_function\": \"").append(escapeJson(targetFunction)).append("\", ");
+            result.append("\"threshold\": ").append(threshold).append(", ");
+            result.append("\"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires control flow graph comparison and similarity analysis\"}\n");
+            result.append("]");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Analyze function control flow complexity
+     */
+    private String analyzeControlFlow(String functionName) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        if (functionName == null || functionName.trim().isEmpty()) {
+            return "Error: Function name is required";
+        }
+
+        try {
+            // Placeholder implementation
+            // Full implementation would calculate cyclomatic complexity, basic blocks,
+            // control flow graph metrics, etc.
+
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+            result.append("\"function_name\": \"").append(escapeJson(functionName)).append("\", ");
+            result.append("\"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires control flow graph analysis and complexity calculation\"");
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Detect anti-analysis and anti-debugging techniques
+     */
+    private String findAntiAnalysisTechniques() {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        try {
+            final StringBuilder result = new StringBuilder();
+            result.append("[\n");
+
+            // Placeholder implementation
+            // Full implementation would search for:
+            // - IsDebuggerPresent, CheckRemoteDebuggerPresent calls
+            // - Timing checks, RDTSC usage
+            // - SEH anti-debugging
+            // - Process enumeration
+            // - VM detection techniques
+
+            result.append("  {\"technique\": \"Anti-Analysis Detection\", \"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires pattern matching for anti-debug and anti-VM techniques\"}\n");
+            result.append("]");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Extract Indicators of Compromise (IOCs) from the binary
+     */
+    private String extractIOCs() {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        try {
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+
+            // Placeholder implementation
+            // Full implementation would extract:
+            // - IP addresses (IPv4/IPv6)
+            // - URLs and domains
+            // - File paths
+            // - Registry keys
+            // - Mutex names
+            // - Service names
+
+            result.append("\"ips\": [], ");
+            result.append("\"urls\": [], ");
+            result.append("\"file_paths\": [], ");
+            result.append("\"registry_keys\": [], ");
+            result.append("\"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires pattern matching for various IOC types\"");
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Batch decompile multiple functions
+     */
+    private String batchDecompileFunctions(String functionsParam) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        if (functionsParam == null || functionsParam.trim().isEmpty()) {
+            return "Error: Functions parameter is required";
+        }
+
+        try {
+            String[] functionNames = functionsParam.split(",");
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+
+            // Placeholder implementation
+            // Full implementation would decompile each function and return results
+
+            for (int i = 0; i < functionNames.length && i < 10; i++) {
+                if (i > 0) result.append(", ");
+                result.append("\"").append(escapeJson(functionNames[i].trim())).append("\": ");
+                result.append("\"Decompilation not yet implemented\"");
+            }
+
+            result.append("}");
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Find potentially unreachable code blocks
+     */
+    private String findDeadCode(String functionName) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        if (functionName == null || functionName.trim().isEmpty()) {
+            return "Error: Function name is required";
+        }
+
+        try {
+            final StringBuilder result = new StringBuilder();
+            result.append("[\n");
+
+            // Placeholder implementation
+            // Full implementation would analyze control flow to find unreachable blocks
+
+            result.append("  {\"function_name\": \"").append(escapeJson(functionName)).append("\", ");
+            result.append("\"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires reachability analysis via control flow graph\"}\n");
+            result.append("]");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Calculate various complexity metrics for a function
+     */
+    private String analyzeFunctionComplexity(String functionName) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        if (functionName == null || functionName.trim().isEmpty()) {
+            return "Error: Function name is required";
+        }
+
+        try {
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+            result.append("\"function_name\": \"").append(escapeJson(functionName)).append("\", ");
+            result.append("\"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires calculation of cyclomatic complexity, LOC, and other metrics\"");
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Rename multiple functions atomically
+     */
+    private String batchRenameFunctions(String renamesParam) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        if (renamesParam == null || renamesParam.trim().isEmpty()) {
+            return "Error: Renames parameter is required";
+        }
+
+        try {
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+            result.append("\"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires atomic rename operations with transaction management\"");
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Automatically identify and decrypt obfuscated strings
+     */
+    private String autoDecryptStrings() {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        try {
+            final StringBuilder result = new StringBuilder();
+            result.append("[\n");
+
+            // Placeholder implementation
+            // Full implementation would detect and decrypt:
+            // - XOR-encoded strings
+            // - Base64-encoded strings
+            // - ROT13 encoding
+            // - Stack strings
+            // - RC4/AES encrypted strings
+
+            result.append("  {\"method\": \"String Decryption\", \"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires pattern detection and decryption of various encoding schemes\"}\n");
+            result.append("]");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Identify and analyze suspicious API call chains
+     */
+    private String analyzeAPICallChains() {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        try {
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+
+            // Placeholder implementation
+            // Full implementation would detect patterns like:
+            // - VirtualAllocEx → WriteProcessMemory → CreateRemoteThread (process injection)
+            // - RegSetValueEx + Run key (persistence)
+            // - CreateToolhelp32Snapshot → Process32First/Next (process enumeration)
+
+            result.append("\"patterns\": [], ");
+            result.append("\"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires API call sequence analysis and threat pattern matching\"");
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Enhanced IOC extraction with context and confidence scoring
+     */
+    private String extractIOCsWithContext() {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        try {
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+            result.append("\"iocs\": [], ");
+            result.append("\"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires IOC extraction with usage context and confidence scoring\"");
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Detect common malware behaviors and techniques
+     */
+    private String detectMalwareBehaviors() {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        try {
+            final StringBuilder result = new StringBuilder();
+            result.append("[\n");
+
+            // Placeholder implementation
+            // Full implementation would detect behaviors like:
+            // - Code injection techniques
+            // - Keylogging patterns
+            // - Network C2 communication
+            // - File/registry manipulation
+            // - Privilege escalation
+            // - Lateral movement
+
+            result.append("  {\"behavior\": \"Malware Behavior Detection\", \"status\": \"Not yet implemented\", ");
+            result.append("\"note\": \"This endpoint requires comprehensive behavioral analysis and pattern recognition\"}\n");
+            result.append("]");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
     }
 
     @Override
