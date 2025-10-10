@@ -51,17 +51,22 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 @PluginInfo(
     status = PluginStatus.RELEASED,
     packageName = ghidra.app.DeveloperPluginPackage.NAME,
     category = PluginCategoryNames.ANALYSIS,
-    shortDescription = "GhidraMCP v1.3.0 - HTTP server plugin",
-    description = "GhidraMCP v1.3.0 - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 63+ endpoints for reverse engineering automation. Port configurable via Tool Options. " +
+    shortDescription = "GhidraMCP v1.5.0 - HTTP server plugin",
+    description = "GhidraMCP v1.5.0 - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
+                  "Provides 75+ endpoints for reverse engineering automation. Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
-                  "and high-performance batch data analysis (v1.3.0: analyze_data_region, get_bulk_xrefs, detect_array_bounds, " +
-                  "get_assembly_context, batch_decompile_xref_sources, apply_data_classification)."
+                  "high-performance batch data analysis, and field-level structure analysis. " +
+                  "v1.5.0: Workflow optimization tools including batch_set_comments, set_plate_comment, get_function_variables, " +
+                  "batch_rename_function_components, get_valid_data_types, validate_data_type, analyze_function_completeness, " +
+                  "find_next_undefined_function, and batch_set_variable_types for streamlined reverse engineering workflows."
 )
 public class GhidraMCPPlugin extends Plugin {
 
@@ -69,6 +74,24 @@ public class GhidraMCPPlugin extends Plugin {
     private static final String OPTION_CATEGORY_NAME = "GhidraMCP HTTP Server";
     private static final String PORT_OPTION_NAME = "Server Port";
     private static final int DEFAULT_PORT = 8089;
+
+    // Field analysis constants (v1.4.0)
+    private static final int MAX_FUNCTIONS_TO_ANALYZE = 100;
+    private static final int MIN_FUNCTIONS_TO_ANALYZE = 1;
+    private static final int MAX_STRUCT_FIELDS = 256;
+    private static final int MAX_FIELD_EXAMPLES = 50;
+    private static final int DECOMPILE_TIMEOUT_SECONDS = 30;
+    private static final int MIN_TOKEN_LENGTH = 3;
+    private static final int MAX_FIELD_OFFSET = 65536;
+
+    // C language keywords to filter from field name suggestions
+    private static final Set<String> C_KEYWORDS = Set.of(
+        "if", "else", "for", "while", "do", "switch", "case", "default",
+        "break", "continue", "return", "goto", "int", "void", "char",
+        "float", "double", "long", "short", "struct", "union", "enum",
+        "typedef", "sizeof", "const", "static", "extern", "auto", "register",
+        "signed", "unsigned", "volatile", "inline", "restrict"
+    );
 
     public GhidraMCPPlugin(PluginTool tool) {
         super(tool);
@@ -83,11 +106,19 @@ public class GhidraMCPPlugin extends Plugin {
 
         try {
             startServer();
+            Msg.info(this, "GhidraMCPPlugin loaded successfully with HTTP server on port " +
+                options.getInt(PORT_OPTION_NAME, DEFAULT_PORT));
         }
         catch (IOException e) {
-            Msg.error(this, "Failed to start HTTP server", e);
+            Msg.error(this, "Failed to start HTTP server: " + e.getMessage(), e);
+            Msg.showError(this, null, "GhidraMCP Server Error",
+                "Failed to start MCP server on port " + options.getInt(PORT_OPTION_NAME, DEFAULT_PORT) +
+                ".\n\nThe port may already be in use. Try:\n" +
+                "1. Restarting Ghidra\n" +
+                "2. Changing the port in Edit > Tool Options > GhidraMCP\n" +
+                "3. Checking if another Ghidra instance is running\n\n" +
+                "Error: " + e.getMessage());
         }
-        Msg.info(this, "GhidraMCPPlugin loaded!");
     }
 
     private void startServer() throws IOException {
@@ -98,11 +129,31 @@ public class GhidraMCPPlugin extends Plugin {
         // Stop existing server if running (e.g., if plugin is reloaded)
         if (server != null) {
             Msg.info(this, "Stopping existing HTTP server before starting new one.");
-            server.stop(0);
+            try {
+                server.stop(0);
+                // Give the server time to fully stop and release all resources
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                Msg.warn(this, "Interrupted while waiting for server to stop");
+            }
             server = null;
         }
 
-        server = HttpServer.create(new InetSocketAddress(port), 0);
+        // Create new server - if port is in use, try to handle gracefully
+        try {
+            server = HttpServer.create(new InetSocketAddress(port), 0);
+            Msg.info(this, "HTTP server created successfully on port " + port);
+        } catch (java.net.BindException e) {
+            Msg.error(this, "Port " + port + " is already in use. " +
+                "Another instance may be running or port is not released yet. " +
+                "Please wait a few seconds and restart Ghidra, or change the port in Tool Options.");
+            throw e;
+        } catch (IllegalArgumentException e) {
+            Msg.error(this, "Cannot create HTTP server contexts - they may already exist. " +
+                "Please restart Ghidra completely. Error: " + e.getMessage());
+            throw new IOException("Server context creation failed", e);
+        }
 
         // Each listing endpoint uses offset & limit from query params:
         server.createContext("/methods", exchange -> {
@@ -442,6 +493,14 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         });
 
+        // BATCH_CREATE_LABELS - Create multiple labels in a single operation (v1.5.1)
+        server.createContext("/batch_create_labels", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            List<Map<String, String>> labels = convertToMapList(params.get("labels"));
+            String result = batchCreateLabels(labels);
+            sendResponse(exchange, result);
+        });
+
         server.createContext("/rename_or_label", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
@@ -643,12 +702,7 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, cloneDataType(sourceType, newName));
         });
 
-        server.createContext("/validate_data_type", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String address = qparams.get("address");
-            String typeName = qparams.get("type_name");
-            sendResponse(exchange, validateDataType(address, typeName));
-        });
+        // Removed duplicate - see v1.5.0 VALIDATE_DATA_TYPE endpoint below
 
         server.createContext("/export_data_types", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
@@ -825,6 +879,40 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         });
 
+        // === FIELD-LEVEL ANALYSIS ENDPOINTS (v1.4.0) ===
+
+        // ANALYZE_STRUCT_FIELD_USAGE - Analyze how structure fields are accessed
+        server.createContext("/analyze_struct_field_usage", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String address = (String) params.get("address");
+            String structName = (String) params.get("struct_name");
+            int maxFunctionsToAnalyze = parseIntOrDefault(String.valueOf(params.get("max_functions")), 10);
+
+            String result = analyzeStructFieldUsage(address, structName, maxFunctionsToAnalyze);
+            sendResponse(exchange, result);
+        });
+
+        // GET_FIELD_ACCESS_CONTEXT - Get assembly/decompilation context for specific field offsets
+        server.createContext("/get_field_access_context", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String structAddress = (String) params.get("struct_address");
+            int fieldOffset = parseIntOrDefault(String.valueOf(params.get("field_offset")), 0);
+            int numExamples = parseIntOrDefault(String.valueOf(params.get("num_examples")), 5);
+
+            String result = getFieldAccessContext(structAddress, fieldOffset, numExamples);
+            sendResponse(exchange, result);
+        });
+
+        // SUGGEST_FIELD_NAMES - AI-assisted field name suggestions based on usage patterns
+        server.createContext("/suggest_field_names", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String structAddress = (String) params.get("struct_address");
+            int structSize = parseIntOrDefault(String.valueOf(params.get("struct_size")), 0);
+
+            String result = suggestFieldNames(structAddress, structSize);
+            sendResponse(exchange, result);
+        });
+
         // 7. INSPECT_MEMORY_CONTENT - Memory content inspection with string detection
         server.createContext("/inspect_memory_content", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
@@ -942,6 +1030,107 @@ public class GhidraMCPPlugin extends Plugin {
         // DETECT_MALWARE_BEHAVIORS - Detect common malware behaviors
         server.createContext("/detect_malware_behaviors", exchange -> {
             String result = detectMalwareBehaviors();
+            sendResponse(exchange, result);
+        });
+
+        // === WORKFLOW OPTIMIZATION ENDPOINTS (v1.5.0) ===
+
+        // BATCH_SET_COMMENTS - Set multiple comments in a single operation
+        server.createContext("/batch_set_comments", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String functionAddress = (String) params.get("function_address");
+
+            // Convert List<Object> to List<Map<String, String>>
+            List<Map<String, String>> decompilerComments = convertToMapList(params.get("decompiler_comments"));
+            List<Map<String, String>> disassemblyComments = convertToMapList(params.get("disassembly_comments"));
+            String plateComment = (String) params.get("plate_comment");
+
+            String result = batchSetComments(functionAddress, decompilerComments, disassemblyComments, plateComment);
+            sendResponse(exchange, result);
+        });
+
+        // SET_PLATE_COMMENT - Set function header/plate comment
+        server.createContext("/set_plate_comment", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String functionAddress = params.get("function_address");
+            String comment = params.get("comment");
+
+            String result = setPlateComment(functionAddress, comment);
+            sendResponse(exchange, result);
+        });
+
+        // GET_FUNCTION_VARIABLES - List all variables in a function
+        server.createContext("/get_function_variables", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String functionName = qparams.get("function_name");
+
+            String result = getFunctionVariables(functionName);
+            sendResponse(exchange, result);
+        });
+
+        // BATCH_RENAME_FUNCTION_COMPONENTS - Rename function and components atomically
+        server.createContext("/batch_rename_function_components", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String functionAddress = (String) params.get("function_address");
+            String functionName = (String) params.get("function_name");
+            @SuppressWarnings("unchecked")
+            Map<String, String> parameterRenames = (Map<String, String>) params.get("parameter_renames");
+            @SuppressWarnings("unchecked")
+            Map<String, String> localRenames = (Map<String, String>) params.get("local_renames");
+            String returnType = (String) params.get("return_type");
+
+            String result = batchRenameFunctionComponents(functionAddress, functionName, parameterRenames, localRenames, returnType);
+            sendResponse(exchange, result);
+        });
+
+        // GET_VALID_DATA_TYPES - List valid Ghidra data type strings
+        server.createContext("/get_valid_data_types", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String category = qparams.get("category");
+
+            String result = getValidDataTypes(category);
+            sendResponse(exchange, result);
+        });
+
+        // VALIDATE_DATA_TYPE - Validate data type applicability at address
+        server.createContext("/validate_data_type", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String address = qparams.get("address");
+            String typeName = qparams.get("type_name");
+
+            String result = validateDataType(address, typeName);
+            sendResponse(exchange, result);
+        });
+
+        // ANALYZE_FUNCTION_COMPLETENESS - Check function documentation completeness
+        server.createContext("/analyze_function_completeness", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String functionAddress = qparams.get("function_address");
+
+            String result = analyzeFunctionCompleteness(functionAddress);
+            sendResponse(exchange, result);
+        });
+
+        // FIND_NEXT_UNDEFINED_FUNCTION - Find next function needing analysis
+        server.createContext("/find_next_undefined_function", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String startAddress = qparams.get("start_address");
+            String criteria = qparams.get("criteria");
+            String pattern = qparams.get("pattern");
+            String direction = qparams.get("direction");
+
+            String result = findNextUndefinedFunction(startAddress, criteria, pattern, direction);
+            sendResponse(exchange, result);
+        });
+
+        // BATCH_SET_VARIABLE_TYPES - Set types for multiple variables
+        server.createContext("/batch_set_variable_types", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String functionAddress = (String) params.get("function_address");
+            @SuppressWarnings("unchecked")
+            Map<String, String> variableTypes = (Map<String, String>) params.get("variable_types");
+
+            String result = batchSetVariableTypes(functionAddress, variableTypes);
             sendResponse(exchange, result);
         });
 
@@ -2486,11 +2675,12 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Parse a JSON array string into a List of Strings
+     * Parse a JSON array string into a List of Objects (can be Strings or Maps)
      * Example: "[\"0x6FAC8A58\", \"0x6FAC8A5C\"]" -> List<String>
+     * Example: "[{\"address\": \"0x...\", \"comment\": \"...\"}]" -> List<Map<String, String>>
      */
-    private List<String> parseJsonArray(String arrayStr) {
-        List<String> result = new ArrayList<>();
+    private List<Object> parseJsonArray(String arrayStr) {
+        List<Object> result = new ArrayList<>();
 
         if (arrayStr == null || !arrayStr.startsWith("[") || !arrayStr.endsWith("]")) {
             return result;
@@ -2503,10 +2693,12 @@ public class GhidraMCPPlugin extends Plugin {
             return result;
         }
 
-        // Split by comma, but respect quoted strings
+        // Split by comma, but respect quoted strings and nested objects/arrays
         StringBuilder current = new StringBuilder();
         boolean inString = false;
         boolean escaped = false;
+        int braceDepth = 0;
+        int bracketDepth = 0;
 
         for (char c : content.toCharArray()) {
             if (escaped) {
@@ -2527,31 +2719,134 @@ public class GhidraMCPPlugin extends Plugin {
                 continue;
             }
 
-            if (c == ',' && !inString) {
-                // End of current element
-                String element = current.toString().trim();
-                if (element.startsWith("\"") && element.endsWith("\"")) {
-                    element = element.substring(1, element.length() - 1);
+            if (!inString) {
+                if (c == '{') braceDepth++;
+                else if (c == '}') braceDepth--;
+                else if (c == '[') bracketDepth++;
+                else if (c == ']') bracketDepth--;
+                else if (c == ',' && braceDepth == 0 && bracketDepth == 0) {
+                    // End of current element
+                    String element = current.toString().trim();
+                    if (!element.isEmpty()) {
+                        result.add(parseJsonElement(element));
+                    }
+                    current = new StringBuilder();
+                    continue;
                 }
-                if (!element.isEmpty()) {
-                    result.add(element);
-                }
-                current = new StringBuilder();
-            } else {
-                current.append(c);
             }
+
+            current.append(c);
         }
 
         // Add last element
         String element = current.toString().trim();
-        if (element.startsWith("\"") && element.endsWith("\"")) {
-            element = element.substring(1, element.length() - 1);
-        }
         if (!element.isEmpty()) {
-            result.add(element);
+            result.add(parseJsonElement(element));
         }
 
         return result;
+    }
+
+    /**
+     * Parse a single JSON element (string, number, object, array, etc.)
+     */
+    private Object parseJsonElement(String element) {
+        element = element.trim();
+
+        // String
+        if (element.startsWith("\"") && element.endsWith("\"")) {
+            return element.substring(1, element.length() - 1);
+        }
+
+        // Object
+        if (element.startsWith("{") && element.endsWith("}")) {
+            return parseJsonObject(element);
+        }
+
+        // Array
+        if (element.startsWith("[") && element.endsWith("]")) {
+            return parseJsonArray(element);
+        }
+
+        // Number
+        if (element.matches("-?\\d+")) {
+            return Integer.parseInt(element);
+        }
+
+        // Boolean
+        if (element.equals("true")) return true;
+        if (element.equals("false")) return false;
+
+        // Null
+        if (element.equals("null")) return null;
+
+        // Default to string
+        return element;
+    }
+
+    /**
+     * Parse a JSON object string into a Map<String, String>
+     * Example: "{\"address\": \"0x...\", \"comment\": \"...\"}" -> Map
+     */
+    private Map<String, String> parseJsonObject(String objectStr) {
+        Map<String, String> result = new HashMap<>();
+
+        if (objectStr == null || !objectStr.startsWith("{") || !objectStr.endsWith("}")) {
+            return result;
+        }
+
+        // Remove outer braces
+        String content = objectStr.substring(1, objectStr.length() - 1).trim();
+
+        if (content.isEmpty()) {
+            return result;
+        }
+
+        // Split by commas, respecting nested structures
+        String[] pairs = splitJsonPairs(content);
+
+        for (String pair : pairs) {
+            String[] kv = pair.split(":", 2);
+            if (kv.length == 2) {
+                String key = kv[0].trim().replaceAll("^\"|\"$", "");
+                String value = kv[1].trim();
+
+                // Remove quotes from string values
+                if (value.startsWith("\"") && value.endsWith("\"")) {
+                    value = value.substring(1, value.length() - 1);
+                }
+
+                result.put(key, value);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Convert Object (potentially List<Object>) to List<Map<String, String>>
+     * Handles the type conversion from parsed JSON arrays of objects
+     */
+    @SuppressWarnings("unchecked")
+    private List<Map<String, String>> convertToMapList(Object obj) {
+        if (obj == null) {
+            return null;
+        }
+
+        if (obj instanceof List) {
+            List<Object> objList = (List<Object>) obj;
+            List<Map<String, String>> result = new ArrayList<>();
+
+            for (Object item : objList) {
+                if (item instanceof Map) {
+                    result.add((Map<String, String>) item);
+                }
+            }
+
+            return result;
+        }
+
+        return null;
     }
 
     /**
@@ -2848,7 +3143,7 @@ public class GhidraMCPPlugin extends Plugin {
         if (addressStr == null || addressStr.isEmpty()) {
             return "Address is required";
         }
-        
+
         if (labelName == null || labelName.isEmpty()) {
             return "Label name is required";
         }
@@ -2860,7 +3155,7 @@ public class GhidraMCPPlugin extends Plugin {
             }
 
             SymbolTable symbolTable = program.getSymbolTable();
-            
+
             // Check if a label with this name already exists at this address
             Symbol[] existingSymbols = symbolTable.getSymbols(address);
             for (Symbol symbol : existingSymbols) {
@@ -2868,14 +3163,14 @@ public class GhidraMCPPlugin extends Plugin {
                     return "Label '" + labelName + "' already exists at address " + addressStr;
                 }
             }
-            
+
             // Check if the label name is already used elsewhere (optional warning)
             SymbolIterator existingLabels = symbolTable.getSymbolIterator(labelName, true);
             if (existingLabels.hasNext()) {
                 Symbol existingSymbol = existingLabels.next();
                 if (existingSymbol.getSymbolType() == SymbolType.LABEL) {
                     // Allow creation but warn about duplicate name
-                    Msg.warn(this, "Label name '" + labelName + "' already exists at address " + 
+                    Msg.warn(this, "Label name '" + labelName + "' already exists at address " +
                             existingSymbol.getAddress() + ". Creating duplicate at " + addressStr);
                 }
             }
@@ -2898,6 +3193,121 @@ public class GhidraMCPPlugin extends Plugin {
         } catch (Exception e) {
             return "Error processing request: " + e.getMessage();
         }
+    }
+
+    /**
+     * v1.5.1: Batch create multiple labels in a single transaction
+     * Reduces API calls and prevents user interruption hooks from triggering multiple times
+     *
+     * @param labels List of label objects with "address" and "name" fields
+     * @return JSON string with success status and counts
+     */
+    public String batchCreateLabels(List<Map<String, String>> labels) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        if (labels == null || labels.isEmpty()) {
+            return "{\"error\": \"No labels provided\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        result.append("{");
+        final AtomicInteger successCount = new AtomicInteger(0);
+        final AtomicInteger skipCount = new AtomicInteger(0);
+        final AtomicInteger errorCount = new AtomicInteger(0);
+        final List<String> errors = new ArrayList<>();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Batch Create Labels");
+                try {
+                    SymbolTable symbolTable = program.getSymbolTable();
+
+                    for (Map<String, String> labelEntry : labels) {
+                        String addressStr = labelEntry.get("address");
+                        String labelName = labelEntry.get("name");
+
+                        if (addressStr == null || addressStr.isEmpty()) {
+                            errors.add("Missing address in label entry");
+                            errorCount.incrementAndGet();
+                            continue;
+                        }
+
+                        if (labelName == null || labelName.isEmpty()) {
+                            errors.add("Missing name for address " + addressStr);
+                            errorCount.incrementAndGet();
+                            continue;
+                        }
+
+                        try {
+                            Address address = program.getAddressFactory().getAddress(addressStr);
+                            if (address == null) {
+                                errors.add("Invalid address: " + addressStr);
+                                errorCount.incrementAndGet();
+                                continue;
+                            }
+
+                            // Check if label already exists
+                            Symbol[] existingSymbols = symbolTable.getSymbols(address);
+                            boolean labelExists = false;
+                            for (Symbol symbol : existingSymbols) {
+                                if (symbol.getName().equals(labelName) && symbol.getSymbolType() == SymbolType.LABEL) {
+                                    labelExists = true;
+                                    break;
+                                }
+                            }
+
+                            if (labelExists) {
+                                skipCount.incrementAndGet();
+                                continue;
+                            }
+
+                            // Create the label
+                            Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
+                            if (newSymbol != null) {
+                                successCount.incrementAndGet();
+                            } else {
+                                errors.add("Failed to create label '" + labelName + "' at " + addressStr);
+                                errorCount.incrementAndGet();
+                            }
+
+                        } catch (Exception e) {
+                            errors.add("Error at " + addressStr + ": " + e.getMessage());
+                            errorCount.incrementAndGet();
+                            Msg.error(this, "Error creating label at " + addressStr, e);
+                        }
+                    }
+
+                } catch (Exception e) {
+                    errors.add("Transaction error: " + e.getMessage());
+                    Msg.error(this, "Error in batch create labels transaction", e);
+                } finally {
+                    program.endTransaction(tx, successCount.get() > 0);
+                }
+            });
+
+            result.append("\"success\": true, ");
+            result.append("\"labels_created\": ").append(successCount.get()).append(", ");
+            result.append("\"labels_skipped\": ").append(skipCount.get()).append(", ");
+            result.append("\"labels_failed\": ").append(errorCount.get());
+
+            if (!errors.isEmpty()) {
+                result.append(", \"errors\": [");
+                for (int i = 0; i < errors.size(); i++) {
+                    if (i > 0) result.append(", ");
+                    result.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
+                }
+                result.append("]");
+            }
+
+        } catch (Exception e) {
+            result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+        }
+
+        result.append("}");
+        return result.toString();
     }
 
     /**
@@ -5843,6 +6253,546 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
+     * === FIELD-LEVEL ANALYSIS IMPLEMENTATIONS (v1.4.0) ===
+     */
+
+    /**
+     * ANALYZE_STRUCT_FIELD_USAGE - Analyze how structure fields are accessed in decompiled code
+     *
+     * This method decompiles all functions that reference a structure and extracts usage patterns
+     * for each field, including variable names, access types, and purposes.
+     *
+     * @param addressStr Address of the structure instance
+     * @param structName Name of the structure type (optional - can be inferred if null)
+     * @param maxFunctionsToAnalyze Maximum number of referencing functions to analyze
+     * @return JSON string with field usage analysis
+     */
+    private String analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze) {
+        // CRITICAL FIX #3: Validate input parameters
+        if (maxFunctionsToAnalyze < MIN_FUNCTIONS_TO_ANALYZE || maxFunctionsToAnalyze > MAX_FUNCTIONS_TO_ANALYZE) {
+            return "{\"error\": \"maxFunctionsToAnalyze must be between " + MIN_FUNCTIONS_TO_ANALYZE +
+                   " and " + MAX_FUNCTIONS_TO_ANALYZE + "\"}";
+        }
+
+        final AtomicReference<String> result = new AtomicReference<>();
+
+        // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    Program program = getCurrentProgram();
+                    if (program == null) {
+                        result.set("{\"error\": \"No program loaded\"}");
+                        return;
+                    }
+
+                    Address addr = program.getAddressFactory().getAddress(addressStr);
+                    if (addr == null) {
+                        result.set("{\"error\": \"Invalid address: " + addressStr + "\"}");
+                        return;
+                    }
+
+                    // Get data at address to determine structure
+                    Data data = program.getListing().getDataAt(addr);
+                    DataType dataType = (data != null) ? data.getDataType() : null;
+
+                    if (dataType == null || !(dataType instanceof Structure)) {
+                        result.set("{\"error\": \"No structure data type found at " + addressStr + "\"}");
+                        return;
+                    }
+
+                    Structure struct = (Structure) dataType;
+
+                    // MAJOR FIX #5: Validate structure size
+                    DataTypeComponent[] components = struct.getComponents();
+                    if (components.length > MAX_STRUCT_FIELDS) {
+                        result.set("{\"error\": \"Structure too large (" + components.length +
+                                   " fields). Maximum " + MAX_STRUCT_FIELDS + " fields supported.\"}");
+                        return;
+                    }
+
+                    String actualStructName = (structName != null && !structName.isEmpty()) ? structName : struct.getName();
+
+                    // Get all xrefs to this address
+                    ReferenceManager refMgr = program.getReferenceManager();
+                    ReferenceIterator refIter = refMgr.getReferencesTo(addr);
+
+                    Set<Function> functionsToAnalyze = new HashSet<>();
+                    while (refIter.hasNext() && functionsToAnalyze.size() < maxFunctionsToAnalyze) {
+                        Reference ref = refIter.next();
+                        Function func = program.getFunctionManager().getFunctionContaining(ref.getFromAddress());
+                        if (func != null) {
+                            functionsToAnalyze.add(func);
+                        }
+                    }
+
+                    // Decompile all functions and analyze field usage
+                    Map<Integer, FieldUsageInfo> fieldUsageMap = new HashMap<>();
+                    DecompInterface decomp = null;
+
+                    // CRITICAL FIX #2: Resource management with try-finally
+                    try {
+                        decomp = new DecompInterface();
+                        decomp.openProgram(program);
+
+                        long analysisStart = System.currentTimeMillis();
+                        Msg.info(this, "Analyzing struct at " + addressStr + " with " + functionsToAnalyze.size() + " functions");
+
+                        for (Function func : functionsToAnalyze) {
+                            try {
+                                DecompileResults results = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS,
+                                                                                   new ConsoleTaskMonitor());
+                                if (results != null && results.decompileCompleted()) {
+                                    String decompiledCode = results.getDecompiledFunction().getC();
+                                    analyzeFieldUsageInCode(decompiledCode, struct, fieldUsageMap, addr.toString());
+                                } else {
+                                    Msg.warn(this, "Failed to decompile function: " + func.getName());
+                                }
+                            } catch (Exception e) {
+                                // Continue with other functions if one fails
+                                Msg.error(this, "Error decompiling function " + func.getName() + ": " + e.getMessage());
+                            }
+                        }
+
+                        long analysisTime = System.currentTimeMillis() - analysisStart;
+                        Msg.info(this, "Field analysis completed in " + analysisTime + "ms, found " +
+                                 fieldUsageMap.size() + " fields with usage data");
+
+                    } finally {
+                        // CRITICAL FIX #2: Always dispose of DecompInterface
+                        if (decomp != null) {
+                            decomp.dispose();
+                        }
+                    }
+
+                    // Build JSON response with field analysis
+                    StringBuilder json = new StringBuilder();
+                    json.append("{");
+                    json.append("\"struct_address\": \"").append(addressStr).append("\",");
+                    json.append("\"struct_name\": \"").append(escapeJson(actualStructName)).append("\",");
+                    json.append("\"struct_size\": ").append(struct.getLength()).append(",");
+                    json.append("\"functions_analyzed\": ").append(functionsToAnalyze.size()).append(",");
+                    json.append("\"field_usage\": {");
+
+                    boolean first = true;
+                    for (int i = 0; i < components.length; i++) {
+                        DataTypeComponent component = components[i];
+                        int offset = component.getOffset();
+
+                        if (!first) json.append(",");
+                        first = false;
+
+                        json.append("\"").append(offset).append("\": {");
+                        json.append("\"field_name\": \"").append(escapeJson(component.getFieldName())).append("\",");
+                        json.append("\"field_type\": \"").append(escapeJson(component.getDataType().getName())).append("\",");
+                        json.append("\"offset\": ").append(offset).append(",");
+                        json.append("\"size\": ").append(component.getLength()).append(",");
+
+                        FieldUsageInfo usageInfo = fieldUsageMap.get(offset);
+                        if (usageInfo != null) {
+                            json.append("\"access_count\": ").append(usageInfo.accessCount).append(",");
+                            json.append("\"suggested_names\": ").append(usageInfo.getSuggestedNamesJson()).append(",");
+                            json.append("\"usage_patterns\": ").append(usageInfo.getUsagePatternsJson());
+                        } else {
+                            json.append("\"access_count\": 0,");
+                            json.append("\"suggested_names\": [],");
+                            json.append("\"usage_patterns\": []");
+                        }
+
+                        json.append("}");
+                    }
+
+                    json.append("}");
+                    json.append("}");
+
+                    result.set(json.toString());
+                } catch (Exception e) {
+                    result.set("{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
+                }
+            });
+        } catch (InvocationTargetException | InterruptedException e) {
+            Msg.error(this, "Thread synchronization error in analyzeStructFieldUsage", e);
+            return "{\"error\": \"Thread synchronization error: " + escapeJson(e.getMessage()) + "\"}";
+        }
+
+        return result.get();
+    }
+
+    /**
+     * Helper class to track field usage information
+     */
+    private static class FieldUsageInfo {
+        int accessCount = 0;
+        Set<String> suggestedNames = new HashSet<>();
+        Set<String> usagePatterns = new HashSet<>();
+
+        String getSuggestedNamesJson() {
+            StringBuilder json = new StringBuilder("[");
+            boolean first = true;
+            for (String name : suggestedNames) {
+                if (!first) json.append(",");
+                first = false;
+                json.append("\"").append(name).append("\"");
+            }
+            json.append("]");
+            return json.toString();
+        }
+
+        String getUsagePatternsJson() {
+            StringBuilder json = new StringBuilder("[");
+            boolean first = true;
+            for (String pattern : usagePatterns) {
+                if (!first) json.append(",");
+                first = false;
+                json.append("\"").append(pattern).append("\"");
+            }
+            json.append("]");
+            return json.toString();
+        }
+    }
+
+    /**
+     * Analyze decompiled code to extract field usage patterns
+     * MAJOR FIX #4: Improved pattern matching with word boundaries and keyword filtering
+     */
+    private void analyzeFieldUsageInCode(String code, Structure struct, Map<Integer, FieldUsageInfo> fieldUsageMap, String baseAddr) {
+        String[] lines = code.split("\\n");
+
+        for (String line : lines) {
+            // Skip empty lines and comments
+            String trimmedLine = line.trim();
+            if (trimmedLine.isEmpty() || trimmedLine.startsWith("//") || trimmedLine.startsWith("/*")) {
+                continue;
+            }
+
+            // Look for field access patterns
+            for (DataTypeComponent component : struct.getComponents()) {
+                String fieldName = component.getFieldName();
+                int offset = component.getOffset();
+                boolean fieldMatched = false;
+
+                // IMPROVED: Use word boundary matching for field names
+                Pattern fieldPattern = Pattern.compile("\\b" + Pattern.quote(fieldName) + "\\b");
+                if (fieldPattern.matcher(line).find()) {
+                    fieldMatched = true;
+                }
+
+                // IMPROVED: Use word boundary for offset matching (e.g., "+4" but not "+40")
+                Pattern offsetPattern = Pattern.compile("\\+\\s*" + offset + "\\b");
+                if (offsetPattern.matcher(line).find()) {
+                    fieldMatched = true;
+                }
+
+                if (fieldMatched) {
+                    FieldUsageInfo info = fieldUsageMap.computeIfAbsent(offset, k -> new FieldUsageInfo());
+                    info.accessCount++;
+
+                    // IMPROVED: Detect usage patterns with better regex
+                    // Conditional check: if (field == ...) or if (field != ...)
+                    if (line.matches(".*\\bif\\s*\\(.*\\b" + Pattern.quote(fieldName) + "\\b.*(==|!=|<|>|<=|>=).*")) {
+                        info.usagePatterns.add("conditional_check");
+                    }
+
+                    // Increment/decrement: field++ or field--
+                    if (line.matches(".*\\b" + Pattern.quote(fieldName) + "\\s*(\\+\\+|--).*") ||
+                        line.matches(".*(\\+\\+|--)\\s*\\b" + Pattern.quote(fieldName) + "\\b.*")) {
+                        info.usagePatterns.add("increment_decrement");
+                    }
+
+                    // Assignment: variable = field or field = value
+                    if (line.matches(".*\\b\\w+\\s*=\\s*.*\\b" + Pattern.quote(fieldName) + "\\b.*") ||
+                        line.matches(".*\\b" + Pattern.quote(fieldName) + "\\s*=.*")) {
+                        info.usagePatterns.add("assignment");
+                    }
+
+                    // Array access: field[index]
+                    if (line.matches(".*\\b" + Pattern.quote(fieldName) + "\\s*\\[.*\\].*")) {
+                        info.usagePatterns.add("array_access");
+                    }
+
+                    // Pointer dereference: ptr->field or struct.field
+                    if (line.matches(".*->\\s*\\b" + Pattern.quote(fieldName) + "\\b.*") ||
+                        line.matches(".*\\.\\s*\\b" + Pattern.quote(fieldName) + "\\b.*")) {
+                        info.usagePatterns.add("pointer_dereference");
+                    }
+
+                    // IMPROVED: Extract variable names with C keyword filtering
+                    String[] tokens = line.split("\\W+");
+                    for (String token : tokens) {
+                        if (token.length() >= MIN_TOKEN_LENGTH &&
+                            !token.equals(fieldName) &&
+                            !C_KEYWORDS.contains(token.toLowerCase()) &&
+                            Character.isLetter(token.charAt(0)) &&
+                            !token.matches("\\d+")) {  // Filter out numbers
+                            info.suggestedNames.add(token);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * GET_FIELD_ACCESS_CONTEXT - Get assembly/decompilation context for specific field offsets
+     *
+     * @param structAddressStr Address of the structure instance
+     * @param fieldOffset Offset of the field within the structure
+     * @param numExamples Number of usage examples to return
+     * @return JSON string with field access contexts
+     */
+    private String getFieldAccessContext(String structAddressStr, int fieldOffset, int numExamples) {
+        // MAJOR FIX #7: Validate input parameters
+        if (fieldOffset < 0 || fieldOffset > MAX_FIELD_OFFSET) {
+            return "{\"error\": \"Field offset must be between 0 and " + MAX_FIELD_OFFSET + "\"}";
+        }
+        if (numExamples < 1 || numExamples > MAX_FIELD_EXAMPLES) {
+            return "{\"error\": \"numExamples must be between 1 and " + MAX_FIELD_EXAMPLES + "\"}";
+        }
+
+        final AtomicReference<String> result = new AtomicReference<>();
+
+        // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    Program program = getCurrentProgram();
+                    if (program == null) {
+                        result.set("{\"error\": \"No program loaded\"}");
+                        return;
+                    }
+
+                    Address structAddr = program.getAddressFactory().getAddress(structAddressStr);
+                    if (structAddr == null) {
+                        result.set("{\"error\": \"Invalid address: " + structAddressStr + "\"}");
+                        return;
+                    }
+
+                    // Calculate field address with overflow protection
+                    Address fieldAddr;
+                    try {
+                        fieldAddr = structAddr.add(fieldOffset);
+                    } catch (Exception e) {
+                        result.set("{\"error\": \"Field offset overflow: " + fieldOffset + "\"}");
+                        return;
+                    }
+
+                    Msg.info(this, "Getting field access context for " + fieldAddr + " (offset " + fieldOffset + ")");
+
+                    // Get xrefs to the field address (or nearby addresses)
+                    ReferenceManager refMgr = program.getReferenceManager();
+                    ReferenceIterator refIter = refMgr.getReferencesTo(fieldAddr);
+
+                    StringBuilder json = new StringBuilder();
+                    json.append("{");
+                    json.append("\"struct_address\": \"").append(structAddressStr).append("\",");
+                    json.append("\"field_offset\": ").append(fieldOffset).append(",");
+                    json.append("\"field_address\": \"").append(fieldAddr.toString()).append("\",");
+                    json.append("\"examples\": [");
+
+                    int exampleCount = 0;
+                    boolean first = true;
+
+                    while (refIter.hasNext() && exampleCount < numExamples) {
+                        Reference ref = refIter.next();
+                        Address fromAddr = ref.getFromAddress();
+
+                        if (!first) json.append(",");
+                        first = false;
+
+                        json.append("{");
+                        json.append("\"access_address\": \"").append(fromAddr.toString()).append("\",");
+                        json.append("\"ref_type\": \"").append(ref.getReferenceType().getName()).append("\",");
+
+                        // Get assembly context with null check
+                        Listing listing = program.getListing();
+                        Instruction instr = listing.getInstructionAt(fromAddr);
+                        if (instr != null) {
+                            json.append("\"assembly\": \"").append(escapeJson(instr.toString())).append("\",");
+                        } else {
+                            json.append("\"assembly\": \"\",");
+                        }
+
+                        // Get function context with null check
+                        Function func = program.getFunctionManager().getFunctionContaining(fromAddr);
+                        if (func != null) {
+                            json.append("\"function_name\": \"").append(escapeJson(func.getName())).append("\",");
+                            json.append("\"function_address\": \"").append(func.getEntryPoint().toString()).append("\"");
+                        } else {
+                            json.append("\"function_name\": \"\",");
+                            json.append("\"function_address\": \"\"");
+                        }
+
+                        json.append("}");
+                        exampleCount++;
+                    }
+
+                    json.append("]");
+                    json.append("}");
+
+                    Msg.info(this, "Found " + exampleCount + " field access examples");
+                    result.set(json.toString());
+
+                } catch (Exception e) {
+                    Msg.error(this, "Error in getFieldAccessContext", e);
+                    result.set("{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
+                }
+            });
+        } catch (InvocationTargetException | InterruptedException e) {
+            Msg.error(this, "Thread synchronization error in getFieldAccessContext", e);
+            return "{\"error\": \"Thread synchronization error: " + escapeJson(e.getMessage()) + "\"}";
+        }
+
+        return result.get();
+    }
+
+    /**
+     * SUGGEST_FIELD_NAMES - AI-assisted field name suggestions based on usage patterns
+     *
+     * @param structAddressStr Address of the structure instance
+     * @param structSize Size of the structure in bytes (0 for auto-detect)
+     * @return JSON string with field name suggestions
+     */
+    private String suggestFieldNames(String structAddressStr, int structSize) {
+        // Validate input parameters
+        if (structSize < 0 || structSize > MAX_FIELD_OFFSET) {
+            return "{\"error\": \"structSize must be between 0 and " + MAX_FIELD_OFFSET + "\"}";
+        }
+
+        final AtomicReference<String> result = new AtomicReference<>();
+
+        // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    Program program = getCurrentProgram();
+                    if (program == null) {
+                        result.set("{\"error\": \"No program loaded\"}");
+                        return;
+                    }
+
+                    Address addr = program.getAddressFactory().getAddress(structAddressStr);
+                    if (addr == null) {
+                        result.set("{\"error\": \"Invalid address: " + structAddressStr + "\"}");
+                        return;
+                    }
+
+                    Msg.info(this, "Generating field name suggestions for structure at " + structAddressStr);
+
+                    // Get data at address
+                    Data data = program.getListing().getDataAt(addr);
+                    DataType dataType = (data != null) ? data.getDataType() : null;
+
+                    if (dataType == null || !(dataType instanceof Structure)) {
+                        result.set("{\"error\": \"No structure data type found at " + structAddressStr + "\"}");
+                        return;
+                    }
+
+                    Structure struct = (Structure) dataType;
+
+                    // MAJOR FIX #5: Validate structure size
+                    DataTypeComponent[] components = struct.getComponents();
+                    if (components.length > MAX_STRUCT_FIELDS) {
+                        result.set("{\"error\": \"Structure too large: " + components.length +
+                                   " fields (max " + MAX_STRUCT_FIELDS + ")\"}");
+                        return;
+                    }
+
+                    StringBuilder json = new StringBuilder();
+                    json.append("{");
+                    json.append("\"struct_address\": \"").append(structAddressStr).append("\",");
+                    json.append("\"struct_name\": \"").append(escapeJson(struct.getName())).append("\",");
+                    json.append("\"struct_size\": ").append(struct.getLength()).append(",");
+                    json.append("\"suggestions\": [");
+
+                    boolean first = true;
+                    for (DataTypeComponent component : components) {
+                        if (!first) json.append(",");
+                        first = false;
+
+                        json.append("{");
+                        json.append("\"offset\": ").append(component.getOffset()).append(",");
+                        json.append("\"current_name\": \"").append(escapeJson(component.getFieldName())).append("\",");
+                        json.append("\"field_type\": \"").append(escapeJson(component.getDataType().getName())).append("\",");
+
+                        // Generate suggestions based on type and patterns
+                        List<String> suggestions = generateFieldNameSuggestions(component);
+
+                        // Ensure we always have fallback suggestions
+                        if (suggestions.isEmpty()) {
+                            suggestions.add(component.getFieldName() + "Value");
+                            suggestions.add(component.getFieldName() + "Data");
+                        }
+
+                        json.append("\"suggested_names\": [");
+                        for (int i = 0; i < suggestions.size(); i++) {
+                            if (i > 0) json.append(",");
+                            json.append("\"").append(escapeJson(suggestions.get(i))).append("\"");
+                        }
+                        json.append("],");
+
+                        json.append("\"confidence\": \"medium\"");  // Placeholder confidence level
+                        json.append("}");
+                    }
+
+                    json.append("]");
+                    json.append("}");
+
+                    Msg.info(this, "Generated suggestions for " + components.length + " fields");
+                    result.set(json.toString());
+
+                } catch (Exception e) {
+                    Msg.error(this, "Error in suggestFieldNames", e);
+                    result.set("{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
+                }
+            });
+        } catch (InvocationTargetException | InterruptedException e) {
+            Msg.error(this, "Thread synchronization error in suggestFieldNames", e);
+            return "{\"error\": \"Thread synchronization error: " + escapeJson(e.getMessage()) + "\"}";
+        }
+
+        return result.get();
+    }
+
+    /**
+     * Generate field name suggestions based on data type and patterns
+     */
+    private List<String> generateFieldNameSuggestions(DataTypeComponent component) {
+        List<String> suggestions = new ArrayList<>();
+        String typeName = component.getDataType().getName().toLowerCase();
+        String currentName = component.getFieldName();
+
+        // Hungarian notation suggestions based on type
+        if (typeName.contains("pointer") || typeName.startsWith("p")) {
+            suggestions.add("p" + capitalizeFirst(currentName));
+            suggestions.add("lp" + capitalizeFirst(currentName));
+        } else if (typeName.contains("dword")) {
+            suggestions.add("dw" + capitalizeFirst(currentName));
+        } else if (typeName.contains("word")) {
+            suggestions.add("w" + capitalizeFirst(currentName));
+        } else if (typeName.contains("byte") || typeName.contains("char")) {
+            suggestions.add("b" + capitalizeFirst(currentName));
+            suggestions.add("sz" + capitalizeFirst(currentName));
+        } else if (typeName.contains("int")) {
+            suggestions.add("n" + capitalizeFirst(currentName));
+            suggestions.add("i" + capitalizeFirst(currentName));
+        }
+
+        // Add generic suggestions
+        suggestions.add(currentName + "Value");
+        suggestions.add(currentName + "Data");
+
+        return suggestions;
+    }
+
+    /**
+     * Helper to capitalize first letter
+     */
+    private String capitalizeFirst(String str) {
+        if (str == null || str.isEmpty()) return str;
+        return Character.toUpperCase(str.charAt(0)) + str.substring(1);
+    }
+
+    /**
      * 7. INSPECT_MEMORY_CONTENT - Memory content inspection with string detection
      *
      * Reads raw memory bytes and provides hex/ASCII representation with string detection hints.
@@ -6400,11 +7350,630 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
+    /**
+     * v1.5.0: Batch set multiple comments in a single operation
+     * Reduces API calls from 10+ to 1 for typical function documentation
+     */
+    @SuppressWarnings("deprecation")
+    private String batchSetComments(String functionAddress, List<Map<String, String>> decompilerComments,
+                                    List<Map<String, String>> disassemblyComments, String plateComment) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        result.append("{");
+        final AtomicBoolean success = new AtomicBoolean(false);
+        final AtomicReference<Integer> decompilerCount = new AtomicReference<>(0);
+        final AtomicReference<Integer> disassemblyCount = new AtomicReference<>(0);
+        final AtomicReference<Boolean> plateSet = new AtomicReference<>(false);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Batch Set Comments");
+                try {
+                    // Set plate comment if provided
+                    if (plateComment != null && functionAddress != null) {
+                        Address funcAddr = program.getAddressFactory().getAddress(functionAddress);
+                        if (funcAddr != null) {
+                            Function func = program.getFunctionManager().getFunctionAt(funcAddr);
+                            if (func != null) {
+                                func.setComment(plateComment);
+                                plateSet.set(true);
+                            }
+                        }
+                    }
+
+                    // Set decompiler comments (PRE_COMMENT)
+                    if (decompilerComments != null) {
+                        for (Map<String, String> commentEntry : decompilerComments) {
+                            String addr = commentEntry.get("address");
+                            String comment = commentEntry.get("comment");
+                            if (addr != null && comment != null) {
+                                Address address = program.getAddressFactory().getAddress(addr);
+                                if (address != null) {
+                                    program.getListing().setComment(address, CodeUnit.PRE_COMMENT, comment);
+                                    decompilerCount.getAndSet(decompilerCount.get() + 1);
+                                }
+                            }
+                        }
+                    }
+
+                    // Set disassembly comments (EOL_COMMENT)
+                    if (disassemblyComments != null) {
+                        for (Map<String, String> commentEntry : disassemblyComments) {
+                            String addr = commentEntry.get("address");
+                            String comment = commentEntry.get("comment");
+                            if (addr != null && comment != null) {
+                                Address address = program.getAddressFactory().getAddress(addr);
+                                if (address != null) {
+                                    program.getListing().setComment(address, CodeUnit.EOL_COMMENT, comment);
+                                    disassemblyCount.getAndSet(disassemblyCount.get() + 1);
+                                }
+                            }
+                        }
+                    }
+
+                    success.set(true);
+                } catch (Exception e) {
+                    result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+                    Msg.error(this, "Error in batch set comments", e);
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+
+            if (success.get()) {
+                result.append("\"success\": true, ");
+                result.append("\"decompiler_comments_set\": ").append(decompilerCount.get()).append(", ");
+                result.append("\"disassembly_comments_set\": ").append(disassemblyCount.get()).append(", ");
+                result.append("\"plate_comment_set\": ").append(plateSet.get());
+            }
+        } catch (Exception e) {
+            result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+        }
+
+        result.append("}");
+        return result.toString();
+    }
+
+    /**
+     * v1.5.0: Set function plate (header) comment
+     */
+    @SuppressWarnings("deprecation")
+    private String setPlateComment(String functionAddress, String comment) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "Error: No program loaded";
+        }
+
+        if (functionAddress == null || functionAddress.isEmpty()) {
+            return "Error: Function address is required";
+        }
+
+        if (comment == null) {
+            return "Error: Comment is required";
+        }
+
+        final StringBuilder resultMsg = new StringBuilder();
+        final AtomicBoolean success = new AtomicBoolean(false);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Set Plate Comment");
+                try {
+                    Address addr = program.getAddressFactory().getAddress(functionAddress);
+                    if (addr == null) {
+                        resultMsg.append("Error: Invalid address: ").append(functionAddress);
+                        return;
+                    }
+
+                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    if (func == null) {
+                        resultMsg.append("Error: No function at address: ").append(functionAddress);
+                        return;
+                    }
+
+                    func.setComment(comment);
+                    success.set(true);
+                    resultMsg.append("Success: Set plate comment for function at ").append(functionAddress);
+                } catch (Exception e) {
+                    resultMsg.append("Error: ").append(e.getMessage());
+                    Msg.error(this, "Error setting plate comment", e);
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (Exception e) {
+            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
+        }
+
+        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+    }
+
+    /**
+     * v1.5.0: Get all variables in a function (parameters and locals)
+     */
+    @SuppressWarnings("deprecation")
+    private String getFunctionVariables(String functionName) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        if (functionName == null || functionName.isEmpty()) {
+            return "{\"error\": \"Function name is required\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    // Find function by name
+                    Function func = null;
+                    for (Function f : program.getFunctionManager().getFunctions(true)) {
+                        if (f.getName().equals(functionName)) {
+                            func = f;
+                            break;
+                        }
+                    }
+
+                    if (func == null) {
+                        errorMsg.set("Function not found: " + functionName);
+                        return;
+                    }
+
+                    result.append("{");
+                    result.append("\"function_name\": \"").append(func.getName()).append("\", ");
+                    result.append("\"function_address\": \"").append(func.getEntryPoint().toString()).append("\", ");
+
+                    // Get parameters
+                    result.append("\"parameters\": [");
+                    Parameter[] params = func.getParameters();
+                    for (int i = 0; i < params.length; i++) {
+                        if (i > 0) result.append(", ");
+                        Parameter param = params[i];
+                        result.append("{");
+                        result.append("\"name\": \"").append(param.getName()).append("\", ");
+                        result.append("\"type\": \"").append(param.getDataType().getName()).append("\", ");
+                        result.append("\"ordinal\": ").append(param.getOrdinal()).append(", ");
+                        result.append("\"storage\": \"").append(param.getVariableStorage().toString()).append("\"");
+                        result.append("}");
+                    }
+                    result.append("], ");
+
+                    // Get local variables
+                    result.append("\"locals\": [");
+                    Variable[] locals = func.getLocalVariables();
+                    for (int i = 0; i < locals.length; i++) {
+                        if (i > 0) result.append(", ");
+                        Variable local = locals[i];
+                        result.append("{");
+                        result.append("\"name\": \"").append(local.getName()).append("\", ");
+                        result.append("\"type\": \"").append(local.getDataType().getName()).append("\", ");
+                        result.append("\"storage\": \"").append(local.getVariableStorage().toString()).append("\"");
+                        result.append("}");
+                    }
+                    result.append("]");
+                    result.append("}");
+                } catch (Exception e) {
+                    errorMsg.set(e.getMessage());
+                    Msg.error(this, "Error getting function variables", e);
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+            }
+        } catch (Exception e) {
+            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * v1.5.0: Batch rename function and all its components atomically
+     */
+    @SuppressWarnings("deprecation")
+    private String batchRenameFunctionComponents(String functionAddress, String functionName,
+                                                Map<String, String> parameterRenames,
+                                                Map<String, String> localRenames,
+                                                String returnType) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        result.append("{");
+        final AtomicBoolean success = new AtomicBoolean(false);
+        final AtomicReference<Integer> paramsRenamed = new AtomicReference<>(0);
+        final AtomicReference<Integer> localsRenamed = new AtomicReference<>(0);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Batch Rename Function Components");
+                try {
+                    Address addr = program.getAddressFactory().getAddress(functionAddress);
+                    if (addr == null) {
+                        result.append("\"error\": \"Invalid address: ").append(functionAddress).append("\"");
+                        return;
+                    }
+
+                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    if (func == null) {
+                        result.append("\"error\": \"No function at address: ").append(functionAddress).append("\"");
+                        return;
+                    }
+
+                    // Rename function
+                    if (functionName != null && !functionName.isEmpty()) {
+                        func.setName(functionName, SourceType.USER_DEFINED);
+                    }
+
+                    // Rename parameters
+                    if (parameterRenames != null && !parameterRenames.isEmpty()) {
+                        Parameter[] params = func.getParameters();
+                        for (Parameter param : params) {
+                            String newName = parameterRenames.get(param.getName());
+                            if (newName != null && !newName.isEmpty()) {
+                                param.setName(newName, SourceType.USER_DEFINED);
+                                paramsRenamed.getAndSet(paramsRenamed.get() + 1);
+                            }
+                        }
+                    }
+
+                    // Rename local variables
+                    if (localRenames != null && !localRenames.isEmpty()) {
+                        Variable[] locals = func.getLocalVariables();
+                        for (Variable local : locals) {
+                            String newName = localRenames.get(local.getName());
+                            if (newName != null && !newName.isEmpty()) {
+                                local.setName(newName, SourceType.USER_DEFINED);
+                                localsRenamed.getAndSet(localsRenamed.get() + 1);
+                            }
+                        }
+                    }
+
+                    // Set return type if provided
+                    if (returnType != null && !returnType.isEmpty()) {
+                        DataTypeManager dtm = program.getDataTypeManager();
+                        DataType dt = dtm.getDataType(returnType);
+                        if (dt != null) {
+                            func.setReturnType(dt, SourceType.USER_DEFINED);
+                        }
+                    }
+
+                    success.set(true);
+                } catch (Exception e) {
+                    result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+                    Msg.error(this, "Error in batch rename", e);
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+
+            if (success.get()) {
+                result.append("\"success\": true, ");
+                result.append("\"function_renamed\": ").append(functionName != null).append(", ");
+                result.append("\"parameters_renamed\": ").append(paramsRenamed.get()).append(", ");
+                result.append("\"locals_renamed\": ").append(localsRenamed.get());
+            }
+        } catch (Exception e) {
+            result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+        }
+
+        result.append("}");
+        return result.toString();
+    }
+
+    /**
+     * v1.5.0: Get valid Ghidra data type strings
+     */
+    private String getValidDataTypes(String category) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    result.append("{");
+                    result.append("\"builtin_types\": [");
+
+                    // Common builtin types
+                    String[] builtinTypes = {
+                        "void", "byte", "char", "short", "int", "long", "longlong",
+                        "float", "double", "pointer", "bool",
+                        "undefined", "undefined1", "undefined2", "undefined4", "undefined8",
+                        "uchar", "ushort", "uint", "ulong", "ulonglong",
+                        "sbyte", "sword", "sdword", "sqword",
+                        "word", "dword", "qword"
+                    };
+
+                    for (int i = 0; i < builtinTypes.length; i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(builtinTypes[i]).append("\"");
+                    }
+
+                    result.append("], ");
+                    result.append("\"windows_types\": [");
+
+                    String[] windowsTypes = {
+                        "BOOL", "BOOLEAN", "BYTE", "CHAR", "DWORD", "QWORD", "WORD",
+                        "HANDLE", "HMODULE", "HWND", "LPVOID", "PVOID",
+                        "LPCSTR", "LPSTR", "LPCWSTR", "LPWSTR",
+                        "SIZE_T", "ULONG", "USHORT"
+                    };
+
+                    for (int i = 0; i < windowsTypes.length; i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(windowsTypes[i]).append("\"");
+                    }
+
+                    result.append("]");
+                    result.append("}");
+                } catch (Exception e) {
+                    errorMsg.set(e.getMessage());
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+            }
+        } catch (Exception e) {
+            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * v1.5.0: Analyze function completeness for documentation
+     */
+    @SuppressWarnings("deprecation")
+    private String analyzeFunctionCompleteness(String functionAddress) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    Address addr = program.getAddressFactory().getAddress(functionAddress);
+                    if (addr == null) {
+                        errorMsg.set("Invalid address: " + functionAddress);
+                        return;
+                    }
+
+                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    if (func == null) {
+                        errorMsg.set("No function at address: " + functionAddress);
+                        return;
+                    }
+
+                    result.append("{");
+                    result.append("\"function_name\": \"").append(func.getName()).append("\", ");
+                    result.append("\"has_custom_name\": ").append(!func.getName().startsWith("FUN_")).append(", ");
+                    result.append("\"has_prototype\": ").append(func.getSignature() != null).append(", ");
+                    result.append("\"has_calling_convention\": ").append(func.getCallingConvention() != null).append(", ");
+                    result.append("\"has_plate_comment\": ").append(func.getComment() != null).append(", ");
+
+                    // Check for undefined variables
+                    List<String> undefinedVars = new ArrayList<>();
+                    for (Parameter param : func.getParameters()) {
+                        if (param.getName().startsWith("param_")) {
+                            undefinedVars.add(param.getName());
+                        }
+                    }
+                    for (Variable local : func.getLocalVariables()) {
+                        if (local.getName().startsWith("local_")) {
+                            undefinedVars.add(local.getName());
+                        }
+                    }
+
+                    result.append("\"undefined_variables\": [");
+                    for (int i = 0; i < undefinedVars.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(undefinedVars.get(i)).append("\"");
+                    }
+                    result.append("], ");
+
+                    result.append("\"completeness_score\": ").append(calculateCompletenessScore(func, undefinedVars.size()));
+                    result.append("}");
+                } catch (Exception e) {
+                    errorMsg.set(e.getMessage());
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+            }
+        } catch (Exception e) {
+            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+        }
+
+        return result.toString();
+    }
+
+    private double calculateCompletenessScore(Function func, int undefinedCount) {
+        double score = 100.0;
+
+        if (func.getName().startsWith("FUN_")) score -= 30;
+        if (func.getSignature() == null) score -= 20;
+        if (func.getCallingConvention() == null) score -= 10;
+        if (func.getComment() == null) score -= 20;
+        score -= (undefinedCount * 5);
+
+        return Math.max(0, score);
+    }
+
+    /**
+     * v1.5.0: Find next undefined function needing analysis
+     */
+    @SuppressWarnings("deprecation")
+    private String findNextUndefinedFunction(String startAddress, String criteria,
+                                            String pattern, String direction) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    FunctionManager funcMgr = program.getFunctionManager();
+                    Address start = startAddress != null ?
+                        program.getAddressFactory().getAddress(startAddress) :
+                        program.getMinAddress();
+
+                    String searchPattern = pattern != null ? pattern : "FUN_";
+                    boolean ascending = !"descending".equals(direction);
+
+                    FunctionIterator iter = ascending ?
+                        funcMgr.getFunctions(start, true) :
+                        funcMgr.getFunctions(start, false);
+
+                    Function found = null;
+                    while (iter.hasNext()) {
+                        Function func = iter.next();
+                        if (func.getName().startsWith(searchPattern)) {
+                            found = func;
+                            break;
+                        }
+                    }
+
+                    if (found != null) {
+                        result.append("{");
+                        result.append("\"found\": true, ");
+                        result.append("\"function_name\": \"").append(found.getName()).append("\", ");
+                        result.append("\"function_address\": \"").append(found.getEntryPoint().toString()).append("\", ");
+                        result.append("\"xref_count\": ").append(found.getSymbol().getReferenceCount());
+                        result.append("}");
+                    } else {
+                        result.append("{\"found\": false}");
+                    }
+                } catch (Exception e) {
+                    errorMsg.set(e.getMessage());
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+            }
+        } catch (Exception e) {
+            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * v1.5.0: Batch set variable types
+     */
+    @SuppressWarnings("deprecation")
+    private String batchSetVariableTypes(String functionAddress, Map<String, String> variableTypes) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        result.append("{");
+        final AtomicBoolean success = new AtomicBoolean(false);
+        final AtomicReference<Integer> typesSet = new AtomicReference<>(0);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Batch Set Variable Types");
+                try {
+                    Address addr = program.getAddressFactory().getAddress(functionAddress);
+                    if (addr == null) {
+                        result.append("\"error\": \"Invalid address: ").append(functionAddress).append("\"");
+                        return;
+                    }
+
+                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    if (func == null) {
+                        result.append("\"error\": \"No function at address: ").append(functionAddress).append("\"");
+                        return;
+                    }
+
+                    DataTypeManager dtm = program.getDataTypeManager();
+
+                    if (variableTypes != null) {
+                        // Set parameter types
+                        for (Parameter param : func.getParameters()) {
+                            String newType = variableTypes.get(param.getName());
+                            if (newType != null) {
+                                DataType dt = dtm.getDataType(newType);
+                                if (dt != null) {
+                                    param.setDataType(dt, SourceType.USER_DEFINED);
+                                    typesSet.getAndSet(typesSet.get() + 1);
+                                }
+                            }
+                        }
+
+                        // Set local variable types
+                        for (Variable local : func.getLocalVariables()) {
+                            String newType = variableTypes.get(local.getName());
+                            if (newType != null) {
+                                DataType dt = dtm.getDataType(newType);
+                                if (dt != null) {
+                                    local.setDataType(dt, SourceType.USER_DEFINED);
+                                    typesSet.getAndSet(typesSet.get() + 1);
+                                }
+                            }
+                        }
+                    }
+
+                    success.set(true);
+                } catch (Exception e) {
+                    result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+                    Msg.error(this, "Error in batch set variable types", e);
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+
+            if (success.get()) {
+                result.append("\"success\": true, ");
+                result.append("\"variables_typed\": ").append(typesSet.get());
+            }
+        } catch (Exception e) {
+            result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+        }
+
+        result.append("}");
+        return result.toString();
+    }
+
     @Override
     public void dispose() {
         if (server != null) {
             Msg.info(this, "Stopping GhidraMCP HTTP server...");
-            server.stop(1); // Stop with a small delay (e.g., 1 second) for connections to finish
+            try {
+                server.stop(1); // Stop with a small delay (e.g., 1 second) for connections to finish
+                // Give the server time to fully release the port
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             server = null; // Nullify the reference
             Msg.info(this, "GhidraMCP HTTP server stopped.");
         }

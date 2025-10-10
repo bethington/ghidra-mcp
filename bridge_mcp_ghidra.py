@@ -519,12 +519,29 @@ def rename_data(address: str, new_name: str) -> str:
     """
     Rename a data label at the specified address.
 
+    IMPORTANT: This tool only works for DEFINED data (data with an existing symbol/type).
+    For undefined memory addresses, use create_label() or rename_or_label() instead.
+
+    What is "defined data"?
+    - Data that has been typed (e.g., dword, struct, array)
+    - Data created via apply_data_type() or Ghidra's "D" key
+    - Data with existing symbols in the Symbol Tree
+
+    If you get an error like "No defined data at address", use:
+    - create_label(address, name) for undefined addresses
+    - rename_or_label(address, name) for automatic detection (recommended)
+
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
         new_name: New name for the data label
 
     Returns:
         Success or failure message indicating the result of the rename operation
+
+    See Also:
+        - create_label(): Create label at undefined address
+        - rename_or_label(): Automatically detect and use correct method
+        - apply_data_type(): Define data type before renaming
     """
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
@@ -1016,6 +1033,47 @@ def create_label(address: str, name: str) -> str:
     })
 
 @mcp.tool()
+def batch_create_labels(labels: list) -> str:
+    """
+    Create multiple labels in a single atomic operation (v1.5.1).
+
+    This tool creates multiple labels in one transaction, dramatically reducing API calls
+    and preventing user interruption hooks from triggering repeatedly. This is the
+    preferred method for creating multiple labels during function documentation.
+
+    Performance impact:
+    - Reduces N API calls to 1 call
+    - Prevents interruption after each label creation
+    - Atomic transaction ensures all-or-nothing semantics
+
+    Args:
+        labels: List of label objects, each with "address" and "name" fields
+                Example: [{"address": "0x6faeb266", "name": "begin_slot_processing"},
+                         {"address": "0x6faeb280", "name": "loop_check_slot_active"}]
+
+    Returns:
+        JSON string with success status, counts, and any errors:
+        {"success": true, "labels_created": 5, "labels_skipped": 1, "labels_failed": 0}
+    """
+    if not labels or not isinstance(labels, list):
+        raise GhidraValidationError("labels must be a non-empty list")
+
+    # Validate each label entry
+    for i, label in enumerate(labels):
+        if not isinstance(label, dict):
+            raise GhidraValidationError(f"Label at index {i} must be a dictionary")
+
+        if "address" not in label or "name" not in label:
+            raise GhidraValidationError(f"Label at index {i} must have 'address' and 'name' fields")
+
+        if not validate_hex_address(label["address"]):
+            raise GhidraValidationError(f"Invalid hexadecimal address at index {i}: {label['address']}")
+
+    return safe_post_json("batch_create_labels", {
+        "labels": labels
+    })
+
+@mcp.tool()
 def rename_or_label(address: str, name: str) -> str:
     """
     Intelligently rename data or create label at an address (server-side detection).
@@ -1494,27 +1552,53 @@ def export_data_types(format: str = "c", category: str = None) -> list:
 @mcp.tool()
 def import_data_types(source: str, format: str = "c") -> str:
     """
-    Import data types from various sources (placeholder for future implementation).
-    
+    [ROADMAP v2.0] Import data types from various sources.
+
+    IMPLEMENTATION STATUS: Placeholder - Returns "Import functionality not yet implemented"
+    PLANNED FOR: Version 2.0
+
+    Planned functionality:
+    - Parse C header files and extract struct/enum/typedef definitions
+    - Import JSON-formatted type definitions
+    - Support Ghidra Data Type Archive (.gdt) files
+    - Handle type conflicts and dependencies
+    - Validate imported types before applying
+    - Batch import multiple types in single operation
+
+    Related tool:
+    - export_data_types(): Fully implemented - export types to C/JSON/summary formats
+
     Args:
-        source: Source data containing type definitions
+        source: Source data containing type definitions (C header, JSON, etc.)
         format: Format of the source data ("c", "json") - default: "c"
-        
+
     Returns:
-        Import results and status
+        Currently: Placeholder message
+        Future: Import results with success/failure counts and error details
     """
     return safe_post("import_data_types", {"source": source, "format": format})
 
-# === NEW ENHANCED ENDPOINTS FOR MALWARE ANALYSIS ===
+# === MALWARE ANALYSIS TOOLS (ROADMAP - v2.0) ===
+# NOTE: The following tools are planned for future implementation.
+# They currently return placeholder responses from the Java plugin.
+# Status: ROADMAP features targeted for v2.0 release
 
 @mcp.tool()
 def detect_crypto_constants() -> list:
     """
-    Identify cryptographic constants and algorithms in the binary.
-    Searches for known crypto constants like AES S-boxes, SHA constants, etc.
-    
+    [ROADMAP v2.0] Identify cryptographic constants and algorithms in the binary.
+
+    IMPLEMENTATION STATUS: Placeholder - Returns "Not yet implemented"
+    PLANNED FOR: Version 2.0
+
+    Planned functionality:
+    - Searches for known crypto constants like AES S-boxes, SHA constants
+    - Identifies DES, AES, RSA, SHA, MD5 algorithm usage
+    - Detects custom crypto implementations
+
     Returns:
-        List of potential crypto constants with algorithm identification
+        Currently: Placeholder message
+        Future: List of potential crypto constants with algorithm identification
     """
     return safe_get("detect_crypto_constants")
 
@@ -1539,19 +1623,28 @@ def search_byte_patterns(pattern: str, mask: str = None) -> list:
 @mcp.tool()
 def find_similar_functions(target_function: str, threshold: float = 0.8) -> list:
     """
-    Find functions similar to target using structural analysis.
-    Uses control flow and instruction patterns to identify similar functions.
-    
+    [ROADMAP v2.0] Find functions similar to target using structural analysis.
+
+    IMPLEMENTATION STATUS: Placeholder - Returns "Not yet implemented"
+    PLANNED FOR: Version 2.0
+
+    Planned functionality:
+    - Uses control flow graph comparison for similarity detection
+    - Analyzes instruction patterns and basic block structures
+    - Identifies code reuse, copied functions, and variants
+    - Useful for finding malware variants and common code patterns
+
     Args:
         target_function: Name of the function to compare against
         threshold: Similarity threshold (0.0 to 1.0, higher = more similar)
-        
+
     Returns:
-        List of similar functions with similarity scores
+        Currently: Placeholder message
+        Future: List of similar functions with similarity scores
     """
     if not validate_function_name(target_function):
         raise GhidraValidationError(f"Invalid function name: {target_function}")
-    
+
     return safe_get("find_similar_functions", {
         "target_function": target_function,
         "threshold": threshold
@@ -1560,39 +1653,70 @@ def find_similar_functions(target_function: str, threshold: float = 0.8) -> list
 @mcp.tool()
 def analyze_control_flow(function_name: str) -> dict:
     """
-    Analyze control flow complexity, cyclomatic complexity, and basic blocks.
-    Provides detailed analysis of function complexity and structure.
-    
+    [ROADMAP v2.0] Analyze control flow complexity, cyclomatic complexity, and basic blocks.
+
+    IMPLEMENTATION STATUS: Placeholder - Returns "Not yet implemented"
+    PLANNED FOR: Version 2.0
+
+    Planned functionality:
+    - Calculates cyclomatic complexity (McCabe metric)
+    - Identifies basic blocks and control flow paths
+    - Detects complex branching patterns
+    - Analyzes loop structures and nesting depth
+    - Useful for identifying obfuscated or intentionally complex code
+
     Args:
         function_name: Name of the function to analyze
-        
+
     Returns:
-        Dictionary with control flow analysis results
+        Currently: Placeholder message
+        Future: Dictionary with control flow analysis results (complexity scores, block counts, path analysis)
     """
     if not validate_function_name(function_name):
         raise GhidraValidationError(f"Invalid function name: {function_name}")
-    
+
     return safe_get("analyze_control_flow", {"function_name": function_name})
 
 @mcp.tool()
 def find_anti_analysis_techniques() -> list:
     """
-    Detect anti-analysis, anti-debugging, and evasion techniques.
-    Looks for common obfuscation and evasion patterns used by malware.
-    
+    [ROADMAP v2.0] Detect anti-analysis, anti-debugging, and evasion techniques.
+
+    IMPLEMENTATION STATUS: Placeholder - Returns "Not yet implemented"
+    PLANNED FOR: Version 2.0
+
+    Planned functionality:
+    - Detects anti-debugging checks (IsDebuggerPresent, CheckRemoteDebuggerPresent)
+    - Identifies anti-VM techniques (CPUID checks, timing attacks)
+    - Finds anti-disassembly patterns (opaque predicates, junk code)
+    - Detects environment checks (sandbox detection, process enumeration)
+    - Identifies code obfuscation techniques
+
     Returns:
-        List of detected evasion techniques with locations and descriptions
+        Currently: Placeholder message
+        Future: List of detected evasion techniques with addresses, descriptions, and severity
     """
     return safe_get("find_anti_analysis_techniques")
 
 @mcp.tool()
 def extract_iocs() -> dict:
     """
-    Extract Indicators of Compromise (IOCs) from the binary.
-    Finds IP addresses, URLs, file paths, registry keys, and other artifacts.
-    
+    [ROADMAP v2.0] Extract Indicators of Compromise (IOCs) from the binary.
+
+    IMPLEMENTATION STATUS: Placeholder - Returns "Not yet implemented"
+    PLANNED FOR: Version 2.0
+
+    Planned functionality:
+    - Extracts IP addresses (IPv4 and IPv6)
+    - Finds URLs and domain names
+    - Identifies file paths (Windows, Linux, macOS)
+    - Detects registry keys and values
+    - Finds email addresses and cryptocurrency wallets
+    - Identifies mutex names and named pipes
+
     Returns:
-        Dictionary of IOCs organized by type (IPs, URLs, files, etc.)
+        Currently: Placeholder message
+        Future: Dictionary of IOCs organized by type (ips, urls, files, registry, etc.)
     """
     return safe_get("extract_iocs")
 
@@ -1668,49 +1792,92 @@ def batch_rename_functions(renames: dict) -> dict:
     
     return safe_get("batch_rename_functions", {"renames": str(renames)})
 
-# === HIGH-VALUE MALWARE ANALYSIS FEATURES ===
-
 @mcp.tool()
 def auto_decrypt_strings() -> list:
     """
-    Automatically identify and attempt to decrypt common string obfuscation patterns.
-    Detects XOR encoding, Base64, ROT13, and simple stack strings.
-    
+    [ROADMAP v2.0] Automatically identify and attempt to decrypt common string obfuscation patterns.
+
+    IMPLEMENTATION STATUS: Placeholder - Returns "Not yet implemented"
+    PLANNED FOR: Version 2.0
+
+    Planned functionality:
+    - Detects XOR encoding patterns (single-byte and multi-byte keys)
+    - Identifies Base64 encoded strings
+    - Recognizes ROT13 and simple substitution ciphers
+    - Finds stack strings (strings built character-by-character)
+    - Attempts automatic decryption with common algorithms
+    - Reports decryption confidence scores
+
     Returns:
-        List of decrypted strings with their locations and decryption method
+        Currently: Placeholder message
+        Future: List of decrypted strings with locations, decryption method, and confidence
     """
     return safe_get("decrypt_strings_auto")
 
 @mcp.tool()
 def analyze_api_call_chains() -> dict:
     """
-    Identify and visualize suspicious Windows API call sequences used by malware.
-    Detects patterns like process injection, persistence, and anti-analysis techniques.
-    
+    [ROADMAP v2.0] Identify and visualize suspicious Windows API call sequences used by malware.
+
+    IMPLEMENTATION STATUS: Placeholder - Returns "Not yet implemented"
+    PLANNED FOR: Version 2.0
+
+    Planned functionality:
+    - Detects process injection patterns (CreateRemoteThread, WriteProcessMemory)
+    - Identifies persistence mechanisms (Registry, Scheduled Tasks, Services)
+    - Finds privilege escalation sequences
+    - Detects network communication patterns
+    - Identifies file system manipulation chains
+    - Analyzes API call order and dependencies
+
     Returns:
-        Dictionary of detected API call patterns with threat assessment
+        Currently: Placeholder message
+        Future: Dictionary of detected API call patterns with threat assessment, severity, and MITRE ATT&CK mappings
     """
     return safe_get("analyze_api_call_chains")
 
 @mcp.tool()
 def extract_iocs_with_context() -> dict:
     """
-    Enhanced IOC extraction with analysis context and confidence scoring.
-    Provides context about where/how IOCs are used and categorizes them.
-    
+    [ROADMAP v2.0] Enhanced IOC extraction with analysis context and confidence scoring.
+
+    IMPLEMENTATION STATUS: Placeholder - Returns "Not yet implemented"
+    PLANNED FOR: Version 2.0
+
+    Planned functionality:
+    - Extracts IOCs with surrounding code context
+    - Provides confidence scores based on usage patterns
+    - Categorizes IOCs by purpose (C2, exfiltration, lateral movement)
+    - Identifies how IOCs are constructed (hardcoded, dynamically built)
+    - Links IOCs to function purposes and call chains
+    - Detects obfuscated or encoded IOCs
+
     Returns:
-        Dictionary of IOCs with context, confidence scores, and usage analysis
+        Currently: Placeholder message
+        Future: Dictionary of IOCs with context, confidence scores, usage analysis, and categorization
     """
     return safe_get("extract_iocs_with_context")
 
 @mcp.tool()
 def detect_malware_behaviors() -> list:
     """
-    Automatically detect common malware behaviors and techniques.
-    Analyzes code patterns to identify potential malicious functionality.
-    
+    [ROADMAP v2.0] Automatically detect common malware behaviors and techniques.
+
+    IMPLEMENTATION STATUS: Placeholder - Returns "Not yet implemented"
+    PLANNED FOR: Version 2.0
+
+    Planned functionality:
+    - Detects keylogging patterns
+    - Identifies screen capture functionality
+    - Finds credential harvesting code
+    - Detects network beaconing patterns
+    - Identifies ransomware behaviors (encryption, file enumeration)
+    - Finds rootkit techniques (hooking, SSDT modification)
+    - Maps behaviors to MITRE ATT&CK framework
+
     Returns:
-        List of detected behaviors with confidence scores and evidence
+        Currently: Placeholder message
+        Future: List of detected behaviors with confidence scores, evidence, and MITRE ATT&CK IDs
     """
     return safe_get("detect_malware_behaviors")
 
@@ -2488,6 +2655,424 @@ def create_and_apply_data_type(
             raise GhidraValidationError(f"Invalid JSON in type_definition: {str(e)}")
 
     return safe_post_json("apply_data_classification", data)
+
+# ============================================================================
+# FIELD-LEVEL ANALYSIS TOOLS (v1.4.0)
+# ============================================================================
+
+@mcp.tool()
+def analyze_struct_field_usage(
+    address: str,
+    struct_name: str = None,
+    max_functions: int = 10
+) -> str:
+    """
+    Analyze how structure fields are accessed in decompiled code.
+
+    This tool decompiles all functions that reference a structure and extracts usage patterns
+    for each field, including variable names, access types, and purposes. This enables
+    generating descriptive field names based on actual usage rather than generic placeholders.
+
+    Args:
+        address: Address of the structure instance in hex format (e.g., "0x6fb835b8")
+        struct_name: Name of the structure type (optional - can be inferred if null)
+        max_functions: Maximum number of referencing functions to analyze (default: 10)
+
+    Returns:
+        JSON string with field usage analysis:
+        {
+          "struct_address": "0x6fb835b8",
+          "struct_name": "ConfigData",
+          "struct_size": 28,
+          "functions_analyzed": 5,
+          "field_usage": {
+            "0": {
+              "field_name": "dwResourceType",
+              "field_type": "dword",
+              "offset": 0,
+              "size": 4,
+              "access_count": 12,
+              "suggested_names": ["resourceType", "dwType", "nResourceId"],
+              "usage_patterns": ["conditional_check", "assignment"]
+            },
+            ...
+          }
+        }
+    """
+    import json
+
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hex address format: {address}")
+
+    # Validate parameter bounds (must match Java constants)
+    if not isinstance(max_functions, int) or max_functions < 1 or max_functions > 100:
+        raise GhidraValidationError("max_functions must be between 1 and 100")
+
+    data = {
+        "address": address,
+        "max_functions": max_functions
+    }
+    if struct_name:
+        data["struct_name"] = struct_name
+
+    result = safe_post_json("analyze_struct_field_usage", data)
+
+    # Format the JSON response for readability
+    try:
+        parsed = json.loads(result)
+        return json.dumps(parsed, indent=2)
+    except:
+        return result
+
+@mcp.tool()
+def get_field_access_context(
+    struct_address: str,
+    field_offset: int,
+    num_examples: int = 5
+) -> str:
+    """
+    Get assembly/decompilation context for specific field offsets.
+
+    This tool retrieves specific usage examples for a field at a given offset within a structure,
+    including the assembly instructions, reference types, and containing functions. Useful for
+    understanding how a particular field is accessed and what its purpose might be.
+
+    Args:
+        struct_address: Address of the structure instance in hex format (e.g., "0x6fb835b8")
+        field_offset: Offset of the field within the structure (e.g., 4 for second DWORD)
+        num_examples: Number of usage examples to return (default: 5)
+
+    Returns:
+        JSON string with field access contexts:
+        {
+          "struct_address": "0x6fb835b8",
+          "field_offset": 4,
+          "field_address": "0x6fb835bc",
+          "examples": [
+            {
+              "access_address": "0x6fb6cae9",
+              "ref_type": "DATA_READ",
+              "assembly": "MOV EDX, [0x6fb835bc]",
+              "function_name": "ProcessResource",
+              "function_address": "0x6fb6ca00"
+            },
+            ...
+          ]
+        }
+    """
+    import json
+
+    if not validate_hex_address(struct_address):
+        raise GhidraValidationError(f"Invalid hex address format: {struct_address}")
+
+    # Validate parameter bounds (must match Java constants: MAX_FIELD_OFFSET=65536, MAX_FIELD_EXAMPLES=50)
+    if not isinstance(field_offset, int) or field_offset < 0 or field_offset > 65536:
+        raise GhidraValidationError("field_offset must be between 0 and 65536")
+
+    if not isinstance(num_examples, int) or num_examples < 1 or num_examples > 50:
+        raise GhidraValidationError("num_examples must be between 1 and 50")
+
+    data = {
+        "struct_address": struct_address,
+        "field_offset": field_offset,
+        "num_examples": num_examples
+    }
+
+    result = safe_post_json("get_field_access_context", data)
+
+    # Format the JSON response for readability
+    try:
+        parsed = json.loads(result)
+        return json.dumps(parsed, indent=2)
+    except:
+        return result
+
+@mcp.tool()
+def suggest_field_names(
+    struct_address: str,
+    struct_size: int = 0
+) -> str:
+    """
+    AI-assisted field name suggestions based on usage patterns and data types.
+
+    This tool analyzes a structure's field types and generates suggested names following
+    common naming conventions (Hungarian notation, camelCase, etc.). Useful for quickly
+    generating descriptive names for structure fields based on their types.
+
+    Args:
+        struct_address: Address of the structure instance in hex format (e.g., "0x6fb835b8")
+        struct_size: Size of the structure in bytes (optional - auto-detected if 0)
+
+    Returns:
+        JSON string with field name suggestions:
+        {
+          "struct_address": "0x6fb835b8",
+          "struct_name": "ConfigData",
+          "struct_size": 28,
+          "suggestions": [
+            {
+              "offset": 0,
+              "current_name": "field0",
+              "field_type": "dword",
+              "suggested_names": ["dwValue", "nCount", "dwFlags"],
+              "confidence": "medium"
+            },
+            {
+              "offset": 4,
+              "current_name": "field1",
+              "field_type": "pointer",
+              "suggested_names": ["pData", "lpBuffer", "pNext"],
+              "confidence": "high"
+            },
+            ...
+          ]
+        }
+    """
+    import json
+
+    if not validate_hex_address(struct_address):
+        raise GhidraValidationError(f"Invalid hex address format: {struct_address}")
+
+    # Validate parameter bounds (must match Java constant: MAX_FIELD_OFFSET=65536)
+    if not isinstance(struct_size, int) or struct_size < 0 or struct_size > 65536:
+        raise GhidraValidationError("struct_size must be between 0 and 65536")
+
+    data = {
+        "struct_address": struct_address,
+        "struct_size": struct_size
+    }
+
+    result = safe_post_json("suggest_field_names", data)
+
+    # Format the JSON response for readability
+    try:
+        parsed = json.loads(result)
+        return json.dumps(parsed, indent=2)
+    except:
+        return result
+
+# ========== v1.5.0: WORKFLOW OPTIMIZATION TOOLS ==========
+
+@mcp.tool()
+def batch_set_comments(
+    function_address: str,
+    decompiler_comments: list = None,
+    disassembly_comments: list = None,
+    plate_comment: str = None
+) -> str:
+    """
+    Set multiple comments in a single operation (v1.5.0).
+    Reduces API calls from 10+ to 1 for typical function documentation.
+
+    Args:
+        function_address: Function address for plate comment
+        decompiler_comments: List of {"address": "0x...", "comment": "..."} for PRE_COMMENT
+        disassembly_comments: List of {"address": "0x...", "comment": "..."} for EOL_COMMENT
+        plate_comment: Function header summary comment
+
+    Returns:
+        JSON with success status and counts of comments set
+    """
+    validate_hex_address(function_address)
+
+    payload = {
+        "function_address": function_address,
+        "decompiler_comments": decompiler_comments or [],
+        "disassembly_comments": disassembly_comments or [],
+        "plate_comment": plate_comment
+    }
+
+    return safe_post_json("batch_set_comments", payload)
+
+@mcp.tool()
+def set_plate_comment(
+    function_address: str,
+    comment: str
+) -> str:
+    """
+    Set function plate (header) comment (v1.5.0).
+    This comment appears above the function in both disassembly and decompiler views.
+
+    Args:
+        function_address: Function address in hex format (e.g., "0x401000")
+        comment: Function header summary comment
+
+    Returns:
+        Success or failure message
+    """
+    validate_hex_address(function_address)
+
+    params = {"function_address": function_address, "comment": comment}
+    return safe_post("set_plate_comment", params)
+
+@mcp.tool()
+def get_function_variables(
+    function_name: str
+) -> str:
+    """
+    List all variables in a function including parameters and locals (v1.5.0).
+
+    Args:
+        function_name: Name of the function
+
+    Returns:
+        JSON with function variables including names, types, and storage locations
+    """
+    validate_function_name(function_name)
+
+    params = {"function_name": function_name}
+    return safe_get("get_function_variables", params)
+
+@mcp.tool()
+def batch_rename_function_components(
+    function_address: str,
+    function_name: str = None,
+    parameter_renames: dict = None,
+    local_renames: dict = None,
+    return_type: str = None
+) -> str:
+    """
+    Rename function and all its components atomically (v1.5.0).
+    Combines multiple rename operations into a single transaction.
+
+    Args:
+        function_address: Function address in hex format
+        function_name: New name for the function (optional)
+        parameter_renames: Dict of {"old_name": "new_name"} for parameters
+        local_renames: Dict of {"old_name": "new_name"} for local variables
+        return_type: New return type (optional)
+
+    Returns:
+        JSON with success status and counts of renamed components
+    """
+    validate_hex_address(function_address)
+
+    payload = {
+        "function_address": function_address,
+        "function_name": function_name,
+        "parameter_renames": parameter_renames or {},
+        "local_renames": local_renames or {},
+        "return_type": return_type
+    }
+
+    return safe_post_json("batch_rename_function_components", payload)
+
+@mcp.tool()
+def get_valid_data_types(
+    category: str = None
+) -> str:
+    """
+    Get list of valid Ghidra data type strings (v1.5.0).
+    Helps construct proper type definitions for create_struct and other type operations.
+
+    Args:
+        category: Optional category filter (not currently used)
+
+    Returns:
+        JSON with lists of builtin_types and windows_types
+    """
+    params = {"category": category} if category else {}
+    return safe_get("get_valid_data_types", params)
+
+@mcp.tool()
+def validate_data_type(
+    address: str,
+    type_name: str
+) -> str:
+    """
+    Validate if a data type can be applied at a given address (v1.5.0).
+    Checks memory availability, size compatibility, and alignment.
+
+    Args:
+        address: Target address in hex format
+        type_name: Name of the data type to validate
+
+    Returns:
+        JSON with validation results including memory availability and size checks
+    """
+    validate_hex_address(address)
+
+    params = {"address": address, "type_name": type_name}
+    return safe_get("validate_data_type", params)
+
+@mcp.tool()
+def analyze_function_completeness(
+    function_address: str
+) -> str:
+    """
+    Analyze how completely a function has been documented (v1.5.0).
+    Checks for custom names, prototypes, comments, and undefined variables.
+
+    Args:
+        function_address: Function address in hex format
+
+    Returns:
+        JSON with completeness analysis including:
+        - has_custom_name, has_prototype, has_calling_convention
+        - has_plate_comment, undefined_variables
+        - completeness_score (0-100)
+    """
+    validate_hex_address(function_address)
+
+    params = {"function_address": function_address}
+    return safe_get("analyze_function_completeness", params)
+
+@mcp.tool()
+def find_next_undefined_function(
+    start_address: str = None,
+    criteria: str = "name_pattern",
+    pattern: str = "FUN_",
+    direction: str = "ascending"
+) -> str:
+    """
+    Find the next function needing analysis (v1.5.0).
+    Intelligently searches for functions matching specified criteria.
+
+    Args:
+        start_address: Starting address for search (default: program min address)
+        criteria: Search criteria (default: "name_pattern")
+        pattern: Name pattern to match (default: "FUN_")
+        direction: Search direction "ascending" or "descending" (default: "ascending")
+
+    Returns:
+        JSON with found function details or {"found": false}
+    """
+    if start_address:
+        validate_hex_address(start_address)
+
+    params = {
+        "start_address": start_address,
+        "criteria": criteria,
+        "pattern": pattern,
+        "direction": direction
+    }
+    return safe_get("find_next_undefined_function", params)
+
+@mcp.tool()
+def batch_set_variable_types(
+    function_address: str,
+    variable_types: dict
+) -> str:
+    """
+    Set types for multiple variables in a single operation (v1.5.0).
+
+    Args:
+        function_address: Function address in hex format
+        variable_types: Dict of {"variable_name": "type_name"}
+
+    Returns:
+        JSON with success status and count of variables typed
+    """
+    validate_hex_address(function_address)
+
+    payload = {
+        "function_address": function_address,
+        "variable_types": variable_types or {}
+    }
+
+    return safe_post_json("batch_set_variable_types", payload)
+
+# ========== MAIN ==========
 
 def main():
     parser = argparse.ArgumentParser(description="MCP server for Ghidra")

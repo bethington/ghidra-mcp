@@ -6,9 +6,9 @@
     <groupId>com.xebyte</groupId>
     <artifactId>GhidraMCP</artifactId>
     <packaging>jar</packaging>
-    <version>1.3.0</version>
+    <version>1.5.0</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform with workflow optimization tools</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
