@@ -1444,6 +1444,16 @@ public class GhidraMCPPlugin extends Plugin {
                     program.endTransaction(tx, successFlag.get());
                 }
             });
+
+            // Force event processing to ensure changes propagate
+            if (successFlag.get()) {
+                program.flushEvents();
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
         }
         catch (InterruptedException | InvocationTargetException e) {
             resultMsg.append("Error: Failed to execute rename on Swing thread: ").append(e.getMessage());
@@ -7521,6 +7531,17 @@ public class GhidraMCPPlugin extends Plugin {
                 }
             });
 
+            // Force event processing to ensure changes propagate to decompiler cache
+            if (success.get()) {
+                program.flushEvents();
+                // Small delay to ensure decompiler cache refresh
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
             if (success.get()) {
                 result.append("\"success\": true, ");
                 result.append("\"decompiler_comments_set\": ").append(decompilerCount.get()).append(", ");
@@ -7582,6 +7603,17 @@ public class GhidraMCPPlugin extends Plugin {
                     program.endTransaction(tx, success.get());
                 }
             });
+
+            // Force event processing to ensure changes propagate to decompiler cache
+            if (success.get()) {
+                program.flushEvents();
+                // Small delay to ensure decompiler cache refresh
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
         } catch (Exception e) {
             resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
         }

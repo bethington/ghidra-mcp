@@ -26,6 +26,21 @@ DEFAULT_GHIDRA_SERVER = "http://127.0.0.1:8089/"
 # HTTP request timeout (30s chosen for slow decompilation operations)
 REQUEST_TIMEOUT = 30
 DEFAULT_PAGINATION_LIMIT = 100
+
+# Per-endpoint timeout configuration for expensive operations
+ENDPOINT_TIMEOUTS = {
+    'document_function_complete': 120,     # 2 minutes - comprehensive atomic documentation
+    'batch_rename_variables': 60,          # 1 minute - variable renames can trigger re-analysis
+    'batch_set_comments': 45,              # 45 seconds - multiple comment operations
+    'analyze_function_complete': 60,       # 1 minute - comprehensive analysis with decompilation
+    'batch_decompile_functions': 90,       # 1.5 minutes - multiple decompilations
+    'batch_rename_function_components': 60, # 1 minute - multiple rename operations
+    'batch_set_variable_types': 60,        # 1 minute - DataType lookups can be slow
+    'analyze_data_region': 60,             # 1 minute - complex data analysis
+    'batch_decompile_xref_sources': 90,    # 1.5 minutes - multiple decompilations
+    'create_and_apply_data_type': 45,      # 45 seconds - struct creation + application
+    'default': 30                          # 30 seconds for all other operations
+}
 # Maximum retry attempts for transient failures (3 attempts with exponential backoff)
 MAX_RETRIES = 3
 # Exponential backoff factor (0.5s, 1s, 2s, 4s sequence)
@@ -99,6 +114,12 @@ def validate_server_url(url: str) -> bool:
         return False
     except Exception:
         return False
+
+def get_timeout_for_endpoint(endpoint: str) -> int:
+    """Get the appropriate timeout for a specific endpoint"""
+    # Extract endpoint name from URL path
+    endpoint_name = endpoint.strip('/').split('/')[-1]
+    return ENDPOINT_TIMEOUTS.get(endpoint_name, ENDPOINT_TIMEOUTS['default'])
 
 def validate_hex_address(address: str) -> bool:
     """Validate hexadecimal address format"""
@@ -226,10 +247,14 @@ def safe_get_uncached(endpoint: str, params: dict = None, retries: int = 3) -> l
 
     url = urljoin(ghidra_server_url, endpoint)
 
+    # Get endpoint-specific timeout
+    timeout = get_timeout_for_endpoint(endpoint)
+    logger.debug(f"Using timeout of {timeout}s for endpoint {endpoint}")
+
     for attempt in range(retries):
         try:
             start_time = time.time()
-            response = session.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            response = session.get(url, params=params, timeout=timeout)
             response.encoding = 'utf-8'
             duration = time.time() - start_time
 
@@ -292,10 +317,14 @@ def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
 
     url = urljoin(ghidra_server_url, endpoint)
 
+    # Get endpoint-specific timeout
+    timeout = get_timeout_for_endpoint(endpoint)
+    logger.debug(f"Using timeout of {timeout}s for endpoint {endpoint}")
+
     for attempt in range(retries):
         try:
             start_time = time.time()
-            response = session.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            response = session.get(url, params=params, timeout=timeout)
             response.encoding = 'utf-8'
             duration = time.time() - start_time
 
@@ -354,16 +383,20 @@ def safe_post_json(endpoint: str, data: dict, retries: int = 3) -> str:
 
     url = urljoin(ghidra_server_url, endpoint)
 
+    # Get endpoint-specific timeout
+    timeout = get_timeout_for_endpoint(endpoint)
+    logger.debug(f"Using timeout of {timeout}s for endpoint {endpoint}")
+
     for attempt in range(retries):
         try:
             start_time = time.time()
-            
+
             logger.info(f"Sending JSON POST to {url} with data: {data}")
-            response = session.post(url, json=data, timeout=REQUEST_TIMEOUT)
-            
+            response = session.post(url, json=data, timeout=timeout)
+
             response.encoding = 'utf-8'
             duration = time.time() - start_time
-            
+
             logger.info(f"JSON POST to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries}), status: {response.status_code}")
             
             if response.ok:
@@ -410,20 +443,24 @@ def safe_post(endpoint: str, data: dict | str, retries: int = 3) -> str:
 
     url = urljoin(ghidra_server_url, endpoint)
 
+    # Get endpoint-specific timeout
+    timeout = get_timeout_for_endpoint(endpoint)
+    logger.debug(f"Using timeout of {timeout}s for endpoint {endpoint}")
+
     for attempt in range(retries):
         try:
             start_time = time.time()
-            
+
             if isinstance(data, dict):
                 logger.info(f"Sending POST to {url} with form data: {data}")
-                response = session.post(url, data=data, timeout=REQUEST_TIMEOUT)
+                response = session.post(url, data=data, timeout=timeout)
             else:
                 logger.info(f"Sending POST to {url} with raw data: {data}")
-                response = session.post(url, data=data.encode("utf-8"), timeout=REQUEST_TIMEOUT)
-            
+                response = session.post(url, data=data.encode("utf-8"), timeout=timeout)
+
             response.encoding = 'utf-8'
             duration = time.time() - start_time
-            
+
             logger.info(f"POST to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries}), status: {response.status_code}")
             
             if response.ok:
