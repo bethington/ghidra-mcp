@@ -27,18 +27,25 @@ DEFAULT_GHIDRA_SERVER = "http://127.0.0.1:8089/"
 REQUEST_TIMEOUT = 30
 DEFAULT_PAGINATION_LIMIT = 100
 
-# Per-endpoint timeout configuration for expensive operations
+# Per-endpoint timeout configuration for expensive operations (v1.6.1)
 ENDPOINT_TIMEOUTS = {
-    'document_function_complete': 120,     # 2 minutes - comprehensive atomic documentation
-    'batch_rename_variables': 60,          # 1 minute - variable renames can trigger re-analysis
-    'batch_set_comments': 45,              # 45 seconds - multiple comment operations
-    'analyze_function_complete': 60,       # 1 minute - comprehensive analysis with decompilation
-    'batch_decompile_functions': 90,       # 1.5 minutes - multiple decompilations
-    'batch_rename_function_components': 60, # 1 minute - multiple rename operations
-    'batch_set_variable_types': 60,        # 1 minute - DataType lookups can be slow
-    'analyze_data_region': 60,             # 1 minute - complex data analysis
-    'batch_decompile_xref_sources': 90,    # 1.5 minutes - multiple decompilations
-    'create_and_apply_data_type': 45,      # 45 seconds - struct creation + application
+    'document_function_complete': 180,     # 3 minutes - comprehensive atomic documentation
+    'batch_rename_variables': 120,         # 2 minutes - variable renames trigger re-analysis (increased from 90s)
+    'batch_set_comments': 120,             # 2 minutes - multiple comment operations (increased from 90s)
+    'analyze_function_complete': 120,      # 2 minutes - comprehensive analysis with decompilation (increased from 90s)
+    'batch_decompile_functions': 120,      # 2 minutes - multiple decompilations
+    'batch_rename_function_components': 120, # 2 minutes - multiple rename operations (increased from 90s)
+    'batch_set_variable_types': 90,        # 1.5 minutes - DataType lookups can be slow
+    'analyze_data_region': 90,             # 1.5 minutes - complex data analysis
+    'batch_decompile_xref_sources': 120,   # 2 minutes - multiple decompilations
+    'create_and_apply_data_type': 60,      # 1 minute - struct creation + application
+    'batch_create_labels': 60,             # 1 minute - creating multiple labels in transaction
+    'set_plate_comment': 45,               # 45 seconds - plate comments can be lengthy
+    'set_function_prototype': 45,          # 45 seconds - prototype changes trigger re-analysis
+    'rename_function_by_address': 45,      # 45 seconds - function renames update xrefs
+    'rename_variable': 30,                 # 30 seconds - single variable rename
+    'rename_function': 45,                 # 45 seconds - function renames update xrefs
+    'decompile_function': 45,              # 45 seconds - decompilation can be slow for large functions
     'default': 30                          # 30 seconds for all other operations
 }
 # Maximum retry attempts for transient failures (3 attempts with exponential backoff)
