@@ -1,11 +1,3 @@
-# Function Documentation Workflow
-
-**Purpose**: Systematic approach to documenting undocumented functions in Ghidra
-**Audience**: Reverse engineers working with Diablo II binaries
-**Complexity**: ⭐⭐ Intermediate
-
-## Workflow Overview
-
 Begin by finding functions that need documentation, prioritizing those with the most cross-references (xrefs) since these are typically more important to the codebase. Focus on functions still named with patterns like "FUN_" which indicate they haven't been analyzed yet.
 
 When documenting functions, rename them using PascalCase convention based on their purpose and how they're used by callers. Names should clearly describe what the function does, such as ProcessPlayerSlots, ValidateEntityState, or InitializeGameResources. Examine the function's callees and the context from xrefs to understand the function's role in the larger system.
@@ -25,9 +17,3 @@ Add comments in both decompiler and disassembly views to explain the code's purp
 Define all undefined variables that appear in the decompiled output. Ghidra may show variables like undefined1, undefined2, undefined4, or undefined8 which should be replaced with proper types. Map these to appropriate types: undefined1 becomes BYTE, undefined2 becomes WORD, undefined4 becomes DWORD or pointer, and undefined8 becomes QWORD. Look at how the variable is used to determine if it should be a numeric type, a pointer, or part of a structure.
 
 Work silently without showing status messages or progress output. Do not create or edit any files as all documentation changes should be made directly within Ghidra. Apply all function renaming, variable typing, structure creation, label creation, and commenting operations through the Ghidra MCP tools. Use batch operations when available to improve efficiency, such as batch_set_comments for adding multiple comments at once, batch_set_variable_types for typing multiple variables, and batch_create_labels for creating multiple jump target labels. After completing documentation for each function, immediately search for the next undocumented function and repeat the process, continuing until all critical functions have been analyzed.
-
----
-
-**Version**: 1.0
-**Last Updated**: 2025-10-10
-**Related**: [UNIFIED_ANALYSIS_PROMPT.md](UNIFIED_ANALYSIS_PROMPT.md), [QUICK_START_PROMPT.md](QUICK_START_PROMPT.md)
