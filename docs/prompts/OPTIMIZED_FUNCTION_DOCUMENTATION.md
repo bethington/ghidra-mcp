@@ -1,159 +1,29 @@
-# Function Documentation Workflow
+# Function Documentation Workflow Instructions
 
-Find functions needing documentation by prioritizing those with the most cross-references (xrefs), as these are typically more important to the codebase.
+You are assisting with reverse engineering binary code in Ghidra. Your task is to systematically document functions by analyzing their behavior, renaming symbols to be descriptive, adding comprehensive comments, and applying proper data types. Follow this workflow carefully to ensure complete and accurate documentation.
 
-## STEP 1 - VERIFY FUNCTION BOUNDARIES
+Start by identifying functions that need documentation. Use search_functions_enhanced to find functions with default names like "FUN_" and prioritize those with the highest cross-reference counts, as these are typically more important to the codebase. Before beginning any analysis, verify that function boundaries are correct by examining the disassembly. Check that the function starts at the expected address, confirm all code blocks belong to this function, and ensure return instructions are properly included at function exits. If you discover the boundaries are incorrect, you will need to delete the function and recreate it with the correct address range.
 
-Before any analysis, verify that function boundaries are correct:
-- Check if the function starts at the expected address
-- Ensure all code blocks belong to this function
-- Verify return instructions are properly included
-- If boundaries are wrong, delete and recreate the function with correct range
+Once you have verified the function boundaries, begin the comprehensive analysis phase. Use analyze_function_complete to gather all necessary information about the function in a single efficient call. This tool retrieves the decompiled code, cross-references, callees, callers, disassembly, and variable information simultaneously. Carefully study the decompiled code to understand what the function does, examine how it is called by other functions to understand its context and purpose, review the functions it calls to understand its dependencies, and analyze the disassembly to see actual memory access patterns and offsets.
 
-## STEP 2 - FUNCTION DOCUMENTATION
+After completing your analysis, rename the function using PascalCase based on its purpose and how callers use it. Choose descriptive names that reflect the function's action and target, such as ProcessPlayerSlots for a function that iterates over player data, ValidateEntityState for a function checking entity validity, or InitializeGameResources for a function setting up game structures. Next, set an accurate return data type by examining what value the function returns in EAX or RAX. Use void if there is no return value, int or DWORD for status codes or count values, BOOL for true/false return values, or pointer types for functions returning object references.
 
-Rename the function using PascalCase based on its purpose and caller context.
-Examples: ProcessPlayerSlots, ValidateEntityState, InitializeGameResources
+Define the complete function prototype with all parameters properly typed and named. Examine how parameters are used in the decompiled code and give them descriptive camelCase names like playerNode, itemPointer, or resourceCount. Specify the correct calling convention based on the architecture and observed behavior: use __cdecl for standard C functions where caller cleans stack, __stdcall for Windows API functions where callee cleans stack, __fastcall for functions passing first arguments in registers, or __thiscall for C++ member functions with implicit this pointer.
 
-Set accurate return data type:
-- void (no return), int/DWORD (status/count), BOOL (true/false), pointers (objects)
+Proceed to create labels at all jump targets using snake_case naming conventions. For control flow structures, use descriptive labels like loop_start for the beginning of a loop, loop_continue for continue targets, loop_end for loop exits, or loop_check for condition checks. For validation logic, use labels like validation_failed, check_bounds, or bounds_ok. For error handling, use error_handler, cleanup_and_exit, or handle_failure. For state machines, use sequential labels like state_0_init, state_1_processing, or state_2_complete. Always use batch_create_labels to create multiple labels in a single atomic operation.
 
-Define function prototype with:
-- All parameters properly typed and named
-- Calling convention: __cdecl, __stdcall, __fastcall, __thiscall
+Now systematically rename all variables using descriptive camelCase names. Replace generic names like local_8, param_1, or iVar1 with meaningful names that describe what the variable represents. Use names like playerIndex for array indices, bufferSize for size values, entityPointer for object pointers, or isValid for boolean flags. When meaningful, include register artifacts in your naming such as eax_returnValue or ecx_objectPointer to show data flow. Use batch_rename_variables to rename multiple variables atomically. After each batch rename operation, you must decompile the function again to check for new variable names, as Ghidra may introduce new temporary variables like iVar1 or iVar2 when you rename existing ones. Continue iterating through variable renaming until no default variable names remain. Pay special attention to common patterns: iVar1, iVar2, etc. should become descriptive names based on their purpose, extraout_EDX or similar should become register artifacts, and uVar1, lVar1, etc. should be renamed based on their semantic meaning.
 
-## STEP 3 - VARIABLE NAMING
+When working with Diablo II game structures, apply the appropriate data types. For UnitAny structures, use fields like dwType for unit type, dwUnitId for unique identifier, dwMode for current mode, pInventory for inventory pointer, pStats for stats pointer, and wX/wY for coordinates. For Room1 and Room2 structures, use pRoom2 for Room2 pointer, dwPosX/dwPosY for position, dwSizeX/dwSizeY for dimensions, and pLevel for level pointer. For PlayerData, use szName for player name, pNormalQuest/pNightmareQuest/pHellQuest for quest pointers. For ItemData, use dwQuality, dwItemFlags, wPrefix, wSuffix, and BodyLocation. For MonsterData, use anEnchants, wUniqueNo, and wName. For Inventory, use pOwner, pFirstItem, pCursorItem, and dwItemCount. Use proper pointer types like LPUNITANY, LPROOM1, LPROOM2, and LPLEVEL. Follow Hungarian notation consistently: use dw prefix for DWORD fields like dwFlags or dwUnitId, p or lp prefix for pointers like pNext or lpPlayerUnit, w prefix for WORD fields like wLevel or wStatIndex, n prefix for counts like nCount or nMaxXCells, sz prefix for strings like szName or szGameName, and f or b prefix for booleans like fSaved or bActive.
 
-Rename variables using descriptive camelCase names:
-- playerIndex, bufferSize, entityPointer (not local_8, param_1)
-- Include register artifacts when meaningful: eax_returnValue, ecx_objectPointer
-- Check decompiled output AFTER each rename batch to identify new variable names
-- Ghidra may reuse variable names (e.g., iVar1, iVar2) when variables are renamed
-- Iterate variable renaming until all default names are replaced
-- Common patterns: iVar* → descriptive names, extraout_* → register artifacts
+Add comprehensive decompiler comments that provide insight beyond what the code shows. Explain the algorithm's context and purpose, describe how structures are accessed and what fields mean, document magic numbers and sentinel values, explain validation logic and boundary checks, and note edge cases and error handling. Critically, you must verify offset values against the actual assembly before adding comments. The assembly shows true memory offsets where an instruction like [EBX + 0x4] means offset +4 from the base, not offset +2. Always match your comment offsets to what appears in the disassembly rather than relying on the decompiler's line order, and document memory access patterns rather than just stating what variable is being loaded. Use concise disassembly comments with a maximum of 32 characters that describe the instruction's purpose, such as "Load player slot index", "Check if slot active", or "Jump to error handler".
 
-## STEP 4 - LABEL CREATION
+Create a comprehensive function header comment using set_plate_comment. This plate comment should include a high-level algorithm summary explaining what the function does and why, describe key parameters and the return value, note any important preconditions or side effects, and when the function accesses structured data, document the structure layout in detail including field names, offsets, and sizes. If you can calculate the structure size from repeated access patterns such as stride multiplied by element count, note this in the comment. Create struct definitions for repeated access patterns using create_struct, and use analyze_data_region to analyze pointer targets and understand data layouts. Replace all undefined types with proper types: undefined1 becomes BYTE, undefined2 becomes WORD, undefined4 becomes DWORD or pointer, and undefined8 becomes QWORD.
 
-Create labels at jump targets using snake_case:
-- Control flow: loop_start, loop_continue, loop_end
-- Validation: validation_failed, check_bounds, bounds_ok
-- Error handling: error_handler, cleanup_and_exit
-- State machines: state_0_init, state_1_processing
+After completing major operations like function renaming, prototype setting, or adding comments, always verify that changes applied correctly. Decompile the function again and check that the plate comment appears correctly and is not showing as "/* null */", confirm that all variable renames succeeded and no default names remain, and validate that comment placement matches the intended addresses. If you see "/* null */" in the decompiler output, this means the plate comment failed to apply and you must retry with set_plate_comment.
 
-## STEP 5 - DATA STRUCTURES
+For batch operations, prefer document_function_complete whenever possible as this performs all documentation updates in a single atomic transaction. However, if document_function_complete fails due to connection errors or timeouts, fall back to individual operations in this specific order: first use rename_function_by_address to rename the function, then set_function_prototype to set the return type and parameters, next use batch_create_labels to create all labels at once, then use batch_rename_variables to rename variables in batches iterating as needed, then set_plate_comment to add the function header, and finally use batch_set_comments to add all decompiler and disassembly comments. Verify after each major step that changes were applied successfully.
 
-Apply Diablo II data types:
-- UnitAny: dwType, dwUnitId, dwMode, pInventory, pStats, wX, wY
-- Room1/Room2: pRoom2, dwPosX, dwPosY, dwSizeX, dwSizeY, pLevel
-- PlayerData: szName, pNormalQuest, pNightmareQuest, pHellQuest
-- ItemData: dwQuality, dwItemFlags, wPrefix, wSuffix, BodyLocation
-- MonsterData: anEnchants, wUniqueNo, wName
-- Inventory: pOwner, pFirstItem, pCursorItem, dwItemCount
+Handle errors appropriately based on their type. For connection timeouts, retry the operation once and then switch to smaller batches if it fails again. For "Variable not found" errors, re-decompile the function and check the current variable names as Ghidra may have renamed them. For "/* null */" appearing in the output, retry set_plate_comment because the plate comment failed to apply. For offset mismatches between your comments and the actual code, cross-reference the disassembly before adding comments to ensure accuracy. During execution, work efficiently and silently without generating excessive status output or progress updates. Do not create or edit any files on the filesystem. Apply all changes directly in Ghidra using the available MCP tools. Use batch operations whenever possible to minimize network round-trips. If batch operations fail with connection errors, retry with individual operations. Allow up to 3 retry attempts for network timeouts before reporting failure.
 
-Pointer types: LPUNITANY, LPROOM1, LPROOM2, LPLEVEL
-
-Field naming (Hungarian notation):
-- dw: DWORD (dwFlags, dwUnitId)
-- p/lp: pointers (pNext, lpPlayerUnit)
-- w: WORD (wLevel, wStatIndex)
-- n: counts (nCount, nMaxXCells)
-- sz: strings (szName, szGameName)
-- f/b: boolean (fSaved, bActive)
-
-## STEP 6 - ADD COMMENTS
-
-Decompiler comments explain:
-- Algorithm context and purpose
-- Structure access patterns
-- Magic numbers and sentinel values
-- Validation logic and boundary checks
-- Edge cases and error handling
-- CRITICAL: Verify offset values against actual assembly before commenting
-- Assembly shows true offsets: [EBX + 0x4] means offset +4, not +2
-- Match comment offsets to disassembly, not decompiler line order
-- Document memory access patterns, not just variable loads
-
-Disassembly comments (max 32 chars):
-- "Load player slot index"
-- "Check if slot active"
-- "Jump to error handler"
-
-Function header should include:
-- High-level algorithm summary
-- Key parameters and return value
-- Important preconditions/side effects
-
-## STEP 6.5 - DEFINE DATA STRUCTURES
-
-When functions access structured data:
-- Document structure layout in plate comment
-- Note structure size if calculable (e.g., element * stride)
-- Create struct definitions for repeated access patterns
-- Use analyze_data_region for pointer targets
-
-## STEP 7 - DEFINE VARIABLES
-
-Replace undefined types:
-- undefined1 → BYTE
-- undefined2 → WORD
-- undefined4 → DWORD or pointer
-- undefined8 → QWORD
-
-## VERIFICATION
-
-After major operations (rename, prototype, comments):
-- Decompile function to verify changes applied correctly
-- Check that plate comment appears (not "/* null */")
-- Confirm all variable renames succeeded
-- Validate comment placement matches intended addresses
-
-## EXECUTION ORDER
-
-1. Analyze function completely first (analyze_function_complete)
-2. Rename function and set prototype
-3. Create labels at jump targets
-4. Rename variables (iterate until complete)
-5. Set plate comment with structure documentation
-6. Add decompiler comments
-7. Add disassembly comments
-8. Verify final output
-
-## BATCH OPERATIONS
-
-- Prefer document_function_complete for all-in-one updates
-- If document_function_complete fails, fall back to individual operations:
-  1. rename_function_by_address
-  2. set_function_prototype
-  3. batch_create_labels
-  4. batch_rename_variables (iterate if needed)
-  5. set_plate_comment
-  6. batch_set_comments
-- Verify after each major step
-
-## ERROR HANDLING
-
-- Connection timeouts: Retry operation once, then use smaller batches
-- "Variable not found": Re-decompile and check current variable names
-- "/* null */" in output: Plate comment failed to apply, retry set_plate_comment
-- Offset mismatches: Cross-reference disassembly before adding comments
-
-## EXECUTION
-
-- Work silently without status output
-- Do not create or edit files
-- Apply all changes in Ghidra using MCP tools
-- Use batch operations when possible
-- If batch operations fail with connection errors, retry with individual operations
-- Allow up to 3 retry attempts for network timeouts
-
-## COMPLETION CRITERIA
-
-A function is fully documented when:
-- Function has descriptive PascalCase name
-- Prototype includes accurate return type and parameters
-- All variables use camelCase descriptive names (no iVar*, param_*)
-- Plate comment shows structure with algorithm overview
-- Jump targets have snake_case labels
-- Decompiler shows inline comments at key operations
-- Disassembly has concise comments (max 32 chars)
-- Re-decompilation shows all changes applied successfully
+A function is considered fully documented when all of the following criteria are met: it has a descriptive PascalCase name that clearly indicates its purpose, the function prototype includes an accurate return type, all parameters are properly typed and named, all variables use descriptive camelCase names with no remaining iVar, param_, or local_ default names, the plate comment appears in the decompiler showing the function's purpose and structure documentation with algorithm overview, all jump targets have descriptive snake_case labels, the decompiler shows inline comments at key operations explaining what is happening, the disassembly has concise comments with a maximum of 32 characters at important instructions, and re-decompilation shows that all changes were applied successfully with no errors or "/* null */" placeholders. Only after verifying all these criteria are met should you consider the function documentation complete.
