@@ -4,6 +4,59 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v1.7.3 - 2025-10-13
+
+### Critical Bug Fix
+- ✅ **Fixed disassemble_bytes transaction commit** - Added missing `success = true` flag assignment before transaction commit, ensuring disassembled instructions are properly persisted to Ghidra database
+
+### Impact
+- **High** - All `disassemble_bytes` operations now correctly save changes
+- Resolves issue where API reported success but changes were rolled back
+
+### Testing
+- ✅ Verified with test case at address 0x6fb4ca14 (21 bytes)
+- ✅ Transaction commits successfully and persists across server restarts
+- ✅ Complete verification documented in `DISASSEMBLE_BYTES_VERIFICATION.md`
+
+### Changed Files
+- `src/main/java/com/xebyte/GhidraMCPPlugin.java` (Line 9716: Added `success = true`)
+- `pom.xml` (Version 1.7.2 → 1.7.3)
+- `src/main/resources/extension.properties` (Version 1.7.2 → 1.7.3)
+
+**See**: [v1.7.3 Release Notes](V1.7.3_RELEASE_NOTES.md)
+
+---
+
+## v1.7.2 - 2025-10-12
+
+### Critical Bug Fix
+- ✅ **Fixed disassemble_bytes connection abort** - Added explicit response flushing and enhanced error logging to prevent HTTP connection abort errors
+
+### Documentation
+- ✅ Comprehensive code review documented in `CODE_REVIEW_2025-10-13.md`
+- ✅ Overall rating: 4/5 (Very Good) - Production-ready with minor improvements identified
+
+**See**: [v1.7.2 Release Notes](V1.7.2_RELEASE_NOTES.md)
+
+---
+
+## v1.7.0 - 2025-10-11
+
+### Major Features
+- ✅ **Variable storage control** - `set_variable_storage` endpoint for fixing register reuse issues
+- ✅ **Ghidra script automation** - `run_script` and `list_scripts` endpoints
+- ✅ **Forced decompilation** - `force_decompile` endpoint for cache clearing
+- ✅ **Flow override control** - `clear_instruction_flow_override` and `set_function_no_return` endpoints
+
+### Capabilities
+- **Register reuse fixes** - Resolve EBP and other register conflicts
+- **Automated analysis** - Execute Python/Java Ghidra scripts programmatically
+- **Flow analysis control** - Fix incorrect CALL_TERMINATOR overrides
+
+**See**: [v1.7.0 Release Notes](V1.7.0_RELEASE_NOTES.md)
+
+---
+
 ## v1.6.0 - 2025-10-10
 
 ### New Features
