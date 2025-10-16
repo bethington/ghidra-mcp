@@ -4,6 +4,58 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v1.8.0 - 2025-10-16
+
+### Major Features
+- ✅ **6 New Structure Field Analysis Tools** - Comprehensive struct field reverse engineering
+  - `analyze_struct_field_usage` - Analyze field access patterns across functions
+  - `get_field_access_context` - Get assembly/decompilation context for specific field offsets
+  - `suggest_field_names` - AI-assisted field naming based on usage patterns
+  - `inspect_memory_content` - Read raw bytes with string detection heuristics
+  - `get_bulk_xrefs` - Batch xref retrieval for multiple addresses
+  - `get_assembly_context` - Get assembly instructions with context for xref sources
+
+### Documentation Suite
+- ✅ **6 Comprehensive Reverse Engineering Guides** (in `docs/guides/`)
+  - CALL_RETURN_OVERRIDE_CLEANUP.md - Flow override debugging
+  - EBP_REGISTER_REUSE_SOLUTIONS.md - Register reuse pattern analysis
+  - LIST_DATA_BY_XREFS_GUIDE.md - Data analysis workflow
+  - NORETURN_FIX_GUIDE.md - Non-returning function fixes
+  - ORPHANED_CALL_RETURN_OVERRIDES.md - Orphaned override detection
+  - REGISTER_REUSE_FIX_GUIDE.md - Complete register reuse fix workflow
+
+- ✅ **Enhanced Prompt Templates** (in `docs/prompts/`)
+  - PLATE_COMMENT_EXAMPLES.md - Real-world examples
+  - PLATE_COMMENT_FORMAT_GUIDE.md - Best practices
+  - README.md - Prompt documentation index
+  - OPTIMIZED_FUNCTION_DOCUMENTATION.md - Enhanced workflow
+
+### Utility Scripts
+- ✅ **9 Reverse Engineering Scripts** (in `scripts/`)
+  - ClearCallReturnOverrides.java - Clear orphaned flow overrides
+  - b_extract_data_with_xrefs.py - Bulk data extraction
+  - create_d2_typedefs.py - Type definition generation
+  - populate_d2_structs.py - Structure population automation
+  - test_data_xrefs_tool.py - Unit tests for xref tools
+  - data-extract.ps1, data-process.ps1, function-process.ps1, functions-extract.ps1 - PowerShell automation
+
+### Project Organization
+- ✅ **Restructured Documentation**
+  - Release notes → `docs/releases/v1.7.x/`
+  - Code reviews → `docs/code-reviews/`
+  - Analysis data → `docs/analysis/`
+  - Guides consolidated in `docs/guides/`
+
+### Changed Files
+- `bridge_mcp_ghidra.py` (+585 lines) - 6 new MCP tools, enhanced field analysis
+- `src/main/java/com/xebyte/GhidraMCPPlugin.java` (+188 lines) - Struct analysis endpoints
+- `pom.xml` (Version 1.7.3 → 1.8.0)
+- `.gitignore` - Added `*.txt` for temporary files
+
+**See**: Tag [v1.8.0](https://github.com/bethington/ghidra-mcp/releases/tag/v1.8.0)
+
+---
+
 ## v1.7.3 - 2025-10-13
 
 ### Critical Bug Fix
