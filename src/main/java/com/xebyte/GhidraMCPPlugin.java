@@ -299,6 +299,23 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, listDefinedData(offset, limit));
         });
 
+        // Alias for /data to match MCP tool name
+        server.createContext("/list_data_items", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit  = parseIntOrDefault(qparams.get("limit"),  100);
+            sendResponse(exchange, listDefinedData(offset, limit));
+        });
+
+        // List data items sorted by xref count (v1.7.4)
+        server.createContext("/list_data_items_by_xrefs", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit  = parseIntOrDefault(qparams.get("limit"),  100);
+            String format = qparams.getOrDefault("format", "text");
+            sendResponse(exchange, listDataItemsByXrefs(offset, limit, format));
+        });
+
         server.createContext("/searchFunctions", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String searchTerm = qparams.get("query");
@@ -972,8 +989,10 @@ public class GhidraMCPPlugin extends Plugin {
             String targetAddress = (String) params.get("target_address");
             boolean includeFunctionNames = parseBoolOrDefault(params.get("include_function_names"), true);
             boolean includeUsageContext = parseBoolOrDefault(params.get("include_usage_context"), true);
+            int limit = parseIntOrDefault(String.valueOf(params.get("limit")), 10);
+            int offset = parseIntOrDefault(String.valueOf(params.get("offset")), 0);
 
-            String result = batchDecompileXrefSources(targetAddress, includeFunctionNames, includeUsageContext);
+            String result = batchDecompileXrefSources(targetAddress, includeFunctionNames, includeUsageContext, limit, offset);
             sendResponse(exchange, result);
         });
 
@@ -1464,17 +1483,144 @@ public class GhidraMCPPlugin extends Plugin {
             while (it.hasNext()) {
                 Data data = it.next();
                 if (block.contains(data.getAddress())) {
-                    String label   = data.getLabel() != null ? data.getLabel() : "(unnamed)";
-                    String valRepr = data.getDefaultValueRepresentation();
-                    lines.add(String.format("%s: %s = %s",
-                        data.getAddress(),
-                        escapeNonAscii(label),
-                        escapeNonAscii(valRepr)
-                    ));
+                    // Use same format as list_globals: "name @ address [type] (info)"
+                    StringBuilder info = new StringBuilder();
+                    String label = data.getLabel() != null ? data.getLabel() : "DAT_" + data.getAddress().toString().replace(":", "");
+                    info.append(label);
+                    info.append(" @ ").append(data.getAddress().toString().replace(":", ""));
+
+                    // Add data type
+                    DataType dt = data.getDataType();
+                    String typeName = (dt != null) ? dt.getName() : "undefined";
+                    info.append(" [").append(typeName).append("]");
+
+                    // Add size information
+                    int length = data.getLength();
+                    String sizeStr = (length == 1) ? "1 byte" : length + " bytes";
+                    info.append(" (").append(sizeStr).append(")");
+
+                    lines.add(info.toString());
                 }
             }
         }
         return paginateList(lines, offset, limit);
+    }
+
+    /**
+     * List defined data items sorted by cross-reference count (v1.7.4).
+     * Returns data items with the most references first.
+     *
+     * @param offset Pagination offset
+     * @param limit Maximum results to return
+     * @param format Output format: "text" (default) or "json"
+     * @return Formatted list of data items sorted by xref count
+     */
+    private String listDataItemsByXrefs(int offset, int limit, String format) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+
+        // Collect all data items with their xref counts
+        List<DataItemInfo> dataItems = new ArrayList<>();
+        ReferenceManager refMgr = program.getReferenceManager();
+
+        for (MemoryBlock block : program.getMemory().getBlocks()) {
+            DataIterator it = program.getListing().getDefinedData(block.getStart(), true);
+            while (it.hasNext()) {
+                Data data = it.next();
+                if (block.contains(data.getAddress())) {
+                    // Count xrefs to this data item
+                    Address addr = data.getAddress();
+                    int xrefCount = refMgr.getReferenceCountTo(addr);
+
+                    String label = data.getLabel() != null ? data.getLabel() :
+                                   "DAT_" + addr.toString().replace(":", "");
+
+                    DataType dt = data.getDataType();
+                    String typeName = (dt != null) ? dt.getName() : "undefined";
+                    int length = data.getLength();
+
+                    dataItems.add(new DataItemInfo(addr.toString().replace(":", ""), label, typeName, length, xrefCount));
+                }
+            }
+        }
+
+        // Sort by xref count (descending)
+        dataItems.sort((a, b) -> Integer.compare(b.xrefCount, a.xrefCount));
+
+        // Format output based on requested format
+        if ("json".equalsIgnoreCase(format)) {
+            return formatDataItemsAsJson(dataItems, offset, limit);
+        } else {
+            return formatDataItemsAsText(dataItems, offset, limit);
+        }
+    }
+
+    // Simple data class for holding data item information
+    private static class DataItemInfo {
+        final String address;
+        final String label;
+        final String typeName;
+        final int length;
+        final int xrefCount;
+
+        DataItemInfo(String address, String label, String typeName, int length, int xrefCount) {
+            this.address = address;
+            this.label = label;
+            this.typeName = typeName;
+            this.length = length;
+            this.xrefCount = xrefCount;
+        }
+    }
+
+    private String formatDataItemsAsText(List<DataItemInfo> dataItems, int offset, int limit) {
+        List<String> lines = new ArrayList<>();
+
+        int start = Math.min(offset, dataItems.size());
+        int end = Math.min(start + limit, dataItems.size());
+
+        for (int i = start; i < end; i++) {
+            DataItemInfo item = dataItems.get(i);
+
+            StringBuilder line = new StringBuilder();
+            line.append(item.label);
+            line.append(" @ ").append(item.address);
+            line.append(" [").append(item.typeName).append("]");
+
+            String sizeStr = (item.length == 1) ? "1 byte" : item.length + " bytes";
+            line.append(" (").append(sizeStr).append(")");
+            line.append(" - ").append(item.xrefCount).append(" xrefs");
+
+            lines.add(line.toString());
+        }
+
+        return String.join("\n", lines);
+    }
+
+    private String formatDataItemsAsJson(List<DataItemInfo> dataItems, int offset, int limit) {
+        StringBuilder json = new StringBuilder();
+        json.append("[");
+
+        int start = Math.min(offset, dataItems.size());
+        int end = Math.min(start + limit, dataItems.size());
+
+        for (int i = start; i < end; i++) {
+            if (i > start) json.append(",");
+
+            DataItemInfo item = dataItems.get(i);
+
+            json.append("\n  {");
+            json.append("\n    \"address\": \"").append(item.address).append("\",");
+            json.append("\n    \"name\": \"").append(escapeJson(item.label)).append("\",");
+            json.append("\n    \"type\": \"").append(escapeJson(item.typeName)).append("\",");
+
+            String sizeStr = (item.length == 1) ? "1 byte" : item.length + " bytes";
+            json.append("\n    \"size\": \"").append(sizeStr).append("\",");
+            json.append("\n    \"xref_count\": ").append(item.xrefCount);
+            json.append("\n  }");
+        }
+
+        json.append("\n]");
+        return json.toString();
     }
 
     private String searchFunctionsByName(String searchTerm, int offset, int limit) {
@@ -6832,7 +6978,9 @@ public class GhidraMCPPlugin extends Plugin {
      */
     private String batchDecompileXrefSources(String targetAddressStr,
                                              boolean includeFunctionNames,
-                                             boolean includeUsageContext) {
+                                             boolean includeUsageContext,
+                                             int limit,
+                                             int offset) {
         Program program = getCurrentProgram();
         if (program == null) return "{\"error\": \"No program loaded\"}";
 
@@ -6854,18 +7002,34 @@ public class GhidraMCPPlugin extends Plugin {
                 }
             }
 
+            // Convert to list for pagination
+            List<Function> functionList = new ArrayList<>(functionsToDecompile);
+            int totalFunctions = functionList.size();
+
+            // Apply pagination
+            int startIndex = Math.min(offset, totalFunctions);
+            int endIndex = Math.min(offset + limit, totalFunctions);
+            List<Function> paginatedFunctions = functionList.subList(startIndex, endIndex);
+
             StringBuilder json = new StringBuilder();
             json.append("{");
+            json.append("\"total_functions\": ").append(totalFunctions).append(",");
+            json.append("\"offset\": ").append(offset).append(",");
+            json.append("\"limit\": ").append(limit).append(",");
+            json.append("\"returned\": ").append(paginatedFunctions.size()).append(",");
+            json.append("\"functions\": [");
+
             boolean first = true;
 
             DecompInterface decomp = new DecompInterface();
             decomp.openProgram(program);
 
-            for (Function func : functionsToDecompile) {
+            for (Function func : paginatedFunctions) {
                 if (!first) json.append(",");
                 first = false;
 
-                json.append("\"").append(func.getEntryPoint().toString()).append("\": {");
+                json.append("{");
+                json.append("\"function_address\": \"").append(func.getEntryPoint().toString()).append("\",");
                 json.append("\"function_name\": \"").append(func.getName()).append("\",");
 
                 DecompileResults results = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
@@ -6881,7 +7045,7 @@ public class GhidraMCPPlugin extends Plugin {
             }
 
             decomp.dispose();
-            json.append("}");
+            json.append("]}");
             return json.toString();
         } catch (Exception e) {
             return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";

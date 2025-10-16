@@ -46,6 +46,7 @@ ENDPOINT_TIMEOUTS = {
     'rename_variable': 30,                 # 30 seconds - single variable rename
     'rename_function': 45,                 # 45 seconds - function renames update xrefs
     'decompile_function': 45,              # 45 seconds - decompilation can be slow for large functions
+    'disassemble_bytes': 120,              # 2 minutes - disassembly can be slow for large ranges
     'default': 30                          # 30 seconds for all other operations
 }
 # Maximum retry attempts for transient failures (3 attempts with exponential backoff)
@@ -374,16 +375,16 @@ def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
 def safe_post_json(endpoint: str, data: dict, retries: int = 3) -> str:
     """
     Perform a JSON POST request with enhanced error handling and retry logic.
-    
+
     Args:
         endpoint: The API endpoint to call
         data: Data to send as JSON
         retries: Number of retry attempts for server errors
-    
+
     Returns:
         String response from the server
     """
-    # Validate server URL for security  
+    # Validate server URL for security
     if not validate_server_url(ghidra_server_url):
         logger.error(f"Invalid or unsafe server URL: {ghidra_server_url}")
         return "Error: Invalid server URL - only local addresses allowed"
@@ -394,12 +395,15 @@ def safe_post_json(endpoint: str, data: dict, retries: int = 3) -> str:
     timeout = get_timeout_for_endpoint(endpoint)
     logger.debug(f"Using timeout of {timeout}s for endpoint {endpoint}")
 
+    # Disable Keep-Alive for long-running operations to prevent connection timeout
+    headers = {'Connection': 'close'}
+
     for attempt in range(retries):
         try:
             start_time = time.time()
 
             logger.info(f"Sending JSON POST to {url} with data: {data}")
-            response = session.post(url, json=data, timeout=timeout)
+            response = session.post(url, json=data, headers=headers, timeout=timeout)
 
             response.encoding = 'utf-8'
             duration = time.time() - start_time
@@ -768,15 +772,61 @@ def list_namespaces(offset: int = 0, limit: int = 100) -> list:
 def list_data_items(offset: int = 0, limit: int = 100) -> list:
     """
     List defined data labels and their values with pagination.
-    
+
     Args:
         offset: Pagination offset for starting position (default: 0)
         limit: Maximum number of data items to return (default: 100)
-        
+
     Returns:
         List of data labels with their addresses, names, and values
     """
     return safe_get("data", {"offset": offset, "limit": limit})
+
+@mcp.tool()
+def list_data_items_by_xrefs(offset: int = 0, limit: int = 100, format: str = "json") -> str:
+    """
+    List defined data items sorted by cross-reference count (v1.7.4).
+    Returns data items with the most references first.
+
+    This tool is ideal for identifying the most heavily-used data structures
+    in a binary, helping prioritize which data items to analyze first.
+
+    Args:
+        offset: Pagination offset for starting position (default: 0)
+        limit: Maximum number of data items to return (default: 100)
+        format: Output format - "text" for human-readable or "json" for structured data (default: "json")
+
+    Returns:
+        Sorted list of data items with xref counts. Items with the most xrefs appear first.
+
+        JSON format returns:
+        [
+          {
+            "address": "0x6fb835b8",
+            "name": "DataTableName",
+            "type": "pointer",
+            "size": "4 bytes",
+            "xref_count": 25
+          },
+          ...
+        ]
+
+        Text format returns:
+        DataTableName @ 6fb835b8 [pointer] (4 bytes) - 25 xrefs
+        ...
+
+    Example:
+        # Get top 50 most referenced data items as JSON
+        list_data_items_by_xrefs(limit=50, format="json")
+
+        # Get all data items sorted by xrefs (text format)
+        list_data_items_by_xrefs(limit=10000, format="text")
+    """
+    if format not in ["text", "json"]:
+        raise GhidraValidationError("format must be 'text' or 'json'")
+
+    result = safe_get("list_data_items_by_xrefs", {"offset": offset, "limit": limit, "format": format})
+    return result
 
 @mcp.tool()
 def search_functions_by_name(query: str, offset: int = 0, limit: int = 100) -> list:
@@ -964,6 +1014,282 @@ def set_local_variable_type(function_address: str, variable_name: str, new_type:
         "function_address": function_address,
         "variable_name": variable_name,
         "new_type": new_type
+    })
+
+@mcp.tool()
+def set_function_no_return(function_address: str, no_return: bool) -> str:
+    """
+    Set a function's "No Return" attribute to control flow analysis.
+
+    This tool controls whether Ghidra treats a function as non-returning (like exit(), abort(), etc.).
+    When a function is marked as non-returning:
+    - Call sites are treated as terminators (CALL_TERMINATOR)
+    - The decompiler doesn't show code execution continuing after the call
+    - Control flow analysis treats the call like a RET instruction
+
+    Use this to:
+    - Fix incorrect flow overrides where functions actually return
+    - Mark error handlers that never return (ExitProcess, TerminateThread, etc.)
+    - Improve decompilation accuracy by correcting control flow assumptions
+
+    Args:
+        function_address: Memory address of the function in hex format (e.g., "0x6fabbf92")
+        no_return: true to mark as non-returning, false to mark as returning
+
+    Returns:
+        Success or failure message with the function's old and new state
+
+    Example:
+        # Fix TriggerFatalError that actually returns
+        set_function_no_return("0x6fabbf92", False)
+
+        # Mark ExitApplication as non-returning
+        set_function_no_return("0x6fab3664", True)
+    """
+    if not validate_hex_address(function_address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {function_address}")
+
+    return safe_post("set_function_no_return", {
+        "function_address": function_address,
+        "no_return": str(no_return).lower()  # Convert boolean to string for HTTP form data
+    })
+
+@mcp.tool()
+def clear_instruction_flow_override(address: str) -> str:
+    """
+    Clear instruction-level flow override at a specific address.
+
+    Flow overrides in Ghidra can exist at two levels:
+    1. Function level (set via set_function_no_return) - affects all call sites globally
+    2. Instruction level (per call site) - takes precedence over function-level settings
+
+    This tool clears instruction-level overrides like CALL_TERMINATOR that prevent
+    the decompiler from showing code execution continuing after a CALL instruction.
+
+    Use this tool to:
+    - Clear CALL_TERMINATOR overrides on specific CALL instructions
+    - Fix cases where a function actually returns but a specific call site is marked as non-returning
+    - Remove incorrect flow analysis overrides that hide reachable code
+    - Restore default flow analysis behavior for an instruction
+
+    After clearing the override, Ghidra re-analyzes the instruction using default flow rules,
+    which will show the complete execution path including code after the call.
+
+    Args:
+        address: Instruction address in hex format (e.g., "0x6fb5c8b9")
+
+    Returns:
+        Success message showing the old and new flow override state
+
+    Example:
+        # Clear CALL_TERMINATOR override at the TriggerFatalError call site
+        # This will reveal the error handling code that executes after the call
+        clear_instruction_flow_override("0x6fb5c8b9")
+
+    Note:
+        This operates on individual instructions, not functions. If you want to change
+        the function's global behavior, use set_function_no_return instead.
+    """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
+    return safe_post("clear_instruction_flow_override", {
+        "address": address
+    })
+
+@mcp.tool()
+def set_variable_storage(function_address: str, variable_name: str, storage: str) -> str:
+    """
+    Set custom storage for a local variable or parameter (v1.7.0).
+
+    This allows overriding Ghidra's automatic variable storage detection, which is
+    crucial for fixing decompilation issues caused by compiler optimizations.
+
+    **Use Cases:**
+    - Fix register reuse issues (e.g., EBP used as local variable after PUSH EBP)
+    - Correct variables misidentified as "unaff_" (unaffected registers)
+    - Override incorrect automatic stack variable allocation
+    - Force specific register or stack storage for variables
+
+    **Common Register Reuse Pattern:**
+    When a compiler pushes a register like EBP, then reuses it as a local variable:
+    ```asm
+    PUSH EBP        ; Save EBP
+    CALL func       ; Returns value in EAX
+    MOV EBP,EAX     ; Reuse EBP as local variable!
+    TEST EBP,EBP    ; Use it
+    ```
+
+    Ghidra sees this as "unaff_EBP" and produces incorrect decompilation.
+    Use this tool to create a proper local variable for the reused register.
+
+    Args:
+        function_address: Function address in hex (e.g., "0x6fb6aef0")
+        variable_name: Name of variable to modify (e.g., "unaff_EBP")
+        storage: Storage specification in one of these formats:
+            - "Stack[-0x10]:4" - Stack location at offset -0x10, 4 bytes
+            - "EBP:4" - EBP register, 4 bytes
+            - "register:EBP" - EBP register (auto-sized)
+            - "EAX:4" - EAX register, 4 bytes
+
+    Returns:
+        Success message with old and new storage details
+
+    Example:
+        # Fix EBP register reuse issue
+        set_variable_storage(
+            function_address="0x6fb6aef0",
+            variable_name="unaff_EBP",
+            storage="Stack[-0x4]:4"  # Move to stack to clarify it's a local var
+        )
+
+        # Then force re-decompilation to see the fix
+        force_decompile("0x6fb6aef0")
+
+    Note:
+        After changing variable storage, use force_decompile() to see the updated
+        decompilation with the new variable assignments.
+    """
+    if not validate_hex_address(function_address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {function_address}")
+
+    if not variable_name or not variable_name.strip():
+        raise GhidraValidationError("Variable name cannot be empty")
+
+    if not storage or not storage.strip():
+        raise GhidraValidationError("Storage specification cannot be empty")
+
+    return safe_post("set_variable_storage", {
+        "function_address": function_address,
+        "variable_name": variable_name,
+        "storage": storage
+    })
+
+@mcp.tool()
+def run_script(script_path: str, args: str = "") -> str:
+    """
+    Run a Ghidra script programmatically (v1.7.0).
+
+    Executes Java (.java) or Python (.py) Ghidra scripts to automate complex
+    analysis tasks that aren't covered by existing MCP tools.
+
+    **Common Use Cases:**
+    - Run custom analysis scripts
+    - Execute batch processing workflows
+    - Apply domain-specific reverse engineering techniques
+    - Automate repetitive manual tasks
+
+    Args:
+        script_path: Absolute path to the script file (.java or .py)
+        args: Optional JSON string of arguments (not yet fully implemented)
+
+    Returns:
+        Script execution result or error message
+
+    Example:
+        # Run the EBP register reuse fix script
+        run_script("C:/Users/user/ghidra-mcp/FixEBPRegisterReuse.py")
+
+        # Run a custom analysis script
+        run_script("/path/to/my_custom_analysis.java")
+
+    Note:
+        - Script must be a valid Ghidra script with proper annotations
+        - The script runs in the context of the currently loaded program
+        - Use list_scripts() to see available scripts
+    """
+    if not script_path or not script_path.strip():
+        raise GhidraValidationError("Script path cannot be empty")
+
+    return safe_post("run_script", {
+        "script_path": script_path,
+        "args": args
+    })
+
+@mcp.tool()
+def list_scripts(filter: str = "") -> str:
+    """
+    List available Ghidra scripts (v1.7.0).
+
+    Returns a JSON list of all Ghidra scripts available in the script directories,
+    optionally filtered by name.
+
+    Args:
+        filter: Optional filter string to match script names (case-sensitive substring match)
+
+    Returns:
+        JSON object with array of script information:
+        {
+          "scripts": [
+            {
+              "name": "FixEBPRegisterReuse.py",
+              "path": "/full/path/to/script.py",
+              "provider": "PythonScriptProvider"
+            },
+            ...
+          ]
+        }
+
+    Example:
+        # List all scripts
+        list_scripts()
+
+        # Find EBP-related scripts
+        list_scripts("EBP")
+
+        # Find Python scripts
+        list_scripts(".py")
+    """
+    params = {}
+    if filter:
+        params["filter"] = filter
+
+    return safe_get("list_scripts", params)
+
+@mcp.tool()
+def force_decompile(function_address: str) -> str:
+    """
+    Force fresh decompilation of a function (v1.7.0).
+
+    Clears cached decompilation results and forces Ghidra to re-analyze the function
+    from scratch. Essential after making changes that affect decompilation.
+
+    **When to Use:**
+    - After changing function signatures or prototypes
+    - After modifying variable storage with set_variable_storage()
+    - After updating data types used by the function
+    - After clearing flow overrides
+    - When decompilation seems stale or incorrect
+
+    **Workflow Example:**
+    ```python
+    # 1. Fix the variable storage issue
+    set_variable_storage("0x6fb6aef0", "unaff_EBP", "Stack[-0x4]:4")
+
+    # 2. Force re-decompilation to see the fix
+    result = force_decompile("0x6fb6aef0")
+    print(result)  # Shows new decompiled code
+    ```
+
+    Args:
+        function_address: Function address in hex format (e.g., "0x6fb6aef0")
+
+    Returns:
+        Success message followed by the fresh decompiled C code
+
+    Example:
+        # Force redecompilation after fixing register reuse
+        force_decompile("0x6fb6aef0")
+
+    Note:
+        This creates a new decompiler instance and forces a complete re-analysis.
+        The result includes the full decompiled C code showing any changes.
+    """
+    if not validate_hex_address(function_address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {function_address}")
+
+    return safe_post("force_decompile", {
+        "function_address": function_address
     })
 
 @mcp.tool()
@@ -1320,7 +1646,7 @@ def apply_data_type(address: str, type_name: str, clear_existing: bool = True) -
 def check_connection() -> str:
     """
     Check if the Ghidra plugin is running and accessible.
-    
+
     Returns:
         Connection status message
     """
@@ -1332,6 +1658,24 @@ def check_connection() -> str:
             return f"Connection failed: HTTP {response.status_code}"
     except Exception as e:
         return f"Connection failed: {str(e)}"
+
+@mcp.tool()
+def get_version() -> str:
+    """
+    Get version information about the GhidraMCP plugin and Ghidra.
+
+    Returns detailed version information including:
+    - Plugin version
+    - Plugin name
+    - Ghidra version
+    - Java version
+    - Endpoint count
+    - Implementation status
+
+    Returns:
+        JSON string with version information
+    """
+    return "\n".join(safe_get("get_version"))
 
 @mcp.tool()
 def get_metadata() -> str:
@@ -1649,15 +1993,22 @@ def detect_crypto_constants() -> list:
 @mcp.tool()
 def search_byte_patterns(pattern: str, mask: str = None) -> list:
     """
-    Search for byte patterns with optional masks (e.g., 'E8 ?? ?? ?? ??').
+    Search for byte patterns with optional wildcards (e.g., 'E8 ?? ?? ?? ??').
     Useful for finding shellcode, API calls, or specific instruction sequences.
-    
+
+    **IMPLEMENTED in v1.7.1** - Searches all initialized memory blocks for matching byte sequences.
+    Supports wildcard patterns using '??' for any byte. Returns up to 1000 matches.
+
     Args:
         pattern: Hexadecimal pattern to search for (e.g., "E8 ?? ?? ?? ??")
         mask: Optional mask for wildcards (use ? for wildcards)
-        
+
     Returns:
         List of addresses where the pattern was found
+
+    Example:
+        search_byte_patterns("E8 ?? ?? ?? ??")  # Find all CALL instructions
+        search_byte_patterns("558BEC")  # Find standard function prologue
     """
     params = {"pattern": pattern}
     if mask:
@@ -1745,22 +2096,31 @@ def find_anti_analysis_techniques() -> list:
 @mcp.tool()
 def extract_iocs() -> dict:
     """
-    [ROADMAP v2.0] Extract Indicators of Compromise (IOCs) from the binary.
+    Extract Indicators of Compromise (IOCs) from the binary.
 
-    IMPLEMENTATION STATUS: Placeholder - Returns "Not yet implemented"
-    PLANNED FOR: Version 2.0
+    **IMPLEMENTED in v1.7.1** - Searches all defined strings for IOC patterns.
+    Extracts IPv4 addresses, URLs, Windows file paths, and registry keys.
 
-    Planned functionality:
-    - Extracts IP addresses (IPv4 and IPv6)
-    - Finds URLs and domain names
-    - Identifies file paths (Windows, Linux, macOS)
-    - Detects registry keys and values
-    - Finds email addresses and cryptocurrency wallets
-    - Identifies mutex names and named pipes
+    Functionality:
+    - Extracts IPv4 addresses (filters out 0.0.0.0 and 255.255.255.255)
+    - Finds HTTP/HTTPS URLs
+    - Identifies Windows file paths (C:\...)
+    - Detects registry keys (HKEY_*, HKLM, HKCU, etc.)
+    - Scans up to 10,000 strings for performance
+    - Returns up to 100 results per category
 
     Returns:
-        Currently: Placeholder message
-        Future: Dictionary of IOCs organized by type (ips, urls, files, registry, etc.)
+        Dictionary of IOCs organized by type:
+        {
+            "ips": ["192.168.1.1", ...],
+            "urls": ["http://example.com", ...],
+            "file_paths": ["C:\\Windows\\System32\\...", ...],
+            "registry_keys": ["HKLM\\Software\\...", ...]
+        }
+
+    Example:
+        iocs = extract_iocs()
+        print(f"Found {len(iocs['ips'])} IP addresses")
     """
     return safe_get("extract_iocs")
 
@@ -1768,18 +2128,31 @@ def extract_iocs() -> dict:
 def batch_decompile_functions(function_names: list) -> dict:
     """
     Decompile multiple functions in a single request for better performance.
-    
+
+    **IMPLEMENTED in v1.7.1** - Decompiles up to 20 functions in one API call.
+    Reduces network round-trips and improves efficiency when analyzing multiple functions.
+
     Args:
-        function_names: List of function names to decompile
-        
+        function_names: List of function names to decompile (max 20)
+
     Returns:
-        Dictionary mapping function names to their decompiled code
+        Dictionary mapping function names to their decompiled code:
+        {
+            "FunctionName1": "void FunctionName1() { ... }",
+            "FunctionName2": "int FunctionName2(int param) { ... }",
+            ...
+        }
+
+    Example:
+        results = batch_decompile_functions(["main", "initializeApp", "cleanup"])
+        for func_name, code in results.items():
+            print(f"{func_name}:\n{code}\n")
     """
     # Validate all function names
     for name in function_names:
         if not validate_function_name(name):
             raise GhidraValidationError(f"Invalid function name: {name}")
-    
+
     return safe_get("batch_decompile", {"functions": ",".join(function_names)})
 
 @mcp.tool()
@@ -2493,7 +2866,9 @@ def get_assembly_context(
 def batch_decompile_xref_sources(
     target_address: str,
     include_function_names: bool = True,
-    include_usage_context: bool = True
+    include_usage_context: bool = True,
+    limit: int = 10,
+    offset: int = 0
 ) -> str:
     """
     Decompile all functions that reference a target address in one batch operation.
@@ -2501,29 +2876,48 @@ def batch_decompile_xref_sources(
     This tool finds all functions containing xrefs to the target address and
     decompiles them, providing usage context and variable type hints.
 
+    **Performance**: Uses pagination to prevent token overflow on high-traffic globals.
+    Default limit=10 functions. For globals with 100+ xrefs, use multiple calls with
+    different offset values to retrieve all results.
+
     Args:
         target_address: Address being referenced (e.g., "0x6fb835b8")
         include_function_names: Include function name analysis (default: True)
         include_usage_context: Extract specific usage lines (default: True)
+        limit: Maximum number of functions to decompile (default: 10, prevents token overflow)
+        offset: Pagination offset for starting position (default: 0)
 
     Returns:
-        JSON string with decompiled functions:
-        [
-          {
-            "function_name": "ProcessTimedSpellEffect...",
-            "function_address": "0x6fb6a000",
-            "xref_address": "0x6fb6a023",
-            "decompiled_code": "...",
-            "usage_lines": [
-              "pFVar4 = &FrameThresholdDataTable;",
-              "if ((int)pFVar4->threshold < iVar3) break;"
-            ],
-            "variable_type_hints": {
-              "threshold": "dword",
-              "access_pattern": "structure_field"
+        JSON string with pagination metadata and decompiled functions:
+        {
+          "total_functions": 114,
+          "offset": 0,
+          "limit": 10,
+          "returned": 10,
+          "functions": [
+            {
+              "function_name": "ProcessTimedSpellEffect...",
+              "function_address": "0x6fb6a000",
+              "xref_address": "0x6fb6a023",
+              "decompiled_code": "...",
+              "usage_lines": [
+                "pFVar4 = &FrameThresholdDataTable;",
+                "if ((int)pFVar4->threshold < iVar3) break;"
+              ],
+              "variable_type_hints": {
+                "threshold": "dword",
+                "access_pattern": "structure_field"
+              }
             }
-          }
-        ]
+          ]
+        }
+
+    Example:
+        # Get first 10 functions
+        result1 = batch_decompile_xref_sources("0x6fdeff80", limit=10, offset=0)
+
+        # Get next 10 functions
+        result2 = batch_decompile_xref_sources("0x6fdeff80", limit=10, offset=10)
     """
     import json
 
@@ -2533,7 +2927,9 @@ def batch_decompile_xref_sources(
     data = {
         "target_address": target_address,
         "include_function_names": include_function_names,
-        "include_usage_context": include_usage_context
+        "include_usage_context": include_usage_context,
+        "limit": limit,
+        "offset": offset
     }
 
     result = safe_post_json("batch_decompile_xref_sources", data)
@@ -2947,7 +3343,43 @@ def set_plate_comment(
     validate_hex_address(function_address)
 
     params = {"function_address": function_address, "comment": comment}
-    return safe_post("set_plate_comment", params)
+    result = safe_post("set_plate_comment", params)
+
+    # Verify plate comment was applied by decompiling the function
+    # This works around a Ghidra decompiler cache race condition where
+    # plate comments may not immediately appear in decompilation output
+    if "Success" in result:
+        try:
+            # Get function name to decompile
+            func_info = safe_get("get_function_by_address", {"address": function_address})
+            if "error" not in func_info.lower():
+                import json
+                func_data = json.loads(func_info)
+                func_name = func_data.get("name", "")
+
+                if func_name:
+                    # Wait brief moment for cache to settle
+                    import time
+                    time.sleep(0.3)
+
+                    # Decompile and check for plate comment
+                    decompiled = safe_get("decompile_function", {"name": func_name})
+
+                    # If plate comment shows as "/* null */", retry once
+                    if "/* null */" in decompiled:
+                        logger.warning(f"Plate comment cache miss detected at {function_address}, retrying...")
+                        time.sleep(0.5)  # Longer wait before retry
+                        result = safe_post("set_plate_comment", params)
+
+                        # Verify retry succeeded
+                        time.sleep(0.3)
+                        decompiled = safe_get("decompile_function", {"name": func_name})
+                        if "/* null */" in decompiled:
+                            result += " (WARNING: Plate comment may require additional retry - cache persistence issue)"
+        except Exception as e:
+            logger.debug(f"Could not verify plate comment: {e}")
+
+    return result
 
 @mcp.tool()
 def get_function_variables(
@@ -3427,6 +3859,67 @@ def search_functions_enhanced(
     params = {k: v for k, v in params.items() if v is not None}
 
     return safe_get("search_functions_enhanced", params)
+
+@mcp.tool()
+def disassemble_bytes(
+    start_address: str,
+    end_address: str = None,
+    length: int = None,
+    restrict_to_execute_memory: bool = True
+) -> str:
+    """
+    Disassemble a range of undefined bytes at a specific address (v1.7.1).
+
+    This tool converts undefined bytes into disassembled instructions, which is
+    essential after clearing flow overrides that previously hid code.
+
+    Args:
+        start_address: Starting address in hex format (e.g., "0x6fb4ca14")
+        end_address: Optional ending address in hex format (exclusive)
+        length: Optional length in bytes (alternative to end_address)
+        restrict_to_execute_memory: If true, restricts to executable memory (default: True)
+
+    Returns:
+        JSON with disassembly result:
+        {
+          "success": true,
+          "start_address": "0x6fb4ca14",
+          "end_address": "0x6fb4ca28",
+          "bytes_disassembled": 21,
+          "message": "Successfully disassembled 21 byte(s)"
+        }
+
+    Example:
+        # Disassemble 21 bytes at 0x6fb4ca14
+        disassemble_bytes("0x6fb4ca14", length=21)
+
+        # Disassemble range from 0x6fb4ca14 to 0x6fb4ca29 (exclusive)
+        disassemble_bytes("0x6fb4ca14", end_address="0x6fb4ca29")
+
+        # Auto-detect length (scan until existing code/data found)
+        disassemble_bytes("0x6fb4ca14")
+
+    Note:
+        If neither end_address nor length is provided, the tool will automatically
+        detect the range by scanning until it hits existing instructions or defined data.
+    """
+    if not validate_hex_address(start_address):
+        raise GhidraValidationError(f"Invalid start address format: {start_address}")
+
+    if end_address and not validate_hex_address(end_address):
+        raise GhidraValidationError(f"Invalid end address format: {end_address}")
+
+    data = {
+        "start_address": start_address,
+        "end_address": end_address,
+        "length": length,
+        "restrict_to_execute_memory": restrict_to_execute_memory
+    }
+
+    # Remove None values
+    data = {k: v for k, v in data.items() if v is not None}
+
+    return safe_post_json("disassemble_bytes", data)
 
 # ========== MAIN ==========
 
