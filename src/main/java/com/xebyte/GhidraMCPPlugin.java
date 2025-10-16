@@ -61,19 +61,18 @@ import java.util.regex.Pattern;
     status = PluginStatus.RELEASED,
     packageName = ghidra.app.DeveloperPluginPackage.NAME,
     category = PluginCategoryNames.ANALYSIS,
-    shortDescription = "GhidraMCP v1.7.2 - HTTP server plugin",
-    description = "GhidraMCP v1.7.2 - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 108 endpoints (101 implemented + 7 ROADMAP v2.0) for reverse engineering automation. " +
+    shortDescription = "GhidraMCP v1.8.0 - HTTP server plugin",
+    description = "GhidraMCP v1.8.0 - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
+                  "Provides 108 endpoints (98 implemented + 10 ROADMAP v2.0) for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, and Ghidra script automation. " +
-                  "v1.7.0: MAJOR UPDATE - Added programmatic variable storage control (set_variable_storage), " +
-                  "Ghidra script execution (run_script, list_scripts), and forced decompilation (force_decompile). " +
-                  "Enables fixing register reuse issues and automating complex analysis workflows. " +
-                  "v1.6.7: clear_instruction_flow_override endpoint - fixes CALL_TERMINATOR overrides. " +
-                  "v1.6.6: set_function_no_return endpoint - control function flow analysis. " +
-                  "v1.6.3: PERFORMANCE - batch_rename_variables timeout fix. " +
-                  "v1.6.1: PERFORMANCE - HTTP keep-alive, extended timeouts."
+                  "v1.8.0: MAJOR UPDATE - Comprehensive reverse engineering documentation suite with 6 new struct field " +
+                  "analysis tools (analyze_struct_field_usage, get_field_access_context, suggest_field_names), " +
+                  "enhanced documentation guides, and automated workflow scripts. " +
+                  "v1.7.3: Fixed disassemble_bytes transaction commit for proper database persistence. " +
+                  "v1.7.0: Added variable storage control, Ghidra script execution, and forced decompilation. " +
+                  "v1.6.0: Batch operations, validation tools, and comprehensive function documentation."
 )
 public class GhidraMCPPlugin extends Plugin {
 
