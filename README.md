@@ -10,7 +10,7 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 ## 🌟 Features
 
 ### Core MCP Integration
-- **Full MCP 1.8.0 Compatibility** - Complete implementation of Model Context Protocol
+- **Full MCP 1.8.1 Compatibility** - Complete implementation of Model Context Protocol
 - **109 MCP Tools Available** - Comprehensive API surface for binary analysis (102 implemented + 7 ROADMAP v2.0)
 - **Production-Ready Reliability** - Tested batch operations and atomic transactions
 - **Real-time Analysis** - Live integration with Ghidra's analysis engine
@@ -227,14 +227,14 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## 🏆 Production Status
 
-**Current Version**: 1.8.0
+**Current Version**: 1.8.1
 **Production Ready**: ✅ Yes
 **Package**: com.xebyte
 **MCP Tools**: 109 tools (102 implemented + 7 ROADMAP v2.0)
 **Test Coverage**: 100% compilation, full functionality verified
 **Documentation Coverage**: 100% with comprehensive ROADMAP
 **Performance**: 93% API call reduction with batch operations
-**Latest Enhancement**: Calling convention validation and diagnostics (v1.8.0)  
+**Latest Enhancement**: Project reorganization and __d2edicall support (v1.8.1)  
 
 ## 🙏 Acknowledgments
 

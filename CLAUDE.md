@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Ghidra MCP Server is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It exposes 108 MCP tools for binary analysis (98 implemented + 10 ROADMAP v2.0) through a dual-layer architecture: a Java plugin running in Ghidra that provides REST endpoints, and a Python bridge that implements the MCP protocol.
 
-**Current Version**: 1.8.0
+**Current Version**: 1.8.1
 **Package**: com.xebyte
 **Ghidra Version**: 11.4.2
 **Java Version**: 21 LTS
@@ -57,7 +57,7 @@ mvn clean package assembly:single
 
 This produces:
 - `target/GhidraMCP.jar` - The plugin JAR
-- `target/GhidraMCP-1.8.0.zip` - Ghidra extension package
+- `target/GhidraMCP-1.8.1.zip` - Ghidra extension package
 
 ### Testing
 
@@ -97,7 +97,7 @@ Manual installation:
 cp target/GhidraMCP.jar "<ghidra_install>/Extensions/Ghidra/"
 
 # Option 2: Install ZIP via Ghidra GUI
-# File → Install Extensions → Add Extension → Select GhidraMCP-1.8.0.zip
+# File → Install Extensions → Add Extension → Select GhidraMCP-1.8.1.zip
 ```
 
 ### Running the MCP Bridge

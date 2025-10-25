@@ -61,12 +61,13 @@ import java.util.regex.Pattern;
     status = PluginStatus.RELEASED,
     packageName = ghidra.app.DeveloperPluginPackage.NAME,
     category = PluginCategoryNames.ANALYSIS,
-    shortDescription = "GhidraMCP v1.8.0 - HTTP server plugin",
-    description = "GhidraMCP v1.8.0 - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
+    shortDescription = "GhidraMCP v1.8.1 - HTTP server plugin",
+    description = "GhidraMCP v1.8.1 - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
                   "Provides 108 endpoints (98 implemented + 10 ROADMAP v2.0) for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, and Ghidra script automation. " +
+                  "v1.8.1: Documentation reorganization, __d2edicall calling convention support, Windows compatibility fixes. " +
                   "v1.8.0: MAJOR UPDATE - Comprehensive reverse engineering documentation suite with 6 new struct field " +
                   "analysis tools (analyze_struct_field_usage, get_field_access_context, suggest_field_names), " +
                   "enhanced documentation guides, and automated workflow scripts. " +
@@ -5285,7 +5286,7 @@ public class GhidraMCPPlugin extends Plugin {
     private String getVersion() {
         StringBuilder version = new StringBuilder();
         version.append("{\n");
-        version.append("  \"plugin_version\": \"1.8.0\",\n");
+        version.append("  \"plugin_version\": \"1.8.1\",\n");
         version.append("  \"plugin_name\": \"GhidraMCP\",\n");
         version.append("  \"ghidra_version\": \"11.4.2\",\n");
         version.append("  \"java_version\": \"").append(System.getProperty("java.version")).append("\",\n");
