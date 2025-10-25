@@ -4,13 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ghidra MCP Server is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It exposes 108 MCP tools for binary analysis (98 implemented + 10 ROADMAP v2.0) through a dual-layer architecture: a Java plugin running in Ghidra that provides REST endpoints, and a Python bridge that implements the MCP protocol.
+Ghidra MCP Server is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It exposes 109 MCP tools for binary analysis (102 implemented + 7 ROADMAP v2.0) through a dual-layer architecture: a Java plugin running in Ghidra that provides REST endpoints, and a Python bridge that implements the MCP protocol.
 
 **Current Version**: 1.8.1
 **Package**: com.xebyte
 **Ghidra Version**: 11.4.2
 **Java Version**: 21 LTS
 **Python Version**: 3.8+
+**MCP Protocol**: stdio (default) and SSE transports
 
 ## Architecture
 
@@ -19,14 +20,16 @@ Ghidra MCP Server is a production-ready Model Context Protocol (MCP) server that
 1. **Ghidra Java Plugin** (`src/main/java/com/xebyte/GhidraMCPPlugin.java`)
    - Embedded HTTP server running on port 8089 (configurable)
    - Exposes Ghidra's reverse engineering API as REST endpoints
-   - Single-file plugin (~9400 lines) with 108 endpoints (98 implemented + 10 ROADMAP v2.0)
+   - Single-file plugin (~10,400 lines) with 109 endpoints (102 implemented + 7 ROADMAP v2.0)
    - Handles function analysis, decompilation, symbols, data types, cross-references
+   - Batch operations: atomic transactions with 93% API call reduction
 
 2. **Python MCP Bridge** (`bridge_mcp_ghidra.py`)
    - Translates REST API to MCP protocol using FastMCP framework
+   - 109 MCP tools exposed to AI assistants
    - Implements connection pooling, retry logic, request caching
    - Input validation and security restrictions (localhost-only connections)
-   - Two transport modes: stdio (default) and SSE
+   - Two transport modes: stdio (default, for AI tools) and SSE (for web clients)
 
 3. **Java Build System** (Maven-based)
    - System-scoped dependencies to Ghidra JARs in `lib/`
@@ -116,22 +119,40 @@ python bridge_mcp_ghidra.py --ghidra-server http://127.0.0.1:8089/
 ## Key Files and Structure
 
 ### Core Implementation
-- `bridge_mcp_ghidra.py` - Main MCP server (108 MCP tools: 98 implemented + 10 ROADMAP v2.0)
+
+- `bridge_mcp_ghidra.py` - Main MCP server (109 MCP tools: 102 implemented + 7 ROADMAP v2.0)
 - `src/main/java/com/xebyte/GhidraMCPPlugin.java` - Ghidra plugin (all REST endpoints)
 - `pom.xml` - Maven build configuration with system-scoped Ghidra dependencies
 - `src/assembly/ghidra-extension.xml` - Assembly descriptor for ZIP packaging
 
+### Automation & Scripts
+
+- `ghidra_scripts/` - Ghidra scripts for automation
+  - `DocumentFunctionWithClaude.java` - AI-assisted function documentation (Ctrl+Shift+P)
+  - `ClearCallReturnOverrides.java` - Clean orphaned flow overrides
+- `mcp_function_processor.py` - Batch function processing automation
+- `scripts/hybrid-function-processor.ps1` - Automated analysis workflows
+
 ### Configuration
+
 - `.env.template` - Environment variables template (copy to `.env` for local config)
+- `mcp-config.json` - Claude MCP configuration template
 - `pytest.ini` - Test configuration with markers and coverage settings
-- `requirements.txt` - Production dependencies (mcp, requests)
+- `requirements.txt` - Production dependencies (mcp, requests, fastmcp)
 - `requirements-test.txt` - Test dependencies
 
-### Documentation
-- `README.md` - User-facing documentation
-- `docs/API_REFERENCE.md` - Complete endpoint documentation
-- `docs/DEVELOPMENT_GUIDE.md` - Contributing guidelines
-- `tests/README.md` - Comprehensive test documentation
+### Documentation Structure
+
+- `START_HERE.md` - Getting started guide with multiple learning paths
+- `README.md` - User-facing documentation and quick start
+- `DOCUMENTATION_INDEX.md` - Complete documentation map
+- `VERSION_UPDATE_CHECKLIST.md` - Release process checklist
+- `docs/examples/` - Case studies and practical examples
+  - `examples/punit/` - Complete UnitAny structure analysis (8 files)
+  - `examples/diablo2/` - Diablo II structure references (2 files)
+- `docs/conventions/` - Calling convention documentation (5 files)
+- `docs/guides/` - Structure discovery methodologies (4 files)
+- `docs/prompts/` - AI workflow templates (8 optimized prompts)
 
 ## Development Guidelines
 
@@ -159,6 +180,14 @@ python bridge_mcp_ghidra.py --ghidra-server http://127.0.0.1:8089/
 - **Markers**: Use `@pytest.mark.integration`, `@pytest.mark.functional`, `@pytest.mark.slow`
 - **All new features require 100% test pass rate**
 
+### Release Process
+
+When preparing a new release, always use `VERSION_UPDATE_CHECKLIST.md`:
+- 16 locations must be updated with version numbers
+- Build, test, commit, tag, and push process documented
+- Includes semantic versioning guide and common pitfalls
+- Ensures consistency across all documentation
+
 ## Common Patterns
 
 ### Adding a New MCP Tool
@@ -180,22 +209,29 @@ result = safe_post_json("create_struct", {"name": "MyStruct", "fields": fields})
 
 ### Calling Conventions Support
 
-The plugin supports setting function prototypes with calling conventions:
+The plugin supports custom calling conventions including Diablo II conventions:
 ```python
+# Standard conventions
 set_function_prototype(
     function_address="0x401000",
     prototype="int main(int argc, char* argv[])",
-    calling_convention="__cdecl"  # Optional: __cdecl, __stdcall, __fastcall, __thiscall
+    calling_convention="__cdecl"  # __cdecl, __stdcall, __fastcall, __thiscall
 )
+
+# Custom Diablo II conventions (v1.8.1)
+# __d2call: Context in ECX (uses game.exe context pointer)
+# __d2edicall: Context in EDI (uses EDI for state management)
+# See docs/conventions/ for complete documentation
 ```
 
 ## Important Constraints
 
 1. **Ghidra JARs are system-scoped**: Maven won't download them; they must exist in `lib/` before building
-2. **Plugin requires Ghidra restart**: Changes to Java plugin only take effect after restarting Ghidra
-3. **Python 3.8+ required**: MCP framework uses modern Python features
+2. **Plugin requires Ghidra restart**: Changes to Java plugin only take effect after restarting Ghidra completely
+3. **Python 3.8+ required**: MCP framework uses modern Python features (async/await)
 4. **No concurrent program access**: Ghidra API is single-threaded; all operations serialize through Swing EDT
 5. **Security restrictions**: Bridge only accepts localhost/private IP connections for Ghidra server
+6. **Version consistency**: Use `VERSION_UPDATE_CHECKLIST.md` when releasing (16 locations to update)
 
 ## Troubleshooting
 
