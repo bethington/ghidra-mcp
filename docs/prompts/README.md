@@ -1,6 +1,6 @@
 # Ghidra MCP Documentation Prompts
 
-This directory contains optimized prompts for documenting binary code in Ghidra using the MCP tools. These prompts are designed to be used with Claude Code or other AI assistants to systematically reverse engineer and document functions.
+This directory contains optimized prompts for documenting binary code in Ghidra using the MCP tools. These prompts are designed to be used with Claude or other AI assistants to systematically reverse engineer and document functions.
 
 ## Available Prompts
 
@@ -9,44 +9,51 @@ This directory contains optimized prompts for documenting binary code in Ghidra 
 1. **OPTIMIZED_FUNCTION_DOCUMENTATION.md** ⭐ **RECOMMENDED**
    - Most comprehensive and detailed workflow
    - Complete step-by-step instructions for thorough function documentation
-   - Includes verification steps and error handling
+   - Includes verification steps, error handling, and structure identification
    - Best for: Detailed analysis requiring full documentation
    - Use when: Working on critical functions or complex algorithms
 
-2. **SINGLE_FUNCTION_COMPLETE_DOCUMENTATION.md**
-   - Concise workflow for single function analysis
-   - Structured steps with clear sections
-   - Best for: Quick reference during documentation
-   - Use when: You need a quick reminder of the workflow
+2. **UNIFIED_ANALYSIS_PROMPT.md**
+   - Combined function and data analysis workflow
+   - Comprehensive approach for complex binaries
+   - Best for: Full system analysis including structures
+   - Use when: Need to understand relationships between code and data
 
-3. **FUNCTION_DOCUMENTATION_WORKFLOW.md**
-   - Original workflow in prose format
-   - Less structured than the above prompts
-   - Best for: Understanding the general approach
-   - Use when: Learning the documentation methodology
+3. **ENHANCED_ANALYSIS_PROMPT.md**
+   - Advanced analysis techniques
+   - Specialized for data structure discovery and application
+   - Best for: Complex reverse engineering scenarios
+   - Use when: Standard workflow isn't sufficient
+
+4. **QUICK_START_PROMPT.md**
+   - Simplified workflow for beginners
+   - Essential steps without advanced features
+   - Best for: Getting started quickly
+   - Use when: Learning the system or simple functions
 
 ### Formatting Guides
 
-4. **PLATE_COMMENT_FORMAT_GUIDE.md** ⭐ **ESSENTIAL**
+5. **PLATE_COMMENT_FORMAT_GUIDE.md** ⭐ **ESSENTIAL**
    - Exact template for creating structured function header comments
-   - Box-drawing format with precise character counts
-   - Detailed formatting rules for sections
+   - Plain text format (Ghidra adds formatting automatically)
+   - Detailed formatting rules for all sections
    - Best for: Creating consistent, professional plate comments
    - Use when: You need to format function headers correctly
 
-5. **PLATE_COMMENT_EXAMPLES.md** ⭐ **PRACTICAL**
+6. **PLATE_COMMENT_EXAMPLES.md** ⭐ **PRACTICAL**
    - Real-world examples of properly formatted plate comments
    - Multiple function types (validation, processing, initialization, etc.)
    - Quick reference templates
    - Best for: Seeing complete examples before creating your own
    - Use when: You need inspiration or want to copy a template
 
-### Specialized Prompts
+### Data Analysis
 
-6. **ENHANCED_ANALYSIS_PROMPT.md**
-   - Advanced analysis techniques
-   - Best for: Complex reverse engineering scenarios
-   - Use when: Standard workflow isn't sufficient
+7. **DATA_DOCUMENTATION_TEMPLATE.md**
+   - Comprehensive template for documenting data structures and global variables
+   - Includes usage analysis, structure context, and naming conventions
+   - Best for: Analyzing data regions and applying proper types
+   - Use when: Documenting global variables, tables, or data structures
 
 7. **UNIFIED_ANALYSIS_PROMPT.md**
    - Combines multiple analysis approaches

@@ -1,0 +1,111 @@
+{
+  "enabled": true,
+  "description": "Process whitelist for MCP Cheat Engine Server",
+  "last_updated": "2025-10-19T14:52:11.438466",
+  "entries": [
+    {
+      "process_name": "notepad.exe",
+      "description": "Windows Notepad",
+      "category": "system",
+      "added_date": "2025-10-19T14:52:11.262226",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "code.exe",
+      "description": "Visual Studio Code",
+      "category": "development",
+      "added_date": "2025-10-19T14:52:11.262236",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "devenv.exe",
+      "description": "Visual Studio",
+      "category": "development",
+      "added_date": "2025-10-19T14:52:11.262238",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "windbg.exe",
+      "description": "Windows Debugger",
+      "category": "development",
+      "added_date": "2025-10-19T14:52:11.262240",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "x64dbg.exe",
+      "description": "x64dbg Debugger",
+      "category": "development",
+      "added_date": "2025-10-19T14:52:11.262241",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "ollydbg.exe",
+      "description": "OllyDbg Debugger",
+      "category": "development",
+      "added_date": "2025-10-19T14:52:11.262243",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "calc.exe",
+      "description": "Windows Calculator",
+      "category": "system",
+      "added_date": "2025-10-19T14:52:11.262244",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "mspaint.exe",
+      "description": "Microsoft Paint",
+      "category": "system",
+      "added_date": "2025-10-19T14:52:11.262246",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "wordpad.exe",
+      "description": "Windows WordPad",
+      "category": "system",
+      "added_date": "2025-10-19T14:52:11.262247",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "minesweeper.exe",
+      "description": "Minesweeper",
+      "category": "game",
+      "added_date": "2025-10-19T14:52:11.262248",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "solitaire.exe",
+      "description": "Solitaire",
+      "category": "game",
+      "added_date": "2025-10-19T14:52:11.262250",
+      "enabled": true,
+      "exact_match": true
+    },
+    {
+      "process_name": "test*.exe",
+      "description": "Test Applications",
+      "category": "test",
+      "added_date": "2025-10-19T14:52:11.262251",
+      "enabled": true,
+      "exact_match": false
+    },
+    {
+      "process_name": "demo*.exe",
+      "description": "Demo Applications",
+      "category": "test",
+      "added_date": "2025-10-19T14:52:11.262253",
+      "enabled": true,
+      "exact_match": false
+    }
+  ]
+}

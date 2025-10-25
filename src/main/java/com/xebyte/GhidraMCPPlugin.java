@@ -409,6 +409,11 @@ public class GhidraMCPPlugin extends Plugin {
             }
         });
 
+        server.createContext("/list_calling_conventions", exchange -> {
+            String result = listCallingConventions();
+            sendResponse(exchange, result);
+        });
+
         server.createContext("/set_local_variable_type", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String functionAddress = params.get("function_address");
@@ -675,8 +680,15 @@ public class GhidraMCPPlugin extends Plugin {
             Map<String, Object> params = parseJsonParams(exchange);
             String name = (String) params.get("name");
             Object fieldsObj = params.get("fields");
-            String fieldsJson = (fieldsObj instanceof String) ? (String) fieldsObj : 
-                                (fieldsObj != null ? fieldsObj.toString() : null);
+            String fieldsJson;
+            if (fieldsObj instanceof String) {
+                fieldsJson = (String) fieldsObj;
+            } else if (fieldsObj instanceof java.util.List) {
+                // Convert List to proper JSON array
+                fieldsJson = serializeListToJson((java.util.List<?>) fieldsObj);
+            } else {
+                fieldsJson = fieldsObj != null ? fieldsObj.toString() : null;
+            }
             sendResponse(exchange, createStruct(name, fieldsJson));
         });
 
@@ -684,10 +696,17 @@ public class GhidraMCPPlugin extends Plugin {
             Map<String, Object> params = parseJsonParams(exchange);
             String name = (String) params.get("name");
             Object valuesObj = params.get("values");
-            String valuesJson = (valuesObj instanceof String) ? (String) valuesObj : 
-                                (valuesObj != null ? valuesObj.toString() : null);
+            String valuesJson;
+            if (valuesObj instanceof String) {
+                valuesJson = (String) valuesObj;
+            } else if (valuesObj instanceof java.util.Map) {
+                // Convert Map to proper JSON object
+                valuesJson = serializeMapToJson((java.util.Map<?, ?>) valuesObj);
+            } else {
+                valuesJson = valuesObj != null ? valuesObj.toString() : null;
+            }
             Object sizeObj = params.get("size");
-            int size = (sizeObj instanceof Integer) ? (Integer) sizeObj : 
+            int size = (sizeObj instanceof Integer) ? (Integer) sizeObj :
                        parseIntOrDefault(sizeObj != null ? sizeObj.toString() : null, 4);
             sendResponse(exchange, createEnum(name, valuesJson, size));
         });
@@ -772,9 +791,15 @@ public class GhidraMCPPlugin extends Plugin {
                 Map<String, Object> params = parseJsonParams(exchange);
                 String name = (String) params.get("name");
                 Object fieldsObj = params.get("fields");
-                // Convert to JSON string like struct endpoint does
-                String fieldsJson = (fieldsObj instanceof String) ? (String) fieldsObj : 
-                                    (fieldsObj != null ? fieldsObj.toString() : null);
+                String fieldsJson;
+                if (fieldsObj instanceof String) {
+                    fieldsJson = (String) fieldsObj;
+                } else if (fieldsObj instanceof java.util.List) {
+                    // Convert List to proper JSON array (same as create_struct)
+                    fieldsJson = serializeListToJson((java.util.List<?>) fieldsObj);
+                } else {
+                    fieldsJson = fieldsObj != null ? fieldsObj.toString() : null;
+                }
                 sendResponse(exchange, createUnion(name, fieldsJson));
             } catch (Exception e) {
                 sendResponse(exchange, "Union endpoint error: " + e.getMessage());
@@ -2307,17 +2332,15 @@ public class GhidraMCPPlugin extends Plugin {
                                               String callingConvention, AtomicBoolean success, StringBuilder errorMessage) {
         // Use ApplyFunctionSignatureCmd to parse and apply the signature
         int txProto = program.startTransaction("Set function prototype");
+        boolean signatureApplied = false;
         try {
             // Get data type manager
             DataTypeManager dtm = program.getDataTypeManager();
 
-            // Get data type manager service
-            ghidra.app.services.DataTypeManagerService dtms = 
-                tool.getService(ghidra.app.services.DataTypeManagerService.class);
-
-            // Create function signature parser
-            ghidra.app.util.parser.FunctionSignatureParser parser = 
-                new ghidra.app.util.parser.FunctionSignatureParser(dtm, dtms);
+            // Create function signature parser without DataTypeManagerService
+            // to prevent UI dialogs from popping up (pass null instead of dtms)
+            ghidra.app.util.parser.FunctionSignatureParser parser =
+                new ghidra.app.util.parser.FunctionSignatureParser(dtm, null);
 
             // Parse the prototype into a function signature
             ghidra.program.model.data.FunctionDefinitionDataType sig = parser.parse(null, prototype);
@@ -2330,7 +2353,7 @@ public class GhidraMCPPlugin extends Plugin {
             }
 
             // Create and apply the command
-            ghidra.app.cmd.function.ApplyFunctionSignatureCmd cmd = 
+            ghidra.app.cmd.function.ApplyFunctionSignatureCmd cmd =
                 new ghidra.app.cmd.function.ApplyFunctionSignatureCmd(
                     addr, sig, SourceType.USER_DEFINED);
 
@@ -2338,11 +2361,7 @@ public class GhidraMCPPlugin extends Plugin {
             boolean cmdResult = cmd.applyTo(program, new ConsoleTaskMonitor());
 
             if (cmdResult) {
-                // Apply calling convention if specified
-                if (callingConvention != null && !callingConvention.isEmpty()) {
-                    applyCallingConvention(program, addr, callingConvention, errorMessage);
-                }
-                success.set(true);
+                signatureApplied = true;
                 Msg.info(this, "Successfully applied function signature");
             } else {
                 String msg = "Command failed: " + cmd.getStatusMsg();
@@ -2354,60 +2373,118 @@ public class GhidraMCPPlugin extends Plugin {
             errorMessage.append(msg);
             Msg.error(this, msg, e);
         } finally {
-            program.endTransaction(txProto, success.get());
+            program.endTransaction(txProto, signatureApplied);
+        }
+
+        // Apply calling convention in a SEPARATE transaction after signature is committed
+        // This ensures the calling convention isn't overridden by ApplyFunctionSignatureCmd
+        if (signatureApplied && callingConvention != null && !callingConvention.isEmpty()) {
+            int txConv = program.startTransaction("Set calling convention");
+            boolean conventionApplied = false;
+            try {
+                conventionApplied = applyCallingConvention(program, addr, callingConvention, errorMessage);
+                if (conventionApplied) {
+                    success.set(true);
+                } else {
+                    success.set(false);  // Fail if calling convention couldn't be applied
+                }
+            } catch (Exception e) {
+                String msg = "Error in calling convention transaction: " + e.getMessage();
+                errorMessage.append(msg);
+                Msg.error(this, msg, e);
+                success.set(false);
+            } finally {
+                program.endTransaction(txConv, conventionApplied);
+            }
+        } else if (signatureApplied) {
+            success.set(true);
+        }
+    }
+
+    /**
+     * List all available calling conventions in the current program
+     */
+    private String listCallingConventions() {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        try {
+            ghidra.program.model.lang.CompilerSpec compilerSpec = program.getCompilerSpec();
+            ghidra.program.model.lang.PrototypeModel[] available = compilerSpec.getCallingConventions();
+
+            StringBuilder result = new StringBuilder();
+            result.append("Available Calling Conventions (").append(available.length).append("):\n\n");
+
+            for (ghidra.program.model.lang.PrototypeModel model : available) {
+                result.append("- ").append(model.getName()).append("\n");
+            }
+
+            return result.toString();
+        } catch (Exception e) {
+            return "Error listing calling conventions: " + e.getMessage();
         }
     }
 
     /**
      * Apply calling convention to a function
+     * @return true if convention was successfully applied, false otherwise
      */
-    private void applyCallingConvention(Program program, Address addr, String callingConvention, StringBuilder errorMessage) {
+    private boolean applyCallingConvention(Program program, Address addr, String callingConvention, StringBuilder errorMessage) {
         try {
             Function func = getFunctionForAddress(program, addr);
             if (func == null) {
                 errorMessage.append("Could not find function to set calling convention");
-                return;
+                return false;
             }
 
             // Get the program's calling convention manager
             ghidra.program.model.lang.CompilerSpec compilerSpec = program.getCompilerSpec();
             ghidra.program.model.lang.PrototypeModel callingConv = null;
-            
+
             // Get all available calling conventions
             ghidra.program.model.lang.PrototypeModel[] available = compilerSpec.getCallingConventions();
-            
+
             // Try to find matching calling convention by name
             String targetName = callingConvention.toLowerCase();
             for (ghidra.program.model.lang.PrototypeModel model : available) {
                 String modelName = model.getName().toLowerCase();
-                if (modelName.equals(targetName) || 
+                if (modelName.equals(targetName) ||
                     modelName.equals("__" + targetName) ||
                     modelName.replace("__", "").equals(targetName.replace("__", ""))) {
                     callingConv = model;
                     break;
                 }
             }
-            
+
             if (callingConv != null) {
                 func.setCallingConvention(callingConv.getName());
                 Msg.info(this, "Set calling convention to: " + callingConv.getName());
+                return true;  // Successfully applied
             } else {
-                String msg = "Unknown calling convention: " + callingConvention;
-                errorMessage.append(msg);
-                Msg.warn(this, msg);
-                
+                String msg = "Unknown calling convention: " + callingConvention + ". ";
+
                 // List available calling conventions for debugging
-                StringBuilder availList = new StringBuilder("Available: ");
+                StringBuilder availList = new StringBuilder("Available calling conventions: ");
                 for (ghidra.program.model.lang.PrototypeModel model : available) {
                     availList.append(model.getName()).append(", ");
                 }
-                Msg.info(this, availList.toString());
+                String availMsg = availList.toString();
+                msg += availMsg;
+
+                errorMessage.append(msg);
+                Msg.warn(this, msg);
+                Msg.info(this, availMsg);
+
+                return false;  // Convention not found
             }
-            
+
         } catch (Exception e) {
             String msg = "Error setting calling convention: " + e.getMessage();
             errorMessage.append(msg);
             Msg.error(this, msg, e);
+            return false;
         }
     }
 
@@ -4603,65 +4680,88 @@ public class GhidraMCPPlugin extends Plugin {
         if (program == null) {
             return "No program loaded";
         }
-        
+
         if (name == null || name.isEmpty()) {
             return "Structure name is required";
         }
-        
+
         if (fieldsJson == null || fieldsJson.isEmpty()) {
             return "Fields JSON is required";
         }
+
+        final StringBuilder resultMsg = new StringBuilder();
+        final AtomicBoolean successFlag = new AtomicBoolean(false);
 
         try {
             // Parse the fields JSON (simplified parsing for basic structure)
             // Expected format: [{"name":"field1","type":"int"},{"name":"field2","type":"char"}]
             List<FieldDefinition> fields = parseFieldsJson(fieldsJson);
-            
+
             if (fields.isEmpty()) {
                 return "No valid fields provided";
             }
 
             DataTypeManager dtm = program.getDataTypeManager();
-            
+
             // Check if struct already exists
             DataType existingType = dtm.getDataType("/" + name);
             if (existingType != null) {
                 return "Structure with name '" + name + "' already exists";
             }
 
-            // Create the structure
-            int txId = program.startTransaction("Create Structure: " + name);
-            try {
-                ghidra.program.model.data.StructureDataType struct = 
-                    new ghidra.program.model.data.StructureDataType(name, 0);
-                
-                // Add fields sequentially for simplicity
-                for (FieldDefinition field : fields) {
-                    DataType fieldType = resolveDataType(dtm, field.type);
-                    if (fieldType == null) {
-                        return "Unknown field type: " + field.type;
+            // Create the structure on Swing EDT thread (required for transactions)
+            SwingUtilities.invokeAndWait(() -> {
+                int txId = program.startTransaction("Create Structure: " + name);
+                try {
+                    ghidra.program.model.data.StructureDataType struct =
+                        new ghidra.program.model.data.StructureDataType(name, 0);
+
+                    // Add fields sequentially for simplicity
+                    for (FieldDefinition field : fields) {
+                        DataType fieldType = resolveDataType(dtm, field.type);
+                        if (fieldType == null) {
+                            resultMsg.append("Unknown field type: ").append(field.type);
+                            return;
+                        }
+
+                        // Add field to the end of the structure
+                        struct.add(fieldType, fieldType.getLength(), field.name, "");
                     }
-                    
-                    // Add field to the end of the structure
-                    struct.add(fieldType, fieldType.getLength(), field.name, "");
+
+                    // Add the structure to the data type manager
+                    DataType createdStruct = dtm.addDataType(struct, null);
+
+                    successFlag.set(true);
+                    resultMsg.append("Successfully created structure '").append(name).append("' with ")
+                            .append(fields.size()).append(" fields, total size: ")
+                            .append(createdStruct.getLength()).append(" bytes");
+
+                } catch (Exception e) {
+                    resultMsg.append("Error creating structure: ").append(e.getMessage());
+                    Msg.error(this, "Error creating structure", e);
                 }
-                
-                // Add the structure to the data type manager
-                DataType createdStruct = dtm.addDataType(struct, null);
-                
-                program.endTransaction(txId, true);
-                
-                return "Successfully created structure '" + name + "' with " + fields.size() + 
-                       " fields, total size: " + createdStruct.getLength() + " bytes";
-                       
-            } catch (Exception e) {
-                program.endTransaction(txId, false);
-                return "Error creating structure: " + e.getMessage();
+                finally {
+                    program.endTransaction(txId, successFlag.get());
+                }
+            });
+
+            // Force event processing to ensure changes propagate
+            if (successFlag.get()) {
+                program.flushEvents();
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
-            
+
+        } catch (InterruptedException | InvocationTargetException e) {
+            return "Error: Failed to execute on Swing thread: " + e.getMessage();
         } catch (Exception e) {
             return "Error parsing fields JSON: " + e.getMessage();
         }
+
+        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
     /**
@@ -4680,67 +4780,235 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Parse fields JSON into FieldDefinition objects
+     * Parse fields JSON into FieldDefinition objects using robust JSON parsing
+     * Supports array format: [{"name":"field1","type":"uint"}, {"name":"field2","type":"void*"}]
      */
     private List<FieldDefinition> parseFieldsJson(String fieldsJson) {
         List<FieldDefinition> fields = new ArrayList<>();
-        
+
+        if (fieldsJson == null || fieldsJson.isEmpty()) {
+            Msg.error(this, "Fields JSON is null or empty");
+            return fields;
+        }
+
         try {
-            // Remove outer brackets and whitespace
-            String content = fieldsJson.trim();
-            if (content.startsWith("[")) {
-                content = content.substring(1);
+            // Trim and validate JSON array
+            String json = fieldsJson.trim();
+            if (!json.startsWith("[")) {
+                Msg.error(this, "Fields JSON must be an array starting with [, got: " + json.substring(0, Math.min(50, json.length())));
+                return fields;
             }
-            if (content.endsWith("]")) {
-                content = content.substring(0, content.length() - 1);
+            if (!json.endsWith("]")) {
+                Msg.error(this, "Fields JSON must be an array ending with ]");
+                return fields;
             }
-            
-            // Split by field objects (simple parsing)
-            String[] fieldStrings = content.split("\\},\\s*\\{");
-            
-            for (String fieldStr : fieldStrings) {
-                // Clean up braces
-                fieldStr = fieldStr.replace("{", "").replace("}", "").trim();
-                
-                String name = null;
-                String type = null;
-                int offset = -1;
-                
-                // Parse key-value pairs
-                String[] pairs = fieldStr.split(",");
-                for (String pair : pairs) {
-                    String[] keyValue = pair.split(":");
-                    if (keyValue.length == 2) {
-                        String key = keyValue[0].trim().replace("\"", "");
-                        String value = keyValue[1].trim().replace("\"", "");
-                        
-                        switch (key) {
-                            case "name":
-                                name = value;
-                                break;
-                            case "type":
-                                type = value;
-                                break;
-                            case "offset":
-                                try {
-                                    offset = Integer.parseInt(value);
-                                } catch (NumberFormatException e) {
-                                    // Ignore invalid offset
-                                }
-                                break;
+
+            // Remove outer brackets
+            json = json.substring(1, json.length() - 1).trim();
+
+            // Parse field objects using proper bracket/brace matching
+            List<String> fieldJsons = parseFieldJsonArray(json);
+            Msg.info(this, "Found " + fieldJsons.size() + " field objects to parse");
+
+            for (String fieldJson : fieldJsons) {
+                FieldDefinition field = parseFieldJsonObject(fieldJson);
+                if (field != null && field.name != null && field.type != null) {
+                    fields.add(field);
+                    Msg.info(this, "  ✓ Parsed field: " + field.name + " (" + field.type + ")");
+                } else {
+                    Msg.warn(this, "  ✗ Field missing required fields (name/type): " + fieldJson.substring(0, Math.min(50, fieldJson.length())));
+                }
+            }
+
+            if (fields.isEmpty()) {
+                Msg.error(this, "No valid fields parsed from JSON");
+            } else {
+                Msg.info(this, "Successfully parsed " + fields.size() + " field(s)");
+            }
+
+        } catch (Exception e) {
+            Msg.error(this, "Exception parsing fields JSON: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        return fields;
+    }
+
+    /**
+     * Parse a JSON array string by properly matching braces
+     * Returns list of individual JSON object content strings (without outer braces)
+     */
+    private List<String> parseFieldJsonArray(String json) {
+        List<String> items = new ArrayList<>();
+
+        int braceDepth = 0;
+        int start = -1;
+        boolean inString = false;
+        boolean escapeNext = false;
+
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+
+            // Handle escape sequences
+            if (escapeNext) {
+                escapeNext = false;
+                continue;
+            }
+
+            if (c == '\\') {
+                escapeNext = true;
+                continue;
+            }
+
+            // Track if we're inside a string
+            if (c == '"' && !escapeNext) {
+                inString = !inString;
+                continue;
+            }
+
+            // Only count braces outside of strings
+            if (!inString) {
+                if (c == '{') {
+                    if (braceDepth == 0) {
+                        start = i + 1; // Start after the opening brace
+                    }
+                    braceDepth++;
+                } else if (c == '}') {
+                    braceDepth--;
+                    if (braceDepth == 0 && start >= 0) {
+                        // Extract object content (between braces)
+                        String item = json.substring(start, i).trim();
+                        if (!item.isEmpty()) {
+                            items.add(item);
                         }
+                        start = -1;
                     }
                 }
-                
-                if (name != null && type != null) {
-                    fields.add(new FieldDefinition(name, type, offset));
+            }
+        }
+
+        return items;
+    }
+
+    /**
+     * Parse a single JSON object string (content between braces) into a FieldDefinition
+     * Format: "name":"fieldname","type":"typename","offset":0
+     */
+    private FieldDefinition parseFieldJsonObject(String objectJson) {
+        if (objectJson == null || objectJson.isEmpty()) {
+            return null;
+        }
+
+        String name = null;
+        String type = null;
+        int offset = -1;
+
+        try {
+            // Parse key-value pairs while respecting quotes and escapes
+            Map<String, String> keyValues = parseJsonKeyValues(objectJson);
+
+            if (keyValues.containsKey("name")) {
+                name = keyValues.get("name");
+            }
+            if (keyValues.containsKey("type")) {
+                type = keyValues.get("type");
+            }
+            if (keyValues.containsKey("offset")) {
+                try {
+                    offset = Integer.parseInt(keyValues.get("offset"));
+                } catch (NumberFormatException e) {
+                    // Keep offset as -1
                 }
             }
+
         } catch (Exception e) {
-            // Return empty list on parse error
+            Msg.error(this, "Error parsing JSON object: " + e.getMessage());
         }
-        
-        return fields;
+
+        return new FieldDefinition(name, type, offset);
+    }
+
+    /**
+     * Parse JSON key-value pairs from a string like: "name":"value","type":"typename"
+     * Properly handles quoted strings and escapes
+     */
+    private Map<String, String> parseJsonKeyValues(String json) {
+        Map<String, String> pairs = new LinkedHashMap<>();
+
+        // Find all "key":"value" or "key":value patterns
+        int i = 0;
+        while (i < json.length()) {
+            // Skip whitespace and commas
+            while (i < json.length() && (Character.isWhitespace(json.charAt(i)) || json.charAt(i) == ',')) {
+                i++;
+            }
+
+            if (i >= json.length()) break;
+
+            // Expect opening quote for key
+            if (json.charAt(i) != '"') {
+                i++;
+                continue;
+            }
+
+            // Parse key (quoted string)
+            i++; // Skip opening quote
+            int keyStart = i;
+            boolean escapeNext = false;
+            while (i < json.length()) {
+                char c = json.charAt(i);
+                if (escapeNext) {
+                    escapeNext = false;
+                } else if (c == '\\') {
+                    escapeNext = true;
+                } else if (c == '"') {
+                    break;
+                }
+                i++;
+            }
+            String key = json.substring(keyStart, i).replace("\\\"", "\"");
+            i++; // Skip closing quote
+
+            // Skip whitespace and colon
+            while (i < json.length() && (Character.isWhitespace(json.charAt(i)) || json.charAt(i) == ':')) {
+                i++;
+            }
+
+            if (i >= json.length()) break;
+
+            // Parse value (can be quoted string or number)
+            String value;
+            if (json.charAt(i) == '"') {
+                // Quoted string value
+                i++; // Skip opening quote
+                int valueStart = i;
+                escapeNext = false;
+                while (i < json.length()) {
+                    char c = json.charAt(i);
+                    if (escapeNext) {
+                        escapeNext = false;
+                    } else if (c == '\\') {
+                        escapeNext = true;
+                    } else if (c == '"') {
+                        break;
+                    }
+                    i++;
+                }
+                value = json.substring(valueStart, i).replace("\\\"", "\"");
+                i++; // Skip closing quote
+            } else {
+                // Unquoted value (number, boolean, etc)
+                int valueStart = i;
+                while (i < json.length() && json.charAt(i) != ',' && json.charAt(i) != '}') {
+                    i++;
+                }
+                value = json.substring(valueStart, i).trim();
+            }
+
+            pairs.put(key, value);
+        }
+
+        return pairs;
     }
 
     /**
@@ -4849,6 +5117,74 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
+     * Serialize a List of objects to proper JSON string
+     * Handles Map objects within the list
+     */
+    private String serializeListToJson(java.util.List<?> list) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) sb.append(",");
+            Object item = list.get(i);
+            if (item instanceof String) {
+                sb.append("\"").append(escapeJsonString((String) item)).append("\"");
+            } else if (item instanceof Number) {
+                sb.append(item);
+            } else if (item instanceof java.util.Map) {
+                sb.append(serializeMapToJson((java.util.Map<?, ?>) item));
+            } else if (item instanceof java.util.List) {
+                sb.append(serializeListToJson((java.util.List<?>) item));
+            } else {
+                sb.append("\"").append(escapeJsonString(item.toString())).append("\"");
+            }
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    /**
+     * Serialize a Map to proper JSON object
+     */
+    private String serializeMapToJson(java.util.Map<?, ?> map) {
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (java.util.Map.Entry<?, ?> entry : map.entrySet()) {
+            if (!first) sb.append(",");
+            first = false;
+            sb.append("\"").append(escapeJsonString(entry.getKey().toString())).append("\":");
+            Object value = entry.getValue();
+            if (value instanceof String) {
+                sb.append("\"").append(escapeJsonString((String) value)).append("\"");
+            } else if (value instanceof Number) {
+                sb.append(value);
+            } else if (value instanceof java.util.Map) {
+                sb.append(serializeMapToJson((java.util.Map<?, ?>) value));
+            } else if (value instanceof java.util.List) {
+                sb.append(serializeListToJson((java.util.List<?>) value));
+            } else if (value instanceof Boolean) {
+                sb.append(value);
+            } else if (value == null) {
+                sb.append("null");
+            } else {
+                sb.append("\"").append(escapeJsonString(value.toString())).append("\"");
+            }
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    /**
+     * Escape special characters in JSON string values
+     */
+    private String escapeJsonString(String str) {
+        if (str == null) return "";
+        return str.replace("\\", "\\\\")
+                  .replace("\"", "\\\"")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r")
+                  .replace("\t", "\\t");
+    }
+
+    /**
      * Apply a specific data type at the given memory address
      */
     public String applyDataType(String addressStr, String typeName, boolean clearExisting) {
@@ -4949,12 +5285,12 @@ public class GhidraMCPPlugin extends Plugin {
     private String getVersion() {
         StringBuilder version = new StringBuilder();
         version.append("{\n");
-        version.append("  \"plugin_version\": \"1.7.2\",\n");
+        version.append("  \"plugin_version\": \"1.8.0\",\n");
         version.append("  \"plugin_name\": \"GhidraMCP\",\n");
         version.append("  \"ghidra_version\": \"11.4.2\",\n");
         version.append("  \"java_version\": \"").append(System.getProperty("java.version")).append("\",\n");
-        version.append("  \"endpoint_count\": 108,\n");
-        version.append("  \"implementation_status\": \"101 implemented + 7 ROADMAP v2.0\"\n");
+        version.append("  \"endpoint_count\": 109,\n");
+        version.append("  \"implementation_status\": \"102 implemented + 7 ROADMAP v2.0\"\n");
         version.append("}");
         return version.toString();
     }
@@ -7060,26 +7396,237 @@ public class GhidraMCPPlugin extends Plugin {
         Program program = getCurrentProgram();
         if (program == null) return "{\"error\": \"No program loaded\"}";
 
+        final StringBuilder resultJson = new StringBuilder();
+        final AtomicReference<String> typeApplied = new AtomicReference<>("none");
+        final List<String> operations = new ArrayList<>();
+
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             if (addr == null) {
-                return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+                return "{\"error\": \"Invalid address: " + escapeJson(addressStr) + "\"}";
             }
 
-            // This is a simplified placeholder
-            // Full implementation would parse typeDefinitionObj and create actual structures
+            // Parse type_definition from the object
+            @SuppressWarnings("unchecked")
+            final Map<String, Object> typeDef;
+            if (typeDefinitionObj instanceof Map) {
+                typeDef = (Map<String, Object>) typeDefinitionObj;
+            } else if (typeDefinitionObj == null) {
+                typeDef = null;
+            } else {
+                // Received something unexpected - log it for debugging
+                return "{\"error\": \"type_definition must be a JSON object/dict, got: " +
+                       escapeJson(typeDefinitionObj.getClass().getSimpleName()) +
+                       " with value: " + escapeJson(String.valueOf(typeDefinitionObj)) + "\"}";
+            }
 
-            StringBuilder result = new StringBuilder();
-            result.append("{");
-            result.append("\"success\": true,");
-            result.append("\"address\": \"").append(addressStr).append("\",");
-            result.append("\"classification\": \"").append(classification).append("\",");
-            result.append("\"name\": \"").append(name).append("\",");
-            result.append("\"type_applied\": \"placeholder\",");
-            result.append("\"operations_performed\": [\"created_type\", \"applied_type\", \"renamed\", \"commented\"]");
-            result.append("}");
+            final String finalClassification = classification;
+            final String finalName = name;
+            final String finalComment = comment;
 
-            return result.toString();
+            // Atomic transaction for all operations
+            SwingUtilities.invokeAndWait(() -> {
+                int txId = program.startTransaction("Apply Data Classification");
+                boolean success = false;
+
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    Listing listing = program.getListing();
+                    DataType dataTypeToApply = null;
+
+                    // 1. CREATE/RESOLVE DATA TYPE based on classification
+                    if ("PRIMITIVE".equals(finalClassification)) {
+                        // CRITICAL FIX: Require type_definition for PRIMITIVE classification
+                        if (typeDef == null) {
+                            throw new IllegalArgumentException(
+                                "PRIMITIVE classification requires type_definition parameter. " +
+                                "Example: type_definition='{\"type\": \"dword\"}' or type_definition={\"type\": \"dword\"}");
+                        }
+                        if (!typeDef.containsKey("type")) {
+                            throw new IllegalArgumentException(
+                                "PRIMITIVE classification requires 'type' field in type_definition. " +
+                                "Received: " + typeDef.keySet() + ". " +
+                                "Example: {\"type\": \"dword\"}");
+                        }
+
+                        String typeStr = (String) typeDef.get("type");
+                        dataTypeToApply = resolveDataType(dtm, typeStr);
+                        if (dataTypeToApply != null) {
+                            typeApplied.set(typeStr);
+                            operations.add("resolved_primitive_type");
+                        } else {
+                            throw new IllegalArgumentException("Failed to resolve primitive type: " + typeStr);
+                        }
+                    }
+                    else if ("STRUCTURE".equals(finalClassification)) {
+                        // CRITICAL FIX: Require type_definition for STRUCTURE classification
+                        if (typeDef == null || !typeDef.containsKey("name") || !typeDef.containsKey("fields")) {
+                            throw new IllegalArgumentException(
+                                "STRUCTURE classification requires type_definition with 'name' and 'fields'. " +
+                                "Example: {\"name\": \"MyStruct\", \"fields\": [{\"name\": \"field1\", \"type\": \"dword\"}]}");
+                        }
+
+                        String structName = (String) typeDef.get("name");
+                        Object fieldsObj = typeDef.get("fields");
+
+                        // Check if structure already exists
+                        DataType existing = dtm.getDataType("/" + structName);
+                        if (existing != null) {
+                            dataTypeToApply = existing;
+                            typeApplied.set(structName);
+                            operations.add("found_existing_structure");
+                        } else {
+                            // Create new structure
+                            StructureDataType struct = new StructureDataType(structName, 0);
+
+                            // Parse fields
+                            if (fieldsObj instanceof List) {
+                                @SuppressWarnings("unchecked")
+                                List<Map<String, Object>> fieldsList = (List<Map<String, Object>>) fieldsObj;
+                                for (Map<String, Object> field : fieldsList) {
+                                    String fieldName = (String) field.get("name");
+                                    String fieldType = (String) field.get("type");
+
+                                    DataType fieldDataType = resolveDataType(dtm, fieldType);
+                                    if (fieldDataType != null) {
+                                        struct.add(fieldDataType, fieldDataType.getLength(), fieldName, "");
+                                    }
+                                }
+                            }
+
+                            dataTypeToApply = dtm.addDataType(struct, null);
+                            typeApplied.set(structName);
+                            operations.add("created_structure");
+                        }
+                    }
+                    else if ("ARRAY".equals(finalClassification)) {
+                        // CRITICAL FIX: Require type_definition for ARRAY classification
+                        if (typeDef == null) {
+                            throw new IllegalArgumentException(
+                                "ARRAY classification requires type_definition with 'element_type' or 'element_struct', and 'count'. " +
+                                "Example: {\"element_type\": \"dword\", \"count\": 64}");
+                        }
+
+                        DataType elementType = null;
+                        int count = 1;
+
+                        // Support element_type or element_struct
+                        if (typeDef.containsKey("element_type")) {
+                            String elementTypeStr = (String) typeDef.get("element_type");
+                            elementType = resolveDataType(dtm, elementTypeStr);
+                            if (elementType == null) {
+                                throw new IllegalArgumentException("Failed to resolve array element type: " + elementTypeStr);
+                            }
+                        } else if (typeDef.containsKey("element_struct")) {
+                            String structName = (String) typeDef.get("element_struct");
+                            elementType = dtm.getDataType("/" + structName);
+                            if (elementType == null) {
+                                throw new IllegalArgumentException("Failed to find struct for array element: " + structName);
+                            }
+                        } else {
+                            throw new IllegalArgumentException(
+                                "ARRAY type_definition must contain 'element_type' or 'element_struct'");
+                        }
+
+                        if (typeDef.containsKey("count")) {
+                            Object countObj = typeDef.get("count");
+                            if (countObj instanceof Integer) {
+                                count = (Integer) countObj;
+                            } else if (countObj instanceof String) {
+                                count = Integer.parseInt((String) countObj);
+                            }
+                        } else {
+                            throw new IllegalArgumentException("ARRAY type_definition must contain 'count' field");
+                        }
+
+                        if (count <= 0) {
+                            throw new IllegalArgumentException("Array count must be positive, got: " + count);
+                        }
+
+                        ArrayDataType arrayType = new ArrayDataType(elementType, count, elementType.getLength());
+                        dataTypeToApply = arrayType;
+                        typeApplied.set(elementType.getName() + "[" + count + "]");
+                        operations.add("created_array");
+                    }
+                    else if ("STRING".equals(finalClassification)) {
+                        if (typeDef != null && typeDef.containsKey("type")) {
+                            String typeStr = (String) typeDef.get("type");
+                            dataTypeToApply = resolveDataType(dtm, typeStr);
+                            if (dataTypeToApply != null) {
+                                typeApplied.set(typeStr);
+                                operations.add("resolved_string_type");
+                            }
+                        }
+                    }
+
+                    // 2. APPLY DATA TYPE
+                    if (dataTypeToApply != null) {
+                        // Clear existing code/data
+                        CodeUnit existingCU = listing.getCodeUnitAt(addr);
+                        if (existingCU != null) {
+                            listing.clearCodeUnits(addr,
+                                addr.add(Math.max(dataTypeToApply.getLength() - 1, 0)), false);
+                        }
+
+                        listing.createData(addr, dataTypeToApply);
+                        operations.add("applied_type");
+                    }
+
+                    // 3. RENAME (if name provided)
+                    if (finalName != null && !finalName.isEmpty()) {
+                        Data data = listing.getDefinedDataAt(addr);
+                        if (data != null) {
+                            SymbolTable symTable = program.getSymbolTable();
+                            Symbol symbol = symTable.getPrimarySymbol(addr);
+                            if (symbol != null) {
+                                symbol.setName(finalName, SourceType.USER_DEFINED);
+                            } else {
+                                symTable.createLabel(addr, finalName, SourceType.USER_DEFINED);
+                            }
+                            operations.add("renamed");
+                        }
+                    }
+
+                    // 4. SET COMMENT (if provided)
+                    if (finalComment != null && !finalComment.isEmpty()) {
+                        // CRITICAL FIX: Unescape newlines before setting comment
+                        String unescapedComment = finalComment.replace("\\n", "\n")
+                                                             .replace("\\t", "\t")
+                                                             .replace("\\r", "\r");
+                        listing.setComment(addr, CodeUnit.PRE_COMMENT, unescapedComment);
+                        operations.add("commented");
+                    }
+
+                    success = true;
+
+                } catch (Exception e) {
+                    resultJson.append("{\"error\": \"").append(escapeJson(e.getMessage())).append("\"}");
+                } finally {
+                    program.endTransaction(txId, success);
+                }
+            });
+
+            // Build result JSON if no error
+            if (resultJson.length() == 0) {
+                resultJson.append("{");
+                resultJson.append("\"success\": true,");
+                resultJson.append("\"address\": \"").append(escapeJson(addressStr)).append("\",");
+                resultJson.append("\"classification\": \"").append(escapeJson(classification)).append("\",");
+                if (name != null) {
+                    resultJson.append("\"name\": \"").append(escapeJson(name)).append("\",");
+                }
+                resultJson.append("\"type_applied\": \"").append(escapeJson(typeApplied.get())).append("\",");
+                resultJson.append("\"operations_performed\": [");
+                for (int i = 0; i < operations.size(); i++) {
+                    resultJson.append("\"").append(escapeJson(operations.get(i))).append("\"");
+                    if (i < operations.size() - 1) resultJson.append(",");
+                }
+                resultJson.append("]");
+                resultJson.append("}");
+            }
+
+            return resultJson.toString();
+
         } catch (Exception e) {
             return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
         }

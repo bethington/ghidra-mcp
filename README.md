@@ -3,15 +3,15 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-11.4.2-green.svg)](https://ghidra-sre.org/)
-[![MCP Version](https://img.shields.io/badge/MCP-1.7.3-purple.svg)](https://modelcontextprotocol.io/)
+[![MCP Version](https://img.shields.io/badge/MCP-1.8.0-purple.svg)](https://modelcontextprotocol.io/)
 
 A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks.
 
 ## 🌟 Features
 
 ### Core MCP Integration
-- **Full MCP 1.7.3 Compatibility** - Complete implementation of Model Context Protocol
-- **108 MCP Tools Available** - Comprehensive API surface for binary analysis (98 implemented + 10 ROADMAP v2.0)
+- **Full MCP 1.8.0 Compatibility** - Complete implementation of Model Context Protocol
+- **109 MCP Tools Available** - Comprehensive API surface for binary analysis (102 implemented + 7 ROADMAP v2.0)
 - **Production-Ready Reliability** - Tested batch operations and atomic transactions
 - **Real-time Analysis** - Live integration with Ghidra's analysis engine
 
@@ -71,7 +71,7 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
    .\deploy-to-ghidra.ps1
 
    # Or manually copy to Ghidra Extensions
-   Copy-Item target\GhidraMCP-1.7.3.zip "C:\ghidra\Extensions\Ghidra\"
+   Copy-Item target\GhidraMCP-1.8.0.zip "C:\ghidra\Extensions\Ghidra\"
    ```
 
 ### Basic Usage
@@ -227,14 +227,14 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## 🏆 Production Status
 
-**Current Version**: 1.7.3
+**Current Version**: 1.8.0
 **Production Ready**: ✅ Yes
 **Package**: com.xebyte
-**MCP Tools**: 108 tools (98 implemented + 10 ROADMAP v2.0)
+**MCP Tools**: 109 tools (102 implemented + 7 ROADMAP v2.0)
 **Test Coverage**: 100% compilation, full functionality verified
 **Documentation Coverage**: 100% with comprehensive ROADMAP
 **Performance**: 93% API call reduction with batch operations
-**Latest Fix**: Transaction commit bug in disassemble_bytes (v1.7.3)  
+**Latest Enhancement**: Calling convention validation and diagnostics (v1.8.0)  
 
 ## 🙏 Acknowledgments
 

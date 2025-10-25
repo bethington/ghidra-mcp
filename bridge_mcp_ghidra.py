@@ -991,8 +991,33 @@ def set_function_prototype(function_address: str, prototype: str, calling_conven
 
     data = {"function_address": function_address, "prototype": prototype}
     if calling_convention:
-        data["callingConvention"] = calling_convention
+        data["calling_convention"] = calling_convention
     return safe_post_json("set_function_prototype", data)
+
+@mcp.tool()
+def list_calling_conventions() -> str:
+    """
+    List all available calling conventions in the current Ghidra program.
+
+    This tool is useful for debugging and verifying which calling conventions
+    are loaded, especially after adding custom conventions to x86win.cspec.
+
+    Returns:
+        List of available calling convention names
+
+    Example:
+        conventions = list_calling_conventions()
+        print(conventions)
+        # Output: Available Calling Conventions (7):
+        #         - __stdcall
+        #         - __cdecl
+        #         - __fastcall
+        #         - __thiscall
+        #         - __d2call
+        #         - __d2regcall
+        #         - __d2mixcall
+    """
+    return safe_get("list_calling_conventions")
 
 @mcp.tool()
 def set_local_variable_type(function_address: str, variable_name: str, new_type: str) -> str:
@@ -1567,27 +1592,56 @@ def list_data_types(category: str = None, offset: int = 0, limit: int = 100) -> 
 def create_struct(name: str, fields: list) -> str:
     """
     Create a new structure data type with specified fields.
-    
+
     This tool creates a custom structure definition that can be applied to memory
-    locations. Fields should be specified as a list of dictionaries with 'name',
-    'type', and optionally 'offset' keys.
-    
+    locations. Fields should be specified as a list of dictionaries with 'name'
+    and 'type' keys (offset is optional).
+
+    IMPORTANT: The 'fields' parameter should be a Python list of dictionaries.
+    The tool will automatically convert it to proper JSON format for the Ghidra endpoint.
+
+    Supported field types:
+    - Integers: int, uint, long, dword, ushort, word, short, char, byte, uchar
+    - Floats: float, double
+    - Pointers: void* (e.g., "void*" for void pointers)
+    - Arrays: typename[count] (e.g., "char[16]" for 16-byte char array)
+    - Custom: Any previously defined struct or enum name
+
     Args:
-        name: Name for the new structure
-        fields: List of field definitions, each with:
-                - name: Field name
-                - type: Field data type (e.g., "int", "char", "DWORD")
-                - offset: Optional explicit offset (auto-calculated if omitted)
-                
+        name: Name for the new structure (must be unique)
+        fields: List of field definitions as dictionaries with:
+                - name (required): Field name (must be valid C identifier)
+                - type (required): Field data type from supported list above
+                - offset (optional): Explicit byte offset (fields auto-calculated if omitted)
+
     Returns:
-        Success/failure message with created structure details
-        
-    Example:
+        Success message with structure details (name, field count, total size)
+        Error message if creation fails
+
+    Examples:
+        # Simple struct with basic types
         fields = [
-            {"name": "id", "type": "int"},
-            {"name": "name", "type": "char[32]"},
-            {"name": "flags", "type": "DWORD"}
+            {"name": "id", "type": "uint"},
+            {"name": "flags", "type": "ushort"},
+            {"name": "reserved", "type": "ushort"}
         ]
+        result = create_struct("MyStruct", fields)
+
+        # Struct with pointers and arrays
+        fields = [
+            {"name": "dwType", "type": "uint"},
+            {"name": "pData", "type": "void*"},
+            {"name": "wX", "type": "ushort"},
+            {"name": "wY", "type": "ushort"},
+            {"name": "szName", "type": "char[16]"}
+        ]
+        result = create_struct("UnitAny", fields)
+
+    Note:
+        - Structure size is calculated based on field types and sizes
+        - Fields are added sequentially unless explicit offsets are provided
+        - Structure names must be unique (not previously defined)
+        - Use apply_data_type tool to apply the struct to memory locations
     """
     return safe_post_json("create_struct", {"name": name, "fields": fields})
 
@@ -1801,7 +1855,7 @@ def create_union(name: str, fields: list) -> str:
     """
     import json
     fields_json = json.dumps(fields) if isinstance(fields, list) else str(fields)
-    return safe_post("create_union", {"name": name, "fields": fields_json})
+    return safe_post_json("create_union", {"name": name, "fields": fields_json})
 
 @mcp.tool()
 def get_data_type_size(type_name: str) -> list:
@@ -3015,25 +3069,25 @@ def create_and_apply_data_type(
         classification: Data classification: "PRIMITIVE", "STRUCTURE", or "ARRAY"
         name: Name to apply (optional, only if meaningful)
         comment: Comment to apply (optional)
-        type_definition: JSON string (NOT dict) with type definition:
-                        For PRIMITIVE: '{\"type\": \"dword\"}'  # ← Note the quotes
-                        For STRUCTURE: '{\"name\": \"StructName\", \"fields\": [...]}'
-                        For ARRAY: '{\"element_type\": \"dword\", \"count\": 64}'
-                                  or '{\"element_struct\": \"StructName\", \"count\": 10}'
+        type_definition: JSON string or dict with type definition:
+                        For PRIMITIVE: {"type": "dword"} or '{\"type\": \"dword\"}'
+                        For STRUCTURE: {"name": "StructName", "fields": [...]} or JSON string
+                        For ARRAY: {"element_type": "dword", "count": 64} or JSON string
+                                  or {"element_struct": "StructName", "count": 10}
 
-                        IMPORTANT: Must be a JSON string, not a Python dict.
-                        Use json.dumps() if constructing programmatically.
+                        Both dict and JSON string formats are accepted.
+                        The MCP framework automatically parses JSON strings to dicts.
 
-                        Example (CORRECT):
+                        Example (dict format - preferred for MCP tools):
                             create_and_apply_data_type(
-                                address=\"0x6fb835b8\",
-                                classification=\"ARRAY\",
-                                name=\"MyArray\",
-                                type_definition='{\"element_type\": \"dword\", \"count\": 7}'  # JSON string
+                                address="0x6fb835b8",
+                                classification="ARRAY",
+                                name="MyArray",
+                                type_definition={"element_type": "dword", "count": 7}
                             )
 
-                        Example (INCORRECT):
-                            type_definition={\"element_type\": \"dword\", \"count\": 7}  # Will fail validation
+                        Example (JSON string format - for direct Python calls):
+                            type_definition='{"element_type": "dword", "count": 7}'
 
     Returns:
         Success message with all operations performed:
@@ -3084,12 +3138,16 @@ def create_and_apply_data_type(
         data["comment"] = comment
     if type_definition:
         try:
-            if not isinstance(type_definition, str):
+            # Handle both string (from direct calls) and dict (from MCP framework parsing)
+            if isinstance(type_definition, str):
+                type_def = json.loads(type_definition)
+            elif isinstance(type_definition, dict):
+                type_def = type_definition
+            else:
                 raise GhidraValidationError(
-                    "type_definition must be a JSON string (use json.dumps() if needed), "
+                    "type_definition must be a JSON string or dict, "
                     f"got {type(type_definition).__name__}"
                 )
-            type_def = json.loads(type_definition)
             data["type_definition"] = type_def
         except json.JSONDecodeError as e:
             raise GhidraValidationError(f"Invalid JSON in type_definition: {str(e)}")
@@ -3293,6 +3351,22 @@ def suggest_field_names(
 
 # ========== v1.5.0: WORKFLOW OPTIMIZATION TOOLS ==========
 
+def _convert_escaped_newlines(text: str) -> str:
+    """
+    Convert escaped newline sequences (\\n) to actual newlines.
+    This ensures plate comments display with proper line breaks instead of literal \\n text.
+
+    Args:
+        text: Text that may contain escaped newlines
+
+    Returns:
+        Text with escaped newlines converted to actual newlines
+    """
+    if text is None:
+        return None
+    # Replace literal \\n with actual newline character
+    return text.replace('\\n', '\n')
+
 @mcp.tool()
 def batch_set_comments(
     function_address: str,
@@ -3314,6 +3388,10 @@ def batch_set_comments(
         JSON with success status and counts of comments set
     """
     validate_hex_address(function_address)
+
+    # Convert escaped newlines in plate comment
+    if plate_comment:
+        plate_comment = _convert_escaped_newlines(plate_comment)
 
     payload = {
         "function_address": function_address,
@@ -3341,6 +3419,9 @@ def set_plate_comment(
         Success or failure message
     """
     validate_hex_address(function_address)
+
+    # Convert escaped newlines to actual newlines
+    comment = _convert_escaped_newlines(comment)
 
     params = {"function_address": function_address, "comment": comment}
     result = safe_post("set_plate_comment", params)
@@ -3774,6 +3855,10 @@ def document_function_complete(
         )
     """
     validate_hex_address(function_address)
+
+    # Convert escaped newlines in plate comment
+    if plate_comment:
+        plate_comment = _convert_escaped_newlines(plate_comment)
 
     payload = {
         "function_address": function_address,
