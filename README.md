@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-11.4.2-green.svg)](https://ghidra-sre.org/)
-[![MCP Version](https://img.shields.io/badge/MCP-1.8.0-purple.svg)](https://modelcontextprotocol.io/)
+[![MCP Version](https://img.shields.io/badge/MCP-1.8.1-purple.svg)](https://modelcontextprotocol.io/)
 
 A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks.
 
@@ -71,7 +71,7 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
    .\deploy-to-ghidra.ps1
 
    # Or manually copy to Ghidra Extensions
-   Copy-Item target\GhidraMCP-1.8.0.zip "C:\ghidra\Extensions\Ghidra\"
+   Copy-Item target\GhidraMCP-1.8.1.zip "C:\ghidra\Extensions\Ghidra\"
    ```
 
 ### Basic Usage

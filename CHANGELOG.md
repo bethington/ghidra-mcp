@@ -4,6 +4,55 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v1.8.1 - 2025-10-25
+
+### Documentation Reorganization
+- ✅ **Project Structure Overhaul** - Cleaned and reorganized entire documentation
+  - Consolidated prompts: 12 files → 8 focused workflow files
+  - Created `docs/examples/` with punit/ and diablo2/ subdirectories
+  - Moved structure discovery guides to `docs/guides/`
+  - Created comprehensive `START_HERE.md` with multiple learning paths
+  - Updated `DOCUMENTATION_INDEX.md` to reflect new structure
+  - Removed ~70 obsolete files (old reports, duplicates, summaries)
+
+### New Calling Convention
+- ✅ **__d2edicall Convention** - Diablo II EDI-based context passing
+  - Documented in `docs/conventions/D2CALL_CONVENTION_REFERENCE.md`
+  - Applied to BuildNearbyRoomsList function
+  - Installed in x86win.cspec
+
+### Bug Fixes
+- ✅ **Fixed DocumentFunctionWithClaude.java** - Windows compatibility
+  - Resolved "claude: CreateProcess error=2" 
+  - Now uses full path: `%APPDATA%\npm\claude.cmd`
+  - Changed keybinding from Ctrl+Shift+D to Ctrl+Shift+P
+
+### New Files & Tools
+- ✅ **ghidra_scripts/** - Example Ghidra scripts
+  - `DocumentFunctionWithClaude.java` - AI-assisted function documentation
+  - `ClearCallReturnOverrides.java` - Clean orphaned flow overrides
+- ✅ **mcp-config.json** - Claude MCP configuration template
+- ✅ **mcp_function_processor.py** - Batch function processing automation
+- ✅ **scripts/hybrid-function-processor.ps1** - Automated analysis workflows
+
+### Enhanced Documentation
+- ✅ **examples/punit/** - Complete UnitAny structure case study (8 files)
+- ✅ **examples/diablo2/** - Diablo II structure references (2 files)
+- ✅ **conventions/** - Calling convention documentation (5 files)
+- ✅ **guides/** - Structure discovery methodology (4 files)
+
+### Cleanup
+- ❌ Removed obsolete implementation/completion reports
+- ❌ Removed duplicate function documentation workflows
+- ❌ Removed old D2-specific installation guides
+- ❌ Removed temporary Python scripts and cleanup utilities
+
+**Impact**: Better organization, easier navigation, reduced duplication, comprehensive examples
+
+**See**: Tag [v1.8.1](https://github.com/bethington/ghidra-mcp/releases/tag/v1.8.1)
+
+---
+
 ## v1.8.0 - 2025-10-16
 
 ### Major Features

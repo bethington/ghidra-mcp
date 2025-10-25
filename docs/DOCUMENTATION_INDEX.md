@@ -4,7 +4,7 @@ Complete documentation index for the Ghidra MCP Server project.
 
 ## 📋 Current Documentation Status
 
-- **Version**: 1.7.3
+- **Version**: 1.8.1
 - **Package**: com.xebyte
 - **MCP Tools**: 109 tools (102 implemented + 7 ROADMAP v2.0)
 - **Build Status**: ✅ Production ready

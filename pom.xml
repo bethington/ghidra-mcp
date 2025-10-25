@@ -6,9 +6,9 @@
     <groupId>com.xebyte</groupId>
     <artifactId>GhidraMCP</artifactId>
     <packaging>jar</packaging>
-    <version>1.8.0</version>
+    <version>1.8.1</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v1.8.0: Comprehensive reverse engineering documentation suite with 6 new struct field analysis tools, enhanced documentation, and automated workflow scripts.</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v1.8.1: Documentation reorganization, __d2edicall calling convention, and enhanced project structure with comprehensive examples.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
