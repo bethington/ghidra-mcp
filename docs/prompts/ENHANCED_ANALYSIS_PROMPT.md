@@ -61,21 +61,32 @@ Call `get_current_address()` then `analyze_data_region()` to get boundaries, xre
   - If more context needed, paginate: `limit=2, offset=2`, then `limit=2, offset=4`, etc.
   - For high-traffic globals (50+ xrefs), limit=2 is critical to stay under 25,000 token response limit
 
-### Step 3: Apply Type (Use Atomic Operations)
+### Step 3: Apply Type (Two-Step Reliable Pattern)
 
-**Primitive:** `create_and_apply_data_type(address, "PRIMITIVE", '{"type": "dword"}', "dwName", "comment")`
+**Best Practice - Use separate calls (avoids retry loops):**
 
-**Structure:** `create_and_apply_data_type(address, "STRUCTURE", '{"name": "StructName", "fields": [...]}', "instanceName", "comment")`
+```python
+# Step 3a: Apply the data type first
+apply_data_type(address, "dword")  # or "char[N]", "pointer", etc.
 
-**Array:** `create_and_apply_data_type(address, "ARRAY", '{"element_type": "dword", "count": 64}', "arrayName", "comment")`
+# Step 3b: Rename with Hungarian notation
+rename_or_label(address, "dwName")  # or "szString", "pPointer", etc.
 
-**Note:** `type_definition` must be JSON string, not dict. All operations are atomic (all-or-nothing).
+# Step 3c: Set documentation (done in Step 6)
+set_decompiler_comment(address, "formatted_documentation")
+```
+
+**Type Names (use directly with apply_data_type):**
+- Primitives: `"dword"`, `"word"`, `"byte"`, `"int"`, `"short"`, `"char"`, `"float"`, `"double"`, `"pointer"`, `"qword"`, `"longlong"`
+- Strings: `"char[N]"` (where N is the size, e.g., `"char[6]"`, `"char[256]"`)
+- Arrays: `"dword[64]"`, `"byte[16]"`, `"pointer[32]"`, etc.
+- Booleans: `"bool"`
 
 **Verify Success:**
-- Check that operation succeeded without errors
-- Verify data type is no longer "undefined"
-- Verify name is set correctly with Hungarian notation prefix
-- If errors occur: review error message, adjust parameters, retry
+- `apply_data_type()` returns success message with size info
+- `rename_or_label()` confirms rename succeeded
+- Verify data type is no longer "undefined" using `analyze_data_region()`
+- Verify name has Hungarian notation prefix
 
 ### Step 4: Structure Field Analysis (if applicable)
 
@@ -118,20 +129,31 @@ After gathering all documentation data:
 1. **Format documentation** using the **Documentation Template** below
 2. **Set PRE comment** at the data address with the formatted documentation
    - Use `set_decompiler_comment(address, formatted_documentation)` for PRE comment
-   - Alternatively use atomic operation: include comment in `create_and_apply_data_type()` call from Step 3
+   - This is called AFTER Steps 3a-3b (apply type and rename)
+
+**Code Pattern:**
+```python
+# After apply_data_type() and rename_or_label() succeed:
+set_decompiler_comment(address, """================================================================================
+                    STRING szVideoSection @ 0x0040BC08
+================================================================================
+TYPE: char[6] (6 bytes) - Null-terminated ASCII string
+
+VALUE: "VIDEO" (0x56 0x49 0x44 0x45 0x4F 0x00)
+
+PURPOSE:
+[Your detailed description here...]
+""")
+```
 
 All documentation MUST follow the template structure with mandatory TYPE, VALUE, and PURPOSE sections.
 
-**Best Practice:** Use atomic operation in Step 3 by including full documentation in the `comment` parameter:
-- `create_and_apply_data_type(address, "PRIMITIVE", '{"type": "dword"}', "dwItemTypeCount", "TYPE: DWORD (4 bytes)...")`
-
-**Alternative:** Set comment separately after type application:
-- `set_decompiler_comment(address, "TYPE: DWORD (4 bytes)\\nVALUE: 0x07 (7)\\n\\nPURPOSE:\\n...")`
-
 **Verify Documentation Set:**
+- `set_decompiler_comment()` returns success message
 - PRE comment is visible at address in Ghidra
-- Comment follows template format
-- All mandatory sections present (TYPE, VALUE, PURPOSE)
+- Comment follows template format with header banner (====...)
+- All mandatory sections present: TYPE, VALUE, PURPOSE
+- Any additional sections based on findings are included
 
 ### Step 7: Output Final Summary
 
@@ -260,9 +282,10 @@ All documentation MUST follow the template structure with mandatory TYPE, VALUE,
 4. **Generic pointer names:** Use `pPlayerData` not `pData` (document unions in comments)
 5. **Wrong string prefixes:** Use `szName` for ASCII, `wName` for Unicode (type matches prefix)
 6. **Decimal padding sizes:** Use hex `_1[0x158]` not `_1[344]` (matches offset calculations)
-7. **Python dict instead of JSON string:** `create_and_apply_data_type()` requires JSON strings for `type_definition`
+7. **Using atomic create_and_apply_data_type():** This tool has type parameter issues - use separate `apply_data_type()` + `rename_or_label()` instead
 8. **Fetching xrefs for every byte:** Sample at field boundaries (4/8-byte intervals), not every byte in large structures
 9. **Skipping validation:** Always use `validate_data_type_exists()` before `apply_data_type()` to catch typos
+10. **Forgetting to set documentation comment:** Always call `set_decompiler_comment()` after applying type and name
 
 **Best Practices:**
 - Hungarian notation mandatory for ALL names

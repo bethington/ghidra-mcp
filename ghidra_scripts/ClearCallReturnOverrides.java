@@ -1,6 +1,9 @@
 // Clear incorrect CALL_RETURN flow overrides in Ghidra
 // This script scans all functions for CALL instructions with CALL_RETURN overrides
 // and clears them, allowing Ghidra to re-analyze the control flow correctly.
+// It also fixes noreturn function signatures that cause these overrides,
+// disassembles previously hidden code regions, and removes stale flow override comments.
+// Use when decompilation shows incomplete code after CALL instructions.
 //
 // @author Ben Ethington
 // @category Analysis
