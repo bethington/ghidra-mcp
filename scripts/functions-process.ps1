@@ -5,9 +5,9 @@
     [switch]$Help
 )
 
-$todoFile = ".\\D2CommonPtrsTodo.txt"
-$mcpConfigFile = "..\\mcp-config.json"
-$promptFile = "..\\docs\\prompts\\OPTIMIZED_FUNCTION_DOCUMENTATION.md"
+$todoFile = ".\FunctionsTodo.txt"
+$mcpConfigFile = "..\mcp-config.json"
+$promptFile = "..\docs\prompts\OPTIMIZED_FUNCTION_DOCUMENTATION.md"
 
 function Show-Help {
     Write-Host "function-process.ps1 - Function Processing with MCP"
@@ -67,7 +67,7 @@ if ($Function) {
     $success = Process-Function $Function
     if ($success) {
         $content = Get-Content $todoFile -Raw
-        $updated = $content -replace "\[ \] ($Function)", "[X] $1"
+        $updated = $content -replace "\[\s*\]\s+$Function\s+@", "[X] $Function @"
         Set-Content $todoFile $updated -NoNewline
     }
     exit 0
@@ -75,12 +75,12 @@ if ($Function) {
 
 while ($true) {
     $content = Get-Content $todoFile
-    $pending = $content | Where-Object { $_ -match '^\[ \] ((?:FUN_|Ordinal_)[0-9a-fA-F]+)' }
+    $pending = $content | Where-Object { $_ -match '^\[ \] (.+?) @ ([0-9a-fA-F]+)' }
     
     if ($pending.Count -eq 0) { break }
     
     $line = if ($Reverse) { $pending | Select-Object -Last 1 } else { $pending | Select-Object -First 1 }
-    $matches = [regex]::Match($line, '^\[ \] ((?:FUN_|Ordinal_)[0-9a-fA-F]+) @ ([0-9a-fA-F]+)')
+    $matches = [regex]::Match($line, '^\[ \] (.+?) @ ([0-9a-fA-F]+)')
     $funcName = $matches.Groups[1].Value
     $address = $matches.Groups[2].Value
     
@@ -90,7 +90,8 @@ $($pending.Count) remaining" -ForegroundColor Yellow
     
     if ($success) {
         $content = Get-Content $todoFile -Raw
-        $updated = $content -replace "\[ \] ($funcName)", "[X] $1"
+        $escapedFuncName = [regex]::Escape($funcName)
+        $updated = $content -replace "\[\s*\]\s+$escapedFuncName\s+@", "[X] $funcName @"
         Set-Content $todoFile $updated -NoNewline
     }
     

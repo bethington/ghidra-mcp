@@ -1,5 +1,5 @@
 param(
-    [string]$TodoFile = ".\D2CommonPtrsTodo.txt",
+    [string]$TodoFile = ".\FunctionsTodo.txt",
     [switch]$Preview,
     [switch]$Help
 )

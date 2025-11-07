@@ -393,3 +393,11 @@ temp/
 .tmp/
 .temp/
 
+# =============================================================================
+# ORDINAL FIX LOGS (Temporary - not part of repo)
+# =============================================================================
+
+# Ordinal fix log files (historical logs from automated fixing)
+ordinal_fix_log*.txt
+ordinal_fix_log.txt
+

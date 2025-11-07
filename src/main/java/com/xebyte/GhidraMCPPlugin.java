@@ -23,6 +23,10 @@ import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.services.CodeViewerService;
 import ghidra.app.services.ProgramManager;
+import ghidra.app.script.GhidraScriptUtil;
+import ghidra.app.script.GhidraScript;
+import ghidra.app.script.GhidraScriptProvider;
+import ghidra.app.plugin.core.script.GhidraScriptMgrPlugin;
 
 import ghidra.program.model.symbol.SourceType;
 
@@ -45,8 +49,7 @@ import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.Headers;
 
 import javax.swing.SwingUtilities;
-import java.io.IOException;
-import java.io.OutputStream;
+import java.io.*;
 import java.lang.reflect.InvocationTargetException;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
@@ -57,23 +60,45 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
+// Load version from properties file (populated by Maven during build)
+class VersionInfo {
+    private static String VERSION = "1.9.2"; // Default fallback
+    private static String APP_NAME = "GhidraMCP";
+    
+    static {
+        try (InputStream input = GhidraMCPPlugin.class
+                .getResourceAsStream("/version.properties")) {
+            if (input != null) {
+                Properties props = new Properties();
+                props.load(input);
+                VERSION = props.getProperty("app.version", "1.9.2");
+                APP_NAME = props.getProperty("app.name", "GhidraMCP");
+            }
+        } catch (IOException e) {
+            // Use defaults if file not found
+        }
+    }
+    
+    public static String getVersion() {
+        return VERSION;
+    }
+    
+    public static String getAppName() {
+        return APP_NAME;
+    }
+}
+
 @PluginInfo(
     status = PluginStatus.RELEASED,
     packageName = ghidra.app.DeveloperPluginPackage.NAME,
     category = PluginCategoryNames.ANALYSIS,
-    shortDescription = "GhidraMCP v1.8.1 - HTTP server plugin",
-    description = "GhidraMCP v1.8.1 - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
+    shortDescription = "GhidraMCP - HTTP server plugin",
+    description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
                   "Provides 108 endpoints (98 implemented + 10 ROADMAP v2.0) for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, and Ghidra script automation. " +
-                  "v1.8.1: Documentation reorganization, __d2edicall calling convention support, Windows compatibility fixes. " +
-                  "v1.8.0: MAJOR UPDATE - Comprehensive reverse engineering documentation suite with 6 new struct field " +
-                  "analysis tools (analyze_struct_field_usage, get_field_access_context, suggest_field_names), " +
-                  "enhanced documentation guides, and automated workflow scripts. " +
-                  "v1.7.3: Fixed disassemble_bytes transaction commit for proper database persistence. " +
-                  "v1.7.0: Added variable storage control, Ghidra script execution, and forced decompilation. " +
-                  "v1.6.0: Batch operations, validation tools, and comprehensive function documentation."
+                  "See https://github.com/bethington/ghidra-mcp for documentation and version history."
 )
 public class GhidraMCPPlugin extends Plugin {
 
@@ -614,6 +639,28 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, getFunctionJumpTargets(name, offset, limit));
         });
 
+        // External location endpoints (v1.8.2)
+        server.createContext("/list_external_locations", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 100);
+            sendResponse(exchange, listExternalLocations(offset, limit));
+        });
+
+        server.createContext("/get_external_location", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String address = qparams.get("address");
+            String dllName = qparams.get("dll_name");
+            sendResponse(exchange, getExternalLocationDetails(address, dllName));
+        });
+
+        server.createContext("/rename_external_location", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String address = params.get("address");
+            String newName = params.get("new_name");
+            sendResponse(exchange, renameExternalLocation(address, newName));
+        });
+
         server.createContext("/create_label", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
@@ -780,13 +827,6 @@ public class GhidraMCPPlugin extends Plugin {
         });
 
         // Data type analysis endpoints
-        server.createContext("/analyze_data_types", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String address = qparams.get("address");
-            int depth = parseIntOrDefault(qparams.get("depth"), 1);
-            sendResponse(exchange, analyzeDataTypes(address, depth));
-        });
-
         server.createContext("/create_union", exchange -> {
             try {
                 Map<String, Object> params = parseJsonParams(exchange);
@@ -827,14 +867,6 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, searchDataTypes(pattern, offset, limit));
         });
 
-        server.createContext("/auto_create_struct", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String address = params.get("address");
-            int size = parseIntOrDefault(params.get("size"), 0);
-            String name = params.get("name");
-            sendResponse(exchange, autoCreateStruct(address, size, name));
-        });
-
         server.createContext("/get_enum_values", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String enumName = qparams.get("enum_name");
@@ -856,13 +888,6 @@ public class GhidraMCPPlugin extends Plugin {
         });
 
         // Removed duplicate - see v1.5.0 VALIDATE_DATA_TYPE endpoint below
-
-        server.createContext("/export_data_types", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String format = qparams.getOrDefault("format", "c");
-            String category = qparams.get("category");
-            sendResponse(exchange, exportDataTypes(format, category));
-        });
 
         server.createContext("/import_data_types", exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
@@ -1008,19 +1033,6 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         });
 
-        // 5. BATCH_DECOMPILE_XREF_SOURCES - Batch decompilation
-        server.createContext("/batch_decompile_xref_sources", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String targetAddress = (String) params.get("target_address");
-            boolean includeFunctionNames = parseBoolOrDefault(params.get("include_function_names"), true);
-            boolean includeUsageContext = parseBoolOrDefault(params.get("include_usage_context"), true);
-            int limit = parseIntOrDefault(String.valueOf(params.get("limit")), 10);
-            int offset = parseIntOrDefault(String.valueOf(params.get("offset")), 0);
-
-            String result = batchDecompileXrefSources(targetAddress, includeFunctionNames, includeUsageContext, limit, offset);
-            sendResponse(exchange, result);
-        });
-
         // 6. APPLY_DATA_CLASSIFICATION - Atomic type application
         server.createContext("/apply_data_classification", exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
@@ -1122,12 +1134,6 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         });
 
-        // EXTRACT_IOCS - Extract indicators of compromise
-        server.createContext("/extract_iocs", exchange -> {
-            String result = extractIOCs();
-            sendResponse(exchange, result);
-        });
-
         // BATCH_DECOMPILE - Decompile multiple functions at once
         server.createContext("/batch_decompile", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
@@ -1143,24 +1149,6 @@ public class GhidraMCPPlugin extends Plugin {
             String functionName = qparams.get("function_name");
 
             String result = findDeadCode(functionName);
-            sendResponse(exchange, result);
-        });
-
-        // ANALYZE_FUNCTION_COMPLEXITY - Calculate complexity metrics
-        server.createContext("/analyze_function_complexity", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String functionName = qparams.get("function_name");
-
-            String result = analyzeFunctionComplexity(functionName);
-            sendResponse(exchange, result);
-        });
-
-        // BATCH_RENAME_FUNCTIONS - Rename multiple functions atomically
-        server.createContext("/batch_rename_functions", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String renames = qparams.get("renames");
-
-            String result = batchRenameFunctions(renames);
             sendResponse(exchange, result);
         });
 
@@ -1284,8 +1272,9 @@ public class GhidraMCPPlugin extends Plugin {
             String functionAddress = (String) params.get("function_address");
             @SuppressWarnings("unchecked")
             Map<String, String> variableTypes = (Map<String, String>) params.get("variable_types");
+            boolean forceIndividual = parseBoolOrDefault(params.get("force_individual"), false);
 
-            String result = batchSetVariableTypes(functionAddress, variableTypes);
+            String result = batchSetVariableTypes(functionAddress, variableTypes, forceIndividual);
             sendResponse(exchange, result);
         });
 
@@ -1295,8 +1284,9 @@ public class GhidraMCPPlugin extends Plugin {
             String functionAddress = (String) params.get("function_address");
             @SuppressWarnings("unchecked")
             Map<String, String> variableRenames = (Map<String, String>) params.get("variable_renames");
+            boolean forceIndividual = parseBoolOrDefault(params.get("force_individual"), false);
 
-            String result = batchRenameVariables(functionAddress, variableRenames);
+            String result = batchRenameVariables(functionAddress, variableRenames, forceIndividual);
             sendResponse(exchange, result);
         });
 
@@ -1343,30 +1333,6 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         });
 
-        // NEW v1.6.0: DOCUMENT_FUNCTION_COMPLETE - Atomic all-in-one documentation
-        server.createContext("/document_function_complete", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String functionAddress = (String) params.get("function_address");
-            String newName = (String) params.get("new_name");
-            String prototype = (String) params.get("prototype");
-            String callingConvention = (String) params.get("calling_convention");
-            @SuppressWarnings("unchecked")
-            Map<String, String> variableRenames = (Map<String, String>) params.get("variable_renames");
-            @SuppressWarnings("unchecked")
-            Map<String, String> variableTypes = (Map<String, String>) params.get("variable_types");
-            @SuppressWarnings("unchecked")
-            List<Map<String, String>> labels = (List<Map<String, String>>) params.get("labels");
-            String plateComment = (String) params.get("plate_comment");
-            @SuppressWarnings("unchecked")
-            List<Map<String, String>> decompilerComments = (List<Map<String, String>>) params.get("decompiler_comments");
-            @SuppressWarnings("unchecked")
-            List<Map<String, String>> disassemblyComments = (List<Map<String, String>>) params.get("disassembly_comments");
-
-            String result = documentFunctionComplete(functionAddress, newName, prototype, callingConvention,
-                variableRenames, variableTypes, labels, plateComment, decompilerComments, disassemblyComments);
-            sendResponse(exchange, result);
-        });
-
         // NEW v1.6.0: SEARCH_FUNCTIONS_ENHANCED - Advanced search with filtering
         server.createContext("/search_functions_enhanced", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
@@ -1395,6 +1361,17 @@ public class GhidraMCPPlugin extends Plugin {
                 (Boolean) params.get("restrict_to_execute_memory") : true;
 
             String result = disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory);
+            sendResponse(exchange, result);
+        });
+
+        // Script execution endpoint (v1.9.1)
+        server.createContext("/run_ghidra_script", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String scriptName = (String) params.get("script_name");
+            int timeoutSeconds = ((Number) params.getOrDefault("timeout_seconds", 300)).intValue();
+            boolean captureOutput = (boolean) params.getOrDefault("capture_output", true);
+
+            String result = runGhidraScriptWithCapture(scriptName, timeoutSeconds, captureOutput);
             sendResponse(exchange, result);
         });
 
@@ -2051,9 +2028,27 @@ public class GhidraMCPPlugin extends Plugin {
             decomp.openProgram(program);
             DecompileResults result = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
 
-            return (result != null && result.decompileCompleted()) 
-                ? result.getDecompiledFunction().getC() 
-                : "Decompilation failed";
+            if (result == null) {
+                return "Error: Decompiler returned null result for function at " + addressStr;
+            }
+            
+            if (!result.decompileCompleted()) {
+                String errorMsg = result.getErrorMessage();
+                return "Error: Decompilation did not complete. " + 
+                       (errorMsg != null ? "Reason: " + errorMsg : "Function may be too complex or have invalid code flow.");
+            }
+            
+            if (result.getDecompiledFunction() == null) {
+                return "Error: Decompiler completed but returned null decompiled function. " +
+                       "This can happen with functions that have:\n" +
+                       "- Invalid control flow or unreachable code\n" +
+                       "- Large NOP sleds or padding\n" +
+                       "- External calls to unknown addresses\n" +
+                       "- Stack frame issues\n" +
+                       "Consider using get_disassembly() instead for this function.";
+            }
+            
+            return result.getDecompiledFunction().getC();
         } catch (Exception e) {
             return "Error decompiling function: " + e.getMessage();
         }
@@ -2918,40 +2913,141 @@ public class GhidraMCPPlugin extends Plugin {
 
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
+        final ByteArrayOutputStream outputCapture = new ByteArrayOutputStream();
+        final PrintStream originalOut = System.out;
+        final PrintStream originalErr = System.err;
 
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    // Ghidra script execution requires complex API interaction
-                    // The proper way is through the Ghidra GUI or headless analyzer
-                    resultMsg.append("Note: Programmatic script execution via REST API has limitations.\n\n");
-                    resultMsg.append("Script path provided: ").append(scriptPath).append("\n\n");
-                    resultMsg.append("To run Ghidra scripts:\n");
-                    resultMsg.append("1. Use Ghidra's Script Manager (Window → Script Manager)\n");
-                    resultMsg.append("2. Use Ghidra Headless Analyzer from command line\n");
-                    resultMsg.append("3. Place script in Ghidra's script directory and run via GUI\n\n");
-                    resultMsg.append("Example headless command:\n");
-                    resultMsg.append("  analyzeHeadless <project_path> <project_name> \\\n");
-                    resultMsg.append("    -process <binary> -postScript ").append(scriptPath).append("\n\n");
-                    resultMsg.append("For automated workflows, consider:\n");
-                    resultMsg.append("- Using existing MCP tools instead of custom scripts\n");
-                    resultMsg.append("- Running scripts via Ghidra's GUI or headless mode\n");
-                    resultMsg.append("- Implementing functionality as MCP tool endpoints\n");
+                    // Capture console output
+                    PrintStream captureStream = new PrintStream(outputCapture);
+                    System.setOut(captureStream);
+                    System.setErr(captureStream);
+                    
+                    resultMsg.append("=== GHIDRA SCRIPT EXECUTION ===\n");
+                    resultMsg.append("Script: ").append(scriptPath).append("\n");
+                    resultMsg.append("Program: ").append(program.getName()).append("\n");
+                    resultMsg.append("Time: ").append(new Date().toString()).append("\n\n");
+                    
+                    // Find the script file
+                    generic.jar.ResourceFile scriptFile = null;
+                    
+                    // Try multiple locations for the script
+                    String[] possiblePaths = {
+                        scriptPath,  // Absolute path
+                        System.getProperty("user.home") + "/ghidra_scripts/" + scriptPath,
+                        System.getProperty("user.home") + "/ghidra_scripts/" + new File(scriptPath).getName(),
+                        "./ghidra_scripts/" + scriptPath,
+                        "./ghidra_scripts/" + new File(scriptPath).getName()
+                    };
+                    
+                    for (String path : possiblePaths) {
+                        try {
+                            File candidateFile = new File(path);
+                            if (candidateFile.exists()) {
+                                scriptFile = new generic.jar.ResourceFile(candidateFile);
+                                break;
+                            }
+                        } catch (Exception e) {
+                            // Continue trying other paths
+                        }
+                    }
+                    
+                    if (scriptFile == null || !scriptFile.exists()) {
+                        resultMsg.append("ERROR: Script file not found in any of these locations:\n");
+                        for (String path : possiblePaths) {
+                            resultMsg.append("  - ").append(path).append("\n");
+                        }
+                        return;
+                    }
 
+                    resultMsg.append("Found script: ").append(scriptFile.getAbsolutePath()).append("\n");
+                    resultMsg.append("Size: ").append(scriptFile.length()).append(" bytes\n\n");
+                    
+                    // Get script provider
+                    ghidra.app.script.GhidraScriptProvider provider = ghidra.app.script.GhidraScriptUtil.getProvider(scriptFile);
+                    if (provider == null) {
+                        resultMsg.append("ERROR: No script provider found for: ").append(scriptFile.getName()).append("\n");
+                        return;
+                    }
+                    
+                    resultMsg.append("Script provider: ").append(provider.getClass().getSimpleName()).append("\n");
+                    
+                    // Create script instance
+                    StringWriter scriptWriter = new StringWriter();
+                    PrintWriter scriptPrintWriter = new PrintWriter(scriptWriter);
+                    
+                    ghidra.app.script.GhidraScript script = provider.getScriptInstance(scriptFile, scriptPrintWriter);
+                    if (script == null) {
+                        resultMsg.append("ERROR: Failed to create script instance\n");
+                        return;
+                    }
+
+                    // Set up script state
+                    ghidra.program.util.ProgramLocation location = new ghidra.program.util.ProgramLocation(program, program.getMinAddress());
+                    ghidra.framework.plugintool.PluginTool pluginTool = this.getTool();
+                    ghidra.app.script.GhidraState scriptState = new ghidra.app.script.GhidraState(pluginTool, pluginTool.getProject(), program, location, null, null);
+                    
+                    ghidra.util.task.TaskMonitor scriptMonitor = new ghidra.util.task.ConsoleTaskMonitor();
+                    
+                    script.set(scriptState, scriptMonitor, scriptPrintWriter);
+                    
+                    resultMsg.append("\n--- SCRIPT OUTPUT ---\n");
+                    
+                    // Parse arguments if provided
+                    String[] args = new String[0];
+                    if (scriptArgs != null && !scriptArgs.trim().isEmpty()) {
+                        try {
+                            // Simple space-separated argument parsing
+                            args = scriptArgs.trim().split("\\s+");
+                        } catch (Exception e) {
+                            resultMsg.append("Warning: Could not parse arguments: ").append(scriptArgs).append("\n");
+                        }
+                    }
+                    
+                    // Execute the script
+                    script.runScript(scriptFile.getName(), args);
+                    
+                    // Get script output
+                    String scriptOutput = scriptWriter.toString();
+                    if (!scriptOutput.isEmpty()) {
+                        resultMsg.append(scriptOutput).append("\n");
+                    }
+                    
                     success.set(true);
-                    Msg.info(this, "Script execution request for: " + scriptPath);
-
+                    resultMsg.append("\n=== SCRIPT COMPLETED SUCCESSFULLY ===\n");
+                    
                 } catch (Exception e) {
-                    resultMsg.append("Error: ").append(e.getMessage());
-                    Msg.error(this, "Error in script execution handler", e);
+                    resultMsg.append("\n=== SCRIPT EXECUTION ERROR ===\n");
+                    resultMsg.append("Error: ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append("\n");
+                    
+                    // Add stack trace for debugging
+                    StringWriter sw = new StringWriter();
+                    PrintWriter pw = new PrintWriter(sw);
+                    e.printStackTrace(pw);
+                    resultMsg.append("Stack trace:\n").append(sw.toString()).append("\n");
+                    
+                    Msg.error(this, "Script execution failed: " + scriptPath, e);
+                } finally {
+                    // Restore original output streams
+                    System.setOut(originalOut);
+                    System.setErr(originalErr);
+                    
+                    // Append any captured console output
+                    String capturedOutput = outputCapture.toString();
+                    if (!capturedOutput.isEmpty()) {
+                        resultMsg.append("\n--- CONSOLE OUTPUT ---\n");
+                        resultMsg.append(capturedOutput).append("\n");
+                    }
                 }
             });
         } catch (InterruptedException | InvocationTargetException e) {
-            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
+            resultMsg.append("ERROR: Failed to execute on Swing thread: ").append(e.getMessage()).append("\n");
             Msg.error(this, "Failed to execute on Swing thread", e);
         }
 
-        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        return resultMsg.toString();
     }
 
     /**
@@ -3039,7 +3135,23 @@ public class GhidraMCPPlugin extends Plugin {
                         DecompileResults results = decompiler.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
 
                         if (results == null || !results.decompileCompleted()) {
-                            resultMsg.append("Error: Decompilation failed for function ").append(func.getName());
+                            String errorMsg = results != null ? results.getErrorMessage() : "Unknown error";
+                            resultMsg.append("Error: Decompilation did not complete for function ").append(func.getName());
+                            if (errorMsg != null && !errorMsg.isEmpty()) {
+                                resultMsg.append(". Reason: ").append(errorMsg);
+                            }
+                            return;
+                        }
+
+                        // Check if decompiled function is null (can happen even when decompileCompleted returns true)
+                        if (results.getDecompiledFunction() == null) {
+                            resultMsg.append("Error: Decompiler completed but returned null decompiled function for ").append(func.getName()).append(".\n");
+                            resultMsg.append("This can happen with functions that have:\n");
+                            resultMsg.append("- Invalid control flow or unreachable code\n");
+                            resultMsg.append("- Large NOP sleds or padding\n");
+                            resultMsg.append("- External calls to unknown addresses\n");
+                            resultMsg.append("- Stack frame issues\n");
+                            resultMsg.append("Consider using get_disassembly() instead for this function.");
                             return;
                         }
 
@@ -3088,13 +3200,18 @@ public class GhidraMCPPlugin extends Plugin {
                 Reference ref = refIter.next();
                 Address fromAddr = ref.getFromAddress();
                 RefType refType = ref.getReferenceType();
-                
+
                 Function fromFunc = program.getFunctionManager().getFunctionContaining(fromAddr);
                 String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
-                
+
                 refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
             }
-            
+
+            // Return meaningful message if no references found
+            if (refs.isEmpty()) {
+                return "No references found to address: " + addressStr;
+            }
+
             return paginateList(refs, offset, limit);
         } catch (Exception e) {
             return "Error getting references to address: " + e.getMessage();
@@ -3119,7 +3236,7 @@ public class GhidraMCPPlugin extends Plugin {
             for (Reference ref : references) {
                 Address toAddr = ref.getToAddress();
                 RefType refType = ref.getReferenceType();
-                
+
                 String targetInfo = "";
                 Function toFunc = program.getFunctionManager().getFunctionAt(toAddr);
                 if (toFunc != null) {
@@ -3130,10 +3247,15 @@ public class GhidraMCPPlugin extends Plugin {
                         targetInfo = " to data " + (data.getLabel() != null ? data.getLabel() : data.getPathName());
                     }
                 }
-                
+
                 refs.add(String.format("To %s%s [%s]", toAddr, targetInfo, refType.getName()));
             }
-            
+
+            // Return meaningful message if no references found
+            if (refs.isEmpty()) {
+                return "No references found from address: " + addressStr;
+            }
+
             return paginateList(refs, offset, limit);
         } catch (Exception e) {
             return "Error getting references from address: " + e.getMessage();
@@ -3188,20 +3310,30 @@ public class GhidraMCPPlugin extends Plugin {
 
         List<String> lines = new ArrayList<>();
         DataIterator dataIt = program.getListing().getDefinedData(true);
-        
+
         while (dataIt.hasNext()) {
             Data data = dataIt.next();
-            
+
             if (data != null && isStringData(data)) {
                 String value = data.getValue() != null ? data.getValue().toString() : "";
-                
+
+                // Apply quality filtering: minimum 4 chars, 80% printable
+                if (!isQualityString(value)) {
+                    continue;
+                }
+
                 if (filter == null || value.toLowerCase().contains(filter.toLowerCase())) {
                     String escapedValue = escapeString(value);
                     lines.add(String.format("%s: \"%s\"", data.getAddress(), escapedValue));
                 }
             }
         }
-        
+
+        // Return meaningful message if no strings found
+        if (lines.isEmpty()) {
+            return "No quality strings found (minimum 4 characters, 80% printable)";
+        }
+
         return paginateList(lines, offset, limit);
     }
 
@@ -3210,10 +3342,33 @@ public class GhidraMCPPlugin extends Plugin {
      */
     private boolean isStringData(Data data) {
         if (data == null) return false;
-        
+
         DataType dt = data.getDataType();
         String typeName = dt.getName().toLowerCase();
         return typeName.contains("string") || typeName.contains("char") || typeName.equals("unicode");
+    }
+
+    /**
+     * Check if a string meets quality criteria for listing
+     * - Minimum length of 4 characters
+     * - At least 80% printable ASCII characters
+     */
+    private boolean isQualityString(String str) {
+        if (str == null || str.length() < 4) {
+            return false;
+        }
+
+        int printableCount = 0;
+        for (int i = 0; i < str.length(); i++) {
+            char c = str.charAt(i);
+            // Printable ASCII: space (32) to tilde (126), plus common whitespace
+            if ((c >= 32 && c < 127) || c == '\n' || c == '\r' || c == '\t') {
+                printableCount++;
+            }
+        }
+
+        double printableRatio = (double) printableCount / str.length();
+        return printableRatio >= 0.80;
     }
 
     /**
@@ -4628,21 +4783,27 @@ public class GhidraMCPPlugin extends Plugin {
         Iterator<DataType> allTypes = dtm.getAllDataTypes();
         while (allTypes.hasNext()) {
             DataType dt = allTypes.next();
-            
-            // Apply category filter if specified
+
+            // Apply category/type filter if specified
             if (category != null && !category.isEmpty()) {
                 String dtCategory = getCategoryName(dt);
-                if (!dtCategory.toLowerCase().contains(category.toLowerCase())) {
+                String dtTypeName = getDataTypeName(dt);
+
+                // Check both category path AND data type name
+                boolean matches = dtCategory.toLowerCase().contains(category.toLowerCase()) ||
+                                dtTypeName.toLowerCase().contains(category.toLowerCase());
+
+                if (!matches) {
                     continue;
                 }
             }
-            
+
             // Format: name | category | size | path
             String categoryName = getCategoryName(dt);
             int size = dt.getLength();
             String sizeStr = (size > 0) ? String.valueOf(size) : "variable";
-            
-            dataTypes.add(String.format("%s | %s | %s bytes | %s", 
+
+            dataTypes.add(String.format("%s | %s | %s bytes | %s",
                 dt.getName(), categoryName, sizeStr, dt.getPathName()));
         }
         
@@ -4667,10 +4828,34 @@ public class GhidraMCPPlugin extends Plugin {
         if (categoryPath.isEmpty() || categoryPath.equals("/")) {
             return "builtin";
         }
-        
+
         // Extract the last part of the category path
         String[] parts = categoryPath.split("/");
         return parts[parts.length - 1].toLowerCase();
+    }
+
+    /**
+     * Helper method to get the type classification of a data type
+     * Returns: struct, enum, typedef, pointer, array, union, function, or primitive
+     */
+    private String getDataTypeName(DataType dt) {
+        if (dt instanceof Structure) {
+            return "struct";
+        } else if (dt instanceof Union) {
+            return "union";
+        } else if (dt instanceof ghidra.program.model.data.Enum) {
+            return "enum";
+        } else if (dt instanceof TypeDef) {
+            return "typedef";
+        } else if (dt instanceof Pointer) {
+            return "pointer";
+        } else if (dt instanceof Array) {
+            return "array";
+        } else if (dt instanceof FunctionDefinition) {
+            return "function";
+        } else {
+            return "primitive";
+        }
     }
 
     /**
@@ -5286,12 +5471,12 @@ public class GhidraMCPPlugin extends Plugin {
     private String getVersion() {
         StringBuilder version = new StringBuilder();
         version.append("{\n");
-        version.append("  \"plugin_version\": \"1.8.1\",\n");
-        version.append("  \"plugin_name\": \"GhidraMCP\",\n");
+        version.append("  \"plugin_version\": \"").append(VersionInfo.getVersion()).append("\",\n");
+        version.append("  \"plugin_name\": \"").append(VersionInfo.getAppName()).append("\",\n");
         version.append("  \"ghidra_version\": \"11.4.2\",\n");
         version.append("  \"java_version\": \"").append(System.getProperty("java.version")).append("\",\n");
-        version.append("  \"endpoint_count\": 109,\n");
-        version.append("  \"implementation_status\": \"102 implemented + 7 ROADMAP v2.0\"\n");
+        version.append("  \"endpoint_count\": 111,\n");
+        version.append("  \"implementation_status\": \"105 implemented + 6 ROADMAP v2.0\"\n");
         version.append("}");
         return version.toString();
     }
@@ -5636,72 +5821,6 @@ public class GhidraMCPPlugin extends Plugin {
     // ----------------------------------------------------------------------------------
 
     /**
-     * Analyze data types at a given address with specified depth
-     */
-    private String analyzeDataTypes(String addressStr, int depth) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
-        if (addressStr == null || addressStr.isEmpty()) return "Address is required";
-
-        try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
-            StringBuilder result = new StringBuilder();
-            
-            result.append("Data type analysis at ").append(addressStr).append(" (depth: ").append(depth).append("):\n\n");
-            
-            // Analyze the data at the given address
-            analyzeDataAtAddress(program, addr, result, depth, 0);
-            
-            return result.toString();
-        } catch (Exception e) {
-            return "Error analyzing data types: " + e.getMessage();
-        }
-    }
-
-    /**
-     * Recursively analyze data types at an address
-     */
-    private void analyzeDataAtAddress(Program program, Address addr, StringBuilder result, int maxDepth, int currentDepth) {
-        if (currentDepth >= maxDepth) return;
-        
-        String indent = "  ".repeat(currentDepth);
-        Data data = program.getListing().getDefinedDataAt(addr);
-        
-        if (data != null) {
-            DataType dataType = data.getDataType();
-            result.append(indent).append("Address: ").append(addr)
-                  .append(" | Type: ").append(dataType.getName())
-                  .append(" | Size: ").append(dataType.getLength())
-                  .append(" | Value: ").append(data.getDefaultValueRepresentation()).append("\n");
-            
-            // If it's a composite type, analyze its components
-            if (dataType instanceof Composite) {
-                Composite composite = (Composite) dataType;
-                for (DataTypeComponent component : composite.getDefinedComponents()) {
-                    result.append(indent).append("  Component: ").append(component.getFieldName())
-                          .append(" | Type: ").append(component.getDataType().getName())
-                          .append(" | Offset: ").append(component.getOffset()).append("\n");
-                }
-            }
-            
-            // If it's a pointer, analyze what it points to
-            if (dataType instanceof Pointer && currentDepth < maxDepth - 1) {
-                try {
-                    Address pointedAddr = (Address) data.getValue();
-                    if (pointedAddr != null) {
-                        result.append(indent).append("Points to:\n");
-                        analyzeDataAtAddress(program, pointedAddr, result, maxDepth, currentDepth + 1);
-                    }
-                } catch (Exception e) {
-                    result.append(indent).append("Could not follow pointer: ").append(e.getMessage()).append("\n");
-                }
-            }
-        } else {
-            result.append(indent).append("Address: ").append(addr).append(" | No defined data\n");
-        }
-    }
-
-    /**
      * Create a union data type with simplified approach for testing
      */
     private String createUnionSimple(String name, Object fieldsObj) {
@@ -5922,73 +6041,6 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Automatically create a structure by analyzing memory layout
-     */
-    private String autoCreateStruct(String addressStr, int size, String name) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
-        if (addressStr == null || addressStr.isEmpty()) return "Address is required";
-        if (name == null || name.isEmpty()) return "Structure name is required";
-
-        AtomicBoolean success = new AtomicBoolean(false);
-        StringBuilder result = new StringBuilder();
-
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Auto-create structure");
-                try {
-                    Address addr = program.getAddressFactory().getAddress(addressStr);
-                    DataTypeManager dtm = program.getDataTypeManager();
-                    StructureDataType struct = new StructureDataType(name, 0);
-
-                    // Analyze memory at the address to infer structure
-                    Memory memory = program.getMemory();
-                    int actualSize = (size > 0) ? size : 64; // Default to 64 bytes if size not specified
-                    
-                    // Simple field inference based on data patterns
-                    for (int i = 0; i < actualSize; i += 4) { // Assume 4-byte fields for simplicity
-                        if (i + 4 <= actualSize) {
-                            try {
-                                int value = memory.getInt(addr.add(i));
-                                String fieldName = "field_" + (i / 4);
-                                
-                                // Try to infer type based on value patterns
-                                DataType fieldType;
-                                if (value == 0 || (value > 0 && value < 1000000)) {
-                                    fieldType = new IntegerDataType();
-                                } else {
-                                    // Could be a pointer
-                                    fieldType = new PointerDataType();
-                                }
-                                
-                                struct.add(fieldType, fieldName, null);
-                                result.append("Added field: ").append(fieldName)
-                                      .append(" at offset ").append(i)
-                                      .append(" (").append(fieldType.getName()).append(")\n");
-                            } catch (Exception e) {
-                                // Memory might not be readable, add undefined byte
-                                struct.add(new ByteDataType(), "undefined_" + i, null);
-                            }
-                        }
-                    }
-
-                    dtm.addDataType(struct, DataTypeConflictHandler.REPLACE_HANDLER);
-                    result.append("Structure '").append(name).append("' created with ").append(struct.getNumComponents()).append(" fields");
-                    success.set(true);
-                } catch (Exception e) {
-                    result.append("Error auto-creating structure: ").append(e.getMessage());
-                } finally {
-                    program.endTransaction(tx, success.get());
-                }
-            });
-        } catch (InterruptedException | InvocationTargetException e) {
-            result.append("Failed to execute auto-create structure on Swing thread: ").append(e.getMessage());
-        }
-
-        return result.toString();
-    }
-
-    /**
      * Get all values in an enumeration
      */
     private String getEnumValues(String enumName) {
@@ -6180,105 +6232,6 @@ public class GhidraMCPPlugin extends Plugin {
         } catch (Exception e) {
             return "Error validating data type: " + e.getMessage();
         }
-    }
-
-    /**
-     * Export data types in various formats
-     */
-    private String exportDataTypes(String format, String category) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
-
-        StringBuilder result = new StringBuilder();
-        DataTypeManager dtm = program.getDataTypeManager();
-        
-        result.append("Exporting data types in ").append(format).append(" format");
-        if (category != null && !category.isEmpty()) {
-            result.append(" (category: ").append(category).append(")");
-        }
-        result.append(":\n\n");
-
-        Iterator<DataType> allTypes = dtm.getAllDataTypes();
-        int count = 0;
-
-        while (allTypes.hasNext()) {
-            DataType dt = allTypes.next();
-            
-            // Filter by category if specified
-            if (category != null && !category.isEmpty()) {
-                if (!dt.getCategoryPath().toString().toLowerCase().contains(category.toLowerCase())) {
-                    continue;
-                }
-            }
-
-            switch (format.toLowerCase()) {
-                case "c":
-                    result.append(exportDataTypeAsC(dt)).append("\n");
-                    break;
-                case "json":
-                    result.append(exportDataTypeAsJson(dt)).append("\n");
-                    break;
-                case "summary":
-                default:
-                    result.append(dt.getName()).append(" | Size: ").append(dt.getLength())
-                          .append(" | Path: ").append(dt.getPathName()).append("\n");
-                    break;
-            }
-            count++;
-        }
-
-        result.append("\nExported ").append(count).append(" data types");
-        return result.toString();
-    }
-
-    /**
-     * Export a data type as C declaration
-     */
-    private String exportDataTypeAsC(DataType dataType) {
-        if (dataType instanceof Structure) {
-            Structure struct = (Structure) dataType;
-            StringBuilder c = new StringBuilder();
-            c.append("struct ").append(struct.getName()).append(" {\n");
-            for (DataTypeComponent comp : struct.getDefinedComponents()) {
-                c.append("    ").append(comp.getDataType().getName()).append(" ");
-                if (comp.getFieldName() != null) {
-                    c.append(comp.getFieldName());
-                } else {
-                    c.append("field_").append(comp.getOffset());
-                }
-                c.append(";\n");
-            }
-            c.append("};");
-            return c.toString();
-        } else if (dataType instanceof ghidra.program.model.data.Enum) {
-            ghidra.program.model.data.Enum enumType = (ghidra.program.model.data.Enum) dataType;
-            StringBuilder c = new StringBuilder();
-            c.append("enum ").append(enumType.getName()).append(" {\n");
-            String[] names = enumType.getNames();
-            for (int i = 0; i < names.length; i++) {
-                c.append("    ").append(names[i]).append(" = ").append(enumType.getValue(names[i]));
-                if (i < names.length - 1) c.append(",");
-                c.append("\n");
-            }
-            c.append("};");
-            return c.toString();
-        } else {
-            return "/* " + dataType.getName() + " - size: " + dataType.getLength() + " */";
-        }
-    }
-
-    /**
-     * Export a data type as JSON
-     */
-    private String exportDataTypeAsJson(DataType dataType) {
-        StringBuilder json = new StringBuilder();
-        json.append("{");
-        json.append("\"name\":\"").append(dataType.getName()).append("\",");
-        json.append("\"size\":").append(dataType.getLength()).append(",");
-        json.append("\"type\":\"").append(dataType.getClass().getSimpleName()).append("\",");
-        json.append("\"path\":\"").append(dataType.getPathName()).append("\"");
-        json.append("}");
-        return json.toString();
     }
 
     /**
@@ -7291,9 +7244,68 @@ public class GhidraMCPPlugin extends Plugin {
                 try {
                     Address addr = program.getAddressFactory().getAddress(addrStr);
                     if (addr != null) {
+                        Instruction instr = listing.getInstructionAt(addr);
+
                         json.append("\"address\": \"").append(addrStr).append("\",");
-                        json.append("\"context\": \"Placeholder assembly context\",");
-                        json.append("\"patterns_detected\": [\"data_access\"]");
+
+                        // Get the instruction at this address
+                        if (instr != null) {
+                            json.append("\"instruction\": \"").append(escapeJson(instr.toString())).append("\",");
+
+                            // Get context before
+                            json.append("\"context_before\": [");
+                            Address prevAddr = addr;
+                            for (int i = 0; i < contextInstructions; i++) {
+                                Instruction prevInstr = listing.getInstructionBefore(prevAddr);
+                                if (prevInstr == null) break;
+                                prevAddr = prevInstr.getAddress();
+                                if (i > 0) json.append(",");
+                                json.append("\"").append(prevAddr).append(": ").append(escapeJson(prevInstr.toString())).append("\"");
+                            }
+                            json.append("],");
+
+                            // Get context after
+                            json.append("\"context_after\": [");
+                            Address nextAddr = addr;
+                            for (int i = 0; i < contextInstructions; i++) {
+                                Instruction nextInstr = listing.getInstructionAfter(nextAddr);
+                                if (nextInstr == null) break;
+                                nextAddr = nextInstr.getAddress();
+                                if (i > 0) json.append(",");
+                                json.append("\"").append(nextAddr).append(": ").append(escapeJson(nextInstr.toString())).append("\"");
+                            }
+                            json.append("],");
+
+                            // Detect patterns
+                            String mnemonic = instr.getMnemonicString().toUpperCase();
+                            json.append("\"mnemonic\": \"").append(mnemonic).append("\",");
+
+                            List<String> patterns = new ArrayList<>();
+                            if (mnemonic.equals("MOV") || mnemonic.equals("LEA")) {
+                                patterns.add("data_access");
+                            }
+                            if (mnemonic.equals("CMP") || mnemonic.equals("TEST")) {
+                                patterns.add("comparison");
+                            }
+                            if (mnemonic.equals("IMUL") || mnemonic.equals("SHL") || mnemonic.equals("SHR")) {
+                                patterns.add("arithmetic");
+                            }
+                            if (mnemonic.equals("PUSH") || mnemonic.equals("POP")) {
+                                patterns.add("stack_operation");
+                            }
+                            if (mnemonic.startsWith("J") || mnemonic.equals("CALL")) {
+                                patterns.add("control_flow");
+                            }
+
+                            json.append("\"patterns_detected\": [");
+                            for (int i = 0; i < patterns.size(); i++) {
+                                if (i > 0) json.append(",");
+                                json.append("\"").append(patterns.get(i)).append("\"");
+                            }
+                            json.append("]");
+                        } else {
+                            json.append("\"error\": \"No instruction at address\"");
+                        }
                     }
                 } catch (Exception e) {
                     json.append("\"error\": \"").append(escapeJson(e.getMessage())).append("\"");
@@ -7307,85 +7319,6 @@ public class GhidraMCPPlugin extends Plugin {
 
         json.append("}");
         return json.toString();
-    }
-
-    /**
-     * 5. BATCH_DECOMPILE_XREF_SOURCES - Batch decompilation
-     */
-    private String batchDecompileXrefSources(String targetAddressStr,
-                                             boolean includeFunctionNames,
-                                             boolean includeUsageContext,
-                                             int limit,
-                                             int offset) {
-        Program program = getCurrentProgram();
-        if (program == null) return "{\"error\": \"No program loaded\"}";
-
-        try {
-            Address targetAddr = program.getAddressFactory().getAddress(targetAddressStr);
-            if (targetAddr == null) {
-                return "{\"error\": \"Invalid address: " + targetAddressStr + "\"}";
-            }
-
-            ReferenceManager refMgr = program.getReferenceManager();
-            ReferenceIterator refIter = refMgr.getReferencesTo(targetAddr);
-
-            Set<Function> functionsToDecompile = new HashSet<>();
-            while (refIter.hasNext()) {
-                Reference ref = refIter.next();
-                Function func = program.getFunctionManager().getFunctionContaining(ref.getFromAddress());
-                if (func != null) {
-                    functionsToDecompile.add(func);
-                }
-            }
-
-            // Convert to list for pagination
-            List<Function> functionList = new ArrayList<>(functionsToDecompile);
-            int totalFunctions = functionList.size();
-
-            // Apply pagination
-            int startIndex = Math.min(offset, totalFunctions);
-            int endIndex = Math.min(offset + limit, totalFunctions);
-            List<Function> paginatedFunctions = functionList.subList(startIndex, endIndex);
-
-            StringBuilder json = new StringBuilder();
-            json.append("{");
-            json.append("\"total_functions\": ").append(totalFunctions).append(",");
-            json.append("\"offset\": ").append(offset).append(",");
-            json.append("\"limit\": ").append(limit).append(",");
-            json.append("\"returned\": ").append(paginatedFunctions.size()).append(",");
-            json.append("\"functions\": [");
-
-            boolean first = true;
-
-            DecompInterface decomp = new DecompInterface();
-            decomp.openProgram(program);
-
-            for (Function func : paginatedFunctions) {
-                if (!first) json.append(",");
-                first = false;
-
-                json.append("{");
-                json.append("\"function_address\": \"").append(func.getEntryPoint().toString()).append("\",");
-                json.append("\"function_name\": \"").append(func.getName()).append("\",");
-
-                DecompileResults results = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                if (results != null && results.decompileCompleted()) {
-                    String decompiledCode = results.getDecompiledFunction().getC();
-                    json.append("\"decompiled_code\": \"").append(escapeJson(decompiledCode)).append("\",");
-                } else {
-                    json.append("\"decompiled_code\": \"Decompilation failed\",");
-                }
-
-                json.append("\"usage_line\": \"Placeholder: usage context\"");
-                json.append("}");
-            }
-
-            decomp.dispose();
-            json.append("]}");
-            return json.toString();
-        } catch (Exception e) {
-            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
-        }
     }
 
     /**
@@ -8528,138 +8461,6 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Extract Indicators of Compromise (IOCs) from the binary
-     */
-    private String extractIOCs() {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "Error: No program loaded";
-        }
-
-        try {
-            StringBuilder result = new StringBuilder();
-            result.append("{");
-
-            // Extract strings from the program
-            java.util.Set<String> ipv4Set = new java.util.HashSet<>();
-            java.util.Set<String> urlSet = new java.util.HashSet<>();
-            java.util.Set<String> filePathSet = new java.util.HashSet<>();
-            java.util.Set<String> registryKeySet = new java.util.HashSet<>();
-
-            // Regex patterns for IOCs
-            java.util.regex.Pattern ipv4Pattern = java.util.regex.Pattern.compile(
-                "\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b"
-            );
-            java.util.regex.Pattern urlPattern = java.util.regex.Pattern.compile(
-                "https?://[a-zA-Z0-9\\-._~:/?#\\[\\]@!$&'()*+,;=%]+"
-            );
-            java.util.regex.Pattern winPathPattern = java.util.regex.Pattern.compile(
-                "[A-Za-z]:\\\\[^\\x00-\\x1F\\x7F<>:\"|?*\\n\\r]+"
-            );
-            java.util.regex.Pattern registryPattern = java.util.regex.Pattern.compile(
-                "(?:HKEY_[A-Z_]+|HKLM|HKCU|HKCR|HKU|HKCC)\\\\[^\\x00-\\x1F\\x7F\\n\\r]+"
-            );
-
-            // Iterate through all defined strings
-            SymbolTable symbolTable = program.getSymbolTable();
-            Listing listing = program.getListing();
-            Memory memory = program.getMemory();
-
-            // Search defined data
-            DataIterator dataIter = listing.getDefinedData(true);
-            int stringsChecked = 0;
-            final int MAX_STRINGS = 10000; // Limit for performance
-
-            while (dataIter.hasNext() && stringsChecked < MAX_STRINGS) {
-                Data data = dataIter.next();
-                if (data.hasStringValue()) {
-                    String str = data.getDefaultValueRepresentation();
-                    if (str == null || str.length() < 4) continue;
-
-                    stringsChecked++;
-
-                    // Check for IPv4
-                    java.util.regex.Matcher ipMatcher = ipv4Pattern.matcher(str);
-                    while (ipMatcher.find()) {
-                        String ip = ipMatcher.group();
-                        // Basic validation: not 0.0.0.0, not all 255s
-                        if (!ip.equals("0.0.0.0") && !ip.equals("255.255.255.255")) {
-                            ipv4Set.add(ip);
-                        }
-                    }
-
-                    // Check for URLs
-                    java.util.regex.Matcher urlMatcher = urlPattern.matcher(str);
-                    while (urlMatcher.find()) {
-                        urlSet.add(urlMatcher.group());
-                    }
-
-                    // Check for Windows paths
-                    java.util.regex.Matcher pathMatcher = winPathPattern.matcher(str);
-                    while (pathMatcher.find()) {
-                        String path = pathMatcher.group();
-                        if (path.length() > 5) { // Reasonable minimum
-                            filePathSet.add(path);
-                        }
-                    }
-
-                    // Check for registry keys
-                    java.util.regex.Matcher regMatcher = registryPattern.matcher(str);
-                    while (regMatcher.find()) {
-                        registryKeySet.add(regMatcher.group());
-                    }
-                }
-            }
-
-            // Build JSON output
-            result.append("\"ips\": [");
-            int count = 0;
-            for (String ip : ipv4Set) {
-                if (count > 0) result.append(", ");
-                result.append("\"").append(escapeJson(ip)).append("\"");
-                count++;
-                if (count >= 100) break; // Limit output
-            }
-            result.append("], ");
-
-            result.append("\"urls\": [");
-            count = 0;
-            for (String url : urlSet) {
-                if (count > 0) result.append(", ");
-                result.append("\"").append(escapeJson(url)).append("\"");
-                count++;
-                if (count >= 100) break;
-            }
-            result.append("], ");
-
-            result.append("\"file_paths\": [");
-            count = 0;
-            for (String path : filePathSet) {
-                if (count > 0) result.append(", ");
-                result.append("\"").append(escapeJson(path)).append("\"");
-                count++;
-                if (count >= 100) break;
-            }
-            result.append("], ");
-
-            result.append("\"registry_keys\": [");
-            count = 0;
-            for (String reg : registryKeySet) {
-                if (count > 0) result.append(", ");
-                result.append("\"").append(escapeJson(reg)).append("\"");
-                count++;
-                if (count >= 100) break;
-            }
-            result.append("]");
-
-            result.append("}");
-            return result.toString();
-        } catch (Exception e) {
-            return "Error: " + e.getMessage();
-        }
-    }
-
-    /**
      * Batch decompile multiple functions
      */
     private String batchDecompileFunctions(String functionsParam) {
@@ -8755,59 +8556,6 @@ public class GhidraMCPPlugin extends Plugin {
             result.append("\"status\": \"Not yet implemented\", ");
             result.append("\"note\": \"This endpoint requires reachability analysis via control flow graph\"}\n");
             result.append("]");
-
-            return result.toString();
-        } catch (Exception e) {
-            return "Error: " + e.getMessage();
-        }
-    }
-
-    /**
-     * Calculate various complexity metrics for a function
-     */
-    private String analyzeFunctionComplexity(String functionName) {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "Error: No program loaded";
-        }
-
-        if (functionName == null || functionName.trim().isEmpty()) {
-            return "Error: Function name is required";
-        }
-
-        try {
-            StringBuilder result = new StringBuilder();
-            result.append("{");
-            result.append("\"function_name\": \"").append(escapeJson(functionName)).append("\", ");
-            result.append("\"status\": \"Not yet implemented\", ");
-            result.append("\"note\": \"This endpoint requires calculation of cyclomatic complexity, LOC, and other metrics\"");
-            result.append("}");
-
-            return result.toString();
-        } catch (Exception e) {
-            return "Error: " + e.getMessage();
-        }
-    }
-
-    /**
-     * Rename multiple functions atomically
-     */
-    private String batchRenameFunctions(String renamesParam) {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "Error: No program loaded";
-        }
-
-        if (renamesParam == null || renamesParam.trim().isEmpty()) {
-            return "Error: Renames parameter is required";
-        }
-
-        try {
-            StringBuilder result = new StringBuilder();
-            result.append("{");
-            result.append("\"status\": \"Not yet implemented\", ");
-            result.append("\"note\": \"This endpoint requires atomic rename operations with transaction management\"");
-            result.append("}");
 
             return result.toString();
         } catch (Exception e) {
@@ -9490,10 +9238,15 @@ public class GhidraMCPPlugin extends Plugin {
      * v1.5.0: Batch set variable types
      */
     @SuppressWarnings("deprecation")
-    private String batchSetVariableTypes(String functionAddress, Map<String, String> variableTypes) {
+    private String batchSetVariableTypes(String functionAddress, Map<String, String> variableTypes, boolean forceIndividual) {
         Program program = getCurrentProgram();
         if (program == null) {
             return "{\"error\": \"No program loaded\"}";
+        }
+
+        // If forceIndividual is true, skip batch operations and use individual method
+        if (forceIndividual) {
+            return batchSetVariableTypesIndividual(functionAddress, variableTypes);
         }
 
         final StringBuilder result = new StringBuilder();
@@ -9547,15 +9300,30 @@ public class GhidraMCPPlugin extends Plugin {
 
                     success.set(true);
                 } catch (Exception e) {
-                    result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
-                    Msg.error(this, "Error in batch set variable types", e);
+                    // If batch operation fails, try individual operations as fallback
+                    Msg.warn(this, "Batch set variable types failed, attempting individual operations: " + e.getMessage());
+                    try {
+                        program.endTransaction(tx, false);
+
+                        // Try individual operations
+                        String individualResult = batchSetVariableTypesIndividual(functionAddress, variableTypes);
+                        result.append("\"fallback_used\": true, ");
+                        result.append(individualResult);
+                        return;
+                    } catch (Exception fallbackE) {
+                        result.append("\"error\": \"Batch operation failed and fallback also failed: ").append(e.getMessage()).append("\"");
+                        Msg.error(this, "Both batch and individual type setting operations failed", e);
+                    }
                 } finally {
-                    program.endTransaction(tx, success.get());
+                    if (!result.toString().contains("\"fallback_used\"")) {
+                        program.endTransaction(tx, success.get());
+                    }
                 }
             });
 
-            if (success.get()) {
+            if (success.get() && !result.toString().contains("\"fallback_used\"")) {
                 result.append("\"success\": true, ");
+                result.append("\"method\": \"batch\", ");
                 result.append("\"variables_typed\": ").append(typesSet.get());
             }
         } catch (Exception e) {
@@ -9567,9 +9335,60 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * NEW v1.6.0: Batch rename variables with partial success reporting
+     * Individual variable type setting using setLocalVariableType (fallback method)
+     * This method uses decompilation but is more reliable for persistence
      */
-    private String batchRenameVariables(String functionAddress, Map<String, String> variableRenames) {
+    private String batchSetVariableTypesIndividual(String functionAddress, Map<String, String> variableTypes) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "\"error\": \"No program loaded\"";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        final AtomicInteger variablesTyped = new AtomicInteger(0);
+        final AtomicInteger variablesFailed = new AtomicInteger(0);
+        final List<String> errors = new ArrayList<>();
+
+        // Process each variable individually using the reliable method
+        for (Map.Entry<String, String> entry : variableTypes.entrySet()) {
+            String varName = entry.getKey();
+            String newType = entry.getValue();
+
+            try {
+                String typeResult = setLocalVariableType(functionAddress, varName, newType);
+                if (typeResult.startsWith("Success:")) {
+                    variablesTyped.incrementAndGet();
+                } else {
+                    variablesFailed.incrementAndGet();
+                    errors.add("Failed to set type of '" + varName + "' to '" + newType + "': " + typeResult);
+                }
+            } catch (Exception e) {
+                variablesFailed.incrementAndGet();
+                errors.add("Exception setting type of '" + varName + "' to '" + newType + "': " + e.getMessage());
+            }
+        }
+
+        result.append("\"success\": true, ");
+        result.append("\"method\": \"individual\", ");
+        result.append("\"variables_typed\": ").append(variablesTyped.get()).append(", ");
+        result.append("\"variables_failed\": ").append(variablesFailed.get());
+        if (!errors.isEmpty()) {
+            result.append(", \"errors\": [");
+            for (int i = 0; i < errors.size(); i++) {
+                if (i > 0) result.append(", ");
+                result.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
+            }
+            result.append("]");
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * NEW v1.6.0: Batch rename variables with partial success reporting and fallback
+     * Falls back to individual operations if batch operations fail due to decompilation issues
+     */
+    private String batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual) {
         Program program = getCurrentProgram();
         if (program == null) {
             return "{\"error\": \"No program loaded\"}";
@@ -9634,18 +9453,34 @@ public class GhidraMCPPlugin extends Plugin {
 
                     success.set(true);
                 } catch (Exception e) {
-                    result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
-                    Msg.error(this, "Error in batch rename variables", e);
+                    // If batch operation fails, try individual operations as fallback
+                    Msg.warn(this, "Batch rename variables failed, attempting individual operations: " + e.getMessage());
+                    try {
+                        program.endTransaction(eventTx, false);
+                        program.endTransaction(tx, false);
+
+                        // Try individual operations
+                        String individualResult = batchRenameVariablesIndividual(functionAddress, variableRenames);
+                        result.append("\"fallback_used\": true, ");
+                        result.append(individualResult);
+                        return;
+                    } catch (Exception fallbackE) {
+                        result.append("\"error\": \"Batch operation failed and fallback also failed: ").append(e.getMessage()).append("\"");
+                        Msg.error(this, "Both batch and individual rename operations failed", e);
+                    }
                 } finally {
-                    // End event suppression transaction - this triggers ONE re-analysis for all renames
-                    program.endTransaction(eventTx, success.get());
-                    program.flushEvents();  // Force event processing now that we're done
-                    program.endTransaction(tx, success.get());
+                    if (!result.toString().contains("\"fallback_used\"")) {
+                        // End event suppression transaction - this triggers ONE re-analysis for all renames
+                        program.endTransaction(eventTx, success.get());
+                        program.flushEvents();  // Force event processing now that we're done
+                        program.endTransaction(tx, success.get());
+                    }
                 }
             });
 
-            if (success.get()) {
+            if (success.get() && !result.toString().contains("\"fallback_used\"")) {
                 result.append("\"success\": true, ");
+                result.append("\"method\": \"batch\", ");
                 result.append("\"variables_renamed\": ").append(variablesRenamed.get()).append(", ");
                 result.append("\"variables_failed\": ").append(variablesFailed.get());
                 if (!errors.isEmpty()) {
@@ -9657,6 +9492,193 @@ public class GhidraMCPPlugin extends Plugin {
                     result.append("]");
                 }
             }
+        } catch (Exception e) {
+            result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+        }
+
+        result.append("}");
+        return result.toString();
+    }
+
+    /**
+     * Individual variable renaming using HighFunctionDBUtil (fallback method)
+     * This method uses decompilation but is more reliable for persistence
+     */
+    private String batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "\"error\": \"No program loaded\"";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        final AtomicInteger variablesRenamed = new AtomicInteger(0);
+        final AtomicInteger variablesFailed = new AtomicInteger(0);
+        final List<String> errors = new ArrayList<>();
+
+        // Get function name for individual operations
+        final String[] functionName = new String[1];
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                Address addr = program.getAddressFactory().getAddress(functionAddress);
+                if (addr != null) {
+                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    if (func != null) {
+                        functionName[0] = func.getName();
+                    }
+                }
+            });
+        } catch (Exception e) {
+            return "\"error\": \"Failed to get function name: " + e.getMessage() + "\"";
+        }
+
+        if (functionName[0] == null) {
+            return "\"error\": \"Could not find function at address: " + functionAddress + "\"";
+        }
+
+        // Process each variable individually using the reliable method
+        for (Map.Entry<String, String> entry : variableRenames.entrySet()) {
+            String oldName = entry.getKey();
+            String newName = entry.getValue();
+
+            try {
+                String renameResult = renameVariableInFunction(functionName[0], oldName, newName);
+                if (renameResult.equals("Variable renamed")) {
+                    variablesRenamed.incrementAndGet();
+                } else {
+                    variablesFailed.incrementAndGet();
+                    errors.add("Failed to rename '" + oldName + "' to '" + newName + "': " + renameResult);
+                }
+            } catch (Exception e) {
+                variablesFailed.incrementAndGet();
+                errors.add("Exception renaming '" + oldName + "' to '" + newName + "': " + e.getMessage());
+            }
+        }
+
+        result.append("\"success\": true, ");
+        result.append("\"method\": \"individual\", ");
+        result.append("\"variables_renamed\": ").append(variablesRenamed.get()).append(", ");
+        result.append("\"variables_failed\": ").append(variablesFailed.get());
+        if (!errors.isEmpty()) {
+            result.append(", \"errors\": [");
+            for (int i = 0; i < errors.size(); i++) {
+                if (i > 0) result.append(", ");
+                result.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
+            }
+            result.append("]");
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Validate that batch operations actually persisted by checking current state
+     */
+    private String validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        result.append("{");
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    Address addr = program.getAddressFactory().getAddress(functionAddress);
+                    if (addr == null) {
+                        result.append("\"error\": \"Invalid address: ").append(functionAddress).append("\"");
+                        return;
+                    }
+
+                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    if (func == null) {
+                        result.append("\"error\": \"No function at address: ").append(functionAddress).append("\"");
+                        return;
+                    }
+
+                    int renamesValidated = 0;
+                    int typesValidated = 0;
+                    List<String> validationErrors = new ArrayList<>();
+
+                    // Validate renames
+                    if (expectedRenames != null) {
+                        for (Parameter param : func.getParameters()) {
+                            String expectedName = expectedRenames.get(param.getName());
+                            if (expectedName != null) {
+                                // This parameter was supposed to be renamed to expectedName
+                                // But now it has a different name, so the rename didn't persist
+                                validationErrors.add("Parameter rename not persisted: expected '" + expectedName + "', found '" + param.getName() + "'");
+                            } else if (expectedRenames.containsValue(param.getName())) {
+                                // This parameter has a name that was expected from a rename
+                                renamesValidated++;
+                            }
+                        }
+
+                        for (Variable local : func.getLocalVariables()) {
+                            String expectedName = expectedRenames.get(local.getName());
+                            if (expectedName != null) {
+                                validationErrors.add("Local variable rename not persisted: expected '" + expectedName + "', found '" + local.getName() + "'");
+                            } else if (expectedRenames.containsValue(local.getName())) {
+                                renamesValidated++;
+                            }
+                        }
+                    }
+
+                    // Validate types
+                    if (expectedTypes != null) {
+                        DataTypeManager dtm = program.getDataTypeManager();
+
+                        for (Parameter param : func.getParameters()) {
+                            String expectedType = expectedTypes.get(param.getName());
+                            if (expectedType != null) {
+                                DataType currentType = param.getDataType();
+                                DataType expectedDataType = dtm.getDataType(expectedType);
+                                if (expectedDataType != null && currentType != null &&
+                                    currentType.getName().equals(expectedDataType.getName())) {
+                                    typesValidated++;
+                                } else {
+                                    validationErrors.add("Parameter type not persisted for '" + param.getName() +
+                                                       "': expected '" + expectedType + "', found '" +
+                                                       (currentType != null ? currentType.getName() : "null") + "'");
+                                }
+                            }
+                        }
+
+                        for (Variable local : func.getLocalVariables()) {
+                            String expectedType = expectedTypes.get(local.getName());
+                            if (expectedType != null) {
+                                DataType currentType = local.getDataType();
+                                DataType expectedDataType = dtm.getDataType(expectedType);
+                                if (expectedDataType != null && currentType != null &&
+                                    currentType.getName().equals(expectedDataType.getName())) {
+                                    typesValidated++;
+                                } else {
+                                    validationErrors.add("Local variable type not persisted for '" + local.getName() +
+                                                       "': expected '" + expectedType + "', found '" +
+                                                       (currentType != null ? currentType.getName() : "null") + "'");
+                                }
+                            }
+                        }
+                    }
+
+                    result.append("\"success\": true, ");
+                    result.append("\"renames_validated\": ").append(renamesValidated).append(", ");
+                    result.append("\"types_validated\": ").append(typesValidated);
+                    if (!validationErrors.isEmpty()) {
+                        result.append(", \"validation_errors\": [");
+                        for (int i = 0; i < validationErrors.size(); i++) {
+                            if (i > 0) result.append(", ");
+                            result.append("\"").append(validationErrors.get(i).replace("\"", "\\\"")).append("\"");
+                        }
+                        result.append("]");
+                    }
+
+                } catch (Exception e) {
+                    result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+                    Msg.error(this, "Error validating batch operations", e);
+                }
+            });
         } catch (Exception e) {
             result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
         }
@@ -9983,200 +10005,6 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * NEW v1.6.0: Document function atomically with rollback on failure
-     */
-    private String documentFunctionComplete(String functionAddress, String newName, String prototype,
-                                           String callingConvention, Map<String, String> variableRenames,
-                                           Map<String, String> variableTypes, List<Map<String, String>> labels,
-                                           String plateComment, List<Map<String, String>> decompilerComments,
-                                           List<Map<String, String>> disassemblyComments) {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
-        }
-
-        final StringBuilder result = new StringBuilder();
-        final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicInteger operationsCompleted = new AtomicInteger(0);
-
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                int tx = program.startTransaction("Document Function Complete");
-                try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        result.append("{\"error\": \"Invalid address: ").append(functionAddress).append("\"}");
-                        return;
-                    }
-
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func == null) {
-                        result.append("{\"error\": \"No function at address: ").append(functionAddress).append("\"}");
-                        return;
-                    }
-
-                    result.append("{");
-
-                    // Rename function
-                    if (newName != null && !newName.isEmpty()) {
-                        func.setName(newName, SourceType.USER_DEFINED);
-                        operationsCompleted.incrementAndGet();
-                        result.append("\"function_renamed\": true, ");
-                    }
-
-                    // Set prototype (simplified - would need full parser for production)
-                    if (prototype != null && !prototype.isEmpty()) {
-                        // This is a simplified version - production would parse the full prototype
-                        operationsCompleted.incrementAndGet();
-                        result.append("\"prototype_set\": true, ");
-                    }
-
-                    // Rename variables
-                    if (variableRenames != null && !variableRenames.isEmpty()) {
-                        int renamed = 0;
-                        for (Parameter param : func.getParameters()) {
-                            String newVarName = variableRenames.get(param.getName());
-                            if (newVarName != null) {
-                                param.setName(newVarName, SourceType.USER_DEFINED);
-                                renamed++;
-                            }
-                        }
-                        for (Variable local : func.getLocalVariables()) {
-                            String newVarName = variableRenames.get(local.getName());
-                            if (newVarName != null) {
-                                local.setName(newVarName, SourceType.USER_DEFINED);
-                                renamed++;
-                            }
-                        }
-                        operationsCompleted.incrementAndGet();
-                        result.append("\"variables_renamed\": ").append(renamed).append(", ");
-                    }
-
-                    // Set variable types
-                    if (variableTypes != null && !variableTypes.isEmpty()) {
-                        int typed = 0;
-                        DataTypeManager dtm = program.getDataTypeManager();
-                        for (Parameter param : func.getParameters()) {
-                            String typeName = variableTypes.get(param.getName());
-                            if (typeName != null) {
-                                DataType dt = dtm.getDataType(typeName);
-                                if (dt != null) {
-                                    param.setDataType(dt, SourceType.USER_DEFINED);
-                                    typed++;
-                                }
-                            }
-                        }
-                        for (Variable local : func.getLocalVariables()) {
-                            String typeName = variableTypes.get(local.getName());
-                            if (typeName != null) {
-                                DataType dt = dtm.getDataType(typeName);
-                                if (dt != null) {
-                                    local.setDataType(dt, SourceType.USER_DEFINED);
-                                    typed++;
-                                }
-                            }
-                        }
-                        operationsCompleted.incrementAndGet();
-                        result.append("\"variables_typed\": ").append(typed).append(", ");
-                    }
-
-                    // Create labels
-                    if (labels != null && !labels.isEmpty()) {
-                        int labelsCreated = 0;
-                        SymbolTable symTable = program.getSymbolTable();
-                        for (Map<String, String> label : labels) {
-                            String labelAddr = label.get("address");
-                            String labelName = label.get("name");
-                            if (labelAddr != null && labelName != null) {
-                                Address lAddr = program.getAddressFactory().getAddress(labelAddr);
-                                if (lAddr != null) {
-                                    symTable.createLabel(lAddr, labelName, SourceType.USER_DEFINED);
-                                    labelsCreated++;
-                                }
-                            }
-                        }
-                        operationsCompleted.incrementAndGet();
-                        result.append("\"labels_created\": ").append(labelsCreated).append(", ");
-                    }
-
-                    // Set plate comment
-                    if (plateComment != null && !plateComment.isEmpty()) {
-                        func.setComment(plateComment);
-                        operationsCompleted.incrementAndGet();
-                        result.append("\"plate_comment_set\": true, ");
-                    }
-
-                    // Set decompiler comments (v1.6.1: with progress logging)
-                    if (decompilerComments != null && !decompilerComments.isEmpty()) {
-                        int commentsSet = 0;
-                        int totalComments = decompilerComments.size();
-                        Msg.info(this, "Setting " + totalComments + " decompiler comments...");
-                        for (Map<String, String> comment : decompilerComments) {
-                            String commentAddr = comment.get("address");
-                            String commentText = comment.get("comment");
-                            if (commentAddr != null && commentText != null) {
-                                Address cAddr = program.getAddressFactory().getAddress(commentAddr);
-                                if (cAddr != null) {
-                                    program.getListing().setComment(cAddr, CodeUnit.PRE_COMMENT, commentText);
-                                    commentsSet++;
-                                    // Log progress every 10 comments
-                                    if (commentsSet % 10 == 0) {
-                                        Msg.info(this, "Progress: " + commentsSet + "/" + totalComments + " decompiler comments set");
-                                    }
-                                }
-                            }
-                        }
-                        operationsCompleted.incrementAndGet();
-                        result.append("\"decompiler_comments_set\": ").append(commentsSet).append(", ");
-                        Msg.info(this, "Completed: " + commentsSet + " decompiler comments set");
-                    }
-
-                    // Set disassembly comments (v1.6.1: with progress logging)
-                    if (disassemblyComments != null && !disassemblyComments.isEmpty()) {
-                        int commentsSet = 0;
-                        int totalComments = disassemblyComments.size();
-                        Msg.info(this, "Setting " + totalComments + " disassembly comments...");
-                        for (Map<String, String> comment : disassemblyComments) {
-                            String commentAddr = comment.get("address");
-                            String commentText = comment.get("comment");
-                            if (commentAddr != null && commentText != null) {
-                                Address cAddr = program.getAddressFactory().getAddress(commentAddr);
-                                if (cAddr != null) {
-                                    program.getListing().setComment(cAddr, CodeUnit.EOL_COMMENT, commentText);
-                                    commentsSet++;
-                                    // Log progress every 10 comments
-                                    if (commentsSet % 10 == 0) {
-                                        Msg.info(this, "Progress: " + commentsSet + "/" + totalComments + " disassembly comments set");
-                                    }
-                                }
-                            }
-                        }
-                        operationsCompleted.incrementAndGet();
-                        result.append("\"disassembly_comments_set\": ").append(commentsSet).append(", ");
-                        Msg.info(this, "Completed: " + commentsSet + " disassembly comments set");
-                    }
-
-                    result.append("\"operations_completed\": ").append(operationsCompleted.get());
-                    result.append("}");
-                    success.set(true);
-
-                } catch (Exception e) {
-                    result.setLength(0);
-                    result.append("{\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\", ");
-                    result.append("\"operations_completed\": ").append(operationsCompleted.get()).append("}");
-                    Msg.error(this, "Error in document function complete", e);
-                } finally {
-                    program.endTransaction(tx, success.get()); // Rollback on failure
-                }
-            });
-        } catch (Exception e) {
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
-        }
-
-        return result.toString();
-    }
-
-    /**
      * NEW v1.6.0: Enhanced function search with filtering and sorting
      */
     private String searchFunctionsEnhanced(String namePattern, Integer minXrefs, Integer maxXrefs,
@@ -10452,6 +10280,546 @@ public class GhidraMCPPlugin extends Plugin {
         String response = result.toString();
         Msg.debug(this, "disassembleBytes: Returning success response, length=" + response.length());
         return response;
+    }
+
+    private String generateScriptContent(String purpose, String workflowType, Map<String, Object> parameters) {
+        if (parameters == null) {
+            parameters = new HashMap<>();
+        }
+
+        switch (workflowType) {
+            case "document_functions":
+                return generateDocumentFunctionsScript(purpose, parameters);
+            case "fix_ordinals":
+                return generateFixOrdinalsScript(purpose, parameters);
+            case "bulk_rename":
+                return generateBulkRenameScript(purpose, parameters);
+            case "analyze_structures":
+                return generateAnalyzeStructuresScript(purpose, parameters);
+            case "find_patterns":
+                return generateFindPatternsScript(purpose, parameters);
+            case "custom":
+            default:
+                return generateCustomScript(purpose, parameters);
+        }
+    }
+
+    private String generateDocumentFunctionsScript(String purpose, Map<String, Object> parameters) {
+        return "import ghidra.app.script.GhidraScript;\n" +
+               "import ghidra.program.model.listing.Function;\n" +
+               "import ghidra.program.model.listing.FunctionManager;\n\n" +
+               "public class DocumentFunctions extends GhidraScript {\n" +
+               "    public void run() throws Exception {\n" +
+               "        FunctionManager funcMgr = currentProgram.getFunctionManager();\n" +
+               "        int documentedCount = 0;\n" +
+               "        \n" +
+               "        // Purpose: " + purpose + "\n" +
+               "        for (Function func : funcMgr.getFunctions(true)) {\n" +
+               "            try {\n" +
+               "                // Add custom documentation logic here\n" +
+               "                // Example: set_plate_comment(func.getEntryPoint(), \"Documented: \" + func.getName());\n" +
+               "                documentedCount++;\n" +
+               "                \n" +
+               "                if (documentedCount % 100 == 0) {\n" +
+               "                    println(\"Processed \" + documentedCount + \" functions\");\n" +
+               "                }\n" +
+               "            } catch (Exception e) {\n" +
+               "                println(\"Error processing \" + func.getName() + \": \" + e.getMessage());\n" +
+               "            }\n" +
+               "        }\n" +
+               "        \n" +
+               "        println(\"Document functions workflow complete! Processed \" + documentedCount + \" functions.\");\n" +
+               "    }\n" +
+               "}\n";
+    }
+
+    private String generateFixOrdinalsScript(String purpose, Map<String, Object> parameters) {
+        return "import ghidra.app.script.GhidraScript;\n" +
+               "import ghidra.program.model.symbol.ExternalManager;\n" +
+               "import ghidra.program.model.symbol.ExternalLocation;\n" +
+               "import ghidra.program.model.symbol.ExternalLocationIterator;\n\n" +
+               "public class FixOrdinalImports extends GhidraScript {\n" +
+               "    public void run() throws Exception {\n" +
+               "        ExternalManager extMgr = currentProgram.getExternalManager();\n" +
+               "        int fixedCount = 0;\n" +
+               "        \n" +
+               "        // Purpose: " + purpose + "\n" +
+               "        for (String libName : extMgr.getExternalLibraryNames()) {\n" +
+               "            ExternalLocationIterator iter = extMgr.getExternalLocations(libName);\n" +
+               "            while (iter.hasNext()) {\n" +
+               "                ExternalLocation extLoc = iter.next();\n" +
+               "                String label = extLoc.getLabel();\n" +
+               "                \n" +
+               "                // Check if this is an ordinal import (e.g., \"Ordinal_123\")\n" +
+               "                if (label.startsWith(\"Ordinal_\")) {\n" +
+               "                    try {\n" +
+               "                        // Add logic to determine correct function name from ordinal\n" +
+               "                        // Then rename: extLoc.setName(..., correctName, SourceType.USER_DEFINED);\n" +
+               "                        fixedCount++;\n" +
+               "                    } catch (Exception e) {\n" +
+               "                        println(\"Error fixing ordinal \" + label + \": \" + e.getMessage());\n" +
+               "                    }\n" +
+               "                }\n" +
+               "            }\n" +
+               "        }\n" +
+               "        \n" +
+               "        println(\"Fix ordinals workflow complete! Fixed \" + fixedCount + \" ordinal imports.\");\n" +
+               "    }\n" +
+               "}\n";
+    }
+
+    private String generateBulkRenameScript(String purpose, Map<String, Object> parameters) {
+        return "import ghidra.app.script.GhidraScript;\n" +
+               "import ghidra.program.model.symbol.SymbolTable;\n" +
+               "import ghidra.program.model.symbol.Symbol;\n" +
+               "import ghidra.program.model.symbol.SourceType;\n\n" +
+               "public class BulkRenameSymbols extends GhidraScript {\n" +
+               "    public void run() throws Exception {\n" +
+               "        SymbolTable symTable = currentProgram.getSymbolTable();\n" +
+               "        int renamedCount = 0;\n" +
+               "        \n" +
+               "        // Purpose: " + purpose + "\n" +
+               "        for (Symbol symbol : symTable.getAllSymbols(true)) {\n" +
+               "            try {\n" +
+               "                String currentName = symbol.getName();\n" +
+               "                // Add pattern matching logic here\n" +
+               "                // Example: if (currentName.matches(\"var_.*\")) { newName = ... }\n" +
+               "                renamedCount++;\n" +
+               "            } catch (Exception e) {\n" +
+               "                println(\"Error renaming symbol: \" + e.getMessage());\n" +
+               "            }\n" +
+               "        }\n" +
+               "        \n" +
+               "        println(\"Bulk rename workflow complete! Renamed \" + renamedCount + \" symbols.\");\n" +
+               "    }\n" +
+               "}\n";
+    }
+
+    private String generateAnalyzeStructuresScript(String purpose, Map<String, Object> parameters) {
+        return "import ghidra.app.script.GhidraScript;\n" +
+               "import ghidra.program.model.data.DataType;\n" +
+               "import ghidra.program.model.data.DataTypeManager;\n" +
+               "import ghidra.program.model.data.Structure;\n\n" +
+               "public class AnalyzeStructures extends GhidraScript {\n" +
+               "    public void run() throws Exception {\n" +
+               "        DataTypeManager dtMgr = currentProgram.getDataTypeManager();\n" +
+               "        int analyzedCount = 0;\n" +
+               "        \n" +
+               "        // Purpose: " + purpose + "\n" +
+               "        for (DataType dt : dtMgr.getAllDataTypes()) {\n" +
+               "            if (dt instanceof Structure) {\n" +
+               "                try {\n" +
+               "                    Structure struct = (Structure) dt;\n" +
+               "                    // Add analysis logic here\n" +
+               "                    analyzedCount++;\n" +
+               "                } catch (Exception e) {\n" +
+               "                    println(\"Error analyzing \" + dt.getName() + \": \" + e.getMessage());\n" +
+               "                }\n" +
+               "            }\n" +
+               "        }\n" +
+               "        \n" +
+               "        println(\"Analyze structures workflow complete! Analyzed \" + analyzedCount + \" structures.\");\n" +
+               "    }\n" +
+               "}\n";
+    }
+
+    private String generateFindPatternsScript(String purpose, Map<String, Object> parameters) {
+        return "import ghidra.app.script.GhidraScript;\n" +
+               "import ghidra.program.model.listing.Function;\n" +
+               "import ghidra.program.model.listing.FunctionManager;\n\n" +
+               "public class FindPatterns extends GhidraScript {\n" +
+               "    public void run() throws Exception {\n" +
+               "        FunctionManager funcMgr = currentProgram.getFunctionManager();\n" +
+               "        int foundCount = 0;\n" +
+               "        \n" +
+               "        // Purpose: " + purpose + "\n" +
+               "        for (Function func : funcMgr.getFunctions(true)) {\n" +
+               "            try {\n" +
+               "                // Add pattern matching logic here\n" +
+               "                // Example: if (matchesPattern(func)) { handleMatch(func); }\n" +
+               "                foundCount++;\n" +
+               "            } catch (Exception e) {\n" +
+               "                println(\"Error processing \" + func.getName() + \": \" + e.getMessage());\n" +
+               "            }\n" +
+               "        }\n" +
+               "        \n" +
+               "        println(\"Find patterns workflow complete! Found \" + foundCount + \" matching patterns.\");\n" +
+               "    }\n" +
+               "}\n";
+    }
+
+    private String generateCustomScript(String purpose, Map<String, Object> parameters) {
+        return "import ghidra.app.script.GhidraScript;\n" +
+               "import ghidra.program.model.listing.Function;\n" +
+               "import ghidra.program.model.listing.FunctionManager;\n\n" +
+               "public class CustomAnalysis extends GhidraScript {\n" +
+               "    public void run() throws Exception {\n" +
+               "        // Purpose: " + purpose + "\n" +
+               "        println(\"Custom analysis script started...\");\n" +
+               "        \n" +
+               "        // Add your custom analysis logic here\n" +
+               "        FunctionManager funcMgr = currentProgram.getFunctionManager();\n" +
+               "        int count = 0;\n" +
+               "        \n" +
+               "        for (Function func : funcMgr.getFunctions(true)) {\n" +
+               "            // Add logic here\n" +
+               "            count++;\n" +
+               "        }\n" +
+               "        \n" +
+               "        println(\"Custom analysis complete! Processed \" + count + \" items.\");\n" +
+               "    }\n" +
+               "}\n";
+    }
+
+    private String generateScriptName(String workflowType) {
+        switch (workflowType) {
+            case "document_functions":
+                return "DocumentFunctions.java";
+            case "fix_ordinals":
+                return "FixOrdinalImports.java";
+            case "bulk_rename":
+                return "BulkRenameSymbols.java";
+            case "analyze_structures":
+                return "AnalyzeStructures.java";
+            case "find_patterns":
+                return "FindPatterns.java";
+            default:
+                return "CustomAnalysis.java";
+        }
+    }
+
+    /**
+     * Execute a Ghidra script and capture all output, errors, and warnings (v1.9.1)
+     * This enables automatic troubleshooting by providing comprehensive error information.
+     *
+     * Note: Since Ghidra scripts are typically run through the GUI via Script Manager,
+     * this endpoint provides script discovery and validation. Full execution with output
+     * capture should be done through Ghidra's Script Manager UI or headless mode.
+     */
+    private String runGhidraScriptWithCapture(String scriptName, int timeoutSeconds, boolean captureOutput) {
+        if (scriptName == null || scriptName.isEmpty()) {
+            return "{\"success\": false, \"error\": \"Script name is required\"}";
+        }
+
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"success\": false, \"error\": \"No program loaded\"}";
+        }
+
+        try {
+            // Locate the script file in ghidra_scripts directory
+            // Try multiple common locations
+            File scriptFile = null;
+
+            String[] possibleDirs = {
+                System.getProperty("user.home") + "/.ghidra/.ghidra_11.4/Extensions/Ghidra/ghidra_scripts",
+                System.getProperty("user.home") + "/.ghidra/.ghidra_11.x/Extensions/Ghidra/ghidra_scripts",
+                System.getenv("GHIDRA_USER_HOME") + "/Extensions/Ghidra/ghidra_scripts",
+                System.getProperty("user.dir") + "/ghidra_scripts",
+                "./ghidra_scripts"
+            };
+
+            String filename = scriptName.endsWith(".java") ? scriptName : scriptName + ".java";
+
+            for (String dirPath : possibleDirs) {
+                if (dirPath != null) {
+                    File candidate = new File(dirPath, filename);
+                    if (candidate.exists()) {
+                        scriptFile = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (scriptFile == null) {
+                // List where we searched
+                StringBuilder searched = new StringBuilder();
+                for (String dir : possibleDirs) {
+                    if (dir != null) searched.append(dir).append(", ");
+                }
+                return "{\"success\": false, \"error\": \"Script '" + escapeJsonString(filename) +
+                       "' not found. Searched: " + escapeJsonString(searched.toString()) + "\"}";
+            }
+
+            // Validate script file
+            long startTime = System.currentTimeMillis();
+            List<Map<String, Object>> errors = new ArrayList<>();
+            List<Map<String, Object>> warnings = new ArrayList<>();
+            String consoleOutput = "";
+            int exitCode = 0;
+
+            try {
+                // Read script content for basic validation
+                byte[] scriptContent = new byte[(int) scriptFile.length()];
+                FileInputStream fis = new FileInputStream(scriptFile);
+                fis.read(scriptContent);
+                fis.close();
+
+                String scriptText = new String(scriptContent, StandardCharsets.UTF_8);
+                consoleOutput = "Script validation successful for: " + scriptFile.getAbsolutePath() + "\n";
+                consoleOutput += "Script size: " + scriptContent.length + " bytes\n";
+
+                // Check for common errors in script
+                if (!scriptText.contains("extends GhidraScript")) {
+                    Map<String, Object> warning = new HashMap<>();
+                    warning.put("type", "ValidationWarning");
+                    warning.put("message", "Script does not extend GhidraScript");
+                    warnings.add(warning);
+                }
+
+                consoleOutput += "\nTo run this script:\n";
+                consoleOutput += "1. Open Ghidra with your binary loaded\n";
+                consoleOutput += "2. Go to Window → Script Manager\n";
+                consoleOutput += "3. Find and select: " + scriptName + "\n";
+                consoleOutput += "4. Click the play button to execute\n";
+
+            } catch (Exception e) {
+                exitCode = 1;
+                Map<String, Object> error = new HashMap<>();
+                error.put("type", e.getClass().getSimpleName());
+                error.put("message", e.getMessage() != null ? e.getMessage() : "Unknown error");
+                errors.add(error);
+                consoleOutput = "Error validating script: " + e.getMessage();
+            }
+
+            double executionTime = (System.currentTimeMillis() - startTime) / 1000.0;
+
+            // Build response
+            StringBuilder response = new StringBuilder();
+            response.append("{");
+            response.append("\"success\": ").append(exitCode == 0 ? "true" : "false").append(", ");
+            response.append("\"script_name\": \"").append(escapeJsonString(scriptName)).append("\", ");
+            response.append("\"script_path\": \"").append(escapeJsonString(scriptFile.getAbsolutePath())).append("\", ");
+            response.append("\"execution_time_seconds\": ").append(String.format("%.2f", executionTime)).append(", ");
+            response.append("\"console_output\": \"").append(escapeJsonString(consoleOutput)).append("\", ");
+            response.append("\"exit_code\": ").append(exitCode).append(", ");
+            response.append("\"note\": \"Ghidra scripts run in Script Manager UI. See console_output for instructions.\", ");
+            response.append("\"errors\": ").append(jsonifyErrorList(errors)).append(", ");
+            response.append("\"warnings\": ").append(jsonifyErrorList(warnings));
+            response.append("}");
+
+            return response.toString();
+
+        } catch (Exception e) {
+            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * Parse script console output for error and warning patterns
+     */
+    private void parseScriptOutput(String output, List<Map<String, Object>> errors, List<Map<String, Object>> warnings) {
+        if (output == null || output.isEmpty()) {
+            return;
+        }
+
+        String[] lines = output.split("\n");
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+
+            // Look for common error patterns
+            if (line.contains("Exception") || line.contains("Error") || line.contains("ERROR")) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("type", "RuntimeError");
+                error.put("message", line.trim());
+                error.put("line", i);
+                if (!errors.contains(error)) {
+                    errors.add(error);
+                }
+            }
+
+            // Look for common warning patterns
+            if (line.contains("Warning") || line.contains("WARN") || line.contains("warning")) {
+                Map<String, Object> warning = new HashMap<>();
+                warning.put("type", "Warning");
+                warning.put("message", line.trim());
+                warning.put("line", i);
+                if (!warnings.contains(warning)) {
+                    warnings.add(warning);
+                }
+            }
+        }
+    }
+
+    /**
+     * Convert list of error maps to JSON array
+     */
+    private String jsonifyErrorList(List<Map<String, Object>> errorList) {
+        if (errorList.isEmpty()) {
+            return "[]";
+        }
+
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < errorList.size(); i++) {
+            if (i > 0) json.append(", ");
+            Map<String, Object> error = errorList.get(i);
+            json.append("{");
+            boolean first = true;
+            for (Map.Entry<String, Object> entry : error.entrySet()) {
+                if (!first) json.append(", ");
+                json.append("\"").append(entry.getKey()).append("\": ");
+                if (entry.getValue() instanceof String) {
+                    json.append("\"").append(escapeJsonString((String) entry.getValue())).append("\"");
+                } else if (entry.getValue() instanceof Integer) {
+                    json.append(entry.getValue());
+                } else {
+                    json.append("\"").append(escapeJsonString(entry.getValue().toString())).append("\"");
+                }
+                first = false;
+            }
+            json.append("}");
+        }
+        json.append("]");
+        return json.toString();
+    }
+
+    /**
+     * List all external locations (imports, ordinal imports, etc.)
+     * Returns detailed information including library name and label
+     */
+    private String listExternalLocations(int offset, int limit) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+
+        ExternalManager extMgr = program.getExternalManager();
+        List<String> lines = new ArrayList<>();
+
+        try {
+            String[] extLibNames = extMgr.getExternalLibraryNames();
+            for (String libName : extLibNames) {
+                ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
+                while (iter.hasNext()) {
+                    ExternalLocation extLoc = iter.next();
+                    String locName = extLoc.getLabel();
+                    String address = extLoc.getAddress().toString().replace(":", "");
+                    String info = String.format("%s (%s) - %s @ %s",
+                        locName, libName, extLoc.getLabel(), address);
+                    lines.add(info);
+                }
+            }
+        } catch (Exception e) {
+            Msg.error(this, "Error listing external locations: " + e.getMessage());
+            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+        }
+
+        return paginateList(lines, offset, limit);
+    }
+
+    /**
+     * Get details of a specific external location
+     */
+    private String getExternalLocationDetails(String address, String dllName) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(address);
+            ExternalManager extMgr = program.getExternalManager();
+
+            StringBuilder result = new StringBuilder();
+            result.append("{");
+            result.append("\"address\": \"").append(address).append("\", ");
+
+            if (dllName != null && !dllName.isEmpty()) {
+                ExternalLocationIterator iter = extMgr.getExternalLocations(dllName);
+                while (iter.hasNext()) {
+                    ExternalLocation extLoc = iter.next();
+                    if (extLoc.getAddress().equals(addr)) {
+                        result.append("\"dll_name\": \"").append(dllName).append("\", ");
+                        result.append("\"label\": \"").append(escapeJson(extLoc.getLabel())).append("\", ");
+                        result.append("\"address\": \"").append(addr).append("\"");
+                        break;
+                    }
+                }
+                if (!result.toString().contains("label")) {
+                    result.append("\"error\": \"External location not found in DLL\"");
+                }
+            } else {
+                // Try to find it in any DLL
+                String[] libNames = extMgr.getExternalLibraryNames();
+                for (String libName : libNames) {
+                    ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
+                    while (iter.hasNext()) {
+                        ExternalLocation extLoc = iter.next();
+                        if (extLoc.getAddress().equals(addr)) {
+                            result.append("\"dll_name\": \"").append(libName).append("\", ");
+                            result.append("\"label\": \"").append(escapeJson(extLoc.getLabel())).append("\", ");
+                            result.append("\"address\": \"").append(addr).append("\"");
+                            break;
+                        }
+                    }
+                    if (result.toString().contains("label")) break;
+                }
+            }
+            result.append("}");
+            return result.toString();
+        } catch (Exception e) {
+            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+        }
+    }
+
+    /**
+     * Rename an external location (e.g., change Ordinal_123 to a real function name)
+     */
+    private String renameExternalLocation(String address, String newName) {
+        Program program = getCurrentProgram();
+        if (program == null) return "No program loaded";
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(address);
+            ExternalManager extMgr = program.getExternalManager();
+
+            String[] libNames = extMgr.getExternalLibraryNames();
+            for (String libName : libNames) {
+                ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
+                while (iter.hasNext()) {
+                    ExternalLocation extLoc = iter.next();
+                    if (extLoc.getAddress().equals(addr)) {
+                        final String finalLibName = libName;
+                        final ExternalLocation finalExtLoc = extLoc;
+                        final String oldName = extLoc.getLabel();
+
+                        AtomicBoolean success = new AtomicBoolean(false);
+                        AtomicReference<String> errorMsg = new AtomicReference<>();
+
+                        try {
+                            SwingUtilities.invokeAndWait(() -> {
+                                int tx = program.startTransaction("Rename external location");
+                                try {
+                                    // Get the external library namespace for this external location
+                                    Namespace extLibNamespace = extMgr.getExternalLibrary(finalLibName);
+                                    finalExtLoc.setName(extLibNamespace, newName, SourceType.USER_DEFINED);
+                                    success.set(true);
+                                    Msg.info(this, "Renamed external location: " + oldName + " -> " + newName);
+                                } catch (Exception e) {
+                                    errorMsg.set(e.getMessage());
+                                    Msg.error(this, "Error renaming external location: " + e.getMessage());
+                                } finally {
+                                    program.endTransaction(tx, success.get());
+                                }
+                            });
+                        } catch (InterruptedException e) {
+                            errorMsg.set("Interrupted: " + e.getMessage());
+                        } catch (InvocationTargetException e) {
+                            errorMsg.set(e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
+                        }
+
+                        if (success.get()) {
+                            return "{\"success\": true, \"old_name\": \"" + escapeJson(oldName) +
+                                   "\", \"new_name\": \"" + escapeJson(newName) +
+                                   "\", \"dll\": \"" + finalLibName + "\"}";
+                        } else {
+                            return "{\"error\": \"" + (errorMsg.get() != null ? errorMsg.get().replace("\"", "\\\"") : "Unknown error") + "\"}";
+                        }
+                    }
+                }
+            }
+
+            return "{\"error\": \"External location not found at address " + address + "\"}";
+        } catch (Exception e) {
+            Msg.error(this, "Exception in renameExternalLocation: " + e.getMessage());
+            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+        }
     }
 
     @Override

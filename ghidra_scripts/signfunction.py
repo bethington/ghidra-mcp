@@ -1,14 +1,15 @@
-#Set proper comment on function header with sign
+#Sign Function
+#
 #This script adds a standardized function header comment for the Diablo 2 reverse engineering team.
 #The header includes date, author (from Ghidra username), function name, address, and existing description.
 #If the function uses custom variable storage, it appends a note listing all custom register parameters.
 #Bound to F6 for quick function documentation during reverse engineering sessions.
 #
-#@author dzik
+#@author Ben Ethington
 #@category Diablo 2
+#@description Adds standardized function header comment with date, author, and custom register documentation
 #@keybinding F6
-#@menupath 
-#@toolbar
+#@menupath Diablo II.Sign Function
 
 from ghidra.util.exception import CancelledException, InvalidInputException
 from datetime import date

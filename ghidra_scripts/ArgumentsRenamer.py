@@ -1,14 +1,16 @@
-#Arguments renamer - Automatically renames function parameters based on Diablo 2 data types
+#Arguments Renamer - Automatically renames function parameters based on Diablo 2 data types
+#
 #Iterates through all functions and renames parameters to follow Hungarian notation:
 #  - Pointer types: prefix 'p' (pGame, pClient, pUnit)
 #  - Double pointers: prefix 'pp' (ppMonsterRegion)
 #  - Enum types: prefix 'e' (eUnitType, eSkill, eState)
 #Handles duplicate names gracefully and tracks successful renames.
-#@author dzik
+#
+#@author Ben Ethington
 #@category Diablo 2
-#@keybinding 
-#@menupath 
-#@toolbar
+#@description Renames function parameters following Hungarian notation conventions (p, pp, e prefixes)
+#@keybinding
+#@menupath Diablo II.Arguments Renamer
 
 import json
 

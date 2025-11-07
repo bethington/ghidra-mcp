@@ -29,8 +29,8 @@ DOCS_DIR = WORKSPACE_ROOT / "docs"
 PROMPTS_DIR = DOCS_DIR / "prompts"
 
 def load_pending_functions() -> List[str]:
-    """Load pending functions from D2CommonPtrsTodo.txt"""
-    todo_file = SCRIPTS_DIR / "D2CommonPtrsTodo.txt"
+    """Load pending functions from FunctionsTodo.txt"""
+    todo_file = SCRIPTS_DIR / "FunctionsTodo.txt"
     if not todo_file.exists():
         print(f"ERROR: Cannot find {todo_file}")
         return []

@@ -3,15 +3,14 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-11.4.2-green.svg)](https://ghidra-sre.org/)
-[![MCP Version](https://img.shields.io/badge/MCP-1.8.1-purple.svg)](https://modelcontextprotocol.io/)
 
 A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks.
 
 ## 🌟 Features
 
 ### Core MCP Integration
-- **Full MCP 1.8.1 Compatibility** - Complete implementation of Model Context Protocol
-- **109 MCP Tools Available** - Comprehensive API surface for binary analysis (102 implemented + 7 ROADMAP v2.0)
+- **Full MCP Compatibility** - Complete implementation of Model Context Protocol
+- **111 MCP Tools Available** - Comprehensive API surface for binary analysis
 - **Production-Ready Reliability** - Tested batch operations and atomic transactions
 - **Real-time Analysis** - Live integration with Ghidra's analysis engine
 
@@ -71,7 +70,7 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
    .\deploy-to-ghidra.ps1
 
    # Or manually copy to Ghidra Extensions
-   Copy-Item target\GhidraMCP-1.8.1.zip "C:\ghidra\Extensions\Ghidra\"
+   Copy-Item target\GhidraMCP.zip "C:\ghidra\Extensions\Ghidra\"
    ```
 
 ### Basic Usage
@@ -227,14 +226,14 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## 🏆 Production Status
 
-**Current Version**: 1.8.1
 **Production Ready**: ✅ Yes
 **Package**: com.xebyte
-**MCP Tools**: 109 tools (102 implemented + 7 ROADMAP v2.0)
+**MCP Tools**: 111 tools (105 implemented + 6 ROADMAP v2.0)
 **Test Coverage**: 100% compilation, full functionality verified
 **Documentation Coverage**: 100% with comprehensive ROADMAP
 **Performance**: 93% API call reduction with batch operations
-**Latest Enhancement**: Project reorganization and __d2edicall support (v1.8.1)  
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.  
 
 ## 🙏 Acknowledgments
 

@@ -1,14 +1,15 @@
-#Add custom registers to function arguments
+#Custom Registers
+#
 #This script identifies functions in Diablo 2 that use non-standard registers (in_* or unaff_*)
 #as parameters and promotes them to explicit function arguments. It enables custom variable storage,
 #adds the register parameters to the function signature, and sets the calling convention to "unknown".
 #Useful for fixing functions with unusual register usage patterns that Ghidra doesn't detect automatically.
 #
-#@author dzik
+#@author Ben Ethington
 #@category Diablo 2
-#@keybinding 
-#@menupath 
-#@toolbar
+#@description Promotes non-standard registers (in_*, unaff_*) to explicit function arguments with custom storage
+#@keybinding
+#@menupath Diablo II.Custom Registers
 
 import json
 import os

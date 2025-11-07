@@ -1,15 +1,16 @@
-#Export function addresses and parameters info
+#Function Exporter
+#
 #This script exports all Diablo 2 functions to JSON format with complete metadata including
 #function names, addresses, parameter counts, return types, disassembly snippets (first 5 bytes),
 #jumpback addresses for hooking, and detailed parameter information (name, type, location, size).
 #Outputs both formatted (game.json) and minified (game_minify.json) versions.
 #Useful for creating function hooking frameworks or external analysis tools.
 #
-#@author dzik
+#@author Ben Ethington
 #@category Diablo 2
-#@keybinding 
-#@menupath 
-#@toolbar
+#@description Exports all functions to JSON with metadata, parameters, addresses, and hooking information
+#@keybinding
+#@menupath Diablo II.Function Exporter
 
 import json
 

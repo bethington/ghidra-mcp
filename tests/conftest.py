@@ -56,15 +56,23 @@ class APIClient:
         url = urljoin(self.base_url, endpoint)
         return self.session.get(url, params=params, **kwargs)
     
-    def post(self, endpoint: str, data: Optional[Dict] = None, **kwargs) -> requests.Response:
-        """Make POST request."""
+    def post(self, endpoint: str, data: Optional[Dict] = None, json: Optional[Dict] = None, **kwargs) -> requests.Response:
+        """Make POST request with JSON encoding by default."""
         url = urljoin(self.base_url, endpoint)
-        return self.session.post(url, data=data, **kwargs)
+        # If data is provided and json is not, convert data to json
+        if data is not None and json is None:
+            json = data
+            data = None
+        return self.session.post(url, data=data, json=json, **kwargs)
     
-    def put(self, endpoint: str, data: Optional[Dict] = None, **kwargs) -> requests.Response:
-        """Make PUT request."""
+    def put(self, endpoint: str, data: Optional[Dict] = None, json: Optional[Dict] = None, **kwargs) -> requests.Response:
+        """Make PUT request with JSON encoding by default."""
         url = urljoin(self.base_url, endpoint)
-        return self.session.put(url, data=data, **kwargs)
+        # If data is provided and json is not, convert data to json
+        if data is not None and json is None:
+            json = data
+            data = None
+        return self.session.put(url, data=data, json=json, **kwargs)
     
     def delete(self, endpoint: str, **kwargs) -> requests.Response:
         """Make DELETE request."""

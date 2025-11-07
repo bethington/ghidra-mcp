@@ -16,7 +16,8 @@
 // FindFunctionsAtINT3.java
 // Finds potential function starts after INT3 (0xCC) padding and creates functions
 // Searches for sequences of INT3 bytes (0xCC) and creates functions at the next valid address
-//@category Functions
+//@author Ben Ethington
+//@category Diablo 2
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;

@@ -1,15 +1,17 @@
-#Arguments unifier - Standardizes function parameter and return types to fixed-width types
+#Arguments Unifier - Standardizes function parameter and return types to fixed-width types
+#
 #Converts variable-sized types to explicit fixed-width equivalents:
 #  - int → int32_t, uint → uint32_t
 #  - short → int16_t, ushort → uint16_t
 #  - BYTE → int8_t
 #Applies to both function parameters and return types across all functions.
 #Ensures consistent type sizes regardless of platform or compiler settings.
-#@author dzik
+#
+#@author Ben Ethington
 #@category Diablo 2
-#@keybinding 
-#@menupath 
-#@toolbar
+#@description Standardizes function parameter and return types to fixed-width equivalents (int32_t, uint16_t, etc.)
+#@keybinding
+#@menupath Diablo II.Arguments Unifier
 
 import json
 

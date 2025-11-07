@@ -1,4 +1,5 @@
 //Apply DWORD from windows.h
+//@author Ben Ethington
 //@category Data
 //@keybinding
 //@menupath

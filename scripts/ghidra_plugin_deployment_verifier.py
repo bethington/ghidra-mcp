@@ -69,7 +69,7 @@ def test_core_endpoints():
     return results
 
 def main():
-    plugin_zip = "../target/GhidraMCP-1.2.0.zip"
+    plugin_zip = "../target/GhidraMCP-1.9.2.zip"
     
     print("🔧 Ghidra Plugin Deployment Helper")
     print("=" * 50)

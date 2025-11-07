@@ -4,8 +4,8 @@
 // causing incorrect decompilation. The script creates a proper local variable with custom
 // storage to fix the decompilation output. Specifically targets the pattern at 0x6fb6aef0.
 //
-// @category Analysis
-// @author Claude Code
+// @category Diablo 2
+// @author Ben Ethington
 // @description Manually creates a local variable for the EBP register reuse pattern at 0x6fb6af4f
 
 import ghidra.app.script.GhidraScript;

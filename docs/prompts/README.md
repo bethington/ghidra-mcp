@@ -2,30 +2,72 @@
 
 This directory contains optimized prompts for documenting binary code in Ghidra using the MCP tools. These prompts are designed to be used with Claude or other AI assistants to systematically reverse engineer and document functions.
 
+⚠️ **NEW: Comprehensive Workflow Enhancement** - After documenting 4 complex Diablo II functions, the workflow was refined to eliminate missing globals and string constants. **All new documentation should follow the updated guidance below.**
+
+## Quick Navigation
+
+- **Starting a new function?** → Start with DOCUMENTATION_WORKFLOW_INDEX.md for the decision tree, then read OPTIMIZED_FUNCTION_DOCUMENTATION.md
+- **Missing global data?** → Use GLOBAL_DATA_NAMING_CHECKLIST.md
+- **Naming questions?** → Reference [NAMING_CONVENTIONS.md](../../NAMING_CONVENTIONS.md)
+- **Complete workflow guide?** → Read the new **BINARY_FUNCTION_DOCUMENTATION_COMPLETE_GUIDE.md** (comprehensive overview)
+
 ## Available Prompts
+
+### ⭐ NEW: Complete Workflow Documentation (Start Here)
+
+1. **BINARY_FUNCTION_DOCUMENTATION_COMPLETE_GUIDE.md** ⭐ **START HERE**
+   - Complete overview of the proven 12-step workflow
+   - Built from experience documenting 4 complex functions
+   - Includes gap analysis and fixes (prevents missing globals/strings)
+   - Lists all 14 completion criteria
+   - Troubleshooting guide for common issues
+   - Cross-references all supporting documents
+   - Best for: Understanding the complete workflow before starting
+   - Use when: First time with this project or want complete context
+
+2. **DOCUMENTATION_WORKFLOW_INDEX.md** ⭐ **QUICK REFERENCE**
+   - Decision tree for which tool to use when
+   - Quick reference for all MCP tools
+   - Naming convention quick reference
+   - Common patterns by function type
+   - Troubleshooting common issues
+   - Tool batch size limits and workarounds
+   - Best for: Fast lookups while working
+   - Use when: Need specific tool info or workflow step
+
+3. **GLOBAL_DATA_NAMING_CHECKLIST.md** ⭐ **CRITICAL FOR STEP 6**
+   - Systematic checklist for finding and renaming ALL global data
+   - Prevents missing string constants, buffers, configuration variables
+   - Explains difference between local rename_variable and global rename_or_label
+   - 5 categories of global data with naming patterns
+   - Search strategies for each category
+   - Integration with main 12-step workflow
+   - Best for: Completing step 6 (variables) properly
+   - Use when: Renaming variables in any function
 
 ### Core Documentation Workflows
 
-1. **OPTIMIZED_FUNCTION_DOCUMENTATION.md** ⭐ **RECOMMENDED**
-   - Most comprehensive and detailed workflow
+4. **OPTIMIZED_FUNCTION_DOCUMENTATION.md** ⭐ **MAIN WORKFLOW**
+   - Most comprehensive and detailed workflow (updated with global data requirements)
    - Complete step-by-step instructions for thorough function documentation
-   - Includes verification steps, error handling, and structure identification
+   - Now includes explicit requirements for string constants and globals
+   - Verification steps and structure identification
    - Best for: Detailed analysis requiring full documentation
    - Use when: Working on critical functions or complex algorithms
 
-2. **UNIFIED_ANALYSIS_PROMPT.md**
+5. **UNIFIED_ANALYSIS_PROMPT.md**
    - Combined function and data analysis workflow
    - Comprehensive approach for complex binaries
    - Best for: Full system analysis including structures
    - Use when: Need to understand relationships between code and data
 
-3. **ENHANCED_ANALYSIS_PROMPT.md**
+6. **ENHANCED_ANALYSIS_PROMPT.md**
    - Advanced analysis techniques
    - Specialized for data structure discovery and application
    - Best for: Complex reverse engineering scenarios
    - Use when: Standard workflow isn't sufficient
 
-4. **QUICK_START_PROMPT.md**
+7. **QUICK_START_PROMPT.md**
    - Simplified workflow for beginners
    - Essential steps without advanced features
    - Best for: Getting started quickly
@@ -33,14 +75,14 @@ This directory contains optimized prompts for documenting binary code in Ghidra 
 
 ### Formatting Guides
 
-5. **PLATE_COMMENT_FORMAT_GUIDE.md** ⭐ **ESSENTIAL**
+8. **PLATE_COMMENT_FORMAT_GUIDE.md** ⭐ **ESSENTIAL**
    - Exact template for creating structured function header comments
    - Plain text format (Ghidra adds formatting automatically)
    - Detailed formatting rules for all sections
    - Best for: Creating consistent, professional plate comments
    - Use when: You need to format function headers correctly
 
-6. **PLATE_COMMENT_EXAMPLES.md** ⭐ **PRACTICAL**
+9. **PLATE_COMMENT_EXAMPLES.md** ⭐ **PRACTICAL**
    - Real-world examples of properly formatted plate comments
    - Multiple function types (validation, processing, initialization, etc.)
    - Quick reference templates
@@ -49,21 +91,11 @@ This directory contains optimized prompts for documenting binary code in Ghidra 
 
 ### Data Analysis
 
-7. **DATA_DOCUMENTATION_TEMPLATE.md**
-   - Comprehensive template for documenting data structures and global variables
-   - Includes usage analysis, structure context, and naming conventions
-   - Best for: Analyzing data regions and applying proper types
-   - Use when: Documenting global variables, tables, or data structures
-
-7. **UNIFIED_ANALYSIS_PROMPT.md**
-   - Combines multiple analysis approaches
-   - Best for: Flexible analysis methodology
-   - Use when: You need adaptability in approach
-
-8. **QUICK_START_PROMPT.md**
-   - Minimal instructions for rapid documentation
-   - Best for: Experienced users who know the tools
-   - Use when: You want minimal guidance
+10. **DATA_DOCUMENTATION_TEMPLATE.md**
+    - Comprehensive template for documenting data structures and global variables
+    - Includes usage analysis, structure context, and naming conventions
+    - Best for: Analyzing data regions and applying proper types
+    - Use when: Documenting global variables, tables, or data structures
 
 ## Recommended Usage Workflow
 
