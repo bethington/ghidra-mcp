@@ -1,52 +1,152 @@
-# GhidraMCP Scripts Directory
+# 🛠️ GhidraMCP Scripts Directory
 
-Professional utilities and tools for GhidraMCP development, testing, and deployment.
+> **Professional utilities and automation tools** for GhidraMCP development, testing, and deployment.
 
-## � **Centralized Configuration**
+---
 
-### **`scripts_config.py`** - Centralized Configuration System
-- **Purpose**: Shared configuration for all GhidraMCP scripts
-- **Features**:
-  - Server URL and connection settings management
-  - Comprehensive endpoint definitions (41 endpoints across 6 categories)
-  - Standardized message formatting and symbols
-  - Sample data for testing and examples
-  - Validation patterns and rules
-  - Path and logging configuration
-- **Usage**: `from scripts_config import Config, EndpointConfig, MessageConfig`
-- **Benefits**: Eliminates hardcoded values, ensures consistency, simplifies maintenance
+## 📂 Directory Organization
 
-### **`config_usage_example.py`** - Configuration Usage Examples
-- **Purpose**: Demonstrates how to use the centralized configuration
-- **Features**: Complete examples of all configuration categories
-- **Usage**: `python config_usage_example.py`
+```
+scripts/
+├── 🔄 Data Processing
+│   ├── data-extract.ps1              # Extract data from Ghidra
+│   ├── data-process.ps1              # Process extracted data
+│   ├── process_char_arrays.py        # Character array processing
+│   └── make_data_meaningful.py       # Data naming automation
+│
+├── ⚡ Function Processing
+│   ├── functions-extract.ps1         # Extract function data
+│   ├── functions-process.ps1         # Process functions  
+│   ├── hybrid-function-processor.ps1 # Hybrid processing workflow
+│   └── FunctionsTodo.txt             # Function processing task list
+│
+├── 🧪 Testing & Validation
+│   ├── test_convention_detection.py      # Test calling convention detection
+│   ├── test_d2_detection.py              # Test D2 convention detection
+│   ├── test_d2_simple.py                 # Simple D2 tests
+│   ├── test_data_xrefs_tool.py           # Test xref tools
+│   ├── validate_function_accuracy.py     # Validate function analysis
+│   ├── verify_all_structures.py          # Structure verification
+│   ├── quick_detection_test.py           # Quick detection tests
+│   ├── ghidra_rest_api_functional_tests.py  # REST API tests
+│   ├── ghidra_server_health_check.py     # Server health monitoring
+│   └── ghidra_plugin_deployment_verifier.py # Plugin verification
+│
+├── 🔧 Fix & Repair
+│   ├── fix_undefined_types.py            # Fix undefined type issues
+│   ├── apply_edge_case_fixes.py          # Apply edge case fixes
+│   ├── apply_test_fixes.py               # Apply test-identified fixes
+│   ├── automated_edge_case_fix.py        # Automated fixing
+│   ├── run_edge_case_validation.py       # Validate edge cases
+│   └── ClearCallReturnOverrides.java     # Clear call/return overrides
+│
+├── 📊 Reporting & Analysis
+│   ├── final_comprehensive_report.py     # Generate comprehensive reports
+│   ├── ghidra_mcp_usage_examples.py      # Usage examples
+│   └── search_punit_references.py        # Search pUnit references
+│
+├── 🔍 Verification
+│   └── verify_version.py                 # Version consistency verification
+│
+├── 📝 Configuration
+│   ├── scripts_config.py                 # Shared configuration
+│   ├── process_whitelist.json            # Processing whitelist
+│   ├── TEST_SUITE_README.md              # Test suite documentation
+│   └── CONFIGURATION_MIGRATION_GUIDE.md  # Configuration migration
+│
+└── � Documentation
+    └── README.md                          # This file
+```
 
-## �📋 Available Scripts
+---
 
-### 🏥 **Health & Diagnostics**
+## � Centralized Configuration
 
-#### **`ghidra_server_health_check.py`** - Server Health Diagnostics
-- **Purpose**: Comprehensive health check for GhidraMCP server readiness
-- **Features**:
-  - Server connectivity validation
-  - Plugin installation verification
-  - Program loading status check
-  - Core functionality testing
-  - Detailed diagnostic reporting
-- **Usage**: `python ghidra_server_health_check.py [server_url]`
-- **When to use**: Before running tests, after plugin installation, troubleshooting
+### **`scripts_config.py`** - Central Configuration System
 
-#### **`ghidra_plugin_deployment_verifier.py`** - Deployment Verification
-- **Purpose**: Verifies plugin deployment and provides deployment guidance
-- **Features**:
-  - Core endpoint functionality testing
-  - Step-by-step deployment instructions
-  - Post-deployment validation
-  - Installation status reporting
-- **Usage**: `python ghidra_plugin_deployment_verifier.py [server_url]`
-- **When to use**: After building plugin, during deployment process
+**Purpose**: Shared configuration for all GhidraMCP scripts
 
-### 🧪 **Testing & Validation**
+**Features**:
+- Server URL and connection settings management
+- Comprehensive endpoint definitions (41 endpoints across 6 categories)
+- Standardized message formatting and symbols
+- Sample data for testing and examples
+- Validation patterns and rules
+- Path and logging configuration
+
+**Usage**:
+```python
+from scripts_config import Config, EndpointConfig, MessageConfig
+
+# Get server URL
+server_url = Config.SERVER_URL
+
+# Access endpoints
+endpoint = EndpointConfig.FUNCTIONS_LIST
+
+# Use message formatting
+print(MessageConfig.success("Operation completed"))
+```
+
+**Benefits**:
+- ✅ Eliminates hardcoded values
+- ✅ Ensures consistency across scripts
+- ✅ Simplifies maintenance
+- ✅ Centralized updates
+
+---
+
+## 🚀 Quick Start
+
+### Data Extraction & Processing
+
+```powershell
+# Extract all data items from Ghidra
+.\data-extract.ps1
+
+# Process extracted data with meaningful names
+.\data-process.ps1
+
+# Process character arrays specifically
+python process_char_arrays.py
+
+# Make data meaningful (auto-naming)
+python make_data_meaningful.py
+```
+
+### Function Analysis
+
+```powershell
+# Extract all functions
+.\functions-extract.ps1 -All
+
+# Extract excluding library functions
+.\functions-extract.ps1 -All -ExcludeLibraryFunctions
+
+# Process functions (forward pass)
+.\functions-process.ps1
+
+# Process functions (reverse pass)
+.\functions-process.ps1 -Reverse
+
+# Hybrid processing workflow
+.\hybrid-function-processor.ps1
+```
+
+### Health & Diagnostics
+
+```powershell
+# Check server health
+python ghidra_server_health_check.py
+
+# Verify plugin deployment
+python ghidra_plugin_deployment_verifier.py
+
+# Quick detection test
+python quick_detection_test.py
+```
+
+---
 
 #### **`ghidra_rest_api_functional_tests.py`** - API Functional Testing
 - **Purpose**: Comprehensive REST API functionality testing with real data
