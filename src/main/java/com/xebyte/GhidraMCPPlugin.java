@@ -9264,7 +9264,24 @@ public class GhidraMCPPlugin extends Plugin {
                     result.append("\"has_custom_name\": ").append(!func.getName().startsWith("FUN_")).append(", ");
                     result.append("\"has_prototype\": ").append(func.getSignature() != null).append(", ");
                     result.append("\"has_calling_convention\": ").append(func.getCallingConvention() != null).append(", ");
-                    result.append("\"has_plate_comment\": ").append(func.getComment() != null).append(", ");
+
+                    // Enhanced plate comment validation
+                    String plateComment = func.getComment();
+                    boolean hasPlateComment = plateComment != null && !plateComment.isEmpty();
+                    result.append("\"has_plate_comment\": ").append(hasPlateComment).append(", ");
+
+                    // Validate plate comment structure and content
+                    List<String> plateCommentIssues = new ArrayList<>();
+                    if (hasPlateComment) {
+                        validatePlateCommentStructure(plateComment, plateCommentIssues);
+                    }
+
+                    result.append("\"plate_comment_issues\": [");
+                    for (int i = 0; i < plateCommentIssues.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(escapeJson(plateCommentIssues.get(i))).append("\"");
+                    }
+                    result.append("], ");
 
                     // Check for undefined variables (both names and types)
                     List<String> undefinedVars = new ArrayList<>();
@@ -9298,7 +9315,7 @@ public class GhidraMCPPlugin extends Plugin {
                     }
                     result.append("], ");
 
-                    result.append("\"completeness_score\": ").append(calculateCompletenessScore(func, undefinedVars.size()));
+                    result.append("\"completeness_score\": ").append(calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size()));
                     result.append("}");
                 } catch (Exception e) {
                     errorMsg.set(e.getMessage());
@@ -9315,7 +9332,70 @@ public class GhidraMCPPlugin extends Plugin {
         return result.toString();
     }
 
-    private double calculateCompletenessScore(Function func, int undefinedCount) {
+    /**
+     * Validate plate comment structure and content quality
+     */
+    private void validatePlateCommentStructure(String plateComment, List<String> issues) {
+        if (plateComment == null || plateComment.isEmpty()) {
+            issues.add("Plate comment is empty");
+            return;
+        }
+
+        // Check minimum line count
+        String[] lines = plateComment.split("\n");
+        if (lines.length < 10) {
+            issues.add("Plate comment has only " + lines.length + " lines (minimum 10 required)");
+        }
+
+        // Check for required sections based on PLATE_COMMENT_FORMAT_GUIDE.md
+        boolean hasAlgorithm = false;
+        boolean hasParameters = false;
+        boolean hasReturns = false;
+        boolean hasNumberedSteps = false;
+
+        for (String line : lines) {
+            String trimmed = line.trim();
+
+            // Check for Algorithm section with numbered steps
+            if (trimmed.startsWith("Algorithm:") || trimmed.equals("Algorithm")) {
+                hasAlgorithm = true;
+            }
+
+            // Check for numbered steps (1., 2., etc.)
+            if (trimmed.matches("^\\d+\\.\\s+.*")) {
+                hasNumberedSteps = true;
+            }
+
+            // Check for Parameters section
+            if (trimmed.startsWith("Parameters:") || trimmed.equals("Parameters")) {
+                hasParameters = true;
+            }
+
+            // Check for Returns section
+            if (trimmed.startsWith("Returns:") || trimmed.equals("Returns")) {
+                hasReturns = true;
+            }
+        }
+
+        // Add issues for missing required sections
+        if (!hasAlgorithm) {
+            issues.add("Missing Algorithm section");
+        }
+
+        if (hasAlgorithm && !hasNumberedSteps) {
+            issues.add("Algorithm section exists but has no numbered steps");
+        }
+
+        if (!hasParameters) {
+            issues.add("Missing Parameters section");
+        }
+
+        if (!hasReturns) {
+            issues.add("Missing Returns section");
+        }
+    }
+
+    private double calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount) {
         double score = 100.0;
 
         if (func.getName().startsWith("FUN_")) score -= 30;
@@ -9323,6 +9403,7 @@ public class GhidraMCPPlugin extends Plugin {
         if (func.getCallingConvention() == null) score -= 10;
         if (func.getComment() == null) score -= 20;
         score -= (undefinedCount * 5);
+        score -= (plateCommentIssueCount * 5); // 5 points per plate comment issue
 
         return Math.max(0, score);
     }
