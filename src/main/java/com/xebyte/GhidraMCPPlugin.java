@@ -9315,7 +9315,23 @@ public class GhidraMCPPlugin extends Plugin {
                     }
                     result.append("], ");
 
-                    result.append("\"completeness_score\": ").append(calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size()));
+                    // Check Hungarian notation compliance
+                    List<String> hungarianViolations = new ArrayList<>();
+                    for (Parameter param : func.getParameters()) {
+                        validateHungarianNotation(param.getName(), param.getDataType().getName(), false, hungarianViolations);
+                    }
+                    for (Variable local : func.getLocalVariables()) {
+                        validateHungarianNotation(local.getName(), local.getDataType().getName(), false, hungarianViolations);
+                    }
+
+                    result.append("\"hungarian_notation_violations\": [");
+                    for (int i = 0; i < hungarianViolations.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(escapeJson(hungarianViolations.get(i))).append("\"");
+                    }
+                    result.append("], ");
+
+                    result.append("\"completeness_score\": ").append(calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size()));
                     result.append("}");
                 } catch (Exception e) {
                     errorMsg.set(e.getMessage());
@@ -9330,6 +9346,103 @@ public class GhidraMCPPlugin extends Plugin {
         }
 
         return result.toString();
+    }
+
+    /**
+     * Validate Hungarian notation compliance for variables
+     */
+    private void validateHungarianNotation(String varName, String typeName, boolean isGlobal, List<String> violations) {
+        // Skip generic/default names - they're already caught by undefined variable check
+        if (varName.startsWith("param_") || varName.startsWith("local_") ||
+            varName.startsWith("iVar") || varName.startsWith("uVar") ||
+            varName.startsWith("dVar") || varName.startsWith("fVar") ||
+            varName.startsWith("in_") || varName.startsWith("extraout_")) {
+            return;
+        }
+
+        // Skip undefined types - they're already caught by undefined type check
+        if (typeName.startsWith("undefined")) {
+            return;
+        }
+
+        // Normalize type name (remove array brackets, pointer stars, etc.)
+        String baseTypeName = typeName.replaceAll("\\[.*\\]", "").replaceAll("\\s*\\*", "").trim();
+
+        // Get expected prefix for this type
+        String expectedPrefix = getExpectedHungarianPrefix(baseTypeName, typeName.contains("*"), typeName.contains("["));
+
+        if (expectedPrefix == null) {
+            // Unknown type or structure type - skip validation
+            return;
+        }
+
+        // For global variables, expect g_ prefix before type prefix
+        String fullExpectedPrefix = isGlobal ? "g_" + expectedPrefix : expectedPrefix;
+
+        // Check if variable name starts with expected prefix
+        boolean hasCorrectPrefix = false;
+
+        // For types with multiple valid prefixes (e.g., byte can be 'b' or 'by')
+        if (expectedPrefix.contains("|")) {
+            String[] validPrefixes = expectedPrefix.split("\\|");
+            for (String prefix : validPrefixes) {
+                String fullPrefix = isGlobal ? "g_" + prefix : prefix;
+                if (varName.startsWith(fullPrefix)) {
+                    hasCorrectPrefix = true;
+                    break;
+                }
+            }
+        } else {
+            hasCorrectPrefix = varName.startsWith(fullExpectedPrefix);
+        }
+
+        if (!hasCorrectPrefix) {
+            violations.add(varName + " (type: " + typeName + ", expected prefix: " + fullExpectedPrefix + ")");
+        }
+    }
+
+    /**
+     * Get expected Hungarian notation prefix for a given type
+     */
+    private String getExpectedHungarianPrefix(String typeName, boolean isPointer, boolean isArray) {
+        // Handle arrays
+        if (isArray) {
+            if (typeName.equals("byte")) return "ab";
+            if (typeName.equals("ushort")) return "aw";
+            if (typeName.equals("uint")) return "ad";
+            if (typeName.equals("char")) return "sz";
+            return null; // Unknown array type
+        }
+
+        // Handle pointers
+        if (isPointer) {
+            if (typeName.equals("void")) return "p";
+            if (typeName.equals("char")) return "sz|lpsz";
+            if (typeName.equals("wchar_t")) return "wsz";
+            return "p"; // Typed pointers generally use 'p' prefix
+        }
+
+        // Handle basic types
+        switch (typeName) {
+            case "byte": return "b|by";
+            case "char": return "c|ch";
+            case "bool": return "f";
+            case "short": return "n|s";
+            case "ushort": return "w";
+            case "int": return "n|i";
+            case "uint": return "dw";
+            case "long": return "l";
+            case "ulong": return "dw";
+            case "longlong": return "ll";
+            case "ulonglong": return "qw";
+            case "float": return "fl";
+            case "double": return "d";
+            case "float10": return "ld";
+            case "HANDLE": return "h";
+            default:
+                // Unknown type (might be structure or custom type)
+                return null;
+        }
     }
 
     /**
@@ -9395,7 +9508,7 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
-    private double calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount) {
+    private double calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount) {
         double score = 100.0;
 
         if (func.getName().startsWith("FUN_")) score -= 30;
@@ -9404,6 +9517,7 @@ public class GhidraMCPPlugin extends Plugin {
         if (func.getComment() == null) score -= 20;
         score -= (undefinedCount * 5);
         score -= (plateCommentIssueCount * 5); // 5 points per plate comment issue
+        score -= (hungarianViolationCount * 3); // 3 points per Hungarian notation violation
 
         return Math.max(0, score);
     }

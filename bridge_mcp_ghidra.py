@@ -125,6 +125,86 @@ def get_timeout_for_endpoint(endpoint: str) -> int:
     endpoint_name = endpoint.strip('/').split('/')[-1]
     return ENDPOINT_TIMEOUTS.get(endpoint_name, ENDPOINT_TIMEOUTS['default'])
 
+def calculate_dynamic_timeout(endpoint: str, payload: dict = None) -> int:
+    """
+    Calculate timeout dynamically based on operation complexity.
+
+    For batch operations, scales timeout based on the number of items being processed.
+    This prevents timeouts on large functions while protecting against indefinite hangs.
+
+    Args:
+        endpoint: API endpoint name
+        payload: Request payload with operation parameters
+
+    Returns:
+        Calculated timeout in seconds (capped at 600s / 10 minutes)
+
+    Examples:
+        For batch_rename_variables with 14 variables:
+        - Base: 120s
+        - Per-variable: 25s × 1.5 safety = 37.5s
+        - Total: 120 + (14 × 37.5) = 645s → capped at 600s
+    """
+    # Get base timeout for this endpoint
+    endpoint_name = endpoint.strip('/').split('/')[-1]
+    base_timeout = ENDPOINT_TIMEOUTS.get(endpoint_name, ENDPOINT_TIMEOUTS['default'])
+
+    # If no payload or not a batch operation, return base timeout
+    if not payload:
+        return base_timeout
+
+    # Dynamic timeout for batch variable renaming
+    # Formula: base + (variables × per_variable_overhead × safety_multiplier)
+    if endpoint_name == 'batch_rename_variables':
+        variable_count = len(payload.get('variable_renames', {}))
+
+        # Per-variable overhead accounts for decompiler refresh on large functions
+        # Safety margin accounts for variability in function complexity
+        per_variable_time = 25  # seconds (empirical: large function decompile time)
+        safety_multiplier = 1.5  # 50% safety margin
+
+        calculated_timeout = int(base_timeout + (variable_count * per_variable_time * safety_multiplier))
+
+        # Cap at 10 minutes to prevent indefinite hangs
+        max_timeout = 600
+        timeout = min(calculated_timeout, max_timeout)
+
+        logger.debug(f"Dynamic timeout for {variable_count} variables: {timeout}s (base={base_timeout}s, calculated={calculated_timeout}s)")
+        return timeout
+
+    # Dynamic timeout for batch comments
+    if endpoint_name == 'batch_set_comments':
+        comment_count = 0
+        comment_count += len(payload.get('decompiler_comments', []))
+        comment_count += len(payload.get('disassembly_comments', []))
+        comment_count += 1 if payload.get('plate_comment') else 0
+
+        per_comment_time = 5  # seconds per comment
+        safety_multiplier = 1.5
+
+        calculated_timeout = int(base_timeout + (comment_count * per_comment_time * safety_multiplier))
+        max_timeout = 600
+        timeout = min(calculated_timeout, max_timeout)
+
+        logger.debug(f"Dynamic timeout for {comment_count} comments: {timeout}s")
+        return timeout
+
+    # Dynamic timeout for batch labels
+    if endpoint_name == 'batch_create_labels':
+        label_count = len(payload.get('labels', []))
+        per_label_time = 2  # seconds per label
+        safety_multiplier = 1.5
+
+        calculated_timeout = int(base_timeout + (label_count * per_label_time * safety_multiplier))
+        max_timeout = 600
+        timeout = min(calculated_timeout, max_timeout)
+
+        logger.debug(f"Dynamic timeout for {label_count} labels: {timeout}s")
+        return timeout
+
+    # Default to base timeout for non-batch operations
+    return base_timeout
+
 def validate_hex_address(address: str) -> bool:
     """Validate hexadecimal address format"""
     if not address or not isinstance(address, str):
@@ -421,9 +501,9 @@ def safe_post_json(endpoint: str, data: dict, retries: int = 3) -> str:
 
     url = urljoin(ghidra_server_url, endpoint)
 
-    # Get endpoint-specific timeout
-    timeout = get_timeout_for_endpoint(endpoint)
-    logger.debug(f"Using timeout of {timeout}s for endpoint {endpoint}")
+    # Get dynamic timeout based on payload complexity
+    timeout = calculate_dynamic_timeout(endpoint, data)
+    logger.info(f"Using dynamic timeout of {timeout}s for endpoint {endpoint} (payload items: {len(data)})")
 
     # Disable Keep-Alive for long-running operations to prevent connection timeout
     headers = {'Connection': 'close'}
@@ -1166,23 +1246,213 @@ def search_functions_by_name(query: str, offset: int = 0, limit: int = 100) -> l
     return safe_get("searchFunctions", {"query": query, "offset": offset, "limit": limit})
 
 @mcp.tool()
-def rename_variable(function_name: str, old_name: str, new_name: str) -> str:
+def rename_variables(
+    function_address: str,
+    variable_renames: dict,
+    backend: str = "auto"
+) -> str:
     """
-    Rename a local variable within a function.
-    
+    Rename one or more variables in a function with automatic backend selection.
+
+    This unified tool replaces the deprecated rename_variable, batch_rename_variables,
+    and rename_variables_progressive tools. It automatically selects the optimal
+    backend based on the number of variables and handles timeouts gracefully.
+
+    Backend Selection Strategy:
+    - "auto" (default): Automatically chooses based on variable count
+      - 1 variable: Uses batch endpoint (most reliable)
+      - 2-10 variables: Uses batch endpoint with timeout monitoring
+      - 11+ variables: Uses progressive chunking with retry logic
+    - "batch": Always use batch endpoint (faster but may timeout on large functions)
+    - "progressive": Always use progressive chunking (slower but handles timeouts)
+
     Args:
-        function_name: Name of the function containing the variable
-        old_name: Current name of the variable to rename
-        new_name: New name for the variable
-        
+        function_address: Function address in hex format (e.g., "0x401000")
+        variable_renames: Dict of {"old_name": "new_name"} pairs (can be single or multiple)
+        backend: Backend strategy - "auto" (default), "batch", or "progressive"
+
     Returns:
-        Success or failure message indicating the result of the rename operation
+        JSON with detailed results:
+        {
+          "success": true,
+          "variables_renamed": 5,
+          "variables_failed": 0,
+          "backend_used": "batch",
+          "errors": []
+        }
+
+    Examples:
+        # Single variable (backend: auto → batch)
+        rename_variables("0x401000", {"local_8": "bufferSize"})
+
+        # Multiple variables (backend: auto → batch)
+        rename_variables("0x401000", {
+            "param_1": "pFile",
+            "local_4": "count",
+            "iVar1": "result"
+        })
+
+        # Large function with many variables (backend: auto → progressive)
+        rename_variables("0x401000", {
+            "local_8": "var1", "local_c": "var2", ... # 20+ variables
+        })
+
+        # Force batch mode
+        rename_variables("0x401000", {"local_8": "count"}, backend="batch")
+
+        # Force progressive mode for reliability
+        rename_variables("0x401000", renames_dict, backend="progressive")
     """
-    return safe_post("renameVariable", {
-        "functionName": function_name,
-        "oldName": old_name,
-        "newName": new_name
-    })
+    import json
+
+    validate_hex_address(function_address)
+
+    if not variable_renames:
+        return json.dumps({
+            "success": True,
+            "variables_renamed": 0,
+            "variables_failed": 0,
+            "backend_used": "none",
+            "message": "No variables to rename"
+        })
+
+    num_variables = len(variable_renames)
+
+    # Determine backend strategy
+    if backend == "auto":
+        if num_variables <= 10:
+            actual_backend = "batch"
+        else:
+            actual_backend = "progressive"
+    elif backend in ["batch", "progressive"]:
+        actual_backend = backend
+    else:
+        raise GhidraValidationError(f"Invalid backend: {backend}. Must be 'auto', 'batch', or 'progressive'")
+
+    logger.info(f"rename_variables: {num_variables} variables, backend={actual_backend}")
+
+    # Execute based on selected backend
+    if actual_backend == "batch":
+        try:
+            payload = {
+                "function_address": function_address,
+                "variable_renames": variable_renames
+            }
+            result_json = safe_post_json("batch_rename_variables", payload)
+            result = json.loads(result_json)
+            result["backend_used"] = "batch"
+            return json.dumps(result, indent=2)
+
+        except Exception as e:
+            error_msg = str(e)
+            if "timeout" in error_msg.lower() or "connection" in error_msg.lower():
+                # Timeout detected - fallback to progressive if auto mode
+                if backend == "auto":
+                    logger.warning(f"Batch backend timed out, falling back to progressive")
+                    return _rename_variables_progressive_internal(function_address, variable_renames)
+
+            # Non-timeout error or explicit batch mode - return error
+            return json.dumps({
+                "success": False,
+                "variables_renamed": 0,
+                "variables_failed": num_variables,
+                "backend_used": "batch",
+                "errors": [{"error": error_msg}]
+            }, indent=2)
+
+    else:  # progressive
+        return _rename_variables_progressive_internal(function_address, variable_renames)
+
+
+def _rename_variables_progressive_internal(
+    function_address: str,
+    variable_renames: dict,
+    chunk_size: int = 5,
+    retry_attempts: int = 3
+) -> str:
+    """
+    Internal progressive chunking implementation with retry logic.
+
+    This handles large functions that timeout with batch operations by breaking
+    variable renames into smaller chunks and retrying failed chunks.
+    """
+    import json
+    import time
+
+    variables_list = list(variable_renames.items())
+    total_variables = len(variables_list)
+
+    results = {
+        "success": True,
+        "total_variables": total_variables,
+        "variables_renamed": 0,
+        "variables_failed": 0,
+        "backend_used": "progressive",
+        "chunks_processed": 0,
+        "chunks_failed": 0,
+        "chunk_size": chunk_size,
+        "failed_variables": [],
+        "errors": []
+    }
+
+    # Process variables in chunks
+    for i in range(0, total_variables, chunk_size):
+        chunk = dict(variables_list[i:i+chunk_size])
+        chunk_num = (i // chunk_size) + 1
+        total_chunks = (total_variables + chunk_size - 1) // chunk_size
+
+        logger.info(f"Processing chunk {chunk_num}/{total_chunks} with {len(chunk)} variables")
+
+        # Attempt to rename this chunk with retries
+        chunk_success = False
+        last_error = None
+
+        for attempt in range(retry_attempts):
+            try:
+                payload = {
+                    "function_address": function_address,
+                    "variable_renames": chunk
+                }
+
+                result_json = safe_post_json("batch_rename_variables", payload)
+                result = json.loads(result_json)
+
+                if result.get("success"):
+                    results["variables_renamed"] += result.get("variables_renamed", len(chunk))
+                    results["variables_failed"] += result.get("variables_failed", 0)
+
+                    if result.get("errors"):
+                        results["errors"].extend(result["errors"])
+                        for error in result["errors"]:
+                            results["failed_variables"].append(error.get("old_name"))
+
+                    chunk_success = True
+                    results["chunks_processed"] += 1
+                    break
+                else:
+                    last_error = result.get("error", "Unknown error")
+
+            except Exception as e:
+                last_error = str(e)
+                if attempt < retry_attempts - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff
+                    logger.warning(f"Chunk {chunk_num} failed (attempt {attempt + 1}/{retry_attempts}), retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"Chunk {chunk_num} failed after {retry_attempts} attempts")
+
+        if not chunk_success:
+            results["chunks_failed"] += 1
+            results["success"] = False
+            for old_name in chunk.keys():
+                results["failed_variables"].append(old_name)
+                results["errors"].append({
+                    "old_name": old_name,
+                    "error": f"Chunk timeout after {retry_attempts} attempts: {last_error}"
+                })
+            results["variables_failed"] += len(chunk)
+
+    return json.dumps(results, indent=2)
 
 @mcp.tool()
 def get_function_by_address(address: str) -> str:
@@ -1992,6 +2262,33 @@ def list_data_types(category: str = None, offset: int = 0, limit: int = 100) -> 
     if category:
         params["category"] = category
     return safe_get("list_data_types", params)
+
+@mcp.tool()
+def search_data_types(pattern: str, offset: int = 0, limit: int = 100) -> list:
+    """
+    Search for data types by pattern matching against type names.
+
+    This tool searches all data types in the program and returns those matching
+    the specified pattern. The search is case-insensitive and matches against
+    type names, categories, and full paths.
+
+    Args:
+        pattern: Search pattern (case-insensitive substring match)
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of results to return (default: 100)
+
+    Returns:
+        List of matching data types with their names, categories, and sizes
+
+    Example:
+        # Search for all integer types
+        search_data_types(pattern="int", limit=20)
+
+        # Search for pointer types
+        search_data_types(pattern="ptr", limit=10)
+    """
+    params = {"pattern": pattern, "offset": offset, "limit": limit}
+    return safe_get("search_data_types", params)
 
 @mcp.tool()
 def create_struct(name: str, fields: list) -> str:
@@ -2993,8 +3290,9 @@ def analyze_function_completeness(
     function_address: str
 ) -> str:
     """
-    Analyze how completely a function has been documented (v1.5.0).
-    Checks for custom names, prototypes, comments, and undefined variables.
+    Analyze how completely a function has been documented (v1.5.0+).
+    Checks for custom names, prototypes, comments, undefined variables,
+    plate comment structure, and Hungarian notation compliance.
 
     Args:
         function_address: Function address in hex format
@@ -3002,8 +3300,23 @@ def analyze_function_completeness(
     Returns:
         JSON with completeness analysis including:
         - has_custom_name, has_prototype, has_calling_convention
-        - has_plate_comment, undefined_variables
+        - has_plate_comment, plate_comment_issues (minimum lines, required sections)
+        - undefined_variables (generic names and undefined types)
+        - hungarian_notation_violations (type-to-prefix mismatches)
         - completeness_score (0-100)
+
+    Example violations:
+        {
+          "plate_comment_issues": [
+            "Plate comment has only 7 lines (minimum 10 required)",
+            "Missing Algorithm section"
+          ],
+          "hungarian_notation_violations": [
+            "bFlags (type: uint, expected prefix: dw)",
+            "count (type: int, expected prefix: n|i)"
+          ],
+          "completeness_score": 85.0
+        }
     """
     validate_hex_address(function_address)
 
@@ -3066,48 +3379,40 @@ def batch_set_variable_types(
     return safe_post_json("batch_set_variable_types", payload)
 
 # ========== HIGH PRIORITY: WORKFLOW ENHANCEMENTS (v1.6.0) ==========
+# NOTE: batch_rename_variables() and rename_variables_progressive() have been
+# removed in favor of the unified rename_variables() tool.
+# Use rename_variables(function_address, variable_renames, backend="auto") instead.
 
 @mcp.tool()
-def batch_rename_variables(
+def set_parameter_type(
     function_address: str,
-    variable_renames: dict
+    parameter_name: str,
+    new_type: str
 ) -> str:
     """
-    Rename multiple variables in a function atomically (v1.6.0).
+    Change a parameter's data type to improve decompilation quality.
 
-    This tool renames multiple local variables or parameters in a single
-    transaction with partial success reporting.
+    This tool updates a function parameter's type from a primitive type to a structure
+    pointer or other complex type. Critical for improving decompilation readability when
+    parameters are actually pointers to structures but Ghidra infers them as int or void*.
 
     Args:
-        function_address: Function address in hex format (e.g., "0x401000")
-        variable_renames: Dict of {"old_name": "new_name"} pairs
+        function_address: Function address in hex format
+        parameter_name: Name of the parameter to modify
+        new_type: New data type (e.g., "MyStruct *", "int *", "char *")
 
     Returns:
-        JSON with detailed results:
-        {
-          "success": true,
-          "variables_renamed": 5,
-          "variables_failed": 1,
-          "errors": [{"old_name": "var1", "error": "Variable not found"}]
-        }
-
-    Example:
-        batch_rename_variables("0x6fb385a0", {
-            "param_1": "eventRecord",
-            "local_4": "playerNode",
-            "iVar1": "skillIndex"
-        })
+        Success or failure message with details
     """
     validate_hex_address(function_address)
 
     payload = {
         "function_address": function_address,
-        "variable_renames": variable_renames or {}
+        "parameter_name": parameter_name,
+        "new_type": new_type
     }
 
-    return safe_post_json("batch_rename_variables", payload)
-
-
+    return safe_post_json("set_parameter_type", payload)
 
 
 @mcp.tool()
@@ -3284,6 +3589,66 @@ def disassemble_bytes(
     data = {k: v for k, v in data.items() if v is not None}
 
     return safe_post_json("disassemble_bytes", data)
+
+@mcp.tool()
+def create_function(
+    address: str,
+    name: str = None,
+    disassemble_first: bool = True
+) -> str:
+    """
+    Create a function at the specified address (v1.9.4).
+
+    This tool creates a new function at the given address. Useful for
+    defining functions that Ghidra didn't automatically detect, such as:
+    - Code after unconditional returns
+    - Functions referenced only from data pointers/tables
+    - Hidden code revealed after clearing flow overrides
+    - Orphaned code segments
+
+    Args:
+        address: Starting address for the function in hex format (e.g., "0x6ff56791")
+        name: Optional name for the function (if omitted, uses auto-generated FUN_ name)
+        disassemble_first: If true, disassemble bytes before creating function (default: True)
+
+    Returns:
+        JSON with function creation result:
+        {
+          "success": true,
+          "address": "0x6ff56791",
+          "function_name": "FUN_6ff56791",
+          "entry_point": "0x6ff56791",
+          "auto_analysis_pending": true,
+          "message": "Function created successfully at 0x6ff56791"
+        }
+
+    Examples:
+        # Create function at orphan address with auto-generated name
+        create_function("0x6ff56791")
+
+        # Create function with custom name
+        create_function("0x6ff56791", name="ProcessOrphanedData")
+
+        # Create function without disassembling first (if already disassembled)
+        create_function("0x6ff56791", disassemble_first=False)
+
+    Note:
+        This will fail if a function already exists at the address.
+        Use disassemble_first=True (default) to ensure instructions exist before function creation.
+    """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid address format: {address}")
+
+    data = {
+        "address": address,
+        "name": name,
+        "disassemble_first": disassemble_first
+    }
+
+    # Remove None values
+    data = {k: v for k, v in data.items() if v is not None}
+
+    return safe_post_json("create_function", data)
 
 # ========== SCRIPT GENERATION (v1.9.0) ==========
 
