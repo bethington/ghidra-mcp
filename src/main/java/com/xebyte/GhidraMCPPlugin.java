@@ -1282,8 +1282,21 @@ public class GhidraMCPPlugin extends Plugin {
         server.createContext("/batch_rename_variables", exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String functionAddress = (String) params.get("function_address");
-            @SuppressWarnings("unchecked")
-            Map<String, String> variableRenames = (Map<String, String>) params.get("variable_renames");
+
+            // Handle variable_renames as either String or Map (like create_struct does with fields)
+            Object renamesObj = params.get("variable_renames");
+            Map<String, String> variableRenames;
+            if (renamesObj instanceof String) {
+                // Parse the JSON object string into a Map
+                variableRenames = parseJsonObject((String) renamesObj);
+            } else if (renamesObj instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, String> typedMap = (Map<String, String>) renamesObj;
+                variableRenames = typedMap;
+            } else {
+                variableRenames = new HashMap<>();
+            }
+
             boolean forceIndividual = parseBoolOrDefault(params.get("force_individual"), false);
 
             String result = batchRenameVariables(functionAddress, variableRenames, forceIndividual);
@@ -2564,12 +2577,31 @@ public class GhidraMCPPlugin extends Plugin {
                     }
 
                     // Apply the type change in a transaction
-                    if (updateVariableType(program, symbol, dataType, success)) {
+                    StringBuilder errorDetails = new StringBuilder();
+                    if (updateVariableType(program, symbol, dataType, success, errorDetails)) {
                         resultMsg.append("Success: Changed type of variable '").append(variableName)
                                 .append("' from '").append(oldType).append("' to '")
                                 .append(dataType.getName()).append("'");
                     } else {
-                        resultMsg.append("Error: Failed to update variable type");
+                        // Provide detailed error message including storage location
+                        String storageInfo = "unknown";
+                        try {
+                            storageInfo = symbol.getStorage().toString();
+                        } catch (Exception e) {
+                            // If we can't get storage, continue without it
+                        }
+
+                        resultMsg.append("Error: Failed to update variable type for '").append(variableName).append("'");
+                        resultMsg.append(" (Storage: ").append(storageInfo).append(")");
+
+                        if (errorDetails.length() > 0) {
+                            resultMsg.append(". Details: ").append(errorDetails.toString());
+                        }
+
+                        // Add helpful guidance for known limitations
+                        if (storageInfo.startsWith("Stack[-") && storageInfo.contains(":4")) {
+                            resultMsg.append(". Note: Stack-based local variables with 4-byte size may have type-setting limitations in Ghidra's API");
+                        }
                     }
 
                 } catch (Exception e) {
@@ -2622,10 +2654,24 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Apply the type update in a transaction
      */
-    private boolean updateVariableType(Program program, HighSymbol symbol, DataType dataType, AtomicBoolean success) {
+    private boolean updateVariableType(Program program, HighSymbol symbol, DataType dataType,
+                                       AtomicBoolean success, StringBuilder errorDetails) {
         int tx = program.startTransaction("Set variable type");
         boolean result = false;
+        String storageInfo = "unknown";
+
         try {
+            // Get storage information for detailed logging
+            try {
+                storageInfo = symbol.getStorage().toString();
+            } catch (Exception e) {
+                // If we can't get storage, continue without it
+            }
+
+            // Log variable storage information for debugging
+            Msg.info(this, "Attempting to set type for variable: " + symbol.getName() +
+                          ", storage: " + storageInfo + ", new type: " + dataType.getName());
+
             // Use HighFunctionDBUtil to update the variable with the new type
             HighFunctionDBUtil.updateDBVariable(
                 symbol,                // The high symbol to modify
@@ -2637,8 +2683,33 @@ public class GhidraMCPPlugin extends Plugin {
             success.set(true);
             result = true;
             Msg.info(this, "Successfully set variable type using HighFunctionDBUtil");
+
+        } catch (ghidra.util.exception.DuplicateNameException e) {
+            String msg = "Variable name conflict: " + e.getMessage();
+            Msg.error(this, msg, e);
+            if (errorDetails != null) {
+                errorDetails.append(msg).append(" (Storage: ").append(storageInfo).append(")");
+            }
+        } catch (ghidra.util.exception.InvalidInputException e) {
+            String msg = "Invalid input for variable type update: " + e.getMessage();
+            Msg.error(this, msg, e);
+            if (errorDetails != null) {
+                errorDetails.append(msg).append(" (Storage: ").append(storageInfo).append(")");
+            }
+        } catch (IllegalArgumentException e) {
+            String msg = "Illegal argument: " + e.getMessage();
+            Msg.error(this, msg, e);
+            if (errorDetails != null) {
+                errorDetails.append(msg).append(" (Storage: ").append(storageInfo).append(")");
+            }
         } catch (Exception e) {
-            Msg.error(this, "Error setting variable type: " + e.getMessage());
+            // Generic catch-all for unexpected exceptions
+            String msg = "Unexpected error setting variable type: " + e.getClass().getName() + ": " + e.getMessage();
+            Msg.error(this, msg, e);
+            e.printStackTrace();  // Full stack trace for debugging
+            if (errorDetails != null) {
+                errorDetails.append(msg).append(" (Storage: ").append(storageInfo).append(")");
+            }
         } finally {
             program.endTransaction(tx, success.get());
         }
@@ -3402,10 +3473,26 @@ public class GhidraMCPPlugin extends Plugin {
      * @return The resolved DataType, or null if not found
      */
     private DataType resolveDataType(DataTypeManager dtm, String typeName) {
-        // First try to find exact match in all categories
+        // FIRST: Try Ghidra builtin types in root category (prioritize over Windows types)
+        // This ensures we use lowercase builtin types (uint, ushort, byte) instead of
+        // Windows SDK types (UINT, USHORT, BYTE) when the type name matches
+        DataType builtinType = dtm.getDataType("/" + typeName);
+        if (builtinType != null) {
+            Msg.info(this, "Found builtin data type: " + builtinType.getPathName());
+            return builtinType;
+        }
+
+        // SECOND: Try lowercase version of builtin types (handles "UINT" → "/uint")
+        DataType builtinTypeLower = dtm.getDataType("/" + typeName.toLowerCase());
+        if (builtinTypeLower != null) {
+            Msg.info(this, "Found builtin data type (lowercase): " + builtinTypeLower.getPathName());
+            return builtinTypeLower;
+        }
+
+        // THIRD: Search all categories as fallback (for Windows types, custom types, etc.)
         DataType dataType = findDataTypeByNameInAllCategories(dtm, typeName);
         if (dataType != null) {
-            Msg.info(this, "Found exact data type match: " + dataType.getPathName());
+            Msg.info(this, "Found data type in categories: " + dataType.getPathName());
             return dataType;
         }
 
@@ -3434,6 +3521,29 @@ public class GhidraMCPPlugin extends Plugin {
                 Msg.error(this, "Invalid array count in type: " + typeName);
                 return null;
             }
+        }
+
+        // Check for C-style pointer types (type*)
+        if (typeName.endsWith("*")) {
+            String baseTypeName = typeName.substring(0, typeName.length() - 1).trim();
+
+            // Special case for void*
+            if (baseTypeName.equals("void") || baseTypeName.isEmpty()) {
+                Msg.info(this, "Creating void* pointer type");
+                return new PointerDataType(dtm.getDataType("/void"));
+            }
+
+            // Try to resolve the base type recursively (handles nested types)
+            DataType baseType = resolveDataType(dtm, baseTypeName);
+            if (baseType != null) {
+                Msg.info(this, "Creating pointer type: " + typeName +
+                        " (base: " + baseType.getName() + ")");
+                return new PointerDataType(baseType);
+            }
+
+            // If base type not found, warn and default to void*
+            Msg.warn(this, "Base type not found for " + typeName + ", defaulting to void*");
+            return new PointerDataType(dtm.getDataType("/void"));
         }
 
         // Check for Windows-style pointer types (PXXX)
@@ -3937,13 +4047,47 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     private void sendResponse(HttpExchange exchange, String response) throws IOException {
+        // Determine appropriate HTTP status code based on response content
+        int statusCode = 200;  // Default to success
+
+        if (response != null) {
+            String responseLower = response.toLowerCase();
+
+            // Check for warnings (limitations, not actual errors) - return 200 OK
+            if (response.startsWith("Warning:")) {
+                statusCode = 200;  // Success with warning message
+            }
+            // Check for known limitations - return 422 Unprocessable Entity
+            else if (responseLower.contains("type-setting limitations") ||
+                     responseLower.contains("stack-based local variables with 4-byte size may have type-setting limitations")) {
+                statusCode = 422;  // Unprocessable Entity - operation understood but cannot be processed
+            }
+            // Check for error indicators at the start of the response
+            else if (response.startsWith("Error") ||
+                response.startsWith("Failed") ||
+                response.startsWith("Invalid") ||
+                response.startsWith("Unknown field type:") ||
+                response.startsWith("No program loaded") ||
+                response.startsWith("No function found") ||
+                responseLower.startsWith("exception") ||
+                responseLower.contains("error:") && responseLower.indexOf("error:") < 50) {
+                statusCode = 500;  // Internal Server Error - unexpected failure
+            }
+            // Check for "not found" type errors
+            else if (responseLower.contains("not found") ||
+                     responseLower.contains("does not exist") ||
+                     responseLower.contains("no such")) {
+                statusCode = 404;  // Not Found
+            }
+        }
+
         byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
         Headers headers = exchange.getResponseHeaders();
         headers.set("Content-Type", "text/plain; charset=utf-8");
         // v1.6.1: Enable HTTP keep-alive for long-running operations
         headers.set("Connection", "keep-alive");
         headers.set("Keep-Alive", "timeout=" + HTTP_IDLE_TIMEOUT_SECONDS + ", max=100");
-        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.sendResponseHeaders(statusCode, bytes.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(bytes);
             os.flush();  // v1.7.2: Explicit flush to ensure response is sent immediately
@@ -9122,16 +9266,28 @@ public class GhidraMCPPlugin extends Plugin {
                     result.append("\"has_calling_convention\": ").append(func.getCallingConvention() != null).append(", ");
                     result.append("\"has_plate_comment\": ").append(func.getComment() != null).append(", ");
 
-                    // Check for undefined variables
+                    // Check for undefined variables (both names and types)
                     List<String> undefinedVars = new ArrayList<>();
                     for (Parameter param : func.getParameters()) {
+                        // Check for generic parameter names
                         if (param.getName().startsWith("param_")) {
-                            undefinedVars.add(param.getName());
+                            undefinedVars.add(param.getName() + " (generic name)");
+                        }
+                        // Check for undefined data types
+                        String typeName = param.getDataType().getName();
+                        if (typeName.startsWith("undefined")) {
+                            undefinedVars.add(param.getName() + " (type: " + typeName + ")");
                         }
                     }
                     for (Variable local : func.getLocalVariables()) {
+                        // Check for generic local names
                         if (local.getName().startsWith("local_")) {
-                            undefinedVars.add(local.getName());
+                            undefinedVars.add(local.getName() + " (generic name)");
+                        }
+                        // Check for undefined data types
+                        String typeName = local.getDataType().getName();
+                        if (typeName.startsWith("undefined")) {
+                            undefinedVars.add(local.getName() + " (type: " + typeName + ")");
                         }
                     }
 
@@ -9422,33 +9578,105 @@ public class GhidraMCPPlugin extends Plugin {
                     }
 
                     if (variableRenames != null && !variableRenames.isEmpty()) {
-                        // Rename parameters (events suppressed - no re-analysis per rename)
-                        for (Parameter param : func.getParameters()) {
-                            String newName = variableRenames.get(param.getName());
-                            if (newName != null && !newName.isEmpty()) {
-                                try {
-                                    param.setName(newName, SourceType.USER_DEFINED);
-                                    variablesRenamed.incrementAndGet();
-                                } catch (Exception e) {
-                                    variablesFailed.incrementAndGet();
-                                    errors.add("Failed to rename " + param.getName() + " to " + newName + ": " + e.getMessage());
+                        // Use decompiler to access SSA variables (the ones that appear in decompiled code)
+                        DecompInterface decomp = new DecompInterface();
+                        decomp.openProgram(program);
+
+                        DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                        if (decompResult != null && decompResult.decompileCompleted()) {
+                            HighFunction highFunction = decompResult.getHighFunction();
+                            if (highFunction != null) {
+                                LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
+                                if (localSymbolMap != null) {
+                                    // Check for name conflicts first
+                                    Set<String> existingNames = new HashSet<>();
+                                    Iterator<HighSymbol> checkSymbols = localSymbolMap.getSymbols();
+                                    while (checkSymbols.hasNext()) {
+                                        existingNames.add(checkSymbols.next().getName());
+                                    }
+
+                                    // Validate no conflicts
+                                    for (Map.Entry<String, String> entry : variableRenames.entrySet()) {
+                                        String newName = entry.getValue();
+                                        if (!entry.getKey().equals(newName) && existingNames.contains(newName)) {
+                                            variablesFailed.incrementAndGet();
+                                            errors.add("Variable name '" + newName + "' already exists in function");
+                                        }
+                                    }
+
+                                    // Commit parameters if needed
+                                    boolean commitRequired = false;
+                                    Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
+                                    if (symbols.hasNext()) {
+                                        HighSymbol firstSymbol = symbols.next();
+                                        commitRequired = checkFullCommit(firstSymbol, highFunction);
+                                    }
+
+                                    if (commitRequired) {
+                                        HighFunctionDBUtil.commitParamsToDatabase(highFunction, false,
+                                            ReturnCommitOption.NO_COMMIT, func.getSignatureSource());
+                                    }
+
+                                    // PATH 1: Rename SSA variables from LocalSymbolMap (decompiler variables)
+                                    Set<String> renamedVars = new HashSet<>();
+                                    Iterator<HighSymbol> renameSymbols = localSymbolMap.getSymbols();
+                                    while (renameSymbols.hasNext()) {
+                                        HighSymbol symbol = renameSymbols.next();
+                                        String oldName = symbol.getName();
+                                        String newName = variableRenames.get(oldName);
+
+                                        if (newName != null && !newName.isEmpty() && !oldName.equals(newName)) {
+                                            try {
+                                                HighFunctionDBUtil.updateDBVariable(
+                                                    symbol,
+                                                    newName,
+                                                    null,
+                                                    SourceType.USER_DEFINED
+                                                );
+                                                variablesRenamed.incrementAndGet();
+                                                renamedVars.add(oldName);
+                                            } catch (Exception e) {
+                                                variablesFailed.incrementAndGet();
+                                                errors.add("Failed to rename SSA variable " + oldName + " to " + newName + ": " + e.getMessage());
+                                            }
+                                        }
+                                    }
+
+                                    // PATH 2: Rename storage-based variables from Function.getAllVariables()
+                                    // This handles variables that have storage locations but aren't in LocalSymbolMap
+                                    try {
+                                        Variable[] allVars = func.getAllVariables();
+                                        for (Variable var : allVars) {
+                                            String oldName = var.getName();
+                                            String newName = variableRenames.get(oldName);
+
+                                            // Only rename if: 1) rename requested, 2) not already renamed in PATH 1, 3) name would change
+                                            if (newName != null && !newName.isEmpty() && !oldName.equals(newName) && !renamedVars.contains(oldName)) {
+                                                try {
+                                                    var.setName(newName, SourceType.USER_DEFINED);
+                                                    variablesRenamed.incrementAndGet();
+                                                    renamedVars.add(oldName);
+                                                } catch (Exception e) {
+                                                    variablesFailed.incrementAndGet();
+                                                    errors.add("Failed to rename storage variable " + oldName + " to " + newName + ": " + e.getMessage());
+                                                }
+                                            }
+                                        }
+                                    } catch (Exception e) {
+                                        // Don't fail the whole operation if storage rename fails
+                                        Msg.warn(this, "Storage variable rename encountered error: " + e.getMessage());
+                                    }
+                                } else {
+                                    errors.add("Failed to get LocalSymbolMap from decompiler");
                                 }
+                            } else {
+                                errors.add("Failed to get HighFunction from decompiler");
                             }
+                        } else {
+                            errors.add("Decompilation failed or did not complete");
                         }
 
-                        // Rename local variables (events suppressed - no re-analysis per rename)
-                        for (Variable local : func.getLocalVariables()) {
-                            String newName = variableRenames.get(local.getName());
-                            if (newName != null && !newName.isEmpty()) {
-                                try {
-                                    local.setName(newName, SourceType.USER_DEFINED);
-                                    variablesRenamed.incrementAndGet();
-                                } catch (Exception e) {
-                                    variablesFailed.incrementAndGet();
-                                    errors.add("Failed to rename " + local.getName() + " to " + newName + ": " + e.getMessage());
-                                }
-                            }
-                        }
+                        decomp.dispose();
                     }
 
                     success.set(true);
