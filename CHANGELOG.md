@@ -4,6 +4,36 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v1.9.3 - 2025-11-14
+
+### Documentation & Workflow Enhancement Release
+
+#### 📚 Documentation Organization
+- **Organized scattered markdown files**: Moved release files to proper `docs/releases/` structure
+- **Created comprehensive navigation**: Added `docs/README.md` with complete directory structure
+- **Enhanced release documentation**: Added `docs/releases/README.md` with version index
+- **Streamlined project structure**: Moved administrative docs to `docs/project-management/`
+
+#### 🔧 Hungarian Notation Improvements
+- **Enhanced pointer type coverage**: Added comprehensive double pointer types (`void **` → `pp`, `char **` → `pplpsz`)
+- **Added const pointer support**: New rules for `const char *` → `lpcsz`, `const void *` → `pc`
+- **Windows SDK integration**: Added mappings for `LPVOID`, `LPCSTR`, `LPWSTR`, `PVOID`
+- **Fixed spacing standards**: Corrected `char **` notation (removed spaces)
+- **Array vs pointer clarity**: Distinguished stack arrays from pointer parameters
+
+#### 🎯 Variable Renaming Workflow
+- **Comprehensive variable identification**: Mandated examining both decompiled and assembly views
+- **Eliminated pre-filtering**: Attempt renaming ALL variables regardless of name patterns
+- **Enhanced failure handling**: Use `variables_renamed` count as sole reliability indicator
+- **Improved documentation**: Better comment examples for non-renameable variables
+
+#### 🛠 Build & Development
+- **Fixed Ghidra script issues**: Resolved class name mismatches and deprecated API usage
+- **Improved workflow efficiency**: Streamlined function documentation processes
+- **Enhanced type mapping**: More precise Hungarian notation type-to-prefix mapping
+
+---
+
 ## v1.9.2 - 2025-11-07
 
 ### Documentation & Organization Release

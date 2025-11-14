@@ -441,40 +441,22 @@ public class GhidraMCPPlugin extends Plugin {
         });
 
         server.createContext("/set_local_variable_type", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String functionAddress = params.get("function_address");
-            String variableName = params.get("variable_name");
-            String newType = params.get("new_type");
+            try {
+                Map<String, String> params = parsePostParams(exchange);
+                String functionAddress = params.get("function_address");
+                String variableName = params.get("variable_name");
+                String newType = params.get("new_type");
 
-            // Capture detailed information about setting the type
-            StringBuilder responseMsg = new StringBuilder();
-            responseMsg.append("Setting variable type: ").append(variableName)
-                      .append(" to ").append(newType)
-                      .append(" in function at ").append(functionAddress).append("\n\n");
-
-            // Attempt to find the data type in various categories
-            Program program = getCurrentProgram();
-            if (program != null) {
-                DataTypeManager dtm = program.getDataTypeManager();
-                DataType directType = findDataTypeByNameInAllCategories(dtm, newType);
-                if (directType != null) {
-                    responseMsg.append("Found type: ").append(directType.getPathName()).append("\n");
-                } else if (newType.startsWith("P") && newType.length() > 1) {
-                    String baseTypeName = newType.substring(1);
-                    DataType baseType = findDataTypeByNameInAllCategories(dtm, baseTypeName);
-                    if (baseType != null) {
-                        responseMsg.append("Found base type for pointer: ").append(baseType.getPathName()).append("\n");
-                    } else {
-                        responseMsg.append("Base type not found for pointer: ").append(baseTypeName).append("\n");
-                    }
-                } else {
-                    responseMsg.append("Type not found directly: ").append(newType).append("\n");
-                }
+                // Try to set the type (with internal error handling)
+                String result = setLocalVariableType(functionAddress, variableName, newType);
+                sendResponse(exchange, result);
+            } catch (Exception e) {
+                // Catch any uncaught exceptions to prevent 500 errors
+                String errorMsg = "Error: Unexpected exception in set_local_variable_type: " +
+                                 e.getClass().getSimpleName() + ": " + e.getMessage();
+                Msg.error(this, errorMsg, e);
+                sendResponse(exchange, errorMsg);
             }
-
-            // Try to set the type
-            String result = setLocalVariableType(functionAddress, variableName, newType);
-            sendResponse(exchange, result);
         });
 
         server.createContext("/set_function_no_return", exchange -> {
@@ -1249,6 +1231,29 @@ public class GhidraMCPPlugin extends Plugin {
         server.createContext("/analyze_function_completeness", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionAddress = qparams.get("function_address");
+
+            // FIX #4: Force decompiler cache refresh before analysis to ensure fresh data
+            Program program = getCurrentProgram();
+            if (program != null && functionAddress != null && !functionAddress.isEmpty()) {
+                try {
+                    Address addr = program.getAddressFactory().getAddress(functionAddress);
+                    if (addr != null) {
+                        Function func = program.getFunctionManager().getFunctionAt(addr);
+                        if (func != null) {
+                            // Force fresh decompilation to get current variable states
+                            DecompInterface tempDecomp = new DecompInterface();
+                            tempDecomp.openProgram(program);
+                            tempDecomp.flushCache();
+                            tempDecomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                            tempDecomp.dispose();
+                            Msg.info(this, "Refreshed decompiler cache before completeness analysis for " + func.getName());
+                        }
+                    }
+                } catch (Exception e) {
+                    Msg.warn(this, "Failed to refresh cache before completeness analysis: " + e.getMessage());
+                    // Continue with analysis anyway
+                }
+            }
 
             String result = analyzeFunctionCompleteness(functionAddress);
             sendResponse(exchange, result);
@@ -2553,8 +2558,42 @@ public class GhidraMCPPlugin extends Plugin {
                     // Find the symbol by name
                     HighSymbol symbol = findSymbolByName(highFunction, variableName);
                     if (symbol == null) {
+                        // PRIORITY 2 FIX: Provide helpful diagnostic information
                         resultMsg.append("Error: Variable '").append(variableName)
-                                .append("' not found in function");
+                                .append("' not found in decompiled function. ");
+
+                        // List available variables for user guidance
+                        List<String> availableNames = new ArrayList<>();
+                        Iterator<HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
+                        while (symbols.hasNext()) {
+                            availableNames.add(symbols.next().getName());
+                        }
+
+                        if (!availableNames.isEmpty()) {
+                            resultMsg.append("Available variables: ")
+                                    .append(String.join(", ", availableNames))
+                                    .append(". ");
+                        }
+
+                        // Check if variable exists in low-level API but not high-level (phantom variable)
+                        Variable[] lowLevelVars = func.getLocalVariables();
+                        boolean isPhantomVariable = false;
+                        for (Variable v : lowLevelVars) {
+                            if (v.getName().equals(variableName)) {
+                                isPhantomVariable = true;
+                                break;
+                            }
+                        }
+
+                        if (isPhantomVariable) {
+                            resultMsg.append("NOTE: Variable '").append(variableName)
+                                    .append("' exists in stack frame but not in decompiled code. ")
+                                    .append("This is a phantom variable created by Ghidra's stack analysis ")
+                                    .append("that was optimized away during decompilation. ")
+                                    .append("You cannot set the type of phantom variables. ")
+                                    .append("Only variables visible in the decompiled code can be typed.");
+                        }
+
                         return;
                     }
 
@@ -2632,23 +2671,78 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Decompile a function and return the results
+     * Decompile a function and return the results (with retry logic)
      */
     private DecompileResults decompileFunction(Function func, Program program) {
-        // Set up decompiler for accessing the decompiled function
-        DecompInterface decomp = new DecompInterface();
-        decomp.openProgram(program);
-        decomp.setSimplificationStyle("decompile"); // Full decompilation
+        return decompileFunctionWithRetry(func, program, 3);  // 3 retries for stability
+    }
 
-        // Decompile the function
-        DecompileResults results = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+    /**
+     * Decompile function with retry logic for stability (FIX #3)
+     * Complex functions with SEH + alloca may fail initially but succeed on retry
+     * @param func Function to decompile
+     * @param program Current program
+     * @param maxRetries Maximum number of retry attempts
+     * @return Decompilation results or null if all retries exhausted
+     */
+    private DecompileResults decompileFunctionWithRetry(Function func, Program program, int maxRetries) {
+        DecompInterface decomp = null;
 
-        if (!results.decompileCompleted()) {
-            Msg.error(this, "Could not decompile function: " + results.getErrorMessage());
-            return null;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                decomp = new DecompInterface();
+                decomp.openProgram(program);
+                decomp.setSimplificationStyle("decompile");
+
+                // On retry attempts, flush cache first and increase timeout
+                if (attempt > 1) {
+                    Msg.info(this, "Decompilation attempt " + attempt + " for function " + func.getName());
+                    decomp.flushCache();
+
+                    // Increase timeout on retries for complex functions
+                    int timeoutSeconds = DECOMPILE_TIMEOUT_SECONDS * attempt;
+                    DecompileResults results = decomp.decompileFunction(func, timeoutSeconds, new ConsoleTaskMonitor());
+
+                    if (results != null && results.decompileCompleted()) {
+                        Msg.info(this, "Decompilation succeeded on attempt " + attempt);
+                        return results;
+                    }
+
+                    String errorMsg = (results != null) ? results.getErrorMessage() : "Unknown error";
+                    Msg.warn(this, "Decompilation attempt " + attempt + " failed: " + errorMsg);
+                } else {
+                    // First attempt - use normal timeout
+                    DecompileResults results = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+
+                    if (results != null && results.decompileCompleted()) {
+                        return results;
+                    }
+
+                    String errorMsg = (results != null) ? results.getErrorMessage() : "Unknown error";
+                    Msg.warn(this, "Decompilation attempt " + attempt + " failed: " + errorMsg);
+                }
+
+            } catch (Exception e) {
+                Msg.warn(this, "Decompilation attempt " + attempt + " threw exception: " + e.getMessage());
+            } finally {
+                if (decomp != null) {
+                    decomp.dispose();
+                    decomp = null;
+                }
+            }
+
+            // Small delay between retries to allow Ghidra to stabilize
+            if (attempt < maxRetries) {
+                try {
+                    Thread.sleep(100);  // 100ms delay
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
         }
 
-        return results;
+        Msg.error(this, "Could not decompile function after " + maxRetries + " attempts: " + func.getName());
+        return null;
     }
 
     /**
@@ -2691,10 +2785,27 @@ public class GhidraMCPPlugin extends Plugin {
                 errorDetails.append(msg).append(" (Storage: ").append(storageInfo).append(")");
             }
         } catch (ghidra.util.exception.InvalidInputException e) {
-            String msg = "Invalid input for variable type update: " + e.getMessage();
+            String msg;
+
+            // FIX: Detect register-based storage and provide helpful error message
+            if (storageInfo.contains("ESP:") || storageInfo.contains("EDI:") ||
+                storageInfo.contains("EAX:") || storageInfo.contains("EBX:") ||
+                storageInfo.contains("ECX:") || storageInfo.contains("EDX:") ||
+                storageInfo.contains("ESI:") || storageInfo.contains("EBP:")) {
+
+                msg = "Cannot set type for register-based variable '" + symbol.getName() +
+                      "' at storage location: " + storageInfo + ". " +
+                      "Register variables (ESP/EDI/EAX/etc) are decompiler temporaries and cannot have types set via API. " +
+                      "Workaround: Manually retype this variable in Ghidra's decompiler UI (right-click → Retype Variable). " +
+                      "Ghidra limitation: " + e.getMessage();
+            } else {
+                msg = "Invalid input for variable type update: " + e.getMessage() +
+                      " (Storage: " + storageInfo + ")";
+            }
+
             Msg.error(this, msg, e);
             if (errorDetails != null) {
-                errorDetails.append(msg).append(" (Storage: ").append(storageInfo).append(")");
+                errorDetails.append(msg);
             }
         } catch (IllegalArgumentException e) {
             String msg = "Illegal argument: " + e.getMessage();
@@ -9021,6 +9132,19 @@ public class GhidraMCPPlugin extends Plugin {
                         return;
                     }
 
+                    // FIX: Force decompiler cache refresh to get current variable states after type changes
+                    // This ensures get_function_variables returns fresh data matching actual decompilation
+                    try {
+                        DecompInterface tempDecomp = new DecompInterface();
+                        tempDecomp.openProgram(program);
+                        tempDecomp.flushCache();
+                        tempDecomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                        tempDecomp.dispose();
+                    } catch (Exception e) {
+                        Msg.warn(this, "Failed to refresh decompiler cache for getFunctionVariables: " + e.getMessage());
+                        // Continue anyway - better to return potentially stale data than fail completely
+                    }
+
                     result.append("{");
                     result.append("\"function_name\": \"").append(func.getName()).append("\", ");
                     result.append("\"function_address\": \"").append(func.getEntryPoint().toString()).append("\", ");
@@ -9040,16 +9164,35 @@ public class GhidraMCPPlugin extends Plugin {
                     }
                     result.append("], ");
 
-                    // Get local variables
+                    // Get local variables and detect phantom variables
                     result.append("\"locals\": [");
                     Variable[] locals = func.getLocalVariables();
+
+                    // Decompile to get HighFunction for phantom detection
+                    DecompileResults decompResults = decompileFunction(func, program);
+                    java.util.Set<String> decompVarNames = new java.util.HashSet<>();
+                    if (decompResults != null && decompResults.decompileCompleted()) {
+                        ghidra.program.model.pcode.HighFunction highFunc = decompResults.getHighFunction();
+                        if (highFunc != null) {
+                            java.util.Iterator<ghidra.program.model.pcode.HighSymbol> symbols =
+                                highFunc.getLocalSymbolMap().getSymbols();
+                            while (symbols.hasNext()) {
+                                decompVarNames.add(symbols.next().getName());
+                            }
+                        }
+                    }
+
                     for (int i = 0; i < locals.length; i++) {
                         if (i > 0) result.append(", ");
                         Variable local = locals[i];
+                        boolean isPhantom = !decompVarNames.contains(local.getName());
+
                         result.append("{");
                         result.append("\"name\": \"").append(local.getName()).append("\", ");
                         result.append("\"type\": \"").append(local.getDataType().getName()).append("\", ");
-                        result.append("\"storage\": \"").append(local.getVariableStorage().toString()).append("\"");
+                        result.append("\"storage\": \"").append(local.getVariableStorage().toString()).append("\", ");
+                        result.append("\"is_phantom\": ").append(isPhantom).append(", ");
+                        result.append("\"in_decompiled_code\": ").append(!isPhantom);
                         result.append("}");
                     }
                     result.append("]");
@@ -9284,29 +9427,79 @@ public class GhidraMCPPlugin extends Plugin {
                     result.append("], ");
 
                     // Check for undefined variables (both names and types)
+                    // PRIORITY 1 FIX: Use decompilation-based variable detection to avoid phantom variables
                     List<String> undefinedVars = new ArrayList<>();
-                    for (Parameter param : func.getParameters()) {
-                        // Check for generic parameter names
-                        if (param.getName().startsWith("param_")) {
-                            undefinedVars.add(param.getName() + " (generic name)");
-                        }
-                        // Check for undefined data types
-                        String typeName = param.getDataType().getName();
-                        if (typeName.startsWith("undefined")) {
-                            undefinedVars.add(param.getName() + " (type: " + typeName + ")");
+                    boolean decompilationAvailable = false;
+
+                    // Try to use decompilation-based detection (high-level API)
+                    DecompileResults decompResults = decompileFunction(func, program);
+                    if (decompResults != null && decompResults.decompileCompleted()) {
+                        decompilationAvailable = true;
+                        ghidra.program.model.pcode.HighFunction highFunction = decompResults.getHighFunction();
+
+                        if (highFunction != null) {
+                            // Check parameters (same as before, from Function API)
+                            for (Parameter param : func.getParameters()) {
+                                // Check for generic parameter names
+                                if (param.getName().startsWith("param_")) {
+                                    undefinedVars.add(param.getName() + " (generic name)");
+                                }
+                                // Check for undefined data types
+                                String typeName = param.getDataType().getName();
+                                if (typeName.startsWith("undefined")) {
+                                    undefinedVars.add(param.getName() + " (type: " + typeName + ")");
+                                }
+                            }
+
+                            // Check locals from HIGH-LEVEL decompiled symbol map (not low-level stack frame)
+                            // This avoids phantom variables that exist in stack analysis but not decompilation
+                            Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
+                            while (symbols.hasNext()) {
+                                ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
+                                String name = symbol.getName();
+                                String typeName = symbol.getDataType().getName();
+
+                                // Check for generic local names (local_XX or XVar patterns)
+                                if (name.startsWith("local_") ||
+                                    name.matches(".*Var\\d+") ||  // pvVar1, iVar2, etc.
+                                    name.matches("(i|u|d|f|p|b)Var\\d+")) {  // specific type patterns
+                                    undefinedVars.add(name + " (generic name)");
+                                }
+
+                                // Check for undefined data types
+                                if (typeName.startsWith("undefined")) {
+                                    undefinedVars.add(name + " (type: " + typeName + ")");
+                                }
+                            }
                         }
                     }
-                    for (Variable local : func.getLocalVariables()) {
-                        // Check for generic local names
-                        if (local.getName().startsWith("local_")) {
-                            undefinedVars.add(local.getName() + " (generic name)");
+
+                    // Fallback to low-level API if decompilation failed (with warning in output)
+                    if (!decompilationAvailable) {
+                        // Check parameters
+                        for (Parameter param : func.getParameters()) {
+                            if (param.getName().startsWith("param_")) {
+                                undefinedVars.add(param.getName() + " (generic name)");
+                            }
+                            String typeName = param.getDataType().getName();
+                            if (typeName.startsWith("undefined")) {
+                                undefinedVars.add(param.getName() + " (type: " + typeName + ")");
+                            }
                         }
-                        // Check for undefined data types
-                        String typeName = local.getDataType().getName();
-                        if (typeName.startsWith("undefined")) {
-                            undefinedVars.add(local.getName() + " (type: " + typeName + ")");
+
+                        // Use low-level API with phantom variable warning
+                        for (Variable local : func.getLocalVariables()) {
+                            if (local.getName().startsWith("local_")) {
+                                undefinedVars.add(local.getName() + " (generic name, may be phantom variable)");
+                            }
+                            String typeName = local.getDataType().getName();
+                            if (typeName.startsWith("undefined")) {
+                                undefinedVars.add(local.getName() + " (type: " + typeName + ", may be phantom variable)");
+                            }
                         }
                     }
+
+                    result.append("\"decompilation_available\": ").append(decompilationAvailable).append(", ");
 
                     result.append("\"undefined_variables\": [");
                     for (int i = 0; i < undefinedVars.size(); i++) {
@@ -9316,12 +9509,25 @@ public class GhidraMCPPlugin extends Plugin {
                     result.append("], ");
 
                     // Check Hungarian notation compliance
+                    // PRIORITY 1 FIX: Use same decompilation-based detection for consistency
                     List<String> hungarianViolations = new ArrayList<>();
                     for (Parameter param : func.getParameters()) {
                         validateHungarianNotation(param.getName(), param.getDataType().getName(), false, hungarianViolations);
                     }
-                    for (Variable local : func.getLocalVariables()) {
-                        validateHungarianNotation(local.getName(), local.getDataType().getName(), false, hungarianViolations);
+
+                    // Use decompilation-based locals if available, otherwise fallback to low-level API
+                    if (decompilationAvailable && decompResults != null && decompResults.getHighFunction() != null) {
+                        ghidra.program.model.pcode.HighFunction highFunction = decompResults.getHighFunction();
+                        Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
+                        while (symbols.hasNext()) {
+                            ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
+                            validateHungarianNotation(symbol.getName(), symbol.getDataType().getName(), false, hungarianViolations);
+                        }
+                    } else {
+                        // Fallback to low-level API
+                        for (Variable local : func.getLocalVariables()) {
+                            validateHungarianNotation(local.getName(), local.getDataType().getName(), false, hungarianViolations);
+                        }
                     }
 
                     result.append("\"hungarian_notation_violations\": [");
@@ -9331,7 +9537,32 @@ public class GhidraMCPPlugin extends Plugin {
                     }
                     result.append("], ");
 
-                    result.append("\"completeness_score\": ").append(calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size()));
+                    // Enhanced validation: Check parameter type quality
+                    List<String> typeQualityIssues = new ArrayList<>();
+                    validateParameterTypeQuality(func, typeQualityIssues);
+
+                    result.append("\"type_quality_issues\": [");
+                    for (int i = 0; i < typeQualityIssues.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(escapeJson(typeQualityIssues.get(i))).append("\"");
+                    }
+                    result.append("], ");
+
+                    double completenessScore = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size());
+                    result.append("\"completeness_score\": ").append(completenessScore).append(", ");
+
+                    // Generate workflow-aligned recommendations
+                    List<String> recommendations = generateWorkflowRecommendations(
+                        func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues, completenessScore
+                    );
+
+                    result.append("\"recommendations\": [");
+                    for (int i = 0; i < recommendations.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(escapeJson(recommendations.get(i))).append("\"");
+                    }
+                    result.append("]");
+
                     result.append("}");
                 } catch (Exception e) {
                     errorMsg.set(e.getMessage());
@@ -9446,6 +9677,62 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
+     * Validate parameter type quality (enhanced completeness check)
+     * Checks for: generic void*, state-based type names, missing structures, type duplication
+     */
+    private void validateParameterTypeQuality(Function func, List<String> issues) {
+        Program program = func.getProgram();
+        DataTypeManager dtm = program.getDataTypeManager();
+
+        // State-based type name prefixes to flag
+        String[] statePrefixes = {"Initialized", "Allocated", "Created", "Updated",
+                                  "Processed", "Deleted", "Modified", "Constructed",
+                                  "Freed", "Destroyed", "Copied", "Cloned"};
+
+        for (Parameter param : func.getParameters()) {
+            DataType paramType = param.getDataType();
+            String typeName = paramType.getName();
+
+            // Check 1: Generic void* pointers (should use specific types)
+            if (paramType instanceof Pointer) {
+                Pointer ptrType = (Pointer) paramType;
+                DataType pointedTo = ptrType.getDataType();
+                if (pointedTo != null && pointedTo.getName().equals("void")) {
+                    issues.add("Generic void* parameter: " + param.getName() +
+                              " (should use specific structure type)");
+                }
+            }
+
+            // Check 2: State-based type names (bad practice)
+            for (String prefix : statePrefixes) {
+                if (typeName.startsWith(prefix)) {
+                    issues.add("State-based type name: " + typeName +
+                              " on parameter " + param.getName() +
+                              " (should use identity-based name)");
+                    break;
+                }
+            }
+
+            // Check 3: Check for similar type names (potential duplicates)
+            if (paramType instanceof Pointer) {
+                String baseType = typeName.replace(" *", "").trim();
+                // Check for types with similar base names
+                for (String prefix : statePrefixes) {
+                    if (baseType.startsWith(prefix)) {
+                        String identityName = baseType.substring(prefix.length());
+                        // Check if identity-based version exists
+                        DataType identityType = dtm.getDataType("/" + identityName);
+                        if (identityType != null) {
+                            issues.add("Type duplication: " + baseType + " and " + identityName +
+                                      " exist (consider consolidating to " + identityName + ")");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Validate plate comment structure and content quality
      */
     private void validatePlateCommentStructure(String plateComment, List<String> issues) {
@@ -9508,7 +9795,7 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
-    private double calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount) {
+    private double calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount) {
         double score = 100.0;
 
         if (func.getName().startsWith("FUN_")) score -= 30;
@@ -9518,8 +9805,116 @@ public class GhidraMCPPlugin extends Plugin {
         score -= (undefinedCount * 5);
         score -= (plateCommentIssueCount * 5); // 5 points per plate comment issue
         score -= (hungarianViolationCount * 3); // 3 points per Hungarian notation violation
+        score -= (typeQualityIssueCount * 15); // 15 points per type quality issue (void*, state-based names, duplicates) - HARD PENALTY to enforce identity-based naming
 
         return Math.max(0, score);
+    }
+
+    /**
+     * Generate workflow-aligned recommendations based on FUNCTION_DOC_WORKFLOW_V2.md
+     */
+    private List<String> generateWorkflowRecommendations(
+            Function func,
+            List<String> undefinedVars,
+            List<String> plateCommentIssues,
+            List<String> hungarianViolations,
+            List<String> typeQualityIssues,
+            double completenessScore) {
+
+        List<String> recommendations = new ArrayList<>();
+
+        // If 100% complete, return early
+        if (completenessScore >= 100.0) {
+            recommendations.add("Function is fully documented - no further action needed.");
+            return recommendations;
+        }
+
+        // CRITICAL: Undefined Type Audit (FUNCTION_DOC_WORKFLOW_V2.md Section: Mandatory Undefined Type Audit)
+        if (!undefinedVars.isEmpty()) {
+            recommendations.add("UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V2.md 'Mandatory Undefined Type Audit' section:");
+            recommendations.add("1. Type Resolution: Apply type normalization before renaming:");
+            recommendations.add("   - undefined1 -> byte (8-bit integer)");
+            recommendations.add("   - undefined2 -> ushort/short (16-bit integer)");
+            recommendations.add("   - undefined4 -> uint/int/float/pointer (32-bit - check usage context)");
+            recommendations.add("   - undefined8 -> double/ulonglong/longlong (64-bit)");
+            recommendations.add("   - undefined1[N] -> byte[N] (byte array for XMM spills, buffers)");
+            recommendations.add("2. Use set_local_variable_type() with lowercase builtin types (uint, ushort, byte) NOT uppercase Windows types (UINT, USHORT, BYTE)");
+            recommendations.add("3. CRITICAL: Check disassembly with get_disassembly() for assembly-only undefined types:");
+            recommendations.add("   - Stack temporaries: [EBP + local_offset] not in get_function_variables()");
+            recommendations.add("   - XMM register spills: undefined1[16] at stack locations");
+            recommendations.add("   - Intermediate calculation results not appearing in decompiled view");
+            recommendations.add("4. After resolving ALL undefined types, rename variables with Hungarian notation using rename_variables()");
+        }
+
+        // Plate Comment Issues
+        if (!plateCommentIssues.isEmpty()) {
+            recommendations.add("PLATE COMMENT ISSUES - Follow FUNCTION_DOC_WORKFLOW_V2.md 'Plate Comment Creation' section:");
+            for (String issue : plateCommentIssues) {
+                if (issue.contains("Missing Algorithm section")) {
+                    recommendations.add("1. Add Algorithm section with numbered steps describing operations (validation, function calls, error handling)");
+                } else if (issue.contains("no numbered steps")) {
+                    recommendations.add("2. Add numbered steps in Algorithm section (1., 2., 3., etc.)");
+                } else if (issue.contains("Missing Parameters section")) {
+                    recommendations.add("3. Add Parameters section documenting all parameters with types and purposes (include IMPLICIT keyword for undocumented register params)");
+                } else if (issue.contains("Missing Returns section")) {
+                    recommendations.add("4. Add Returns section explaining return values, success codes, error conditions, NULL/zero cases");
+                } else if (issue.contains("lines (minimum 10 required)")) {
+                    recommendations.add("5. Expand plate comment to minimum 10 lines with comprehensive documentation");
+                }
+            }
+            recommendations.add("Use set_plate_comment() to create/update plate comment following docs/prompts/PLATE_COMMENT_FORMAT_GUIDE.md");
+        }
+
+        // Hungarian Notation Violations
+        if (!hungarianViolations.isEmpty()) {
+            recommendations.add("HUNGARIAN NOTATION VIOLATIONS - Follow FUNCTION_DOC_WORKFLOW_V2.md 'Hungarian Notation Type System' section:");
+            recommendations.add("1. Verify type-to-prefix mapping matches Ghidra type:");
+            recommendations.add("   - byte -> b/by | char -> c/ch | bool -> f | short -> n/s | ushort -> w");
+            recommendations.add("   - int -> n/i | uint -> dw | long -> l | ulong -> dw");
+            recommendations.add("   - longlong -> ll | ulonglong -> qw | float -> fl | double -> d");
+            recommendations.add("   - void* -> p | typed pointers -> p+StructName (pUnitAny)");
+            recommendations.add("   - byte[N] -> ab | ushort[N] -> aw | uint[N] -> ad");
+            recommendations.add("   - char* -> sz/lpsz | wchar_t* -> wsz");
+            recommendations.add("2. First set correct type with set_local_variable_type() using lowercase builtin");
+            recommendations.add("3. Then rename with rename_variables() using correct Hungarian prefix");
+            recommendations.add("4. For globals, add g_ prefix before type prefix: g_dwProcessId, g_abEncryptionKey");
+        }
+
+        // Type Quality Issues
+        if (!typeQualityIssues.isEmpty()) {
+            recommendations.add("TYPE QUALITY ISSUES - Follow FUNCTION_DOC_WORKFLOW_V2.md 'Structure Identification' section:");
+            for (String issue : typeQualityIssues) {
+                if (issue.contains("Generic void*")) {
+                    recommendations.add("1. Replace generic void* parameters with specific structure types using set_function_prototype()");
+                    recommendations.add("   Example: void ProcessData(void* pData) -> void ProcessData(UnitAny* pUnit)");
+                } else if (issue.contains("State-based type name")) {
+                    recommendations.add("2. Rename state-based type names to identity-based names:");
+                    recommendations.add("   BAD: InitializedGameObject, AllocatedBuffer, ProcessedData");
+                    recommendations.add("   GOOD: GameObject, Buffer, DataRecord");
+                    recommendations.add("   Use create_struct() with identity-based name, document legacy name in comments");
+                } else if (issue.contains("Type duplication")) {
+                    recommendations.add("3. Consolidate duplicate types - use identity-based version, delete state-based variant");
+                }
+            }
+        }
+
+        // General Workflow Guidance
+        if (completenessScore < 100.0) {
+            recommendations.add("COMPLETE WORKFLOW (FUNCTION_DOC_WORKFLOW_V2.md):");
+            recommendations.add("1. Initialization: Use analyze_function_complete() to gather decompiled code, xrefs, callees, callers, disassembly, variables");
+            recommendations.add("2. Undefined Type Audit: Check BOTH decompiled code AND disassembly (get_disassembly()) for all undefined types");
+            recommendations.add("3. Structure Identification: Create structures BEFORE renaming (create_struct, apply_data_type)");
+            recommendations.add("4. Function Naming: Use rename_function_by_address() with PascalCase");
+            recommendations.add("5. Prototype: Use set_function_prototype() with specific typed parameters");
+            recommendations.add("6. Labels: Use batch_create_labels() for jump targets (snake_case)");
+            recommendations.add("7. Variable Types: Use set_local_variable_type() with lowercase builtins");
+            recommendations.add("8. Variable Renaming: Use rename_variables() with Hungarian notation");
+            recommendations.add("9. Plate Comment: Use set_plate_comment() with Algorithm, Parameters, Returns sections");
+            recommendations.add("10. Inline Comments: Use batch_set_comments() for decompiler and disassembly comments");
+            recommendations.add("11. Verification: Re-run analyze_function_completeness() to confirm 100% score");
+        }
+
+        return recommendations;
     }
 
     /**
@@ -9751,6 +10146,7 @@ public class GhidraMCPPlugin extends Plugin {
         final AtomicInteger variablesRenamed = new AtomicInteger(0);
         final AtomicInteger variablesFailed = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
+        final AtomicReference<Function> funcRef = new AtomicReference<>(null);  // FIX: Store func reference for cache invalidation
 
         try {
             SwingUtilities.invokeAndWait(() -> {
@@ -9767,6 +10163,7 @@ public class GhidraMCPPlugin extends Plugin {
                     }
 
                     Function func = program.getFunctionManager().getFunctionAt(addr);
+                    funcRef.set(func);  // FIX: Store function reference for later use
                     if (func == null) {
                         result.append("\"error\": \"No function at address: ").append(functionAddress).append("\"");
                         return;
@@ -9897,6 +10294,22 @@ public class GhidraMCPPlugin extends Plugin {
                         program.endTransaction(eventTx, success.get());
                         program.flushEvents();  // Force event processing now that we're done
                         program.endTransaction(tx, success.get());
+
+                        // FIX #1: Invalidate decompiler cache after successful renames to ensure consistency
+                        if (success.get() && variablesRenamed.get() > 0 && funcRef.get() != null) {
+                            try {
+                                // Force decompilation to refresh with new variable names
+                                DecompInterface tempDecomp = new DecompInterface();
+                                tempDecomp.openProgram(program);
+                                tempDecomp.flushCache();
+                                tempDecomp.decompileFunction(funcRef.get(), DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                                tempDecomp.dispose();
+                                Msg.info(this, "Invalidated decompiler cache after renaming " + variablesRenamed.get() + " variables");
+                            } catch (Exception cacheEx) {
+                                Msg.warn(this, "Failed to invalidate decompiler cache: " + cacheEx.getMessage());
+                                // Don't fail the operation if cache invalidation fails
+                            }
+                        }
                     }
                 }
             });
