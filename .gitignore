@@ -401,3 +401,16 @@ temp/
 ordinal_fix_log*.txt
 ordinal_fix_log.txt
 
+
+# =============================================================================
+# WORKFLOW LOCAL STATE FILES
+# =============================================================================
+
+# Ghidra manager config (contains local paths)
+workflows/.ghidra_manager_config.json
+
+# Improvement loop state (session-specific)
+workflows/.improvement_state.json
+
+# Workflow logs
+workflows/logs/
