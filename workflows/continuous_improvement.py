@@ -100,6 +100,14 @@ class ImprovementState:
     friction_history: List[Dict] = field(default_factory=list)
     tool_usage_stats: Dict[str, Dict] = field(default_factory=dict)
 
+    # Recovery and checkpoint state
+    current_function: Optional[str] = None  # Function currently being worked on
+    current_function_address: Optional[str] = None
+    recovery_count: int = 0  # Total number of auto-recoveries
+    last_checkpoint: Optional[str] = None  # ISO timestamp of last successful operation
+    ghidra_restarts: int = 0  # Number of times Ghidra was restarted
+    documented_addresses: List[str] = field(default_factory=list)  # Addresses we've documented
+
     def save(self):
         """Save state to disk."""
         def serialize(obj):
@@ -523,9 +531,139 @@ class ContinuousImprovementLoop:
         """
         return self.ghidra_manager.health_check()
 
+    def call_with_recovery(self, endpoint: str, params: Dict[str, Any] = None,
+                           method: str = "GET", timeout: int = 30,
+                           max_retries: int = 3) -> Dict[str, Any]:
+        """
+        Make a Ghidra API call with auto-recovery on failure.
+
+        If the call fails due to connection issues, this will:
+        1. Check if Ghidra/MCP is still running
+        2. If not, restart Ghidra and wait for MCP
+        3. Retry the original call
+
+        Args:
+            endpoint: API endpoint to call
+            params: Parameters for the call
+            method: HTTP method (GET or POST)
+            timeout: Request timeout in seconds
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            API response dict with success, data, etc.
+        """
+        last_error = None
+
+        for attempt in range(max_retries + 1):
+            # Make the call
+            result = self.ghidra_client.call(endpoint, params, method, timeout)
+
+            if result.get("success"):
+                # Update checkpoint on success
+                self.state.last_checkpoint = datetime.now().isoformat()
+                return result
+
+            # Call failed - check if it's a connection issue
+            error = result.get("error", "")
+            is_connection_error = any(x in str(error).lower() for x in [
+                "connection", "refused", "timeout", "unreachable", "reset"
+            ])
+
+            if not is_connection_error:
+                # Not a connection error, don't retry
+                return result
+
+            last_error = error
+            print(f"Connection error on attempt {attempt + 1}/{max_retries + 1}: {error}")
+
+            if attempt < max_retries:
+                # Track recovery attempt
+                self.state.recovery_count += 1
+
+                # Check Ghidra state
+                state = self.ghidra_manager.get_state(force_check=True)
+                print(f"Ghidra state: {state.value}")
+
+                if state != self.GhidraState.RUNNING_WITH_MCP:
+                    print("MCP not available, attempting recovery...")
+
+                    # Save state before restart in case we need to resume
+                    self.state.save()
+
+                    # Try to restart Ghidra
+                    success, msg = self.ghidra_manager.restart()
+                    if success:
+                        print(f"Ghidra restarted successfully: {msg}")
+                        self.state.ghidra_restarts += 1
+                        self.state.save()
+                    else:
+                        print(f"Failed to restart Ghidra: {msg}")
+                        # Wait a bit before next attempt anyway
+                        time.sleep(5)
+                else:
+                    # MCP is running but call failed - wait and retry
+                    time.sleep(2)
+
+        # All retries exhausted
+        return {
+            "success": False,
+            "error": f"Failed after {max_retries + 1} attempts. Last error: {last_error}",
+            "recovery_attempted": True
+        }
+
+    def start_function_work(self, func_name: str, func_address: str):
+        """
+        Mark that we're starting work on a function.
+
+        This saves state so we can resume if interrupted.
+        """
+        self.state.current_function = func_name
+        self.state.current_function_address = func_address
+        self.state.save()
+        logger.info(f"Started work on function: {func_name} @ {func_address}")
+
+    def complete_function_work(self, func_address: str, success: bool = True):
+        """
+        Mark that we've completed work on a function.
+
+        Args:
+            func_address: Address of the completed function
+            success: Whether the documentation was successful
+        """
+        if success and func_address not in self.state.documented_addresses:
+            self.state.documented_addresses.append(func_address)
+            self.state.functions_documented += 1
+
+        self.state.current_function = None
+        self.state.current_function_address = None
+        self.state.last_checkpoint = datetime.now().isoformat()
+        self.state.save()
+        logger.info(f"Completed work on function @ {func_address}, success={success}")
+
+    def get_resume_function(self) -> Optional[Dict]:
+        """
+        Get the function we were working on before interruption.
+
+        Returns:
+            Dict with name and address if there's work to resume, None otherwise.
+        """
+        if self.state.current_function and self.state.current_function_address:
+            return {
+                "name": self.state.current_function,
+                "address": self.state.current_function_address,
+                "resumed": True
+            }
+        return None
+
     def get_next_function_to_document(self) -> Optional[Dict]:
         """Find the next undocumented function to work on."""
-        result = self.ghidra_client.call("searchFunctions", {"query": "FUN_", "limit": 1})
+        # First check if we need to resume previous work
+        resume = self.get_resume_function()
+        if resume:
+            logger.info(f"Resuming work on {resume['name']} @ {resume['address']}")
+            return resume
+
+        result = self.call_with_recovery("searchFunctions", {"query": "FUN_", "limit": 1})
         if result.get("success") and result.get("data"):
             lines = result["data"].strip().split('\n')
             for line in lines:
@@ -547,28 +685,28 @@ class ContinuousImprovementLoop:
             "constants": []
         }
 
-        # Decompile
-        result = self.ghidra_client.call("decompile", {"name": func_name}, timeout=60)
+        # Decompile - use recovery for critical operation
+        result = self.call_with_recovery("decompile", {"name": func_name}, timeout=60)
         if result.get("success"):
             analysis["decompiled"] = result["data"]
 
         # Disassemble
-        result = self.ghidra_client.call("disassemble_function", {"name": func_name})
+        result = self.call_with_recovery("disassemble_function", {"name": func_name})
         if result.get("success"):
             analysis["disassembly"] = result["data"]
 
         # Variables
-        result = self.ghidra_client.call("function_variables", {"name": func_name})
+        result = self.call_with_recovery("function_variables", {"name": func_name})
         if result.get("success"):
             analysis["variables"] = result["data"]
 
         # Callees
-        result = self.ghidra_client.call("function_callees", {"name": func_name})
+        result = self.call_with_recovery("function_callees", {"name": func_name})
         if result.get("success"):
             analysis["callees"] = result["data"]
 
         # Callers
-        result = self.ghidra_client.call("function_callers", {"name": func_name})
+        result = self.call_with_recovery("function_callers", {"name": func_name})
         if result.get("success"):
             analysis["callers"] = result["data"]
 
@@ -580,19 +718,19 @@ class ContinuousImprovementLoop:
                            plate_comment: str = None,
                            variable_renames: Dict[str, str] = None,
                            variable_types: Dict[str, str] = None) -> Dict[str, bool]:
-        """Apply documentation to a function."""
+        """Apply documentation to a function with auto-recovery."""
         results = {}
 
         if new_name:
             # First need to get the current name
-            funcs = self.ghidra_client.call("searchFunctions",
+            funcs = self.call_with_recovery("searchFunctions",
                                             {"query": func_address[-8:], "limit": 1})
             if funcs.get("success") and funcs.get("data"):
                 lines = funcs["data"].strip().split('\n')
                 for line in lines:
                     if ' @ ' in line:
                         old_name = line.split(' @ ')[0].strip()
-                        result = self.ghidra_client.call("rename_function", {
+                        result = self.call_with_recovery("rename_function", {
                             "old_name": old_name,
                             "new_name": new_name
                         }, method="POST")
@@ -600,7 +738,7 @@ class ContinuousImprovementLoop:
                         break
 
         if prototype:
-            result = self.ghidra_client.call("set_function_prototype", {
+            result = self.call_with_recovery("set_function_prototype", {
                 "function_address": func_address,
                 "prototype": prototype
             }, method="POST")
@@ -608,20 +746,48 @@ class ContinuousImprovementLoop:
 
         if plate_comment:
             func_name = new_name or func_address
-            result = self.ghidra_client.call("set_plate_comment", {
+            result = self.call_with_recovery("set_plate_comment", {
                 "function_name": func_name,
                 "comment": plate_comment
             }, method="POST")
             results["plate_comment"] = result.get("success", False)
 
         if variable_types:
-            result = self.ghidra_client.call("batch_set_variable_types", {
+            result = self.call_with_recovery("batch_set_variable_types", {
                 "function_address": func_address,
                 "variable_types": json.dumps(variable_types)
             }, method="POST", timeout=60)
             results["variable_types"] = result.get("success", False)
 
         return results
+
+    def get_session_stats(self) -> Dict[str, Any]:
+        """
+        Get statistics about the current session and overall progress.
+
+        Returns:
+            Dict with session statistics including:
+            - session_count: Total sessions run
+            - functions_documented: Total functions documented
+            - recovery_count: Total auto-recoveries
+            - ghidra_restarts: Total Ghidra restarts
+            - current_function: Function being worked on (if any)
+            - last_checkpoint: Last successful operation timestamp
+            - documented_count: Number of documented addresses
+        """
+        return {
+            "session_count": self.state.session_count,
+            "functions_documented": self.state.functions_documented,
+            "recovery_count": self.state.recovery_count,
+            "ghidra_restarts": self.state.ghidra_restarts,
+            "current_function": self.state.current_function,
+            "current_function_address": self.state.current_function_address,
+            "last_checkpoint": self.state.last_checkpoint,
+            "documented_count": len(self.state.documented_addresses),
+            "friction_count": len(self.state.friction_history),
+            "pending_changes": len(self.state.pending_changes),
+            "completed_changes": len(self.state.completed_changes)
+        }
 
     def record_friction(self, description: str, context: Dict = None):
         """Record a friction point for later analysis."""

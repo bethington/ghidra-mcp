@@ -18,11 +18,35 @@ import time
 import os
 import sys
 import json
+import logging
 import requests
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from dataclasses import dataclass, field, asdict
 from enum import Enum
+from datetime import datetime
+
+# Setup logging
+LOG_DIR = Path(__file__).parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+
+# File handler for persistent logs
+log_file = LOG_DIR / f"ghidra_manager_{datetime.now().strftime('%Y%m%d')}.log"
+file_handler = logging.FileHandler(log_file, encoding='utf-8')
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+))
+
+# Console handler for stdout
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter('%(message)s'))
+
+# Configure logger
+logger = logging.getLogger('ghidra_manager')
+logger.setLevel(logging.INFO)
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 # Default configuration
 DEFAULT_GHIDRA_PATH = r"F:\ghidra_11.4.2"
@@ -201,10 +225,10 @@ class GhidraManager:
         timeout = timeout or GHIDRA_SHUTDOWN_TIMEOUT
 
         if force:
-            print(f"WARNING: Force-closing Ghidra WITHOUT saving! (timeout={timeout}s)")
+            logger.warning(f"Force-closing Ghidra WITHOUT saving! (timeout={timeout}s)")
         else:
-            print(f"Closing Ghidra gracefully (timeout={timeout}s)...")
-            print("  Ghidra will save the project before closing.")
+            logger.info(f"Closing Ghidra gracefully (timeout={timeout}s)...")
+            logger.info("  Ghidra will save the project before closing.")
 
         # Send graceful close signal (WM_CLOSE to window)
         # Match both "Ghidra*" (project manager) and "CodeBrowser*" (active code window)
@@ -232,21 +256,21 @@ class GhidraManager:
                 text=True,
                 timeout=15
             )
-            print(result.stdout.strip())
+            logger.info(result.stdout.strip())
 
             if result.returncode != 0:
-                print("Ghidra is not running - nothing to close")
+                logger.info("Ghidra is not running - nothing to close")
                 return True  # Already closed
 
             # Wait for graceful shutdown - Ghidra needs time to save
             # Ghidra may have multiple windows (CodeBrowser, Project Manager, etc.)
             # We keep checking and sending close commands until all windows are closed
-            print("Waiting for Ghidra to save and close...")
+            logger.info("Waiting for Ghidra to save and close...")
             last_close_attempt = 0
             for i in range(timeout):
                 time.sleep(1)
                 if not self._check_ghidra_process():
-                    print(f"Ghidra closed successfully after {i+1}s (project saved)")
+                    logger.info(f"Ghidra closed successfully after {i+1}s (project saved)")
                     self._last_state = None
                     return True
 
@@ -263,17 +287,17 @@ class GhidraManager:
                         # Found more windows, sent close
                         for line in retry_result.stdout.strip().split('\n'):
                             if line.strip():
-                                print(f"  {line.strip()}")
+                                logger.info(f"  {line.strip()}")
                         last_close_attempt = i + 1
                     # else: no more windows found, just waiting for process to exit
 
                 # Progress updates every 10 seconds
                 if (i + 1) % 10 == 0:
-                    print(f"  Still waiting for Ghidra to finish saving... ({i+1}/{timeout}s)")
+                    logger.info(f"  Still waiting for Ghidra to finish saving... ({i+1}/{timeout}s)")
 
             # Timeout reached - Ghidra is still running
             if force:
-                print(f"Timeout after {timeout}s - force-killing Ghidra (DATA MAY BE LOST!)...")
+                logger.warning(f"Timeout after {timeout}s - force-killing Ghidra (DATA MAY BE LOST!)...")
                 force_script = '''
                 Get-Process | Where-Object {
                     $_.ProcessName -eq 'javaw' -and ($_.MainWindowTitle -like 'Ghidra*' -or $_.MainWindowTitle -like 'CodeBrowser*')
@@ -290,18 +314,18 @@ class GhidraManager:
             else:
                 # Don't force-kill - report that it's still running
                 # This likely means Ghidra is showing a dialog (e.g., "Save project?")
-                print(f"Ghidra did not close after {timeout}s.")
-                print("  This usually means Ghidra is showing a dialog box.")
-                print("  Check Ghidra and respond to any dialogs (Save/Don't Save/Cancel).")
-                print("  TIP: Ghidra auto-saves periodically, so 'Don't Save' is usually safe.")
-                print("  Use force=True only if Ghidra is completely frozen.")
+                logger.warning(f"Ghidra did not close after {timeout}s.")
+                logger.warning("  This usually means Ghidra is showing a dialog box.")
+                logger.warning("  Check Ghidra and respond to any dialogs (Save/Don't Save/Cancel).")
+                logger.info("  TIP: Ghidra auto-saves periodically, so 'Don't Save' is usually safe.")
+                logger.info("  Use force=True only if Ghidra is completely frozen.")
                 return False
 
         except subprocess.TimeoutExpired:
-            print("Timeout while sending close command to Ghidra")
+            logger.error("Timeout while sending close command to Ghidra")
             return False
         except Exception as e:
-            print(f"Error closing Ghidra: {e}")
+            logger.error(f"Error closing Ghidra: {e}")
             return False
 
     def start_ghidra(
@@ -337,7 +361,7 @@ class GhidraManager:
             if binary:
                 cmd.extend(["-open", binary])
 
-        print(f"Starting Ghidra: {' '.join(cmd)}")
+        logger.info(f"Starting Ghidra: {' '.join(cmd)}")
 
         try:
             # Start Ghidra (don't wait for it to finish)
@@ -348,7 +372,7 @@ class GhidraManager:
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
             )
 
-            print(f"Ghidra process started (PID: {process.pid})")
+            logger.info(f"Ghidra process started (PID: {process.pid})")
 
             if wait_for_mcp:
                 return self._wait_for_mcp()
@@ -361,7 +385,7 @@ class GhidraManager:
     def _wait_for_mcp(self) -> Tuple[bool, str]:
         """Wait for MCP server to become available"""
         timeout = self.config.startup_timeout
-        print(f"Waiting for MCP server (timeout: {timeout}s)...")
+        logger.info(f"Waiting for MCP server (timeout: {timeout}s)...")
 
         start_time = time.time()
         check_interval = 2  # seconds between checks
@@ -370,7 +394,7 @@ class GhidraManager:
             elapsed = int(time.time() - start_time)
 
             if self._check_mcp_server():
-                print(f"MCP server available after {elapsed}s")
+                logger.info(f"MCP server available after {elapsed}s")
                 self._last_state = GhidraState.RUNNING_WITH_MCP
                 return True, f"Ghidra running with MCP (startup took {elapsed}s)"
 
@@ -378,7 +402,7 @@ class GhidraManager:
             if elapsed > 10 and not self._check_ghidra_process():
                 return False, "Ghidra process terminated unexpectedly"
 
-            print(f"Waiting for MCP server... ({elapsed}/{timeout}s)")
+            logger.info(f"Waiting for MCP server... ({elapsed}/{timeout}s)")
             time.sleep(check_interval)
 
         # Timeout
@@ -411,14 +435,14 @@ class GhidraManager:
         Returns:
             Tuple of (success, message)
         """
-        print("=" * 50)
-        print("RESTARTING GHIDRA")
-        print("=" * 50)
+        logger.info("=" * 50)
+        logger.info("RESTARTING GHIDRA")
+        logger.info("=" * 50)
 
         # Close existing instance
         state = self.get_state(force_check=True)
         if state != GhidraState.NOT_RUNNING:
-            print(f"Current state: {state.value}")
+            logger.info(f"Current state: {state.value}")
             closed = self.close_ghidra(force=force_close, timeout=close_timeout)
             if not closed:
                 if force_close:
