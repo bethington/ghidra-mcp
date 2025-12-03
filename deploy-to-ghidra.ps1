@@ -15,6 +15,29 @@ function Write-Error { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Re
 Write-Info "GhidraMCP Deployment Script"
 Write-Info "============================"
 
+# Build the extension first
+Write-Info "Building GhidraMCP extension..."
+$mavenPath = "$env:USERPROFILE\tools\apache-maven-3.9.6\bin\mvn.cmd"
+
+if (-not (Test-Path $mavenPath)) {
+    Write-Error "Maven not found at: $mavenPath"
+    Write-Info "Please ensure Maven is installed or update the path in this script"
+    exit 1
+}
+
+try {
+    $buildOutput = & $mavenPath clean package assembly:single -DskipTests 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Build failed with exit code: $LASTEXITCODE"
+        Write-Host $buildOutput
+        exit 1
+    }
+    Write-Success "Build completed successfully"
+} catch {
+    Write-Error "Build failed: $($_.Exception.Message)"
+    exit 1
+}
+
 # Detect version from pom.xml
 $pomPath = "$PSScriptRoot\pom.xml"
 if (Test-Path $pomPath) {
@@ -33,10 +56,6 @@ if (Test-Path $pomPath) {
 
 # Find Ghidra installation
 $possiblePaths = @(
-    "C:\ghidra",
-    "C:\Program Files\ghidra",
-    "C:\Program Files (x86)\ghidra",
-    "C:\tools\ghidra",
     "F:\ghidra_11.4.2",
     "$env:USERPROFILE\ghidra",
     "$env:USERPROFILE\tools\ghidra"
@@ -262,13 +281,35 @@ if (Test-Path $destinationPath) {
     $fileSize = (Get-Item $destinationPath).Length
     Write-Success "Installation verified: $([math]::Round($fileSize/1KB, 2)) KB"
     
-    # Offer to start Ghidra
-    $startGhidra = Read-Host "Would you like to start Ghidra now? (y/N)"
-    if ($startGhidra -match '^[Yy]') {
-        Write-Info "Starting Ghidra..."
-        Start-Process "$GhidraPath\ghidraRun.bat"
-        Write-Success "Ghidra started! The plugin should be available after restart if needed."
+    # Automatically restart Ghidra if running
+    # Look for javaw process with "Ghidra: PD2" window
+    $ghidraProcess = Get-Process | Where-Object { $_.ProcessName -eq "javaw" -and $_.MainWindowTitle -eq "Ghidra: PD2" }
+    
+    if ($ghidraProcess) {
+        Write-Info "Found Ghidra window 'Ghidra: PD2' (PID: $($ghidraProcess.Id)) - closing it..."
+        try {
+            $ghidraProcess.CloseMainWindow() | Out-Null
+            Start-Sleep -Seconds 2
+            
+            if (!$ghidraProcess.HasExited) {
+                Write-Warning "Force closing Ghidra process (PID: $($ghidraProcess.Id))..."
+                Stop-Process -Id $ghidraProcess.Id -Force
+            }
+            Write-Success "Closed Ghidra (PID: $($ghidraProcess.Id))"
+        } catch {
+            Write-Warning "Could not close process $($ghidraProcess.Id): $($_.Exception.Message)"
+        }
+        
+        Write-Info "Waiting for Ghidra to fully terminate..."
+        Start-Sleep -Seconds 3
+    } else {
+        Write-Info "No running Ghidra instance detected"
     }
+    
+    # Always start Ghidra
+    Write-Info "Starting Ghidra..."
+    Start-Process "$GhidraPath\ghidraRun.bat"
+    Write-Success "Ghidra started! The updated plugin (v$version) is now available."
 } else {
     Write-Error "Installation verification failed!"
     exit 1

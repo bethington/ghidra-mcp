@@ -789,6 +789,249 @@ class ContinuousImprovementLoop:
             "completed_changes": len(self.state.completed_changes)
         }
 
+    # =========================================================================
+    # Batch Mode Operations
+    # =========================================================================
+
+    def get_functions_by_pattern(self, pattern: str, limit: int = 100) -> List[Dict]:
+        """
+        Find functions matching a name pattern.
+
+        Args:
+            pattern: Pattern to match (e.g., "FUN_", "Process", "Init")
+            limit: Maximum functions to return
+
+        Returns:
+            List of dicts with 'name' and 'address' keys
+        """
+        result = self.call_with_recovery("searchFunctions", {"query": pattern, "limit": limit})
+        functions = []
+
+        if result.get("success") and result.get("data"):
+            lines = result["data"].strip().split('\n')
+            for line in lines:
+                if ' @ ' in line:
+                    name, addr = line.split(' @ ')
+                    functions.append({
+                        "name": name.strip(),
+                        "address": addr.strip()
+                    })
+
+        logger.info(f"Found {len(functions)} functions matching '{pattern}'")
+        return functions
+
+    def get_functions_in_range(self, start_address: str, end_address: str) -> List[Dict]:
+        """
+        Find functions within an address range.
+
+        Args:
+            start_address: Start address (hex string)
+            end_address: End address (hex string)
+
+        Returns:
+            List of dicts with 'name' and 'address' keys
+        """
+        # Convert to integers for comparison
+        start_int = int(start_address, 16)
+        end_int = int(end_address, 16)
+
+        # Get all FUN_ functions and filter by range
+        all_funcs = self.get_functions_by_pattern("FUN_", limit=1000)
+
+        in_range = []
+        for func in all_funcs:
+            try:
+                addr_int = int(func["address"], 16)
+                if start_int <= addr_int <= end_int:
+                    in_range.append(func)
+            except ValueError:
+                continue
+
+        # Sort by address
+        in_range.sort(key=lambda f: int(f["address"], 16))
+
+        logger.info(f"Found {len(in_range)} functions in range {start_address}-{end_address}")
+        return in_range
+
+    def get_functions_by_addresses(self, addresses: List[str]) -> List[Dict]:
+        """
+        Get function info for specific addresses.
+
+        Args:
+            addresses: List of hex addresses
+
+        Returns:
+            List of dicts with 'name' and 'address' keys
+        """
+        functions = []
+
+        for addr in addresses:
+            # Search for function at this address
+            result = self.call_with_recovery("searchFunctions", {"query": addr[-8:], "limit": 5})
+
+            if result.get("success") and result.get("data"):
+                lines = result["data"].strip().split('\n')
+                for line in lines:
+                    if ' @ ' in line and addr.lower() in line.lower():
+                        name, func_addr = line.split(' @ ')
+                        functions.append({
+                            "name": name.strip(),
+                            "address": func_addr.strip()
+                        })
+                        break
+
+        logger.info(f"Found {len(functions)} of {len(addresses)} requested functions")
+        return functions
+
+    def queue_batch(
+        self,
+        functions: List[Dict] = None,
+        pattern: str = None,
+        address_range: Tuple[str, str] = None,
+        addresses: List[str] = None
+    ) -> List[Dict]:
+        """
+        Queue a batch of functions for documentation.
+
+        Provide ONE of the following:
+        - functions: Direct list of function dicts
+        - pattern: Name pattern to search
+        - address_range: Tuple of (start, end) addresses
+        - addresses: List of specific addresses
+
+        Returns:
+            List of queued functions
+        """
+        if functions:
+            queued = functions
+        elif pattern:
+            queued = self.get_functions_by_pattern(pattern)
+        elif address_range:
+            queued = self.get_functions_in_range(address_range[0], address_range[1])
+        elif addresses:
+            queued = self.get_functions_by_addresses(addresses)
+        else:
+            logger.warning("No batch criteria provided")
+            return []
+
+        # Filter out already documented addresses
+        undocumented = [
+            f for f in queued
+            if f["address"] not in self.state.documented_addresses
+        ]
+
+        logger.info(f"Queued {len(undocumented)} undocumented functions "
+                   f"(filtered {len(queued) - len(undocumented)} already documented)")
+
+        return undocumented
+
+    def process_batch(
+        self,
+        functions: List[Dict],
+        progress_callback: callable = None,
+        stop_on_error: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Process a batch of functions for documentation.
+
+        Args:
+            functions: List of function dicts with 'name' and 'address'
+            progress_callback: Optional callback(current, total, func, result)
+            stop_on_error: Stop processing on first error
+
+        Returns:
+            Dict with batch results:
+            - total: Total functions in batch
+            - processed: Number processed
+            - successful: Number successfully documented
+            - failed: Number that failed
+            - skipped: Number skipped (already documented)
+            - results: List of per-function results
+        """
+        batch_results = {
+            "total": len(functions),
+            "processed": 0,
+            "successful": 0,
+            "failed": 0,
+            "skipped": 0,
+            "results": []
+        }
+
+        for i, func in enumerate(functions):
+            func_name = func["name"]
+            func_address = func["address"]
+
+            # Skip if already documented
+            if func_address in self.state.documented_addresses:
+                batch_results["skipped"] += 1
+                batch_results["results"].append({
+                    "function": func_name,
+                    "address": func_address,
+                    "status": "skipped",
+                    "reason": "already documented"
+                })
+                continue
+
+            # Mark work started
+            self.start_function_work(func_name, func_address)
+
+            try:
+                # Get analysis
+                analysis = self.get_function_analysis(func_name)
+
+                if not analysis.get("decompiled"):
+                    batch_results["failed"] += 1
+                    batch_results["results"].append({
+                        "function": func_name,
+                        "address": func_address,
+                        "status": "failed",
+                        "reason": "could not decompile"
+                    })
+                    self.complete_function_work(func_address, success=False)
+
+                    if stop_on_error:
+                        break
+                    continue
+
+                # Success - mark as ready for Claude analysis
+                batch_results["successful"] += 1
+                batch_results["results"].append({
+                    "function": func_name,
+                    "address": func_address,
+                    "status": "analyzed",
+                    "analysis": analysis
+                })
+
+                self.complete_function_work(func_address, success=True)
+
+            except Exception as e:
+                batch_results["failed"] += 1
+                batch_results["results"].append({
+                    "function": func_name,
+                    "address": func_address,
+                    "status": "error",
+                    "error": str(e)
+                })
+                self.complete_function_work(func_address, success=False)
+
+                if stop_on_error:
+                    break
+
+            batch_results["processed"] += 1
+
+            if progress_callback:
+                progress_callback(
+                    i + 1,
+                    len(functions),
+                    func,
+                    batch_results["results"][-1]
+                )
+
+        logger.info(f"Batch complete: {batch_results['successful']} successful, "
+                   f"{batch_results['failed']} failed, {batch_results['skipped']} skipped")
+
+        return batch_results
+
     def record_friction(self, description: str, context: Dict = None):
         """Record a friction point for later analysis."""
         friction = {

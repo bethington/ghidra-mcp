@@ -2,19 +2,26 @@ param(
     [switch]$Reverse,
     [switch]$Single,
     [string]$Function,
-    [string]$Model = "claude-haiku-4-5-20251001",
+    [ValidateSet("haiku", "sonnet", "opus")]
+    [string]$Model = "opus",
     [switch]$Help,
     [int]$MaxRetries = 3,
     [int]$DelayBetweenFunctions = 2,
     [int]$MinScore = 0,
     [int]$MaxScore = 99,
+    [int]$MaxFunctions = 0,  # 0 = unlimited, otherwise stop after N functions per worker
     [switch]$DryRun,
     [switch]$SkipValidation,
+    [switch]$CompactPrompt,
     [int]$Workers = 1,
     [switch]$Coordinator,
     [int]$WorkerId = 0,
-    [string]$GhidraServer = "http://127.0.0.1:8089"
+    [string]$GhidraServer = "http://127.0.0.1:8089",
+    [switch]$ReEvaluate  # Re-scan functions for completeness without Claude processing
 )
+
+# Model name - CLI accepts simple aliases directly
+$FullModelName = $Model
 
 # Constants
 $STALE_LOCK_MINUTES = 30
@@ -22,15 +29,15 @@ $MAX_PROMPT_BYTES = 180000
 $FUNCTION_BATCH_SIZE = 50
 
 $todoFile = ".\FunctionsTodo.txt"
-$promptFile = ".\docs\prompts\FUNCTION_DOC_WORKFLOW_V2.md"
-$logFile = ".\logs\functions-process-worker$WorkerId-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
-$checkpointFile = ".\functions-progress-worker$WorkerId.json"
-$outputDir = ".\output"
-$lockDir = ".\locks"
-$globalLockFile = ".\locks\.global.lock"
+$promptFile = if ($CompactPrompt) { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V3_COMPACT.md" } else { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V2.md" }
+$logFile = ".\\logs\\functions-process-worker$WorkerId-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$checkpointFile = ".\\functions-progress-worker$WorkerId.json"
+$outputDir = ".\\output"
+$lockDir = ".\\locks"
+$globalLockFile = ".\\locks\\.global.lock"
 
 # Create directories if they don't exist
-New-Item -ItemType Directory -Force -Path ".\logs" | Out-Null
+New-Item -ItemType Directory -Force -Path ".\\logs" | Out-Null
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 New-Item -ItemType Directory -Force -Path $lockDir | Out-Null
 
@@ -41,6 +48,10 @@ if (-not (Test-Path $promptFile)) {
     $defaultPrompt = $true
 } else {
     $defaultPrompt = $false
+    $promptSize = (Get-Content $promptFile -Raw).Length
+    if ($CompactPrompt) {
+        Write-Host "Using compact prompt ($promptSize chars, ~$([math]::Round($promptSize/4)) tokens)" -ForegroundColor Green
+    }
 }
 
 function Write-Log {
@@ -79,25 +90,42 @@ function Show-Help {
     Write-Host "  -Single              Process one function and stop"
     Write-Host "  -Function <name>     Process specific function"
     Write-Host "  -Reverse             Process from bottom to top"
-    Write-Host "  -Model <model>       Claude model to use (default: claude-haiku-4-5-20251001)"
+    Write-Host "  -Model <model>       Claude model to use (default: opus)"
     Write-Host ""
     Write-Host "  Available models:"
-    Write-Host "    claude-haiku-4-5-20251001    (fast, cost-effective)"
-    Write-Host "    claude-sonnet-4-5-20250929   (balanced)"
-    Write-Host "    claude-opus-4-5              (most capable)"
+    Write-Host "    haiku   - claude-haiku-4-5-20251001  (fast, cost-effective)"
+    Write-Host "    sonnet  - claude-sonnet-4-5-20250929 (balanced)"
+    Write-Host "    opus    - claude-opus-4-5            (most capable)"
     Write-Host ""
     Write-Host "  -MaxRetries <n>      Maximum retry attempts (default: 3)"
     Write-Host "  -DelayBetweenFunctions <n>  Seconds between functions (default: 2)"
+    Write-Host "  -MaxFunctions <n>    Stop after processing N functions per worker (0 = unlimited)"
     Write-Host "  -MinScore <n>        Only process functions with score >= n (default: 0)"
     Write-Host "  -MaxScore <n>        Only process functions with score <= n (default: 99)"
     Write-Host "  -DryRun              Preview what will be processed without changes"
     Write-Host "  -SkipValidation      Skip post-processing validation checks"
+    Write-Host "  -CompactPrompt       Use compact prompt (91% smaller, saves tokens/cost)"
+    Write-Host "  -ReEvaluate          Re-scan all completed functions for updated scores (no Claude)"
     Write-Host "  -Help                Show this help"
+    Write-Host ""
+    Write-Host "RE-EVALUATION MODE:"
+    Write-Host "  -ReEvaluate scans all [X] marked functions and updates their completeness scores"
+    Write-Host "  This is useful after updating the Ghidra plugin with new scoring criteria"
+    Write-Host "  No Claude processing occurs - only calls analyze_function_completeness()"
+    Write-Host "  Generates a report showing improved, regressed, and unchanged functions"
+    Write-Host ""
+    Write-Host "COST OPTIMIZATION:"
+    Write-Host "  -CompactPrompt reduces prompt from ~6000 to ~500 tokens per function"
+    Write-Host "  -Model haiku is 10-20x cheaper than opus with good quality"
+    Write-Host "  Recommended: -Model haiku -CompactPrompt for bulk processing"
     Write-Host ""
     Write-Host "EXAMPLES:"
     Write-Host "  .\functions-process.ps1 -Workers 6          # Run 6 parallel workers"
     Write-Host "  .\functions-process.ps1 -Workers 6 -MaxScore 50  # 6 workers on low-score functions"
-    Write-Host "  .\functions-process.ps1 -Model claude-sonnet-4-5-20250929  # Use Sonnet"
+    Write-Host "  .\functions-process.ps1 -MaxFunctions 10    # Process only 10 functions then stop"
+    Write-Host "  .\functions-process.ps1 -Model haiku -CompactPrompt  # Cost-optimized"
+    Write-Host "  .\functions-process.ps1 -Model sonnet     # Use Sonnet"
+    Write-Host "  .\functions-process.ps1 -ReEvaluate       # Re-scan scores without Claude"
     Write-Host "  .\functions-process.ps1 -GhidraServer http://localhost:8089  # Custom server"
     Write-Host "  .\functions-process.ps1                     # Single worker (original behavior)"
     Write-Host ""
@@ -105,6 +133,7 @@ function Show-Help {
     Write-Host "  - Each worker claims functions using lock files to prevent collisions"
     Write-Host "  - Workers automatically skip functions already claimed by others"
     Write-Host "  - Progress is tracked per-worker in separate log files"
+    Write-Host "  - Completeness tracking is saved to completeness-tracking.json"
     exit 0
 }
 
@@ -224,40 +253,259 @@ function Update-TodoFile {
     }
 }
 
+# Completeness tracking database
+$trackingFile = ".\completeness-tracking.json"
+
+function Update-CompletenessTracking {
+    param(
+        [string]$funcName,
+        [string]$address,
+        [float]$initialScore,
+        [float]$finalScore,
+        [object]$completenessData = $null
+    )
+    
+    if (-not (Get-GlobalLock)) {
+        Write-Log "Could not acquire global lock for tracking update" "WARN"
+        return $false
+    }
+    
+    try {
+        # Load existing tracking data
+        if (Test-Path $trackingFile) {
+            $tracking = Get-Content $trackingFile -Raw | ConvertFrom-Json
+        } else {
+            $tracking = @{
+                metadata = @{
+                    version = "1.0"
+                    created = Get-Date -Format "o"
+                    last_updated = $null
+                    description = "Tracks completeness scores for documented functions"
+                }
+                functions = @{}
+            }
+        }
+        
+        # Create entry for this function
+        $entry = @{
+            address = "0x$address"
+            initial_score = $initialScore
+            current_score = $finalScore
+            improvement = $finalScore - $initialScore
+            last_processed = Get-Date -Format "o"
+            model_used = $Model
+            worker_id = $WorkerId
+        }
+        
+        # Add detailed completeness data if provided
+        if ($completenessData) {
+            $entry.unrenamed_globals_count = if ($completenessData.unrenamed_globals) { $completenessData.unrenamed_globals.Count } else { 0 }
+            $entry.undocumented_ordinals_count = if ($completenessData.undocumented_ordinals) { $completenessData.undocumented_ordinals.Count } else { 0 }
+            $entry.comment_density = if ($completenessData.comment_density) { $completenessData.comment_density } else { 0 }
+            $entry.undefined_vars_count = if ($completenessData.undefined_vars) { $completenessData.undefined_vars.Count } else { 0 }
+        }
+        
+        # Track history
+        if ($tracking.functions.$funcName) {
+            $existing = $tracking.functions.$funcName
+            if (-not $existing.history) {
+                $existing | Add-Member -NotePropertyName history -NotePropertyValue @() -Force
+            }
+            $historyEntry = @{
+                score = $existing.current_score
+                timestamp = $existing.last_processed
+            }
+            $existing.history += $historyEntry
+            
+            # Update with new data
+            foreach ($key in $entry.Keys) {
+                $existing | Add-Member -NotePropertyName $key -NotePropertyValue $entry[$key] -Force
+            }
+        } else {
+            $tracking.functions | Add-Member -NotePropertyName $funcName -NotePropertyValue $entry -Force
+        }
+        
+        $tracking.metadata.last_updated = Get-Date -Format "o"
+        
+        # Save back
+        $tracking | ConvertTo-Json -Depth 10 | Set-Content $trackingFile
+        Write-Log "Updated completeness tracking for $funcName : $initialScore -> $finalScore"
+        return $true
+    } catch {
+        Write-Log "Failed to update tracking: $($_.Exception.Message)" "ERROR"
+        return $false
+    } finally {
+        Release-GlobalLock
+    }
+}
+
+function Invoke-ReEvaluate {
+    Write-Host "=== RE-EVALUATION MODE ===" -ForegroundColor Cyan
+    Write-Host "Scanning functions for updated completeness scores (no Claude processing)" -ForegroundColor Cyan
+    Write-Host ""
+    
+    # Load todo file to get function list
+    if (-not (Test-Path $todoFile)) {
+        Write-Host "ERROR: Todo file not found at $todoFile" -ForegroundColor Red
+        return
+    }
+    
+    # Load existing tracking data for previous scores
+    $previousScores = @{}
+    if (Test-Path $trackingFile) {
+        try {
+            $tracking = Get-Content $trackingFile -Raw | ConvertFrom-Json
+            foreach ($prop in $tracking.functions.PSObject.Properties) {
+                $previousScores[$prop.Name] = $prop.Value.current_score
+            }
+            Write-Host "Loaded $($previousScores.Count) previous scores from tracking database" -ForegroundColor Gray
+        } catch {
+            Write-Host "Warning: Could not load tracking database" -ForegroundColor Yellow
+        }
+    }
+    
+    $lines = Get-Content $todoFile
+    # Updated pattern to match actual format: [X] FUN_xxx @ address (no Score field)
+    $funcPattern = '^\[(.)\]\s+(\S+)\s+@\s*([0-9a-fA-F]+)'
+    
+    $total = 0
+    $improved = 0
+    $regressed = 0
+    $unchanged = 0
+    $errors = 0
+    
+    $results = @()
+    
+    foreach ($line in $lines) {
+        if ($line -match $funcPattern) {
+            $status = $Matches[1]
+            $funcName = $Matches[2]
+            $address = $Matches[3]
+            
+            # Skip if not marked complete
+            if ($status -ne 'X') { continue }
+            
+            # Get previous score from tracking database, default to 0 if not found
+            $oldScore = if ($previousScores.ContainsKey($funcName)) { [int]$previousScores[$funcName] } else { 0 }
+            
+            $total++
+            
+            try {
+                Write-Host "  Re-evaluating $funcName..." -NoNewline
+                
+                $response = Invoke-RestMethod -Uri "$GhidraServer/analyze_function_completeness?function_address=0x$address" -Method GET -TimeoutSec 15
+                $newScore = [int]$response.completeness_score
+                
+                $result = @{
+                    name = $funcName
+                    address = $address
+                    old_score = $oldScore
+                    new_score = $newScore
+                    difference = $newScore - $oldScore
+                    unrenamed_globals = if ($response.unrenamed_globals) { $response.unrenamed_globals.Count } else { 0 }
+                    undocumented_ordinals = if ($response.undocumented_ordinals) { $response.undocumented_ordinals.Count } else { 0 }
+                    comment_density = if ($response.comment_density) { $response.comment_density } else { 0 }
+                }
+                $results += $result
+                
+                if ($newScore -gt $oldScore) {
+                    Write-Host " $oldScore -> $newScore (+$($newScore - $oldScore))" -ForegroundColor Green
+                    $improved++
+                } elseif ($newScore -lt $oldScore) {
+                    Write-Host " $oldScore -> $newScore ($($newScore - $oldScore))" -ForegroundColor Red
+                    $regressed++
+                } else {
+                    Write-Host " $oldScore (no change)" -ForegroundColor Gray
+                    $unchanged++
+                }
+                
+                # Update tracking database
+                Update-CompletenessTracking -funcName $funcName -address $address -initialScore $oldScore -finalScore $newScore -completenessData $response | Out-Null
+                
+            } catch {
+                Write-Host " ERROR: $($_.Exception.Message)" -ForegroundColor Red
+                $errors++
+            }
+            
+            Start-Sleep -Milliseconds 100  # Rate limiting
+        }
+    }
+    
+    # Summary
+    Write-Host ""
+    Write-Host "=== RE-EVALUATION SUMMARY ===" -ForegroundColor Cyan
+    Write-Host "  Total functions: $total" -ForegroundColor White
+    Write-Host "  Improved: $improved" -ForegroundColor Green
+    Write-Host "  Regressed: $regressed" -ForegroundColor Red
+    Write-Host "  Unchanged: $unchanged" -ForegroundColor Gray
+    Write-Host "  Errors: $errors" -ForegroundColor Yellow
+    Write-Host ""
+    
+    # Show functions needing attention (DAT_* or Ordinals remaining)
+    $needsWork = $results | Where-Object { $_.unrenamed_globals -gt 0 -or $_.undocumented_ordinals -gt 0 }
+    if ($needsWork.Count -gt 0) {
+        Write-Host "Functions needing attention:" -ForegroundColor Yellow
+        foreach ($f in $needsWork | Sort-Object -Property @{Expression={$_.unrenamed_globals + $_.undocumented_ordinals}; Descending=$true} | Select-Object -First 10) {
+            Write-Host "  $($f.name): $($f.unrenamed_globals) DAT_* globals, $($f.undocumented_ordinals) undocumented ordinals, density $($f.comment_density)" -ForegroundColor Yellow
+        }
+    }
+    
+    # Save detailed report
+    $reportFile = ".\logs\reevaluate-report-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+    @{
+        timestamp = Get-Date -Format "o"
+        summary = @{
+            total = $total
+            improved = $improved
+            regressed = $regressed
+            unchanged = $unchanged
+            errors = $errors
+        }
+        functions = $results
+    } | ConvertTo-Json -Depth 5 | Set-Content $reportFile
+    Write-Host "Detailed report saved to: $reportFile" -ForegroundColor Cyan
+}
+
 function Test-WorkflowCompliance {
     param([string]$output, [string]$funcName, [float]$initialScore)
     
     $issues = @()
     
-    # Check if MCP tools were actually called
-    $toolCallPatterns = @(
-        'mcp_ghidra_decompile_function',
-        'mcp_ghidra_get_function_variables',
-        'mcp_ghidra_batch_rename',
-        'mcp_ghidra_set_function_prototype',
-        'mcp_ghidra_set_plate_comment',
-        'mcp_ghidra_batch_set_comments'
+    # Check if MCP tools were actually called - look for evidence in the output
+    # The output may contain tool call names OR evidence of actions taken
+    $actionPatterns = @(
+        'mcp_ghidra_',
+        'renamed.*ΓåÆ',
+        'Renamed.*from.*to',
+        'Function Renamed',
+        'Prototype Set',
+        'Variable.*Renamed',
+        'Variable.*Typed',
+        'Plate Comment',
+        'Comments Added',
+        'Labels Created',
+        'Completeness Score.*100',
+        'Score.*100/100',
+        '100%'
     )
     
-    $toolsCalled = $false
-    foreach ($pattern in $toolCallPatterns) {
+    $actionsTaken = $false
+    foreach ($pattern in $actionPatterns) {
         if ($output -match $pattern) {
-            $toolsCalled = $true
+            $actionsTaken = $true
             break
         }
     }
     
-    if (-not $toolsCalled) {
-        $issues += "No MCP tool calls detected - may have only provided suggestions"
+    if (-not $actionsTaken) {
+        $issues += "No MCP actions detected - may have only provided suggestions"
     }
     
-    # Check for common anti-patterns
-    if ($output -match "(?i)(you should|you could|consider|recommend|suggest)") {
-        $issues += "Output contains suggestions rather than actions taken"
-    }
-    
-    if ($output -match "(?i)(would|might|could be)") {
-        $issues += "Output uses conditional language indicating no action taken"
+    # Check for common anti-patterns (only if no actions were detected)
+    if (-not $actionsTaken) {
+        if ($output -match "(?i)(you should|you could|consider doing|I recommend|I suggest)") {
+            $issues += "Output contains suggestions rather than actions taken"
+        }
     }
     
     # Check if workflow steps were mentioned
@@ -400,7 +648,22 @@ For the target function specified below, execute these steps using the MCP tools
         $basePrompt = Get-Content $promptFile -Raw
     }
     
-    $prompt = $basePrompt + "`n`n## TARGET FUNCTION TO DOCUMENT`n`nFunction Name: **$funcName**$(if ($address) { "`nFunction Address: **0x$address**" })$completenessInfo`n`n**BEGIN DOCUMENTATION:** Proceed with complete and thorough documentation of this function following the workflow above."
+    $prompt = $basePrompt + @"
+
+## TARGET FUNCTION TO DOCUMENT
+
+Function Name: **$funcName**$(if ($address) { "`nFunction Address: **0x$address**" })$completenessInfo
+
+**BEGIN DOCUMENTATION:** Document this function following the workflow above.
+
+**OUTPUT FORMAT:** After completing documentation, output ONLY this brief summary:
+``````
+DONE: <FunctionName>
+Score: <completeness_score>%
+Changes: <one-line list of what was renamed/documented>
+``````
+Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Keep the final summary to 3-4 lines maximum.
+"@
     
     $promptSize = [System.Text.Encoding]::UTF8.GetByteCount($prompt)
     Write-Log "Prompt size: $promptSize bytes"
@@ -412,7 +675,8 @@ For the target function specified below, execute these steps using the MCP tools
     try {
         $env:NODE_OPTIONS = "--max-old-space-size=8192"
         Write-WorkerHost "Invoking Claude with MCP..." "Cyan"
-        Write-Log "Invoking Claude for $funcName with model $Model"
+        $modelInfo = if ($FullModelName) { "model $FullModelName" } else { "default model" }
+        Write-Log "Invoking Claude for $funcName with $modelInfo"
         
         $retryCount = 0
         $backoffSeconds = 2
@@ -420,7 +684,11 @@ For the target function specified below, execute these steps using the MCP tools
         $output = ""
         
         while ($retryCount -lt $MaxRetries) {
-            $output = echo $prompt | claude --model $Model 2>&1
+            if ($FullModelName) {
+                $output = echo $prompt | claude --model $FullModelName 2>&1
+            } else {
+                $output = echo $prompt | claude 2>&1
+            }
             $exitCode = $LASTEXITCODE
             
             # Check for rate limit message (5-hour limit)
@@ -548,7 +816,30 @@ For the target function specified below, execute these steps using the MCP tools
             Write-WorkerHost "Success!" "Green"
             Write-Log "Successfully processed $funcName"
             
-            $outputFile = Join-Path $outputDir "$funcName-worker$WorkerId-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
+            # Extract and display concise summary from output
+            $outputStr = $output -join "`n"
+            
+            # Look for our concise DONE format first to get the new function name
+            $newFuncName = $funcName  # Default to original name
+            if ($outputStr -match "(?s)DONE:\s*([^`n]+)[`n]+Score:\s*([^`n]+)[`n]+Changes:\s*([^`n]+)") {
+                $newFuncName = $Matches[1].Trim()
+                Write-Host "  DONE: $newFuncName" -ForegroundColor Green
+                Write-Host "  Score: $($Matches[2].Trim())" -ForegroundColor Cyan
+                Write-Host "  Changes: $($Matches[3].Trim())" -ForegroundColor Gray
+            } else {
+                # Fallback: extract key info from verbose output
+                if ($outputStr -match "Function.*?renamed.*?to.*?([A-Z][A-Za-z0-9]+)") { 
+                    $newFuncName = $Matches[1] 
+                }
+                $scoreMatch = "?"
+                if ($outputStr -match "(\d+(?:\.\d+)?)\s*[%/]?\s*complete|complete[^\d]*(\d+(?:\.\d+)?)") {
+                    $scoreMatch = if ($Matches[1]) { $Matches[1] } elseif ($Matches[2]) { $Matches[2] } else { "?" }
+                }
+                Write-Host "  Completed: $newFuncName (Score: $scoreMatch%)" -ForegroundColor Green
+            }
+            
+            # Save output file named after the NEW function name (not FUN_xxx)
+            $outputFile = Join-Path $outputDir "$newFuncName-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
             $output | Out-File $outputFile -Encoding UTF8
             Write-WorkerHost "  Output saved to: $outputFile" "Gray"
             
@@ -560,8 +851,6 @@ For the target function specified below, execute these steps using the MCP tools
                     Write-Log "Compliance issue for ${funcName}: $issue" "WARN"
                 }
             }
-            
-            Write-Host $output
             
             if (-not $SkipValidation -and $address) {
                 Write-WorkerHost "  Validating changes..." "Cyan"
@@ -582,6 +871,9 @@ For the target function specified below, execute these steps using the MCP tools
                         Write-WorkerHost "  WARNING: Score decreased: $score -> $newScore" "Red"
                         Write-Log "Score decreased from $score to $newScore for $funcName" "ERROR"
                     }
+                    
+                    # Update completeness tracking database
+                    Update-CompletenessTracking -funcName $newFuncName -address $address -initialScore $score -finalScore $newScore -completenessData $newResponse | Out-Null
                 } catch {
                     Write-WorkerHost "  Could not validate changes: $($_.Exception.Message)" "Yellow"
                     Write-Log "Validation failed: $($_.Exception.Message)" "WARN"
@@ -638,11 +930,13 @@ function Start-Coordinator {
     $commonArgs = ""
     if ($Reverse) { $commonArgs += " -Reverse" }
     if ($SkipValidation) { $commonArgs += " -SkipValidation" }
-    $commonArgs += " -Model `"$Model`""
+    if ($CompactPrompt) { $commonArgs += " -CompactPrompt" }
+    if ($Model) { $commonArgs += " -Model `"$Model`"" }
     $commonArgs += " -MaxRetries $MaxRetries"
     $commonArgs += " -DelayBetweenFunctions $DelayBetweenFunctions"
     $commonArgs += " -MinScore $MinScore"
     $commonArgs += " -MaxScore $MaxScore"
+    if ($MaxFunctions -gt 0) { $commonArgs += " -MaxFunctions $MaxFunctions" }
     $commonArgs += " -GhidraServer `"$GhidraServer`""
     # Note: We intentionally do NOT pass -Workers to spawned processes
     # This ensures they run in worker mode, not coordinator mode
@@ -753,6 +1047,12 @@ function Start-Coordinator {
 
 if ($Help) { Show-Help }
 
+# Re-evaluate mode - scan existing functions without Claude processing
+if ($ReEvaluate) {
+    Invoke-ReEvaluate
+    exit 0
+}
+
 # Only become coordinator if:
 # 1. Workers > 1 (user wants parallel processing)
 # 2. WorkerId is still default 0 (not explicitly set as a worker)
@@ -769,7 +1069,8 @@ if ($Coordinator) {
 }
 
 # Worker mode
-Write-Log "Worker $WorkerId started with parameters: Reverse=$Reverse, Model=$Model, MinScore=$MinScore, MaxScore=$MaxScore, GhidraServer=$GhidraServer"
+$modelLog = if ($FullModelName) { $FullModelName } else { "(default)" }
+Write-Log "Worker $WorkerId started with parameters: Reverse=$Reverse, Model=$modelLog, MinScore=$MinScore, MaxScore=$MaxScore, GhidraServer=$GhidraServer"
 
 # Validate todo file exists
 if (-not (Test-Path $todoFile)) {
@@ -862,26 +1163,35 @@ while ($true) {
     }
     
     try {
-        Write-WorkerHost "$($pending.Count) remaining" "Yellow"
         $result = Process-Function $funcName $address
         
         $processedCount++
         if ($result -eq "skip") {
             $skipCount++
-            Update-TodoFile $funcName "complete"
-            Write-WorkerHost "  Marked as complete (skipped)" "Gray"
+            Update-TodoFile $funcName "complete" | Out-Null
+            Write-WorkerHost "  Skipped (outside score filter)" "Gray"
         } elseif ($result) {
             $successCount++
-            Update-TodoFile $funcName "complete"
+            Update-TodoFile $funcName "complete" | Out-Null
         } else {
             $failCount++
-            Update-TodoFile $funcName "failed"
+            Update-TodoFile $funcName "failed" | Out-Null
         }
+        
+        # Show progress summary
+        Write-WorkerHost "  [$successCount success / $failCount fail / $($pending.Count - 1) remaining]" "DarkGray"
     } finally {
         Release-FunctionLock $funcName
     }
     
     if ($Single) { break }
+    
+    # Check if we've hit the max functions limit
+    if ($MaxFunctions -gt 0 -and $processedCount -ge $MaxFunctions) {
+        Write-WorkerHost "Reached MaxFunctions limit ($MaxFunctions), stopping worker." "Yellow"
+        Write-Log "Stopped after processing $processedCount functions (MaxFunctions=$MaxFunctions)"
+        break
+    }
     
     if ($pending.Count -gt 1) {
         $delay = $DelayBetweenFunctions + (Get-Random -Maximum 2)

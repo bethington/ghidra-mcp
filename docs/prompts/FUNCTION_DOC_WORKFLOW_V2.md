@@ -28,7 +28,7 @@ When naming structures, use identity-based names that describe what the object r
 
 ## Function Naming and Prototype
 
-Rename the function with rename_function_by_address using descriptive PascalCase name based on purpose and caller usage (ProcessPlayerSlots, ValidateEntityState, InitializeGameResources). Set accurate return type by examining EAX: void for no return, int/uint for status codes, bool for true/false, or pointer types for object references. Define complete prototype using set_function_prototype with all parameters properly typed using identified structure types (UnitAny * not int *) and descriptive camelCase names (pPlayerNode, pItem, nResourceCount). Specify correct calling convention based on register usage and stack cleanup: __cdecl (stack with caller cleanup), __stdcall (stack with callee cleanup), __fastcall (ECX/EDX with callee cleanup), __thiscall (this in ECX). Diablo II conventions: __d2call (EBX with callee cleanup), __d2regcall (EBX/EAX/ECX with caller cleanup), __d2mixcall (EAX/ESI with callee cleanup), __d2edicall (EDI with callee cleanup). Document other implicit register parameters in plate comment with IMPLICIT keyword. After setting prototype, use get_decompiled_code with refresh_cache=True ONLY after structural changes (create_struct, apply_data_type, set_function_prototype)—not after cosmetic changes like variable renames or comments.
+Rename the function with rename_function_by_address using descriptive PascalCase name based on purpose and caller usage (ProcessPlayerSlots, ValidateEntityState, InitializeGameResources). Set accurate return type by examining EAX: void for no return, int/uint for status codes, bool for true/false, or pointer types for object references. Define complete prototype using set_function_prototype with all parameters properly typed using identified structure types (UnitAny * not int *) and descriptive camelCase names (pPlayerNode, pItem, nResourceCount). Double check the calling convention based on register usage and stack cleanup: __cdecl (stack with caller cleanup), __stdcall (stack with callee cleanup), __fastcall (ECX/EDX with callee cleanup), __thiscall (this in ECX). Diablo II conventions: __d2call (EBX with callee cleanup), __d2regcall (EBX/EAX/ECX with caller cleanup), __d2mixcall (EAX/ESI with callee cleanup), __d2edicall (EDI with callee cleanup). Document other implicit register parameters in plate comment with IMPLICIT keyword. After setting prototype, use get_decompiled_code with refresh_cache=True ONLY after structural changes (create_struct, apply_data_type, set_function_prototype)—not after cosmetic changes like variable renames or comments.
 
 ## Hungarian Notation Type System
 
@@ -54,6 +54,35 @@ For failed renames (verified by count), add PRE_COMMENT with format "VariableNam
 
 Identify and rename ALL global data items: string constants, buffers, configuration values, structure pointers, function pointer tables. Items with DAT_ prefixes or ones that end with the _address or That do not have Hungarian notation prefix or bare addresses must be renamed with Hungarian notation prefixes matching actual data type based on physical size and type in memory. Search disassembly for global references. Use list_data_items_by_xrefs to prioritize high-impact globals, analyze_data_region to determine type and size. Set proper type with apply_data_type before renaming, following type replacement rules. Apply correct prefix using type-to-prefix mapping. Use get_xrefs_to to trace usage across functions. For pointers, use get_xrefs_from to follow pointer chain—set type for and rename both pointer AND data it points to. Use rename_or_label to apply name with correct prefix (works for both defined data and undefined addresses).
 
+**MANDATORY: Rename ALL DAT_* Globals**: Every global referenced by the function with a `DAT_` prefix MUST be renamed using Hungarian notation based on its data type:
+- `DAT_6fbf42a0` (dword pointer) → `g_pAutomapConfig`
+- `DAT_6fbe9014` (dword flag) → `g_dwSnowModeFlag`
+- `DAT_6fbf42cc` (int offset) → `g_nCameraOffsetX`
+- `_DAT_*` (underscore prefix) → same rules apply, just rename the core data
+
+Do NOT leave DAT_* globals in the function—they must ALL be renamed before marking complete. Use analyze_data_region to determine type, then rename_or_label to apply the Hungarian-prefixed name.
+
+**String Data Labels (MANDATORY)**: Ghidra auto-detects strings and labels them with `s_` prefix followed by string content and address suffix (e.g., `s_%s\UI\AutoMap\MaxiMap_6fbb2124`). These are string CONTENT used as labels—NOT proper variable names. You MUST rename ALL `s_*` labels to Hungarian notation:
+- ANSI strings: `sz` prefix (szAutomapPath, szGameTitle, szErrorMessage)
+- Wide strings: `wsz` prefix (wszPlayerName, wszDialogText)
+- Format strings: `szFmt` or `szFormat` prefix (szFmtPlayerStats, szFormatPath)
+- Path strings: `szPath` prefix (szPathAutomap, szPathResources)
+
+Examples:
+- `s_%s\UI\AutoMap\MaxiMap_6fbb2124` → `szAutomapMaxiMapPath`
+- `s_Hello_World_6fb12345` → `szHelloWorldMessage`
+- `s_%d_%s_6fb98765` → `szFmtIntString`
+- `s_C:\Game\Data_6fba0000` → `szPathGameData`
+
+Do NOT leave `s_*` labels unchanged—they violate Hungarian notation and are unreadable.
+
+**Ordinal Function Comments**: When the function calls ordinal imports (Ordinal_XXXXX), add inline comments explaining their purpose. Reference docs/KNOWN_ORDINALS.md for common mappings:
+- `Ordinal_10342(pUnit)` → add comment `/* D2Common.GetUnitStat */`
+- `Ordinal_10918()` → add comment `/* D2Common.RandSeed - random number generator */`
+- `Ordinal_10949(0xffffffff)` → add comment `/* D2Win.GetMapId - get current area ID */`
+
+If an ordinal is not in the reference, analyze its behavior and add a descriptive comment based on context (e.g., `/* Unknown ordinal - appears to validate input */`).
+
 When documenting structure offsets and array strides, clearly distinguish byte offsets, element indices, and calculated addresses. For [EBX + EAX*0x24 + 0x4], break down explicitly: "EBX (base of descriptor table) + EAX*0x24 (index × 36-byte stride) + 0x4 (offset to flags field)". Document stride value, explain what it represents, show how indices are scaled before adding field offsets. For bucket-based indexing (bucket = index >> 5, offset = (index & 0x1F) * stride), document both bucket calculation and within-bucket offset with explicit bit manipulation explanations.
 
 ## Cross-Reference Verification for Flags
@@ -65,6 +94,15 @@ When documenting flag bits or bit fields, cross-reference all usage sites to ver
 Create comprehensive header with set_plate_comment following docs\prompts\PLATE_COMMENT_FORMAT_GUIDE.md. Use plain text without decorative borders—Ghidra adds formatting. Include: one-line summary; Algorithm section with numbered steps describing operations including validation, function calls, error handling; Parameters section with types (structure types not generic pointers) and purposes, IMPLICIT keyword for undocumented register parameters; Returns section with success values, error codes, NULL/zero conditions; Special Cases for edge cases; Magic Numbers Reference with hex value, decimal, semantic meaning (include whenever function uses numeric constants); Error Handling mapping error paths, API error translations, validation failures, error propagation; State Machine (if complex flow) enumerating execution states and transitions; Structure Layout with ASCII table showing field offsets, sizes, descriptions; Flag Bits with detailed bit table using consistent hex notation.
 
 For flag bits and numeric constants, maintain consistent notation: use hex with 0x prefix (0x02, 0x04, 0x80) not mixed decimal/hex. Align hex values consistently, use same bit numbering (0-7 or 1-8) throughout. If flag is 0x80 in algorithm, use 0x80 in flag table and inline comments—never switch to decimal 128 or binary. Reference ordinals, addresses, magic numbers by values in Algorithm. For structure layouts, use table format with Offset, Size, Field Name, Type, Description columns. Create struct definitions with create_struct. Replace undefined types: undefined1→byte, undefined2→word, undefined4→uint/pointer, undefined8→qword.
+
+**Related Functions Section** (optional but recommended for complex functions): After Magic Numbers Reference, add a Related Functions section listing functions this one calls or is called by, with brief purpose notes:
+```
+Related Functions:
+- InitializeViewportCoordinates() - Must be called first to reset base coords
+- RenderAutomapPlayerMarkers() - Called after sprite rendering complete
+- GetScrollWindowMode() - Provides panel state input (1=left, 2=right, 3=none)
+```
+This helps readers understand the function's role in the call graph and required sequencing.
 
 ## Algorithm Verification
 
@@ -127,3 +165,19 @@ Disassembly comments (EOL_COMMENT) appear at assembly line end without disruptin
 **Minimum Standard: 100% completeness_score required before moving to next function.**
 
 **Exception**: Only move on with less than 100% after 3 documented fix attempts using different strategies, with clear explanation of blockers.
+
+## Output Format
+
+When documentation is complete, output EXACTLY this 3-line format (no markdown, no extra text):
+```
+DONE: FunctionName
+Score: XX%
+Changes: [brief summary of changes made]
+```
+
+Example:
+```
+DONE: UpdateAutomapRenderingAndCamera
+Score: 100%
+Changes: Renamed function, set prototype, typed/renamed 12 variables, renamed 8 globals, added plate comment with 18-step algorithm, 32 inline comments
+```

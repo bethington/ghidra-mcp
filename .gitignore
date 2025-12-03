@@ -411,6 +411,28 @@ workflows/.ghidra_manager_config.json
 
 # Improvement loop state (session-specific)
 workflows/.improvement_state.json
+workflows/.self_improvement_state.json
 
-# Workflow logs
+# Session and quality history
+workflows/.session_history.json
+workflows/.quality_history.json
+
+# Workflow logs and reports
 workflows/logs/
+workflows/reports/
+
+# =============================================================================
+# TEST OUTPUT DIRECTORIES
+# =============================================================================
+
+# Quality reports from automated testing
+quality-reports/
+
+# Model comparison test output
+model-comparison-output/
+
+# Global data analysis reports (regenerated)
+global_data_analysis_report.md
+
+# Windows NUL file artifacts
+nul

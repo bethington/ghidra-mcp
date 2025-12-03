@@ -7,6 +7,9 @@ import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.address.GlobalNamespace;
 import ghidra.program.model.listing.*;
+import ghidra.program.model.listing.Bookmark;
+import ghidra.program.model.listing.BookmarkManager;
+import ghidra.program.model.listing.BookmarkType;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.*;
 import ghidra.program.model.symbol.ReferenceManager;
@@ -1390,6 +1393,76 @@ public class GhidraMCPPlugin extends Plugin {
             boolean captureOutput = (boolean) params.getOrDefault("capture_output", true);
 
             String result = runGhidraScriptWithCapture(scriptName, timeoutSeconds, captureOutput);
+            sendResponse(exchange, result);
+        });
+
+        // BOOKMARK ENDPOINTS (v1.9.4) - Progress tracking via Ghidra bookmarks
+        // SET_BOOKMARK - Create or update a bookmark at an address
+        server.createContext("/set_bookmark", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String address = (String) params.get("address");
+            String category = (String) params.get("category");
+            String comment = (String) params.get("comment");
+
+            String result = setBookmark(address, category, comment);
+            sendResponse(exchange, result);
+        });
+
+        // LIST_BOOKMARKS - List bookmarks, optionally filtered by category
+        server.createContext("/list_bookmarks", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String category = qparams.get("category");
+            String address = qparams.get("address");
+
+            String result = listBookmarks(category, address);
+            sendResponse(exchange, result);
+        });
+
+        // DELETE_BOOKMARK - Delete a bookmark at an address
+        server.createContext("/delete_bookmark", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String address = (String) params.get("address");
+            String category = (String) params.get("category");
+
+            String result = deleteBookmark(address, category);
+            sendResponse(exchange, result);
+        });
+
+        // ==================== PROGRAM MANAGEMENT ENDPOINTS ====================
+        
+        // LIST_OPEN_PROGRAMS - List all currently open programs in Ghidra
+        server.createContext("/list_open_programs", exchange -> {
+            String result = listOpenPrograms();
+            sendResponse(exchange, result);
+        });
+
+        // GET_CURRENT_PROGRAM_INFO - Get detailed info about the active program
+        server.createContext("/get_current_program_info", exchange -> {
+            String result = getCurrentProgramInfo();
+            sendResponse(exchange, result);
+        });
+
+        // SWITCH_PROGRAM - Switch MCP context to a different open program
+        server.createContext("/switch_program", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String programName = qparams.get("name");
+            String result = switchProgram(programName);
+            sendResponse(exchange, result);
+        });
+
+        // LIST_PROJECT_FILES - List all files in the current Ghidra project
+        server.createContext("/list_project_files", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String folder = qparams.get("folder");
+            String result = listProjectFiles(folder);
+            sendResponse(exchange, result);
+        });
+
+        // OPEN_PROGRAM - Open a program from the current project
+        server.createContext("/open_program", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String path = qparams.get("path");
+            String result = openProgramFromProject(path);
             sendResponse(exchange, result);
         });
 
@@ -4155,6 +4228,259 @@ public class GhidraMCPPlugin extends Plugin {
     public Program getCurrentProgram() {
         ProgramManager pm = tool.getService(ProgramManager.class);
         return pm != null ? pm.getCurrentProgram() : null;
+    }
+
+    // ----------------------------------------------------------------------------------
+    // Program Management Methods
+    // ----------------------------------------------------------------------------------
+
+    /**
+     * List all currently open programs in Ghidra
+     */
+    private String listOpenPrograms() {
+        ProgramManager pm = tool.getService(ProgramManager.class);
+        if (pm == null) {
+            return "{\"error\": \"ProgramManager service not available\"}";
+        }
+
+        Program[] programs = pm.getAllOpenPrograms();
+        Program currentProgram = pm.getCurrentProgram();
+        
+        StringBuilder result = new StringBuilder();
+        result.append("{\"programs\": [");
+        
+        boolean first = true;
+        for (Program prog : programs) {
+            if (!first) result.append(", ");
+            first = false;
+            
+            result.append("{");
+            result.append("\"name\": \"").append(escapeJson(prog.getName())).append("\", ");
+            result.append("\"path\": \"").append(escapeJson(prog.getDomainFile().getPathname())).append("\", ");
+            result.append("\"is_current\": ").append(prog == currentProgram).append(", ");
+            result.append("\"executable_path\": \"").append(escapeJson(prog.getExecutablePath() != null ? prog.getExecutablePath() : "")).append("\", ");
+            result.append("\"language\": \"").append(escapeJson(prog.getLanguageID().getIdAsString())).append("\", ");
+            result.append("\"compiler\": \"").append(escapeJson(prog.getCompilerSpec().getCompilerSpecID().getIdAsString())).append("\", ");
+            result.append("\"image_base\": \"").append(prog.getImageBase().toString()).append("\", ");
+            result.append("\"memory_size\": ").append(prog.getMemory().getSize()).append(", ");
+            result.append("\"function_count\": ").append(prog.getFunctionManager().getFunctionCount());
+            result.append("}");
+        }
+        
+        result.append("], \"count\": ").append(programs.length);
+        result.append(", \"current_program\": \"").append(currentProgram != null ? escapeJson(currentProgram.getName()) : "").append("\"");
+        result.append("}");
+        
+        return result.toString();
+    }
+
+    /**
+     * Get detailed information about the currently active program
+     */
+    private String getCurrentProgramInfo() {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program currently loaded\"}";
+        }
+        
+        StringBuilder result = new StringBuilder();
+        result.append("{");
+        result.append("\"name\": \"").append(escapeJson(program.getName())).append("\", ");
+        result.append("\"path\": \"").append(escapeJson(program.getDomainFile().getPathname())).append("\", ");
+        result.append("\"executable_path\": \"").append(escapeJson(program.getExecutablePath() != null ? program.getExecutablePath() : "")).append("\", ");
+        result.append("\"executable_format\": \"").append(escapeJson(program.getExecutableFormat())).append("\", ");
+        result.append("\"language\": \"").append(escapeJson(program.getLanguageID().getIdAsString())).append("\", ");
+        result.append("\"compiler\": \"").append(escapeJson(program.getCompilerSpec().getCompilerSpecID().getIdAsString())).append("\", ");
+        result.append("\"address_size\": ").append(program.getAddressFactory().getDefaultAddressSpace().getSize()).append(", ");
+        result.append("\"image_base\": \"").append(program.getImageBase().toString()).append("\", ");
+        result.append("\"min_address\": \"").append(program.getMinAddress() != null ? program.getMinAddress().toString() : "null").append("\", ");
+        result.append("\"max_address\": \"").append(program.getMaxAddress() != null ? program.getMaxAddress().toString() : "null").append("\", ");
+        result.append("\"memory_size\": ").append(program.getMemory().getSize()).append(", ");
+        result.append("\"function_count\": ").append(program.getFunctionManager().getFunctionCount()).append(", ");
+        result.append("\"symbol_count\": ").append(program.getSymbolTable().getNumSymbols()).append(", ");
+        result.append("\"data_type_count\": ").append(program.getDataTypeManager().getDataTypeCount(true)).append(", ");
+        
+        // Get creation and modification dates
+        result.append("\"creation_date\": \"").append(program.getCreationDate() != null ? program.getCreationDate().toString() : "unknown").append("\", ");
+        
+        // Get memory block count
+        result.append("\"memory_block_count\": ").append(program.getMemory().getBlocks().length);
+        
+        result.append("}");
+        return result.toString();
+    }
+
+    /**
+     * Switch MCP context to a different open program by name
+     */
+    private String switchProgram(String programName) {
+        if (programName == null || programName.trim().isEmpty()) {
+            return "{\"error\": \"Program name is required\"}";
+        }
+        
+        ProgramManager pm = tool.getService(ProgramManager.class);
+        if (pm == null) {
+            return "{\"error\": \"ProgramManager service not available\"}";
+        }
+        
+        Program[] programs = pm.getAllOpenPrograms();
+        Program targetProgram = null;
+        
+        // Find program by name (case-insensitive match)
+        for (Program prog : programs) {
+            if (prog.getName().equalsIgnoreCase(programName.trim())) {
+                targetProgram = prog;
+                break;
+            }
+        }
+        
+        // If not found by exact name, try partial match on path
+        if (targetProgram == null) {
+            for (Program prog : programs) {
+                if (prog.getDomainFile().getPathname().toLowerCase().contains(programName.toLowerCase())) {
+                    targetProgram = prog;
+                    break;
+                }
+            }
+        }
+        
+        if (targetProgram == null) {
+            StringBuilder availablePrograms = new StringBuilder();
+            for (int i = 0; i < programs.length; i++) {
+                if (i > 0) availablePrograms.append(", ");
+                availablePrograms.append(programs[i].getName());
+            }
+            return "{\"error\": \"Program not found: " + escapeJson(programName) + "\", \"available_programs\": [" + 
+                   (programs.length > 0 ? "\"" + availablePrograms.toString().replace(", ", "\", \"") + "\"" : "") + "]}";
+        }
+        
+        // Switch to the target program
+        pm.setCurrentProgram(targetProgram);
+        
+        return "{\"success\": true, \"switched_to\": \"" + escapeJson(targetProgram.getName()) + 
+               "\", \"path\": \"" + escapeJson(targetProgram.getDomainFile().getPathname()) + "\"}";
+    }
+
+    /**
+     * List all files in the current Ghidra project
+     */
+    private String listProjectFiles(String folderPath) {
+        ghidra.framework.model.Project project = tool.getProject();
+        if (project == null) {
+            return "{\"error\": \"No project is currently open\"}";
+        }
+        
+        ghidra.framework.model.ProjectData projectData = project.getProjectData();
+        ghidra.framework.model.DomainFolder rootFolder = projectData.getRootFolder();
+        
+        // If folder path specified, navigate to it
+        ghidra.framework.model.DomainFolder targetFolder = rootFolder;
+        if (folderPath != null && !folderPath.trim().isEmpty() && !folderPath.equals("/")) {
+            // Navigate through path segments (handles nested folders like "LoD/1.07")
+            String cleanPath = folderPath.startsWith("/") ? folderPath.substring(1) : folderPath;
+            String[] pathParts = cleanPath.split("/");
+            for (String part : pathParts) {
+                if (part.isEmpty()) continue;
+                ghidra.framework.model.DomainFolder nextFolder = targetFolder.getFolder(part);
+                if (nextFolder == null) {
+                    return "{\"error\": \"Folder not found: " + escapeJson(folderPath) + "\"}";
+                }
+                targetFolder = nextFolder;
+            }
+        }
+        
+        StringBuilder result = new StringBuilder();
+        result.append("{\"project_name\": \"").append(escapeJson(project.getName())).append("\", ");
+        result.append("\"current_folder\": \"").append(escapeJson(targetFolder.getPathname())).append("\", ");
+        result.append("\"folders\": [");
+        
+        // List subfolders
+        ghidra.framework.model.DomainFolder[] subfolders = targetFolder.getFolders();
+        for (int i = 0; i < subfolders.length; i++) {
+            if (i > 0) result.append(", ");
+            result.append("\"").append(escapeJson(subfolders[i].getName())).append("\"");
+        }
+        result.append("], ");
+        
+        result.append("\"files\": [");
+        
+        // List files in folder
+        ghidra.framework.model.DomainFile[] files = targetFolder.getFiles();
+        boolean first = true;
+        for (ghidra.framework.model.DomainFile file : files) {
+            if (!first) result.append(", ");
+            first = false;
+            
+            result.append("{");
+            result.append("\"name\": \"").append(escapeJson(file.getName())).append("\", ");
+            result.append("\"path\": \"").append(escapeJson(file.getPathname())).append("\", ");
+            result.append("\"content_type\": \"").append(escapeJson(file.getContentType())).append("\", ");
+            result.append("\"version\": ").append(file.getVersion()).append(", ");
+            result.append("\"is_read_only\": ").append(file.isReadOnly()).append(", ");
+            result.append("\"is_versioned\": ").append(file.isVersioned());
+            result.append("}");
+        }
+        result.append("]");
+        
+        result.append("}");
+        return result.toString();
+    }
+
+    /**
+     * Open a program from the current project by path
+     */
+    private String openProgramFromProject(String path) {
+        if (path == null || path.trim().isEmpty()) {
+            return "{\"error\": \"Program path is required\"}";
+        }
+        
+        ghidra.framework.model.Project project = tool.getProject();
+        if (project == null) {
+            return "{\"error\": \"No project is currently open\"}";
+        }
+        
+        ghidra.framework.model.ProjectData projectData = project.getProjectData();
+        ghidra.framework.model.DomainFile domainFile = projectData.getFile(path);
+        
+        if (domainFile == null) {
+            return "{\"error\": \"File not found in project: " + escapeJson(path) + "\"}";
+        }
+        
+        // Check if already open
+        ProgramManager pm = tool.getService(ProgramManager.class);
+        if (pm == null) {
+            return "{\"error\": \"ProgramManager service not available\"}";
+        }
+        
+        Program[] openPrograms = pm.getAllOpenPrograms();
+        for (Program prog : openPrograms) {
+            if (prog.getDomainFile().getPathname().equals(path)) {
+                // Already open, just switch to it
+                pm.setCurrentProgram(prog);
+                return "{\"success\": true, \"message\": \"Program already open, switched to it\", " +
+                       "\"name\": \"" + escapeJson(prog.getName()) + "\", " +
+                       "\"path\": \"" + escapeJson(path) + "\"}";
+            }
+        }
+        
+        // Open the program
+        try {
+            Program program = (Program) domainFile.getDomainObject(this, false, false, ghidra.util.task.TaskMonitor.DUMMY);
+            if (program == null) {
+                return "{\"error\": \"Failed to open program: " + escapeJson(path) + "\"}";
+            }
+            
+            // Add to tool and set as current
+            pm.openProgram(program);
+            pm.setCurrentProgram(program);
+            
+            return "{\"success\": true, \"message\": \"Program opened successfully\", " +
+                   "\"name\": \"" + escapeJson(program.getName()) + "\", " +
+                   "\"path\": \"" + escapeJson(path) + "\", " +
+                   "\"function_count\": " + program.getFunctionManager().getFunctionCount() + "}";
+        } catch (Exception e) {
+            return "{\"error\": \"Failed to open program: " + escapeJson(e.getMessage()) + "\"}";
+        }
     }
 
     private void sendResponse(HttpExchange exchange, String response) throws IOException {
@@ -9548,12 +9874,86 @@ public class GhidraMCPPlugin extends Plugin {
                     }
                     result.append("], ");
 
-                    double completenessScore = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size());
+                    // NEW: Check for unrenamed DAT_* globals and undocumented Ordinal calls in decompiled code
+                    List<String> unrenamedGlobals = new ArrayList<>();
+                    List<String> undocumentedOrdinals = new ArrayList<>();
+                    int inlineCommentCount = 0;
+                    int codeLineCount = 0;
+                    
+                    if (decompilationAvailable && decompResults != null) {
+                        String decompiledCode = decompResults.getDecompiledFunction().getC();
+                        if (decompiledCode != null) {
+                            // Count lines of code (excluding comments and empty lines)
+                            String[] lines = decompiledCode.split("\n");
+                            for (String line : lines) {
+                                String trimmed = line.trim();
+                                if (!trimmed.isEmpty() && !trimmed.startsWith("/*") && !trimmed.startsWith("*") && !trimmed.startsWith("//")) {
+                                    codeLineCount++;
+                                }
+                                // Count inline comments
+                                if (trimmed.contains("/*") && !trimmed.startsWith("/*")) {
+                                    inlineCommentCount++;
+                                }
+                            }
+                            
+                            // Find DAT_* references (unrenamed globals)
+                            java.util.regex.Pattern datPattern = java.util.regex.Pattern.compile("DAT_[0-9a-fA-F]+");
+                            java.util.regex.Matcher datMatcher = datPattern.matcher(decompiledCode);
+                            java.util.Set<String> foundDats = new java.util.HashSet<>();
+                            while (datMatcher.find()) {
+                                foundDats.add(datMatcher.group());
+                            }
+                            unrenamedGlobals.addAll(foundDats);
+                            
+                            // Find Ordinal_XXXXX calls without nearby comments
+                            java.util.regex.Pattern ordinalPattern = java.util.regex.Pattern.compile("Ordinal_\\d+");
+                            java.util.regex.Matcher ordinalMatcher = ordinalPattern.matcher(decompiledCode);
+                            java.util.Set<String> foundOrdinals = new java.util.HashSet<>();
+                            while (ordinalMatcher.find()) {
+                                String ordinal = ordinalMatcher.group();
+                                // Check if there's a comment on the same line or nearby
+                                int pos = ordinalMatcher.start();
+                                int lineStart = decompiledCode.lastIndexOf('\n', pos);
+                                int lineEnd = decompiledCode.indexOf('\n', pos);
+                                if (lineEnd == -1) lineEnd = decompiledCode.length();
+                                String line = decompiledCode.substring(lineStart + 1, lineEnd);
+                                // If no comment on the line containing the ordinal, flag it
+                                if (!line.contains("/*") && !line.contains("//")) {
+                                    foundOrdinals.add(ordinal);
+                                }
+                            }
+                            undocumentedOrdinals.addAll(foundOrdinals);
+                        }
+                    }
+                    
+                    result.append("\"unrenamed_globals\": [");
+                    for (int i = 0; i < unrenamedGlobals.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(escapeJson(unrenamedGlobals.get(i))).append("\"");
+                    }
+                    result.append("], ");
+                    
+                    result.append("\"undocumented_ordinals\": [");
+                    for (int i = 0; i < undocumentedOrdinals.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(escapeJson(undocumentedOrdinals.get(i))).append("\"");
+                    }
+                    result.append("], ");
+                    
+                    result.append("\"inline_comment_count\": ").append(inlineCommentCount).append(", ");
+                    result.append("\"code_line_count\": ").append(codeLineCount).append(", ");
+                    
+                    // Calculate comment density (comments per 10 lines of code)
+                    double commentDensity = codeLineCount > 0 ? (inlineCommentCount * 10.0 / codeLineCount) : 0;
+                    result.append("\"comment_density\": ").append(String.format("%.2f", commentDensity)).append(", ");
+
+                    double completenessScore = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity);
                     result.append("\"completeness_score\": ").append(completenessScore).append(", ");
 
                     // Generate workflow-aligned recommendations
                     List<String> recommendations = generateWorkflowRecommendations(
-                        func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues, completenessScore
+                        func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues, 
+                        unrenamedGlobals, undocumentedOrdinals, commentDensity, completenessScore
                     );
 
                     result.append("\"recommendations\": [");
@@ -9795,7 +10195,7 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
-    private double calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount) {
+    private double calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity) {
         double score = 100.0;
 
         if (func.getName().startsWith("FUN_")) score -= 30;
@@ -9806,6 +10206,16 @@ public class GhidraMCPPlugin extends Plugin {
         score -= (plateCommentIssueCount * 5); // 5 points per plate comment issue
         score -= (hungarianViolationCount * 3); // 3 points per Hungarian notation violation
         score -= (typeQualityIssueCount * 15); // 15 points per type quality issue (void*, state-based names, duplicates) - HARD PENALTY to enforce identity-based naming
+        
+        // NEW: Penalties for unrenamed globals and undocumented ordinals
+        score -= (unrenamedGlobalsCount * 3); // 3 points per DAT_* global remaining
+        score -= (undocumentedOrdinalsCount * 2); // 2 points per undocumented Ordinal call
+        
+        // NEW: Penalty for low inline comment density (expect at least 1 comment per 10 lines)
+        if (commentDensity < 1.0 && func.getComment() != null) {
+            // Only penalize if function has a plate comment (meaning it's been partially documented)
+            score -= 5; // Penalty for sparse inline comments
+        }
 
         return Math.max(0, score);
     }
@@ -9819,6 +10229,9 @@ public class GhidraMCPPlugin extends Plugin {
             List<String> plateCommentIssues,
             List<String> hungarianViolations,
             List<String> typeQualityIssues,
+            List<String> unrenamedGlobals,
+            List<String> undocumentedOrdinals,
+            double commentDensity,
             double completenessScore) {
 
         List<String> recommendations = new ArrayList<>();
@@ -9827,6 +10240,25 @@ public class GhidraMCPPlugin extends Plugin {
         if (completenessScore >= 100.0) {
             recommendations.add("Function is fully documented - no further action needed.");
             return recommendations;
+        }
+
+        // CRITICAL: Unnamed DAT_* Globals (highest priority)
+        if (!unrenamedGlobals.isEmpty()) {
+            recommendations.add("UNRENAMED DAT_* GLOBALS DETECTED - Must rename before documentation is complete:");
+            recommendations.add("1. Found " + unrenamedGlobals.size() + " DAT_* reference(s): " + String.join(", ", unrenamedGlobals.subList(0, Math.min(5, unrenamedGlobals.size()))));
+            recommendations.add("2. Use rename_or_label() or rename_data() to give meaningful names to each global");
+            recommendations.add("3. Apply Hungarian notation with g_ prefix: g_dwPlayerCount, g_pCurrentGame, g_abEncryptionKey");
+            recommendations.add("4. If global is a structure, apply type with apply_data_type() first, then rename");
+            recommendations.add("5. Consult KNOWN_ORDINALS.md and existing codebase for naming conventions");
+        }
+
+        // CRITICAL: Undocumented Ordinal Calls
+        if (!undocumentedOrdinals.isEmpty()) {
+            recommendations.add("UNDOCUMENTED ORDINAL CALLS - Add inline comments for each:");
+            recommendations.add("1. Found " + undocumentedOrdinals.size() + " Ordinal call(s) without comments: " + String.join(", ", undocumentedOrdinals.subList(0, Math.min(5, undocumentedOrdinals.size()))));
+            recommendations.add("2. Consult docs/KNOWN_ORDINALS.md for Ordinal mappings (Storm.dll, Fog.dll ordinals documented)");
+            recommendations.add("3. Use set_decompiler_comment() or batch_set_comments() to add inline comment explaining the call");
+            recommendations.add("4. Format: /* Ordinal_123 = StorageFunctionName - brief description */");
         }
 
         // CRITICAL: Undefined Type Audit (FUNCTION_DOC_WORKFLOW_V2.md Section: Mandatory Undefined Type Audit)
@@ -9896,6 +10328,19 @@ public class GhidraMCPPlugin extends Plugin {
                     recommendations.add("3. Consolidate duplicate types - use identity-based version, delete state-based variant");
                 }
             }
+        }
+
+        // Inline Comment Density Check
+        if (commentDensity < 0.67) { // Less than 1 comment per 15 lines
+            recommendations.add("LOW INLINE COMMENT DENSITY - Add more explanatory comments:");
+            recommendations.add("1. Current density: " + String.format("%.2f", commentDensity) + " comments per 10 lines (target: 0.67+)");
+            recommendations.add("2. Add inline comments for:");
+            recommendations.add("   - Complex calculations or magic numbers");
+            recommendations.add("   - Non-obvious conditional branches");
+            recommendations.add("   - Ordinal/DLL calls explaining their purpose");
+            recommendations.add("   - Structure field accesses explaining data meaning");
+            recommendations.add("   - Error handling paths explaining expected failures");
+            recommendations.add("3. Use set_decompiler_comment() for individual comments or batch_set_comments() for multiple");
         }
 
         // General Workflow Guidance
@@ -11435,6 +11880,183 @@ public class GhidraMCPPlugin extends Plugin {
             response.append("}");
 
             return response.toString();
+
+        } catch (Exception e) {
+            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+        }
+    }
+
+    // ===================================================================================
+    // BOOKMARK METHODS (v1.9.4) - Progress tracking via Ghidra bookmarks
+    // ===================================================================================
+
+    /**
+     * Set a bookmark at an address with category and comment.
+     * Creates or updates the bookmark if one already exists at the address with the same category.
+     */
+    private String setBookmark(String addressStr, String category, String comment) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"success\": false, \"error\": \"No program loaded\"}";
+        }
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "{\"success\": false, \"error\": \"Address is required\"}";
+        }
+        if (category == null || category.isEmpty()) {
+            category = "Note";  // Default category
+        }
+        if (comment == null) {
+            comment = "";
+        }
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr == null) {
+                return "{\"success\": false, \"error\": \"Invalid address: " + escapeJsonString(addressStr) + "\"}";
+            }
+
+            BookmarkManager bookmarkManager = program.getBookmarkManager();
+            final String finalCategory = category;
+            final String finalComment = comment;
+
+            int transactionId = program.startTransaction("Set bookmark at " + addressStr);
+            try {
+                // Check if bookmark already exists at this address with this category
+                Bookmark existing = bookmarkManager.getBookmark(addr, BookmarkType.NOTE, finalCategory);
+                if (existing != null) {
+                    // Remove existing to update
+                    bookmarkManager.removeBookmark(existing);
+                }
+
+                // Create new bookmark
+                bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
+                program.endTransaction(transactionId, true);
+
+                return "{\"success\": true, \"address\": \"" + escapeJsonString(addr.toString()) +
+                       "\", \"category\": \"" + escapeJsonString(finalCategory) +
+                       "\", \"comment\": \"" + escapeJsonString(finalComment) + "\"}";
+
+            } catch (Exception e) {
+                program.endTransaction(transactionId, false);
+                throw e;
+            }
+
+        } catch (Exception e) {
+            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * List bookmarks, optionally filtered by category and/or address.
+     */
+    private String listBookmarks(String category, String addressStr) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"success\": false, \"error\": \"No program loaded\"}";
+        }
+
+        try {
+            BookmarkManager bookmarkManager = program.getBookmarkManager();
+            List<Map<String, String>> bookmarks = new ArrayList<>();
+
+            // If specific address provided, get bookmarks at that address
+            if (addressStr != null && !addressStr.isEmpty()) {
+                Address addr = program.getAddressFactory().getAddress(addressStr);
+                if (addr == null) {
+                    return "{\"success\": false, \"error\": \"Invalid address: " + escapeJsonString(addressStr) + "\"}";
+                }
+
+                Bookmark[] bms = bookmarkManager.getBookmarks(addr);
+                for (Bookmark bm : bms) {
+                    if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
+                        Map<String, String> bmMap = new HashMap<>();
+                        bmMap.put("address", bm.getAddress().toString());
+                        bmMap.put("category", bm.getCategory());
+                        bmMap.put("comment", bm.getComment());
+                        bmMap.put("type", bm.getTypeString());
+                        bookmarks.add(bmMap);
+                    }
+                }
+            } else {
+                // Iterate all bookmarks
+                BookmarkType[] types = bookmarkManager.getBookmarkTypes();
+                for (BookmarkType type : types) {
+                    Iterator<Bookmark> iter = bookmarkManager.getBookmarksIterator(type.getTypeString());
+                    while (iter.hasNext()) {
+                        Bookmark bm = iter.next();
+                        if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
+                            Map<String, String> bmMap = new HashMap<>();
+                            bmMap.put("address", bm.getAddress().toString());
+                            bmMap.put("category", bm.getCategory());
+                            bmMap.put("comment", bm.getComment());
+                            bmMap.put("type", bm.getTypeString());
+                            bookmarks.add(bmMap);
+                        }
+                    }
+                }
+            }
+
+            // Build JSON response
+            StringBuilder response = new StringBuilder();
+            response.append("{\"success\": true, \"bookmarks\": [");
+            for (int i = 0; i < bookmarks.size(); i++) {
+                if (i > 0) response.append(", ");
+                Map<String, String> bm = bookmarks.get(i);
+                response.append("{");
+                response.append("\"address\": \"").append(escapeJsonString(bm.get("address"))).append("\", ");
+                response.append("\"category\": \"").append(escapeJsonString(bm.get("category"))).append("\", ");
+                response.append("\"comment\": \"").append(escapeJsonString(bm.get("comment"))).append("\", ");
+                response.append("\"type\": \"").append(escapeJsonString(bm.get("type"))).append("\"");
+                response.append("}");
+            }
+            response.append("], \"count\": ").append(bookmarks.size()).append("}");
+
+            return response.toString();
+
+        } catch (Exception e) {
+            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * Delete a bookmark at an address with optional category filter.
+     */
+    private String deleteBookmark(String addressStr, String category) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"success\": false, \"error\": \"No program loaded\"}";
+        }
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "{\"success\": false, \"error\": \"Address is required\"}";
+        }
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr == null) {
+                return "{\"success\": false, \"error\": \"Invalid address: " + escapeJsonString(addressStr) + "\"}";
+            }
+
+            BookmarkManager bookmarkManager = program.getBookmarkManager();
+
+            int transactionId = program.startTransaction("Delete bookmark at " + addressStr);
+            try {
+                int deleted = 0;
+                Bookmark[] bookmarks = bookmarkManager.getBookmarks(addr);
+
+                for (Bookmark bm : bookmarks) {
+                    if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
+                        bookmarkManager.removeBookmark(bm);
+                        deleted++;
+                    }
+                }
+
+                program.endTransaction(transactionId, true);
+                return "{\"success\": true, \"deleted\": " + deleted + ", \"address\": \"" + escapeJsonString(addr.toString()) + "\"}";
+
+            } catch (Exception e) {
+                program.endTransaction(transactionId, false);
+                throw e;
+            }
 
         } catch (Exception e) {
             return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
