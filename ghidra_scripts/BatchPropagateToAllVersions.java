@@ -1,4 +1,4 @@
-//Batch propagate documentation to all versions of the same binary in the project.
+//[STEP 2] Batch propagate documentation to all versions of the same binary in the project.
 //Opens each matching program, runs hash-based propagation, saves, and closes.
 //Skips the canonical source program (the one documentation is pulled from).
 //@author GhidraMCP

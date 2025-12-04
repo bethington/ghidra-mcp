@@ -2,35 +2,11 @@
 
 Document Ghidra functions via MCP tools only. Retry timeouts once, then use smaller batches. No filesystem edits.
 
-## Phase 0: Type Audit Pre-Check
-
-**Optimize type-setting to skip redundant operations:**
-
-1. **Get Current Types**: Call get_function_variables() and capture all current variable types
-2. **Compare Against Desired Types**: For each variable, determine if type change is needed:
-   - `undefined1` → `byte` (if not already `byte`)
-   - `undefined4` → `uint`/`int`/`pointer` (if not already correct)
-   - `undefined*` → appropriate builtin type (if mismatch detected)
-3. **Skip Already-Correct Variables**: Do NOT call set_local_variable_type() for variables where current type matches desired type
-4. **Skip Phantom Variables**: Variables with `is_phantom=true` cannot be typed—skip them entirely
-5. **Batch Only Changed Types**: Only call batch_set_variable_types() or set_local_variable_type() for variables that actually need changes
-
-**Rationale**: Ghidra's decompiler already assigns reasonable types based on usage context. Blindly re-applying the same types wastes MCP calls and produces confusing "changed X from Y to Y" messages. This pre-check identifies only genuine type mismatches that need fixing.
-
-**Example Workflow**:
-```
-get_function_variables() returns:
-  dwByteCount: uint ← already correct, SKIP
-  pdwBuffer: uint * ← already correct, SKIP
-  nByteVal: undefined4 ← needs change to int, SET
-  Result: Only call set_local_variable_type for nByteVal
-```
-
 ## Phase 1: Analysis
 
 1. **Get Context**: get_current_selection() → analyze_function_complete() for decompiled code, xrefs, callees, callers, disassembly, variables
 2. **Type Audit**: Run analyze_function_completeness() → fix state-based types (InitializedX → X) with consolidate_duplicate_types()
-3. **Undefined Type Resolution**: Check BOTH decompiled code AND disassembly for undefined types. Many exist only in assembly (XMM spills, stack temps). Use Phase 0 pre-check to identify actual type mismatches. Resolve ALL undefined types before proceeding: undefined1→byte, undefined2→ushort, undefined4→uint/int/pointer, undefined8→double/longlong
+3. **Undefined Type Resolution**: Check BOTH decompiled code AND disassembly for undefined types. Many exist only in assembly (XMM spills, stack temps). Resolve ALL before proceeding: undefined1→byte, undefined2→ushort, undefined4→uint/int/pointer, undefined8→double/longlong
 4. **Phantom Variables**: Variables with is_phantom=true or "No HighVariable found" errors cannot be typed—skip them
 
 ## Phase 2: Structure Identification
@@ -41,7 +17,7 @@ Search existing structures with search_data_types(). Create with create_struct()
 
 ## Phase 3: Function Naming and Prototype
 
-1. **Name**: rename_function_by_address with PascalCase (ProcessPlayerSlots, ValidateEntityState). Do NOT use DLL/module prefixes (no D2CMP_, D2Common_, Storm_, etc.)—the function's location already provides context.
+1. **Name**: rename_function_by_address with PascalCase (ProcessPlayerSlots, ValidateEntityState)
 2. **Prototype**: set_function_prototype with typed params (UnitAny* not int*), camelCase names (pPlayerNode, nCount)
 3. **Return type**: void, int/uint (status), bool, or pointer based on EAX usage
 4. **Calling conventions**: __cdecl (caller cleanup), __stdcall (callee cleanup), __fastcall (ECX/EDX), __thiscall (ECX=this)
@@ -95,7 +71,7 @@ Rename ALL globals with Hungarian notation using rename_or_label:
 | DAT_* | analyze_data_region → g_[prefix]Name (g_dwFlags, g_pConfig) |
 | s_* strings | sz/wsz + descriptive name (s_%s\path → szFormatPath) |
 
-**Inline Comments**: Do NOT add PRE_COMMENT, POST_COMMENT, or EOL_COMMENT unless absolutely necessary to convey critical non-obvious information. The plate comment and proper naming should be sufficient. Ordinals can be identified via docs/KNOWN_ORDINALS.md without inline comments.
+**Inline Comments**: Do NOT add PRE_COMMENT, POST_COMMENT, or EOL_COMMENT unless absolutely necessary to convey critical non-obvious information. The plate comment and proper naming should be sufficient.
 
 ## Phase 7: Plate Comment
 

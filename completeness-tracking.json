@@ -3,7 +3,7 @@
                      "created":  "2025-12-03T18:13:47.5532764-06:00",
                      "description":  "Tracks completeness scores for documented functions",
                      "version":  "1.0",
-                     "last_updated":  "2025-12-03T19:32:06.4605726-06:00"
+                     "last_updated":  "2025-12-03T19:37:19.1706734-06:00"
                  },
     "functions":  {
                       "GetQuestSystemInitialized":  {
@@ -252,6 +252,19 @@
                                            "worker_id":  3,
                                            "unrenamed_globals_count":  0,
                                            "address":  "0x6fd9f2c0"
-                                       }
+                                       },
+                      "GetActRoom":  {
+                                         "undocumented_ordinals_count":  0,
+                                         "last_processed":  "2025-12-03T19:37:19.1581600-06:00",
+                                         "undefined_vars_count":  0,
+                                         "initial_score":  40,
+                                         "comment_density":  0,
+                                         "improvement":  55,
+                                         "current_score":  95,
+                                         "model_used":  "opus",
+                                         "worker_id":  1,
+                                         "unrenamed_globals_count":  0,
+                                         "address":  "0x6fd9d490"
+                                     }
                   }
 }
