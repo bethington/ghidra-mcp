@@ -260,6 +260,14 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, listFunctions());
         });
 
+        // LIST_FUNCTIONS_ENHANCED - Returns JSON with thunk/external flags
+        server.createContext("/list_functions_enhanced", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            int offset = Integer.parseInt(qparams.getOrDefault("offset", "0"));
+            int limit = Integer.parseInt(qparams.getOrDefault("limit", "10000"));
+            sendResponse(exchange, listFunctionsEnhanced(offset, limit));
+        });
+
         // ==========================================================================
         // RENAME ENDPOINTS - All use rename_ prefix with snake_case
         // ==========================================================================
@@ -2048,6 +2056,49 @@ public class GhidraMCPPlugin extends Plugin {
                 func.getEntryPoint()));
         }
 
+        return result.toString();
+    }
+
+    /**
+     * List all functions with enhanced metadata including thunk/external flags.
+     * Returns JSON array for easy parsing.
+     */
+    private String listFunctionsEnhanced(int offset, int limit) {
+        Program program = getCurrentProgram();
+        if (program == null) return "{\"error\": \"No program loaded\"}";
+
+        StringBuilder result = new StringBuilder();
+        result.append("{\"functions\": [");
+        
+        int count = 0;
+        int skipped = 0;
+        boolean first = true;
+        
+        for (Function func : program.getFunctionManager().getFunctions(true)) {
+            if (skipped < offset) {
+                skipped++;
+                continue;
+            }
+            if (count >= limit) break;
+            
+            if (!first) result.append(",");
+            first = false;
+            
+            result.append("{");
+            result.append("\"name\":\"").append(escapeJson(func.getName())).append("\",");
+            result.append("\"address\":\"").append(func.getEntryPoint()).append("\",");
+            result.append("\"isThunk\":").append(func.isThunk()).append(",");
+            result.append("\"isExternal\":").append(func.isExternal());
+            result.append("}");
+            
+            count++;
+        }
+        
+        result.append("],\"count\":").append(count);
+        result.append(",\"offset\":").append(offset);
+        result.append(",\"limit\":").append(limit);
+        result.append("}");
+        
         return result.toString();
     }
 

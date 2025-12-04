@@ -403,6 +403,19 @@ ordinal_fix_log.txt
 
 
 # =============================================================================
+# FUNCTION HASH INDEX AND PROGRESS TRACKING
+# =============================================================================
+
+# Function hash index (user-specific, regenerated per binary)
+function_hash_index.json
+
+# Completeness tracking state (local analysis state)
+completeness-tracking.json
+
+# Worker progress files (parallel processing state)
+functions-progress-worker*.json
+
+# =============================================================================
 # WORKFLOW LOCAL STATE FILES
 # =============================================================================
 

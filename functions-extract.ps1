@@ -11,6 +11,8 @@ param(
     [int]$MinCompletenessScore = 80,
     [switch]$ExcludeLibraryFunctions,
     [switch]$IncludeOnlyLibraryFunctions,
+    [switch]$IncludeThunks,
+    [switch]$IncludeExternals,
     [switch]$Preview,
     [switch]$Help
 )
@@ -40,6 +42,8 @@ OPTIONS:
     -MinCompletenessScore Minimum completeness score to exclude (default: 50, range: 0-100)
     -ExcludeLibraryFunctions  Exclude library functions (starting with ___, __, or _)
     -IncludeOnlyLibraryFunctions  Include ONLY library functions (starting with ___, __, or _)
+    -IncludeThunks        Include thunk functions (excluded by default)
+    -IncludeExternals     Include external/imported function pointers (excluded by default)
     -Preview              Show preview without writing file
     -Help                 Show this help message
 
@@ -57,15 +61,19 @@ EXAMPLES:
     .\functions-extract.ps1 -UndocumentedOnly -MinCompletenessScore 60
     .\functions-extract.ps1 -ExcludeLibraryFunctions
     .\functions-extract.ps1 -IncludeOnlyLibraryFunctions
+    .\functions-extract.ps1 -IncludeThunks -IncludeExternals
 
 DESCRIPTION:
     Extracts functions from Ghidra using REST API calls for the specified program.
     By default, only FUN_ and Ordinal_ prefixed functions are included (undocumented functions).
+    Thunk functions and external/imported function pointers are excluded by default.
     Use -FunOnly or -OrdinalsOnly to filter to a specific prefix type.
     Use -All to get all functions including named functions (ignores prefix filtering).
     Use -UndocumentedOnly to filter for functions that need documentation (completeness score < threshold).
     Use -ExcludeLibraryFunctions to filter out library functions (starting with _, __, or ___).
     Use -IncludeOnlyLibraryFunctions to include ONLY library functions (starting with _, __, or ___).
+    Use -IncludeThunks to include thunk functions (jump stubs to other functions).
+    Use -IncludeExternals to include external/imported function pointers.
     Functions are formatted as "[ ] FUN_035b14f0 @ 035b14f0" or "[ ] Ordinal_123 @ 035b14f0" for todo tracking.
 "@
     exit 0
@@ -114,6 +122,16 @@ if ($ExcludeLibraryFunctions) {
 if ($IncludeOnlyLibraryFunctions) {
     Write-Host "Library functions: ONLY INCLUDED (_, __, ___)" -ForegroundColor Yellow
 }
+if (-not $IncludeThunks) {
+    Write-Host "Thunk functions: EXCLUDED (default)" -ForegroundColor Cyan
+} else {
+    Write-Host "Thunk functions: INCLUDED" -ForegroundColor Yellow
+}
+if (-not $IncludeExternals) {
+    Write-Host "External functions: EXCLUDED (default)" -ForegroundColor Cyan
+} else {
+    Write-Host "External functions: INCLUDED" -ForegroundColor Yellow
+}
 if ($All) {
     Write-Host "Documentation filter: ALL FUNCTIONS (no completeness filtering)" -ForegroundColor Cyan
 } elseif ($UndocumentedOnly) {
@@ -129,120 +147,145 @@ $offset = 0
 $totalFetched = 0
 $filteredCount = 0
 $libraryFunctionsFiltered = 0
-$listFunctionsUrl = "$GhidraUrl/list_functions"
+$thunkFunctionsFiltered = 0
+$externalFunctionsFiltered = 0
+$listFunctionsUrl = "$GhidraUrl/list_functions_enhanced"
 $completenessApiUrl = "$GhidraUrl/analyze_function_completeness"
 
 try {
     Write-Host "Fetching functions from Ghidra..." -ForegroundColor Blue
     
-    # Make single REST API call - list_functions returns all functions
+    # Make single REST API call - list_functions_enhanced returns JSON with thunk/external flags
     $requestUrl = "$listFunctionsUrl"
     
     # Make REST API call
-    $response = Invoke-WebRequest -Uri $requestUrl -Method GET -TimeoutSec 30
+    $response = Invoke-WebRequest -Uri $requestUrl -Method GET -TimeoutSec 60
     
     if ($response.StatusCode -eq 200) {
         $content = $response.Content
         Write-Host "Response length: $($content.Length) characters" -ForegroundColor Cyan
         
-        # Parse functions from response
-        # Expected format from Ghidra: "function_name at address" per line
-        $lines = $content -split "`n" | Where-Object { $_.Trim() -ne "" }
+        # Parse JSON response
+        $jsonResponse = $content | ConvertFrom-Json
         
-        Write-Host "Total lines received: $($lines.Count)" -ForegroundColor Cyan
+        if ($jsonResponse.error) {
+            Write-Host "ERROR: $($jsonResponse.error)" -ForegroundColor Red
+            exit 1
+        }
         
-        foreach ($line in $lines) {
-            $line = $line.Trim()
-            # Match pattern: function_name at hexaddress (without 0x prefix)
-            if ($line -match '^(.+?)\s+at\s+([0-9a-fA-F]+)') {
-                $funcName = $matches[1]
-                $address = $matches[2]
-                    
-                    # Apply function type filtering
-                    if ($FunOnly) {
-                        # Only include functions that start with FUN_
-                        if (-not ($funcName -like "FUN_*")) {
-                            continue
-                        }
-                    } elseif ($OrdinalsOnly) {
-                        # Only include functions that start with Ordinal_
-                        if (-not ($funcName -like "Ordinal_*")) {
-                            continue
-                        }
-                    } elseif (-not $All) {
-                        # Default: Only include FUN_ and Ordinal_ prefixed functions
-                        if (-not (($funcName -like "FUN_*") -or ($funcName -like "Ordinal_*"))) {
-                            continue
-                        }
-                    }
-                    # -All flag: include all functions (no prefix filtering)
-                    
-                    # Filter library functions if requested
-                    if ($ExcludeLibraryFunctions) {
-                        # Check if function name starts with ___, __, or _
-                        if ($funcName -match '^_+') {
-                            $libraryFunctionsFiltered++
-                            Write-Host "  Filtered library function: $funcName" -ForegroundColor DarkGray
-                            continue
-                        }
-                    }
-                    
-                    # Include only library functions if requested
-                    if ($IncludeOnlyLibraryFunctions) {
-                        # Check if function name starts with ___, __, or _
-                        if (-not ($funcName -match '^_+')) {
-                            continue
-                        }
-                    }
-                    
-                    # Check documentation completeness if -UndocumentedOnly is specified
-                    # Skip completeness check if -All is specified
-                    $includeFunction = $true
-                    if ($UndocumentedOnly -and -not $All) {
-                        try {
-                            $completenessUrl = "$completenessApiUrl`?function_address=0x$address"
-                            $completenessResponse = Invoke-RestMethod -Uri $completenessUrl -Method GET -TimeoutSec 10
-                            
-                            if ($completenessResponse -and $null -ne $completenessResponse.completeness_score) {
-                                $score = [int]$completenessResponse.completeness_score
-                                
-                                # Adjust score: Ordinal_XXX and FUN_XXX are both "default names"
-                                # Treat Ordinal_ names as needing documentation like FUN_ names
-                                $hasRealName = $completenessResponse.has_custom_name -and 
-                                               -not ($funcName -match '^(FUN_|Ordinal_)')
-                                
-                                # If it's a default name (FUN_ or Ordinal_), subtract 25 points
-                                # This makes Ordinal_XXX and FUN_XXX equivalent in scoring
-                                if (-not $hasRealName -and $completenessResponse.has_custom_name) {
-                                    $score = $score - 25
-                                    Write-Host "  Adjusted score for $funcName : $score (default name penalty)" -ForegroundColor DarkYellow
-                                }
-                                
-                                if ($score -ge $MinCompletenessScore) {
-                                    $includeFunction = $false
-                                    $filteredCount++
-                                    Write-Host "  Filtered $funcName (score: $score >= $MinCompletenessScore)" -ForegroundColor DarkGray
-                                } else {
-                                    Write-Host "  Include $funcName (score: $score < $MinCompletenessScore)" -ForegroundColor Cyan
-                                }
-                            }
-                        } catch {
-                            Write-Host "  Warning: Could not check completeness for $funcName : $($_.Exception.Message)" -ForegroundColor Yellow
-                            # Include function if completeness check fails
-                        }
-                    }
-                    
-                    if ($includeFunction) {
-                        $allFunctions += "[ ] $funcName @ $address"
-                        $totalFetched++
-                    }
+        $functions = $jsonResponse.functions
+        Write-Host "Total functions received: $($functions.Count)" -ForegroundColor Cyan
+        
+        foreach ($func in $functions) {
+            $funcName = $func.name
+            $address = $func.address -replace '^0x', ''  # Remove 0x prefix if present
+            $isThunk = $func.isThunk
+            $isExternal = $func.isExternal
+            
+            # Filter thunk functions (excluded by default)
+            if ($isThunk -and -not $IncludeThunks) {
+                $thunkFunctionsFiltered++
+                continue
+            }
+            
+            # Filter external functions (excluded by default)
+            if ($isExternal -and -not $IncludeExternals) {
+                $externalFunctionsFiltered++
+                continue
+            }
+            
+            # Apply function type filtering
+            if ($FunOnly) {
+                # Only include functions that start with FUN_
+                if (-not ($funcName -like "FUN_*")) {
+                    continue
+                }
+            } elseif ($OrdinalsOnly) {
+                # Only include functions that start with Ordinal_
+                if (-not ($funcName -like "Ordinal_*")) {
+                    continue
+                }
+            } elseif (-not $All) {
+                # Default: Only include FUN_ and Ordinal_ prefixed functions
+                if (-not (($funcName -like "FUN_*") -or ($funcName -like "Ordinal_*"))) {
+                    continue
+                }
+            }
+            # -All flag: include all functions (no prefix filtering)
+            
+            # Filter library functions if requested
+            if ($ExcludeLibraryFunctions) {
+                # Check if function name starts with ___, __, or _
+                if ($funcName -match '^_+') {
+                    $libraryFunctionsFiltered++
+                    continue
                 }
             }
             
-            Write-Host "Processed $($lines.Count) lines, found $totalFetched matching functions" -ForegroundColor Green
-        } else {
-            Write-Host "ERROR: HTTP $($response.StatusCode) - $($response.StatusDescription)" -ForegroundColor Red
+            # Include only library functions if requested
+            if ($IncludeOnlyLibraryFunctions) {
+                # Check if function name starts with ___, __, or _
+                if (-not ($funcName -match '^_+')) {
+                    continue
+                }
+            }
+            
+            # Check documentation completeness if -UndocumentedOnly is specified
+            # Skip completeness check if -All is specified
+            $includeFunction = $true
+            if ($UndocumentedOnly -and -not $All) {
+                try {
+                    $completenessUrl = "$completenessApiUrl`?function_address=0x$address"
+                    $completenessResponse = Invoke-RestMethod -Uri $completenessUrl -Method GET -TimeoutSec 10
+                    
+                    if ($completenessResponse -and $null -ne $completenessResponse.completeness_score) {
+                        $score = [int]$completenessResponse.completeness_score
+                        
+                        # Adjust score: Ordinal_XXX and FUN_XXX are both "default names"
+                        # Treat Ordinal_ names as needing documentation like FUN_ names
+                        $hasRealName = $completenessResponse.has_custom_name -and 
+                                       -not ($funcName -match '^(FUN_|Ordinal_)')
+                        
+                        # If it's a default name (FUN_ or Ordinal_), subtract 25 points
+                        # This makes Ordinal_XXX and FUN_XXX equivalent in scoring
+                        if (-not $hasRealName -and $completenessResponse.has_custom_name) {
+                            $score = $score - 25
+                            Write-Host "  Adjusted score for $funcName : $score (default name penalty)" -ForegroundColor DarkYellow
+                        }
+                        
+                        if ($score -ge $MinCompletenessScore) {
+                            $includeFunction = $false
+                            $filteredCount++
+                            Write-Host "  Filtered $funcName (score: $score >= $MinCompletenessScore)" -ForegroundColor DarkGray
+                        } else {
+                            Write-Host "  Include $funcName (score: $score < $MinCompletenessScore)" -ForegroundColor Cyan
+                        }
+                    }
+                } catch {
+                    Write-Host "  Warning: Could not check completeness for $funcName : $($_.Exception.Message)" -ForegroundColor Yellow
+                    # Include function if completeness check fails
+                }
+            }
+            
+            if ($includeFunction) {
+                $allFunctions += "[ ] $funcName @ $address"
+                $totalFetched++
+            }
         }
+        
+        Write-Host "Processed $($functions.Count) functions, found $totalFetched matching functions" -ForegroundColor Green
+        if ($thunkFunctionsFiltered -gt 0) {
+            Write-Host "  Filtered $thunkFunctionsFiltered thunk functions" -ForegroundColor DarkGray
+        }
+        if ($externalFunctionsFiltered -gt 0) {
+            Write-Host "  Filtered $externalFunctionsFiltered external functions" -ForegroundColor DarkGray
+        }
+        if ($libraryFunctionsFiltered -gt 0) {
+            Write-Host "  Filtered $libraryFunctionsFiltered library functions" -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "ERROR: HTTP $($response.StatusCode) - $($response.StatusDescription)" -ForegroundColor Red
+    }
         
 } catch {
     Write-Host "ERROR: Exception occurred: $($_.Exception.Message)" -ForegroundColor Red
