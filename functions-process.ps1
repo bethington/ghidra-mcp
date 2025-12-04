@@ -608,20 +608,20 @@ You are documenting functions in a Ghidra reverse engineering project using the 
 ## AVAILABLE MCP TOOLS
 
 You have access to Ghidra MCP tools including:
-- mcp_ghidra_decompile_function: Get decompiled code
-- mcp_ghidra_get_function_variables: List all variables in a function
-- mcp_ghidra_batch_rename_function_components: Rename function and variables atomically
-- mcp_ghidra_batch_set_variable_types: Set types for multiple variables
-- mcp_ghidra_batch_set_comments: Set multiple comments in one operation
-- mcp_ghidra_set_function_prototype: Set function prototype
+- decompile_function: Get decompiled code
+- get_function_variables: List all variables in a function
+- batch_rename_function_components: Rename function and variables atomically
+- batch_set_variable_types: Set types for multiple variables
+- batch_set_comments: Set multiple comments in one operation
+- set_function_prototype: Set function prototype
 - And many more...
 
 ## WORKFLOW STEPS
 
 For the target function specified below, execute these steps using the MCP tools:
 
-1. **Decompile the function**: Call mcp_ghidra_decompile_function with the function name
-2. **Get variables**: Call mcp_ghidra_get_function_variables to see all parameters and locals
+1. **Decompile the function**: Call decompile_function with the function name
+2. **Get variables**: Call get_function_variables to see all parameters and locals
 3. **Analyze completeness**: Review the completeness analysis provided below
 4. **Apply fixes for missing elements**:
    - If missing custom name: Rename function using batch_rename_function_components

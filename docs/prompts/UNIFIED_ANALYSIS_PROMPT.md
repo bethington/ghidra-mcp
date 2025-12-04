@@ -96,7 +96,7 @@ batch_set_comments(
 **Analyze Structure Usage**
 ```python
 field_analysis = analyze_struct_field_usage(address="0x403000")
-suggestions = suggest_field_names(struct_address="0x403000", struct_size=28)
+data_types = search_data_types(pattern="Config")  # Find related structures
 ```
 
 **Create & Apply Structure** (atomic operation)
@@ -243,7 +243,7 @@ set_disassembly_comment(addr1, cmt1)  # Don't do this 40 times
 **Data Structures**:
 - `create_and_apply_data_type(addr, class, name, def)` - Atomic create+apply
 - `analyze_struct_field_usage(addr)` - Auto-detect field names from usage
-- `suggest_field_names(addr, size)` - Get naming suggestions
+- `search_data_types(pattern)` - Search for structures by name
 - `detect_array_bounds(addr)` - Auto-detect array size from loops
 - `create_struct(name, fields)` - Manual structure creation
 - `apply_data_type(addr, type)` - Apply type to memory
