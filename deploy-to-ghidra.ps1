@@ -17,11 +17,29 @@ Write-Info "============================"
 
 # Build the extension first
 Write-Info "Building GhidraMCP extension..."
-$mavenPath = "$env:USERPROFILE\tools\apache-maven-3.9.6\bin\mvn.cmd"
 
-if (-not (Test-Path $mavenPath)) {
-    Write-Error "Maven not found at: $mavenPath"
-    Write-Info "Please ensure Maven is installed or update the path in this script"
+# Try multiple Maven locations
+$mavenPaths = @(
+    "$env:USERPROFILE\tools\apache-maven-3.9.6\bin\mvn.cmd",
+    "C:\Program Files\JetBrains\IntelliJ IDEA Community Edition 2025.1.1.1\plugins\maven\lib\maven3\bin\mvn.cmd",
+    (Get-Command mvn -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+)
+
+$mavenPath = $null
+foreach ($path in $mavenPaths) {
+    if ($path -and (Test-Path $path)) {
+        $mavenPath = $path
+        Write-Info "Found Maven at: $mavenPath"
+        break
+    }
+}
+
+if (-not $mavenPath) {
+    Write-Error "Maven not found. Tried:"
+    foreach ($path in $mavenPaths) {
+        if ($path) { Write-Host "  - $path" }
+    }
+    Write-Info "Please ensure Maven is installed or add it to PATH"
     exit 1
 }
 
@@ -56,9 +74,15 @@ if (Test-Path $pomPath) {
 
 # Find Ghidra installation
 $possiblePaths = @(
+    "F:\ghidra_11.4.2_PUBLIC",
     "F:\ghidra_11.4.2",
+    "C:\ghidra",
+    "C:\ghidra_11.4.2_PUBLIC",
     "$env:USERPROFILE\ghidra",
-    "$env:USERPROFILE\tools\ghidra"
+    "$env:USERPROFILE\ghidra_11.4.2_PUBLIC",
+    "$env:USERPROFILE\tools\ghidra",
+    "$env:ProgramFiles\ghidra",
+    "$env:ProgramFiles\ghidra_11.4.2_PUBLIC"
 )
 
 if (-not $GhidraPath) {
@@ -143,13 +167,37 @@ try {
 # Also copy JAR to user's local Extensions directory for development/debugging
 $jarSourcePath = "$PSScriptRoot\target\GhidraMCP.jar"
 if (Test-Path $jarSourcePath) {
-    $userExtensionsDir = "$env:USERPROFILE\AppData\Roaming\ghidra\ghidra_11.4.2_PUBLIC\Extensions\GhidraMCP\lib"
-    
+    # Detect Ghidra version from installation path
+    $ghidraVersionDir = $null
+    $ghidraUserBase = "$env:USERPROFILE\AppData\Roaming\ghidra"
+
+    if (Test-Path $ghidraUserBase) {
+        # Find the most recent ghidra version directory
+        $ghidraVersionDirs = Get-ChildItem -Path $ghidraUserBase -Directory -Filter "ghidra_*" |
+                             Sort-Object Name -Descending
+        if ($ghidraVersionDirs) {
+            $ghidraVersionDir = $ghidraVersionDirs[0].Name
+            Write-Info "Detected Ghidra user config version: $ghidraVersionDir"
+        }
+    }
+
+    if (-not $ghidraVersionDir) {
+        # Fallback: extract version from Ghidra installation path
+        if ($GhidraPath -match "ghidra_([0-9.]+)") {
+            $ghidraVersionDir = "ghidra_$($Matches[1])_PUBLIC"
+        } else {
+            $ghidraVersionDir = "ghidra_11.4.2_PUBLIC"
+        }
+        Write-Info "Using Ghidra version dir: $ghidraVersionDir"
+    }
+
+    $userExtensionsDir = "$ghidraUserBase\$ghidraVersionDir\Extensions\GhidraMCP\lib"
+
     if (-not (Test-Path $userExtensionsDir)) {
         Write-Info "Creating user Extensions directory: $userExtensionsDir"
         New-Item -ItemType Directory -Path $userExtensionsDir -Force | Out-Null
     }
-    
+
     try {
         $jarDestinationPath = Join-Path $userExtensionsDir "GhidraMCP.jar"
         Copy-Item $jarSourcePath $jarDestinationPath -Force
@@ -232,7 +280,9 @@ Write-Success "GhidraMCP v$version Successfully Deployed!"
 Write-Host ""
 Write-Info "Installation Locations:"
 Write-Host "   Plugin: $destinationPath"
-Write-Host "   JAR: $env:USERPROFILE\AppData\Roaming\ghidra\ghidra_11.4.2_PUBLIC\Extensions\GhidraMCP\lib\GhidraMCP.jar"
+if ($userExtensionsDir) {
+    Write-Host "   JAR: $jarDestinationPath"
+}
 Write-Host "   Python Bridge: $GhidraPath\bridge_mcp_ghidra.py"
 Write-Host "   Requirements: $GhidraPath\requirements.txt"
 Write-Host ""
