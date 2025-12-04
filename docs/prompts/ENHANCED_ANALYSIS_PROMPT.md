@@ -93,8 +93,8 @@ set_decompiler_comment(address, "formatted_documentation")
 **For structures and arrays only:**
 - `analyze_struct_field_usage(address, max_functions=10)` - Get access patterns and name suggestions
 - `get_field_access_context(struct_address, field_offset)` - See specific field usage examples
-- `suggest_field_names(struct_address)` - Get Hungarian notation suggestions
-- `get_struct_layout(struct_name)` - Get current field definitions
+- `search_data_types(pattern)` - Search for structures by name pattern
+- `list_data_types(category)` - List data types by category
 - `modify_struct_field(struct_name, field_name, new_type, new_name)` - Update individual fields
 
 **Verify each field:**

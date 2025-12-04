@@ -185,7 +185,7 @@ search_data_types(pattern="Skill", limit=50)
 
 #### 4.2 Compare Layouts
 
-For promising candidates, use `get_struct_layout()` to examine:
+For promising candidates, use `search_data_types()` or `list_data_types()` to find matching structures, then examine:
 - Field names and offsets
 - Field types and sizes
 - Total structure size
@@ -415,7 +415,7 @@ Expected size: 12 bytes (3 DWORDs)
 
 4. SEARCH FOR EXISTING STRUCTURES
    - list_data_types() and search_data_types() to find candidates
-   - get_struct_layout() to compare field offsets
+   - search_data_types() to find matching structures
    - Verify size matches expected stride or allocation
 
 5. CREATE STRUCTURE IF NEEDED

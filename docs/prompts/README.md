@@ -115,7 +115,7 @@ This directory contains optimized prompts for documenting binary code in Ghidra 
 
 ### For High-Volume Documentation
 
-1. Use **document_function_complete** MCP tool for batch operations
+1. Use **analyze_function_complete** MCP tool for comprehensive analysis
 2. Follow **OPTIMIZED_FUNCTION_DOCUMENTATION.md** workflow
 3. Use **PLATE_COMMENT_EXAMPLES.md** templates for consistency
 4. Automate using batch tools (batch_rename_variables, batch_create_labels, etc.)
@@ -183,7 +183,6 @@ These prompts are designed to work with the following Ghidra MCP tools:
 - `search_functions_enhanced`: Find functions to document
 
 ### Documentation Tools
-- `document_function_complete`: Apply all changes atomically
 - `set_plate_comment`: Add function header
 - `batch_set_comments`: Add multiple comments
 - `batch_create_labels`: Create jump target labels

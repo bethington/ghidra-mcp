@@ -10,7 +10,7 @@ Handle errors appropriately based on their type. For connection timeouts, retry 
 
 ## Initialization and Boundary Verification
 
-Start by calling get_current_function() to identify the function at the cursor position in Ghidra. For boundary verification, use get_function_by_address to confirm the function's start and end addresses, and examine the disassembly to ensure all code blocks belong to the function and return instructions are properly included at all exit points. If boundaries are incorrect, delete and recreate the function with the correct address range. This initial verification prevents documentation errors caused by incorrect function scope.
+Start by calling get_current_selection() to identify the function at the cursor position in Ghidra (returns both address and function information). For boundary verification, use get_function_by_address to confirm the function's start and end addresses, and examine the disassembly to ensure all code blocks belong to the function and return instructions are properly included at all exit points. If boundaries are incorrect, delete and recreate the function with the correct address range. This initial verification prevents documentation errors caused by incorrect function scope.
 
 ## Comprehensive Analysis Phase
 

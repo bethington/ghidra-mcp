@@ -197,7 +197,7 @@ XREF COUNT: 2 references
 **For structure creation:**
 - `create_struct(name, fields)` - Create a new structure type
 - `modify_struct_field(struct_name, field_name, new_type, new_name)` - Update fields
-- `get_struct_layout(struct_name)` - View structure layout
+- `search_data_types(pattern)` - Search for structures by name pattern
 
 **For analysis:**
 - `analyze_data_region(address)` - Get data type and boundaries

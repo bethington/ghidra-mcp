@@ -3,7 +3,7 @@
 Get the currently selected function in Ghidra and create a comprehensive plate comment using set_plate_comment.
 
 **IMMEDIATE WORKFLOW**:
-1. Get the current function using `get_current_function`
+1. Get the current function using `get_current_selection()` (returns address and function info)
 2. Analyze it using `analyze_function_complete` to get algorithm, parameters, returns, and control flow
 3. Decompile using `decompile_function` to understand the implementation details
 4. Create a comprehensive plate comment following the format below
@@ -156,15 +156,17 @@ This will appear in Ghidra with automatic formatting applied by Ghidra's comment
 
 ## Integration with Workflow
 
-When using `document_function_complete` or standalone `set_plate_comment`:
+When using `set_plate_comment`:
 
-1. **Analyze the function** using `analyze_function_complete`
-2. **Extract algorithm steps** from decompiled code and control flow
-3. **Document parameters** from prototype and variable usage
-4. **Note return values** from return statements and caller expectations
-5. **Identify special cases** from conditional branches and magic numbers
-6. **Format the comment** using the template above
-7. **Apply to function** using the plate_comment parameter
+1. **Get current context** using `get_current_selection()` to identify the function at cursor
+2. **Analyze the function** using `analyze_function_complete()` to gather decompiled code, cross-references, and variables
+3. **Extract algorithm steps** from decompiled code and control flow
+4. **Document parameters** from prototype and variable usage
+5. **Note return values** from return statements and caller expectations
+6. **Identify special cases** from conditional branches and magic numbers
+7. **Format the comment** using the template above
+8. **Apply to function** using `set_plate_comment(function_address, comment)`
+9. **Verify completeness** using `analyze_function_completeness()` to check plate comment structure
 
 This format ensures consistency, readability, and comprehensive documentation that appears professionally in Ghidra's decompiler and disassembly views.
 

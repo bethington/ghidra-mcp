@@ -12,7 +12,7 @@ Run analyze_function_completeness first to check type_quality_issues. If state-b
 
 ## Analysis
 
-Start with get_current_function() for cursor position. Use analyze_function_complete to gather decompiled code, xrefs, callees, callers, disassembly, and variables in one call. Study code purpose, caller context, callee dependencies, and memory access patterns in disassembly.
+Start with get_current_selection() to identify the function at cursor (returns both address and function information). Use analyze_function_complete to gather decompiled code, xrefs, callees, callers, disassembly, and variables in one call. Study code purpose, caller context, callee dependencies, and memory access patterns in disassembly.
 
 ## Undefined Type Resolution
 
@@ -24,7 +24,7 @@ Type resolution: undefined1→byte, undefined2→ushort/short, undefined4→uint
 
 ## Structure Identification
 
-Before renaming, identify all structure types. Create structures first so field accesses show meaningful names. Analyze offset accesses, search list_data_types for domain matches, use get_struct_layout to review layouts. Create with create_struct if needed. Document structure layout in plate comment table: Offset | Size | Field Name | Type | Description.
+Before renaming, identify all structure types. Create structures first so field accesses show meaningful names. Analyze offset accesses, search list_data_types or search_data_types for domain matches. Create with create_struct if needed. Document structure layout in plate comment table: Offset | Size | Field Name | Type | Description.
 
 Structure naming: Use identity-based names (Player, Inventory, Skill) not state-based (InitializedPlayer, AllocatedInventory). Add semantic qualifiers if needed (PlayerState, SkillDefinition). Prefer specific domain names (UnitAny, QuestRecord, MapTile) over generic (GameObject, DataObject).
 
