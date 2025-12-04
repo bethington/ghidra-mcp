@@ -749,6 +749,85 @@ def safe_post(endpoint: str, data: dict | str, retries: int = 3) -> str:
     
     return "Unexpected error in safe_post"
 
+
+def make_request(url: str, method: str = "GET", params: dict = None, data: str = None, retries: int = 3) -> str:
+    """
+    Perform an HTTP request with enhanced error handling and retry logic.
+    
+    This is a unified request function that supports both GET and POST methods,
+    used by program management and advanced documentation tools.
+    
+    Args:
+        url: Full URL to request (not just endpoint)
+        method: HTTP method ("GET" or "POST")
+        params: Query parameters for GET requests
+        data: Raw data string for POST requests (already JSON-encoded)
+        retries: Number of retry attempts for server errors
+    
+    Returns:
+        String response from the server (typically JSON)
+    """
+    if params is None:
+        params = {}
+
+    # Validate server URL for security
+    if not validate_server_url(url):
+        logger.error(f"Invalid or unsafe server URL: {url}")
+        return '{"error": "Invalid server URL - only local addresses allowed"}'
+
+    # Get endpoint-specific timeout
+    timeout = REQUEST_TIMEOUT
+    logger.debug(f"Using timeout of {timeout}s for {method} request to {url}")
+
+    for attempt in range(retries):
+        try:
+            start_time = time.time()
+
+            if method.upper() == "POST":
+                headers = {'Content-Type': 'application/json'}
+                response = session.post(url, data=data, headers=headers, timeout=timeout)
+            else:
+                response = session.get(url, params=params, timeout=timeout)
+
+            response.encoding = 'utf-8'
+            duration = time.time() - start_time
+
+            logger.info(f"{method} request to {url} took {duration:.2f}s (attempt {attempt + 1}/{retries})")
+
+            if response.ok:
+                return response.text
+            elif response.status_code == 404:
+                logger.warning(f"Endpoint not found: {url}")
+                return f'{{"error": "Endpoint not found: {url}"}}'
+            elif response.status_code >= 500:
+                # Server error - retry with exponential backoff
+                if attempt < retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Server error {response.status_code}, retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Server error after {retries} attempts: {response.status_code}")
+                    return f'{{"error": "Server error {response.status_code} after {retries} attempts"}}'
+            else:
+                logger.error(f"HTTP {response.status_code}: {response.text.strip()}")
+                return f'{{"error": "HTTP {response.status_code}: {response.text.strip()}"}}'
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"Request timeout on attempt {attempt + 1}/{retries}")
+            if attempt < retries - 1:
+                continue
+            return f'{{"error": "Timeout connecting to Ghidra server after {retries} attempts"}}'
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request failed: {str(e)}")
+            return f'{{"error": "Request failed: {str(e)}"}}'
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return f'{{"error": "Unexpected error: {str(e)}"}}'
+
+    return '{"error": "Unexpected error in make_request"}'
+
+
 @mcp.tool()
 def list_functions(offset: int = 0, limit: int = 100) -> list:
     """

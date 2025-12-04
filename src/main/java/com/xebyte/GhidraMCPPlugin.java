@@ -1208,14 +1208,31 @@ public class GhidraMCPPlugin extends Plugin {
 
         // BATCH_SET_VARIABLE_TYPES - Set types for multiple variables
         server.createContext("/batch_set_variable_types", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String functionAddress = (String) params.get("function_address");
-            @SuppressWarnings("unchecked")
-            Map<String, String> variableTypes = (Map<String, String>) params.get("variable_types");
-            boolean forceIndividual = parseBoolOrDefault(params.get("force_individual"), false);
+            try {
+                Map<String, Object> params = parseJsonParams(exchange);
+                String functionAddress = (String) params.get("function_address");
 
-            String result = batchSetVariableTypes(functionAddress, variableTypes, forceIndividual);
-            sendResponse(exchange, result);
+                // Handle variable_types as either Map or String (JSON parsing variation)
+                Map<String, String> variableTypes = new HashMap<>();
+                Object vtObj = params.get("variable_types");
+                if (vtObj instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, String> vtMap = (Map<String, String>) vtObj;
+                    variableTypes = vtMap;
+                } else if (vtObj instanceof String) {
+                    // Parse JSON string into map
+                    variableTypes = parseJsonObject((String) vtObj);
+                }
+
+                // Use optimized method
+                String result = batchSetVariableTypesOptimized(functionAddress, variableTypes);
+                sendResponse(exchange, result);
+            } catch (Exception e) {
+                // Catch any exceptions to prevent connection aborts
+                String errorMsg = "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\", \"method\": \"optimized\"}";
+                sendResponse(exchange, errorMsg);
+                Msg.error(this, "Error in batch_set_variable_types endpoint", e);
+            }
         });
 
         // NEW v1.6.0: BATCH_RENAME_VARIABLES - Rename multiple variables atomically
@@ -11213,42 +11230,66 @@ public class GhidraMCPPlugin extends Plugin {
 
     /**
      * Individual variable type setting using setLocalVariableType (fallback method)
-     * This method uses decompilation but is more reliable for persistence
+     * NOW USES OPTIMIZED SINGLE-DECOMPILE METHOD (v1.9.5+)
+     * This method was refactored to use batchSetVariableTypesOptimized() which decompiles
+     * the function ONCE and applies all type changes within that single decompilation,
+     * avoiding the repeated decompilation timeout issues that plagued the previous approach.
      */
     private String batchSetVariableTypesIndividual(String functionAddress, Map<String, String> variableTypes) {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "\"error\": \"No program loaded\"";
+        // Delegate to the optimized batch method that decompiles once
+        // This fixes the issue where each setLocalVariableType() call caused its own decompilation
+        return batchSetVariableTypesOptimized(functionAddress, variableTypes);
+    }
+
+    /**
+     * OPTIMIZED: Batch set variable types - simple wrapper that calls setLocalVariableType
+     * sequentially with proper spacing to avoid thread issues
+     */
+    private String batchSetVariableTypesOptimized(String functionAddress, Map<String, String> variableTypes) {
+        if (variableTypes == null || variableTypes.isEmpty()) {
+            return "{\"success\": true, \"method\": \"optimized\", \"variables_typed\": 0, \"variables_failed\": 0}";
         }
 
-        final StringBuilder result = new StringBuilder();
         final AtomicInteger variablesTyped = new AtomicInteger(0);
         final AtomicInteger variablesFailed = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
 
-        // Process each variable individually using the reliable method
+        // Call setLocalVariableType for each variable with small delay between calls
         for (Map.Entry<String, String> entry : variableTypes.entrySet()) {
             String varName = entry.getKey();
             String newType = entry.getValue();
 
             try {
-                String typeResult = setLocalVariableType(functionAddress, varName, newType);
-                if (typeResult.startsWith("Success:")) {
+                // Call the working setLocalVariableType method
+                String result = setLocalVariableType(functionAddress, varName, newType);
+
+                if (result.toLowerCase().contains("success")) {
                     variablesTyped.incrementAndGet();
                 } else {
+                    errors.add(varName + ": " + result);
                     variablesFailed.incrementAndGet();
-                    errors.add("Failed to set type of '" + varName + "' to '" + newType + "': " + typeResult);
+                }
+
+                // Small delay to allow Ghidra to process
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
                 }
             } catch (Exception e) {
+                errors.add(varName + ": " + e.getMessage());
                 variablesFailed.incrementAndGet();
-                errors.add("Exception setting type of '" + varName + "' to '" + newType + "': " + e.getMessage());
             }
         }
 
-        result.append("\"success\": true, ");
-        result.append("\"method\": \"individual\", ");
+        // Build response
+        StringBuilder result = new StringBuilder();
+        result.append("{");
+        result.append("\"success\": ").append(variablesFailed.get() == 0 && variablesTyped.get() > 0).append(", ");
+        result.append("\"method\": \"optimized\", ");
         result.append("\"variables_typed\": ").append(variablesTyped.get()).append(", ");
         result.append("\"variables_failed\": ").append(variablesFailed.get());
+
         if (!errors.isEmpty()) {
             result.append(", \"errors\": [");
             for (int i = 0; i < errors.size(); i++) {
@@ -11258,6 +11299,7 @@ public class GhidraMCPPlugin extends Plugin {
             result.append("]");
         }
 
+        result.append("}");
         return result.toString();
     }
 

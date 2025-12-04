@@ -4,7 +4,7 @@ Document Ghidra functions via MCP tools only. Retry timeouts once, then use smal
 
 ## Phase 0: Type Audit Pre-Check
 
-**Optimize type-setting to skip redundant operations:**
+**Optimize type-setting and identify generic naming issues:**
 
 1. **Get Current Types**: Call get_function_variables() and capture all current variable types
 2. **Compare Against Desired Types**: For each variable, determine if type change is needed:
@@ -14,8 +14,16 @@ Document Ghidra functions via MCP tools only. Retry timeouts once, then use smal
 3. **Skip Already-Correct Variables**: Do NOT call set_local_variable_type() for variables where current type matches desired type
 4. **Skip Phantom Variables**: Variables with `is_phantom=true` cannot be typed—skip them entirely
 5. **Batch Only Changed Types**: Only call batch_set_variable_types() or set_local_variable_type() for variables that actually need changes
+6. **Identify Generic/Non-Descriptive Naming**: Flag variables with generic temporary names:
+   - `nTemp1`, `nTemp2`, `nTemp3`, `nTemp4` (generic temporary naming)
+   - `local_4`, `local_8`, `var1`, `var2` (auto-generated names)
+   - Single-letter variables: `x`, `y`, `i`, `j`, `k` (unless context makes them appropriate)
+   - For each generic name, check if the variable is:
+     - **Unused** (declared but never referenced in decompiled code) → Document as compiler artifact, consider renaming to describe storage purpose (e.g., `nUnusedStackSpace1`)
+     - **Assembly-only** (used only in disassembly, not in decompilation) → Rename with descriptive prefix based on actual usage from disassembly analysis
+     - **Legitimately generic** (loop counters, temporary math values with no semantic meaning) → Keep name but document in plate comment
 
-**Rationale**: Ghidra's decompiler already assigns reasonable types based on usage context. Blindly re-applying the same types wastes MCP calls and produces confusing "changed X from Y to Y" messages. This pre-check identifies only genuine type mismatches that need fixing.
+**Rationale**: Ghidra's decompiler already assigns reasonable types based on usage context. Blindly re-applying the same types wastes MCP calls and produces confusing "changed X from Y to Y" messages. This pre-check identifies only genuine type mismatches AND discovers generic naming that obscures function semantics. Generic temporary names like nTemp1-nTemp4 should be examined to determine actual purpose before proceeding to later phases.
 
 **Example Workflow**:
 ```
@@ -23,6 +31,9 @@ get_function_variables() returns:
   dwByteCount: uint ← already correct, SKIP
   pdwBuffer: uint * ← already correct, SKIP
   nByteVal: undefined4 ← needs change to int, SET
+  nTemp1: int ← GENERIC NAME - check usage in decompiled code
+    → Found: declared but UNUSED in decompilation
+    → Action: Document in Phase 7 plate comment as "compiler-allocated stack space"
   Result: Only call set_local_variable_type for nByteVal
 ```
 
@@ -43,7 +54,14 @@ Search existing structures with search_data_types(). Create with create_struct()
 
 1. **Name**: rename_function_by_address with PascalCase (ProcessPlayerSlots, ValidateEntityState). Do NOT use DLL/module prefixes (no D2CMP_, D2Common_, Storm_, etc.)—the function's location already provides context.
 2. **Prototype**: set_function_prototype with typed params (UnitAny* not int*), camelCase names (pPlayerNode, nCount)
-3. **Return type**: void, int/uint (status), bool, or pointer based on EAX usage
+3. **Return type** (MANDATORY): Analyze EAX at function exit points to determine correct return type:
+   - `void` — EAX not set or value is discarded by all callers
+   - `bool` — Returns 0/1 (or 0/non-zero) for success/failure or true/false conditions
+   - `int` — Returns signed values, error codes (negative), or counts that can be -1
+   - `uint` — Returns unsigned values, flags, handles, or non-negative counts
+   - `pointer` — Returns address (check for NULL returns); use typed pointer (UnitAny*, char*) not void* when type is known
+   
+   **How to verify**: Check callers with get_function_callers()—do they TEST EAX, compare to 0, store to typed variable, or ignore it? This reveals expected return semantics.
 4. **Calling conventions**: __cdecl (caller cleanup), __stdcall (callee cleanup), __fastcall (ECX/EDX), __thiscall (ECX=this)
    - D2: __d2call (EBX), __d2regcall (EBX/EAX/ECX), __d2mixcall (EAX/ESI), __d2edicall (EDI)
 5. Use get_decompiled_code(refresh_cache=True) ONLY after structural changes (create_struct, set_function_prototype)
@@ -51,6 +69,16 @@ Search existing structures with search_data_types(). Create with create_struct()
 ## Phase 4: Hungarian Notation
 
 **Type normalization** (always use lowercase builtins): UINT/DWORD→uint, USHORT/WORD→ushort, BYTE→byte, BOOL→bool, LPVOID/PVOID→void*
+
+**Naming conciseness**: Keep variable names SHORT and DESCRIPTIVE:
+- **Target length**: Prefix + 1-2 word base (3-12 characters total)
+- **Good**: `nCount`, `byControl`, `pbSrcPtr`, `dwFlags`, `nRowOffset`, `nPad1`
+- **Bad**: `nStackPadding1`, `nLoopCounter`, `pbSourcePointer`, `dwInputFlags`
+- **Special cases**:
+  - Unused/padding variables: Use abbreviated form (nPad1, nUnused1, nReserved1) not descriptive long names
+  - Loop counters: Single letter (i, j, k) or short (nIdx, nLoop, iVar)
+  - Temporary math values with no semantic meaning: Single/double letter (nTemp, nTmp) only if truly temporary
+  - Unused compiler-allocated stack: Use nPad[N], nReserved[N], or nUnused[N] to be explicit about purpose
 
 **Prefix mapping**:
 | Type | Prefix | Global | Example |
@@ -95,7 +123,7 @@ Rename ALL globals with Hungarian notation using rename_or_label:
 | DAT_* | analyze_data_region → g_[prefix]Name (g_dwFlags, g_pConfig) |
 | s_* strings | sz/wsz + descriptive name (s_%s\path → szFormatPath) |
 
-**Inline Comments**: Do NOT add PRE_COMMENT, POST_COMMENT, or EOL_COMMENT unless absolutely necessary to convey critical non-obvious information. The plate comment and proper naming should be sufficient. Ordinals can be identified via docs/KNOWN_ORDINALS.md without inline comments.
+**Inline Comments**: Do NOT add PRE_COMMENT or POST_COMMENT unless necessary to convey critical non-obvious information. EOL_COMMENT limit 25 characters long. The plate comment and proper naming should be sufficient. Ordinals can be identified via docs/KNOWN_ORDINALS.md without inline comments.
 
 ## Phase 7: Plate Comment
 
