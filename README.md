@@ -10,7 +10,7 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 
 ### Core MCP Integration
 - **Full MCP Compatibility** - Complete implementation of Model Context Protocol
-- **111 MCP Tools Available** - Comprehensive API surface for binary analysis
+- **118 MCP Tools Available** - Comprehensive API surface for binary analysis
 - **Production-Ready Reliability** - Tested batch operations and atomic transactions
 - **Real-time Analysis** - Live integration with Ghidra's analysis engine
 
@@ -87,7 +87,7 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 108 tools (98 fully implemented + 10 ROADMAP v2.0)
+- **MCP Tools**: 118 tools (112 fully implemented + 6 ROADMAP v2.0)
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -114,6 +114,12 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 - `GET /disassemble_function/{addr}` - Disassembly listing
 - `GET /xrefs_to/{addr}` - Cross-references to address
 - `GET /xrefs_from/{addr}` - Cross-references from address
+
+### Function Hash Index (Cross-Binary Documentation)
+- `GET /get_function_hash/{addr}` - SHA-256 hash of normalized function opcodes
+- `GET /get_bulk_function_hashes` - Paginated bulk hashing with filter
+- `GET /get_function_documentation/{addr}` - Export complete function documentation
+- `POST /apply_function_documentation` - Import documentation to target function
 
 ### Data Types & Structures
 - `GET /data_types` - Available data types
@@ -165,7 +171,7 @@ mvn clean package assembly:single
 - **ROADMAP Documentation**: Clear implementation status for all tools
 
 ### Quality Metrics
-- **MCP Tool Coverage**: 108/108 tools documented (98 implemented + 10 ROADMAP v2.0)
+- **MCP Tool Coverage**: 118/118 tools documented (112 implemented + 6 ROADMAP v2.0)
 - **Performance**: 93% API call reduction for function documentation
 - **Reliability**: 100% compilation success, full functionality verified
 - **Documentation**: 100% coverage with comprehensive ROADMAP
@@ -228,7 +234,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 **Production Ready**: ✅ Yes
 **Package**: com.xebyte
-**MCP Tools**: 111 tools (105 implemented + 6 ROADMAP v2.0)
+**MCP Tools**: 118 tools (112 implemented + 6 ROADMAP v2.0)
 **Test Coverage**: 100% compilation, full functionality verified
 **Documentation Coverage**: 100% with comprehensive ROADMAP
 **Performance**: 93% API call reduction with batch operations

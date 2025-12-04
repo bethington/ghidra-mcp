@@ -190,6 +190,15 @@ These prompts are designed to work with the following Ghidra MCP tools:
 - `batch_rename_variables`: Rename multiple variables
 - `set_function_prototype`: Define function signature
 
+### Cross-Binary Documentation (v1.9.4+)
+- `get_function_hash`: Get normalized SHA-256 hash for matching across binaries
+- `get_bulk_function_hashes`: Paginated bulk hashing with filter (documented/undocumented/all)
+- `get_function_documentation`: Export complete function docs (name, prototype, comments, labels)
+- `apply_function_documentation`: Import documentation to target function
+- `build_function_hash_index`: Build persistent JSON index from programs
+- `lookup_function_by_hash`: Find matching functions in index
+- `propagate_documentation`: Apply docs to all matching instances
+
 ### Verification Tools
 - `analyze_function_completeness`: Check documentation status
 - `validate_function_prototype`: Verify prototype syntax
@@ -235,6 +244,7 @@ When creating new prompts or improving existing ones:
 
 ## Version History
 
+- **v1.9.4**: Added cross-binary documentation propagation tools (Function Hash Index)
 - **v1.6.5**: Added PLATE_COMMENT_FORMAT_GUIDE.md and PLATE_COMMENT_EXAMPLES.md
 - **v1.6.0**: Added validation tools and enhanced search
 - **v1.5.1**: Added batch operation support

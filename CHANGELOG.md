@@ -4,6 +4,46 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v1.9.4 - 2025-12-03
+
+### Function Hash Index Release
+
+#### 🔗 Cross-Binary Documentation Propagation
+- **Function Hash Index System**: Hash-based matching of identical functions across different binaries
+- **New Java Endpoints**:
+  - `GET /get_function_hash` - Compute SHA-256 hash of normalized function opcodes
+  - `GET /get_bulk_function_hashes` - Paginated bulk hashing with filter (documented/undocumented/all)
+  - `GET /get_function_documentation` - Export complete function documentation (name, prototype, plate comment, parameters, locals, comments, labels)
+  - `POST /apply_function_documentation` - Import documentation to target function
+- **New Python MCP Tools**:
+  - `get_function_hash` - Single function hash retrieval
+  - `get_bulk_function_hashes` - Bulk hashing with pagination
+  - `get_function_documentation` - Export function docs as JSON
+  - `apply_function_documentation` - Apply docs to target function
+  - `build_function_hash_index` - Build persistent JSON index from programs
+  - `lookup_function_by_hash` - Find matching functions in index
+  - `propagate_documentation` - Apply docs to all matching instances
+
+#### 🧮 Hash Normalization Algorithm
+- Normalizes opcodes for position-independent matching across different base addresses
+- **Internal jumps**: `REL+offset` (relative to function start)
+- **External calls**: `CALL_EXT` placeholder
+- **External data refs**: `DATA_EXT` placeholder
+- **Small immediates** (<0x10000): Preserved as `IMM:value`
+- **Large immediates**: Normalized to `IMM_LARGE`
+- **Registers**: Preserved (part of algorithm logic)
+
+#### ✅ Verified Cross-Version Matching
+- Tested D2Client.dll 1.07 → 1.08: **1,313 undocumented functions** match documented functions
+- Successfully propagated `ConcatenatePathAndWriteFile` documentation across versions
+- Identical functions produce matching hashes despite different base addresses
+
+#### 🛠 Tool Count
+- **Total MCP Tools**: 118 (112 implemented + 6 ROADMAP v2.0)
+- **New tools added**: 7 (4 Java endpoints + 3 Python index management tools)
+
+---
+
 ## v1.9.3 - 2025-11-14
 
 ### Documentation & Workflow Enhancement Release

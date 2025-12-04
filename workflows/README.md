@@ -172,7 +172,7 @@ Changes are:
 
 ## Curated Tool Set
 
-The workflow uses a minimal 25-tool set (vs 111+ in full bridge):
+The workflow uses a minimal 25-tool set (vs 118+ in full bridge):
 
 | Category | Tools |
 |----------|-------|
@@ -181,6 +181,7 @@ The workflow uses a minimal 25-tool set (vs 111+ in full bridge):
 | Documentation | rename_function, set_function_signature, rename_variable, set_variable_type, batch_set_types, create_label, batch_create_labels, set_plate_comment, batch_set_comments |
 | Data Types | list_data_types, search_data_types, create_struct, create_enum, apply_data_type |
 | Verification | analyze_completeness, get_function_info |
+| Cross-Binary | get_function_hash, get_bulk_function_hashes, get_function_documentation, apply_function_documentation |
 
 ## Example Session
 

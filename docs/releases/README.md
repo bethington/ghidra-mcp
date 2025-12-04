@@ -4,7 +4,14 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v1.9.3 (Latest)
+### v1.9.4 (Latest)
+
+- **Function Hash Index Release** - Cross-binary documentation propagation
+- New tools: `get_function_hash`, `get_bulk_function_hashes`, `get_function_documentation`, `apply_function_documentation`, `build_function_hash_index`, `lookup_function_by_hash`, `propagate_documentation`
+- SHA-256 normalized opcode hashing for position-independent function matching
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
+### v1.9.3
 
 - [Release Notes](v1.9.3/RELEASE_NOTES_v1.9.3.md) - Documentation organization and workflow enhancements
 - [Release Checklist](v1.9.3/RELEASE_CHECKLIST_v1.9.3.md) - Pre-release verification tasks

@@ -207,3 +207,72 @@ XREF COUNT: 2 references
 **For validation:**
 - `validate_data_type_exists(type_name)` - Check if type exists
 - `can_rename_at_address(address)` - Check what operation is appropriate
+
+## Cross-Binary Documentation Propagation (v1.9.4+)
+
+These tools enable documentation sharing across different versions of the same binary by matching functions based on their normalized opcode hashes.
+
+### Function Hashing
+
+```python
+# Get hash for a single function
+hash_info = get_function_hash("0x6FAB1234")
+# Returns: {"hash": "abc123...", "instruction_count": 63, "has_custom_name": true}
+
+# Get hashes for many functions (paginated)
+result = get_bulk_function_hashes(offset=0, limit=500, filter="documented")
+# filter options: "documented", "undocumented", "all"
+```
+
+### Documentation Export/Import
+
+```python
+# Export complete documentation from a well-documented function
+docs = get_function_documentation("0x6FAB1234")
+# Returns: name, prototype, plate_comment, parameters, locals, comments, labels
+
+# Apply documentation to another function with matching hash
+apply_function_documentation(
+    target_address="0x6FAC0000",
+    function_name="ProcessPlayerData",
+    return_type="int",
+    calling_convention="__fastcall",
+    plate_comment="Processes player data structures.",
+    parameters=[{"ordinal": 0, "name": "pPlayer", "type": "Player *"}]
+)
+```
+
+### Index Management (High-Level Workflow)
+
+```python
+# Build index from documented functions across programs
+build_function_hash_index(
+    programs=["D2Client.dll 1.07", "D2Client.dll 1.08"],
+    filter="documented",
+    index_file="function_hash_index.json"
+)
+
+# Find functions matching a hash
+matches = lookup_function_by_hash(hash="abc123...")
+# Returns all programs/addresses with matching functions
+
+# Propagate documentation to all matching functions
+propagate_documentation(
+    source_address="0x6FAB1234",
+    target_programs=["D2Client.dll 1.08", "D2Client.dll 1.09"],
+    dry_run=True  # Preview changes without applying
+)
+```
+
+### Hash Normalization Details
+
+The hash algorithm normalizes position-dependent values so identical functions at different addresses produce the same hash:
+
+| Pattern | Normalization | Reason |
+|---------|---------------|--------|
+| Internal jumps | `REL+offset` | Relative to function start |
+| External calls | `CALL_EXT` | Different addresses per binary |
+| External data | `DATA_EXT` | Different addresses per binary |
+| Small immediates (<0x10000) | `IMM:value` | Preserved (constants) |
+| Large immediates | `IMM_LARGE` | May be addresses |
+| Registers | Preserved | Part of algorithm logic |
