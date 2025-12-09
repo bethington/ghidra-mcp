@@ -1,8 +1,8 @@
 {
     "WorkerId":  0,
-    "Timestamp":  "2025-12-04T05:30:24.1757394-06:00",
+    "Timestamp":  "2025-12-09T01:20:24.3425838-06:00",
     "Model":  "opus",
-    "InitialScore":  50.0,
-    "LastProcessed":  "FUN_6ffc28a0",
-    "Address":  "6ffc28a0"
+    "InitialScore":  14.0,
+    "LastProcessed":  "FUN_6ffb122b",
+    "Address":  "6ffb122b"
 }
