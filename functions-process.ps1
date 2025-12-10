@@ -517,6 +517,47 @@ function Get-McpErrors {
     return $uniqueErrors
 }
 
+function Get-WorkflowMilestones {
+    param([string]$output)
+    
+    $milestones = @()
+    
+    # Workflow milestone patterns - ordered by typical workflow sequence
+    $milestonePatterns = @(
+        @{ Pattern = '(?i)mcp_ghidra_decompile_function|decompil(?:ed|ing)\s+(?:function|code)'; Milestone = 'Decompiled function'; Icon = '📖' },
+        @{ Pattern = '(?i)mcp_ghidra_get_function_variables|(?:got|retrieved|listing)\s+variables'; Milestone = 'Retrieved variables'; Icon = '📋' },
+        @{ Pattern = '(?i)mcp_ghidra_analyze_function_completeness|completeness.*?(\d+)'; Milestone = 'Analyzed completeness'; Icon = '📊' },
+        @{ Pattern = '(?i)mcp_ghidra_get_xrefs|cross.?references|xrefs?\s+(?:to|from)'; Milestone = 'Analyzed cross-references'; Icon = '🔗' },
+        @{ Pattern = '(?i)mcp_ghidra_(?:rename_function|batch_rename)|function.*?renamed|renamed.*?function.*?to\s+(\w+)'; Milestone = 'Renamed function'; Icon = '✏️' },
+        @{ Pattern = '(?i)mcp_ghidra_set_function_prototype|prototype.*?set|set.*?prototype'; Milestone = 'Set function prototype'; Icon = '📝' },
+        @{ Pattern = '(?i)mcp_ghidra_(?:rename_variables|batch_rename).*?variable|variable.*?renamed|renamed.*?(?:local|param)'; Milestone = 'Renamed variables'; Icon = '🏷️' },
+        @{ Pattern = '(?i)mcp_ghidra_(?:set_variable_type|batch_set_variable)|variable.*?type.*?set|set.*?type.*?(?:int|char|void|DWORD|struct)'; Milestone = 'Set variable types'; Icon = '🔧' },
+        @{ Pattern = '(?i)mcp_ghidra_set_plate_comment|plate\s*comment.*?(?:set|added|created)'; Milestone = 'Added plate comment'; Icon = '📄' },
+        @{ Pattern = '(?i)mcp_ghidra_(?:set_decompiler_comment|batch_set_comments)|(?:inline|decompiler)\s*comment.*?(?:set|added)'; Milestone = 'Added inline comments'; Icon = '💬' },
+        @{ Pattern = '(?i)mcp_ghidra_(?:create_label|batch_create_labels)|label.*?(?:created|added)|created.*?label'; Milestone = 'Created labels'; Icon = '🏴' },
+        @{ Pattern = '(?i)mcp_ghidra_rename_global|global.*?renamed|DAT_.*?(?:renamed|→)'; Milestone = 'Renamed globals'; Icon = '🌐' },
+        @{ Pattern = '(?i)ordinal.*?(?:\d+|#\d+)|(?:resolved|looked up).*?ordinal'; Milestone = 'Resolved ordinals'; Icon = '🔢' },
+        @{ Pattern = '(?i)(?:100\s*[%/]|score.*?100|completeness.*?100)'; Milestone = 'Achieved 100% completeness'; Icon = '🎯' }
+    )
+    
+    foreach ($mp in $milestonePatterns) {
+        if ($output -match $mp.Pattern) {
+            $detail = ""
+            # Extract additional detail from capture groups if available
+            if ($Matches[1]) {
+                $detail = " ($($Matches[1]))"
+            }
+            $milestones += @{
+                Milestone = $mp.Milestone
+                Icon = $mp.Icon
+                Detail = $detail
+            }
+        }
+    }
+    
+    return $milestones
+}
+
 function Test-WorkflowCompliance {
     param([string]$output, [string]$funcName, [float]$initialScore)
     
@@ -902,6 +943,19 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
                     Write-WorkerHost "    [$($err.Type)] $($err.Message)" "Red"
                     Write-Log "MCP Error for ${funcName}: [$($err.Type)] $($err.Message)" "ERROR"
                 }
+            }
+            
+            # Display workflow milestones achieved
+            $milestones = Get-WorkflowMilestones -output $outputStr
+            if ($milestones.Count -gt 0) {
+                Write-WorkerHost "  WORKFLOW MILESTONES:" "Cyan"
+                foreach ($ms in $milestones) {
+                    Write-WorkerHost "    $($ms.Icon) $($ms.Milestone)$($ms.Detail)" "Cyan"
+                }
+                Write-Log "Milestones for ${funcName}: $($milestones | ForEach-Object { $_.Milestone } | Join-String -Separator ', ')"
+            } else {
+                Write-WorkerHost "  WARNING: No workflow milestones detected" "Yellow"
+                Write-Log "No milestones detected for $funcName" "WARN"
             }
             
             $complianceIssues = Test-WorkflowCompliance -output $output -funcName $funcName -initialScore $score
