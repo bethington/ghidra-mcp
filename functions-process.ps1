@@ -29,7 +29,7 @@ $MAX_PROMPT_BYTES = 180000
 $FUNCTION_BATCH_SIZE = 50
 
 $todoFile = ".\FunctionsTodo.txt"
-$promptFile = if ($CompactPrompt) { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V3_COMPACT.md" } else { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V2.md" }
+$promptFile = if ($CompactPrompt) { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V3_COMPACT.md" } else { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4.md" }
 $logFile = ".\\logs\\functions-process-worker$WorkerId-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 $checkpointFile = ".\\functions-progress-worker$WorkerId.json"
 $outputDir = ".\\output"

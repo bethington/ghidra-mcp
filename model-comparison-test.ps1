@@ -32,7 +32,7 @@ $Models = @(
 )
 
 $todoFile = ".\FunctionsTodo.txt"
-$promptFile = ".\docs\prompts\FUNCTION_DOC_WORKFLOW_V2.md"
+$promptFile = ".\docs\prompts\FUNCTION_DOC_WORKFLOW_V4.md"
 $outputDir = ".\model-comparison-output"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $reportFile = "$outputDir\comparison-report-$timestamp.md"

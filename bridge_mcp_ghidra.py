@@ -2814,7 +2814,7 @@ def consolidate_duplicate_types(base_type_name: str, auto_delete: bool = False) 
         4. Re-run with auto_delete=True to clean up
 
     Note:
-        This tool enforces FUNCTION_DOC_WORKFLOW_V2.md Phase 0 Type Audit requirements.
+        This tool enforces FUNCTION_DOC_WORKFLOW_V4.md Phase 2 Type Audit requirements.
         State-based types cause 15-point completeness score penalty per occurrence.
     """
     import json
@@ -3651,7 +3651,7 @@ def analyze_function_completeness(
     Checks for custom names, prototypes, comments, undefined variables,
     plate comment structure, and Hungarian notation compliance.
 
-    **NEW**: Returns workflow-aligned recommendations based on FUNCTION_DOC_WORKFLOW_V2.md
+    **NEW**: Returns workflow-aligned recommendations based on FUNCTION_DOC_WORKFLOW_V4.md
     to guide users on exactly what steps to take to achieve 100% completeness.
 
     Args:
@@ -3665,7 +3665,7 @@ def analyze_function_completeness(
         - hungarian_notation_violations (type-to-prefix mismatches)
         - type_quality_issues (void* parameters, state-based type names)
         - completeness_score (0-100)
-        - recommendations (array of actionable steps aligned with FUNCTION_DOC_WORKFLOW_V2.md)
+        - recommendations (array of actionable steps aligned with FUNCTION_DOC_WORKFLOW_V4.md)
 
     Recommendations provide specific guidance on:
         - Type normalization (undefined1 -> byte, undefined4 -> uint/int/float)
@@ -3690,7 +3690,7 @@ def analyze_function_completeness(
           "type_quality_issues": [],
           "completeness_score": 85.0,
           "recommendations": [
-            "UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V2.md 'Mandatory Undefined Type Audit' section:",
+            "UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V4.md Phase 2 'Type Audit' section:",
             "1. Type Resolution: Apply type normalization before renaming:",
             "   - undefined4 -> uint/int/float/pointer (32-bit - check usage context)",
             "2. Use set_local_variable_type() with lowercase builtin types (uint, ushort, byte)",

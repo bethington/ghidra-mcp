@@ -625,6 +625,6 @@ When documenting structure investigation results:
 
 ## Related Workflows
 
-- **FUNCTION_DOC_WORKFLOW_V2.md**: For complete function documentation using proper types
+- **FUNCTION_DOC_WORKFLOW_V4.md**: For complete function documentation using proper types (with Haiku subtask delegation)
 - **GLOBAL_DATA_ANALYSIS_WORKFLOW.md**: For global data structure identification
 - **HUNGARIAN_NOTATION_REFERENCE.md**: For proper variable naming conventions

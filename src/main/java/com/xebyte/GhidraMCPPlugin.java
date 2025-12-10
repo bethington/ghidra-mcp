@@ -10924,7 +10924,7 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Generate workflow-aligned recommendations based on FUNCTION_DOC_WORKFLOW_V2.md
+     * Generate workflow-aligned recommendations based on FUNCTION_DOC_WORKFLOW_V4.md
      */
     private List<String> generateWorkflowRecommendations(
             Function func,
@@ -10964,9 +10964,9 @@ public class GhidraMCPPlugin extends Plugin {
             recommendations.add("4. Format: /* Ordinal_123 = StorageFunctionName - brief description */");
         }
 
-        // CRITICAL: Undefined Type Audit (FUNCTION_DOC_WORKFLOW_V2.md Section: Mandatory Undefined Type Audit)
+        // CRITICAL: Undefined Type Audit (FUNCTION_DOC_WORKFLOW_V4.md Phase 2: Type Audit)
         if (!undefinedVars.isEmpty()) {
-            recommendations.add("UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V2.md 'Mandatory Undefined Type Audit' section:");
+            recommendations.add("UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V4.md Phase 2 'Type Audit' section:");
             recommendations.add("1. Type Resolution: Apply type normalization before renaming:");
             recommendations.add("   - undefined1 -> byte (8-bit integer)");
             recommendations.add("   - undefined2 -> ushort/short (16-bit integer)");
@@ -10983,7 +10983,7 @@ public class GhidraMCPPlugin extends Plugin {
 
         // Plate Comment Issues
         if (!plateCommentIssues.isEmpty()) {
-            recommendations.add("PLATE COMMENT ISSUES - Follow FUNCTION_DOC_WORKFLOW_V2.md 'Plate Comment Creation' section:");
+            recommendations.add("PLATE COMMENT ISSUES - Follow FUNCTION_DOC_WORKFLOW_V4.md Phase 7 'Documentation' section:");
             for (String issue : plateCommentIssues) {
                 if (issue.contains("Missing Algorithm section")) {
                     recommendations.add("1. Add Algorithm section with numbered steps describing operations (validation, function calls, error handling)");
@@ -11002,7 +11002,7 @@ public class GhidraMCPPlugin extends Plugin {
 
         // Hungarian Notation Violations
         if (!hungarianViolations.isEmpty()) {
-            recommendations.add("HUNGARIAN NOTATION VIOLATIONS - Follow FUNCTION_DOC_WORKFLOW_V2.md 'Hungarian Notation Type System' section:");
+            recommendations.add("HUNGARIAN NOTATION VIOLATIONS - Follow FUNCTION_DOC_WORKFLOW_V4.md Phase 5 'Variables' and docs/HUNGARIAN_NOTATION.md:");
             recommendations.add("1. Verify type-to-prefix mapping matches Ghidra type:");
             recommendations.add("   - byte -> b/by | char -> c/ch | bool -> f | short -> n/s | ushort -> w");
             recommendations.add("   - int -> n/i | uint -> dw | long -> l | ulong -> dw");
@@ -11017,7 +11017,7 @@ public class GhidraMCPPlugin extends Plugin {
 
         // Type Quality Issues
         if (!typeQualityIssues.isEmpty()) {
-            recommendations.add("TYPE QUALITY ISSUES - Follow FUNCTION_DOC_WORKFLOW_V2.md 'Structure Identification' section:");
+            recommendations.add("TYPE QUALITY ISSUES - Follow FUNCTION_DOC_WORKFLOW_V4.md Phase 3 'Structures' section:");
             for (String issue : typeQualityIssues) {
                 if (issue.contains("Generic void*")) {
                     recommendations.add("1. Replace generic void* parameters with specific structure types using set_function_prototype()");
@@ -11048,7 +11048,7 @@ public class GhidraMCPPlugin extends Plugin {
 
         // General Workflow Guidance
         if (completenessScore < 100.0) {
-            recommendations.add("COMPLETE WORKFLOW (FUNCTION_DOC_WORKFLOW_V2.md):");
+            recommendations.add("COMPLETE WORKFLOW (FUNCTION_DOC_WORKFLOW_V4.md):");
             recommendations.add("1. Initialization: Use analyze_function_complete() to gather decompiled code, xrefs, callees, callers, disassembly, variables");
             recommendations.add("2. Undefined Type Audit: Check BOTH decompiled code AND disassembly (get_disassembly()) for all undefined types");
             recommendations.add("3. Structure Identification: Create structures BEFORE renaming (create_struct, apply_data_type)");
