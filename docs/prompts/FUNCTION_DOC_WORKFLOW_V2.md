@@ -4,7 +4,7 @@ You are assisting with reverse engineering binary code in Ghidra. Your task is t
 
 ## Execution Guidelines
 
-Use MCP tools in this sequence: rename_function_by_address, set_function_prototype, batch_create_labels, rename_variables (iterating as needed), set_plate_comment, and batch_set_comments. Verify changes after each step. For connection timeouts, retry once then switch to smaller batches. Work efficiently without excessive status output. Do not create or edit files on the filesystem. Apply all changes directly in Ghidra using MCP tools. Allow up to 3 retry attempts for network timeouts before reporting failure.
+Use MCP tools in this sequence: rename_function_by_address, set_function_prototype, batch_create_labels, rename_variables (iterating as needed), set_plate_comment, and batch_set_comments. For connection timeouts, retry once then switch to smaller batches. Work efficiently without excessive status output. Do not create or edit files on the filesystem. Apply all changes directly in Ghidra using MCP tools. Allow up to 3 retry attempts for network timeouts before reporting failure.
 
 ## Initialization and Analysis
 
@@ -148,6 +148,14 @@ Identify and rename ALL global data items with DAT_ or s_* prefixes. Use list_da
 
 Do not leave any DAT_* or s_* globals in the function documentation.
 
+**Global Struct Checklist** (for globals that point to structured data):
+- Identify the pointed-to layout: use analyze_data_region, usage patterns, and cross-references to infer fields and stride
+- Create or select the struct: create_struct if missing, or reuse an existing matching struct
+- Apply types at both levels: set the struct type on the global target, and apply the pointer-to-struct type on the global symbol
+- Rename with ownership clarity: g_pStructName (pointer), g_StructName (by value), g_apStructName (array) as appropriate
+- Document ownership/lifetime in plate comment: who allocates/frees, validity window, and mutability
+- Add inline comments where the global is used to clarify key fields or invariants
+
 **API/Ordinal Function Investigation**: For each external call (imported, ordinal, or external function):
 1. Identify the called function name or ordinal number
 2. Document known behavior: what does this API do? Check docs/KNOWN_ORDINALS.md for ordinal mappings
@@ -180,7 +188,7 @@ For structure layouts, use table format and create struct definitions with creat
 
 ## Algorithm Verification
 
-After creating plate comment with numbered steps, immediately verify each step against decompiled code and assembly for logical correctness. For code like if ((flags & 0x80) == 0) return early, verify whether flag being set or clear triggers early return—documenting backwards misrepresents behavior. Create verification pass confirming each step matches actual code. Pay attention to bitwise operations, conditional logic, early returns where semantic meaning can invert. Create explicit algorithm-to-code mapping connecting numbered steps to specific lines/addresses implementing them. Include as inline comments: "Algorithm Step 3: Check buffer exhausted and refill". This bidirectional mapping ensures readers trace from description to implementation and forces verification that every step has code and every code block has step. If code doesn't map to any step, add step or determine it's edge case for Special Cases section.
+After creating plate comment with numbered steps, review the steps for logical correctness and ensure they match the code and assembly. Focus on mapping the algorithm steps to the code, but avoid excessive verification or mapping that increases token usage. If code doesn't map to any step, add a step or determine it's an edge case for Special Cases section.
 
 ## Inline Comments
 
@@ -190,19 +198,18 @@ Disassembly comments (EOL_COMMENT) appear at assembly line end without disruptin
 
 ## Post-Documentation Checklist
 
-Before marking complete, verify:
-- Function classification documented (Leaf/Worker/Thunk/Initialization/Cleanup/Callback/Public API/Internal)
-- Caller analysis completed: documented diversity of callers and parameter patterns
-- Control flow map verified: all paths from entry to exit documented, loops analyzed with bounds verified
-- Decompiler discrepancies noted in plate comment where assembly differs from decompiler output
-- Memory model documented: allocation, ownership, lifetime semantics, stack frame layout
-- All API/ordinal calls researched and commented with behavior and parameter semantics
-- No DAT_* or s_* globals remain (all renamed with Hungarian notation)
+Before marking complete, ensure:
+- Function classification is documented
+- Caller analysis is completed
+- Control flow map is created
+- Decompiler discrepancies are noted in the plate comment
+- Memory model is documented
+- All API/ordinal calls are commented
+- No DAT_* or s_* globals remain (all renamed)
 - All variables have proper types set and Hungarian notation applied
-- Plate comment includes Algorithm section with all steps verified against code
-- Orphaned functions detected: examine code after RET instructions and check get_xrefs_to for undiscovered functions; use create_function if found
-- Inline comments added for complex logic and all ordinal calls
-- No discrepancies remain between documented behavior and actual code
+- Plate comment includes an Algorithm section
+- Orphaned functions are detected and handled
+- Inline comments are added for complex logic and ordinal calls
 
 ## Output Format
 

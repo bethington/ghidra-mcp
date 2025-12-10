@@ -14,6 +14,8 @@ param(
     [switch]$IncludeThunks,
     [switch]$IncludeExternals,
     [switch]$Preview,
+    [switch]$RefreshAll,
+    [string]$RefreshOutput = "",
     [switch]$Help
 )
 
@@ -45,6 +47,8 @@ OPTIONS:
     -IncludeThunks        Include thunk functions (excluded by default)
     -IncludeExternals     Include external/imported function pointers (excluded by default)
     -Preview              Show preview without writing file
+    -RefreshAll           Bypass FunctionsTodo.txt and evaluate completeness for ALL functions directly from Ghidra
+    -RefreshOutput <file> Output file for -RefreshAll results (default: console output, supports .json or .csv extension)
     -Help                 Show this help message
 
 EXAMPLES:
@@ -62,6 +66,9 @@ EXAMPLES:
     .\functions-extract.ps1 -ExcludeLibraryFunctions
     .\functions-extract.ps1 -IncludeOnlyLibraryFunctions
     .\functions-extract.ps1 -IncludeThunks -IncludeExternals
+    .\functions-extract.ps1 -RefreshAll
+    .\functions-extract.ps1 -RefreshAll -RefreshOutput completeness-report.json
+    .\functions-extract.ps1 -RefreshAll -RefreshOutput completeness-report.csv
 
 DESCRIPTION:
     Extracts functions from Ghidra using REST API calls for the specified program.
@@ -74,6 +81,8 @@ DESCRIPTION:
     Use -IncludeOnlyLibraryFunctions to include ONLY library functions (starting with _, __, or ___).
     Use -IncludeThunks to include thunk functions (jump stubs to other functions).
     Use -IncludeExternals to include external/imported function pointers.
+    Use -RefreshAll to bypass FunctionsTodo.txt and evaluate completeness for all functions directly from Ghidra.
+    Use -RefreshOutput with -RefreshAll to save results to a JSON or CSV file.
     Functions are formatted as "[ ] FUN_035b14f0 @ 035b14f0" or "[ ] Ordinal_123 @ 035b14f0" for todo tracking.
 "@
     exit 0
@@ -100,6 +109,262 @@ if ($ExcludeLibraryFunctions -and $IncludeOnlyLibraryFunctions) {
     Write-Host "ERROR: Cannot specify both -ExcludeLibraryFunctions and -IncludeOnlyLibraryFunctions" -ForegroundColor Red
     Write-Host "Use -ExcludeLibraryFunctions to exclude library functions, or -IncludeOnlyLibraryFunctions to include only library functions." -ForegroundColor Yellow
     exit 1
+}
+
+# === REFRESH ALL MODE ===
+# Bypass FunctionsTodo.txt and evaluate completeness for all functions directly from Ghidra
+if ($RefreshAll) {
+    Write-Host "GHIDRA FUNCTION COMPLETENESS SCAN - REFRESH ALL MODE" -ForegroundColor Magenta
+    Write-Host "=====================================================" -ForegroundColor Magenta
+    Write-Host "Ghidra URL: $GhidraUrl"
+    Write-Host "Scanning ALL functions directly from Ghidra (bypassing FunctionsTodo.txt)" -ForegroundColor Cyan
+    Write-Host ""
+    
+    $listApiUrl = "$GhidraUrl/list_functions_enhanced"
+    $completenessApiUrl = "$GhidraUrl/analyze_function_completeness"
+    
+    $allResults = @()
+    $offset = 0
+    $totalProcessed = 0
+    $scoreDistribution = @{
+        "100" = 0
+        "90-99" = 0
+        "80-89" = 0
+        "70-79" = 0
+        "60-69" = 0
+        "50-59" = 0
+        "40-49" = 0
+        "30-39" = 0
+        "20-29" = 0
+        "10-19" = 0
+        "0-9" = 0
+    }
+    
+    try {
+        # First, get all functions
+        Write-Host "Fetching all functions from Ghidra..." -ForegroundColor Yellow
+        $allFunctions = @()
+        
+        do {
+            $listUrl = "$listApiUrl`?offset=$offset&limit=$BatchSize"
+            $response = Invoke-RestMethod -Uri $listUrl -Method GET -TimeoutSec 30
+            
+            if ($response -and $response.functions) {
+                $allFunctions += $response.functions
+                $offset += $response.functions.Count
+                Write-Host "  Fetched $($allFunctions.Count) functions..." -ForegroundColor DarkGray
+            }
+        } while ($response -and $response.functions -and $response.functions.Count -eq $BatchSize)
+        
+        Write-Host "Total functions found: $($allFunctions.Count)" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "Evaluating completeness for each function..." -ForegroundColor Yellow
+        Write-Host ""
+        
+        $startTime = Get-Date
+        
+        foreach ($func in $allFunctions) {
+            $funcName = $func.name
+            $address = $func.address
+            
+            # Skip thunks and externals by default (like normal mode)
+            if (-not $IncludeThunks -and $func.is_thunk) {
+                continue
+            }
+            if (-not $IncludeExternals -and $func.is_external) {
+                continue
+            }
+            
+            try {
+                $completenessUrl = "$completenessApiUrl`?function_address=0x$address"
+                $completenessResponse = Invoke-RestMethod -Uri $completenessUrl -Method GET -TimeoutSec 10
+                
+                $score = 0
+                $hasCustomName = $false
+                $hasPrototype = $false
+                $hasPlateComment = $false
+                $undefinedVars = @()
+                $recommendations = @()
+                
+                if ($completenessResponse) {
+                    $score = [int]$completenessResponse.completeness_score
+                    $hasCustomName = $completenessResponse.has_custom_name
+                    $hasPrototype = $completenessResponse.has_prototype
+                    $hasPlateComment = $completenessResponse.has_plate_comment
+                    $undefinedVars = $completenessResponse.undefined_variables
+                    $recommendations = $completenessResponse.recommendations
+                }
+                
+                # Update score distribution
+                if ($score -eq 100) { $scoreDistribution["100"]++ }
+                elseif ($score -ge 90) { $scoreDistribution["90-99"]++ }
+                elseif ($score -ge 80) { $scoreDistribution["80-89"]++ }
+                elseif ($score -ge 70) { $scoreDistribution["70-79"]++ }
+                elseif ($score -ge 60) { $scoreDistribution["60-69"]++ }
+                elseif ($score -ge 50) { $scoreDistribution["50-59"]++ }
+                elseif ($score -ge 40) { $scoreDistribution["40-49"]++ }
+                elseif ($score -ge 30) { $scoreDistribution["30-39"]++ }
+                elseif ($score -ge 20) { $scoreDistribution["20-29"]++ }
+                elseif ($score -ge 10) { $scoreDistribution["10-19"]++ }
+                else { $scoreDistribution["0-9"]++ }
+                
+                $result = [PSCustomObject]@{
+                    Name = $funcName
+                    Address = "0x$address"
+                    Score = $score
+                    HasCustomName = $hasCustomName
+                    HasPrototype = $hasPrototype
+                    HasPlateComment = $hasPlateComment
+                    UndefinedVarsCount = $undefinedVars.Count
+                    RecommendationsCount = $recommendations.Count
+                    UndefinedVars = ($undefinedVars -join "; ")
+                    Recommendations = ($recommendations -join "; ")
+                }
+                
+                $allResults += $result
+                $totalProcessed++
+                
+                # Progress indicator
+                if ($totalProcessed % 50 -eq 0) {
+                    $elapsed = (Get-Date) - $startTime
+                    $rate = $totalProcessed / $elapsed.TotalSeconds
+                    $remaining = ($allFunctions.Count - $totalProcessed) / $rate
+                    Write-Host "  Processed $totalProcessed / $($allFunctions.Count) functions (ETA: $([int]$remaining)s)" -ForegroundColor DarkGray
+                }
+                
+                # Small delay to avoid overwhelming the server
+                Start-Sleep -Milliseconds 50
+                
+            } catch {
+                Write-Host "  Warning: Could not check completeness for $funcName : $($_.Exception.Message)" -ForegroundColor Yellow
+                
+                $result = [PSCustomObject]@{
+                    Name = $funcName
+                    Address = "0x$address"
+                    Score = -1
+                    HasCustomName = $false
+                    HasPrototype = $false
+                    HasPlateComment = $false
+                    UndefinedVarsCount = 0
+                    RecommendationsCount = 0
+                    UndefinedVars = "ERROR"
+                    Recommendations = $_.Exception.Message
+                }
+                
+                $allResults += $result
+                $totalProcessed++
+            }
+        }
+        
+        $endTime = Get-Date
+        $totalTime = $endTime - $startTime
+        
+        Write-Host ""
+        Write-Host "=============================================" -ForegroundColor Green
+        Write-Host "COMPLETENESS SCAN COMPLETE" -ForegroundColor Green
+        Write-Host "=============================================" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "Total functions scanned: $totalProcessed" -ForegroundColor Cyan
+        Write-Host "Total time: $([int]$totalTime.TotalMinutes)m $([int]($totalTime.TotalSeconds % 60))s" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "SCORE DISTRIBUTION:" -ForegroundColor Yellow
+        Write-Host "  100:    $($scoreDistribution["100"]) functions" -ForegroundColor Green
+        Write-Host "  90-99:  $($scoreDistribution["90-99"]) functions" -ForegroundColor Green
+        Write-Host "  80-89:  $($scoreDistribution["80-89"]) functions" -ForegroundColor DarkGreen
+        Write-Host "  70-79:  $($scoreDistribution["70-79"]) functions" -ForegroundColor Yellow
+        Write-Host "  60-69:  $($scoreDistribution["60-69"]) functions" -ForegroundColor Yellow
+        Write-Host "  50-59:  $($scoreDistribution["50-59"]) functions" -ForegroundColor DarkYellow
+        Write-Host "  40-49:  $($scoreDistribution["40-49"]) functions" -ForegroundColor Red
+        Write-Host "  30-39:  $($scoreDistribution["30-39"]) functions" -ForegroundColor Red
+        Write-Host "  20-29:  $($scoreDistribution["20-29"]) functions" -ForegroundColor DarkRed
+        Write-Host "  10-19:  $($scoreDistribution["10-19"]) functions" -ForegroundColor DarkRed
+        Write-Host "  0-9:    $($scoreDistribution["0-9"]) functions" -ForegroundColor DarkRed
+        Write-Host ""
+        
+        # Calculate summary stats
+        $avgScore = ($allResults | Where-Object { $_.Score -ge 0 } | Measure-Object -Property Score -Average).Average
+        $wellDocumented = ($allResults | Where-Object { $_.Score -ge 80 }).Count
+        $needsWork = ($allResults | Where-Object { $_.Score -ge 0 -and $_.Score -lt 80 }).Count
+        
+        Write-Host "SUMMARY:" -ForegroundColor Yellow
+        Write-Host "  Average completeness score: $([math]::Round($avgScore, 1))%" -ForegroundColor Cyan
+        Write-Host "  Well-documented (>= 80): $wellDocumented functions" -ForegroundColor Green
+        Write-Host "  Needs work (< 80): $needsWork functions" -ForegroundColor Yellow
+        Write-Host ""
+        
+        # Output to file if requested
+        if (-not [string]::IsNullOrEmpty($RefreshOutput)) {
+            $ext = [System.IO.Path]::GetExtension($RefreshOutput).ToLower()
+            
+            if ($ext -eq ".json") {
+                $jsonOutput = @{
+                    scan_date = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+                    total_functions = $totalProcessed
+                    average_score = [math]::Round($avgScore, 1)
+                    well_documented_count = $wellDocumented
+                    needs_work_count = $needsWork
+                    score_distribution = $scoreDistribution
+                    functions = $allResults
+                }
+                $jsonOutput | ConvertTo-Json -Depth 5 | Out-File -FilePath $RefreshOutput -Encoding UTF8
+                Write-Host "Results written to: $RefreshOutput (JSON format)" -ForegroundColor Green
+            } elseif ($ext -eq ".csv") {
+                $allResults | Export-Csv -Path $RefreshOutput -NoTypeInformation -Encoding UTF8
+                Write-Host "Results written to: $RefreshOutput (CSV format)" -ForegroundColor Green
+            } else {
+                # Plain text format
+                $textOutput = @(
+                    "# Ghidra Function Completeness Report"
+                    "# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+                    "# Total functions: $totalProcessed"
+                    "# Average score: $([math]::Round($avgScore, 1))%"
+                    "#"
+                    "# Score Distribution:"
+                    "#   100:    $($scoreDistribution["100"])"
+                    "#   90-99:  $($scoreDistribution["90-99"])"
+                    "#   80-89:  $($scoreDistribution["80-89"])"
+                    "#   70-79:  $($scoreDistribution["70-79"])"
+                    "#   60-69:  $($scoreDistribution["60-69"])"
+                    "#   50-59:  $($scoreDistribution["50-59"])"
+                    "#   40-49:  $($scoreDistribution["40-49"])"
+                    "#   30-39:  $($scoreDistribution["30-39"])"
+                    "#   20-29:  $($scoreDistribution["20-29"])"
+                    "#   10-19:  $($scoreDistribution["10-19"])"
+                    "#   0-9:    $($scoreDistribution["0-9"])"
+                    "#"
+                    ""
+                    "# Functions sorted by score (lowest first):"
+                    ""
+                )
+                
+                $sortedResults = $allResults | Sort-Object Score
+                foreach ($r in $sortedResults) {
+                    $textOutput += "$($r.Name) @ $($r.Address) - Score: $($r.Score)% | CustomName: $($r.HasCustomName) | Prototype: $($r.HasPrototype) | PlateComment: $($r.HasPlateComment) | UndefinedVars: $($r.UndefinedVarsCount)"
+                }
+                
+                $textOutput | Out-File -FilePath $RefreshOutput -Encoding UTF8
+                Write-Host "Results written to: $RefreshOutput (text format)" -ForegroundColor Green
+            }
+        } else {
+            # Console output - show lowest scoring functions
+            Write-Host "LOWEST SCORING FUNCTIONS (need most work):" -ForegroundColor Yellow
+            $lowestScoring = $allResults | Where-Object { $_.Score -ge 0 } | Sort-Object Score | Select-Object -First 20
+            foreach ($r in $lowestScoring) {
+                $scoreColor = if ($r.Score -lt 30) { "Red" } elseif ($r.Score -lt 50) { "DarkYellow" } else { "Yellow" }
+                Write-Host "  $($r.Name) @ $($r.Address) - Score: $($r.Score)%" -ForegroundColor $scoreColor
+            }
+            Write-Host ""
+            Write-Host "Use -RefreshOutput <file.json|file.csv> to save full results to a file" -ForegroundColor DarkGray
+        }
+        
+    } catch {
+        Write-Host "ERROR: Failed to scan functions: $($_.Exception.Message)" -ForegroundColor Red
+        if ($_.Exception.InnerException) {
+            Write-Host "Inner Exception: $($_.Exception.InnerException.Message)" -ForegroundColor Red
+        }
+    }
+    
+    exit 0
 }
 
 Write-Host "GHIDRA FUNCTION EXTRACTOR - REST API VERSION" -ForegroundColor Green
