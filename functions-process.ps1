@@ -466,6 +466,57 @@ function Invoke-ReEvaluate {
     Write-Host "Detailed report saved to: $reportFile" -ForegroundColor Cyan
 }
 
+function Get-McpErrors {
+    param([string]$output)
+    
+    $errors = @()
+    
+    # Common MCP error patterns
+    $errorPatterns = @(
+        @{ Pattern = '(?i)error[:\s]+.*?(?:failed|unable|cannot|could not|timeout|timed out|connection refused|not found|invalid|rejected).*?(?:\n|$)'; Type = 'General Error' },
+        @{ Pattern = '(?i)mcp_ghidra_\w+.*?(?:failed|error|exception).*?(?:\n|$)'; Type = 'MCP Tool Failure' },
+        @{ Pattern = '(?i)GhidraValidationError[:\s]+(.+?)(?:\n|$)'; Type = 'Validation Error' },
+        @{ Pattern = '(?i)connection.*?(?:refused|failed|timeout|error)'; Type = 'Connection Error' },
+        @{ Pattern = '(?i)(?:404|500|502|503)\s*(?:error|not found|internal server)'; Type = 'HTTP Error' },
+        @{ Pattern = '(?i)variable.*?not found'; Type = 'Variable Not Found' },
+        @{ Pattern = '(?i)function.*?not found'; Type = 'Function Not Found' },
+        @{ Pattern = '(?i)(?:rename|set_type|set_prototype).*?failed'; Type = 'Rename/Type Failure' },
+        @{ Pattern = '(?i)timeout.*?(?:waiting|exceeded|expired)'; Type = 'Timeout' },
+        @{ Pattern = '(?i)(?:invalid|malformed).*?(?:address|parameter|argument|type)'; Type = 'Invalid Parameter' },
+        @{ Pattern = '(?i)tool.*?(?:call|invocation).*?(?:failed|error)'; Type = 'Tool Call Error' },
+        @{ Pattern = '(?i)exception[:\s]+\w+Exception'; Type = 'Exception' },
+        @{ Pattern = '(?i)(?:no|cannot find).*?(?:data type|struct|function|symbol)'; Type = 'Symbol Not Found' }
+    )
+    
+    foreach ($ep in $errorPatterns) {
+        $matches = [regex]::Matches($output, $ep.Pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        foreach ($m in $matches) {
+            $errorText = $m.Value.Trim()
+            # Truncate long error messages
+            if ($errorText.Length -gt 150) {
+                $errorText = $errorText.Substring(0, 147) + "..."
+            }
+            $errors += @{
+                Type = $ep.Type
+                Message = $errorText
+            }
+        }
+    }
+    
+    # Deduplicate errors by message
+    $uniqueErrors = @()
+    $seenMessages = @{}
+    foreach ($err in $errors) {
+        $key = $err.Message.ToLower()
+        if (-not $seenMessages.ContainsKey($key)) {
+            $seenMessages[$key] = $true
+            $uniqueErrors += $err
+        }
+    }
+    
+    return $uniqueErrors
+}
+
 function Test-WorkflowCompliance {
     param([string]$output, [string]$funcName, [float]$initialScore)
     
@@ -842,6 +893,16 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
             $outputFile = Join-Path $outputDir "$newFuncName-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
             $output | Out-File $outputFile -Encoding UTF8
             Write-WorkerHost "  Output saved to: $outputFile" "Gray"
+            
+            # Check for MCP errors in the output
+            $mcpErrors = Get-McpErrors -output $outputStr
+            if ($mcpErrors.Count -gt 0) {
+                Write-WorkerHost "  MCP ERRORS DETECTED ($($mcpErrors.Count)):" "Red"
+                foreach ($err in $mcpErrors) {
+                    Write-WorkerHost "    [$($err.Type)] $($err.Message)" "Red"
+                    Write-Log "MCP Error for ${funcName}: [$($err.Type)] $($err.Message)" "ERROR"
+                }
+            }
             
             $complianceIssues = Test-WorkflowCompliance -output $output -funcName $funcName -initialScore $score
             if ($complianceIssues.Count -gt 0) {
