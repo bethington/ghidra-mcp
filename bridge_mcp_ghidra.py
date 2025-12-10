@@ -829,18 +829,23 @@ def make_request(url: str, method: str = "GET", params: dict = None, data: str =
 
 
 @mcp.tool()
-def list_functions(offset: int = 0, limit: int = 100) -> list:
+def list_functions(offset: int = 0, limit: int = 100, program: str = None) -> list:
     """
     List all function names in the program with pagination.
     
     Args:
         offset: Pagination offset for starting position (default: 0)
         limit: Maximum number of functions to return (default: 100)
+        program: Optional program name to query (e.g., "D2Client.dll").
+                 If not specified, uses the currently active program.
         
     Returns:
         List of function names with pagination information
     """
-    return safe_get("list_functions", {"offset": offset, "limit": limit})
+    params = {"offset": offset, "limit": limit}
+    if program:
+        params["program"] = program
+    return safe_get("list_functions", params)
 
 @mcp.tool()
 def list_classes(offset: int = 0, limit: int = 100) -> list:
@@ -861,7 +866,7 @@ def list_classes(offset: int = 0, limit: int = 100) -> list:
 # This would require rebuilding and redeploying the Ghidra plugin.
 
 @mcp.tool()
-def decompile_function(name: str = None, address: str = None, force: bool = False, timeout: int = None) -> str:
+def decompile_function(name: str = None, address: str = None, force: bool = False, timeout: int = None, program: str = None) -> str:
     """
     Decompile a function by name or address and return the decompiled C code.
 
@@ -880,6 +885,8 @@ def decompile_function(name: str = None, address: str = None, force: bool = Fals
         address: Function address in hex format (e.g., "0x6fb6aef0") - alternative to name
         force: Force fresh decompilation, clearing cache and re-analyzing (default: False)
         timeout: Optional timeout in seconds (default: 45s, use higher for complex functions)
+        program: Optional program name to query (e.g., "D2Client.dll").
+                 If not specified, uses the currently active program.
 
     Returns:
         Decompiled C code as a string
@@ -900,6 +907,9 @@ def decompile_function(name: str = None, address: str = None, force: bool = Fals
         # Use custom timeout for very large function
         code = decompile_function(name="ComplexFunction", timeout=120)
 
+        # Decompile from a specific program (cross-binary query)
+        code = decompile_function(address="0x6fb00000", program="D2Common.dll")
+
     Performance Notes:
         - Cached calls: ~10-50ms
         - Fresh decompilation: ~100-500ms (depends on function complexity)
@@ -919,7 +929,10 @@ def decompile_function(name: str = None, address: str = None, force: bool = Fals
     try:
         if name:
             # Look up function address by name first
-            search_result = safe_get("search_functions", {"query": name, "offset": 0, "limit": 10})
+            search_params = {"query": name, "offset": 0, "limit": 10}
+            if program:
+                search_params["program"] = program
+            search_result = safe_get("search_functions", search_params)
             func_address = None
             for line in search_result:
                 # Parse "FunctionName @ 0x12345678" format
@@ -935,7 +948,10 @@ def decompile_function(name: str = None, address: str = None, force: bool = Fals
             if force:
                 result = safe_post("force_decompile", {"function_address": func_address})
             else:
-                result = safe_get("decompile_function", {"address": func_address})
+                params = {"address": func_address}
+                if program:
+                    params["program"] = program
+                result = safe_get("decompile_function", params)
         else:
             address = sanitize_address(address)
             if not validate_hex_address(address):
@@ -945,7 +961,10 @@ def decompile_function(name: str = None, address: str = None, force: bool = Fals
                 result = safe_post("force_decompile", {"function_address": address})
             else:
                 # Use GET for cached decompilation (faster)
-                result = safe_get("decompile_function", {"address": address})
+                params = {"address": address}
+                if program:
+                    params["program"] = program
+                result = safe_get("decompile_function", params)
         
         # Convert list result to string if needed (safe_get returns list)
         if isinstance(result, list):
@@ -1416,7 +1435,7 @@ def list_data_items_by_xrefs(offset: int = 0, limit: int = 100, format: str = "j
     return result
 
 @mcp.tool()
-def search_functions_by_name(query: str, offset: int = 0, limit: int = 100) -> list:
+def search_functions_by_name(query: str, offset: int = 0, limit: int = 100, program: str = None) -> list:
     """
     Search for functions whose name contains the given substring.
 
@@ -1424,13 +1443,18 @@ def search_functions_by_name(query: str, offset: int = 0, limit: int = 100) -> l
         query: Search string to match against function names
         offset: Pagination offset for starting position (default: 0)
         limit: Maximum number of results to return (default: 100)
+        program: Optional program name to query (e.g., "D2Client.dll").
+                 If not specified, uses the currently active program.
 
     Returns:
         List of matching functions with their names and addresses
     """
     if not query:
         raise GhidraValidationError("query string is required")
-    return safe_get("search_functions", {"query": query, "offset": offset, "limit": limit})
+    params = {"query": query, "offset": offset, "limit": limit}
+    if program:
+        params["program"] = program
+    return safe_get("search_functions", params)
 
 @mcp.tool()
 def rename_variables(
@@ -1694,12 +1718,14 @@ def get_current_selection() -> dict:
     return result
 
 @mcp.tool()
-def disassemble_function(address: str) -> list:
+def disassemble_function(address: str, program: str = None) -> list:
     """
     Get assembly code (address: instruction; comment) for a function.
 
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
+        program: Optional program name to query (e.g., "D2Client.dll").
+                 If not specified, uses the currently active program.
 
     Returns:
         List of assembly instructions with addresses and comments
@@ -1707,7 +1733,10 @@ def disassemble_function(address: str) -> list:
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
 
-    return safe_get("disassemble_function", {"address": address})
+    params = {"address": address}
+    if program:
+        params["program"] = program
+    return safe_get("disassemble_function", params)
 
 @mcp.tool()
 def set_decompiler_comment(address: str, comment: str) -> str:
@@ -2147,7 +2176,7 @@ def list_scripts(filter: str = "") -> str:
 
 
 @mcp.tool()
-def get_xrefs_to(address: str, offset: int = 0, limit: int = 100) -> list:
+def get_xrefs_to(address: str, offset: int = 0, limit: int = 100, program: str = None) -> list:
     """
     Get all references to the specified address (xref to).
     
@@ -2155,6 +2184,8 @@ def get_xrefs_to(address: str, offset: int = 0, limit: int = 100) -> list:
         address: Target address in hex format (e.g. "0x1400010a0")
         offset: Pagination offset (default: 0)
         limit: Maximum number of references to return (default: 100)
+        program: Optional program name to query (e.g., "D2Client.dll").
+                 If not specified, uses the currently active program.
         
     Returns:
         List of references to the specified address
@@ -2162,10 +2193,13 @@ def get_xrefs_to(address: str, offset: int = 0, limit: int = 100) -> list:
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
     
-    return safe_get("get_xrefs_to", {"address": address, "offset": offset, "limit": limit})
+    params = {"address": address, "offset": offset, "limit": limit}
+    if program:
+        params["program"] = program
+    return safe_get("get_xrefs_to", params)
 
 @mcp.tool()
-def get_xrefs_from(address: str, offset: int = 0, limit: int = 100) -> list:
+def get_xrefs_from(address: str, offset: int = 0, limit: int = 100, program: str = None) -> list:
     """
     Get all references from the specified address (xref from).
 
@@ -2173,6 +2207,8 @@ def get_xrefs_from(address: str, offset: int = 0, limit: int = 100) -> list:
         address: Source address in hex format (e.g. "0x1400010a0")
         offset: Pagination offset (default: 0)
         limit: Maximum number of references to return (default: 100)
+        program: Optional program name to query (e.g., "D2Client.dll").
+                 If not specified, uses the currently active program.
 
     Returns:
         List of references from the specified address
@@ -2180,10 +2216,13 @@ def get_xrefs_from(address: str, offset: int = 0, limit: int = 100) -> list:
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
 
-    return safe_get("get_xrefs_from", {"address": address, "offset": offset, "limit": limit})
+    params = {"address": address, "offset": offset, "limit": limit}
+    if program:
+        params["program"] = program
+    return safe_get("get_xrefs_from", params)
 
 @mcp.tool()
-def get_function_xrefs(name: str, offset: int = 0, limit: int = 100) -> list:
+def get_function_xrefs(name: str, offset: int = 0, limit: int = 100, program: str = None) -> list:
     """
     Get all references to the specified function by name.
     
@@ -2191,11 +2230,16 @@ def get_function_xrefs(name: str, offset: int = 0, limit: int = 100) -> list:
         name: Function name to search for
         offset: Pagination offset (default: 0)
         limit: Maximum number of references to return (default: 100)
+        program: Optional program name to query (e.g., "D2Client.dll").
+                 If not specified, uses the currently active program.
         
     Returns:
         List of references to the specified function
     """
-    return safe_get("get_function_xrefs", {"name": name, "offset": offset, "limit": limit})
+    params = {"name": name, "offset": offset, "limit": limit}
+    if program:
+        params["program"] = program
+    return safe_get("get_function_xrefs", params)
 
 @mcp.tool()
 def list_strings(offset: int = 0, limit: int = 100, filter: str = None) -> list:
@@ -3850,7 +3894,8 @@ def search_functions_enhanced(
     regex: bool = False,
     sort_by: str = "address",
     offset: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    program: str = None
 ) -> str:
     """
     Enhanced function search with filtering and sorting (v1.6.0).
@@ -3868,6 +3913,8 @@ def search_functions_enhanced(
         sort_by: Sort order: "address"|"name"|"xref_count" (default: "address")
         offset: Pagination offset
         limit: Maximum results to return
+        program: Optional program name to query (e.g., "D2Client.dll").
+                 If not specified, uses the currently active program.
 
     Returns:
         JSON with search results:
@@ -3903,7 +3950,8 @@ def search_functions_enhanced(
         "regex": regex,
         "sort_by": sort_by,
         "offset": offset,
-        "limit": limit
+        "limit": limit,
+        "program": program
     }
     # Remove None values
     params = {k: v for k, v in params.items() if v is not None}
