@@ -8,6 +8,14 @@ Use `list_functions` or `search_functions_enhanced` to retrieve functions, check
 
 **PascalCase Required**: All custom function names must be PascalCase (e.g., `ProcessPlayerSlots`, `ValidateEntityState`, `InitializeGameResources`).
 
+**Unprocessed/Default Names**: These are valid placeholders awaiting documentation:
+- `FUN_*` - Ghidra's default function naming (e.g., `FUN_6fc80a40`)
+- `Ordinal_*` - DLL ordinal exports (e.g., `Ordinal_10025`)
+- `thunk_*` - Thunk/trampoline functions
+- `switch_*` - Switch table handlers
+- `entry` - Program entry point
+- These do NOT need renaming during validation—they are processed separately
+
 **Library/Runtime Functions**: Standard library and compiler-generated functions are valid as-is:
 - Underscore-prefixed: `_malloc`, `_free`, `_memcpy`, `_sprintf`
 - Double underscore: `__aullrem`, `__allmul`, `__ftol2`, `__divdi3`
