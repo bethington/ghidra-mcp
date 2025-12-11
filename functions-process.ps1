@@ -31,6 +31,38 @@ $FullModelName = $Model
 # The CLI accumulates files in ~/.claude/projects and ~/.claude/todos causing EMFILE errors
 $ReuseSession = $SessionReuse
 
+# Claude CLI session directory cleanup function
+# Removes accumulated files that cause EMFILE (too many open files) errors
+function Clear-ClaudeSessionFiles {
+    param([switch]$Quiet)
+    
+    $claudeDir = Join-Path $env:USERPROFILE ".claude"
+    $dirsToClean = @("projects", "todos")
+    $totalRemoved = 0
+    
+    foreach ($subdir in $dirsToClean) {
+        $targetPath = Join-Path $claudeDir $subdir
+        if (Test-Path $targetPath) {
+            try {
+                $items = Get-ChildItem $targetPath -ErrorAction SilentlyContinue
+                $count = $items.Count
+                if ($count -gt 0) {
+                    Remove-Item "$targetPath\*" -Recurse -Force -ErrorAction SilentlyContinue
+                    $totalRemoved += $count
+                }
+            } catch {
+                # Ignore cleanup errors
+            }
+        }
+    }
+    
+    if (-not $Quiet -and $totalRemoved -gt 0) {
+        Write-Host "Cleaned $totalRemoved items from ~/.claude/ (prevents EMFILE errors)" -ForegroundColor Gray
+    }
+    
+    return $totalRemoved
+}
+
 # Constants
 $STALE_LOCK_MINUTES = 30
 $MAX_PROMPT_BYTES = 180000
@@ -1199,6 +1231,11 @@ function Start-Coordinator {
     Write-Host "Workers: $Workers" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
     
+    # Clean Claude CLI session files to prevent EMFILE errors when using --continue
+    if ($ReuseSession) {
+        Clear-ClaudeSessionFiles
+    }
+    
     # Clear stale locks from previous runs
     Clear-StaleLocks -MaxAgeMinutes $STALE_LOCK_MINUTES
     
@@ -1373,6 +1410,10 @@ $sessionModeLog = if ($ReuseSession) { "ReuseSession=ON (reset every $SessionRes
 Write-Log "Worker $WorkerId started with parameters: Reverse=$Reverse, Model=$modelLog, MinScore=$MinScore, MaxScore=$MaxScore, $sessionModeLog, GhidraServer=$GhidraServer"
 
 if ($ReuseSession) {
+    # Clean up Claude CLI files to prevent EMFILE errors (only if running standalone, not from coordinator)
+    if (-not $PSBoundParameters.ContainsKey('WorkerId')) {
+        Clear-ClaudeSessionFiles
+    }
     Write-WorkerHost "Session reuse enabled - workflow prompt sent once, then --continue" "Green"
     Write-WorkerHost "  Session resets every $SessionResetInterval functions" "Gray"
 }
