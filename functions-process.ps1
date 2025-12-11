@@ -20,12 +20,15 @@ param(
     [string]$GhidraServer = "http://127.0.0.1:8089",
     [switch]$ReEvaluate,  # Re-scan functions for completeness without Claude processing
     [switch]$CleanupScripts,  # Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)
-    [bool]$ReuseSession = $true,  # Reuse Claude session to save tokens (use --continue after first call)
+    [switch]$NoSessionReuse,  # Disable session reuse (send full prompt every time)
     [int]$SessionResetInterval = 10  # Reset session every N functions to prevent context overflow
 )
 
 # Model name - CLI accepts simple aliases directly
 $FullModelName = $Model
+
+# Session reuse is ON by default, unless -NoSessionReuse is specified
+$ReuseSession = -not $NoSessionReuse
 
 # Constants
 $STALE_LOCK_MINUTES = 30
@@ -115,7 +118,7 @@ function Show-Help {
     Write-Host "  -Subagent            Use subagent workflow (Opus orchestrator + Haiku subagents)"
     Write-Host "  -ReEvaluate          Re-scan all completed functions for updated scores (no Claude)"
     Write-Host "  -CleanupScripts      Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)"
-    Write-Host "  -ReuseSession <bool> Reuse Claude session to save tokens (default: true)"
+    Write-Host "  -NoSessionReuse      Disable session reuse (send full prompt every time)"
     Write-Host "  -SessionResetInterval <n>  Reset session every N functions (default: 10)"
     Write-Host "  -Help                Show this help"
     Write-Host ""
@@ -153,8 +156,8 @@ function Show-Help {
     Write-Host "  .\functions-process.ps1 -Model sonnet     # Use Sonnet"
     Write-Host "  .\functions-process.ps1 -ReEvaluate       # Re-scan scores without Claude"
     Write-Host "  .\functions-process.ps1 -CleanupScripts   # Remove generated fix scripts"
-    Write-Host "  .\functions-process.ps1 -ReuseSession:`$false  # Disable session reuse"
-    Write-Host "  .\functions-process.ps1 -SessionResetInterval 20  # Reset every 20 funcs"
+    Write-Host "  .\functions-process.ps1 -NoSessionReuse   # Disable session reuse"
+    Write-Host "  .\functions-process.ps1 -SessionResetInterval 20  # Reset session every 20 funcs"
     Write-Host "  .\functions-process.ps1 -GhidraServer http://localhost:8089  # Custom server"
     Write-Host "  .\functions-process.ps1                     # Single worker (original behavior)"
     Write-Host ""
@@ -1216,8 +1219,9 @@ function Start-Coordinator {
     if ($Reverse) { $commonArgs += " -Reverse" }
     if ($SkipValidation) { $commonArgs += " -SkipValidation" }
     if ($Subagent) { $commonArgs += " -Subagent" }
-    if ($ReuseSession) { 
-        $commonArgs += " -ReuseSession"
+    if ($NoSessionReuse) { 
+        $commonArgs += " -NoSessionReuse"
+    } else {
         $commonArgs += " -SessionResetInterval $SessionResetInterval"
     }
     if ($Model) { $commonArgs += " -Model `"$Model`"" }
