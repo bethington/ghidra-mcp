@@ -401,6 +401,40 @@ temp/
 ordinal_fix_log*.txt
 ordinal_fix_log.txt
 
+# =============================================================================
+# GENERATED GHIDRA SCRIPTS (Auto-created during function documentation)
+# =============================================================================
+
+# Address-specific fix/recreate scripts created by Claude during documentation
+# These are one-time use scripts and should not be committed
+# Note: FixFunctionParameters.java and FixFunctionParametersHeadless.java are legitimate scripts
+ghidra_scripts/RecreateFunction*.java
+ghidra_scripts/RecreateFUN_*.java
+ghidra_scripts/RecreateFun*.java
+ghidra_scripts/RecreateFunc*.java
+ghidra_scripts/Recreate_*.java
+ghidra_scripts/FixFunction6*.java
+ghidra_scripts/FixFUN_*.java
+ghidra_scripts/FixFun6*.java
+ghidra_scripts/FixFunc6*.java
+ghidra_scripts/Fix6fc*.java
+ghidra_scripts/CreateFunctionAt*.java
+ghidra_scripts/SimpleDisasm*.java
+ghidra_scripts/SimpleFix*.java
+ghidra_scripts/SimpleRecreate*.java
+ghidra_scripts/AggressiveFix*.java
+ghidra_scripts/ClearAndRecreate*.java
+ghidra_scripts/ExpandFunc*.java
+ghidra_scripts/ExpandFunction*.java
+ghidra_scripts/CheckInstr*.java
+ghidra_scripts/Debug6*.java
+ghidra_scripts/DisassembleAt*.java
+ghidra_scripts/InspectAddress*.java
+ghidra_scripts/InspectListing*.java
+ghidra_scripts/MinimalFix*.java
+ghidra_scripts/QuickFix*.java
+ghidra_scripts/TestSimple.java
+
 
 # =============================================================================
 # FUNCTION HASH INDEX AND PROGRESS TRACKING

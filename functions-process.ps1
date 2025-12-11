@@ -18,7 +18,8 @@ param(
     [switch]$Coordinator,
     [int]$WorkerId = 0,
     [string]$GhidraServer = "http://127.0.0.1:8089",
-    [switch]$ReEvaluate  # Re-scan functions for completeness without Claude processing
+    [switch]$ReEvaluate,  # Re-scan functions for completeness without Claude processing
+    [switch]$CleanupScripts  # Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)
 )
 
 # Model name - CLI accepts simple aliases directly
@@ -107,6 +108,7 @@ function Show-Help {
     Write-Host "  -CompactPrompt       (Deprecated - V4 is already compact, this flag is ignored)"
     Write-Host "  -Subagent            Use subagent workflow (Opus orchestrator + Haiku subagents)"
     Write-Host "  -ReEvaluate          Re-scan all completed functions for updated scores (no Claude)"
+    Write-Host "  -CleanupScripts      Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)"
     Write-Host "  -Help                Show this help"
     Write-Host ""
     Write-Host "RE-EVALUATION MODE:"
@@ -114,6 +116,11 @@ function Show-Help {
     Write-Host "  This is useful after updating the Ghidra plugin with new scoring criteria"
     Write-Host "  No Claude processing occurs - only calls analyze_function_completeness()"
     Write-Host "  Generates a report showing improved, regressed, and unchanged functions"
+    Write-Host ""
+    Write-Host "CLEANUP MODE:"
+    Write-Host "  -CleanupScripts removes auto-generated Ghidra scripts from ghidra_scripts/"
+    Write-Host "  These are address-specific scripts created by Claude to fix problematic functions"
+    Write-Host "  Patterns removed: RecreateFunction*.java, FixFUN_*.java, CreateFunctionAt*.java, etc."
     Write-Host ""
     Write-Host "COST OPTIMIZATION:"
     Write-Host "  V4 workflow is already optimized (~95 lines vs ~228 in V2)"
@@ -134,6 +141,7 @@ function Show-Help {
     Write-Host "  .\functions-process.ps1 -Subagent                    # Opus+Haiku subagent mode"
     Write-Host "  .\functions-process.ps1 -Model sonnet     # Use Sonnet"
     Write-Host "  .\functions-process.ps1 -ReEvaluate       # Re-scan scores without Claude"
+    Write-Host "  .\functions-process.ps1 -CleanupScripts   # Remove generated fix scripts"
     Write-Host "  .\functions-process.ps1 -GhidraServer http://localhost:8089  # Custom server"
     Write-Host "  .\functions-process.ps1                     # Single worker (original behavior)"
     Write-Host ""
@@ -143,6 +151,75 @@ function Show-Help {
     Write-Host "  - Progress is tracked per-worker in separate log files"
     Write-Host "  - Completeness tracking is saved to completeness-tracking.json"
     exit 0
+}
+
+function Invoke-CleanupScripts {
+    <#
+    .SYNOPSIS
+        Remove auto-generated Ghidra scripts created during function documentation.
+    .DESCRIPTION
+        Claude creates address-specific scripts (RecreateFunction*.java, FixFUN_*.java, etc.)
+        when it encounters problematic functions. These are one-time use and can be cleaned up.
+        Note: FixFunctionParameters.java and FixFunctionParametersHeadless.java are preserved.
+    #>
+    
+    $scriptsDir = ".\ghidra_scripts"
+    
+    # Patterns for auto-generated scripts (matches .gitignore patterns)
+    # Note: These patterns specifically target address-suffixed files (e.g., 6fc*, 6fa*)
+    $patterns = @(
+        "RecreateFunction*.java",
+        "RecreateFUN_*.java",
+        "RecreateFun*.java",
+        "RecreateFunc*.java",
+        "Recreate_*.java",
+        "FixFunction6*.java",  # Address-specific only (preserves FixFunctionParameters.java)
+        "FixFUN_*.java",
+        "FixFun6*.java",       # Address-specific only
+        "FixFunc6*.java",      # Address-specific only
+        "Fix6fc*.java",
+        "CreateFunctionAt*.java",
+        "SimpleDisasm*.java",
+        "SimpleFix*.java",
+        "SimpleRecreate*.java",
+        "AggressiveFix*.java",
+        "ClearAndRecreate*.java",
+        "ExpandFunc*.java",
+        "ExpandFunction*.java",
+        "CheckInstr*.java",
+        "Debug6*.java",        # Address-specific debug scripts only
+        "DisassembleAt*.java",
+        "InspectAddress*.java",
+        "InspectListing*.java",
+        "MinimalFix*.java",
+        "QuickFix*.java",
+        "TestSimple.java"
+    )
+    
+    Write-Host "Scanning for auto-generated Ghidra scripts..." -ForegroundColor Cyan
+    
+    $totalRemoved = 0
+    $totalBytes = 0
+    
+    foreach ($pattern in $patterns) {
+        $files = Get-ChildItem -Path $scriptsDir -Filter $pattern -ErrorAction SilentlyContinue
+        foreach ($file in $files) {
+            $totalBytes += $file.Length
+            $totalRemoved++
+            Write-Host "  Removing: $($file.Name)" -ForegroundColor Yellow
+            Remove-Item $file.FullName -Force
+        }
+    }
+    
+    if ($totalRemoved -eq 0) {
+        Write-Host "No auto-generated scripts found to clean up." -ForegroundColor Green
+    } else {
+        $sizeKB = [math]::Round($totalBytes / 1024, 1)
+        Write-Host ""
+        Write-Host "Cleanup complete:" -ForegroundColor Green
+        Write-Host "  Removed: $totalRemoved scripts" -ForegroundColor Green
+        Write-Host "  Freed: $sizeKB KB" -ForegroundColor Green
+    }
 }
 
 function Get-FunctionLockFile {
@@ -1172,6 +1249,12 @@ function Start-Coordinator {
 # ============================================================================
 
 if ($Help) { Show-Help }
+
+# Cleanup mode - remove auto-generated Ghidra scripts
+if ($CleanupScripts) {
+    Invoke-CleanupScripts
+    exit 0
+}
 
 # Re-evaluate mode - scan existing functions without Claude processing
 if ($ReEvaluate) {
