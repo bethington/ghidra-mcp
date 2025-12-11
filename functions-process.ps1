@@ -20,7 +20,7 @@ param(
     [string]$GhidraServer = "http://127.0.0.1:8089",
     [switch]$ReEvaluate,  # Re-scan functions for completeness without Claude processing
     [switch]$CleanupScripts,  # Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)
-    [switch]$ReuseSession,  # Reuse Claude session to save tokens (use --continue after first call)
+    [bool]$ReuseSession = $true,  # Reuse Claude session to save tokens (use --continue after first call)
     [int]$SessionResetInterval = 10  # Reset session every N functions to prevent context overflow
 )
 
@@ -115,7 +115,7 @@ function Show-Help {
     Write-Host "  -Subagent            Use subagent workflow (Opus orchestrator + Haiku subagents)"
     Write-Host "  -ReEvaluate          Re-scan all completed functions for updated scores (no Claude)"
     Write-Host "  -CleanupScripts      Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)"
-    Write-Host "  -ReuseSession        Reuse Claude session to save tokens (--continue after first call)"
+    Write-Host "  -ReuseSession <bool> Reuse Claude session to save tokens (default: true)"
     Write-Host "  -SessionResetInterval <n>  Reset session every N functions (default: 10)"
     Write-Host "  -Help                Show this help"
     Write-Host ""
@@ -153,8 +153,8 @@ function Show-Help {
     Write-Host "  .\functions-process.ps1 -Model sonnet     # Use Sonnet"
     Write-Host "  .\functions-process.ps1 -ReEvaluate       # Re-scan scores without Claude"
     Write-Host "  .\functions-process.ps1 -CleanupScripts   # Remove generated fix scripts"
-    Write-Host "  .\functions-process.ps1 -ReuseSession     # Save tokens by reusing session"
-    Write-Host "  .\functions-process.ps1 -ReuseSession -SessionResetInterval 20  # Reset every 20 funcs"
+    Write-Host "  .\functions-process.ps1 -ReuseSession:`$false  # Disable session reuse"
+    Write-Host "  .\functions-process.ps1 -SessionResetInterval 20  # Reset every 20 funcs"
     Write-Host "  .\functions-process.ps1 -GhidraServer http://localhost:8089  # Custom server"
     Write-Host "  .\functions-process.ps1                     # Single worker (original behavior)"
     Write-Host ""
