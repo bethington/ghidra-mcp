@@ -20,15 +20,16 @@ param(
     [string]$GhidraServer = "http://127.0.0.1:8089",
     [switch]$ReEvaluate,  # Re-scan functions for completeness without Claude processing
     [switch]$CleanupScripts,  # Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)
-    [switch]$NoSessionReuse,  # Disable session reuse (send full prompt every time)
+    [switch]$SessionReuse,  # Enable session reuse (disabled by default due to Claude CLI file handle issues)
     [int]$SessionResetInterval = 10  # Reset session every N functions to prevent context overflow
 )
 
 # Model name - CLI accepts simple aliases directly
 $FullModelName = $Model
 
-# Session reuse is ON by default, unless -NoSessionReuse is specified
-$ReuseSession = -not $NoSessionReuse
+# Session reuse is OFF by default due to Claude CLI file handle exhaustion with --continue
+# The CLI accumulates files in ~/.claude/projects and ~/.claude/todos causing EMFILE errors
+$ReuseSession = $SessionReuse
 
 # Constants
 $STALE_LOCK_MINUTES = 30
@@ -118,7 +119,7 @@ function Show-Help {
     Write-Host "  -Subagent            Use subagent workflow (Opus orchestrator + Haiku subagents)"
     Write-Host "  -ReEvaluate          Re-scan all completed functions for updated scores (no Claude)"
     Write-Host "  -CleanupScripts      Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)"
-    Write-Host "  -NoSessionReuse      Disable session reuse (send full prompt every time)"
+    Write-Host "  -SessionReuse        Enable session reuse (disabled by default due to CLI limitations)"
     Write-Host "  -SessionResetInterval <n>  Reset session every N functions (default: 10)"
     Write-Host "  -Help                Show this help"
     Write-Host ""
@@ -156,8 +157,7 @@ function Show-Help {
     Write-Host "  .\functions-process.ps1 -Model sonnet     # Use Sonnet"
     Write-Host "  .\functions-process.ps1 -ReEvaluate       # Re-scan scores without Claude"
     Write-Host "  .\functions-process.ps1 -CleanupScripts   # Remove generated fix scripts"
-    Write-Host "  .\functions-process.ps1 -NoSessionReuse   # Disable session reuse"
-    Write-Host "  .\functions-process.ps1 -SessionResetInterval 20  # Reset session every 20 funcs"
+    Write-Host "  .\functions-process.ps1 -SessionReuse     # Enable session reuse (experimental)"
     Write-Host "  .\functions-process.ps1 -GhidraServer http://localhost:8089  # Custom server"
     Write-Host "  .\functions-process.ps1                     # Single worker (original behavior)"
     Write-Host ""
@@ -574,19 +574,20 @@ function Get-McpErrors {
     
     # Common MCP error patterns
     $errorPatterns = @(
-        @{ Pattern = '(?i)error[:\s]+.*?(?:failed|unable|cannot|could not|timeout|timed out|connection refused|not found|invalid|rejected).*?(?:\n|$)'; Type = 'General Error' },
-        @{ Pattern = '(?i)mcp_ghidra_\w+.*?(?:failed|error|exception).*?(?:\n|$)'; Type = 'MCP Tool Failure' },
+        # Patterns must be specific to avoid matching Claude's explanatory text
+        # Require patterns to start with error indicators or be at line start
+        @{ Pattern = '(?im)^\s*error[:\s]+.*?(?:failed|unable|cannot|could not|timeout|connection refused)'; Type = 'General Error' },
+        @{ Pattern = '(?i)mcp_ghidra_\w+.*?(?:failed|error|exception)'; Type = 'MCP Tool Failure' },
         @{ Pattern = '(?i)GhidraValidationError[:\s]+(.+?)(?:\n|$)'; Type = 'Validation Error' },
-        @{ Pattern = '(?i)connection.*?(?:refused|failed|timeout|error)'; Type = 'Connection Error' },
-        @{ Pattern = '(?i)(?:404|500|502|503)\s*(?:error|not found|internal server)'; Type = 'HTTP Error' },
-        @{ Pattern = '(?i)variable.*?not found'; Type = 'Variable Not Found' },
-        @{ Pattern = '(?i)function.*?not found'; Type = 'Function Not Found' },
+        @{ Pattern = '(?im)^\s*(?:connection|socket).*?(?:refused|failed|timeout|error)'; Type = 'Connection Error' },
+        @{ Pattern = '(?i)HTTP\s*(?:error|status)[:\s]*(?:404|500|502|503)'; Type = 'HTTP Error' },
+        @{ Pattern = '(?im)^\s*(?:Error|Failed).*?variable.*?not found'; Type = 'Variable Not Found' },
+        @{ Pattern = '(?im)^\s*(?:Error|Failed).*?function.*?not found'; Type = 'Function Not Found' },
         @{ Pattern = '(?i)(?:rename|set_type|set_prototype).*?failed'; Type = 'Rename/Type Failure' },
-        @{ Pattern = '(?i)timeout.*?(?:waiting|exceeded|expired)'; Type = 'Timeout' },
-        @{ Pattern = '(?i)(?:invalid|malformed).*?(?:address|parameter|argument|type)'; Type = 'Invalid Parameter' },
-        @{ Pattern = '(?i)tool.*?(?:call|invocation).*?(?:failed|error)'; Type = 'Tool Call Error' },
-        @{ Pattern = '(?i)exception[:\s]+\w+Exception'; Type = 'Exception' },
-        @{ Pattern = '(?i)(?:no|cannot find).*?(?:data type|struct|function|symbol)'; Type = 'Symbol Not Found' }
+        @{ Pattern = '(?im)^\s*timeout.*?(?:waiting|exceeded|expired)'; Type = 'Timeout' },
+        @{ Pattern = '(?im)^\s*(?:Error|Invalid).*?(?:address|parameter|argument|type)'; Type = 'Invalid Parameter' },
+        @{ Pattern = '(?i)tool\s+(?:call|invocation)\s+(?:failed|error)'; Type = 'Tool Call Error' },
+        @{ Pattern = '(?i)\bexception[:\s]+\w+Exception'; Type = 'Exception' }
     )
     
     foreach ($ep in $errorPatterns) {
@@ -1219,9 +1220,8 @@ function Start-Coordinator {
     if ($Reverse) { $commonArgs += " -Reverse" }
     if ($SkipValidation) { $commonArgs += " -SkipValidation" }
     if ($Subagent) { $commonArgs += " -Subagent" }
-    if ($NoSessionReuse) { 
-        $commonArgs += " -NoSessionReuse"
-    } else {
+    if ($SessionReuse) { 
+        $commonArgs += " -SessionReuse"
         $commonArgs += " -SessionResetInterval $SessionResetInterval"
     }
     if ($Model) { $commonArgs += " -Model `"$Model`"" }
