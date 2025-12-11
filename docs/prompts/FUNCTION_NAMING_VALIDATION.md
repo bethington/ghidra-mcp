@@ -8,6 +8,13 @@ Use `list_functions` or `search_functions_enhanced` to retrieve functions, check
 
 **PascalCase Required**: All custom function names must be PascalCase (e.g., `ProcessPlayerSlots`, `ValidateEntityState`, `InitializeGameResources`).
 
+**Library/Runtime Functions**: Standard library and compiler-generated functions are valid as-is:
+- Underscore-prefixed: `_malloc`, `_free`, `_memcpy`, `_sprintf`
+- Double underscore: `__aullrem`, `__allmul`, `__ftol2`, `__divdi3`
+- Triple underscore: `___add_12`, `___sub_32`, `___mul_64`
+- CRT functions: `_CxxThrowException`, `_purecall`, `_alloca_probe`
+- These should NOT be renamed—they are standard library identifiers
+
 **Verb-First Pattern**: Names should start with an action verb describing what the function does:
 - `Get*` - Retrieve/access data (GetPlayerHealth, GetItemCount)
 - `Set*` - Modify/assign data (SetUnitPosition, SetSkillLevel)
