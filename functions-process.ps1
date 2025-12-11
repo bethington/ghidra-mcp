@@ -19,7 +19,9 @@ param(
     [int]$WorkerId = 0,
     [string]$GhidraServer = "http://127.0.0.1:8089",
     [switch]$ReEvaluate,  # Re-scan functions for completeness without Claude processing
-    [switch]$CleanupScripts  # Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)
+    [switch]$CleanupScripts,  # Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)
+    [switch]$ReuseSession,  # Reuse Claude session to save tokens (use --continue after first call)
+    [int]$SessionResetInterval = 10  # Reset session every N functions to prevent context overflow
 )
 
 # Model name - CLI accepts simple aliases directly
@@ -29,6 +31,10 @@ $FullModelName = $Model
 $STALE_LOCK_MINUTES = 30
 $MAX_PROMPT_BYTES = 180000
 $FUNCTION_BATCH_SIZE = 50
+
+# Session management for token reuse
+$script:SessionActive = $false
+$script:SessionFunctionCount = 0
 
 $todoFile = ".\FunctionsTodo.txt"
 $promptFile = if ($Subagent) { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4_SUBAGENT.md" } else { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4.md" }
@@ -109,6 +115,8 @@ function Show-Help {
     Write-Host "  -Subagent            Use subagent workflow (Opus orchestrator + Haiku subagents)"
     Write-Host "  -ReEvaluate          Re-scan all completed functions for updated scores (no Claude)"
     Write-Host "  -CleanupScripts      Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)"
+    Write-Host "  -ReuseSession        Reuse Claude session to save tokens (--continue after first call)"
+    Write-Host "  -SessionResetInterval <n>  Reset session every N functions (default: 10)"
     Write-Host "  -Help                Show this help"
     Write-Host ""
     Write-Host "RE-EVALUATION MODE:"
@@ -125,7 +133,10 @@ function Show-Help {
     Write-Host "COST OPTIMIZATION:"
     Write-Host "  V4 workflow is already optimized (~95 lines vs ~228 in V2)"
     Write-Host "  -Model haiku is 10-20x cheaper than opus with good quality"
-    Write-Host "  Recommended: -Model haiku for bulk processing"
+    Write-Host "  -ReuseSession sends workflow once, then uses --continue for subsequent calls"
+    Write-Host "    This saves ~2,100 tokens per function (workflow prompt not resent)"
+    Write-Host "    Session resets every -SessionResetInterval functions to prevent context overflow"
+    Write-Host "  Recommended: -Model haiku -ReuseSession for maximum cost savings"
     Write-Host ""
     Write-Host "SUBAGENT MODE (EXPERIMENTAL):"
     Write-Host "  -Subagent uses Opus as orchestrator with Haiku subagents for data gathering"
@@ -142,6 +153,8 @@ function Show-Help {
     Write-Host "  .\functions-process.ps1 -Model sonnet     # Use Sonnet"
     Write-Host "  .\functions-process.ps1 -ReEvaluate       # Re-scan scores without Claude"
     Write-Host "  .\functions-process.ps1 -CleanupScripts   # Remove generated fix scripts"
+    Write-Host "  .\functions-process.ps1 -ReuseSession     # Save tokens by reusing session"
+    Write-Host "  .\functions-process.ps1 -ReuseSession -SessionResetInterval 20  # Reset every 20 funcs"
     Write-Host "  .\functions-process.ps1 -GhidraServer http://localhost:8089  # Custom server"
     Write-Host "  .\functions-process.ps1                     # Single worker (original behavior)"
     Write-Host ""
@@ -842,6 +855,23 @@ Changes: <one-line list of what was renamed/documented>
 ``````
 Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Keep the final summary to 3-4 lines maximum.
 "@
+
+    # Build the function-specific prompt (used for --continue mode)
+    $functionOnlyPrompt = @"
+## TARGET FUNCTION TO DOCUMENT
+
+Function Name: **$funcName**$(if ($address) { "`nFunction Address: **0x$address**" })$completenessInfo
+
+**BEGIN DOCUMENTATION:** Document this function following the same workflow as before.
+
+**OUTPUT FORMAT:** After completing documentation, output ONLY this brief summary:
+``````
+DONE: <FunctionName>
+Score: <completeness_score>%
+Changes: <one-line list of what was renamed/documented>
+``````
+Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Keep the final summary to 3-4 lines maximum.
+"@
     
     $promptSize = [System.Text.Encoding]::UTF8.GetByteCount($prompt)
     Write-Log "Prompt size: $promptSize bytes"
@@ -852,9 +882,31 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
     
     try {
         $env:NODE_OPTIONS = "--max-old-space-size=8192"
-        Write-WorkerHost "Invoking Claude with MCP..." "Cyan"
         $modelInfo = if ($FullModelName) { "model $FullModelName" } else { "default model" }
-        Write-Log "Invoking Claude for $funcName with $modelInfo"
+        
+        # Session reuse logic
+        $useSessionContinue = $false
+        if ($ReuseSession) {
+            # Check if we need to reset the session
+            if ($script:SessionFunctionCount -ge $SessionResetInterval) {
+                Write-WorkerHost "Resetting session (processed $script:SessionFunctionCount functions)..." "Yellow"
+                Write-Log "Session reset after $script:SessionFunctionCount functions"
+                $script:SessionActive = $false
+                $script:SessionFunctionCount = 0
+            }
+            
+            if ($script:SessionActive) {
+                $useSessionContinue = $true
+                Write-WorkerHost "Invoking Claude with --continue (session reuse)..." "Cyan"
+                Write-Log "Invoking Claude for $funcName with $modelInfo (--continue mode)"
+            } else {
+                Write-WorkerHost "Invoking Claude (new session with workflow)..." "Cyan"
+                Write-Log "Invoking Claude for $funcName with $modelInfo (new session)"
+            }
+        } else {
+            Write-WorkerHost "Invoking Claude with MCP..." "Cyan"
+            Write-Log "Invoking Claude for $funcName with $modelInfo"
+        }
         
         $retryCount = 0
         $backoffSeconds = 2
@@ -862,12 +914,31 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
         $output = ""
         
         while ($retryCount -lt $MaxRetries) {
-            if ($FullModelName) {
-                $output = echo $prompt | claude --model $FullModelName 2>&1
+            # Choose prompt based on session state
+            $effectivePrompt = if ($useSessionContinue) { $functionOnlyPrompt } else { $prompt }
+            
+            if ($useSessionContinue) {
+                # Continue existing session - only send function-specific prompt
+                if ($FullModelName) {
+                    $output = echo $effectivePrompt | claude --continue --model $FullModelName 2>&1
+                } else {
+                    $output = echo $effectivePrompt | claude --continue 2>&1
+                }
             } else {
-                $output = echo $prompt | claude 2>&1
+                # New session - send full prompt with workflow
+                if ($FullModelName) {
+                    $output = echo $effectivePrompt | claude --model $FullModelName 2>&1
+                } else {
+                    $output = echo $effectivePrompt | claude 2>&1
+                }
             }
             $exitCode = $LASTEXITCODE
+            
+            # Mark session as active after successful first call
+            if ($ReuseSession -and $exitCode -eq 0) {
+                $script:SessionActive = $true
+                $script:SessionFunctionCount++
+            }
             
             # Check for rate limit message (5-hour limit)
             $outputStr = $output -join "`n"
@@ -979,6 +1050,17 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
             if ($exitCode -eq 0) {
                 $success = $true
                 break
+            }
+            
+            # If --continue failed, reset session and try with full prompt
+            if ($useSessionContinue -and $retryCount -eq 0) {
+                Write-WorkerHost "  --continue failed, falling back to full prompt..." "Yellow"
+                Write-Log "Session continue failed, resetting to full prompt" "WARN"
+                $script:SessionActive = $false
+                $script:SessionFunctionCount = 0
+                $useSessionContinue = $false
+                # Don't increment retry count, try again with full prompt
+                continue
             }
             
             $retryCount++
@@ -1134,6 +1216,10 @@ function Start-Coordinator {
     if ($Reverse) { $commonArgs += " -Reverse" }
     if ($SkipValidation) { $commonArgs += " -SkipValidation" }
     if ($Subagent) { $commonArgs += " -Subagent" }
+    if ($ReuseSession) { 
+        $commonArgs += " -ReuseSession"
+        $commonArgs += " -SessionResetInterval $SessionResetInterval"
+    }
     if ($Model) { $commonArgs += " -Model `"$Model`"" }
     $commonArgs += " -MaxRetries $MaxRetries"
     $commonArgs += " -DelayBetweenFunctions $DelayBetweenFunctions"
@@ -1279,7 +1365,13 @@ if ($Coordinator) {
 
 # Worker mode
 $modelLog = if ($FullModelName) { $FullModelName } else { "(default)" }
-Write-Log "Worker $WorkerId started with parameters: Reverse=$Reverse, Model=$modelLog, MinScore=$MinScore, MaxScore=$MaxScore, GhidraServer=$GhidraServer"
+$sessionModeLog = if ($ReuseSession) { "ReuseSession=ON (reset every $SessionResetInterval)" } else { "ReuseSession=OFF" }
+Write-Log "Worker $WorkerId started with parameters: Reverse=$Reverse, Model=$modelLog, MinScore=$MinScore, MaxScore=$MaxScore, $sessionModeLog, GhidraServer=$GhidraServer"
+
+if ($ReuseSession) {
+    Write-WorkerHost "Session reuse enabled - workflow prompt sent once, then --continue" "Green"
+    Write-WorkerHost "  Session resets every $SessionResetInterval functions" "Gray"
+}
 
 # Validate todo file exists
 if (-not (Test-Path $todoFile)) {
