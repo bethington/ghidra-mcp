@@ -13,6 +13,7 @@ param(
     [switch]$DryRun,
     [switch]$SkipValidation,
     [switch]$CompactPrompt,
+    [switch]$Subagent,  # Use subagent workflow (Opus orchestrator + Haiku subagents)
     [int]$Workers = 1,
     [switch]$Coordinator,
     [int]$WorkerId = 0,
@@ -29,7 +30,7 @@ $MAX_PROMPT_BYTES = 180000
 $FUNCTION_BATCH_SIZE = 50
 
 $todoFile = ".\FunctionsTodo.txt"
-$promptFile = if ($CompactPrompt) { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V3_COMPACT.md" } else { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4.md" }
+$promptFile = if ($Subagent) { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4_SUBAGENT.md" } else { ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4.md" }
 $logFile = ".\\logs\\functions-process-worker$WorkerId-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 $checkpointFile = ".\\functions-progress-worker$WorkerId.json"
 $outputDir = ".\\output"
@@ -49,9 +50,8 @@ if (-not (Test-Path $promptFile)) {
 } else {
     $defaultPrompt = $false
     $promptSize = (Get-Content $promptFile -Raw).Length
-    if ($CompactPrompt) {
-        Write-Host "Using compact prompt ($promptSize chars, ~$([math]::Round($promptSize/4)) tokens)" -ForegroundColor Green
-    }
+    $workflowType = if ($Subagent) { "V4-SUBAGENT (Opus+Haiku)" } else { "V4" }
+    Write-Host "Using workflow $workflowType prompt ($promptSize chars, ~$([math]::Round($promptSize/4)) tokens)" -ForegroundColor Green
 }
 
 function Write-Log {
@@ -104,7 +104,8 @@ function Show-Help {
     Write-Host "  -MaxScore <n>        Only process functions with score <= n (default: 99)"
     Write-Host "  -DryRun              Preview what will be processed without changes"
     Write-Host "  -SkipValidation      Skip post-processing validation checks"
-    Write-Host "  -CompactPrompt       Use compact prompt (91% smaller, saves tokens/cost)"
+    Write-Host "  -CompactPrompt       (Deprecated - V4 is already compact, this flag is ignored)"
+    Write-Host "  -Subagent            Use subagent workflow (Opus orchestrator + Haiku subagents)"
     Write-Host "  -ReEvaluate          Re-scan all completed functions for updated scores (no Claude)"
     Write-Host "  -Help                Show this help"
     Write-Host ""
@@ -115,15 +116,22 @@ function Show-Help {
     Write-Host "  Generates a report showing improved, regressed, and unchanged functions"
     Write-Host ""
     Write-Host "COST OPTIMIZATION:"
-    Write-Host "  -CompactPrompt reduces prompt from ~6000 to ~500 tokens per function"
+    Write-Host "  V4 workflow is already optimized (~95 lines vs ~228 in V2)"
     Write-Host "  -Model haiku is 10-20x cheaper than opus with good quality"
-    Write-Host "  Recommended: -Model haiku -CompactPrompt for bulk processing"
+    Write-Host "  Recommended: -Model haiku for bulk processing"
+    Write-Host ""
+    Write-Host "SUBAGENT MODE (EXPERIMENTAL):"
+    Write-Host "  -Subagent uses Opus as orchestrator with Haiku subagents for data gathering"
+    Write-Host "  Subagents handle: type audits, Hungarian notation mapping, global collection"
+    Write-Host "  Opus handles: analysis, decisions, documentation quality"
+    Write-Host "  Potential cost savings: 40-60% vs pure Opus"
     Write-Host ""
     Write-Host "EXAMPLES:"
     Write-Host "  .\functions-process.ps1 -Workers 6          # Run 6 parallel workers"
     Write-Host "  .\functions-process.ps1 -Workers 6 -MaxScore 50  # 6 workers on low-score functions"
     Write-Host "  .\functions-process.ps1 -MaxFunctions 10    # Process only 10 functions then stop"
-    Write-Host "  .\functions-process.ps1 -Model haiku -CompactPrompt  # Cost-optimized"
+    Write-Host "  .\functions-process.ps1 -Model haiku                 # Cost-optimized"
+    Write-Host "  .\functions-process.ps1 -Subagent                    # Opus+Haiku subagent mode"
     Write-Host "  .\functions-process.ps1 -Model sonnet     # Use Sonnet"
     Write-Host "  .\functions-process.ps1 -ReEvaluate       # Re-scan scores without Claude"
     Write-Host "  .\functions-process.ps1 -GhidraServer http://localhost:8089  # Custom server"
@@ -568,7 +576,7 @@ function Test-WorkflowCompliance {
     # The output may contain tool call names OR evidence of actions taken
     $actionPatterns = @(
         'mcp_ghidra_',
-        'renamed.*ΓåÆ',
+        'renamed.*(to|=>)',
         'Renamed.*from.*to',
         'Function Renamed',
         'Prototype Set',
@@ -916,9 +924,11 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
             $newFuncName = $funcName  # Default to original name
             if ($outputStr -match "(?s)DONE:\s*([^`n]+)[`n]+Score:\s*([^`n]+)[`n]+Changes:\s*([^`n]+)") {
                 $newFuncName = $Matches[1].Trim()
+                # Sanitize arrow characters for readable console output
+                $changesText = $Matches[3].Trim() -replace '[^\x00-\x7F]+', ' -> '
                 Write-Host "  DONE: $newFuncName" -ForegroundColor Green
                 Write-Host "  Score: $($Matches[2].Trim())" -ForegroundColor Cyan
-                Write-Host "  Changes: $($Matches[3].Trim())" -ForegroundColor Gray
+                Write-Host "  Changes: $changesText" -ForegroundColor Gray
             } else {
                 # Fallback: extract key info from verbose output
                 if ($outputStr -match "Function.*?renamed.*?to.*?([A-Z][A-Za-z0-9]+)") { 
@@ -953,7 +963,7 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
                 foreach ($ms in $milestones) {
                     Write-WorkerHost "    $($ms.Icon) $($ms.Milestone)$($ms.Detail)" "Cyan"
                 }
-                Write-Log "Milestones for ${funcName}: $($milestones | ForEach-Object { $_.Milestone } | Join-String -Separator ', ')"
+                Write-Log "Milestones for ${funcName}: $(($milestones | ForEach-Object { $_.Milestone }) -join ', ')"
             } else {
                 Write-WorkerHost "  WARNING: No workflow milestones detected" "Yellow"
                 Write-Log "No milestones detected for $funcName" "WARN"
@@ -1046,7 +1056,7 @@ function Start-Coordinator {
     $commonArgs = ""
     if ($Reverse) { $commonArgs += " -Reverse" }
     if ($SkipValidation) { $commonArgs += " -SkipValidation" }
-    if ($CompactPrompt) { $commonArgs += " -CompactPrompt" }
+    if ($Subagent) { $commonArgs += " -Subagent" }
     if ($Model) { $commonArgs += " -Model `"$Model`"" }
     $commonArgs += " -MaxRetries $MaxRetries"
     $commonArgs += " -DelayBetweenFunctions $DelayBetweenFunctions"
@@ -1282,11 +1292,17 @@ while ($true) {
         $result = Process-Function $funcName $address
         
         $processedCount++
-        if ($result -eq "skip") {
+        # Handle array results - take the last value (the actual return)
+        if ($result -is [array]) {
+            $result = $result[-1]
+        }
+        
+        # Check for string "skip" explicitly (PowerShell coerces types in -eq comparisons)
+        if ($result -is [string] -and $result -eq "skip") {
             $skipCount++
             Update-TodoFile $funcName "complete" | Out-Null
             Write-WorkerHost "  Skipped (outside score filter)" "Gray"
-        } elseif ($result) {
+        } elseif ($result -eq $true) {
             $successCount++
             Update-TodoFile $funcName "complete" | Out-Null
         } else {
@@ -1294,8 +1310,8 @@ while ($true) {
             Update-TodoFile $funcName "failed" | Out-Null
         }
         
-        # Show progress summary
-        Write-WorkerHost "  [$successCount success / $failCount fail / $($pending.Count - 1) remaining]" "DarkGray"
+        # Show progress summary (include skip count)
+        Write-WorkerHost "  [$successCount success / $skipCount skipped / $failCount fail / $($pending.Count - 1) remaining]" "DarkGray"
     } finally {
         Release-FunctionLock $funcName
     }

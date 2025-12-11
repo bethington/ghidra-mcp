@@ -100,14 +100,6 @@ Optional sections: Special Cases, Structure Layout (table format), Flag Bits, Re
 
 Use consistent hex notation (0x80, not 128). Verify algorithm steps match actual code logic—especially bitwise conditions where semantics can invert.
 
-## Phase 8: Verification
-
-Run analyze_function_completeness() and fix ALL reported issues:
-- plate_comment_issues, hungarian_notation_violations, undefined_variables
-- type_quality_issues, undefined_type_globals, unnamed_globals
-
-Iterate until 100% score. After 3 failed attempts with different strategies, document blockers and proceed.
-
 **Orphaned Functions**: After completion, check for executable code after RET with no xrefs—use create_function if found.
 
 ## Output

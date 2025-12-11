@@ -203,49 +203,56 @@ public class GhidraMCPPlugin extends Plugin {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
-            sendResponse(exchange, getAllFunctionNames(offset, limit));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, getAllFunctionNames(offset, limit, programName));
         });
 
         server.createContext("/list_classes", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
-            sendResponse(exchange, getAllClassNames(offset, limit));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, getAllClassNames(offset, limit, programName));
         });
 
         server.createContext("/list_segments", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
-            sendResponse(exchange, listSegments(offset, limit));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, listSegments(offset, limit, programName));
         });
 
         server.createContext("/list_imports", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
-            sendResponse(exchange, listImports(offset, limit));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, listImports(offset, limit, programName));
         });
 
         server.createContext("/list_exports", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
-            sendResponse(exchange, listExports(offset, limit));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, listExports(offset, limit, programName));
         });
 
         server.createContext("/list_namespaces", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
-            sendResponse(exchange, listNamespaces(offset, limit));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, listNamespaces(offset, limit, programName));
         });
 
         server.createContext("/list_data_items", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
-            sendResponse(exchange, listDefinedData(offset, limit));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, listDefinedData(offset, limit, programName));
         });
 
         server.createContext("/list_data_items_by_xrefs", exchange -> {
@@ -253,7 +260,8 @@ public class GhidraMCPPlugin extends Plugin {
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
             String format = qparams.getOrDefault("format", "text");
-            sendResponse(exchange, listDataItemsByXrefs(offset, limit, format));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, listDataItemsByXrefs(offset, limit, format, programName));
         });
 
         server.createContext("/list_functions", exchange -> {
@@ -316,7 +324,8 @@ public class GhidraMCPPlugin extends Plugin {
         server.createContext("/get_function_by_address", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
-            sendResponse(exchange, getFunctionByAddress(address));
+            String programName = qparams.get("program");
+            sendResponse(exchange, getFunctionByAddress(address, programName));
         });
 
         server.createContext("/get_current_address", exchange -> {
@@ -569,16 +578,18 @@ public class GhidraMCPPlugin extends Plugin {
         // External location endpoints (v1.8.2)
         server.createContext("/list_external_locations", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
+            String programName = qparams.get("program");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
-            sendResponse(exchange, listExternalLocations(offset, limit));
+            sendResponse(exchange, listExternalLocations(offset, limit, programName));
         });
 
         server.createContext("/get_external_location", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             String dllName = qparams.get("dll_name");
-            sendResponse(exchange, getExternalLocationDetails(address, dllName));
+            String programName = qparams.get("program");
+            sendResponse(exchange, getExternalLocationDetails(address, dllName, programName));
         });
 
         server.createContext("/rename_external_location", exchange -> {
@@ -621,7 +632,8 @@ public class GhidraMCPPlugin extends Plugin {
             String name = qparams.get("name");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
-            sendResponse(exchange, getFunctionCallees(name, offset, limit));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, getFunctionCallees(name, offset, limit, programName));
         });
 
         server.createContext("/get_function_callers", exchange -> {
@@ -629,7 +641,8 @@ public class GhidraMCPPlugin extends Plugin {
             String name = qparams.get("name");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
-            sendResponse(exchange, getFunctionCallers(name, offset, limit));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, getFunctionCallers(name, offset, limit, programName));
         });
 
         server.createContext("/get_function_call_graph", exchange -> {
@@ -637,14 +650,16 @@ public class GhidraMCPPlugin extends Plugin {
             String name = qparams.get("name");
             int depth = parseIntOrDefault(qparams.get("depth"), 2);
             String direction = qparams.getOrDefault("direction", "both");
-            sendResponse(exchange, getFunctionCallGraph(name, depth, direction));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, getFunctionCallGraph(name, depth, direction, programName));
         });
 
         server.createContext("/get_full_call_graph", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String format = qparams.getOrDefault("format", "edges");
             int limit = parseIntOrDefault(qparams.get("limit"), 1000);
-            sendResponse(exchange, getFullCallGraph(format, limit));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, getFullCallGraph(format, limit, programName));
         });
 
         // ==========================================================================
@@ -654,9 +669,10 @@ public class GhidraMCPPlugin extends Plugin {
         server.createContext("/list_data_types", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String category = qparams.get("category");
+            String programName = qparams.get("program");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
-            sendResponse(exchange, listDataTypes(category, offset, limit));
+            sendResponse(exchange, listDataTypes(category, offset, limit, programName));
         });
 
         server.createContext("/create_struct", exchange -> {
@@ -709,7 +725,8 @@ public class GhidraMCPPlugin extends Plugin {
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String filter = qparams.get("filter");
-            sendResponse(exchange, listDefinedStrings(offset, limit, filter));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, listDefinedStrings(offset, limit, filter, programName));
         });
 
         // New endpoints for missing IDA functionality
@@ -737,7 +754,8 @@ public class GhidraMCPPlugin extends Plugin {
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String filter = qparams.get("filter");
-            sendResponse(exchange, listGlobals(offset, limit, filter));
+            String programName = qparams.get("program");  // Optional: target specific program
+            sendResponse(exchange, listGlobals(offset, limit, filter, programName));
         });
 
         server.createContext("/rename_global_variable", exchange -> {
@@ -906,8 +924,9 @@ public class GhidraMCPPlugin extends Plugin {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             String lengthStr = qparams.get("length");
+            String programName = qparams.get("program");
             int length = parseIntOrDefault(lengthStr, 16);
-            sendResponse(exchange, readMemory(address, length));
+            sendResponse(exchange, readMemory(address, length, programName));
         });
 
         // ==========================================================================
@@ -1132,8 +1151,9 @@ public class GhidraMCPPlugin extends Plugin {
         server.createContext("/get_function_variables", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionName = qparams.get("function_name");
+            String programName = qparams.get("program");
 
-            String result = getFunctionVariables(functionName);
+            String result = getFunctionVariables(functionName, programName);
             sendResponse(exchange, result);
         });
 
@@ -1210,8 +1230,9 @@ public class GhidraMCPPlugin extends Plugin {
             String criteria = qparams.get("criteria");
             String pattern = qparams.get("pattern");
             String direction = qparams.get("direction");
+            String programName = qparams.get("program");
 
-            String result = findNextUndefinedFunction(startAddress, criteria, pattern, direction);
+            String result = findNextUndefinedFunction(startAddress, criteria, pattern, direction, programName);
             sendResponse(exchange, result);
         });
 
@@ -1307,8 +1328,9 @@ public class GhidraMCPPlugin extends Plugin {
             boolean includeCallers = Boolean.parseBoolean(qparams.getOrDefault("include_callers", "true"));
             boolean includeDisasm = Boolean.parseBoolean(qparams.getOrDefault("include_disasm", "true"));
             boolean includeVariables = Boolean.parseBoolean(qparams.getOrDefault("include_variables", "true"));
+            String programName = qparams.get("program");
 
-            String result = analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables);
+            String result = analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, programName);
             sendResponse(exchange, result);
         });
 
@@ -1433,7 +1455,8 @@ public class GhidraMCPPlugin extends Plugin {
         server.createContext("/get_function_hash", exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionAddress = qparams.get("address");
-            String result = getFunctionHash(functionAddress);
+            String programName = qparams.get("program");
+            String result = getFunctionHash(functionAddress, programName);
             sendResponse(exchange, result);
         });
 
@@ -1443,7 +1466,8 @@ public class GhidraMCPPlugin extends Plugin {
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String filter = qparams.get("filter"); // "documented", "undocumented", or null for all
-            String result = getBulkFunctionHashes(offset, limit, filter);
+            String programName = qparams.get("program");
+            String result = getBulkFunctionHashes(offset, limit, filter, programName);
             sendResponse(exchange, result);
         });
 
@@ -1478,9 +1502,10 @@ public class GhidraMCPPlugin extends Plugin {
     // Pagination-aware listing methods
     // ----------------------------------------------------------------------------------
 
-    private String getAllFunctionNames(int offset, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    private String getAllFunctionNames(int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         List<String> names = new ArrayList<>();
         for (Function f : program.getFunctionManager().getFunctions(true)) {
@@ -1489,9 +1514,15 @@ public class GhidraMCPPlugin extends Plugin {
         return paginateList(names, offset, limit);
     }
 
-    private String getAllClassNames(int offset, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    // Backward compatible overload
+    private String getAllFunctionNames(int offset, int limit) {
+        return getAllFunctionNames(offset, limit, null);
+    }
+
+    private String getAllClassNames(int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         Set<String> classNames = new HashSet<>();
         for (Symbol symbol : program.getSymbolTable().getAllSymbols(true)) {
@@ -1506,9 +1537,15 @@ public class GhidraMCPPlugin extends Plugin {
         return paginateList(sorted, offset, limit);
     }
 
-    private String listSegments(int offset, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    // Backward compatible overload
+    private String getAllClassNames(int offset, int limit) {
+        return getAllClassNames(offset, limit, null);
+    }
+
+    private String listSegments(int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         List<String> lines = new ArrayList<>();
         for (MemoryBlock block : program.getMemory().getBlocks()) {
@@ -1517,9 +1554,15 @@ public class GhidraMCPPlugin extends Plugin {
         return paginateList(lines, offset, limit);
     }
 
-    private String listImports(int offset, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    // Backward compatible overload
+    private String listSegments(int offset, int limit) {
+        return listSegments(offset, limit, null);
+    }
+
+    private String listImports(int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         List<String> lines = new ArrayList<>();
         for (Symbol symbol : program.getSymbolTable().getExternalSymbols()) {
@@ -1528,9 +1571,15 @@ public class GhidraMCPPlugin extends Plugin {
         return paginateList(lines, offset, limit);
     }
 
-    private String listExports(int offset, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    // Backward compatible overload
+    private String listImports(int offset, int limit) {
+        return listImports(offset, limit, null);
+    }
+
+    private String listExports(int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         SymbolTable table = program.getSymbolTable();
         SymbolIterator it = table.getAllSymbols(true);
@@ -1546,9 +1595,15 @@ public class GhidraMCPPlugin extends Plugin {
         return paginateList(lines, offset, limit);
     }
 
-    private String listNamespaces(int offset, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    // Backward compatible overload
+    private String listExports(int offset, int limit) {
+        return listExports(offset, limit, null);
+    }
+
+    private String listNamespaces(int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         Set<String> namespaces = new HashSet<>();
         for (Symbol symbol : program.getSymbolTable().getAllSymbols(true)) {
@@ -1562,9 +1617,15 @@ public class GhidraMCPPlugin extends Plugin {
         return paginateList(sorted, offset, limit);
     }
 
-    private String listDefinedData(int offset, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    // Backward compatible overload
+    private String listNamespaces(int offset, int limit) {
+        return listNamespaces(offset, limit, null);
+    }
+
+    private String listDefinedData(int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         List<String> lines = new ArrayList<>();
         for (MemoryBlock block : program.getMemory().getBlocks()) {
@@ -1595,6 +1656,11 @@ public class GhidraMCPPlugin extends Plugin {
         return paginateList(lines, offset, limit);
     }
 
+    // Backward compatible overload
+    private String listDefinedData(int offset, int limit) {
+        return listDefinedData(offset, limit, null);
+    }
+
     /**
      * List defined data items sorted by cross-reference count (v1.7.4).
      * Returns data items with the most references first.
@@ -1604,9 +1670,10 @@ public class GhidraMCPPlugin extends Plugin {
      * @param format Output format: "text" (default) or "json"
      * @return Formatted list of data items sorted by xref count
      */
-    private String listDataItemsByXrefs(int offset, int limit, String format) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    private String listDataItemsByXrefs(int offset, int limit, String format, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         // Collect all data items with their xref counts
         List<DataItemInfo> dataItems = new ArrayList<>();
@@ -2019,9 +2086,10 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Get function by address
      */
-    private String getFunctionByAddress(String addressStr) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    private String getFunctionByAddress(String addressStr, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (addressStr == null || addressStr.isEmpty()) return "Address is required";
 
         try {
@@ -2040,6 +2108,11 @@ public class GhidraMCPPlugin extends Plugin {
         } catch (Exception e) {
             return "Error getting function: " + e.getMessage();
         }
+    }
+    
+    // Backward compatibility overload
+    private String getFunctionByAddress(String addressStr) {
+        return getFunctionByAddress(addressStr, null);
     }
 
     /**
@@ -3617,9 +3690,10 @@ public class GhidraMCPPlugin extends Plugin {
 /**
  * List all defined strings in the program with their addresses
  */
-    private String listDefinedStrings(int offset, int limit, String filter) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    private String listDefinedStrings(int offset, int limit, String filter, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         List<String> lines = new ArrayList<>();
         DataIterator dataIt = program.getListing().getDefinedData(true);
@@ -4639,10 +4713,11 @@ public class GhidraMCPPlugin extends Plugin {
      * 
      * This allows matching identical functions that are located at different addresses.
      */
-    private String getFunctionHash(String functionAddress) {
-        Program program = getCurrentProgram();
+    private String getFunctionHash(String functionAddress, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return "{\"error\": \"" + escapeJson((String) programResult[1]) + "\"}";
         }
 
         try {
@@ -4675,6 +4750,11 @@ public class GhidraMCPPlugin extends Plugin {
         } catch (Exception e) {
             return "{\"error\": \"Failed to compute hash: " + escapeJson(e.getMessage()) + "\"}";
         }
+    }
+    
+    // Backward compatibility overload
+    private String getFunctionHash(String functionAddress) {
+        return getFunctionHash(functionAddress, null);
     }
 
     /**
@@ -4796,10 +4876,11 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Get hashes for multiple functions efficiently
      */
-    private String getBulkFunctionHashes(int offset, int limit, String filter) {
-        Program program = getCurrentProgram();
+    private String getBulkFunctionHashes(int offset, int limit, String filter, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return "{\"error\": \"" + escapeJson((String) programResult[1]) + "\"}";
         }
 
         try {
@@ -4856,6 +4937,11 @@ public class GhidraMCPPlugin extends Plugin {
         } catch (Exception e) {
             return "{\"error\": \"Failed to get bulk hashes: " + escapeJson(e.getMessage()) + "\"}";
         }
+    }
+    
+    // Backward compatibility overload
+    private String getBulkFunctionHashes(int offset, int limit, String filter) {
+        return getBulkFunctionHashes(offset, limit, filter, null);
     }
 
     /**
@@ -5784,11 +5870,10 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Get all functions called by the specified function (callees)
      */
-    public String getFunctionCallees(String functionName, int offset, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "No program loaded";
-        }
+    public String getFunctionCallees(String functionName, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
@@ -5865,11 +5950,10 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Get all functions that call the specified function (callers)
      */
-    public String getFunctionCallers(String functionName, int offset, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "No program loaded";
-        }
+    public String getFunctionCallers(String functionName, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
@@ -5936,11 +6020,10 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Get a call graph subgraph centered on the specified function
      */
-    public String getFunctionCallGraph(String functionName, int depth, String direction) {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "No program loaded";
-        }
+    public String getFunctionCallGraph(String functionName, int depth, String direction, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
@@ -6063,11 +6146,10 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Get the complete call graph for the entire program
      */
-    public String getFullCallGraph(String format, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "No program loaded";
-        }
+    public String getFullCallGraph(String format, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
@@ -6168,10 +6250,11 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * List all data types available in the program with optional category filtering
      */
-    public String listDataTypes(String category, int offset, int limit) {
-        Program program = getCurrentProgram();
+    public String listDataTypes(String category, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "No program loaded";
+            return (String) programResult[1];
         }
 
         DataTypeManager dtm = program.getDataTypeManager();
@@ -6213,6 +6296,11 @@ public class GhidraMCPPlugin extends Plugin {
         }
         
         return result;
+    }
+    
+    // Backward compatibility overload
+    public String listDataTypes(String category, int offset, int limit) {
+        return listDataTypes(category, offset, limit, null);
     }
 
     /**
@@ -6989,11 +7077,10 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * List global variables/symbols with optional filtering
      */
-    private String listGlobals(int offset, int limit, String filter) {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "No program loaded";
-        }
+    private String listGlobals(int offset, int limit, String filter, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         List<String> globals = new ArrayList<>();
         SymbolTable symbolTable = program.getSymbolTable();
@@ -7635,11 +7722,12 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Read memory at a specific address
      */
-    private String readMemory(String addressStr, int length) {
+    private String readMemory(String addressStr, int length, String programName) {
         try {
-            Program program = getCurrentProgram();
+            Object[] programResult = getProgramOrError(programName);
+            Program program = (Program) programResult[0];
             if (program == null) {
-                return "{\"error\":\"No program loaded\"}";
+                return "{\"error\":\"" + escapeJson((String) programResult[1]) + "\"}";
             }
 
             Address address = program.getAddressFactory().getAddress(addressStr);
@@ -7676,6 +7764,11 @@ public class GhidraMCPPlugin extends Plugin {
         } catch (Exception e) {
             return "{\"error\":\"Failed to read memory: " + e.getMessage() + "\"}";
         }
+    }
+    
+    // Backward compatibility overload
+    private String readMemory(String addressStr, int length) {
+        return readMemory(addressStr, length, null);
     }
 
     /**
@@ -10245,16 +10338,18 @@ public class GhidraMCPPlugin extends Plugin {
      * v1.5.0: Get all variables in a function (parameters and locals)
      */
     @SuppressWarnings("deprecation")
-    private String getFunctionVariables(String functionName) {
-        Program program = getCurrentProgram();
+    private String getFunctionVariables(String functionName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return "{\"error\": \"" + escapeJson((String) programResult[1]) + "\"}";
         }
 
         if (functionName == null || functionName.isEmpty()) {
             return "{\"error\": \"Function name is required\"}";
         }
 
+        final Program finalProgram = program;
         final StringBuilder result = new StringBuilder();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
@@ -10263,7 +10358,7 @@ public class GhidraMCPPlugin extends Plugin {
                 try {
                     // Find function by name
                     Function func = null;
-                    for (Function f : program.getFunctionManager().getFunctions(true)) {
+                    for (Function f : finalProgram.getFunctionManager().getFunctions(true)) {
                         if (f.getName().equals(functionName)) {
                             func = f;
                             break;
@@ -10279,7 +10374,7 @@ public class GhidraMCPPlugin extends Plugin {
                     // This ensures get_function_variables returns fresh data matching actual decompilation
                     try {
                         DecompInterface tempDecomp = new DecompInterface();
-                        tempDecomp.openProgram(program);
+                        tempDecomp.openProgram(finalProgram);
                         tempDecomp.flushCache();
                         tempDecomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
                         tempDecomp.dispose();
@@ -10312,7 +10407,7 @@ public class GhidraMCPPlugin extends Plugin {
                     Variable[] locals = func.getLocalVariables();
 
                     // Decompile to get HighFunction for phantom detection
-                    DecompileResults decompResults = decompileFunction(func, program);
+                    DecompileResults decompResults = decompileFunction(func, finalProgram);
                     java.util.Set<String> decompVarNames = new java.util.HashSet<>();
                     if (decompResults != null && decompResults.decompileCompleted()) {
                         ghidra.program.model.pcode.HighFunction highFunc = decompResults.getHighFunction();
@@ -10354,6 +10449,12 @@ public class GhidraMCPPlugin extends Plugin {
         }
 
         return result.toString();
+    }
+    
+    // Backward compatibility overload
+    @SuppressWarnings("deprecation")
+    private String getFunctionVariables(String functionName) {
+        return getFunctionVariables(functionName, null);
     }
 
     /**
@@ -11184,22 +11285,24 @@ public class GhidraMCPPlugin extends Plugin {
      */
     @SuppressWarnings("deprecation")
     private String findNextUndefinedFunction(String startAddress, String criteria,
-                                            String pattern, String direction) {
-        Program program = getCurrentProgram();
+                                            String pattern, String direction, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return "{\"error\": \"" + escapeJson((String) programResult[1]) + "\"}";
         }
 
+        final Program finalProgram = program;
         final StringBuilder result = new StringBuilder();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    FunctionManager funcMgr = program.getFunctionManager();
+                    FunctionManager funcMgr = finalProgram.getFunctionManager();
                     Address start = startAddress != null ?
-                        program.getAddressFactory().getAddress(startAddress) :
-                        program.getMinAddress();
+                        finalProgram.getAddressFactory().getAddress(startAddress) :
+                        finalProgram.getMinAddress();
 
                     String searchPattern = pattern != null ? pattern : "FUN_";
                     boolean ascending = !"descending".equals(direction);
@@ -11240,6 +11343,12 @@ public class GhidraMCPPlugin extends Plugin {
         }
 
         return result.toString();
+    }
+    
+    // Backward compatibility overload
+    private String findNextUndefinedFunction(String startAddress, String criteria,
+                                            String pattern, String direction) {
+        return findNextUndefinedFunction(startAddress, criteria, pattern, direction, null);
     }
 
     /**
@@ -12002,11 +12111,15 @@ public class GhidraMCPPlugin extends Plugin {
      * NEW v1.6.0: Comprehensive function analysis in single call
      */
     private String analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
-                                          boolean includeCallers, boolean includeDisasm, boolean includeVariables) {
-        Program program = getCurrentProgram();
+                                          boolean includeCallers, boolean includeDisasm, boolean includeVariables,
+                                          String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return "{\"error\": \"" + escapeJson((String) programResult[1]) + "\"}";
         }
+
+        final Program finalProgram = program;
 
         final StringBuilder result = new StringBuilder();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
@@ -12015,7 +12128,7 @@ public class GhidraMCPPlugin extends Plugin {
             SwingUtilities.invokeAndWait(() -> {
                 try {
                     Function func = null;
-                    FunctionManager funcMgr = program.getFunctionManager();
+                    FunctionManager funcMgr = finalProgram.getFunctionManager();
 
                     // Find function by name
                     for (Function f : funcMgr.getFunctions(true)) {
@@ -12038,7 +12151,7 @@ public class GhidraMCPPlugin extends Plugin {
                     // Include xrefs
                     if (includeXrefs) {
                         result.append(", \"xrefs\": [");
-                        ReferenceIterator refs = program.getReferenceManager().getReferencesTo(func.getEntryPoint());
+                        ReferenceIterator refs = finalProgram.getReferenceManager().getReferencesTo(func.getEntryPoint());
                         int refCount = 0;
                         while (refs.hasNext() && refCount < 100) {
                             Reference ref = refs.next();
@@ -12078,7 +12191,7 @@ public class GhidraMCPPlugin extends Plugin {
                     // Include disassembly
                     if (includeDisasm) {
                         result.append(", \"disassembly\": [");
-                        Listing listing = program.getListing();
+                        Listing listing = finalProgram.getListing();
                         AddressSetView body = func.getBody();
                         InstructionIterator instrIter = listing.getInstructions(body, true);
                         int instrCount = 0;
@@ -12125,6 +12238,12 @@ public class GhidraMCPPlugin extends Plugin {
         }
 
         return result.toString();
+    }
+    
+    // Backward compatibility overload
+    private String analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
+                                          boolean includeCallers, boolean includeDisasm, boolean includeVariables) {
+        return analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, null);
     }
 
     /**
@@ -12978,9 +13097,10 @@ public class GhidraMCPPlugin extends Plugin {
      * List all external locations (imports, ordinal imports, etc.)
      * Returns detailed information including library name and label
      */
-    private String listExternalLocations(int offset, int limit) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    private String listExternalLocations(int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         ExternalManager extMgr = program.getExternalManager();
         List<String> lines = new ArrayList<>();
@@ -13005,13 +13125,19 @@ public class GhidraMCPPlugin extends Plugin {
 
         return paginateList(lines, offset, limit);
     }
+    
+    // Backward compatibility overload
+    private String listExternalLocations(int offset, int limit) {
+        return listExternalLocations(offset, limit, null);
+    }
 
     /**
      * Get details of a specific external location
      */
-    private String getExternalLocationDetails(String address, String dllName) {
-        Program program = getCurrentProgram();
-        if (program == null) return "No program loaded";
+    private String getExternalLocationDetails(String address, String dllName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         try {
             Address addr = program.getAddressFactory().getAddress(address);
@@ -13057,6 +13183,11 @@ public class GhidraMCPPlugin extends Plugin {
         } catch (Exception e) {
             return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
         }
+    }
+    
+    // Backward compatibility overload
+    private String getExternalLocationDetails(String address, String dllName) {
+        return getExternalLocationDetails(address, dllName, null);
     }
 
     /**

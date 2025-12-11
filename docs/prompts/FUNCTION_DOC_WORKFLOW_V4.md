@@ -1,222 +1,93 @@
 # FUNCTION_DOC_WORKFLOW_V4
 
-Orchestrator workflow for Ghidra function documentation using model delegation.
-Opus handles reasoning; Haiku handles extraction and formatting.
+You are assisting with reverse engineering binary code in Ghidra. Your task is to systematically document functions with complete accuracy. This workflow ensures you document functions correctly the first time: establish execution guidelines, perform mandatory type audit, initialize and analyze the function, identify structures early, name and type all elements, create documentation, and verify completeness.
 
-## Architecture
+## Execution Guidelines
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    OPUS (Orchestrator)                      │
-│  • Function classification    • Type inference              │
-│  • Control flow analysis      • Semantic naming             │
-│  • Algorithm extraction       • MCP tool execution          │
-└─────────────────────────────────────────────────────────────┘
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   HAIKU     │    │   HAIKU     │    │   HAIKU     │
-│  Extract    │    │  Generate   │    │  Format     │
-│  Variables  │    │  Names      │    │  Comments   │
-└─────────────┘    └─────────────┘    └─────────────┘
-```
+Use MCP tools in this sequence: rename_function_by_address, set_function_prototype, batch_create_labels, rename_variables (iterating as needed), set_plate_comment, and batch_set_comments. For connection timeouts, retry once then switch to smaller batches. Work efficiently without excessive status output. Do not create or edit files on the filesystem. Apply all changes directly in Ghidra using MCP tools. Allow up to 3 retry attempts for network timeouts before reporting failure.
 
----
+## Initialization and Analysis
 
-## Phase 1: Initialize & Extract
+Start with get_current_selection() to identify the function at the cursor (returns both address and function information). Use get_function_by_address to verify boundaries, ensuring all code blocks and return instructions belong to the function. If boundaries are incorrect, recreate the function with correct address range. Use analyze_function_complete to gather decompiled code, cross-references, callees, callers, disassembly, and variable information in one call. Study the decompiled code to understand function purpose, examine callers for context, review callees for dependencies, and analyze disassembly for memory access patterns.
 
-### 1.1 Get Function Data (Opus)
-```
-get_current_selection() → analyze_function_complete()
-```
+## Function Classification
 
-### 1.2 Delegate Extraction (Haiku)
-**Call subagent** with `subtasks/EXTRACT_VARIABLES.md`:
-- Input: Decompiled code + disassembly from analyze_function_complete
-- Output: JSON extraction result
+Classify the function's role to guide documentation depth: **Leaf** (no calls—focus on algorithms), **Worker** (meaningful work—document full semantics), **Thunk/Wrapper** (single call—document what it wraps), **Init/Cleanup** (state management—document sequence), **Callback/Handler** (event-driven—document triggers), **Public API** (exported—comprehensive docs), **Internal utility** (helper—document assumptions). Public APIs and initialization require maximum rigor; thunks need only contract documentation.
 
-Expected output format:
-```json
-{
-  "variables": [
-    {"name": "param_1", "type": "undefined4", "category": "param"},
-    {"name": "local_c", "type": "undefined4", "category": "local"},
-    {"name": "iVar1", "type": "int", "category": "ssa"}
-  ],
-  "globals": [
-    {"name": "DAT_6fbf42a0", "address": "0x6fbf42a0"},
-    {"name": "s_Error_6fbe1234", "address": "0x6fbe1234"}
-  ],
-  "ordinals": [
-    {"call": "Ordinal_10342", "address": "0x6fb12340"}
-  ],
-  "undefined_count": 5
-}
-```
+## Mandatory Undefined Type Audit
 
----
+After retrieving function information, systematically examine BOTH decompiled code and disassembly for undefined types. Check for undefined return types, locals, parameters, and structure fields. Critically, examine disassembly for variables appearing ONLY in assembly: stack temporaries, XMM register spills, intermediate calculations. Use get_function_variables and cross-reference against both views. Create a type resolution plan: undefined4 counter→int, undefined4 flags→uint, undefined1[10] FPU→byte[10], undefined4 dereferenced→typed pointer. Only after resolving ALL undefined types proceed to variable renaming.
 
-## Phase 2: Analysis (Opus)
+**Phantom Variables**: Ghidra may show assembly-only temporaries optimized away during decompilation. If "Variable not found" errors occur, document in plate comment but skip type-setting.
 
-Using Haiku's extraction, perform semantic analysis:
+## Verify Decompiler Output Against Assembly
 
-1. **Classify function**: Leaf | Worker | Thunk | Init | Cleanup | Callback | API | Internal
-2. **Analyze callers**: Argument patterns, return value usage
-3. **Map control flow**: Returns, branches, loops (verify bounds vs assembly)
-4. **Detect decompiler errors**: JZ/JNZ inversion, spurious casts, wrong stride
+Validate critical areas where decompilers frequently err: **Loops** (verify bounds, counter increment, trip count against assembly), **Type Casts** (compare with actual mov/lea—spurious casts indicate stack alignment issues), **Pointer Arithmetic** (check stride scaling 1x/2x/4x/8x), **Conditionals** (JZ may be inverted in decompiler), **Early Exits** (check for tail calls misrepresented as returns). Document any discrepancies in plate comment.
 
-For each undefined variable, determine correct type:
-- Arithmetic operations → int/uint
-- Bit operations/flags → uint  
-- Dereferenced → pointer type
-- Loop counter → int/uint
-- Array index scaling → infer element size
+## Control Flow and Loop Mapping
 
----
+Map execution paths before naming variables. Identify all return points and their conditions. For each loop: identify header, induction variable, bounds, exit condition, nested depth, and stride. Verify loop bounds match disassembly (decompilers often wrong). Document error paths separately. This map becomes the Algorithm section outline.
 
-## Phase 3: Delegate Naming (Haiku)
+## Structure Identification
 
-**Call subagent** with `subtasks/GENERATE_HUNGARIAN_NAMES.md`:
-- Input: Variables with resolved types from Phase 2
-- Output: Hungarian notation names
+Before documentation, identify all structure types accessed. Use list_data_types or search_data_types matching the function's domain. If no match exists, create with create_struct using fields from assembly offsets. Use identity-based names (Player not InitializedPlayer, Inventory not AllocatedInventory). Fix duplicates with consolidate_duplicate_types.
 
-Input format:
-```json
-{
-  "variables": [
-    {"name": "param_1", "resolved_type": "UnitAny *"},
-    {"name": "local_c", "resolved_type": "uint"},
-    {"name": "iVar1", "resolved_type": "int"}
-  ],
-  "globals": [
-    {"name": "DAT_6fbf42a0", "resolved_type": "uint", "purpose": "flags"},
-    {"name": "s_Error_6fbe1234", "resolved_type": "char *", "purpose": "error message"}
-  ]
-}
-```
+**Memory Model**: Document allocation patterns (who allocates/frees), lifetime semantics (pointer validity), input ownership, shared globals, stack frame layout, and register preservation.
 
-Expected output:
-```json
-{
-  "variable_renames": [
-    {"old": "param_1", "new": "pUnit", "type": "UnitAny *"},
-    {"old": "local_c", "new": "dwFlags", "type": "uint"},
-    {"old": "iVar1", "new": "nIndex", "type": "int"}
-  ],
-  "global_renames": [
-    {"old": "DAT_6fbf42a0", "new": "g_dwFlags"},
-    {"old": "s_Error_6fbe1234", "new": "szErrorMessage"}
-  ]
-}
-```
+## Function Naming and Prototype
 
----
+Rename with rename_function_by_address using descriptive PascalCase (ProcessPlayerSlots, ValidateEntityState). Set accurate return type from EAX examination. Define complete prototype with set_function_prototype using proper types (UnitAny* not int*) and camelCase names (pPlayerNode, nResourceCount). Verify calling convention from register usage: __cdecl, __stdcall, __fastcall, __thiscall. Document implicit register parameters with IMPLICIT keyword.
 
-## Phase 4: Delegate Ordinal Lookup (Haiku)
+## Hungarian Notation Reference
 
-**Call subagent** with `subtasks/LOOKUP_ORDINALS.md`:
-- Input: List of ordinal calls from Phase 1
-- Output: API mappings from KNOWN_ORDINALS.md
+**Builtins**: byte→b, char→c, bool→f, short→n, ushort→w, int→n, uint→dw, long→l, ulong→dw, longlong→ll, ulonglong→qw, float→fl, double→d, float10→ld
 
-Expected output:
-```json
-{
-  "mappings": [
-    {"ordinal": "Ordinal_10342", "api": "D2Common.GetUnitStat", "params": "(pUnit, nStatId)"},
-    {"ordinal": "Ordinal_10918", "api": "D2Common.RandSeed", "params": "(pSeed)"}
-  ],
-  "unknown": ["Ordinal_99999"]
-}
-```
+**Single Pointers**: void*→p, byte*→pb, ushort*→pw, uint*→pdw, int*→pn, float*→pfl, double*→pd, char*→lpsz(param)/sz(local), wchar_t*→lpwsz(param)/wsz(local), struct*→p+StructName
 
----
+**Double Pointers**: void**→pp, byte**→ppb, uint**→ppdw, char**→pplpsz(param)/ppsz(local), struct**→pp+StructName
 
-## Phase 5: Apply Changes (Opus)
+**Const Pointers**: const char*→lpcsz(param)/csz(local), const void*→pc
 
-Execute MCP tools with Haiku's generated names:
+**Arrays**: byte[N]→ab, ushort[N]→aw, uint[N]→ad, int[N]→an (stack arrays only; pointer params use pointer prefix)
 
-```
-1. rename_function_by_address(address, "PascalCaseName")
-2. set_function_prototype(name, "return_type __conv func(params)")
-3. For each variable:
-   - set_local_variable_type(func_addr, old_name, new_type)
-   - rename_variables(func_addr, {old: new, ...})
-4. For each global:
-   - rename_data(address, new_name) or rename_global_variable()
-5. batch_create_labels() for any code labels
-```
+**Globals**: Add g_ prefix (g_dwProcessId, g_pMainWindow, g_szConfigPath). Function pointers use PascalCase without g_.
 
----
+**Type Normalization**: UINT→uint, DWORD→uint, USHORT→ushort, BYTE→byte, BOOL→bool, LPVOID→void*, undefined1→byte, undefined2→ushort, undefined4→uint/int/float/pointer, undefined8→double/longlong
 
-## Phase 6: Delegate Documentation (Haiku)
+## Local Variable Renaming
 
-**Call subagent** with `subtasks/FORMAT_PLATE_COMMENT.md`:
-- Input: Analysis results from Phase 2
-- Output: Formatted plate comment
+Identify ALL variables in both decompiled code and disassembly using get_function_variables. Include: parameters, locals, SSA temporaries (iVar1), register inputs (in_ST0), implicit returns (extraout_EAX), stack parameters, undefined arrays, and assembly-only variables.
 
-Input format:
-```json
-{
-  "function_name": "ProcessPlayerSlots",
-  "summary": "Iterates player inventory slots and validates each item",
-  "algorithm_steps": [
-    "Get inventory pointer from player unit",
-    "Loop through slots 0 to max_slots",
-    "For each slot, check if item exists",
-    "Validate item state flags",
-    "Return count of valid items"
-  ],
-  "parameters": [
-    {"name": "pUnit", "type": "UnitAny *", "desc": "Player unit pointer"},
-    {"name": "dwFlags", "type": "uint", "desc": "Validation flags"}
-  ],
-  "returns": {"type": "int", "desc": "Count of valid items, -1 on error"},
-  "special_cases": ["Returns 0 if inventory is NULL"],
-  "calling_convention": "__fastcall"
-}
-```
+**Step 1 - Set Types**: Use set_local_variable_type for each variable with correct normalized types before renaming.
 
-Expected output: Formatted plate comment text ready for set_plate_comment().
+**Step 2 - Rename**: Apply Hungarian notation per reference above. Build complete rename dictionary for every variable.
 
----
+For failed renames, add PRE_COMMENT: "in_XMM1_Qa (qwBaseExponent): Quad precision parameter". For assembly-only variables, add EOL_COMMENT: "[EBP + -0x14] - dwTempFlags".
 
-## Phase 7: Finalize (Opus)
+## Global Data Renaming
 
-1. Apply plate comment: `set_plate_comment(address, haiku_output)`
-2. Add inline comments for complex logic: `batch_set_comments()`
-3. Add ordinal comments from Phase 4 mappings
+Rename ALL DAT_* and s_* globals. Use list_data_items_by_xrefs to find high-impact globals. Set type with apply_data_type, rename with Hungarian notation using rename_or_label.
 
----
+**DAT_***: Rename to g_ prefix (DAT_6fbf42a0 → g_pAutomapConfig)
+**Strings (s_*)**: Use sz (ANSI), wsz (wide), szFmt (format), szPath (paths)
 
-## Checklist
+**API/Ordinal Calls**: For external calls, document behavior, parameters, return semantics, side effects. Add inline comments (e.g., `/* D2Common.GetUnitStat */`). Reference docs/KNOWN_ORDINALS.md.
 
-- [ ] Haiku extraction completed
-- [ ] Opus classification done
-- [ ] Types resolved for all undefined
-- [ ] Haiku naming generated
-- [ ] Haiku ordinal lookup done
-- [ ] MCP tools applied
-- [ ] Haiku documentation formatted
-- [ ] Comments applied
+## Plate Comment Creation
 
----
+Create comprehensive header with set_plate_comment following docs\prompts\PLATE_COMMENT_FORMAT_GUIDE.md. Use plain text without decorative borders. Include: one-line summary; Algorithm section with numbered steps; Parameters with proper types and IMPLICIT keyword; Returns with success/error values; Special Cases; Magic Numbers Reference; Error Handling; Structure Layout table (Offset/Size/Field/Type/Description); Flag Bits with consistent hex notation.
 
-## Output
+## Inline Comments
 
+Add decompiler comments (PRE_COMMENT) explaining context, purpose, structure access, magic numbers, edge cases, algorithm step references. For complex control flow, create state machine section in plate comment.
+
+Add disassembly comments (EOL_COMMENT) at line end—concise (max 32 chars): "Load player slot index". Do NOT use PRE_COMMENT for disassembly. Match comment offsets to disassembly, not decompiler line order.
+
+## Output Format
+
+When complete, output EXACTLY:
 ```
 DONE: FunctionName
 Completed: Yes
-Delegation: 3 Haiku calls (extract, name, format)
-Changes: [summary]
+Changes: [brief summary]
 ```
-
----
-
-## Subtask Reference
-
-| Subtask | Model | Purpose |
-|---------|-------|---------|
-| `subtasks/EXTRACT_VARIABLES.md` | Haiku | Pattern extraction from code |
-| `subtasks/GENERATE_HUNGARIAN_NAMES.md` | Haiku | Apply naming rules |
-| `subtasks/LOOKUP_ORDINALS.md` | Haiku | Reference table lookup |
-| `subtasks/FORMAT_PLATE_COMMENT.md` | Haiku | Template-based formatting |
