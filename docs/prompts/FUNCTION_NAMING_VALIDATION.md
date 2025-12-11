@@ -6,23 +6,7 @@ Use `list_functions` or `search_functions_enhanced` to retrieve functions, check
 
 ## Automated Validation Tool
 
-Use the Python script to quickly identify functions needing review:
-
-```bash
-# Basic validation - shows functions with naming violations
-python scripts/validate_function_names.py
-
-# Save results to file
-python scripts/validate_function_names.py --output-file naming-violations.txt
-
-# Show valid functions too (for debugging)
-python scripts/validate_function_names.py --show-valid
-
-# Use different Ghidra server
-python scripts/validate_function_names.py --ghidra-server http://127.0.0.1:8089
-```
-
-The script automatically filters out valid patterns (FUN_*, Ordinal_*, library functions, PascalCase with verbs) and groups violations by reason for efficient review.
+Run `python scripts/validate_function_names.py` to identify functions needing review. The script filters out valid patterns and groups violations by reason.
 
 ## Valid Name Patterns
 
