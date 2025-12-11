@@ -20,16 +20,16 @@ param(
     [string]$GhidraServer = "http://127.0.0.1:8089",
     [switch]$ReEvaluate,  # Re-scan functions for completeness without Claude processing
     [switch]$CleanupScripts,  # Remove auto-generated Ghidra scripts (RecreateFunction*.java, etc.)
-    [switch]$SessionReuse,  # Enable session reuse (disabled by default due to Claude CLI file handle issues)
+    [switch]$NoSessionReuse,  # Disable session reuse (enabled by default with automatic cleanup)
     [int]$SessionResetInterval = 10  # Reset session every N functions to prevent context overflow
 )
 
 # Model name - CLI accepts simple aliases directly
 $FullModelName = $Model
 
-# Session reuse is OFF by default due to Claude CLI file handle exhaustion with --continue
-# The CLI accumulates files in ~/.claude/projects and ~/.claude/todos causing EMFILE errors
-$ReuseSession = $SessionReuse
+# Session reuse is ON by default - automatic cleanup prevents EMFILE errors
+# Use -NoSessionReuse to disable if issues occur
+$ReuseSession = -not $NoSessionReuse
 
 # Claude CLI session directory cleanup function
 # Removes accumulated files that cause EMFILE (too many open files) errors
@@ -1257,8 +1257,9 @@ function Start-Coordinator {
     if ($Reverse) { $commonArgs += " -Reverse" }
     if ($SkipValidation) { $commonArgs += " -SkipValidation" }
     if ($Subagent) { $commonArgs += " -Subagent" }
-    if ($SessionReuse) { 
-        $commonArgs += " -SessionReuse"
+    if ($NoSessionReuse) { 
+        $commonArgs += " -NoSessionReuse"
+    } else {
         $commonArgs += " -SessionResetInterval $SessionResetInterval"
     }
     if ($Model) { $commonArgs += " -Model `"$Model`"" }
