@@ -948,6 +948,7 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
         $backoffSeconds = 2
         $success = $false
         $output = ""
+        $retryDueToMismatch = $false  # Track if we're retrying due to score mismatch
         
         while ($retryCount -lt $MaxRetries) {
             # Choose prompt based on session state
@@ -1109,15 +1110,58 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
         }
         
         if ($success) {
+            # Extract output for analysis
+            $outputStr = $output -join "`n"
+            
+            # Check for SKIP response first (function intentionally skipped by Claude)
+            if ($outputStr -match "SKIP:\s*([^\n]+)(?:\n+Reason:\s*(.+))?") {
+                $skipFunc = $Matches[1].Trim()
+                $skipReason = if ($Matches[2]) { $Matches[2].Trim() } else { "No reason provided" }
+                Write-WorkerHost "SKIPPED: $skipFunc" "Yellow"
+                Write-WorkerHost "  Reason: $skipReason" "Yellow"
+                Write-Log "Function $funcName intentionally skipped: $skipReason" "WARN"
+                
+                # Save output file with SKIP prefix
+                $outputFile = Join-Path $outputDir "SKIP-$funcName-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
+                $output | Out-File $outputFile -Encoding UTF8
+                
+                $checkpoint = @{
+                    LastProcessed = $funcName
+                    Address = $address
+                    Timestamp = Get-Date -Format "o"
+                    InitialScore = $score
+                    Model = $Model
+                    WorkerId = $WorkerId
+                    Status = "Skipped"
+                    SkipReason = $skipReason
+                }
+                $checkpoint | ConvertTo-Json | Set-Content $checkpointFile
+                
+                return $true  # Still counts as successful (intentionally skipped)
+            }
+            
             Write-WorkerHost "Success!" "Green"
             Write-Log "Successfully processed $funcName"
             
-            # Extract and display concise summary from output
-            $outputStr = $output -join "`n"
-            
             # Look for our concise DONE format first to get the new function name
             $newFuncName = $funcName  # Default to original name
-            if ($outputStr -match "(?s)DONE:\s*([^`n]+)[`n]+Score:\s*([^`n]+)[`n]+Changes:\s*([^`n]+)") {
+            
+            # Pattern 1: DONE with arrow format (e.g., "DONE: FUN_xxx → NewName")
+            if ($outputStr -match "DONE:\s*(?:FUN_[a-fA-F0-9]+\s*[→\->]+\s*)?([A-Z][A-Za-z0-9_]+)") {
+                $newFuncName = $Matches[1].Trim()
+                Write-Host "  DONE: $newFuncName" -ForegroundColor Green
+                
+                # Try to extract score and changes from subsequent lines
+                if ($outputStr -match "Score:\s*([^\n]+)") {
+                    Write-Host "  Score: $($Matches[1].Trim())" -ForegroundColor Cyan
+                }
+                if ($outputStr -match "Changes:\s*([^\n]+)") {
+                    $changesText = $Matches[1].Trim() -replace '[^\x00-\x7F]+', ' -> '
+                    Write-Host "  Changes: $changesText" -ForegroundColor Gray
+                }
+            }
+            # Pattern 2: Standard multi-line DONE format
+            elseif ($outputStr -match "(?s)DONE:\s*([^`n]+)[`n]+Score:\s*([^`n]+)[`n]+Changes:\s*([^`n]+)") {
                 $newFuncName = $Matches[1].Trim()
                 # Sanitize arrow characters for readable console output
                 $changesText = $Matches[3].Trim() -replace '[^\x00-\x7F]+', ' -> '
@@ -1126,8 +1170,10 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
                 Write-Host "  Changes: $changesText" -ForegroundColor Gray
             } else {
                 # Fallback: extract key info from verbose output
-                if ($outputStr -match "Function.*?renamed.*?to.*?([A-Z][A-Za-z0-9]+)") { 
+                if ($outputStr -match "Function.*?renamed.*?to.*?[`"']?([A-Z][A-Za-z0-9_]+)[`"']?") { 
                     $newFuncName = $Matches[1] 
+                } elseif ($outputStr -match "rename_function.*?new_name.*?[`"']([A-Z][A-Za-z0-9_]+)[`"']") {
+                    $newFuncName = $Matches[1]
                 }
                 $scoreMatch = "?"
                 if ($outputStr -match "(\d+(?:\.\d+)?)\s*[%/]?\s*complete|complete[^\d]*(\d+(?:\.\d+)?)") {
@@ -1188,6 +1234,32 @@ Do NOT output lengthy explanations, markdown headers, or detailed breakdowns. Ke
                     } elseif ($newScore -eq $score) {
                         Write-WorkerHost "  No change: Score remains $score" "Yellow"
                         Write-Log "No score improvement for $funcName (remains $score)" "WARN"
+                        
+                        # Check if Claude reported making changes - if so, MCP tools may have silently failed
+                        $claimedChanges = $outputStr -match "Changes:\s*[^\n]+" -or 
+                                          $outputStr -match "renamed.*variables?" -or 
+                                          $outputStr -match "set.*prototype" -or
+                                          $outputStr -match "added.*comment"
+                        
+                        if ($claimedChanges -and -not $retryDueToMismatch) {
+                            Write-WorkerHost "  WARNING: Claude reported changes but validation shows none" "Red"
+                            Write-WorkerHost "  This may indicate MCP tools silently failed" "Red"
+                            Write-Log "MCP tool failure suspected for $funcName - Claude claimed changes but score unchanged" "ERROR"
+                            
+                            # Log detailed MCP error information
+                            if ($outputStr -match "error|failed|could not|unable|exception" ) {
+                                Write-WorkerHost "  Checking output for error patterns..." "Yellow"
+                                $errorLines = ($outputStr -split "`n") | Where-Object { $_ -match "error|failed|could not|unable|exception" }
+                                foreach ($errLine in $errorLines | Select-Object -First 5) {
+                                    Write-WorkerHost "    > $($errLine.Trim())" "Red"
+                                    Write-Log "Error line: $($errLine.Trim())" "ERROR"
+                                }
+                            }
+                            
+                            # Set flag for potential future retry implementation
+                            # Currently just logs for diagnosis - manual retry recommended
+                            Write-WorkerHost "  Recommendation: Re-run this function with a fresh session" "Cyan"
+                        }
                     } else {
                         Write-WorkerHost "  WARNING: Score decreased: $score -> $newScore" "Red"
                         Write-Log "Score decreased from $score to $newScore for $funcName" "ERROR"

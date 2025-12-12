@@ -36,7 +36,18 @@ Before documentation, identify all structure types accessed. Use list_data_types
 
 ## Function Naming and Prototype
 
-Rename with rename_function_by_address using descriptive PascalCase (ProcessPlayerSlots, ValidateEntityState). Set accurate return type from EAX examination. Define complete prototype with set_function_prototype using proper types (UnitAny* not int*) and camelCase names (pPlayerNode, nResourceCount). Verify calling convention from register usage: __cdecl, __stdcall, __fastcall, __thiscall. Document implicit register parameters with IMPLICIT keyword.
+Rename with rename_function_by_address using descriptive **PascalCase** names that start with an action verb describing function purpose.
+
+**Verb-First Pattern (Required)**: Use action verbs like Get/Set/Init/Process/Update/Validate/Create/Free/Handle/Is/Has/Can/Find/Load/Save/Draw/Render/Parse/Build/Calculate/Compute followed by descriptive context (e.g., GetPlayerHealth, ProcessInputEvent, ValidateItemSlot).
+
+**Invalid Names (Never Use)**:
+- `PREFIX_*` snake_case prefixes (`SKILLS_GetLevel` → `GetSkillLevel`)
+- lowercase start (`processData` → `ProcessData`)
+- Single word without verb (`Player` → `GetPlayer` or `UpdatePlayer`)
+- ALL_CAPS (`PROCESS_DATA` → `ProcessData`)
+- Generic numbered suffix (`Handler1` → `HandleSkillActivation`)
+
+Set accurate return type from EAX examination. Define complete prototype with set_function_prototype using proper types (UnitAny* not int*) and camelCase names (pPlayerNode, nResourceCount). Verify calling convention from register usage: __cdecl, __stdcall, __fastcall, __thiscall. Document implicit register parameters with IMPLICIT keyword.
 
 ## Hungarian Notation Reference
 

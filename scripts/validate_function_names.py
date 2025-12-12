@@ -64,7 +64,19 @@ VALID_PATTERNS = [
         r"Subscribe|Emit|Consume|Produce|Generate|Fabricate|Synthesize|Analyze|"
         r"Evaluate|Measure|Sample|Poll|Query|Fetch|Retrieve|Lookup|Resolve|Translate|"
         r"Interpolate|Extrapolate|Approximate|Estimate|Predict|Infer|Deduce|Derive|"
-        r"Extract|Inject|Embed)[A-Z][a-zA-Z0-9]*$"
+        r"Extract|Inject|Embed|Accumulate|Adjust|Append|Are|Assert|Assign|Attempt|Auto|"
+        r"Calc|Call|Choose|Clamp|Compact|Conditional|Count|Decrement|Dereference|Detect|"
+        r"Determine|Distribute|Double|Drain|Drlg|Drop|Ensure|Enumerate|Equip|Exchange|"
+        r"Expire|For|Each|Force|Heal|Increment|Iterate|Link|Log|Make|Mark|Mask|Mem|Modify|"
+        r"Move|Name|Notify|Object|Operate|Perform|Place|Prepare|Prevent|Print|Proc|"
+        r"Produce|Queue|Reactivate|Record|Reduce|Register|Release|Remove|Rename|Repeat|"
+        r"Report|Request|Reset|Restore|Rotate|Rollback|Schedule|Scope|Seal|Separate|"
+        r"Sequence|Session|Setup|Shadow|Shape|Share|Shift|Shift|Sideload|Signal|Simulate|"
+        r"Snapshot|Socket|Spawn|Specify|Split|Spread|Stack|Stage|State|Store|Stream|"
+        r"Stress|Structure|Stub|Submit|Subtract|Suggest|Sum|Summarize|Supplement|Sweep|"
+        r"Switch|Sync|System|Test|Trace|Track|Trade|Transfer|Transition|Truncate|Try|"
+        r"Unify|Unit|Unlock|Update|Validate|Verify|View|Visit|Void|Warn|Watch|Wear|Web|"
+        r"Weight|Weld|Wrap|Write|Zone)[A-Z][a-zA-Z0-9]*$"
     ),
 ]
 
