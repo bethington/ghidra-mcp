@@ -65,7 +65,7 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "1.9.2"; // Default fallback
+    private static String VERSION = "1.9.5"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     
     static {
@@ -74,7 +74,7 @@ class VersionInfo {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "1.9.2");
+                VERSION = props.getProperty("app.version", "1.9.5");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
             }
         } catch (IOException e) {
@@ -620,6 +620,23 @@ public class GhidraMCPPlugin extends Plugin {
             String address = params.get("address");
             String name = params.get("name");
             String result = renameOrLabel(address, name);
+            sendResponse(exchange, result);
+        });
+
+        // DELETE_LABEL - Remove a label at an address (v1.9.5)
+        server.createContext("/delete_label", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String address = params.get("address");
+            String name = params.get("name");  // Optional: specific label name to delete
+            String result = deleteLabel(address, name);
+            sendResponse(exchange, result);
+        });
+
+        // BATCH_DELETE_LABELS - Delete multiple labels in a single operation (v1.9.5)
+        server.createContext("/batch_delete_labels", exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            List<Map<String, String>> labels = convertToMapList(params.get("labels"));
+            String result = batchDeleteLabels(labels);
             sendResponse(exchange, result);
         });
 
@@ -1483,6 +1500,34 @@ public class GhidraMCPPlugin extends Plugin {
         server.createContext("/apply_function_documentation", exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             String result = applyFunctionDocumentation(body);
+            sendResponse(exchange, result);
+        });
+
+        // ==================================================================================
+        // CROSS-VERSION MATCHING TOOLS - Accelerate function documentation propagation
+        // ==================================================================================
+
+        // COMPARE_PROGRAMS_DOCUMENTATION - Compare documented vs undocumented counts across programs
+        server.createContext("/compare_programs_documentation", exchange -> {
+            String result = compareProgramsDocumentation();
+            sendResponse(exchange, result);
+        });
+
+        // FIND_UNDOCUMENTED_BY_STRING - Find FUN_* functions referencing a string
+        server.createContext("/find_undocumented_by_string", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String stringAddress = qparams.get("address");
+            String programName = qparams.get("program");
+            String result = findUndocumentedByString(stringAddress, programName);
+            sendResponse(exchange, result);
+        });
+
+        // BATCH_STRING_ANCHOR_REPORT - Generate report of source file strings and their FUN_* functions
+        server.createContext("/batch_string_anchor_report", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String pattern = qparams.getOrDefault("pattern", ".cpp");
+            String programName = qparams.get("program");
+            String result = batchStringAnchorReport(pattern, programName);
             sendResponse(exchange, result);
         });
 
@@ -5864,6 +5909,202 @@ public class GhidraMCPPlugin extends Plugin {
 
         } catch (Exception e) {
             return "Error: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Delete a label at the specified address (v1.9.5).
+     *
+     * @param addressStr Memory address in hex format
+     * @param labelName Optional specific label name to delete. If null/empty, deletes all labels at the address.
+     * @return Success or failure message
+     */
+    public String deleteLabel(String addressStr, String labelName) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "{\"error\": \"Address is required\"}";
+        }
+
+        try {
+            Address address = program.getAddressFactory().getAddress(addressStr);
+            if (address == null) {
+                return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+            }
+
+            SymbolTable symbolTable = program.getSymbolTable();
+            Symbol[] symbols = symbolTable.getSymbols(address);
+
+            if (symbols == null || symbols.length == 0) {
+                return "{\"success\": false, \"message\": \"No symbols found at address " + addressStr + "\"}";
+            }
+
+            final AtomicInteger deletedCount = new AtomicInteger(0);
+            final List<String> deletedNames = new ArrayList<>();
+            final List<String> errors = new ArrayList<>();
+
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Delete Label");
+                try {
+                    for (Symbol symbol : symbols) {
+                        // Only delete LABEL type symbols
+                        if (symbol.getSymbolType() != SymbolType.LABEL) {
+                            continue;
+                        }
+
+                        // If a specific name was given, only delete that one
+                        if (labelName != null && !labelName.isEmpty()) {
+                            if (!symbol.getName().equals(labelName)) {
+                                continue;
+                            }
+                        }
+
+                        String name = symbol.getName();
+                        boolean deleted = symbol.delete();
+                        if (deleted) {
+                            deletedCount.incrementAndGet();
+                            deletedNames.add(name);
+                        } else {
+                            errors.add("Failed to delete label: " + name);
+                        }
+                    }
+                } catch (Exception e) {
+                    errors.add("Error during deletion: " + e.getMessage());
+                } finally {
+                    program.endTransaction(tx, deletedCount.get() > 0);
+                }
+            });
+
+            StringBuilder result = new StringBuilder();
+            result.append("{\"success\": ").append(deletedCount.get() > 0);
+            result.append(", \"deleted_count\": ").append(deletedCount.get());
+            result.append(", \"deleted_names\": [");
+            for (int i = 0; i < deletedNames.size(); i++) {
+                if (i > 0) result.append(", ");
+                result.append("\"").append(deletedNames.get(i).replace("\"", "\\\"")).append("\"");
+            }
+            result.append("]");
+            if (!errors.isEmpty()) {
+                result.append(", \"errors\": [");
+                for (int i = 0; i < errors.size(); i++) {
+                    if (i > 0) result.append(", ");
+                    result.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
+                }
+                result.append("]");
+            }
+            result.append("}");
+            return result.toString();
+
+        } catch (Exception e) {
+            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+        }
+    }
+
+    /**
+     * Batch delete multiple labels in a single transaction (v1.9.5).
+     * Useful for cleaning up orphan labels after applying array types.
+     *
+     * @param labels List of label entries with "address" and optional "name" fields
+     * @return JSON with success status and counts
+     */
+    public String batchDeleteLabels(List<Map<String, String>> labels) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        if (labels == null || labels.isEmpty()) {
+            return "{\"error\": \"No labels provided\"}";
+        }
+
+        final AtomicInteger deletedCount = new AtomicInteger(0);
+        final AtomicInteger skippedCount = new AtomicInteger(0);
+        final AtomicInteger errorCount = new AtomicInteger(0);
+        final List<String> errors = new ArrayList<>();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Batch Delete Labels");
+                try {
+                    SymbolTable symbolTable = program.getSymbolTable();
+
+                    for (Map<String, String> labelEntry : labels) {
+                        String addressStr = labelEntry.get("address");
+                        String labelName = labelEntry.get("name");  // Optional
+
+                        if (addressStr == null || addressStr.isEmpty()) {
+                            errors.add("Missing address in label entry");
+                            errorCount.incrementAndGet();
+                            continue;
+                        }
+
+                        try {
+                            Address address = program.getAddressFactory().getAddress(addressStr);
+                            if (address == null) {
+                                errors.add("Invalid address: " + addressStr);
+                                errorCount.incrementAndGet();
+                                continue;
+                            }
+
+                            Symbol[] symbols = symbolTable.getSymbols(address);
+                            if (symbols == null || symbols.length == 0) {
+                                skippedCount.incrementAndGet();
+                                continue;
+                            }
+
+                            for (Symbol symbol : symbols) {
+                                if (symbol.getSymbolType() != SymbolType.LABEL) {
+                                    continue;
+                                }
+
+                                // If a specific name was given, only delete that one
+                                if (labelName != null && !labelName.isEmpty()) {
+                                    if (!symbol.getName().equals(labelName)) {
+                                        continue;
+                                    }
+                                }
+
+                                boolean deleted = symbol.delete();
+                                if (deleted) {
+                                    deletedCount.incrementAndGet();
+                                } else {
+                                    errors.add("Failed to delete at " + addressStr);
+                                    errorCount.incrementAndGet();
+                                }
+                            }
+                        } catch (Exception e) {
+                            errors.add("Error at " + addressStr + ": " + e.getMessage());
+                            errorCount.incrementAndGet();
+                        }
+                    }
+                } catch (Exception e) {
+                    errors.add("Transaction error: " + e.getMessage());
+                } finally {
+                    program.endTransaction(tx, deletedCount.get() > 0);
+                }
+            });
+
+            StringBuilder result = new StringBuilder();
+            result.append("{\"success\": true");
+            result.append(", \"labels_deleted\": ").append(deletedCount.get());
+            result.append(", \"labels_skipped\": ").append(skippedCount.get());
+            result.append(", \"errors_count\": ").append(errorCount.get());
+            if (!errors.isEmpty()) {
+                result.append(", \"errors\": [");
+                for (int i = 0; i < Math.min(errors.size(), 10); i++) {  // Limit to first 10 errors
+                    if (i > 0) result.append(", ");
+                    result.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
+                }
+                result.append("]");
+            }
+            result.append("}");
+            return result.toString();
+
+        } catch (Exception e) {
+            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
         }
     }
 
@@ -10801,15 +11042,54 @@ public class GhidraMCPPlugin extends Plugin {
                     if (decompilationAvailable && decompResults != null) {
                         String decompiledCode = decompResults.getDecompiledFunction().getC();
                         if (decompiledCode != null) {
-                            // Count lines of code (excluding comments and empty lines)
+                            // Count lines of code and inline comments
+                            // We need to distinguish between:
+                            // 1. Plate comments (before function body) - don't count
+                            // 2. Body comments (inside function braces) - count these
                             String[] lines = decompiledCode.split("\n");
+                            boolean inFunctionBody = false;
+                            boolean inPlateComment = false;
+                            int braceDepth = 0;
+
                             for (String line : lines) {
                                 String trimmed = line.trim();
-                                if (!trimmed.isEmpty() && !trimmed.startsWith("/*") && !trimmed.startsWith("*") && !trimmed.startsWith("//")) {
+
+                                // Track plate comment block (before function signature)
+                                if (!inFunctionBody && trimmed.startsWith("/*")) {
+                                    inPlateComment = true;
+                                }
+                                if (inPlateComment && trimmed.endsWith("*/")) {
+                                    inPlateComment = false;
+                                    continue;
+                                }
+                                if (inPlateComment) continue;
+
+                                // Track function body by counting braces
+                                for (char c : trimmed.toCharArray()) {
+                                    if (c == '{') {
+                                        braceDepth++;
+                                        inFunctionBody = true;
+                                    } else if (c == '}') {
+                                        braceDepth--;
+                                    }
+                                }
+
+                                // Count code lines (non-empty, non-comment lines inside function)
+                                if (inFunctionBody && !trimmed.isEmpty() &&
+                                    !trimmed.startsWith("/*") && !trimmed.startsWith("*") && !trimmed.startsWith("//")) {
                                     codeLineCount++;
                                 }
-                                // Count inline comments
-                                if (trimmed.contains("/*") && !trimmed.startsWith("/*")) {
+
+                                // Count comments inside function body
+                                // This includes both standalone comment lines and trailing comments
+                                if (inFunctionBody && trimmed.contains("/*")) {
+                                    // Exclude WARNING comments from decompiler (they're not user-added)
+                                    if (!trimmed.contains("WARNING:")) {
+                                        inlineCommentCount++;
+                                    }
+                                }
+                                // Also count // style comments
+                                if (inFunctionBody && trimmed.contains("//")) {
                                     inlineCommentCount++;
                                 }
                             }
@@ -13252,6 +13532,264 @@ public class GhidraMCPPlugin extends Plugin {
             Msg.error(this, "Exception in renameExternalLocation: " + e.getMessage());
             return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
         }
+    }
+
+    // ==================================================================================
+    // CROSS-VERSION MATCHING TOOLS
+    // ==================================================================================
+
+    /**
+     * Compare documentation status across all open programs.
+     * Returns documented/undocumented function counts for each program.
+     */
+    private String compareProgramsDocumentation() {
+        StringBuilder result = new StringBuilder();
+        result.append("{\"programs\": [");
+
+        try {
+            PluginTool tool = this.getTool();
+            if (tool == null) {
+                return "{\"error\": \"Tool not available\"}";
+            }
+
+            ProgramManager programManager = tool.getService(ProgramManager.class);
+            if (programManager == null) {
+                return "{\"error\": \"ProgramManager not available\"}";
+            }
+
+            Program[] allPrograms = programManager.getAllOpenPrograms();
+            Program currentProgram = programManager.getCurrentProgram();
+
+            boolean first = true;
+            for (Program prog : allPrograms) {
+                if (!first) result.append(", ");
+                first = false;
+
+                int documented = 0;
+                int undocumented = 0;
+                int total = 0;
+
+                FunctionManager funcMgr = prog.getFunctionManager();
+                for (Function func : funcMgr.getFunctions(true)) {
+                    total++;
+                    if (func.getName().startsWith("FUN_") || func.getName().startsWith("thunk_FUN_")) {
+                        undocumented++;
+                    } else {
+                        documented++;
+                    }
+                }
+
+                double docPercent = total > 0 ? (documented * 100.0 / total) : 0;
+
+                result.append("{");
+                result.append("\"name\": \"").append(escapeJson(prog.getName())).append("\", ");
+                result.append("\"path\": \"").append(escapeJson(prog.getDomainFile().getPathname())).append("\", ");
+                result.append("\"is_current\": ").append(prog == currentProgram).append(", ");
+                result.append("\"total_functions\": ").append(total).append(", ");
+                result.append("\"documented\": ").append(documented).append(", ");
+                result.append("\"undocumented\": ").append(undocumented).append(", ");
+                result.append("\"documentation_percent\": ").append(String.format("%.1f", docPercent));
+                result.append("}");
+            }
+
+            result.append("], \"count\": ").append(allPrograms.length).append("}");
+
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Find undocumented (FUN_*) functions that reference a given string address.
+     * This filters get_xrefs_to results to only return FUN_* functions.
+     */
+    private String findUndocumentedByString(String stringAddress, String programName) {
+        if (stringAddress == null || stringAddress.isEmpty()) {
+            return "{\"error\": \"String address is required\"}";
+        }
+
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) {
+            return "{\"error\": \"" + escapeJson((String) programResult[1]) + "\"}";
+        }
+
+        StringBuilder result = new StringBuilder();
+        result.append("{\"string_address\": \"").append(stringAddress).append("\", ");
+        result.append("\"undocumented_functions\": [");
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(stringAddress);
+            if (addr == null) {
+                return "{\"error\": \"Invalid address format: " + stringAddress + "\"}";
+            }
+
+            ReferenceManager refMgr = program.getReferenceManager();
+            FunctionManager funcMgr = program.getFunctionManager();
+
+            // Get references to this address
+            ReferenceIterator refIter = refMgr.getReferencesTo(addr);
+
+            Set<String> seenFunctions = new java.util.HashSet<>();
+            boolean first = true;
+            int undocCount = 0;
+            int docCount = 0;
+
+            while (refIter.hasNext()) {
+                Reference ref = refIter.next();
+                Address fromAddr = ref.getFromAddress();
+
+                // Find the function containing this reference
+                Function func = funcMgr.getFunctionContaining(fromAddr);
+                if (func != null) {
+                    String funcName = func.getName();
+
+                    // Only add each function once
+                    if (!seenFunctions.contains(funcName)) {
+                        seenFunctions.add(funcName);
+
+                        if (funcName.startsWith("FUN_") || funcName.startsWith("thunk_FUN_")) {
+                            if (!first) result.append(", ");
+                            first = false;
+                            undocCount++;
+
+                            result.append("{");
+                            result.append("\"name\": \"").append(escapeJson(funcName)).append("\", ");
+                            result.append("\"address\": \"").append(func.getEntryPoint().toString()).append("\", ");
+                            result.append("\"ref_address\": \"").append(fromAddr.toString()).append("\", ");
+                            result.append("\"ref_type\": \"").append(ref.getReferenceType().getName()).append("\"");
+                            result.append("}");
+                        } else {
+                            docCount++;
+                        }
+                    }
+                }
+            }
+
+            result.append("], ");
+            result.append("\"undocumented_count\": ").append(undocCount).append(", ");
+            result.append("\"documented_count\": ").append(docCount).append(", ");
+            result.append("\"total_referencing_functions\": ").append(seenFunctions.size());
+            result.append("}");
+
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Generate a report of all strings matching a pattern (e.g., ".cpp") and their referencing FUN_* functions.
+     * This helps identify undocumented functions that can be matched using string anchors.
+     */
+    private String batchStringAnchorReport(String pattern, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) {
+            return "{\"error\": \"" + escapeJson((String) programResult[1]) + "\"}";
+        }
+
+        StringBuilder result = new StringBuilder();
+        result.append("{\"pattern\": \"").append(escapeJson(pattern)).append("\", ");
+        result.append("\"anchors\": [");
+
+        try {
+            Listing listing = program.getListing();
+            ReferenceManager refMgr = program.getReferenceManager();
+            FunctionManager funcMgr = program.getFunctionManager();
+
+            int anchorCount = 0;
+            int totalUndocumented = 0;
+            boolean firstAnchor = true;
+
+            // Iterate through all defined strings in the program
+            DataIterator dataIter = listing.getDefinedData(true);
+            while (dataIter.hasNext()) {
+                Data data = dataIter.next();
+
+                // Check if this is a string type
+                if (data.getDataType() instanceof StringDataType ||
+                    data.getDataType().getName().toLowerCase().contains("string")) {
+
+                    Object value = data.getValue();
+                    if (value instanceof String) {
+                        String strValue = (String) value;
+
+                        // Check if string matches the pattern
+                        if (strValue.toLowerCase().contains(pattern.toLowerCase())) {
+                            Address strAddr = data.getAddress();
+
+                            // Find FUN_* functions referencing this string
+                            ReferenceIterator refIter = refMgr.getReferencesTo(strAddr);
+                            Set<String> undocFuncs = new java.util.LinkedHashSet<>();
+                            Set<String> docFuncs = new java.util.LinkedHashSet<>();
+
+                            while (refIter.hasNext()) {
+                                Reference ref = refIter.next();
+                                Function func = funcMgr.getFunctionContaining(ref.getFromAddress());
+                                if (func != null) {
+                                    String funcName = func.getName();
+                                    if (funcName.startsWith("FUN_") || funcName.startsWith("thunk_FUN_")) {
+                                        undocFuncs.add(funcName + "@" + func.getEntryPoint().toString());
+                                    } else {
+                                        docFuncs.add(funcName);
+                                    }
+                                }
+                            }
+
+                            // Only include strings that have at least one referencing function
+                            if (!undocFuncs.isEmpty() || !docFuncs.isEmpty()) {
+                                if (!firstAnchor) result.append(", ");
+                                firstAnchor = false;
+                                anchorCount++;
+                                totalUndocumented += undocFuncs.size();
+
+                                result.append("{");
+                                result.append("\"string\": \"").append(escapeJson(strValue)).append("\", ");
+                                result.append("\"address\": \"").append(strAddr.toString()).append("\", ");
+                                result.append("\"undocumented\": [");
+
+                                boolean firstFunc = true;
+                                for (String funcInfo : undocFuncs) {
+                                    if (!firstFunc) result.append(", ");
+                                    firstFunc = false;
+                                    String[] parts = funcInfo.split("@");
+                                    result.append("{\"name\": \"").append(parts[0]).append("\", ");
+                                    result.append("\"address\": \"").append(parts[1]).append("\"}");
+                                }
+
+                                result.append("], \"documented\": [");
+
+                                firstFunc = true;
+                                for (String funcName : docFuncs) {
+                                    if (!firstFunc) result.append(", ");
+                                    firstFunc = false;
+                                    result.append("\"").append(escapeJson(funcName)).append("\"");
+                                }
+
+                                result.append("], ");
+                                result.append("\"undocumented_count\": ").append(undocFuncs.size()).append(", ");
+                                result.append("\"documented_count\": ").append(docFuncs.size());
+                                result.append("}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            result.append("], ");
+            result.append("\"total_anchors\": ").append(anchorCount).append(", ");
+            result.append("\"total_undocumented_functions\": ").append(totalUndocumented);
+            result.append("}");
+
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+
+        return result.toString();
     }
 
     @Override

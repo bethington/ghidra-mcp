@@ -4,7 +4,10 @@ You are assisting with reverse engineering binary code in Ghidra. Your task is t
 
 ## Execution Guidelines
 
+
 Use MCP tools in this sequence: rename_function_by_address, set_function_prototype, batch_create_labels, rename_variables (iterating as needed), set_plate_comment, and batch_set_comments. For connection timeouts, retry once then switch to smaller batches. Work efficiently without excessive status output. Do not create or edit files on the filesystem. Apply all changes directly in Ghidra using MCP tools. Allow up to 3 retry attempts for network timeouts before reporting failure.
+
+**When reprocessing functions (especially those with low completeness), always re-apply naming, prototype, and documentation steps. If the new analysis produces a better or more accurate function name or documentation, update and overwrite the existing name and documentation, even if custom values already exist. This ensures all functions are kept up to date with the latest standards and information.**
 
 ## Initialization and Analysis
 
@@ -47,7 +50,7 @@ Rename with rename_function_by_address using descriptive **PascalCase** names th
 - ALL_CAPS (`PROCESS_DATA` → `ProcessData`)
 - Generic numbered suffix (`Handler1` → `HandleSkillActivation`)
 
-Set accurate return type from EAX examination. Define complete prototype with set_function_prototype using proper types (UnitAny* not int*) and camelCase names (pPlayerNode, nResourceCount). Verify calling convention from register usage: __cdecl, __stdcall, __fastcall, __thiscall. Document implicit register parameters with IMPLICIT keyword.
+Set accurate return type from EAX examination. Define complete prototype with set_function_prototype using proper types (UnitAny* not int*) and camelCase names (pPlayerNode, nResourceCount). Verify calling convention from register usage: __cdecl, __stdcall, __fastcall, __thiscall, __d2call, __d2edicall, __d2mixcall, __d2regcall. Document implicit register parameters with IMPLICIT keyword.
 
 ## Hungarian Notation Reference
 

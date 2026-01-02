@@ -1,0 +1,47 @@
+{
+  "matches": [
+    {
+      "target_addr": "6fab676f",
+      "target_name": "FUN_6fab676f",
+      "source_name": "CountValidLockContextEntities",
+      "source_addr": "6fb9ef77",
+      "source_program": "D2Client.dll"
+    },
+    {
+      "target_addr": "6faba4be",
+      "target_name": "FUN_6faba4be",
+      "source_name": "CountValidLockContextEntities",
+      "source_addr": "6fb9ef77",
+      "source_program": "D2Client.dll"
+    },
+    {
+      "target_addr": "6fac0f40",
+      "target_name": "thunk_FUN_6fac0f00",
+      "source_name": "FlushValidationErrors",
+      "source_addr": "6fad8e30",
+      "source_program": "D2Client.dll"
+    },
+    {
+      "target_addr": "6face830",
+      "target_name": "thunk_FUN_6fb38c50",
+      "source_name": "FlushValidationErrors",
+      "source_addr": "6fad8e30",
+      "source_program": "D2Client.dll"
+    },
+    {
+      "target_addr": "6fad5590",
+      "target_name": "FUN_6fad5590",
+      "source_name": "CanMonsterUseInfernoNoIdle",
+      "source_addr": "6fb62a40",
+      "source_program": "D2Client.dll"
+    },
+    {
+      "target_addr": "6fadb220",
+      "target_name": "thunk_FUN_6fadb090",
+      "source_name": "FlushValidationErrors",
+      "source_addr": "6fad8e30",
+      "source_program": "D2Client.dll"
+    }
+  ],
+  "no_match_count": 494
+}

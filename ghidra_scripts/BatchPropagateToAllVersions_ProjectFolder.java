@@ -19,7 +19,7 @@ import javax.swing.JOptionPane;
 
 public class BatchPropagateToAllVersions_ProjectFolder extends GhidraScript {
 
-    private static final String INDEX_FILE = System.getProperty("user.home") + "/ghidra_function_hash_index.json";
+    private static final String INDEX_FILE = System.getProperty("user.home") + "/ghidra_function_hash_index_v2.json";
     
     private Map<String, Map<String, Object>> functionsIndex;
     private Map<String, Map<String, Object>> dataTypesIndex;
@@ -61,22 +61,27 @@ public class BatchPropagateToAllVersions_ProjectFolder extends GhidraScript {
         }
         
         // Load the index
-        println("\n1. Loading function hash index...");
+        println("\n1. Loading function hash index V2...");
         Map<String, Object> index = loadIndex();
-        
+
+        // V2 index uses "functions_by_hash" instead of "functions"
         @SuppressWarnings("unchecked")
-        Map<String, Map<String, Object>> funcs = (Map<String, Map<String, Object>>) index.get("functions");
+        Map<String, Map<String, Object>> funcs = (Map<String, Map<String, Object>>) index.get("functions_by_hash");
+        if (funcs == null) {
+            // Fallback to V1 key for backward compatibility
+            funcs = (Map<String, Map<String, Object>>) index.get("functions");
+        }
         functionsIndex = funcs != null ? funcs : new LinkedHashMap<>();
-        
+
         @SuppressWarnings("unchecked")
         Map<String, Map<String, Object>> datatypes = (Map<String, Map<String, Object>>) index.get("data_types");
         dataTypesIndex = datatypes != null ? datatypes : new LinkedHashMap<>();
-        
+
         println("  Functions indexed: " + functionsIndex.size());
         println("  Data types indexed: " + dataTypesIndex.size());
         
         if (functionsIndex.isEmpty()) {
-            println("\n  Error: No functions in index. Run BuildHashIndex_ProjectFolder.java first.");
+            println("\n  Error: No functions in index. Run BuildHashIndex_V2.java first.");
             return;
         }
         
@@ -299,8 +304,12 @@ public class BatchPropagateToAllVersions_ProjectFolder extends GhidraScript {
                     if (programPath.equals(canonicalPath)) continue;
                     
                     // Skip if canonical is undocumented
-                    Boolean hasCustomName = (Boolean) canonical.get("has_custom_name");
-                    if (hasCustomName == null || !hasCustomName) continue;
+                    // V2 uses "is_documented", V1 uses "has_custom_name"
+                    Boolean isDocumented = (Boolean) canonical.get("is_documented");
+                    if (isDocumented == null) {
+                        isDocumented = (Boolean) canonical.get("has_custom_name");
+                    }
+                    if (isDocumented == null || !isDocumented) continue;
                     
                     // Apply documentation
                     if (applyDocumentation(func, canonical, dtm, createdDataTypes)) {

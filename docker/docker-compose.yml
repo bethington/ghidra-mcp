@@ -1,0 +1,45 @@
+# GhidraMCP Headless Server - Single Instance Deployment
+# Usage: docker-compose up -d
+
+version: '3.8'
+
+services:
+  ghidra-mcp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ghidra-mcp-headless:latest
+    container_name: ghidra-mcp
+    ports:
+      - "8089:8089"
+    volumes:
+      # Persistent data storage
+      - ghidra-data:/data
+      # Ghidra projects directory
+      - ghidra-projects:/projects
+      # Optional: Mount local binaries for analysis
+      # - ./binaries:/binaries:ro
+    environment:
+      - GHIDRA_MCP_PORT=8089
+      - JAVA_OPTS=-Xmx4g -XX:+UseG1GC
+      # Optional: Auto-load a program on startup
+      # - PROGRAM_FILE=/binaries/target.exe
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8089/check_connection"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 6g
+        reservations:
+          memory: 2g
+
+volumes:
+  ghidra-data:
+    driver: local
+  ghidra-projects:
+    driver: local

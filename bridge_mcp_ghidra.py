@@ -36,6 +36,8 @@ ENDPOINT_TIMEOUTS = {
     "batch_set_variable_types": 90,  # 1.5 minutes - DataType lookups can be slow
     "analyze_data_region": 90,  # 1.5 minutes - complex data analysis
     "batch_create_labels": 60,  # 1 minute - creating multiple labels in transaction
+    "delete_label": 30,  # 30 seconds - deleting single label
+    "batch_delete_labels": 60,  # 1 minute - deleting multiple labels in transaction
     "set_plate_comment": 45,  # 45 seconds - plate comments can be lengthy
     "get_plate_comment": 10,  # 10 seconds - simple read operation
     "set_function_prototype": 45,  # 45 seconds - prototype changes trigger re-analysis
@@ -370,7 +372,7 @@ def parse_address_list(addresses: str, param_name: str = "addresses") -> list[st
 
 
 # Performance and caching utilities
-from typing import Callable, TypeVar, Any
+from typing import Callable, TypeVar, Any, Optional
 
 T = TypeVar("T")
 
@@ -1602,7 +1604,8 @@ def list_data_items_by_xrefs(
     params = {"offset": offset, "limit": limit, "format": format}
     if program:
         params["program"] = program
-    result = safe_get("list_data_items_by_xrefs", params)
+    # Use safe_get_json since this endpoint returns JSON (not line-based text)
+    result = safe_get_json("list_data_items_by_xrefs", params)
     return result
 
 
@@ -2681,6 +2684,115 @@ def rename_or_label(address: str, name: str) -> str:
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
 
     return safe_post("rename_or_label", {"address": address, "name": name})
+
+
+@mcp.tool()
+def delete_label(address: str, name: str = None) -> str:
+    """
+    Delete a label at the specified address (v1.9.5).
+
+    This tool removes labels from memory addresses. Useful for cleaning up
+    orphan labels after applying array types that consume multiple addresses.
+
+    Args:
+        address: Memory address in hex format (e.g., "0x6ff86c64")
+                 Accepts addresses with or without 0x prefix
+        name: Optional specific label name to delete. If not provided,
+              deletes all labels at the address.
+
+    Returns:
+        JSON with deletion results:
+        {
+          "success": true,
+          "deleted_count": 1,
+          "deleted_names": ["g_pData_6ff86c64"]
+        }
+
+    Examples:
+        # Delete specific label by name
+        delete_label("0x6ff86c64", "g_pData_6ff86c64")
+
+        # Delete all labels at address
+        delete_label("0x6ff86c64")
+
+    See Also:
+        - batch_delete_labels(): Delete multiple labels efficiently
+        - create_label(): Create new labels
+        - rename_or_label(): Rename or create labels
+    """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+
+    params = {"address": address}
+    if name:
+        params["name"] = name
+
+    return safe_post("delete_label", params)
+
+
+@mcp.tool()
+def batch_delete_labels(labels: list) -> str:
+    """
+    Delete multiple labels in a single atomic operation (v1.9.5).
+
+    This tool deletes multiple labels in one transaction, dramatically reducing
+    API calls. Essential for cleaning up orphan labels after applying array
+    types to pointer tables.
+
+    Args:
+        labels: List of label objects, each with:
+                - "address" (required): Address of label to delete
+                - "name" (optional): Specific label name to delete
+                Example: [{"address": "0x6ff86c64", "name": "g_pData_6ff86c64"},
+                         {"address": "0x6ff86c68"}]
+
+    Returns:
+        JSON with deletion results:
+        {
+          "success": true,
+          "labels_deleted": 30,
+          "labels_skipped": 2,
+          "errors_count": 0
+        }
+
+    Examples:
+        # Delete orphan labels from pointer array
+        labels = [
+            {"address": "0x6ff86c64", "name": "g_pData_6ff86c64"},
+            {"address": "0x6ff86c68", "name": "g_pData_6ff86c68"},
+            {"address": "0x6ff86c6c", "name": "g_pData_6ff86c6c"}
+        ]
+        batch_delete_labels(labels)
+
+        # Delete all labels at addresses (no name filter)
+        labels = [{"address": hex(0x6ff86c60 + i*4)} for i in range(1, 44)]
+        batch_delete_labels(labels)
+
+    See Also:
+        - delete_label(): Delete single label
+        - batch_create_labels(): Create multiple labels
+    """
+    if not isinstance(labels, list):
+        raise GhidraValidationError("labels must be a list")
+
+    if len(labels) == 0:
+        raise GhidraValidationError("labels list cannot be empty")
+
+    for i, label in enumerate(labels):
+        if not isinstance(label, dict):
+            raise GhidraValidationError(f"Label at index {i} must be a dictionary")
+
+        if "address" not in label:
+            raise GhidraValidationError(
+                f"Label at index {i} must have 'address' field"
+            )
+
+        if not validate_hex_address(label["address"]):
+            raise GhidraValidationError(
+                f"Invalid hexadecimal address at index {i}: {label['address']}"
+            )
+
+    return safe_post_json("batch_delete_labels", {"labels": labels})
 
 
 @mcp.tool()
@@ -4128,7 +4240,7 @@ def find_next_undefined_function(
     }
     if program:
         params["program"] = program
-    return safe_get("find_next_undefined_function", params)
+    return safe_get_json("find_next_undefined_function", params)
 
 
 @mcp.tool()
@@ -4197,7 +4309,7 @@ def analyze_function_complete(
     include_callers: bool = True,
     include_disasm: bool = True,
     include_variables: bool = True,
-    program: str = None,
+    program: Optional[str] = None,
 ) -> str:
     """
     Comprehensive function analysis in a single call (v1.6.0).
@@ -4310,7 +4422,7 @@ def search_functions_enhanced(
     # Remove None values
     params = {k: v for k, v in params.items() if v is not None}
 
-    return safe_get("search_functions_enhanced", params)
+    return safe_get_json("search_functions_enhanced", params)
 
 
 @mcp.tool()
@@ -5080,6 +5192,161 @@ def open_program(path: str) -> str:
 
     url = f"{ghidra_server_url}/open_program"
     params = {"path": path}
+    return make_request(url, method="GET", params=params)
+
+
+# ====================================================================================
+# CROSS-VERSION MATCHING TOOLS - Accelerate function documentation propagation
+# ====================================================================================
+
+
+@mcp.tool()
+def compare_programs_documentation() -> str:
+    """
+    Compare documentation status across all open programs.
+
+    Returns documented vs undocumented function counts for each open program,
+    helping identify documentation gaps and prioritize work.
+
+    Returns:
+        JSON with program comparison:
+        {
+          "programs": [
+            {
+              "name": "D2Client.dll",
+              "path": "/LoD/1.07/D2Client.dll",
+              "is_current": true,
+              "total_functions": 5372,
+              "documented": 5350,
+              "undocumented": 22,
+              "documentation_percent": 99.6
+            },
+            {
+              "name": "D2Client.dll",
+              "path": "/LoD/1.11/D2Client.dll",
+              "is_current": false,
+              "total_functions": 5912,
+              "documented": 3500,
+              "undocumented": 2412,
+              "documentation_percent": 59.2
+            }
+          ],
+          "count": 2
+        }
+
+    Example:
+        # Quick check of documentation gaps
+        result = compare_programs_documentation()
+        # Shows which versions need the most work
+    """
+    url = f"{ghidra_server_url}/compare_programs_documentation"
+    return make_request(url, method="GET")
+
+
+@mcp.tool()
+def find_undocumented_by_string(address: str, program: str = None) -> str:
+    """
+    Find undocumented (FUN_*) functions that reference a given string address.
+
+    This is a filtered version of get_xrefs_to that only returns FUN_* functions,
+    making it easy to identify undocumented functions that can be named based on
+    string anchor context.
+
+    Args:
+        address: Address of the string to find references to (e.g., "0x6fb86c18")
+        program: Optional program name for multi-program support
+
+    Returns:
+        JSON with undocumented functions:
+        {
+          "string_address": "0x6fb86c18",
+          "undocumented_functions": [
+            {
+              "name": "FUN_6fadecd0",
+              "address": "6fadecd0",
+              "ref_address": "6fadecfe",
+              "ref_type": "DATA"
+            }
+          ],
+          "undocumented_count": 1,
+          "documented_count": 1,
+          "total_referencing_functions": 2
+        }
+
+    Example:
+        # Find panel.cpp string and get undocumented functions
+        list_strings(filter="panel.cpp")  # Returns address 0x6fb86c18
+        result = find_undocumented_by_string("0x6fb86c18")
+        # Now document each FUN_* function
+    """
+    if not address:
+        raise GhidraValidationError("String address is required")
+
+    url = f"{ghidra_server_url}/find_undocumented_by_string"
+    params = {"address": address}
+    if program:
+        params["program"] = program
+    return make_request(url, method="GET", params=params)
+
+
+@mcp.tool()
+def batch_string_anchor_report(pattern: str = ".cpp", program: str = None) -> str:
+    """
+    Generate a report of source file strings and their undocumented functions.
+
+    Scans all strings matching a pattern (default: ".cpp" for source file paths)
+    and returns a prioritized list of string anchors with their FUN_* functions.
+    This enables efficient batch documentation of functions by source file.
+
+    Args:
+        pattern: String pattern to match (default: ".cpp" for source files)
+                 Other useful patterns: ".h", "Error", "Assert"
+        program: Optional program name for multi-program support
+
+    Returns:
+        JSON with anchor report:
+        {
+          "pattern": ".cpp",
+          "anchors": [
+            {
+              "string": "..\\Source\\D2Client\\UI\\panel.cpp",
+              "address": "6fb86c18",
+              "undocumented": [
+                {"name": "FUN_6fadecd0", "address": "6fadecd0"}
+              ],
+              "documented": ["RenderGamePanels"],
+              "undocumented_count": 1,
+              "documented_count": 1
+            },
+            {
+              "string": "..\\Source\\D2Client\\UI\\automap.cpp",
+              "address": "6fb85e3c",
+              "undocumented": [
+                {"name": "FUN_6fb09460", "address": "6fb09460"},
+                {"name": "FUN_6fb09b60", "address": "6fb09b60"}
+              ],
+              "documented": ["AllocateAutomapSprite", "LoadAutomapDataFromStorage"],
+              "undocumented_count": 2,
+              "documented_count": 2
+            }
+          ],
+          "total_anchors": 17,
+          "total_undocumented_functions": 45
+        }
+
+    Example:
+        # Get prioritized list of source files with undocumented functions
+        report = batch_string_anchor_report(".cpp")
+
+        # Process each anchor's undocumented functions
+        for anchor in report["anchors"]:
+            if anchor["undocumented_count"] > 0:
+                print(f"{anchor['string']}: {anchor['undocumented_count']} to document")
+    """
+    url = f"{ghidra_server_url}/batch_string_anchor_report"
+    params = {"pattern": pattern}
+    if program:
+        params["program"] = program
     return make_request(url, method="GET", params=params)
 
 

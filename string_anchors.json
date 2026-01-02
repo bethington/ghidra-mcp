@@ -1,0 +1,77 @@
+{
+  "description": "Source file path strings used as anchors for cross-version function matching",
+  "source_files": [
+    {
+      "name": "ARCHIVE.CPP",
+      "addr_1_07": "6fbae0a0"
+    },
+    {
+      "name": "Lng.cpp",
+      "addr_1_07": "6fbae170"
+    },
+    {
+      "name": "Video.cpp",
+      "addr_1_07": "6fbae430"
+    },
+    {
+      "name": "WINMAIN.CPP",
+      "addr_1_07": "6fbae68c"
+    },
+    {
+      "name": "Game.cpp",
+      "addr_1_07": "6fbafb7c"
+    },
+    {
+      "name": "Msg.cpp",
+      "addr_1_07": "6fbafe98"
+    },
+    {
+      "name": "Roster.cpp",
+      "addr_1_07": "6fbb00d4"
+    },
+    {
+      "name": "SCmd.cpp",
+      "addr_1_07": "6fbb09e8"
+    },
+    {
+      "name": "Select.cpp",
+      "addr_1_07": "6fbb0e38"
+    },
+    {
+      "name": "Quests.cpp",
+      "addr_1_07": "6fbb10b4",
+      "addr_1_11": "6fbb10b4"
+    },
+    {
+      "name": "Skills.cpp",
+      "addr_1_07": "6fbb130c"
+    },
+    {
+      "name": "automap.cpp",
+      "addr_1_07": "6fbb1d70",
+      "addr_1_11": "6fb85e3c"
+    },
+    {
+      "name": "char.cpp",
+      "addr_1_07": "6fbb2428"
+    },
+    {
+      "name": "chat.cpp",
+      "addr_1_07": "6fbb2548"
+    },
+    {
+      "name": "dialog.cpp",
+      "addr_1_07": "6fbb3034",
+      "addr_1_11": "6fb8704c"
+    },
+    {
+      "name": "inv.cpp",
+      "addr_1_07": "6fbb3c08"
+    },
+    {
+      "name": "panel.cpp",
+      "addr_1_07": "6fbb7784",
+      "addr_1_11": "6fb86c18"
+    }
+  ]
+}
