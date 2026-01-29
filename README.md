@@ -4,6 +4,8 @@
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-11.4.2-green.svg)](https://ghidra-sre.org/)
 
+> If you find this useful, please ⭐ star the repo — it helps others discover it!
+
 A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks.
 
 ## 🌟 Features
@@ -246,6 +248,13 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 - **Ghidra Team** - For the incredible reverse engineering platform
 - **Model Context Protocol** - For the standardized AI integration framework
 - **Contributors** - For testing, feedback, and improvements
+
+---
+
+## 🔗 Related Projects
+
+- [re-universe](https://github.com/bethington/re-universe) — Ghidra BSim PostgreSQL platform for large-scale binary similarity analysis. Pairs perfectly with GhidraMCP for AI-driven reverse engineering workflows.
+- [cheat-engine-server-python](https://github.com/bethington/cheat-engine-server-python) — MCP server for dynamic memory analysis and debugging.
 
 ---
 
