@@ -32,28 +32,31 @@ LOG_DIR.mkdir(exist_ok=True)
 
 # File handler for persistent logs
 log_file = LOG_DIR / f"ghidra_manager_{datetime.now().strftime('%Y%m%d')}.log"
-file_handler = logging.FileHandler(log_file, encoding='utf-8')
-file_handler.setFormatter(logging.Formatter(
-    '%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-))
+file_handler = logging.FileHandler(log_file, encoding="utf-8")
+file_handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+)
 
 # Console handler for stdout
 console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter('%(message)s'))
+console_handler.setFormatter(logging.Formatter("%(message)s"))
 
 # Configure logger
-logger = logging.getLogger('ghidra_manager')
+logger = logging.getLogger("ghidra_manager")
 logger.setLevel(logging.INFO)
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
 # Default configuration
-DEFAULT_GHIDRA_PATH = r"F:\ghidra_11.4.2"
+DEFAULT_GHIDRA_PATH = r"F:\ghidra_12.0.2_PUBLIC"
 DEFAULT_MCP_PORT = 8089  # GhidraMCP default port
 DEFAULT_MCP_HOST = "127.0.0.1"
 MCP_STARTUP_TIMEOUT = 120  # seconds to wait for MCP server after Ghidra starts
-GHIDRA_SHUTDOWN_TIMEOUT = 60  # seconds to wait for graceful shutdown (Ghidra needs time to save)
+GHIDRA_SHUTDOWN_TIMEOUT = (
+    60  # seconds to wait for graceful shutdown (Ghidra needs time to save)
+)
 
 # Config file path
 CONFIG_FILE = Path(__file__).parent / ".ghidra_manager_config.json"
@@ -61,6 +64,7 @@ CONFIG_FILE = Path(__file__).parent / ".ghidra_manager_config.json"
 
 class GhidraState(Enum):
     """Current state of Ghidra"""
+
     NOT_RUNNING = "not_running"
     STARTING = "starting"
     RUNNING_NO_MCP = "running_no_mcp"  # Ghidra running but MCP not available
@@ -71,21 +75,22 @@ class GhidraState(Enum):
 @dataclass
 class GhidraConfig:
     """Configuration for Ghidra management"""
+
     ghidra_path: str = DEFAULT_GHIDRA_PATH
     mcp_host: str = DEFAULT_MCP_HOST
     mcp_port: int = DEFAULT_MCP_PORT
     default_project: Optional[str] = None  # e.g., "F:\\GhidraProjects\\PD2.gpr"
-    default_binary: Optional[str] = None   # e.g., "Game.exe" or full path
+    default_binary: Optional[str] = None  # e.g., "Game.exe" or full path
     auto_start_mcp: bool = True
     startup_timeout: int = MCP_STARTUP_TIMEOUT
 
     def save(self):
         """Save config to disk"""
-        with open(CONFIG_FILE, 'w') as f:
+        with open(CONFIG_FILE, "w") as f:
             json.dump(asdict(self), f, indent=2)
 
     @classmethod
-    def load(cls) -> 'GhidraConfig':
+    def load(cls) -> "GhidraConfig":
         """Load config from disk or return defaults"""
         if CONFIG_FILE.exists():
             try:
@@ -163,10 +168,7 @@ class GhidraManager:
         """Check if MCP server is responding"""
         try:
             # Use /methods endpoint since root returns 404
-            response = requests.get(
-                f"{self.mcp_url}/methods",
-                timeout=5
-            )
+            response = requests.get(f"{self.mcp_url}/methods", timeout=5)
             return response.status_code == 200
         except requests.RequestException:
             return False
@@ -176,14 +178,14 @@ class GhidraManager:
         try:
             # Use tasklist to find javaw processes
             result = subprocess.run(
-                ['tasklist', '/FI', 'IMAGENAME eq javaw.exe', '/FO', 'CSV', '/NH'],
+                ["tasklist", "/FI", "IMAGENAME eq javaw.exe", "/FO", "CSV", "/NH"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
             )
             # If javaw.exe is in the output, Ghidra might be running
             # This is imperfect but reasonable for our needs
-            return 'javaw.exe' in result.stdout
+            return "javaw.exe" in result.stdout
         except subprocess.TimeoutExpired:
             return False
         except FileNotFoundError:
@@ -195,11 +197,14 @@ class GhidraManager:
         try:
             # Match both "Ghidra*" (project manager) and "CodeBrowser*" (active code window)
             result = subprocess.run(
-                ['powershell', '-Command',
-                 "Get-Process | Where-Object { $_.ProcessName -eq 'javaw' -and ($_.MainWindowTitle -like 'Ghidra*' -or $_.MainWindowTitle -like 'CodeBrowser*') } | Select-Object -First 1"],
+                [
+                    "powershell",
+                    "-Command",
+                    "Get-Process | Where-Object { $_.ProcessName -eq 'javaw' -and ($_.MainWindowTitle -like 'Ghidra*' -or $_.MainWindowTitle -like 'CodeBrowser*') } | Select-Object -First 1",
+                ],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
             )
             return bool(result.stdout.strip())
         except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -232,7 +237,7 @@ class GhidraManager:
 
         # Send graceful close signal (WM_CLOSE to window)
         # Match both "Ghidra*" (project manager) and "CodeBrowser*" (active code window)
-        ps_script = '''
+        ps_script = """
         $ghidra = Get-Process | Where-Object {
             $_.ProcessName -eq 'javaw' -and ($_.MainWindowTitle -like 'Ghidra*' -or $_.MainWindowTitle -like 'CodeBrowser*')
         }
@@ -247,14 +252,14 @@ class GhidraManager:
             Write-Host "No Ghidra process found"
             exit 1
         }
-        '''
+        """
 
         try:
             result = subprocess.run(
-                ['powershell', '-Command', ps_script],
+                ["powershell", "-Command", ps_script],
                 capture_output=True,
                 text=True,
-                timeout=15
+                timeout=15,
             )
             logger.info(result.stdout.strip())
 
@@ -270,7 +275,9 @@ class GhidraManager:
             for i in range(timeout):
                 time.sleep(1)
                 if not self._check_ghidra_process():
-                    logger.info(f"Ghidra closed successfully after {i+1}s (project saved)")
+                    logger.info(
+                        f"Ghidra closed successfully after {i+1}s (project saved)"
+                    )
                     self._last_state = None
                     return True
 
@@ -278,14 +285,14 @@ class GhidraManager:
                 # This handles Ghidra's multiple windows (CodeBrowser closes, Project Manager stays)
                 if (i + 1) - last_close_attempt >= 5:
                     retry_result = subprocess.run(
-                        ['powershell', '-Command', ps_script],
+                        ["powershell", "-Command", ps_script],
                         capture_output=True,
                         text=True,
-                        timeout=15
+                        timeout=15,
                     )
                     if retry_result.returncode == 0:
                         # Found more windows, sent close
-                        for line in retry_result.stdout.strip().split('\n'):
+                        for line in retry_result.stdout.strip().split("\n"):
                             if line.strip():
                                 logger.info(f"  {line.strip()}")
                         last_close_attempt = i + 1
@@ -293,20 +300,24 @@ class GhidraManager:
 
                 # Progress updates every 10 seconds
                 if (i + 1) % 10 == 0:
-                    logger.info(f"  Still waiting for Ghidra to finish saving... ({i+1}/{timeout}s)")
+                    logger.info(
+                        f"  Still waiting for Ghidra to finish saving... ({i+1}/{timeout}s)"
+                    )
 
             # Timeout reached - Ghidra is still running
             if force:
-                logger.warning(f"Timeout after {timeout}s - force-killing Ghidra (DATA MAY BE LOST!)...")
-                force_script = '''
+                logger.warning(
+                    f"Timeout after {timeout}s - force-killing Ghidra (DATA MAY BE LOST!)..."
+                )
+                force_script = """
                 Get-Process | Where-Object {
                     $_.ProcessName -eq 'javaw' -and ($_.MainWindowTitle -like 'Ghidra*' -or $_.MainWindowTitle -like 'CodeBrowser*')
                 } | Stop-Process -Force
-                '''
+                """
                 subprocess.run(
-                    ['powershell', '-Command', force_script],
+                    ["powershell", "-Command", force_script],
                     capture_output=True,
-                    timeout=10
+                    timeout=10,
                 )
                 time.sleep(2)
                 self._last_state = None
@@ -316,8 +327,12 @@ class GhidraManager:
                 # This likely means Ghidra is showing a dialog (e.g., "Save project?")
                 logger.warning(f"Ghidra did not close after {timeout}s.")
                 logger.warning("  This usually means Ghidra is showing a dialog box.")
-                logger.warning("  Check Ghidra and respond to any dialogs (Save/Don't Save/Cancel).")
-                logger.info("  TIP: Ghidra auto-saves periodically, so 'Don't Save' is usually safe.")
+                logger.warning(
+                    "  Check Ghidra and respond to any dialogs (Save/Don't Save/Cancel)."
+                )
+                logger.info(
+                    "  TIP: Ghidra auto-saves periodically, so 'Don't Save' is usually safe."
+                )
                 logger.info("  Use force=True only if Ghidra is completely frozen.")
                 return False
 
@@ -332,7 +347,7 @@ class GhidraManager:
         self,
         project: Optional[str] = None,
         binary: Optional[str] = None,
-        wait_for_mcp: bool = True
+        wait_for_mcp: bool = True,
     ) -> Tuple[bool, str]:
         """
         Start Ghidra with optional project and binary.
@@ -369,7 +384,11 @@ class GhidraManager:
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == 'win32' else 0
+                creationflags=(
+                    subprocess.CREATE_NEW_PROCESS_GROUP
+                    if sys.platform == "win32"
+                    else 0
+                ),
             )
 
             logger.info(f"Ghidra process started (PID: {process.pid})")
@@ -407,7 +426,10 @@ class GhidraManager:
 
         # Timeout
         if self._check_ghidra_process():
-            return False, f"Ghidra running but MCP not available after {timeout}s. Enable the plugin manually: Tools > GhidraMCP > Start MCP Server"
+            return (
+                False,
+                f"Ghidra running but MCP not available after {timeout}s. Enable the plugin manually: Tools > GhidraMCP > Start MCP Server",
+            )
         else:
             return False, "Ghidra failed to start"
 
@@ -416,7 +438,7 @@ class GhidraManager:
         project: Optional[str] = None,
         binary: Optional[str] = None,
         force_close: bool = False,
-        close_timeout: int = None
+        close_timeout: int = None,
     ) -> Tuple[bool, str]:
         """
         Restart Ghidra completely.
@@ -448,16 +470,17 @@ class GhidraManager:
                 if force_close:
                     return False, "Failed to close Ghidra even with force=True"
                 else:
-                    return False, "Ghidra did not close in time. It may be saving or showing a dialog. Try again or use force_close=True (will lose unsaved changes)."
+                    return (
+                        False,
+                        "Ghidra did not close in time. It may be saving or showing a dialog. Try again or use force_close=True (will lose unsaved changes).",
+                    )
             time.sleep(3)  # Extra wait after close to ensure file locks are released
 
         # Start fresh
         return self.start_ghidra(project=project, binary=binary)
 
     def ensure_running(
-        self,
-        project: Optional[str] = None,
-        binary: Optional[str] = None
+        self, project: Optional[str] = None, binary: Optional[str] = None
     ) -> Tuple[bool, str]:
         """
         Ensure Ghidra is running with MCP available.
@@ -489,8 +512,7 @@ class GhidraManager:
         """Get info about the currently loaded program in Ghidra"""
         try:
             response = requests.get(
-                f"{self.mcp_url}/methods/get_program_info",
-                timeout=10
+                f"{self.mcp_url}/methods/get_program_info", timeout=10
             )
             if response.status_code == 200:
                 return response.json()
@@ -509,38 +531,49 @@ class GhidraManager:
         - recommendations: List of suggested actions
         """
         state = self.get_state(force_check=True)
-        program_info = self.get_program_info() if state == GhidraState.RUNNING_WITH_MCP else None
+        program_info = (
+            self.get_program_info() if state == GhidraState.RUNNING_WITH_MCP else None
+        )
 
         result = {
             "state": state.value,
             "mcp_available": state == GhidraState.RUNNING_WITH_MCP,
             "program_loaded": None,
-            "recommendations": []
+            "recommendations": [],
         }
 
         if program_info and program_info.get("success"):
             data = program_info.get("data", "")
             if "Program:" in data:
                 # Extract program name from response
-                for line in data.split('\n'):
+                for line in data.split("\n"):
                     if line.startswith("Program:"):
                         result["program_loaded"] = line.split(":", 1)[1].strip()
                         break
 
         # Generate recommendations
         if state == GhidraState.NOT_RUNNING:
-            result["recommendations"].append("Start Ghidra with manager.start_ghidra(project, binary)")
+            result["recommendations"].append(
+                "Start Ghidra with manager.start_ghidra(project, binary)"
+            )
         elif state == GhidraState.RUNNING_NO_MCP:
-            result["recommendations"].append("Enable MCP: Tools > GhidraMCP > Start MCP Server")
-            result["recommendations"].append("Or restart: manager.restart(project, binary)")
+            result["recommendations"].append(
+                "Enable MCP: Tools > GhidraMCP > Start MCP Server"
+            )
+            result["recommendations"].append(
+                "Or restart: manager.restart(project, binary)"
+            )
         elif not result["program_loaded"]:
-            result["recommendations"].append("No program loaded - open a binary in Ghidra")
+            result["recommendations"].append(
+                "No program loaded - open a binary in Ghidra"
+            )
 
         return result
 
 
 # Convenience functions for use without instantiating the class
 _manager_instance = None
+
 
 def get_manager() -> GhidraManager:
     """Get singleton manager instance"""
@@ -556,17 +589,14 @@ def check_ghidra() -> Dict[str, Any]:
 
 
 def restart_ghidra(
-    project: Optional[str] = None,
-    binary: Optional[str] = None,
-    force: bool = False
+    project: Optional[str] = None, binary: Optional[str] = None, force: bool = False
 ) -> Tuple[bool, str]:
     """Restart Ghidra with optional project/binary"""
     return get_manager().restart(project=project, binary=binary, force_close=force)
 
 
 def ensure_ghidra(
-    project: Optional[str] = None,
-    binary: Optional[str] = None
+    project: Optional[str] = None, binary: Optional[str] = None
 ) -> Tuple[bool, str]:
     """Ensure Ghidra is running with MCP available"""
     return get_manager().ensure_running(project=project, binary=binary)
@@ -581,7 +611,7 @@ def configure_defaults(
     ghidra_path: Optional[str] = None,
     project: Optional[str] = None,
     binary: Optional[str] = None,
-    mcp_port: int = None
+    mcp_port: int = None,
 ) -> GhidraConfig:
     """
     Configure default Ghidra settings.
@@ -590,7 +620,7 @@ def configure_defaults(
 
     Example:
         configure_defaults(
-            ghidra_path=r"F:\\ghidra_11.4.2",
+            ghidra_path=r"F:\\ghidra_12.0.2_PUBLIC",
             project=r"F:\\GhidraProjects\\PD2.gpr",
             binary="D2Win.dll"
         )
@@ -615,9 +645,14 @@ def configure_defaults(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Manage Ghidra for autonomous workflows")
-    parser.add_argument("command", choices=["status", "start", "stop", "restart", "configure"],
-                       help="Command to execute")
+    parser = argparse.ArgumentParser(
+        description="Manage Ghidra for autonomous workflows"
+    )
+    parser.add_argument(
+        "command",
+        choices=["status", "start", "stop", "restart", "configure"],
+        help="Command to execute",
+    )
     parser.add_argument("--project", "-p", help="Ghidra project file (.gpr)")
     parser.add_argument("--binary", "-b", help="Binary to open")
     parser.add_argument("--ghidra-path", help="Path to Ghidra installation")
@@ -631,9 +666,9 @@ if __name__ == "__main__":
         print(f"State: {result['state']}")
         print(f"MCP Available: {result['mcp_available']}")
         print(f"Program Loaded: {result['program_loaded'] or 'None'}")
-        if result['recommendations']:
+        if result["recommendations"]:
             print("Recommendations:")
-            for rec in result['recommendations']:
+            for rec in result["recommendations"]:
                 print(f"  - {rec}")
 
     elif args.command == "start":
@@ -648,9 +683,7 @@ if __name__ == "__main__":
 
     elif args.command == "restart":
         success, msg = restart_ghidra(
-            project=args.project,
-            binary=args.binary,
-            force=args.force
+            project=args.project, binary=args.binary, force=args.force
         )
         print(msg)
         sys.exit(0 if success else 1)
@@ -665,8 +698,6 @@ if __name__ == "__main__":
             print(f"  MCP Port: {config.mcp_port}")
         else:
             config = configure_defaults(
-                ghidra_path=args.ghidra_path,
-                project=args.project,
-                binary=args.binary
+                ghidra_path=args.ghidra_path, project=args.project, binary=args.binary
             )
             print("Configuration updated")

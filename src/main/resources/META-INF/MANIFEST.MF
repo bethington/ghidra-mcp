@@ -1,6 +1,6 @@
 Manifest-Version: 1.0
-Plugin-Class: com.xebyte.GhidraMCP
+Plugin-Class: com.xebyte.GhidraMCPPlugin
 Plugin-Name: GhidraMCP
-Plugin-Version: 1.0
-Plugin-Author: LaurieWired
-Plugin-Description: A custom plugin by LaurieWired
+Plugin-Version: 2.0.0
+Plugin-Author: Ben Ethington
+Plugin-Description: GhidraMCP - HTTP server plugin with 133 endpoints for reverse engineering automation

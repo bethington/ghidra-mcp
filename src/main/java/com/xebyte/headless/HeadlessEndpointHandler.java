@@ -1837,7 +1837,7 @@ public class HeadlessEndpointHandler {
     }
 
     /**
-     * Delete a label at the specified address (v1.9.5).
+     * Delete a label at the specified address.
      *
      * @param addressStr Memory address in hex format
      * @param labelName Optional specific label name to delete. If null/empty, deletes all labels at the address.
@@ -1918,7 +1918,7 @@ public class HeadlessEndpointHandler {
     }
 
     /**
-     * Batch delete multiple labels in a single transaction (v1.9.5).
+     * Batch delete multiple labels in a single transaction.
      *
      * @param labelsJson JSON array of label entries with "address" and optional "name" fields
      * @return JSON with success status and counts

@@ -37,7 +37,9 @@ import shutil
 # Configuration
 REPO_ROOT = Path(__file__).parent.parent
 BRIDGE_FILE = REPO_ROOT / "bridge_mcp_ghidra.py"
-JAVA_PLUGIN = REPO_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "GhidraMCPPlugin.java"
+JAVA_PLUGIN = (
+    REPO_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "GhidraMCPPlugin.java"
+)
 DEPLOY_SCRIPT = REPO_ROOT / "deploy-to-ghidra.ps1"
 STATE_FILE = REPO_ROOT / "workflows" / ".improvement_state.json"
 LOG_DIR = REPO_ROOT / "workflows" / "logs"
@@ -48,37 +50,39 @@ GHIDRA_SERVER = os.environ.get("GHIDRA_SERVER", "http://127.0.0.1:8089")
 LOG_DIR.mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
+    format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler(LOG_DIR / f"improvement_{datetime.now():%Y%m%d}.log"),
-        logging.StreamHandler()
-    ]
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger(__name__)
 
 
 class ChangeType(Enum):
     """Types of changes that can be made to tooling."""
-    ADD_ENDPOINT = "add_endpoint"           # Add new REST endpoint to Java
-    ADD_MCP_TOOL = "add_mcp_tool"           # Add new MCP tool to Python bridge
-    MODIFY_ENDPOINT = "modify_endpoint"     # Change existing Java endpoint
-    MODIFY_MCP_TOOL = "modify_mcp_tool"     # Change existing Python tool
-    REMOVE_ENDPOINT = "remove_endpoint"     # Remove Java endpoint
-    REMOVE_MCP_TOOL = "remove_mcp_tool"     # Remove Python tool
-    FIX_BUG = "fix_bug"                     # Bug fix
-    OPTIMIZE = "optimize"                   # Performance improvement
+
+    ADD_ENDPOINT = "add_endpoint"  # Add new REST endpoint to Java
+    ADD_MCP_TOOL = "add_mcp_tool"  # Add new MCP tool to Python bridge
+    MODIFY_ENDPOINT = "modify_endpoint"  # Change existing Java endpoint
+    MODIFY_MCP_TOOL = "modify_mcp_tool"  # Change existing Python tool
+    REMOVE_ENDPOINT = "remove_endpoint"  # Remove Java endpoint
+    REMOVE_MCP_TOOL = "remove_mcp_tool"  # Remove Python tool
+    FIX_BUG = "fix_bug"  # Bug fix
+    OPTIMIZE = "optimize"  # Performance improvement
 
 
 @dataclass
 class ToolChange:
     """Represents a proposed or completed change to tooling."""
+
     id: str
     change_type: ChangeType
     description: str
     rationale: str
-    target_file: str                        # "bridge" or "plugin"
-    code_diff: Optional[str] = None         # The actual code change
-    status: str = "proposed"                # proposed, implemented, tested, deployed, rejected
+    target_file: str  # "bridge" or "plugin"
+    code_diff: Optional[str] = None  # The actual code change
+    status: str = "proposed"  # proposed, implemented, tested, deployed, rejected
     test_results: Optional[Dict] = None
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     implemented_at: Optional[str] = None
@@ -88,6 +92,7 @@ class ToolChange:
 @dataclass
 class ImprovementState:
     """Persistent state across improvement sessions."""
+
     session_count: int = 0
     functions_documented: int = 0
     tools_added: int = 0
@@ -106,20 +111,23 @@ class ImprovementState:
     recovery_count: int = 0  # Total number of auto-recoveries
     last_checkpoint: Optional[str] = None  # ISO timestamp of last successful operation
     ghidra_restarts: int = 0  # Number of times Ghidra was restarted
-    documented_addresses: List[str] = field(default_factory=list)  # Addresses we've documented
+    documented_addresses: List[str] = field(
+        default_factory=list
+    )  # Addresses we've documented
 
     def save(self):
         """Save state to disk."""
+
         def serialize(obj):
             if isinstance(obj, Enum):
                 return obj.value
             raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
-        with open(STATE_FILE, 'w') as f:
+        with open(STATE_FILE, "w") as f:
             json.dump(asdict(self), f, indent=2, default=serialize)
 
     @classmethod
-    def load(cls) -> 'ImprovementState':
+    def load(cls) -> "ImprovementState":
         """Load state from disk."""
         if STATE_FILE.exists():
             with open(STATE_FILE) as f:
@@ -162,15 +170,17 @@ class SourceCodeManager:
 
     def read_file(self, filepath: Path) -> str:
         """Read file contents."""
-        return filepath.read_text(encoding='utf-8')
+        return filepath.read_text(encoding="utf-8")
 
     def write_file(self, filepath: Path, content: str) -> bool:
         """Write content to file."""
         if self.dry_run:
-            logger.info(f"[DRY RUN] Would write {len(content)} chars to {filepath.name}")
+            logger.info(
+                f"[DRY RUN] Would write {len(content)} chars to {filepath.name}"
+            )
             return True
 
-        filepath.write_text(content, encoding='utf-8')
+        filepath.write_text(content, encoding="utf-8")
         logger.info(f"Wrote {len(content)} chars to {filepath.name}")
         return True
 
@@ -203,7 +213,7 @@ class PythonBridgeModifier:
         insert_marker = 'if __name__ == "__main__":'
         if insert_marker not in content:
             # Alternative: insert before the last function
-            insert_marker = '\n\n# ====='  # Common section separator
+            insert_marker = "\n\n# ====="  # Common section separator
 
         # Insert the new tool
         insert_pos = content.find(insert_marker)
@@ -211,7 +221,9 @@ class PythonBridgeModifier:
             # Append at end
             new_content = content + "\n\n" + tool_code
         else:
-            new_content = content[:insert_pos] + tool_code + "\n\n" + content[insert_pos:]
+            new_content = (
+                content[:insert_pos] + tool_code + "\n\n" + content[insert_pos:]
+            )
 
         return self.source_manager.write_file(self.bridge_path, new_content)
 
@@ -308,12 +320,12 @@ class JavaPluginModifier:
             return False
 
         # Build the endpoint registration code
-        endpoint_code = f'''
+        endpoint_code = f"""
         server.createContext("{endpoint_name}", exchange -> {{
             {handler_code}
         }});
 
-        '''
+        """
 
         new_content = content[:insert_pos] + endpoint_code + content[insert_pos:]
 
@@ -338,7 +350,7 @@ class DeploymentManager:
                 cwd=REPO_ROOT,
                 capture_output=True,
                 text=True,
-                timeout=300
+                timeout=300,
             )
             if result.returncode == 0:
                 logger.info("Maven build successful")
@@ -362,11 +374,17 @@ class DeploymentManager:
 
         try:
             result = subprocess.run(
-                ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(DEPLOY_SCRIPT)],
+                [
+                    "powershell",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(DEPLOY_SCRIPT),
+                ],
                 cwd=REPO_ROOT,
                 capture_output=True,
                 text=True,
-                timeout=120
+                timeout=120,
             )
             if result.returncode == 0:
                 logger.info("Deployment successful")
@@ -380,7 +398,9 @@ class DeploymentManager:
     def restart_bridge(self) -> bool:
         """Signal that the bridge needs to be restarted."""
         # In MCP context, this would be handled by Claude Code
-        logger.info("Bridge restart required - changes will take effect on next MCP session")
+        logger.info(
+            "Bridge restart required - changes will take effect on next MCP session"
+        )
         return True
 
 
@@ -401,14 +421,14 @@ class TestRunner:
                 cwd=REPO_ROOT,
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=60,
             )
 
             passed = "OK" in result.stdout or result.returncode == 0
             return passed, {
                 "status": "passed" if passed else "failed",
                 "output": result.stdout,
-                "errors": result.stderr
+                "errors": result.stderr,
             }
         except Exception as e:
             return False, {"status": "error", "error": str(e)}
@@ -424,14 +444,14 @@ class TestRunner:
                 cwd=REPO_ROOT,
                 capture_output=True,
                 text=True,
-                timeout=120
+                timeout=120,
             )
 
             passed = "OK" in result.stdout or result.returncode == 0
             return passed, {
                 "status": "passed" if passed else "failed",
                 "output": result.stdout,
-                "errors": result.stderr
+                "errors": result.stderr,
             }
         except Exception as e:
             return False, {"status": "error", "error": str(e)}
@@ -476,10 +496,12 @@ class ContinuousImprovementLoop:
         # Import Ghidra client
         sys.path.insert(0, str(REPO_ROOT))
         from workflows.re_improvement_workflow import GhidraClient
+
         self.ghidra_client = GhidraClient()
 
         # Import Ghidra manager for process control
         from workflows.ghidra_manager import GhidraManager, GhidraConfig, GhidraState
+
         self.ghidra_manager = GhidraManager()
         self.GhidraState = GhidraState
 
@@ -487,7 +509,9 @@ class ContinuousImprovementLoop:
         """Verify Ghidra is available."""
         return self.ghidra_client.is_available()
 
-    def ensure_ghidra_running(self, project: str = None, binary: str = None) -> Tuple[bool, str]:
+    def ensure_ghidra_running(
+        self, project: str = None, binary: str = None
+    ) -> Tuple[bool, str]:
         """
         Ensure Ghidra is running with MCP available.
 
@@ -504,7 +528,9 @@ class ContinuousImprovementLoop:
         """
         return self.ghidra_manager.ensure_running(project=project, binary=binary)
 
-    def restart_ghidra(self, project: str = None, binary: str = None, force: bool = False) -> Tuple[bool, str]:
+    def restart_ghidra(
+        self, project: str = None, binary: str = None, force: bool = False
+    ) -> Tuple[bool, str]:
         """
         Restart Ghidra completely.
 
@@ -516,7 +542,9 @@ class ContinuousImprovementLoop:
         Returns:
             Tuple of (success, message)
         """
-        return self.ghidra_manager.restart(project=project, binary=binary, force_close=force)
+        return self.ghidra_manager.restart(
+            project=project, binary=binary, force_close=force
+        )
 
     def get_ghidra_state(self) -> str:
         """Get current Ghidra state as a string."""
@@ -531,9 +559,14 @@ class ContinuousImprovementLoop:
         """
         return self.ghidra_manager.health_check()
 
-    def call_with_recovery(self, endpoint: str, params: Dict[str, Any] = None,
-                           method: str = "GET", timeout: int = 30,
-                           max_retries: int = 3) -> Dict[str, Any]:
+    def call_with_recovery(
+        self,
+        endpoint: str,
+        params: Dict[str, Any] = None,
+        method: str = "GET",
+        timeout: int = 30,
+        max_retries: int = 3,
+    ) -> Dict[str, Any]:
         """
         Make a Ghidra API call with auto-recovery on failure.
 
@@ -565,16 +598,19 @@ class ContinuousImprovementLoop:
 
             # Call failed - check if it's a connection issue
             error = result.get("error", "")
-            is_connection_error = any(x in str(error).lower() for x in [
-                "connection", "refused", "timeout", "unreachable", "reset"
-            ])
+            is_connection_error = any(
+                x in str(error).lower()
+                for x in ["connection", "refused", "timeout", "unreachable", "reset"]
+            )
 
             if not is_connection_error:
                 # Not a connection error, don't retry
                 return result
 
             last_error = error
-            print(f"Connection error on attempt {attempt + 1}/{max_retries + 1}: {error}")
+            print(
+                f"Connection error on attempt {attempt + 1}/{max_retries + 1}: {error}"
+            )
 
             if attempt < max_retries:
                 # Track recovery attempt
@@ -608,7 +644,7 @@ class ContinuousImprovementLoop:
         return {
             "success": False,
             "error": f"Failed after {max_retries + 1} attempts. Last error: {last_error}",
-            "recovery_attempted": True
+            "recovery_attempted": True,
         }
 
     def start_function_work(self, func_name: str, func_address: str):
@@ -651,7 +687,7 @@ class ContinuousImprovementLoop:
             return {
                 "name": self.state.current_function,
                 "address": self.state.current_function_address,
-                "resumed": True
+                "resumed": True,
             }
         return None
 
@@ -663,12 +699,14 @@ class ContinuousImprovementLoop:
             logger.info(f"Resuming work on {resume['name']} @ {resume['address']}")
             return resume
 
-        result = self.call_with_recovery("searchFunctions", {"query": "FUN_", "limit": 1})
+        result = self.call_with_recovery(
+            "searchFunctions", {"query": "FUN_", "limit": 1}
+        )
         if result.get("success") and result.get("data"):
-            lines = result["data"].strip().split('\n')
+            lines = result["data"].strip().split("\n")
             for line in lines:
-                if ' @ ' in line:
-                    name, addr = line.split(' @ ')
+                if " @ " in line:
+                    name, addr = line.split(" @ ")
                     return {"name": name.strip(), "address": addr.strip()}
         return None
 
@@ -682,7 +720,7 @@ class ContinuousImprovementLoop:
             "callees": None,
             "callers": None,
             "strings": [],
-            "constants": []
+            "constants": [],
         }
 
         # Decompile - use recovery for critical operation
@@ -712,51 +750,63 @@ class ContinuousImprovementLoop:
 
         return analysis
 
-    def apply_documentation(self, func_address: str,
-                           new_name: str = None,
-                           prototype: str = None,
-                           plate_comment: str = None,
-                           variable_renames: Dict[str, str] = None,
-                           variable_types: Dict[str, str] = None) -> Dict[str, bool]:
+    def apply_documentation(
+        self,
+        func_address: str,
+        new_name: str = None,
+        prototype: str = None,
+        plate_comment: str = None,
+        variable_renames: Dict[str, str] = None,
+        variable_types: Dict[str, str] = None,
+    ) -> Dict[str, bool]:
         """Apply documentation to a function with auto-recovery."""
         results = {}
 
         if new_name:
             # First need to get the current name
-            funcs = self.call_with_recovery("searchFunctions",
-                                            {"query": func_address[-8:], "limit": 1})
+            funcs = self.call_with_recovery(
+                "searchFunctions", {"query": func_address[-8:], "limit": 1}
+            )
             if funcs.get("success") and funcs.get("data"):
-                lines = funcs["data"].strip().split('\n')
+                lines = funcs["data"].strip().split("\n")
                 for line in lines:
-                    if ' @ ' in line:
-                        old_name = line.split(' @ ')[0].strip()
-                        result = self.call_with_recovery("rename_function", {
-                            "old_name": old_name,
-                            "new_name": new_name
-                        }, method="POST")
+                    if " @ " in line:
+                        old_name = line.split(" @ ")[0].strip()
+                        result = self.call_with_recovery(
+                            "rename_function",
+                            {"old_name": old_name, "new_name": new_name},
+                            method="POST",
+                        )
                         results["rename"] = result.get("success", False)
                         break
 
         if prototype:
-            result = self.call_with_recovery("set_function_prototype", {
-                "function_address": func_address,
-                "prototype": prototype
-            }, method="POST")
+            result = self.call_with_recovery(
+                "set_function_prototype",
+                {"function_address": func_address, "prototype": prototype},
+                method="POST",
+            )
             results["prototype"] = result.get("success", False)
 
         if plate_comment:
             func_name = new_name or func_address
-            result = self.call_with_recovery("set_plate_comment", {
-                "function_name": func_name,
-                "comment": plate_comment
-            }, method="POST")
+            result = self.call_with_recovery(
+                "set_plate_comment",
+                {"function_name": func_name, "comment": plate_comment},
+                method="POST",
+            )
             results["plate_comment"] = result.get("success", False)
 
         if variable_types:
-            result = self.call_with_recovery("batch_set_variable_types", {
-                "function_address": func_address,
-                "variable_types": json.dumps(variable_types)
-            }, method="POST", timeout=60)
+            result = self.call_with_recovery(
+                "batch_set_variable_types",
+                {
+                    "function_address": func_address,
+                    "variable_types": json.dumps(variable_types),
+                },
+                method="POST",
+                timeout=60,
+            )
             results["variable_types"] = result.get("success", False)
 
         return results
@@ -786,7 +836,7 @@ class ContinuousImprovementLoop:
             "documented_count": len(self.state.documented_addresses),
             "friction_count": len(self.state.friction_history),
             "pending_changes": len(self.state.pending_changes),
-            "completed_changes": len(self.state.completed_changes)
+            "completed_changes": len(self.state.completed_changes),
         }
 
     # =========================================================================
@@ -804,23 +854,24 @@ class ContinuousImprovementLoop:
         Returns:
             List of dicts with 'name' and 'address' keys
         """
-        result = self.call_with_recovery("searchFunctions", {"query": pattern, "limit": limit})
+        result = self.call_with_recovery(
+            "searchFunctions", {"query": pattern, "limit": limit}
+        )
         functions = []
 
         if result.get("success") and result.get("data"):
-            lines = result["data"].strip().split('\n')
+            lines = result["data"].strip().split("\n")
             for line in lines:
-                if ' @ ' in line:
-                    name, addr = line.split(' @ ')
-                    functions.append({
-                        "name": name.strip(),
-                        "address": addr.strip()
-                    })
+                if " @ " in line:
+                    name, addr = line.split(" @ ")
+                    functions.append({"name": name.strip(), "address": addr.strip()})
 
         logger.info(f"Found {len(functions)} functions matching '{pattern}'")
         return functions
 
-    def get_functions_in_range(self, start_address: str, end_address: str) -> List[Dict]:
+    def get_functions_in_range(
+        self, start_address: str, end_address: str
+    ) -> List[Dict]:
         """
         Find functions within an address range.
 
@@ -850,7 +901,9 @@ class ContinuousImprovementLoop:
         # Sort by address
         in_range.sort(key=lambda f: int(f["address"], 16))
 
-        logger.info(f"Found {len(in_range)} functions in range {start_address}-{end_address}")
+        logger.info(
+            f"Found {len(in_range)} functions in range {start_address}-{end_address}"
+        )
         return in_range
 
     def get_functions_by_addresses(self, addresses: List[str]) -> List[Dict]:
@@ -867,17 +920,18 @@ class ContinuousImprovementLoop:
 
         for addr in addresses:
             # Search for function at this address
-            result = self.call_with_recovery("searchFunctions", {"query": addr[-8:], "limit": 5})
+            result = self.call_with_recovery(
+                "searchFunctions", {"query": addr[-8:], "limit": 5}
+            )
 
             if result.get("success") and result.get("data"):
-                lines = result["data"].strip().split('\n')
+                lines = result["data"].strip().split("\n")
                 for line in lines:
-                    if ' @ ' in line and addr.lower() in line.lower():
-                        name, func_addr = line.split(' @ ')
-                        functions.append({
-                            "name": name.strip(),
-                            "address": func_addr.strip()
-                        })
+                    if " @ " in line and addr.lower() in line.lower():
+                        name, func_addr = line.split(" @ ")
+                        functions.append(
+                            {"name": name.strip(), "address": func_addr.strip()}
+                        )
                         break
 
         logger.info(f"Found {len(functions)} of {len(addresses)} requested functions")
@@ -888,7 +942,7 @@ class ContinuousImprovementLoop:
         functions: List[Dict] = None,
         pattern: str = None,
         address_range: Tuple[str, str] = None,
-        addresses: List[str] = None
+        addresses: List[str] = None,
     ) -> List[Dict]:
         """
         Queue a batch of functions for documentation.
@@ -916,12 +970,13 @@ class ContinuousImprovementLoop:
 
         # Filter out already documented addresses
         undocumented = [
-            f for f in queued
-            if f["address"] not in self.state.documented_addresses
+            f for f in queued if f["address"] not in self.state.documented_addresses
         ]
 
-        logger.info(f"Queued {len(undocumented)} undocumented functions "
-                   f"(filtered {len(queued) - len(undocumented)} already documented)")
+        logger.info(
+            f"Queued {len(undocumented)} undocumented functions "
+            f"(filtered {len(queued) - len(undocumented)} already documented)"
+        )
 
         return undocumented
 
@@ -929,7 +984,7 @@ class ContinuousImprovementLoop:
         self,
         functions: List[Dict],
         progress_callback: callable = None,
-        stop_on_error: bool = False
+        stop_on_error: bool = False,
     ) -> Dict[str, Any]:
         """
         Process a batch of functions for documentation.
@@ -954,7 +1009,7 @@ class ContinuousImprovementLoop:
             "successful": 0,
             "failed": 0,
             "skipped": 0,
-            "results": []
+            "results": [],
         }
 
         for i, func in enumerate(functions):
@@ -964,12 +1019,14 @@ class ContinuousImprovementLoop:
             # Skip if already documented
             if func_address in self.state.documented_addresses:
                 batch_results["skipped"] += 1
-                batch_results["results"].append({
-                    "function": func_name,
-                    "address": func_address,
-                    "status": "skipped",
-                    "reason": "already documented"
-                })
+                batch_results["results"].append(
+                    {
+                        "function": func_name,
+                        "address": func_address,
+                        "status": "skipped",
+                        "reason": "already documented",
+                    }
+                )
                 continue
 
             # Mark work started
@@ -981,12 +1038,14 @@ class ContinuousImprovementLoop:
 
                 if not analysis.get("decompiled"):
                     batch_results["failed"] += 1
-                    batch_results["results"].append({
-                        "function": func_name,
-                        "address": func_address,
-                        "status": "failed",
-                        "reason": "could not decompile"
-                    })
+                    batch_results["results"].append(
+                        {
+                            "function": func_name,
+                            "address": func_address,
+                            "status": "failed",
+                            "reason": "could not decompile",
+                        }
+                    )
                     self.complete_function_work(func_address, success=False)
 
                     if stop_on_error:
@@ -995,23 +1054,27 @@ class ContinuousImprovementLoop:
 
                 # Success - mark as ready for Claude analysis
                 batch_results["successful"] += 1
-                batch_results["results"].append({
-                    "function": func_name,
-                    "address": func_address,
-                    "status": "analyzed",
-                    "analysis": analysis
-                })
+                batch_results["results"].append(
+                    {
+                        "function": func_name,
+                        "address": func_address,
+                        "status": "analyzed",
+                        "analysis": analysis,
+                    }
+                )
 
                 self.complete_function_work(func_address, success=True)
 
             except Exception as e:
                 batch_results["failed"] += 1
-                batch_results["results"].append({
-                    "function": func_name,
-                    "address": func_address,
-                    "status": "error",
-                    "error": str(e)
-                })
+                batch_results["results"].append(
+                    {
+                        "function": func_name,
+                        "address": func_address,
+                        "status": "error",
+                        "error": str(e),
+                    }
+                )
                 self.complete_function_work(func_address, success=False)
 
                 if stop_on_error:
@@ -1021,14 +1084,13 @@ class ContinuousImprovementLoop:
 
             if progress_callback:
                 progress_callback(
-                    i + 1,
-                    len(functions),
-                    func,
-                    batch_results["results"][-1]
+                    i + 1, len(functions), func, batch_results["results"][-1]
                 )
 
-        logger.info(f"Batch complete: {batch_results['successful']} successful, "
-                   f"{batch_results['failed']} failed, {batch_results['skipped']} skipped")
+        logger.info(
+            f"Batch complete: {batch_results['successful']} successful, "
+            f"{batch_results['failed']} failed, {batch_results['skipped']} skipped"
+        )
 
         return batch_results
 
@@ -1038,7 +1100,7 @@ class ContinuousImprovementLoop:
             "timestamp": datetime.now().isoformat(),
             "description": description,
             "context": context or {},
-            "session": self.state.session_count
+            "session": self.state.session_count,
         }
         self.state.friction_history.append(friction)
         self.state.save()
@@ -1077,13 +1139,11 @@ class ContinuousImprovementLoop:
         if target == "bridge":
             if change_type == ChangeType.ADD_MCP_TOOL:
                 success = self.bridge_modifier.add_mcp_tool(
-                    change_dict["description"].split(":")[0],  # Extract tool name
-                    code
+                    change_dict["description"].split(":")[0], code  # Extract tool name
                 )
             elif change_type == ChangeType.MODIFY_MCP_TOOL:
                 success = self.bridge_modifier.modify_mcp_tool(
-                    change_dict["description"].split(":")[0],
-                    code
+                    change_dict["description"].split(":")[0], code
                 )
             elif change_type == ChangeType.REMOVE_MCP_TOOL:
                 success = self.bridge_modifier.remove_mcp_tool(
@@ -1093,8 +1153,7 @@ class ContinuousImprovementLoop:
         elif target == "plugin":
             if change_type == ChangeType.ADD_ENDPOINT:
                 success = self.plugin_modifier.add_endpoint(
-                    change_dict["description"],
-                    code
+                    change_dict["description"], code
                 )
 
         if success:
@@ -1139,9 +1198,11 @@ class ContinuousImprovementLoop:
     def deploy_changes(self) -> Tuple[bool, str]:
         """Build and deploy changes to Ghidra."""
         # Check if Java changes need building
-        if any(c.get("target_file") == "plugin"
-               for c in self.state.pending_changes
-               if c.get("status") == "implemented"):
+        if any(
+            c.get("target_file") == "plugin"
+            for c in self.state.pending_changes
+            if c.get("status") == "implemented"
+        ):
 
             logger.info("Building Java plugin...")
             build_success, build_output = self.deployment_manager.build_java()
@@ -1162,8 +1223,7 @@ class ContinuousImprovementLoop:
 
         # Clear pending
         self.state.pending_changes = [
-            c for c in self.state.pending_changes
-            if c.get("status") != "deployed"
+            c for c in self.state.pending_changes if c.get("status") != "deployed"
         ]
         self.state.save()
 
@@ -1193,7 +1253,7 @@ class ContinuousImprovementLoop:
             "bugs_fixed": self.state.bugs_fixed,
             "pending_changes": len(self.state.pending_changes),
             "completed_changes": len(self.state.completed_changes),
-            "friction_points": len(self.state.friction_history)
+            "friction_points": len(self.state.friction_history),
         }
 
     def start_session(self):
@@ -1213,6 +1273,7 @@ class ContinuousImprovementLoop:
 # =============================================================================
 # Claude Code Integration Functions
 # =============================================================================
+
 
 def get_loop_instance(dry_run: bool = False) -> ContinuousImprovementLoop:
     """Get a configured improvement loop instance."""
@@ -1242,10 +1303,13 @@ def ensure_ghidra(project: str = None, binary: str = None) -> Tuple[bool, str]:
             loop.start_session()
     """
     from workflows.ghidra_manager import ensure_ghidra as _ensure
+
     return _ensure(project=project, binary=binary)
 
 
-def restart_ghidra(project: str = None, binary: str = None, force: bool = False) -> Tuple[bool, str]:
+def restart_ghidra(
+    project: str = None, binary: str = None, force: bool = False
+) -> Tuple[bool, str]:
     """
     Restart Ghidra completely.
 
@@ -1258,6 +1322,7 @@ def restart_ghidra(project: str = None, binary: str = None, force: bool = False)
         Tuple of (success, message)
     """
     from workflows.ghidra_manager import restart_ghidra as _restart
+
     return _restart(project=project, binary=binary, force=force)
 
 
@@ -1273,13 +1338,12 @@ def check_ghidra_status() -> Dict[str, Any]:
         - recommendations: List of suggested actions
     """
     from workflows.ghidra_manager import check_ghidra
+
     return check_ghidra()
 
 
 def configure_ghidra_defaults(
-    ghidra_path: str = None,
-    project: str = None,
-    binary: str = None
+    ghidra_path: str = None, project: str = None, binary: str = None
 ):
     """
     Configure default Ghidra settings for the improvement loop.
@@ -1288,13 +1352,13 @@ def configure_ghidra_defaults(
     to ensure_ghidra() or restart_ghidra().
 
     Args:
-        ghidra_path: Path to Ghidra installation (e.g., "F:\\ghidra_11.4.2")
+        ghidra_path: Path to Ghidra installation (e.g., "F:\\ghidra_12.0.2_PUBLIC")
         project: Default project file (e.g., "F:\\GhidraProjects\\PD2.gpr")
         binary: Default binary to open (e.g., "D2Win.dll")
 
     Example:
         configure_ghidra_defaults(
-            ghidra_path=r"F:\ghidra_11.4.2",
+            ghidra_path=r"F:\ghidra_12.0.2_PUBLIC",
             project=r"F:\GhidraProjects\PD2.gpr",
             binary="D2Win.dll"
         )
@@ -1304,6 +1368,7 @@ def configure_ghidra_defaults(
         restart_ghidra()
     """
     from workflows.ghidra_manager import configure_defaults
+
     return configure_defaults(ghidra_path=ghidra_path, project=project, binary=binary)
 
 
@@ -1319,18 +1384,17 @@ def document_next_function(loop: ContinuousImprovementLoop) -> Optional[Dict]:
         return None
 
     analysis = loop.get_function_analysis(func["name"])
-    return {
-        "function": func,
-        "analysis": analysis
-    }
+    return {"function": func, "analysis": analysis}
 
 
-def apply_function_documentation(loop: ContinuousImprovementLoop,
-                                 address: str,
-                                 name: str,
-                                 prototype: str = None,
-                                 comment: str = None,
-                                 var_types: Dict[str, str] = None) -> Dict:
+def apply_function_documentation(
+    loop: ContinuousImprovementLoop,
+    address: str,
+    name: str,
+    prototype: str = None,
+    comment: str = None,
+    var_types: Dict[str, str] = None,
+) -> Dict:
     """
     Apply documentation to a function.
 
@@ -1341,7 +1405,7 @@ def apply_function_documentation(loop: ContinuousImprovementLoop,
         new_name=name,
         prototype=prototype,
         plate_comment=comment,
-        variable_types=var_types
+        variable_types=var_types,
     )
 
     if any(results.values()):
@@ -1351,26 +1415,30 @@ def apply_function_documentation(loop: ContinuousImprovementLoop,
     return results
 
 
-def report_tool_friction(loop: ContinuousImprovementLoop,
-                        tool_name: str,
-                        issue: str,
-                        suggested_fix: str = None):
+def report_tool_friction(
+    loop: ContinuousImprovementLoop,
+    tool_name: str,
+    issue: str,
+    suggested_fix: str = None,
+):
     """
     Report friction with a tool.
 
     Called by Claude Code when encountering issues.
     """
-    loop.record_friction(f"Tool {tool_name}: {issue}", {
-        "tool": tool_name,
-        "suggested_fix": suggested_fix
-    })
+    loop.record_friction(
+        f"Tool {tool_name}: {issue}",
+        {"tool": tool_name, "suggested_fix": suggested_fix},
+    )
 
 
-def propose_new_tool(loop: ContinuousImprovementLoop,
-                    tool_name: str,
-                    description: str,
-                    rationale: str,
-                    target: str = "bridge") -> str:
+def propose_new_tool(
+    loop: ContinuousImprovementLoop,
+    tool_name: str,
+    description: str,
+    rationale: str,
+    target: str = "bridge",
+) -> str:
     """
     Propose a new tool to be added.
 
@@ -1378,18 +1446,20 @@ def propose_new_tool(loop: ContinuousImprovementLoop,
     """
     change = ToolChange(
         id=f"CHANGE-{loop.state.session_count:04d}-{len(loop.state.pending_changes):03d}",
-        change_type=ChangeType.ADD_MCP_TOOL if target == "bridge" else ChangeType.ADD_ENDPOINT,
+        change_type=(
+            ChangeType.ADD_MCP_TOOL if target == "bridge" else ChangeType.ADD_ENDPOINT
+        ),
         description=f"{tool_name}: {description}",
         rationale=rationale,
-        target_file=target
+        target_file=target,
     )
     loop.propose_tool_change(change)
     return change.id
 
 
-def implement_proposed_change(loop: ContinuousImprovementLoop,
-                             change_id: str,
-                             code: str) -> bool:
+def implement_proposed_change(
+    loop: ContinuousImprovementLoop, change_id: str, code: str
+) -> bool:
     """
     Implement a proposed change with actual code.
 
@@ -1415,13 +1485,14 @@ def test_and_deploy(loop: ContinuousImprovementLoop) -> Tuple[bool, Dict]:
     return deploy_success, {
         "status": "deployed" if deploy_success else "deploy_failed",
         "tests": test_results,
-        "deploy": deploy_msg
+        "deploy": deploy_msg,
     }
 
 
 # =============================================================================
 # Standalone Execution (Limited without Claude)
 # =============================================================================
+
 
 def main():
     """Main entry point for standalone execution."""
@@ -1431,19 +1502,15 @@ def main():
         description="Continuous Self-Improvement Loop for Ghidra MCP"
     )
     parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview changes without applying them"
+        "--dry-run", action="store_true", help="Preview changes without applying them"
     )
     parser.add_argument(
-        "--status",
-        action="store_true",
-        help="Show current improvement status"
+        "--status", action="store_true", help="Show current improvement status"
     )
     parser.add_argument(
         "--standalone",
         action="store_true",
-        help="Run in standalone mode (limited without Claude)"
+        help="Run in standalone mode (limited without Claude)",
     )
 
     args = parser.parse_args()
@@ -1483,11 +1550,15 @@ def main():
             # Find next function
             func = loop.get_next_function_to_document()
             if func:
-                print(f"\nNext function to document: {func['name']} @ {func['address']}")
+                print(
+                    f"\nNext function to document: {func['name']} @ {func['address']}"
+                )
                 print("\nTo document this function, run with Claude Code:")
-                print("  Claude> Analyze and document the function at", func['address'])
+                print("  Claude> Analyze and document the function at", func["address"])
             else:
-                print("\nNo undocumented functions found (all FUN_* functions documented)")
+                print(
+                    "\nNo undocumented functions found (all FUN_* functions documented)"
+                )
         else:
             print("[ERROR] Ghidra server is not accessible")
 
@@ -1497,7 +1568,8 @@ def main():
     print("\n" + "=" * 60)
     print("CONTINUOUS IMPROVEMENT LOOP")
     print("=" * 60)
-    print("""
+    print(
+        """
 This system is designed to run with Claude Code for full functionality.
 
 Usage with Claude Code:
@@ -1519,7 +1591,8 @@ The loop will:
     6. Test changes
     7. Deploy to Ghidra
     8. Repeat
-""")
+"""
+    )
 
     return 0
 

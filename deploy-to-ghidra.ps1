@@ -1,10 +1,17 @@
 # GhidraMCP Deployment Script
-# Automatically installs and configures the GhidraMCP plugin
+# Automatically builds, installs, and configures the GhidraMCP plugin
+# Target: Ghidra 12.0.2
 
 param(
-    [string]$GhidraPath = "",
+    [string]$GhidraPath = "F:\ghidra_12.0.2_PUBLIC",
+    [switch]$SkipBuild = $false,
+    [switch]$SkipRestart = $false,
     [switch]$Verbose = $false
 )
+
+# Configuration
+$GhidraVersion = "12.0.2"
+$PluginVersion = "2.0.0"
 
 # Color output functions
 function Write-Success { param($msg) Write-Host "[SUCCESS] $msg" -ForegroundColor Green }
@@ -12,18 +19,158 @@ function Write-Info { param($msg) Write-Host "[INFO] $msg" -ForegroundColor Cyan
 function Write-Warning { param($msg) Write-Host "[WARNING] $msg" -ForegroundColor Yellow }
 function Write-Error { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
-Write-Info "GhidraMCP Deployment Script"
-Write-Info "============================"
+Write-Host ""
+Write-Host "======================================" -ForegroundColor Magenta
+Write-Host "  GhidraMCP Deployment Script v2.0   " -ForegroundColor Magenta
+Write-Host "  Target: Ghidra $GhidraVersion       " -ForegroundColor Magenta
+Write-Host "======================================" -ForegroundColor Magenta
+Write-Host ""
 
-# Build the extension first
-Write-Info "Building GhidraMCP extension..."
+# Function to find all Ghidra processes
+function Get-GhidraProcesses {
+    $ghidraProcs = @()
+    
+    # Method 1: Check for javaw/java processes with Ghidra in window title
+    $javaProcs = Get-Process -Name javaw, java -ErrorAction SilentlyContinue | Where-Object {
+        $_.MainWindowTitle -match "Ghidra"
+    }
+    if ($javaProcs) { $ghidraProcs += $javaProcs }
+    
+    # Method 2: Check for processes started from Ghidra directory
+    $allProcs = Get-Process -Name javaw, java -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $_.Path -and $_.Path -match "ghidra"
+        } catch { $false }
+    }
+    foreach ($proc in $allProcs) {
+        if ($proc.Id -notin $ghidraProcs.Id) {
+            $ghidraProcs += $proc
+        }
+    }
+    
+    # Method 3: Check command line for ghidra references (requires admin for full access)
+    try {
+        $wmiProcs = Get-CimInstance Win32_Process -Filter "Name='javaw.exe' OR Name='java.exe'" -ErrorAction SilentlyContinue
+        foreach ($wmiProc in $wmiProcs) {
+            if ($wmiProc.CommandLine -match "ghidra") {
+                $proc = Get-Process -Id $wmiProc.ProcessId -ErrorAction SilentlyContinue
+                if ($proc -and $proc.Id -notin $ghidraProcs.Id) {
+                    $ghidraProcs += $proc
+                }
+            }
+        }
+    } catch { }
+    
+    return $ghidraProcs
+}
 
-# Try multiple Maven locations
-$mavenPaths = @(
-    "$env:USERPROFILE\tools\apache-maven-3.9.6\bin\mvn.cmd",
-    "C:\Program Files\JetBrains\IntelliJ IDEA Community Edition 2025.1.1.1\plugins\maven\lib\maven3\bin\mvn.cmd",
-    (Get-Command mvn -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
-)
+# Function to close Ghidra gracefully
+function Close-Ghidra {
+    param([switch]$Force)
+    
+    $ghidraProcesses = Get-GhidraProcesses
+    if (-not $ghidraProcesses) {
+        return $false
+    }
+    
+    Write-Info "Detected $($ghidraProcesses.Count) Ghidra process(es) running"
+    
+    foreach ($ghidraProcess in $ghidraProcesses) {
+        $procInfo = "PID $($ghidraProcess.Id)"
+        if ($ghidraProcess.MainWindowTitle) {
+            $procInfo = "'$($ghidraProcess.MainWindowTitle)' ($procInfo)"
+        }
+        
+        Write-Info "Closing Ghidra $procInfo..."
+        try {
+            # Try graceful close first
+            if ($ghidraProcess.MainWindowHandle -ne 0) {
+                $ghidraProcess.CloseMainWindow() | Out-Null
+                
+                # Wait up to 5 seconds for graceful close
+                $waited = 0
+                while (!$ghidraProcess.HasExited -and $waited -lt 5) {
+                    Start-Sleep -Milliseconds 500
+                    $waited += 0.5
+                    $ghidraProcess.Refresh()
+                }
+            }
+            
+            # Force kill if still running
+            if (!$ghidraProcess.HasExited) {
+                if ($Force) {
+                    Write-Warning "Force terminating Ghidra $procInfo..."
+                    Stop-Process -Id $ghidraProcess.Id -Force -ErrorAction SilentlyContinue
+                } else {
+                    Write-Warning "Ghidra $procInfo did not close gracefully. Use -Force to terminate."
+                }
+            } else {
+                Write-Success "Closed Ghidra $procInfo"
+            }
+        } catch {
+            Write-Warning "Could not close Ghidra $procInfo : $($_.Exception.Message)"
+        }
+    }
+    
+    # Wait for processes to fully terminate
+    Start-Sleep -Seconds 2
+    return $true
+}
+
+# Validate Ghidra path first
+if (-not (Test-Path "$GhidraPath\ghidraRun.bat")) {
+    Write-Error "Ghidra not found at: $GhidraPath"
+    Write-Info "Please specify the correct path: .\deploy-to-ghidra.ps1 -GhidraPath 'C:\path\to\ghidra'"
+    exit 1
+}
+Write-Success "Found Ghidra at: $GhidraPath"
+
+# Check if Ghidra is running BEFORE deployment (files may be locked)
+$ghidraWasRunning = $false
+$preDeployProcesses = Get-GhidraProcesses
+if ($preDeployProcesses) {
+    Write-Warning "Ghidra is currently running - files may be locked"
+    if (-not $SkipRestart) {
+        Write-Info "Closing Ghidra before deployment..."
+        $ghidraWasRunning = Close-Ghidra -Force
+        if ($ghidraWasRunning) {
+            Write-Success "Ghidra closed successfully"
+        }
+    } else {
+        Write-Warning "Ghidra is running but -SkipRestart specified. Some files may fail to copy."
+    }
+}
+
+# Clean up ALL cached GhidraMCP extensions from all Ghidra versions
+$ghidraUserBase = "$env:USERPROFILE\AppData\Roaming\ghidra"
+if (Test-Path $ghidraUserBase) {
+    $cleanedCount = 0
+    Get-ChildItem -Path $ghidraUserBase -Directory -Filter "ghidra_*" | ForEach-Object {
+        $extPath = Join-Path $_.FullName "Extensions\GhidraMCP"
+        if (Test-Path $extPath) {
+            try {
+                Remove-Item -Recurse -Force $extPath -ErrorAction Stop
+                $cleanedCount++
+            } catch {
+                Write-Warning "Could not clean: $extPath - $($_.Exception.Message)"
+            }
+        }
+    }
+    if ($cleanedCount -gt 0) {
+        Write-Info "Cleaned $cleanedCount cached GhidraMCP extension(s)"
+    }
+}
+
+# Build the extension (unless skipped)
+if (-not $SkipBuild) {
+    Write-Info "Building GhidraMCP extension..."
+
+    # Try multiple Maven locations
+    $mavenPaths = @(
+        "$env:USERPROFILE\tools\apache-maven-3.9.6\bin\mvn.cmd",
+        "C:\Program Files\JetBrains\IntelliJ IDEA Community Edition 2025.1.1.1\plugins\maven\lib\maven3\bin\mvn.cmd",
+        (Get-Command mvn -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+    )
 
 $mavenPath = $null
 foreach ($path in $mavenPaths) {
@@ -34,26 +181,30 @@ foreach ($path in $mavenPaths) {
     }
 }
 
-if (-not $mavenPath) {
-    Write-Error "Maven not found. Tried:"
-    foreach ($path in $mavenPaths) {
-        if ($path) { Write-Host "  - $path" }
-    }
-    Write-Info "Please ensure Maven is installed or add it to PATH"
-    exit 1
-}
-
-try {
-    $buildOutput = & $mavenPath clean package assembly:single -DskipTests 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Build failed with exit code: $LASTEXITCODE"
-        Write-Host $buildOutput
+    if (-not $mavenPath) {
+        Write-Error "Maven not found. Tried:"
+        foreach ($path in $mavenPaths) {
+            if ($path) { Write-Host "  - $path" }
+        }
+        Write-Info "Please ensure Maven is installed or add it to PATH"
+        Write-Info "Or use -SkipBuild if you already have a built artifact"
         exit 1
     }
-    Write-Success "Build completed successfully"
-} catch {
-    Write-Error "Build failed: $($_.Exception.Message)"
-    exit 1
+
+    try {
+        $buildOutput = & $mavenPath clean package assembly:single -DskipTests -q 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Build failed with exit code: $LASTEXITCODE"
+            Write-Host $buildOutput
+            exit 1
+        }
+        Write-Success "Build completed successfully"
+    } catch {
+        Write-Error "Build failed: $($_.Exception.Message)"
+        exit 1
+    }
+} else {
+    Write-Info "Skipping build (using existing artifact)"
 }
 
 # Detect version from pom.xml
@@ -64,73 +215,29 @@ if (Test-Path $pomPath) {
         $version = $pom.project.version
         Write-Success "Detected version: $version"
     } catch {
-        Write-Warning "Could not parse version from pom.xml, using manual detection"
-        $version = $null
+        Write-Warning "Could not parse version from pom.xml, using default: $PluginVersion"
+        $version = $PluginVersion
     }
 } else {
-    Write-Warning "pom.xml not found, using manual version detection"
-    $version = $null
-}
-
-# Find Ghidra installation
-$possiblePaths = @(
-    "F:\ghidra_11.4.2_PUBLIC",
-    "F:\ghidra_11.4.2",
-    "C:\ghidra",
-    "C:\ghidra_11.4.2_PUBLIC",
-    "$env:USERPROFILE\ghidra",
-    "$env:USERPROFILE\ghidra_11.4.2_PUBLIC",
-    "$env:USERPROFILE\tools\ghidra",
-    "$env:ProgramFiles\ghidra",
-    "$env:ProgramFiles\ghidra_11.4.2_PUBLIC"
-)
-
-if (-not $GhidraPath) {
-    Write-Info "Searching for Ghidra installation..."
-    foreach ($path in $possiblePaths) {
-        if (Test-Path "$path\ghidraRun.bat") {
-            $GhidraPath = $path
-            Write-Success "Found Ghidra at: $GhidraPath"
-            break
-        }
-    }
-    
-    if (-not $GhidraPath) {
-        Write-Warning "Ghidra installation not found automatically."
-        $GhidraPath = Read-Host "Please enter your Ghidra installation path"
-        if (-not (Test-Path "$GhidraPath\ghidraRun.bat")) {
-            Write-Error "Invalid Ghidra path. ghidraRun.bat not found."
-            exit 1
-        }
-    }
+    Write-Warning "pom.xml not found, using default version: $PluginVersion"
+    $version = $PluginVersion
 }
 
 # Find latest build artifact
-if ($version) {
-    $artifactPath = "$PSScriptRoot\target\GhidraMCP-$version.zip"
-} else {
-    # Auto-detect latest artifact if version not found
-    $artifacts = Get-ChildItem -Path "$PSScriptRoot\target" -Filter "GhidraMCP-*.zip" -ErrorAction SilentlyContinue |
-                 Sort-Object LastWriteTime -Descending
+$artifactPath = "$PSScriptRoot\target\GhidraMCP-$version.zip"
 
+if (-not (Test-Path $artifactPath)) {
+    # Auto-detect latest artifact if version-specific not found
+    $artifacts = Get-ChildItem -Path "$PSScriptRoot\target" -Filter "GhidraMCP-*.zip" -ErrorAction SilentlyContinue | 
+        Sort-Object LastWriteTime -Descending
     if ($artifacts) {
         $artifactPath = $artifacts[0].FullName
-        # Extract version from filename
-        if ($artifacts[0].Name -match 'GhidraMCP-(.+)\.zip') {
-            $version = $Matches[1]
-        }
         Write-Info "Auto-detected latest artifact: $($artifacts[0].Name)"
     } else {
         Write-Error "No build artifacts found in target/"
         Write-Info "Please run the build first: mvn clean package assembly:single"
         exit 1
     }
-}
-
-if (-not (Test-Path $artifactPath)) {
-    Write-Error "Build artifact not found: $artifactPath"
-    Write-Info "Please run the build first: mvn clean package assembly:single"
-    exit 1
 }
 
 Write-Success "Using artifact: $(Split-Path $artifactPath -Leaf) ($version)"
@@ -186,7 +293,7 @@ if (Test-Path $jarSourcePath) {
         if ($GhidraPath -match "ghidra_([0-9.]+)") {
             $ghidraVersionDir = "ghidra_$($Matches[1])_PUBLIC"
         } else {
-            $ghidraVersionDir = "ghidra_11.4.2_PUBLIC"
+            $ghidraVersionDir = "ghidra_12.0.2_PUBLIC"
         }
         Write-Info "Using Ghidra version dir: $ghidraVersionDir"
     }
@@ -297,72 +404,66 @@ Write-Host "      - Click OK and restart Ghidra"
 Write-Host ""
 Write-Info "Usage:"
 Write-Host "   Ghidra: Tools > GhidraMCP > Start MCP Server"
-Write-Host "   Python: python bridge_mcp_ghidra.py (from Ghidra root directory)"
+Write-Host "   Python: python bridge_mcp_ghidra.py (from project root or Ghidra directory)"
 Write-Host ""
 Write-Info "Default Server: http://127.0.0.1:8089/"
 Write-Host ""
 
 # Show version-specific release notes
-if ($version -match "1\.5\.1") {
-    Write-Info "New in v1.5.1 - Batch Operations & ROADMAP Documentation:"
-    Write-Host "   + batch_create_labels - Create labels in single atomic transaction"
-    Write-Host "   + Enhanced batch_set_comments - Fixed JSON parsing (90% error reduction)"
-    Write-Host "   + ROADMAP v2.0 - 10 tools clearly marked with implementation plans"
-    Write-Host "   + Performance: 91% API call reduction (57 → 5 calls per function)"
-    Write-Host "   + Documentation: Organized structure, comprehensive user prompts"
+if ($version -match "^2\.") {
+    Write-Info "New in v2.0.0 - Major Release:"
+    Write-Host "   + 133 total endpoints (was 132)"
+    Write-Host "   + Ghidra 12.0.2 support"
+    Write-Host "   + Malware analysis: IOC extraction, behavior detection, anti-analysis detection"
+    Write-Host "   + Function similarity analysis with CFG comparison"
+    Write-Host "   + Control flow complexity analysis (cyclomatic complexity)"
+    Write-Host "   + Enhanced call graph: cycle detection, path finding, SCC analysis"
+    Write-Host "   + API call chain threat pattern detection"
     Write-Host ""
-    Write-Info "For full release notes, see: RELEASE_NOTES.md"
-} elseif ($version -match "1\.5\.0") {
-    Write-Info "New in v1.5.0 - Workflow Optimization Tools (9 new tools):"
-    Write-Host "   + batch_set_comments - Set multiple comments in one call"
-    Write-Host "   + set_plate_comment - Function header documentation"
-    Write-Host "   + get_function_variables - List all parameters and locals"
-    Write-Host "   + batch_rename_function_components - Atomic rename operations"
-    Write-Host "   + analyze_function_completeness - Automated quality verification"
 } else {
-    Write-Info "For release notes, see: docs/releases/v$version/"
+    Write-Info "For release notes, see: docs/releases/ or CHANGELOG.md"
 }
 Write-Host ""
-
-
 
 # Verify installation
 if (Test-Path $destinationPath) {
     $fileSize = (Get-Item $destinationPath).Length
     Write-Success "Installation verified: $([math]::Round($fileSize/1KB, 2)) KB"
     
-    # Automatically restart Ghidra if running
-    # Look for javaw process with "Ghidra: PD2" window
-    $ghidraProcess = Get-Process | Where-Object { $_.ProcessName -eq "javaw" -and $_.MainWindowTitle -eq "Ghidra: PD2" }
-    
-    if ($ghidraProcess) {
-        Write-Info "Found Ghidra window 'Ghidra: PD2' (PID: $($ghidraProcess.Id)) - closing it..."
-        try {
-            $ghidraProcess.CloseMainWindow() | Out-Null
+    if (-not $SkipRestart) {
+        # Check if any Ghidra is still running (shouldn't be if we closed it earlier)
+        $remainingProcesses = Get-GhidraProcesses
+        if ($remainingProcesses) {
+            Write-Warning "Ghidra processes still detected, attempting to close..."
+            Close-Ghidra -Force
             Start-Sleep -Seconds 2
-            
-            if (!$ghidraProcess.HasExited) {
-                Write-Warning "Force closing Ghidra process (PID: $($ghidraProcess.Id))..."
-                Stop-Process -Id $ghidraProcess.Id -Force
-            }
-            Write-Success "Closed Ghidra (PID: $($ghidraProcess.Id))"
-        } catch {
-            Write-Warning "Could not close process $($ghidraProcess.Id): $($_.Exception.Message)"
         }
         
-        Write-Info "Waiting for Ghidra to fully terminate..."
+        # Start Ghidra
+        Write-Info "Starting Ghidra..."
+        Start-Process "$GhidraPath\ghidraRun.bat" -WorkingDirectory $GhidraPath
+        
+        # Wait a moment and verify it started
         Start-Sleep -Seconds 3
+        $newProcs = Get-GhidraProcesses
+        if ($newProcs) {
+            Write-Success "Ghidra started successfully! (PID: $($newProcs[0].Id))"
+            Write-Success "The updated plugin (v$version) is now available."
+        } else {
+            Write-Info "Ghidra launch initiated - it may take a moment to fully start."
+        }
     } else {
-        Write-Info "No running Ghidra instance detected"
+        if ($ghidraWasRunning) {
+            Write-Warning "Ghidra was closed but -SkipRestart specified. Start Ghidra manually."
+        } else {
+            Write-Info "Skipping Ghidra restart (use without -SkipRestart to auto-restart)"
+        }
     }
-    
-    # Always start Ghidra
-    Write-Info "Starting Ghidra..."
-    Start-Process "$GhidraPath\ghidraRun.bat"
-    Write-Success "Ghidra started! The updated plugin (v$version) is now available."
 } else {
     Write-Error "Installation verification failed!"
     exit 1
 }
 
+Write-Host ""
 Write-Success "Deployment completed successfully!"
+Write-Host ""Write-Success "Deployment completed successfully!"

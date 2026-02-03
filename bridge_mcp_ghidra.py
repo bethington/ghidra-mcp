@@ -269,6 +269,218 @@ def validate_function_name(name: str) -> bool:
     return bool(FUNCTION_NAME_PATTERN.match(name)) if name else False
 
 
+def normalize_address(address: str) -> str:
+    """
+    Normalize address to standard format (0x prefix, no leading zeros except for single 0x0).
+
+    Args:
+        address: Address in any format
+
+    Returns:
+        Normalized address string
+
+    Examples:
+        normalize_address("0x00401000") -> "0x401000"
+        normalize_address("00401000") -> "0x401000"
+        normalize_address("0x10") -> "0x10"
+    """
+    if not address:
+        return address
+
+    # Remove whitespace and lowercase
+    address = address.strip().lower()
+
+    # Remove 0x prefix if present
+    if address.startswith(("0x", "0X")):
+        address = address[2:]
+
+    # Remove leading zeros but keep at least one digit
+    address = address.lstrip("0") or "0"
+
+    return "0x" + address
+
+
+def format_success_response(operation: str, result: dict = None, **kwargs) -> str:
+    """
+    Format a standardized success response.
+
+    Args:
+        operation: Name of the operation
+        result: Result data dictionary
+        **kwargs: Additional fields to include
+
+    Returns:
+        JSON string with success response
+    """
+    response = {"success": True, "operation": operation}
+    if result is not None:
+        response["result"] = result
+    response.update(kwargs)
+    return json.dumps(response)
+
+
+def format_error_response(
+    operation: str, error: str, error_code: str = None, **kwargs
+) -> str:
+    """
+    Format a standardized error response.
+
+    Args:
+        operation: Name of the operation
+        error: Error message
+        error_code: Optional error code
+        **kwargs: Additional fields to include
+
+    Returns:
+        JSON string with error response
+    """
+    response = {"success": False, "operation": operation, "error": error}
+    if error_code:
+        response["error_code"] = error_code
+    response.update(kwargs)
+    return json.dumps(response)
+
+
+def calculate_function_hash(bytecode: bytes) -> str:
+    """
+    Calculate a normalized hash for function bytecode.
+
+    Used for cross-binary function matching.
+
+    Args:
+        bytecode: Raw function bytes
+
+    Returns:
+        Hex string hash
+    """
+    import hashlib
+
+    return hashlib.sha256(bytecode).hexdigest()
+
+
+def validate_hungarian_notation(name: str, type_str: str) -> bool:
+    """
+    Validate that a variable name follows Hungarian notation for its type.
+
+    Hungarian Notation Rules:
+        - Pointers: p prefix (pBuffer, pFunction)
+        - Double pointers: pp prefix
+        - DWORD/uint: dw prefix
+        - WORD/ushort: w prefix
+        - BYTE/byte: b prefix
+        - BOOL/bool: b or is prefix
+        - HANDLE: h prefix
+        - Arrays: a or arr prefix
+        - Strings: sz or str prefix
+        - Counters: c or n prefix
+
+    Args:
+        name: Variable name to validate
+        type_str: Type string
+
+    Returns:
+        True if valid Hungarian notation, False otherwise
+    """
+    if not name or not type_str:
+        return False
+
+    type_lower = type_str.lower()
+    name_lower = name.lower()
+
+    # Pointer check
+    if "*" in type_str or "ptr" in type_lower:
+        if type_str.count("*") >= 2 or "**" in type_str:
+            return name_lower.startswith("pp")
+        return name_lower.startswith("p")
+
+    # Handle types
+    if "handle" in type_lower or type_str.startswith("H"):
+        return name_lower.startswith("h")
+
+    # DWORD/uint
+    if type_lower in ("dword", "uint", "ulong", "unsigned int", "unsigned long"):
+        return name_lower.startswith("dw") or name_lower.startswith("n")
+
+    # WORD/ushort
+    if type_lower in ("word", "ushort", "unsigned short"):
+        return name_lower.startswith("w")
+
+    # BYTE/byte
+    if type_lower in ("byte", "uchar", "unsigned char"):
+        return name_lower.startswith("b")
+
+    # Boolean
+    if type_lower in ("bool", "boolean"):
+        return name_lower.startswith("b") or name_lower.startswith("is")
+
+    # Default - assume valid for unknown types
+    return True
+
+
+def validate_batch_renames(renames: dict) -> bool:
+    """
+    Validate batch rename parameters.
+
+    Args:
+        renames: Dictionary of old_name -> new_name pairs
+
+    Returns:
+        True if valid, False otherwise
+    """
+    if not renames or not isinstance(renames, dict):
+        return False
+
+    for old_name, new_name in renames.items():
+        if not isinstance(old_name, str) or not isinstance(new_name, str):
+            return False
+        if not old_name or not new_name:
+            return False
+
+    return True
+
+
+def validate_batch_comments(comments: list) -> bool:
+    """
+    Validate batch comment parameters.
+
+    Args:
+        comments: List of {address, comment} dictionaries
+
+    Returns:
+        True if valid, False otherwise
+    """
+    if not comments or not isinstance(comments, list):
+        return False
+
+    for item in comments:
+        if not isinstance(item, dict):
+            return False
+        if "address" not in item or "comment" not in item:
+            return False
+
+    return True
+
+
+def validate_program_path(path: str) -> bool:
+    """
+    Validate a Ghidra program path.
+
+    Args:
+        path: Program path string
+
+    Returns:
+        True if valid, False otherwise
+    """
+    if not path or not isinstance(path, str):
+        return False
+
+    # Check for path traversal attempts
+    if ".." in path:
+        return False
+
+    return True
+
+
 @mcp.tool()
 def validate_data_type_exists(type_name: str) -> str:
     """
@@ -2693,7 +2905,7 @@ def rename_or_label(address: str, name: str) -> str:
 @mcp.tool()
 def delete_label(address: str, name: str = None) -> str:
     """
-    Delete a label at the specified address (v1.9.5).
+    Delete a label at the specified address.
 
     This tool removes labels from memory addresses. Useful for cleaning up
     orphan labels after applying array types that consume multiple addresses.
@@ -2737,7 +2949,7 @@ def delete_label(address: str, name: str = None) -> str:
 @mcp.tool()
 def batch_delete_labels(labels: list) -> str:
     """
-    Delete multiple labels in a single atomic operation (v1.9.5).
+    Delete multiple labels in a single atomic operation.
 
     This tool deletes multiple labels in one transaction, dramatically reducing
     API calls. Essential for cleaning up orphan labels after applying array
@@ -2787,9 +2999,7 @@ def batch_delete_labels(labels: list) -> str:
             raise GhidraValidationError(f"Label at index {i} must be a dictionary")
 
         if "address" not in label:
-            raise GhidraValidationError(
-                f"Label at index {i} must have 'address' field"
-            )
+            raise GhidraValidationError(f"Label at index {i} must have 'address' field")
 
         if not validate_hex_address(label["address"]):
             raise GhidraValidationError(

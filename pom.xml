@@ -6,15 +6,20 @@
     <groupId>com.xebyte</groupId>
     <artifactId>GhidraMCP</artifactId>
     <packaging>jar</packaging>
-    <version>1.9.5</version>
+    <version>2.0.0</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v1.9.5: Label deletion endpoints for cleaning up orphan labels in typed arrays.</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v2.0.0: Label deletion endpoints for cleaning up orphan labels in typed arrays.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <ghidra.version>11.4.2</ghidra.version>
+        <!-- Build timestamp generated at compile time (format: yyyyMMdd-HHmmss) -->
+        <build.timestamp>${maven.build.timestamp}</build.timestamp>
+        <maven.build.timestamp.format>yyyyMMdd-HHmmss</maven.build.timestamp.format>
+        <!-- Build number - use current time as unique identifier -->
+        <build.number>${maven.build.timestamp}</build.number>
     </properties>
     <licenses>
         <license>

@@ -2,7 +2,8 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
-[![Ghidra Version](https://img.shields.io/badge/Ghidra-11.4.2-green.svg)](https://ghidra-sre.org/)
+[![Ghidra Version](https://img.shields.io/badge/Ghidra-12.0.2-green.svg)](https://ghidra-sre.org/)
+[![Version](https://img.shields.io/badge/Version-2.0.0-brightgreen.svg)](CHANGELOG.md)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
 
@@ -12,7 +13,7 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 
 ### Core MCP Integration
 - **Full MCP Compatibility** - Complete implementation of Model Context Protocol
-- **118 MCP Tools Available** - Comprehensive API surface for binary analysis
+- **110 MCP Tools Available** - Comprehensive API surface for binary analysis
 - **Production-Ready Reliability** - Tested batch operations and atomic transactions
 - **Real-time Analysis** - Live integration with Ghidra's analysis engine
 
@@ -22,13 +23,13 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 - **String Extraction** - Comprehensive string analysis and categorization  
 - **Import/Export Analysis** - Symbol table and library dependency mapping
 - **Memory Mapping** - Complete memory layout documentation
-- **Security Assessment** - Vulnerability pattern detection and analysis
+- **Cross-Binary Documentation** - Function hash matching across binary versions
 
 ### Development & Automation
 - **Automated Development Cycle** - Complete build-test-deploy-verify pipeline
-- **Quality Assurance** - Automated documentation quality scoring (100% achieved)
-- **Performance Monitoring** - Response time tracking and optimization
-- **Error Recovery** - Intelligent fallback strategies for failed operations
+- **Ghidra Script Management** - Create, run, and manage Ghidra scripts via MCP
+- **Multi-Program Support** - Switch between and compare multiple open programs
+- **Batch Operations** - Efficient bulk renaming, commenting, and typing
 
 ## 🚀 Quick Start
 
@@ -36,7 +37,7 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 
 - **Java 21 LTS** (OpenJDK recommended)
 - **Apache Maven 3.9+**
-- **Ghidra 11.4.2** (or compatible version)
+- **Ghidra 12.0.2** (or compatible version)
 - **Python 3.8+** with pip
 
 ### Installation
@@ -52,27 +53,27 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
    pip install -r requirements.txt
    ```
 
-3. **Copy Ghidra libraries:**
+3. **Copy Ghidra libraries** (see [Library Dependencies](#library-dependencies) for full list):
    ```bash
-   # Windows
-   copy-ghidra-libs.bat "C:\path\to\ghidra"
+   # Windows - run the provided batch script
+   copy-ghidra-libs.bat "C:\path\to\ghidra_12.0.2_PUBLIC"
    
-   # Linux/Mac
-   ./copy-ghidra-libs.sh /path/to/ghidra
+   # Linux/Mac - copy manually from your Ghidra installation
+   # See Library Dependencies section below for all 14 required JARs
    ```
 
 4. **Build the plugin:**
    ```bash
-   mvn clean package assembly:single
+   mvn clean package assembly:single -DskipTests
    ```
 
 5. **Deploy to Ghidra:**
    ```powershell
-   # Windows
+   # Windows (automated)
    .\deploy-to-ghidra.ps1
 
    # Or manually copy to Ghidra Extensions
-   Copy-Item target\GhidraMCP.zip "C:\ghidra\Extensions\Ghidra\"
+   Copy-Item target\GhidraMCP-2.0.0.zip "C:\ghidra\Extensions\Ghidra\"
    ```
 
 ### Basic Usage
@@ -87,9 +88,14 @@ python bridge_mcp_ghidra.py
 python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 ```
 
+#### In Ghidra
+1. Start Ghidra and load a binary
+2. Go to **Tools > GhidraMCP > Start MCP Server**
+3. The server runs on `http://127.0.0.1:8080/` by default
+
 ## 📊 Production Performance
 
-- **MCP Tools**: 118 tools (112 fully implemented + 6 ROADMAP v2.0)
+- **MCP Tools**: 110 tools fully implemented
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -98,135 +104,243 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 ## 🛠️ API Reference
 
 ### Core Operations
-- `GET /check_connection` - Verify MCP connectivity
-- `GET /get_metadata` - Program metadata and info
-- `GET /get_entry_points` - Binary entry points discovery
+- `check_connection` - Verify MCP connectivity
+- `get_metadata` - Program metadata and info
+- `get_version` - Server version information
+- `get_entry_points` - Binary entry points discovery
 
 ### Function Analysis
-- `GET /functions` - List all functions (paginated)
-- `GET /searchFunctions` - Search functions by name/pattern
-- `GET /decompile/{function}` - Decompile function to C pseudocode
-- `GET /function_callers/{function}` - Get function callers
-- `GET /function_callees/{function}` - Get function callees
-- `GET /get_function_call_graph/{function}` - Function relationship graph
+- `list_functions` - List all functions (paginated)
+- `search_functions_by_name` - Search functions by name/pattern
+- `search_functions_enhanced` - Advanced function search with filters
+- `decompile_function` - Decompile function to C pseudocode
+- `get_decompiled_code` - Get decompiled code by address
+- `get_function_callers` - Get function callers
+- `get_function_callees` - Get function callees
+- `get_function_call_graph` - Function relationship graph
+- `get_full_call_graph` - Complete call graph for program
+- `analyze_function_complete` - Comprehensive function analysis
+- `analyze_function_completeness` - Documentation completeness score
 
 ### Memory & Data
-- `GET /segments` - Memory segments and layout
-- `GET /get_function_by_address/{addr}` - Function at address
-- `GET /disassemble_function/{addr}` - Disassembly listing
-- `GET /xrefs_to/{addr}` - Cross-references to address
-- `GET /xrefs_from/{addr}` - Cross-references from address
+- `list_segments` - Memory segments and layout
+- `get_function_by_address` - Function at address
+- `disassemble_function` - Disassembly listing
+- `disassemble_bytes` - Raw byte disassembly
+- `get_xrefs_to` - Cross-references to address
+- `get_xrefs_from` - Cross-references from address
+- `get_bulk_xrefs` - Bulk cross-reference lookup
+- `analyze_data_region` - Analyze memory region structure
+- `inspect_memory_content` - View raw memory content
+- `detect_array_bounds` - Detect array boundaries
 
-### Function Hash Index (Cross-Binary Documentation)
-- `GET /get_function_hash/{addr}` - SHA-256 hash of normalized function opcodes
-- `GET /get_bulk_function_hashes` - Paginated bulk hashing with filter
-- `GET /get_function_documentation/{addr}` - Export complete function documentation
-- `POST /apply_function_documentation` - Import documentation to target function
+### Cross-Binary Documentation (v1.9.4+)
+- `get_function_hash` - SHA-256 hash of normalized function opcodes
+- `get_bulk_function_hashes` - Paginated bulk hashing with filter
+- `get_function_documentation` - Export complete function documentation
+- `apply_function_documentation` - Import documentation to target function
+- `build_function_hash_index` - Build persistent JSON index
+- `lookup_function_by_hash` - Find matching functions in index
+- `propagate_documentation` - Apply docs to all matching instances
 
 ### Data Types & Structures
-- `GET /data_types` - Available data types
-- `POST /create_struct` - Create custom structure
-- `POST /create_union` - Create union type
-- `POST /create_enum` - Create enumeration
+- `list_data_types` - Available data types
+- `search_data_types` - Search for data types
+- `create_struct` - Create custom structure
+- `add_struct_field` - Add field to structure
+- `modify_struct_field` - Modify existing field
+- `remove_struct_field` - Remove field from structure
+- `create_enum` - Create enumeration
+- `get_enum_values` - Get enumeration values
+- `create_array_type` - Create array data type
+- `apply_data_type` - Apply type to address
+- `delete_data_type` - Delete a data type
+- `consolidate_duplicate_types` - Merge duplicate types
+- `get_valid_data_types` - Get list of valid Ghidra types
 
-### Symbols & Strings
-- `GET /imports` - Imported symbols and libraries
-- `GET /exports` - Exported symbols and functions
-- `GET /strings` - Extracted strings with analysis
-- `GET /namespaces` - Available namespaces
+### Symbols & Labels
+- `list_imports` - Imported symbols and libraries
+- `list_exports` - Exported symbols and functions
+- `list_external_locations` - External location references
+- `list_strings` - Extracted strings with analysis
+- `list_namespaces` - Available namespaces
+- `list_globals` - Global variables
+- `create_label` - Create label at address
+- `batch_create_labels` - Bulk label creation
+- `delete_label` - Delete label at address
+- `batch_delete_labels` - Bulk label deletion
+- `rename_label` - Rename existing label
+- `rename_or_label` - Rename or create label
 
-See [API_REFERENCE.md](docs/API_REFERENCE.md) for complete documentation.
+### Renaming & Documentation
+- `rename_function` - Rename function by name
+- `rename_function_by_address` - Rename function by address
+- `rename_data` - Rename data item
+- `rename_variables` - Rename function variables
+- `rename_global_variable` - Rename global variable
+- `rename_external_location` - Rename external reference
+- `batch_rename_function_components` - Bulk renaming
+- `set_decompiler_comment` - Set decompiler comment
+- `set_disassembly_comment` - Set disassembly comment
+- `set_plate_comment` - Set function plate comment
+- `get_plate_comment` - Get function plate comment
+- `batch_set_comments` - Bulk comment setting
+
+### Type System
+- `set_function_prototype` - Set function signature
+- `set_local_variable_type` - Set variable type
+- `set_parameter_type` - Set parameter type
+- `batch_set_variable_types` - Bulk type setting
+- `set_variable_storage` - Control variable storage location
+- `set_function_no_return` - Mark function as non-returning
+- `list_calling_conventions` - Available calling conventions
+- `get_function_variables` - Get all function variables
+- `get_function_labels` - Get labels in function
+
+### Ghidra Script Management
+- `list_scripts` - List available scripts
+- `run_script` - Run a script
+- `list_ghidra_scripts` - List custom Ghidra scripts
+- `save_ghidra_script` - Save new script
+- `get_ghidra_script` - Get script contents
+- `run_ghidra_script` - Execute Ghidra script
+- `update_ghidra_script` - Update existing script
+- `delete_ghidra_script` - Delete script
+
+### Multi-Program Support
+- `list_open_programs` - List all open programs
+- `get_current_program_info` - Current program details
+- `switch_program` - Switch active program
+- `list_project_files` - List project files
+- `open_program` - Open program from project
+- `compare_programs_documentation` - Compare documentation between programs
+
+### Analysis Tools
+- `find_next_undefined_function` - Find undefined functions
+- `find_undocumented_by_string` - Find functions by string reference
+- `batch_string_anchor_report` - String anchor analysis
+- `search_byte_patterns` - Search for byte patterns
+- `get_assembly_context` - Get assembly context
+- `analyze_struct_field_usage` - Analyze structure field access
+- `get_field_access_context` - Get field access patterns
+- `create_function` - Create function at address
+- `get_function_jump_target_addresses` - Get jump targets
+
+See [docs/README.md](docs/README.md) for complete documentation.
 
 ## 🏗️ Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   AI/Automation │◄──►│   MCP Server    │◄──►│     Ghidra      │
-│     Tools       │    │ (bridge_mcp_    │    │   Plugin        │
-│                 │    │  ghidra.py)     │    │ (GhidraMCP.jar) │
+│   AI/Automation │◄──►│   MCP Bridge    │◄──►│  Ghidra Plugin  │
+│     Tools       │    │ (bridge_mcp_    │    │ (GhidraMCP.jar) │
+│  (Claude, etc.) │    │  ghidra.py)     │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
         │                       │                       │
-        ▼                       ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│    REST API     │    │   Development   │    │   Binary        │
-│   Interface     │    │     Cycle       │    │   Analysis      │
-│                 │    │  (ghidra_dev_   │    │   Engine        │
-│                 │    │   cycle.py)     │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+   MCP Protocol            HTTP REST              Ghidra API
+   (stdio/SSE)          (localhost:8080)      (Program, Listing)
 ```
+
+### Components
+
+- **bridge_mcp_ghidra.py** - Python MCP server that translates MCP protocol to HTTP calls
+- **GhidraMCP.jar** - Ghidra plugin that exposes analysis capabilities via HTTP
+- **ghidra_scripts/** - Collection of 70+ automation scripts for common tasks
 
 ## 🔧 Development
 
 ### Building from Source
 ```bash
-# Build the plugin
-mvn clean package assembly:single
+# Build the plugin (skip integration tests)
+mvn clean package assembly:single -DskipTests
 
 # Deploy to Ghidra
 .\deploy-to-ghidra.ps1
 ```
 
+### Project Structure
+```
+ghidra-mcp/
+├── bridge_mcp_ghidra.py     # MCP server (Python)
+├── src/main/java/           # Ghidra plugin (Java)
+├── lib/                     # Ghidra library dependencies
+├── ghidra_scripts/          # 70+ automation scripts
+├── docs/                    # Documentation
+│   ├── prompts/            # AI workflow prompts
+│   ├── releases/           # Version release notes
+│   └── project-management/ # Project docs
+├── examples/                # Example usage
+└── scripts/                 # Build/utility scripts
+```
+
+### Library Dependencies
+
+The `lib/` folder must contain Ghidra JAR files for compilation. Run the provided script to copy them from your Ghidra installation:
+
+```bash
+# Windows
+copy-ghidra-libs.bat "C:\path\to\ghidra_12.0.2_PUBLIC"
+
+# Or manually copy from your Ghidra installation
+```
+
+**Required Libraries (14 JARs, ~37MB):**
+
+| Library | Source Path | Purpose |
+|---------|------------|---------|
+| **Base.jar** | `Features/Base/lib/` | Core Ghidra functionality |
+| **Decompiler.jar** | `Features/Decompiler/lib/` | Decompilation engine |
+| **PDB.jar** | `Features/PDB/lib/` | Microsoft PDB symbol support |
+| **FunctionID.jar** | `Features/FunctionID/lib/` | Function identification |
+| **SoftwareModeling.jar** | `Framework/SoftwareModeling/lib/` | Program model API |
+| **Project.jar** | `Framework/Project/lib/` | Project management |
+| **Docking.jar** | `Framework/Docking/lib/` | UI docking framework |
+| **Generic.jar** | `Framework/Generic/lib/` | Generic utilities |
+| **Utility.jar** | `Framework/Utility/lib/` | Core utilities |
+| **Gui.jar** | `Framework/Gui/lib/` | GUI components |
+| **FileSystem.jar** | `Framework/FileSystem/lib/` | File system support |
+| **Graph.jar** | `Framework/Graph/lib/` | Graph/call graph analysis |
+| **DB.jar** | `Framework/DB/lib/` | Database operations |
+| **Emulation.jar** | `Framework/Emulation/lib/` | P-code emulation |
+
+> **Note**: Libraries are NOT included in the repository (see `.gitignore`). You must copy them from your Ghidra installation before building.
+
 ### Development Features
 - **Automated Deployment**: Version-aware deployment script
-- **Batch Operations**: Reduces API calls by 91%
+- **Batch Operations**: Reduces API calls by 93%
 - **Atomic Transactions**: All-or-nothing semantics
-- **ROADMAP Documentation**: Clear implementation status for all tools
-
-### Quality Metrics
-- **MCP Tool Coverage**: 118/118 tools documented (112 implemented + 6 ROADMAP v2.0)
-- **Performance**: 93% API call reduction for function documentation
-- **Reliability**: 100% compilation success, full functionality verified
-- **Documentation**: 100% coverage with comprehensive ROADMAP
+- **Comprehensive Logging**: Debug and trace capabilities
 
 ## 📚 Documentation
 
 ### Core Documentation
-- [API Reference](docs/API_REFERENCE.md) - Complete endpoint documentation (108 MCP tools)
-- [Development Guide](docs/DEVELOPMENT_GUIDE.md) - Contributing and development setup
-- [Data Type Tools](docs/DATA_TYPE_TOOLS.md) - Custom data structure creation
+- [Documentation Index](docs/README.md) - Complete documentation navigation
+- [Project Structure](docs/PROJECT_STRUCTURE.md) - Project organization guide
+- [Naming Conventions](docs/NAMING_CONVENTIONS.md) - Code naming standards
+- [Hungarian Notation](docs/HUNGARIAN_NOTATION.md) - Variable naming guide
 
-### User Prompts
-- [Unified Analysis Prompt](docs/prompts/UNIFIED_ANALYSIS_PROMPT.md) - Combined function + data analysis workflow
-- [Enhanced Analysis Prompt](docs/prompts/ENHANCED_ANALYSIS_PROMPT.md) - Data structure analysis focused
+### AI Workflow Prompts
+- [Prompts Overview](docs/prompts/README.md) - AI prompting system guide
+- [Function Documentation Workflow](docs/prompts/FUNCTION_DOC_WORKFLOW_V4.md) - Complete workflow
 - [Quick Start Prompt](docs/prompts/QUICK_START_PROMPT.md) - Simplified beginner workflow
-
-### Latest Release
-- [v1.7.3 Release Notes](V1.7.3_RELEASE_NOTES.md) - Transaction commit bug fix for disassemble_bytes
+- [Cross-Version Matching](docs/prompts/CROSS_VERSION_MATCHING_COMPREHENSIVE.md) - Hash-based matching
 
 ### Release History
 - [Complete Changelog](CHANGELOG.md) - All version release notes
-- [v1.7.3 Release](V1.7.3_RELEASE_NOTES.md) - Transaction commit fix
-- [v1.7.2 Release](V1.7.2_RELEASE_NOTES.md) - Connection abort fix
-- [v1.7.0 Release](V1.7.0_RELEASE_NOTES.md) - Variable storage control and script automation
-- [v1.6.0 Release](docs/releases/v1.6.0/) - Validation tools and enhanced analysis
-- [v1.5.1 Release](docs/releases/v1.5.1/) - Batch operations and ROADMAP documentation
-- [v1.5.0 Release](docs/releases/v1.5.0/) - Workflow optimization tools
-- [v1.4.0 Release](docs/releases/v1.4.0/) - Enhanced analysis capabilities
-
-### Development Reports
-- [Code Review Report](docs/reports/MCP_CODE_REVIEW_REPORT.md) - Comprehensive review of 101 tools
-- [Session Evaluation](docs/reports/SESSION_EVALUATION_REPORT.md) - Function documentation session
-- [Enhancement Recommendations](docs/reports/MCP_ENHANCEMENT_RECOMMENDATIONS.md)
-
-### Troubleshooting
-- [Plugin Loading Issues](docs/troubleshooting/TROUBLESHOOTING_PLUGIN_LOAD.md)
+- [Release Notes](docs/releases/) - Detailed release documentation
 
 ## 🤝 Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
+
+### Quick Start
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Build and test your changes (`mvn clean package assembly:single`)
-4. Update documentation (README, CHANGELOG, API_REFERENCE as needed)
+3. Build and test your changes (`mvn clean package assembly:single -DskipTests`)
+4. Update documentation as needed
 5. Commit your changes (`git commit -m 'Add amazing feature'`)
 6. Push to the branch (`git push origin feature/amazing-feature`)
 7. Open a Pull Request
-
-### Development Standards
-- All new features must compile successfully
-- Update version in pom.xml for releases
-- Document new MCP tools in API_REFERENCE.md
-- Mark placeholder tools with [ROADMAP v2.0] prefix
-- Use batch operations where possible for efficiency
 
 ## 📄 License
 
@@ -234,12 +348,14 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## 🏆 Production Status
 
-**Production Ready**: ✅ Yes
-**Package**: com.xebyte
-**MCP Tools**: 118 tools (112 implemented + 6 ROADMAP v2.0)
-**Test Coverage**: 100% compilation, full functionality verified
-**Documentation Coverage**: 100% with comprehensive ROADMAP
-**Performance**: 93% API call reduction with batch operations
+| Metric | Value |
+|--------|-------|
+| **Version** | 2.0.0 |
+| **MCP Tools** | 110 fully implemented |
+| **Compilation** | ✅ 100% success |
+| **Batch Efficiency** | 93% API call reduction |
+| **Ghidra Scripts** | 70+ automation scripts |
+| **Documentation** | Comprehensive with AI prompts |
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.  
 

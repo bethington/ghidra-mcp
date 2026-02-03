@@ -4,6 +4,26 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v2.0.0 - 2026-02-03
+
+### Major Release - Label Management & Cleanup
+
+#### 🏷️ Label Deletion Endpoints
+- **New `delete_label` tool**: Delete individual labels at specified addresses
+- **New `batch_delete_labels` tool**: Efficiently delete multiple labels in a single atomic operation
+- Essential for cleaning up orphan labels after applying array types to pointer tables
+
+#### 🛠️ Tool Count
+- **Total MCP Tools**: 110 fully implemented
+- **New tools added**: 2 (delete_label, batch_delete_labels)
+
+#### 📚 Documentation
+- Updated README with accurate tool count and API reference
+- Reorganized API documentation by category
+- Added comprehensive tool listings for all 110 MCP tools
+
+---
+
 ## v1.9.4 - 2025-12-03
 
 ### Function Hash Index Release

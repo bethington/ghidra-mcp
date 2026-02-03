@@ -47,6 +47,13 @@ import ghidra.program.model.data.PointerDataType;
 
 import ghidra.framework.options.Options;
 
+// Block model for control flow analysis
+import ghidra.program.model.block.BasicBlockModel;
+import ghidra.program.model.block.CodeBlock;
+import ghidra.program.model.block.CodeBlockIterator;
+import ghidra.program.model.block.CodeBlockReference;
+import ghidra.program.model.block.CodeBlockReferenceIterator;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.Headers;
@@ -65,8 +72,11 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "1.9.5"; // Default fallback
+    private static String VERSION = "2.0.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
+    private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
+    private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
+    private static final int ENDPOINT_COUNT = 133;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -74,8 +84,10 @@ class VersionInfo {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "1.9.5");
+                VERSION = props.getProperty("app.version", "2.0.0");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
+                BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
+                BUILD_NUMBER = props.getProperty("build.number", "0");
             }
         } catch (IOException e) {
             // Use defaults if file not found
@@ -89,6 +101,22 @@ class VersionInfo {
     public static String getAppName() {
         return APP_NAME;
     }
+    
+    public static String getBuildTimestamp() {
+        return BUILD_TIMESTAMP;
+    }
+    
+    public static String getBuildNumber() {
+        return BUILD_NUMBER;
+    }
+    
+    public static int getEndpointCount() {
+        return ENDPOINT_COUNT;
+    }
+    
+    public static String getFullVersion() {
+        return VERSION + " (build " + BUILD_NUMBER + ", " + BUILD_TIMESTAMP + ")";
+    }
 }
 
 @PluginInfo(
@@ -97,10 +125,11 @@ class VersionInfo {
     category = PluginCategoryNames.ANALYSIS,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 108 endpoints (98 implemented + 10 ROADMAP v2.0) for reverse engineering automation. " +
+                  "Provides 133 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
-                  "high-performance batch data analysis, field-level structure analysis, and Ghidra script automation. " +
+                  "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +
+                  "malware analysis (IOC extraction, behavior detection, anti-analysis detection), and Ghidra script automation. " +
                   "See https://github.com/bethington/ghidra-mcp for documentation and version history."
 )
 public class GhidraMCPPlugin extends Plugin {
@@ -135,7 +164,10 @@ public class GhidraMCPPlugin extends Plugin {
 
     public GhidraMCPPlugin(PluginTool tool) {
         super(tool);
-        Msg.info(this, "GhidraMCPPlugin loading...");
+        Msg.info(this, "============================================");
+        Msg.info(this, "GhidraMCP " + VersionInfo.getFullVersion());
+        Msg.info(this, "Endpoints: " + VersionInfo.getEndpointCount());
+        Msg.info(this, "============================================");
 
         // Register the configuration option
         Options options = tool.getOptions(OPTION_CATEGORY_NAME);
@@ -628,7 +660,7 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         });
 
-        // DELETE_LABEL - Remove a label at an address (v1.9.5)
+        // DELETE_LABEL - Remove a label at an address
         server.createContext("/delete_label", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
@@ -637,7 +669,7 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         });
 
-        // BATCH_DELETE_LABELS - Delete multiple labels in a single operation (v1.9.5)
+        // BATCH_DELETE_LABELS - Delete multiple labels in a single operation
         server.createContext("/batch_delete_labels", exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             List<Map<String, String>> labels = convertToMapList(params.get("labels"));
@@ -682,6 +714,15 @@ public class GhidraMCPPlugin extends Plugin {
             int limit = parseIntOrDefault(qparams.get("limit"), 1000);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, getFullCallGraph(format, limit, programName));
+        });
+
+        server.createContext("/analyze_call_graph", exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String startFunction = qparams.get("start_function");
+            String endFunction = qparams.get("end_function");
+            String analysisType = qparams.getOrDefault("analysis_type", "summary");
+            String programName = qparams.get("program");
+            sendResponse(exchange, analyzeCallGraph(startFunction, endFunction, analysisType, programName));
         });
 
         // ==========================================================================
@@ -5922,7 +5963,7 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Delete a label at the specified address (v1.9.5).
+     * Delete a label at the specified address.
      *
      * @param addressStr Memory address in hex format
      * @param labelName Optional specific label name to delete. If null/empty, deletes all labels at the address.
@@ -6013,7 +6054,7 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Batch delete multiple labels in a single transaction (v1.9.5).
+     * Batch delete multiple labels in a single transaction.
      * Useful for cleaning up orphan labels after applying array types.
      *
      * @param labels List of label entries with "address" and optional "name" fields
@@ -6495,6 +6536,400 @@ public class GhidraMCPPlugin extends Plugin {
         }
         
         return sb.toString();
+    }
+
+    /**
+     * Enhanced call graph analysis with cycle detection and path finding
+     * Provides advanced graph algorithms for understanding function relationships
+     */
+    public String analyzeCallGraph(String startFunction, String endFunction, String analysisType, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+
+        try {
+            FunctionManager functionManager = program.getFunctionManager();
+            ReferenceManager refManager = program.getReferenceManager();
+            
+            // Build adjacency list representation of call graph
+            Map<String, Set<String>> callGraph = new LinkedHashMap<>();
+            Map<String, String> functionAddresses = new LinkedHashMap<>();
+            
+            for (Function func : functionManager.getFunctions(true)) {
+                if (func.isThunk()) continue;
+                
+                String funcName = func.getName();
+                functionAddresses.put(funcName, func.getEntryPoint().toString());
+                Set<String> callees = new HashSet<>();
+                
+                Listing listing = program.getListing();
+                InstructionIterator instrIter = listing.getInstructions(func.getBody(), true);
+                
+                while (instrIter.hasNext()) {
+                    Instruction instr = instrIter.next();
+                    if (instr.getFlowType().isCall()) {
+                        for (Reference ref : refManager.getReferencesFrom(instr.getAddress())) {
+                            if (ref.getReferenceType().isCall()) {
+                                Function calledFunc = functionManager.getFunctionAt(ref.getToAddress());
+                                if (calledFunc != null && !calledFunc.isThunk()) {
+                                    callees.add(calledFunc.getName());
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (!callees.isEmpty()) {
+                    callGraph.put(funcName, callees);
+                }
+            }
+            
+            StringBuilder result = new StringBuilder();
+            result.append("{\n");
+            
+            if ("cycles".equals(analysisType)) {
+                // Detect cycles in the call graph using DFS
+                List<List<String>> cycles = findCycles(callGraph);
+                
+                result.append("  \"analysis_type\": \"cycle_detection\",\n");
+                result.append("  \"cycles_found\": ").append(cycles.size()).append(",\n");
+                result.append("  \"cycles\": [\n");
+                
+                for (int i = 0; i < Math.min(cycles.size(), 20); i++) {
+                    List<String> cycle = cycles.get(i);
+                    result.append("    {");
+                    result.append("\"length\": ").append(cycle.size()).append(", ");
+                    result.append("\"path\": [");
+                    for (int j = 0; j < cycle.size(); j++) {
+                        if (j > 0) result.append(", ");
+                        result.append("\"").append(escapeJson(cycle.get(j))).append("\"");
+                    }
+                    result.append("]}");
+                    if (i < Math.min(cycles.size(), 20) - 1) result.append(",");
+                    result.append("\n");
+                }
+                
+                if (cycles.size() > 20) {
+                    result.append("    {\"note\": \"").append(cycles.size() - 20).append(" additional cycles omitted\"}\n");
+                }
+                result.append("  ]\n");
+                
+            } else if ("path".equals(analysisType) && startFunction != null && endFunction != null) {
+                // Find shortest path between two functions using BFS
+                List<String> path = findShortestPath(callGraph, startFunction, endFunction);
+                
+                result.append("  \"analysis_type\": \"path_finding\",\n");
+                result.append("  \"start_function\": \"").append(escapeJson(startFunction)).append("\",\n");
+                result.append("  \"end_function\": \"").append(escapeJson(endFunction)).append("\",\n");
+                
+                if (path != null) {
+                    result.append("  \"path_found\": true,\n");
+                    result.append("  \"path_length\": ").append(path.size() - 1).append(",\n");
+                    result.append("  \"path\": [");
+                    for (int i = 0; i < path.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(escapeJson(path.get(i))).append("\"");
+                    }
+                    result.append("]\n");
+                } else {
+                    result.append("  \"path_found\": false,\n");
+                    result.append("  \"message\": \"No path exists between the specified functions\"\n");
+                }
+                
+            } else if ("strongly_connected".equals(analysisType)) {
+                // Find strongly connected components using Kosaraju's algorithm
+                List<Set<String>> sccs = findStronglyConnectedComponents(callGraph);
+                
+                // Filter to only non-trivial SCCs (size > 1)
+                List<Set<String>> nonTrivialSCCs = new ArrayList<>();
+                for (Set<String> scc : sccs) {
+                    if (scc.size() > 1) {
+                        nonTrivialSCCs.add(scc);
+                    }
+                }
+                
+                result.append("  \"analysis_type\": \"strongly_connected_components\",\n");
+                result.append("  \"total_sccs\": ").append(sccs.size()).append(",\n");
+                result.append("  \"non_trivial_sccs\": ").append(nonTrivialSCCs.size()).append(",\n");
+                result.append("  \"components\": [\n");
+                
+                for (int i = 0; i < Math.min(nonTrivialSCCs.size(), 20); i++) {
+                    Set<String> scc = nonTrivialSCCs.get(i);
+                    result.append("    {");
+                    result.append("\"size\": ").append(scc.size()).append(", ");
+                    result.append("\"functions\": [");
+                    int j = 0;
+                    for (String func : scc) {
+                        if (j++ > 0) result.append(", ");
+                        if (j <= 10) {
+                            result.append("\"").append(escapeJson(func)).append("\"");
+                        }
+                    }
+                    if (scc.size() > 10) {
+                        result.append(", \"...").append(scc.size() - 10).append(" more\"");
+                    }
+                    result.append("]}");
+                    if (i < Math.min(nonTrivialSCCs.size(), 20) - 1) result.append(",");
+                    result.append("\n");
+                }
+                
+                result.append("  ]\n");
+                
+            } else if ("entry_points".equals(analysisType)) {
+                // Find functions that are never called (potential entry points)
+                Set<String> allFunctions = new HashSet<>(functionAddresses.keySet());
+                Set<String> calledFunctions = new HashSet<>();
+                for (Set<String> callees : callGraph.values()) {
+                    calledFunctions.addAll(callees);
+                }
+                
+                Set<String> entryPoints = new HashSet<>(allFunctions);
+                entryPoints.removeAll(calledFunctions);
+                
+                result.append("  \"analysis_type\": \"entry_point_detection\",\n");
+                result.append("  \"total_functions\": ").append(allFunctions.size()).append(",\n");
+                result.append("  \"entry_points_found\": ").append(entryPoints.size()).append(",\n");
+                result.append("  \"entry_points\": [\n");
+                
+                int idx = 0;
+                for (String ep : entryPoints) {
+                    if (idx >= 50) {
+                        result.append("    {\"note\": \"").append(entryPoints.size() - 50).append(" more entry points\"}\n");
+                        break;
+                    }
+                    result.append("    {\"name\": \"").append(escapeJson(ep)).append("\", ");
+                    result.append("\"address\": \"").append(functionAddresses.getOrDefault(ep, "unknown")).append("\"}");
+                    if (idx < Math.min(entryPoints.size(), 50) - 1) result.append(",");
+                    result.append("\n");
+                    idx++;
+                }
+                
+                result.append("  ]\n");
+                
+            } else if ("leaf_functions".equals(analysisType)) {
+                // Find functions that don't call any other functions
+                Set<String> leafFunctions = new HashSet<>(functionAddresses.keySet());
+                leafFunctions.removeAll(callGraph.keySet());
+                
+                result.append("  \"analysis_type\": \"leaf_function_detection\",\n");
+                result.append("  \"leaf_functions_found\": ").append(leafFunctions.size()).append(",\n");
+                result.append("  \"leaf_functions\": [\n");
+                
+                int idx = 0;
+                for (String lf : leafFunctions) {
+                    if (idx >= 50) {
+                        result.append("    {\"note\": \"").append(leafFunctions.size() - 50).append(" more leaf functions\"}\n");
+                        break;
+                    }
+                    result.append("    {\"name\": \"").append(escapeJson(lf)).append("\", ");
+                    result.append("\"address\": \"").append(functionAddresses.getOrDefault(lf, "unknown")).append("\"}");
+                    if (idx < Math.min(leafFunctions.size(), 50) - 1) result.append(",");
+                    result.append("\n");
+                    idx++;
+                }
+                
+                result.append("  ]\n");
+                
+            } else {
+                // Default: summary statistics
+                int totalEdges = 0;
+                int maxOutDegree = 0;
+                String maxOutDegreeFunc = "";
+                Map<String, Integer> inDegree = new HashMap<>();
+                
+                for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+                    totalEdges += entry.getValue().size();
+                    if (entry.getValue().size() > maxOutDegree) {
+                        maxOutDegree = entry.getValue().size();
+                        maxOutDegreeFunc = entry.getKey();
+                    }
+                    for (String callee : entry.getValue()) {
+                        inDegree.put(callee, inDegree.getOrDefault(callee, 0) + 1);
+                    }
+                }
+                
+                int maxInDegree = 0;
+                String maxInDegreeFunc = "";
+                for (Map.Entry<String, Integer> entry : inDegree.entrySet()) {
+                    if (entry.getValue() > maxInDegree) {
+                        maxInDegree = entry.getValue();
+                        maxInDegreeFunc = entry.getKey();
+                    }
+                }
+                
+                result.append("  \"analysis_type\": \"summary\",\n");
+                result.append("  \"total_functions\": ").append(functionAddresses.size()).append(",\n");
+                result.append("  \"functions_with_calls\": ").append(callGraph.size()).append(",\n");
+                result.append("  \"total_call_edges\": ").append(totalEdges).append(",\n");
+                result.append("  \"max_out_degree\": {\"function\": \"").append(escapeJson(maxOutDegreeFunc));
+                result.append("\", \"calls\": ").append(maxOutDegree).append("},\n");
+                result.append("  \"max_in_degree\": {\"function\": \"").append(escapeJson(maxInDegreeFunc));
+                result.append("\", \"called_by\": ").append(maxInDegree).append("},\n");
+                result.append("  \"available_analyses\": [\"cycles\", \"path\", \"strongly_connected\", \"entry_points\", \"leaf_functions\"]\n");
+            }
+            
+            result.append("}");
+            return result.toString();
+            
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+    
+    /**
+     * Find cycles in directed graph using DFS
+     */
+    private List<List<String>> findCycles(Map<String, Set<String>> graph) {
+        List<List<String>> cycles = new ArrayList<>();
+        Set<String> visited = new HashSet<>();
+        Set<String> recStack = new HashSet<>();
+        Map<String, String> parent = new HashMap<>();
+        
+        for (String node : graph.keySet()) {
+            if (!visited.contains(node)) {
+                findCyclesDFS(node, graph, visited, recStack, parent, cycles);
+            }
+        }
+        
+        return cycles;
+    }
+    
+    private void findCyclesDFS(String node, Map<String, Set<String>> graph, Set<String> visited,
+                               Set<String> recStack, Map<String, String> parent, List<List<String>> cycles) {
+        visited.add(node);
+        recStack.add(node);
+        
+        Set<String> neighbors = graph.getOrDefault(node, Collections.emptySet());
+        for (String neighbor : neighbors) {
+            if (!visited.contains(neighbor)) {
+                parent.put(neighbor, node);
+                findCyclesDFS(neighbor, graph, visited, recStack, parent, cycles);
+            } else if (recStack.contains(neighbor)) {
+                // Found a cycle - reconstruct it
+                List<String> cycle = new ArrayList<>();
+                cycle.add(neighbor);
+                String current = node;
+                while (current != null && !current.equals(neighbor)) {
+                    cycle.add(0, current);
+                    current = parent.get(current);
+                }
+                cycle.add(0, neighbor);
+                if (cycles.size() < 100) { // Limit cycles
+                    cycles.add(cycle);
+                }
+            }
+        }
+        
+        recStack.remove(node);
+    }
+    
+    /**
+     * Find shortest path using BFS
+     */
+    private List<String> findShortestPath(Map<String, Set<String>> graph, String start, String end) {
+        if (start.equals(end)) {
+            return Arrays.asList(start);
+        }
+        
+        Queue<String> queue = new LinkedList<>();
+        Map<String, String> parent = new HashMap<>();
+        Set<String> visited = new HashSet<>();
+        
+        queue.add(start);
+        visited.add(start);
+        
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            Set<String> neighbors = graph.getOrDefault(current, Collections.emptySet());
+            
+            for (String neighbor : neighbors) {
+                if (!visited.contains(neighbor)) {
+                    visited.add(neighbor);
+                    parent.put(neighbor, current);
+                    
+                    if (neighbor.equals(end)) {
+                        // Reconstruct path
+                        List<String> path = new ArrayList<>();
+                        String node = end;
+                        while (node != null) {
+                            path.add(0, node);
+                            node = parent.get(node);
+                        }
+                        return path;
+                    }
+                    
+                    queue.add(neighbor);
+                }
+            }
+        }
+        
+        return null; // No path found
+    }
+    
+    /**
+     * Find strongly connected components using Kosaraju's algorithm
+     */
+    private List<Set<String>> findStronglyConnectedComponents(Map<String, Set<String>> graph) {
+        // Step 1: Fill vertices in stack according to finishing times
+        Stack<String> stack = new Stack<>();
+        Set<String> visited = new HashSet<>();
+        
+        // Get all nodes
+        Set<String> allNodes = new HashSet<>(graph.keySet());
+        for (Set<String> neighbors : graph.values()) {
+            allNodes.addAll(neighbors);
+        }
+        
+        for (String node : allNodes) {
+            if (!visited.contains(node)) {
+                fillOrder(node, graph, visited, stack);
+            }
+        }
+        
+        // Step 2: Create reversed graph
+        Map<String, Set<String>> reversedGraph = new HashMap<>();
+        for (Map.Entry<String, Set<String>> entry : graph.entrySet()) {
+            for (String neighbor : entry.getValue()) {
+                reversedGraph.computeIfAbsent(neighbor, k -> new HashSet<>()).add(entry.getKey());
+            }
+        }
+        
+        // Step 3: Process vertices in order of decreasing finish time
+        visited.clear();
+        List<Set<String>> sccs = new ArrayList<>();
+        
+        while (!stack.isEmpty()) {
+            String node = stack.pop();
+            if (!visited.contains(node)) {
+                Set<String> scc = new HashSet<>();
+                dfsCollect(node, reversedGraph, visited, scc);
+                sccs.add(scc);
+            }
+        }
+        
+        return sccs;
+    }
+    
+    private void fillOrder(String node, Map<String, Set<String>> graph, Set<String> visited, Stack<String> stack) {
+        visited.add(node);
+        Set<String> neighbors = graph.getOrDefault(node, Collections.emptySet());
+        for (String neighbor : neighbors) {
+            if (!visited.contains(neighbor)) {
+                fillOrder(neighbor, graph, visited, stack);
+            }
+        }
+        stack.push(node);
+    }
+    
+    private void dfsCollect(String node, Map<String, Set<String>> graph, Set<String> visited, Set<String> component) {
+        visited.add(node);
+        component.add(node);
+        Set<String> neighbors = graph.getOrDefault(node, Collections.emptySet());
+        for (String neighbor : neighbors) {
+            if (!visited.contains(neighbor)) {
+                dfsCollect(neighbor, graph, visited, component);
+            }
+        }
     }
 
     /**
@@ -7209,10 +7644,12 @@ public class GhidraMCPPlugin extends Plugin {
         version.append("{\n");
         version.append("  \"plugin_version\": \"").append(VersionInfo.getVersion()).append("\",\n");
         version.append("  \"plugin_name\": \"").append(VersionInfo.getAppName()).append("\",\n");
-        version.append("  \"ghidra_version\": \"11.4.2\",\n");
+        version.append("  \"build_timestamp\": \"").append(VersionInfo.getBuildTimestamp()).append("\",\n");
+        version.append("  \"build_number\": \"").append(VersionInfo.getBuildNumber()).append("\",\n");
+        version.append("  \"full_version\": \"").append(VersionInfo.getFullVersion()).append("\",\n");
+        version.append("  \"ghidra_version\": \"12.0.2\",\n");
         version.append("  \"java_version\": \"").append(System.getProperty("java.version")).append("\",\n");
-        version.append("  \"endpoint_count\": 111,\n");
-        version.append("  \"implementation_status\": \"105 implemented + 6 ROADMAP v2.0\"\n");
+        version.append("  \"endpoint_count\": ").append(VersionInfo.getEndpointCount()).append("\n");
         version.append("}");
         return version.toString();
     }
@@ -10108,6 +10545,7 @@ public class GhidraMCPPlugin extends Plugin {
 
     /**
      * Find functions structurally similar to the target function
+     * Uses basic block count, instruction count, call count, and cyclomatic complexity
      */
     private String findSimilarFunctions(String targetFunction, double threshold) {
         Program program = getCurrentProgram();
@@ -10120,84 +10558,573 @@ public class GhidraMCPPlugin extends Plugin {
         }
 
         try {
-            final StringBuilder result = new StringBuilder();
-            result.append("[\n");
-
-            // Placeholder implementation
-            // Full implementation would compare control flow graphs, instruction patterns,
-            // and structural metrics to find similar functions
-
-            result.append("  {\"target_function\": \"").append(escapeJson(targetFunction)).append("\", ");
-            result.append("\"threshold\": ").append(threshold).append(", ");
-            result.append("\"status\": \"Not yet implemented\", ");
-            result.append("\"note\": \"This endpoint requires control flow graph comparison and similarity analysis\"}\n");
-            result.append("]");
-
-            return result.toString();
-        } catch (Exception e) {
-            return "Error: " + e.getMessage();
-        }
-    }
-
-    /**
-     * Analyze function control flow complexity
-     */
-    private String analyzeControlFlow(String functionName) {
-        Program program = getCurrentProgram();
-        if (program == null) {
-            return "Error: No program loaded";
-        }
-
-        if (functionName == null || functionName.trim().isEmpty()) {
-            return "Error: Function name is required";
-        }
-
-        try {
-            // Placeholder implementation
-            // Full implementation would calculate cyclomatic complexity, basic blocks,
-            // control flow graph metrics, etc.
-
+            FunctionManager functionManager = program.getFunctionManager();
+            Function targetFunc = null;
+            
+            // Find the target function
+            for (Function f : functionManager.getFunctions(true)) {
+                if (f.getName().equals(targetFunction)) {
+                    targetFunc = f;
+                    break;
+                }
+            }
+            
+            if (targetFunc == null) {
+                return "{\"error\": \"Function not found: " + escapeJson(targetFunction) + "\"}";
+            }
+            
+            // Calculate metrics for target function
+            BasicBlockModel blockModel = new BasicBlockModel(program);
+            FunctionMetrics targetMetrics = calculateFunctionMetrics(targetFunc, blockModel, program);
+            
+            // Find similar functions
+            List<Map<String, Object>> similarFunctions = new ArrayList<>();
+            
+            for (Function func : functionManager.getFunctions(true)) {
+                if (func.getName().equals(targetFunction)) continue;
+                if (func.isThunk()) continue;
+                
+                FunctionMetrics funcMetrics = calculateFunctionMetrics(func, blockModel, program);
+                double similarity = calculateSimilarity(targetMetrics, funcMetrics);
+                
+                if (similarity >= threshold) {
+                    Map<String, Object> match = new LinkedHashMap<>();
+                    match.put("name", func.getName());
+                    match.put("address", func.getEntryPoint().toString());
+                    match.put("similarity", Math.round(similarity * 1000.0) / 1000.0);
+                    match.put("basic_blocks", funcMetrics.basicBlockCount);
+                    match.put("instructions", funcMetrics.instructionCount);
+                    match.put("calls", funcMetrics.callCount);
+                    match.put("complexity", funcMetrics.cyclomaticComplexity);
+                    similarFunctions.add(match);
+                }
+            }
+            
+            // Sort by similarity descending
+            similarFunctions.sort((a, b) -> Double.compare((Double)b.get("similarity"), (Double)a.get("similarity")));
+            
+            // Limit results
+            if (similarFunctions.size() > 50) {
+                similarFunctions = similarFunctions.subList(0, 50);
+            }
+            
+            // Build JSON response
             StringBuilder result = new StringBuilder();
-            result.append("{");
-            result.append("\"function_name\": \"").append(escapeJson(functionName)).append("\", ");
-            result.append("\"status\": \"Not yet implemented\", ");
-            result.append("\"note\": \"This endpoint requires control flow graph analysis and complexity calculation\"");
+            result.append("{\n");
+            result.append("  \"target_function\": \"").append(escapeJson(targetFunction)).append("\",\n");
+            result.append("  \"target_metrics\": {\n");
+            result.append("    \"basic_blocks\": ").append(targetMetrics.basicBlockCount).append(",\n");
+            result.append("    \"instructions\": ").append(targetMetrics.instructionCount).append(",\n");
+            result.append("    \"calls\": ").append(targetMetrics.callCount).append(",\n");
+            result.append("    \"complexity\": ").append(targetMetrics.cyclomaticComplexity).append("\n");
+            result.append("  },\n");
+            result.append("  \"threshold\": ").append(threshold).append(",\n");
+            result.append("  \"matches_found\": ").append(similarFunctions.size()).append(",\n");
+            result.append("  \"similar_functions\": [\n");
+            
+            for (int i = 0; i < similarFunctions.size(); i++) {
+                Map<String, Object> match = similarFunctions.get(i);
+                result.append("    {");
+                result.append("\"name\": \"").append(escapeJson((String)match.get("name"))).append("\", ");
+                result.append("\"address\": \"").append(match.get("address")).append("\", ");
+                result.append("\"similarity\": ").append(match.get("similarity")).append(", ");
+                result.append("\"basic_blocks\": ").append(match.get("basic_blocks")).append(", ");
+                result.append("\"instructions\": ").append(match.get("instructions")).append(", ");
+                result.append("\"calls\": ").append(match.get("calls")).append(", ");
+                result.append("\"complexity\": ").append(match.get("complexity"));
+                result.append("}");
+                if (i < similarFunctions.size() - 1) result.append(",");
+                result.append("\n");
+            }
+            
+            result.append("  ]\n");
             result.append("}");
 
             return result.toString();
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+    
+    /**
+     * Helper class to store function metrics for similarity comparison
+     */
+    private static class FunctionMetrics {
+        int basicBlockCount = 0;
+        int instructionCount = 0;
+        int callCount = 0;
+        int cyclomaticComplexity = 0;
+        int edgeCount = 0;
+        Set<String> calledFunctions = new HashSet<>();
+    }
+    
+    /**
+     * Calculate structural metrics for a function
+     */
+    private FunctionMetrics calculateFunctionMetrics(Function func, BasicBlockModel blockModel, Program program) {
+        FunctionMetrics metrics = new FunctionMetrics();
+        
+        try {
+            // Count basic blocks and edges
+            CodeBlockIterator blockIter = blockModel.getCodeBlocksContaining(func.getBody(), null);
+            while (blockIter.hasNext()) {
+                CodeBlock block = blockIter.next();
+                metrics.basicBlockCount++;
+                
+                // Count outgoing edges for complexity calculation
+                CodeBlockReferenceIterator destIter = block.getDestinations(null);
+                while (destIter.hasNext()) {
+                    destIter.next();
+                    metrics.edgeCount++;
+                }
+            }
+            
+            // Cyclomatic complexity = E - N + 2P (where P=1 for single function)
+            metrics.cyclomaticComplexity = metrics.edgeCount - metrics.basicBlockCount + 2;
+            if (metrics.cyclomaticComplexity < 1) metrics.cyclomaticComplexity = 1;
+            
+            // Count instructions and calls
+            Listing listing = program.getListing();
+            InstructionIterator instrIter = listing.getInstructions(func.getBody(), true);
+            ReferenceManager refManager = program.getReferenceManager();
+            
+            while (instrIter.hasNext()) {
+                Instruction instr = instrIter.next();
+                metrics.instructionCount++;
+                
+                if (instr.getFlowType().isCall()) {
+                    metrics.callCount++;
+                    // Track which functions are called
+                    for (Reference ref : refManager.getReferencesFrom(instr.getAddress())) {
+                        if (ref.getReferenceType().isCall()) {
+                            Function calledFunc = program.getFunctionManager().getFunctionAt(ref.getToAddress());
+                            if (calledFunc != null) {
+                                metrics.calledFunctions.add(calledFunc.getName());
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // Return partial metrics on error
+        }
+        
+        return metrics;
+    }
+    
+    /**
+     * Calculate similarity score between two functions (0.0 to 1.0)
+     */
+    private double calculateSimilarity(FunctionMetrics a, FunctionMetrics b) {
+        // Weight different metrics
+        double blockSim = 1.0 - Math.abs(a.basicBlockCount - b.basicBlockCount) / 
+                          (double) Math.max(Math.max(a.basicBlockCount, b.basicBlockCount), 1);
+        double instrSim = 1.0 - Math.abs(a.instructionCount - b.instructionCount) / 
+                          (double) Math.max(Math.max(a.instructionCount, b.instructionCount), 1);
+        double callSim = 1.0 - Math.abs(a.callCount - b.callCount) / 
+                         (double) Math.max(Math.max(a.callCount, b.callCount), 1);
+        double complexitySim = 1.0 - Math.abs(a.cyclomaticComplexity - b.cyclomaticComplexity) / 
+                               (double) Math.max(Math.max(a.cyclomaticComplexity, b.cyclomaticComplexity), 1);
+        
+        // Jaccard similarity for called functions
+        double calledFuncSim = 0.0;
+        if (!a.calledFunctions.isEmpty() || !b.calledFunctions.isEmpty()) {
+            Set<String> intersection = new HashSet<>(a.calledFunctions);
+            intersection.retainAll(b.calledFunctions);
+            Set<String> union = new HashSet<>(a.calledFunctions);
+            union.addAll(b.calledFunctions);
+            calledFuncSim = union.isEmpty() ? 0.0 : (double) intersection.size() / union.size();
+        }
+        
+        // Weighted average (structure matters more than exact counts)
+        return 0.25 * blockSim + 0.20 * instrSim + 0.15 * callSim + 
+               0.20 * complexitySim + 0.20 * calledFuncSim;
+    }
+
+    /**
+     * Analyze function control flow complexity
+     * Calculates cyclomatic complexity, basic blocks, edges, and detailed metrics
+     */
+    private String analyzeControlFlow(String functionName) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        if (functionName == null || functionName.trim().isEmpty()) {
+            return "{\"error\": \"Function name is required\"}";
+        }
+
+        try {
+            FunctionManager functionManager = program.getFunctionManager();
+            Function func = null;
+            
+            // Find the function by name
+            for (Function f : functionManager.getFunctions(true)) {
+                if (f.getName().equals(functionName)) {
+                    func = f;
+                    break;
+                }
+            }
+            
+            if (func == null) {
+                return "{\"error\": \"Function not found: " + escapeJson(functionName) + "\"}";
+            }
+            
+            BasicBlockModel blockModel = new BasicBlockModel(program);
+            Listing listing = program.getListing();
+            ReferenceManager refManager = program.getReferenceManager();
+            
+            // Collect detailed metrics
+            int basicBlockCount = 0;
+            int edgeCount = 0;
+            int conditionalBranches = 0;
+            int unconditionalJumps = 0;
+            int loops = 0;
+            int instructionCount = 0;
+            int callCount = 0;
+            int returnCount = 0;
+            List<Map<String, Object>> blocks = new ArrayList<>();
+            Set<Address> blockEntries = new HashSet<>();
+            
+            // First pass: collect all block entry points
+            CodeBlockIterator blockIter = blockModel.getCodeBlocksContaining(func.getBody(), null);
+            while (blockIter.hasNext()) {
+                CodeBlock block = blockIter.next();
+                blockEntries.add(block.getFirstStartAddress());
+            }
+            
+            // Second pass: detailed analysis
+            blockIter = blockModel.getCodeBlocksContaining(func.getBody(), null);
+            while (blockIter.hasNext()) {
+                CodeBlock block = blockIter.next();
+                basicBlockCount++;
+                
+                Map<String, Object> blockInfo = new LinkedHashMap<>();
+                blockInfo.put("address", block.getFirstStartAddress().toString());
+                blockInfo.put("size", block.getNumAddresses());
+                
+                // Count edges and detect loops
+                int outEdges = 0;
+                boolean hasBackEdge = false;
+                List<String> successors = new ArrayList<>();
+                
+                CodeBlockReferenceIterator destIter = block.getDestinations(null);
+                while (destIter.hasNext()) {
+                    CodeBlockReference ref = destIter.next();
+                    outEdges++;
+                    edgeCount++;
+                    Address destAddr = ref.getDestinationAddress();
+                    successors.add(destAddr.toString());
+                    
+                    // Detect back edges (loops) - destination is before current block
+                    if (destAddr.compareTo(block.getFirstStartAddress()) < 0 && 
+                        blockEntries.contains(destAddr)) {
+                        hasBackEdge = true;
+                    }
+                }
+                
+                if (hasBackEdge) loops++;
+                blockInfo.put("successors", successors.size());
+                blockInfo.put("is_loop_header", hasBackEdge);
+                
+                // Classify block type
+                if (outEdges == 0) {
+                    blockInfo.put("type", "exit");
+                } else if (outEdges == 1) {
+                    blockInfo.put("type", "sequential");
+                } else if (outEdges == 2) {
+                    blockInfo.put("type", "conditional");
+                    conditionalBranches++;
+                } else {
+                    blockInfo.put("type", "switch");
+                }
+                
+                blocks.add(blockInfo);
+            }
+            
+            // Count instructions by type
+            InstructionIterator instrIter = listing.getInstructions(func.getBody(), true);
+            while (instrIter.hasNext()) {
+                Instruction instr = instrIter.next();
+                instructionCount++;
+                
+                if (instr.getFlowType().isCall()) {
+                    callCount++;
+                } else if (instr.getFlowType().isTerminal()) {
+                    returnCount++;
+                } else if (instr.getFlowType().isJump()) {
+                    if (instr.getFlowType().isConditional()) {
+                        // Already counted above
+                    } else {
+                        unconditionalJumps++;
+                    }
+                }
+            }
+            
+            // Calculate cyclomatic complexity: M = E - N + 2P
+            int cyclomaticComplexity = edgeCount - basicBlockCount + 2;
+            if (cyclomaticComplexity < 1) cyclomaticComplexity = 1;
+            
+            // Complexity rating
+            String complexityRating;
+            if (cyclomaticComplexity <= 5) {
+                complexityRating = "low";
+            } else if (cyclomaticComplexity <= 10) {
+                complexityRating = "moderate";
+            } else if (cyclomaticComplexity <= 20) {
+                complexityRating = "high";
+            } else if (cyclomaticComplexity <= 50) {
+                complexityRating = "very_high";
+            } else {
+                complexityRating = "extreme";
+            }
+            
+            // Build JSON response
+            StringBuilder result = new StringBuilder();
+            result.append("{\n");
+            result.append("  \"function_name\": \"").append(escapeJson(functionName)).append("\",\n");
+            result.append("  \"entry_point\": \"").append(func.getEntryPoint().toString()).append("\",\n");
+            result.append("  \"size_bytes\": ").append(func.getBody().getNumAddresses()).append(",\n");
+            result.append("  \"metrics\": {\n");
+            result.append("    \"cyclomatic_complexity\": ").append(cyclomaticComplexity).append(",\n");
+            result.append("    \"complexity_rating\": \"").append(complexityRating).append("\",\n");
+            result.append("    \"basic_blocks\": ").append(basicBlockCount).append(",\n");
+            result.append("    \"edges\": ").append(edgeCount).append(",\n");
+            result.append("    \"instructions\": ").append(instructionCount).append(",\n");
+            result.append("    \"conditional_branches\": ").append(conditionalBranches).append(",\n");
+            result.append("    \"unconditional_jumps\": ").append(unconditionalJumps).append(",\n");
+            result.append("    \"loops_detected\": ").append(loops).append(",\n");
+            result.append("    \"calls\": ").append(callCount).append(",\n");
+            result.append("    \"returns\": ").append(returnCount).append("\n");
+            result.append("  },\n");
+            result.append("  \"basic_block_details\": [\n");
+            
+            for (int i = 0; i < Math.min(blocks.size(), 100); i++) {
+                Map<String, Object> block = blocks.get(i);
+                result.append("    {");
+                result.append("\"address\": \"").append(block.get("address")).append("\", ");
+                result.append("\"size\": ").append(block.get("size")).append(", ");
+                result.append("\"type\": \"").append(block.get("type")).append("\", ");
+                result.append("\"successors\": ").append(block.get("successors")).append(", ");
+                result.append("\"is_loop_header\": ").append(block.get("is_loop_header"));
+                result.append("}");
+                if (i < Math.min(blocks.size(), 100) - 1) result.append(",");
+                result.append("\n");
+            }
+            
+            if (blocks.size() > 100) {
+                result.append("    {\"note\": \"").append(blocks.size() - 100).append(" additional blocks truncated\"}\n");
+            }
+            
+            result.append("  ]\n");
+            result.append("}");
+
+            return result.toString();
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
         }
     }
 
     /**
      * Detect anti-analysis and anti-debugging techniques
+     * Scans for known anti-debug APIs, timing checks, VM detection, and SEH tricks
      */
     private String findAntiAnalysisTechniques() {
         Program program = getCurrentProgram();
         if (program == null) {
-            return "Error: No program loaded";
+            return "{\"error\": \"No program loaded\"}";
         }
 
         try {
-            final StringBuilder result = new StringBuilder();
-            result.append("[\n");
-
-            // Placeholder implementation
-            // Full implementation would search for:
-            // - IsDebuggerPresent, CheckRemoteDebuggerPresent calls
-            // - Timing checks, RDTSC usage
-            // - SEH anti-debugging
-            // - Process enumeration
-            // - VM detection techniques
-
-            result.append("  {\"technique\": \"Anti-Analysis Detection\", \"status\": \"Not yet implemented\", ");
-            result.append("\"note\": \"This endpoint requires pattern matching for anti-debug and anti-VM techniques\"}\n");
-            result.append("]");
+            // Define patterns to search for
+            Map<String, String[]> antiDebugAPIs = new LinkedHashMap<>();
+            antiDebugAPIs.put("debugger_detection", new String[]{
+                "IsDebuggerPresent", "CheckRemoteDebuggerPresent", "NtQueryInformationProcess",
+                "OutputDebugString", "DebugActiveProcess", "CloseHandle", "NtClose"
+            });
+            antiDebugAPIs.put("timing_checks", new String[]{
+                "GetTickCount", "GetTickCount64", "QueryPerformanceCounter", 
+                "GetSystemTimeAsFileTime", "timeGetTime", "NtQuerySystemTime"
+            });
+            antiDebugAPIs.put("process_enumeration", new String[]{
+                "CreateToolhelp32Snapshot", "Process32First", "Process32Next",
+                "EnumProcesses", "NtQuerySystemInformation", "OpenProcess"
+            });
+            antiDebugAPIs.put("vm_detection", new String[]{
+                "GetSystemFirmwareTable", "EnumSystemFirmwareTable", 
+                "WMI", "SMBIOS", "ACPI"
+            });
+            antiDebugAPIs.put("exception_based", new String[]{
+                "SetUnhandledExceptionFilter", "AddVectoredExceptionHandler",
+                "RtlAddVectoredExceptionHandler", "NtSetInformationThread"
+            });
+            antiDebugAPIs.put("memory_checks", new String[]{
+                "VirtualQuery", "NtQueryVirtualMemory", "ReadProcessMemory",
+                "WriteProcessMemory"
+            });
+            
+            // Instruction patterns to detect
+            String[] suspiciousInstructions = {"RDTSC", "CPUID", "INT 3", "INT 0x2d", "SIDT", "SGDT", "SLDT", "STR"};
+            
+            List<Map<String, Object>> findings = new ArrayList<>();
+            FunctionManager functionManager = program.getFunctionManager();
+            SymbolTable symbolTable = program.getSymbolTable();
+            Listing listing = program.getListing();
+            
+            // Scan for API calls
+            for (Map.Entry<String, String[]> category : antiDebugAPIs.entrySet()) {
+                String categoryName = category.getKey();
+                for (String apiName : category.getValue()) {
+                    // Search for symbols matching the API name
+                    SymbolIterator symbols = symbolTable.getSymbolIterator("*" + apiName + "*", true);
+                    while (symbols.hasNext()) {
+                        Symbol sym = symbols.next();
+                        // Find references to this symbol
+                        ReferenceManager refManager = program.getReferenceManager();
+                        ReferenceIterator refs = refManager.getReferencesTo(sym.getAddress());
+                        while (refs.hasNext()) {
+                            Reference ref = refs.next();
+                            if (ref.getReferenceType().isCall()) {
+                                Function callingFunc = functionManager.getFunctionContaining(ref.getFromAddress());
+                                Map<String, Object> finding = new LinkedHashMap<>();
+                                finding.put("category", categoryName);
+                                finding.put("technique", apiName);
+                                finding.put("address", ref.getFromAddress().toString());
+                                finding.put("function", callingFunc != null ? callingFunc.getName() : "unknown");
+                                finding.put("severity", getSeverity(categoryName));
+                                findings.add(finding);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Scan for suspicious instructions
+            for (Function func : functionManager.getFunctions(true)) {
+                InstructionIterator instrIter = listing.getInstructions(func.getBody(), true);
+                while (instrIter.hasNext()) {
+                    Instruction instr = instrIter.next();
+                    String mnemonic = instr.getMnemonicString().toUpperCase();
+                    
+                    for (String suspicious : suspiciousInstructions) {
+                        if (mnemonic.contains(suspicious.split(" ")[0])) {
+                            Map<String, Object> finding = new LinkedHashMap<>();
+                            finding.put("category", "suspicious_instruction");
+                            finding.put("technique", suspicious);
+                            finding.put("address", instr.getAddress().toString());
+                            finding.put("function", func.getName());
+                            finding.put("instruction", instr.toString());
+                            finding.put("severity", "medium");
+                            findings.add(finding);
+                        }
+                    }
+                }
+            }
+            
+            // Check for PEB access patterns (common anti-debug)
+            for (Function func : functionManager.getFunctions(true)) {
+                InstructionIterator instrIter = listing.getInstructions(func.getBody(), true);
+                boolean foundFsAccess = false;
+                while (instrIter.hasNext()) {
+                    Instruction instr = instrIter.next();
+                    String instrStr = instr.toString().toUpperCase();
+                    // FS:[0x30] is PEB access, FS:[0x18] is TEB
+                    if (instrStr.contains("FS:") && (instrStr.contains("0X30") || instrStr.contains("0X18"))) {
+                        if (!foundFsAccess) {
+                            Map<String, Object> finding = new LinkedHashMap<>();
+                            finding.put("category", "peb_teb_access");
+                            finding.put("technique", "Direct PEB/TEB access");
+                            finding.put("address", instr.getAddress().toString());
+                            finding.put("function", func.getName());
+                            finding.put("instruction", instr.toString());
+                            finding.put("severity", "high");
+                            finding.put("description", "Direct access to PEB/TEB can be used to detect debuggers");
+                            findings.add(finding);
+                            foundFsAccess = true;
+                        }
+                    }
+                }
+            }
+            
+            // Build JSON response
+            StringBuilder result = new StringBuilder();
+            result.append("{\n");
+            result.append("  \"total_findings\": ").append(findings.size()).append(",\n");
+            result.append("  \"summary\": {\n");
+            
+            // Count by category
+            Map<String, Integer> categoryCounts = new LinkedHashMap<>();
+            Map<String, Integer> severityCounts = new LinkedHashMap<>();
+            for (Map<String, Object> finding : findings) {
+                String cat = (String) finding.get("category");
+                String sev = (String) finding.get("severity");
+                categoryCounts.put(cat, categoryCounts.getOrDefault(cat, 0) + 1);
+                severityCounts.put(sev, severityCounts.getOrDefault(sev, 0) + 1);
+            }
+            
+            result.append("    \"by_category\": {");
+            int catIdx = 0;
+            for (Map.Entry<String, Integer> entry : categoryCounts.entrySet()) {
+                if (catIdx++ > 0) result.append(", ");
+                result.append("\"").append(entry.getKey()).append("\": ").append(entry.getValue());
+            }
+            result.append("},\n");
+            
+            result.append("    \"by_severity\": {");
+            int sevIdx = 0;
+            for (Map.Entry<String, Integer> entry : severityCounts.entrySet()) {
+                if (sevIdx++ > 0) result.append(", ");
+                result.append("\"").append(entry.getKey()).append("\": ").append(entry.getValue());
+            }
+            result.append("}\n");
+            result.append("  },\n");
+            
+            result.append("  \"findings\": [\n");
+            for (int i = 0; i < Math.min(findings.size(), 100); i++) {
+                Map<String, Object> finding = findings.get(i);
+                result.append("    {");
+                result.append("\"category\": \"").append(finding.get("category")).append("\", ");
+                result.append("\"technique\": \"").append(escapeJson((String)finding.get("technique"))).append("\", ");
+                result.append("\"address\": \"").append(finding.get("address")).append("\", ");
+                result.append("\"function\": \"").append(escapeJson((String)finding.get("function"))).append("\", ");
+                result.append("\"severity\": \"").append(finding.get("severity")).append("\"");
+                if (finding.containsKey("instruction")) {
+                    result.append(", \"instruction\": \"").append(escapeJson((String)finding.get("instruction"))).append("\"");
+                }
+                if (finding.containsKey("description")) {
+                    result.append(", \"description\": \"").append(escapeJson((String)finding.get("description"))).append("\"");
+                }
+                result.append("}");
+                if (i < Math.min(findings.size(), 100) - 1) result.append(",");
+                result.append("\n");
+            }
+            
+            if (findings.size() > 100) {
+                result.append("    {\"note\": \"").append(findings.size() - 100).append(" additional findings truncated\"}\n");
+            }
+            
+            result.append("  ]\n");
+            result.append("}");
 
             return result.toString();
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+    
+    /**
+     * Helper to determine severity based on anti-analysis category
+     */
+    private String getSeverity(String category) {
+        switch (category) {
+            case "debugger_detection": return "high";
+            case "timing_checks": return "medium";
+            case "process_enumeration": return "medium";
+            case "vm_detection": return "high";
+            case "exception_based": return "high";
+            case "memory_checks": return "low";
+            default: return "medium";
         }
     }
 
@@ -10337,31 +11264,246 @@ public class GhidraMCPPlugin extends Plugin {
 
     /**
      * Identify and analyze suspicious API call chains
+     * Detects threat patterns like process injection, persistence, credential theft
      */
     private String analyzeAPICallChains() {
         Program program = getCurrentProgram();
         if (program == null) {
-            return "Error: No program loaded";
+            return "{\"error\": \"No program loaded\"}";
         }
 
         try {
+            // Define threat patterns as API call sequences
+            List<ThreatPattern> threatPatterns = new ArrayList<>();
+            
+            // Process Injection patterns
+            threatPatterns.add(new ThreatPattern("process_injection_classic",
+                "Classic Process Injection", "critical",
+                new String[]{"VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread"},
+                "Allocates memory in remote process, writes code, and creates thread to execute"));
+            
+            threatPatterns.add(new ThreatPattern("process_injection_ntapi",
+                "NT API Process Injection", "critical",
+                new String[]{"NtOpenProcess", "NtAllocateVirtualMemory", "NtWriteVirtualMemory", "NtCreateThreadEx"},
+                "Process injection using NT native APIs"));
+            
+            threatPatterns.add(new ThreatPattern("process_hollowing",
+                "Process Hollowing", "critical",
+                new String[]{"CreateProcess", "NtUnmapViewOfSection", "VirtualAllocEx", "WriteProcessMemory", "SetThreadContext", "ResumeThread"},
+                "Creates suspended process, hollows it out, and replaces with malicious code"));
+            
+            threatPatterns.add(new ThreatPattern("dll_injection",
+                "DLL Injection", "high",
+                new String[]{"OpenProcess", "VirtualAllocEx", "WriteProcessMemory", "LoadLibrary"},
+                "Injects DLL into remote process"));
+            
+            // Persistence patterns
+            threatPatterns.add(new ThreatPattern("registry_persistence",
+                "Registry Persistence", "high",
+                new String[]{"RegOpenKey", "RegSetValue"},
+                "Modifies registry for persistence"));
+            
+            threatPatterns.add(new ThreatPattern("service_persistence",
+                "Service Persistence", "high",
+                new String[]{"OpenSCManager", "CreateService"},
+                "Creates Windows service for persistence"));
+            
+            threatPatterns.add(new ThreatPattern("scheduled_task",
+                "Scheduled Task Persistence", "high",
+                new String[]{"CoCreateInstance", "ITaskScheduler"},
+                "Creates scheduled task for persistence"));
+            
+            // Credential theft patterns
+            threatPatterns.add(new ThreatPattern("lsass_access",
+                "LSASS Memory Access", "critical",
+                new String[]{"OpenProcess", "ReadProcessMemory"},
+                "May be accessing LSASS for credential extraction"));
+            
+            threatPatterns.add(new ThreatPattern("sam_access",
+                "SAM Database Access", "critical",
+                new String[]{"RegOpenKey", "SAM"},
+                "May be accessing SAM database for password hashes"));
+            
+            // Network patterns
+            threatPatterns.add(new ThreatPattern("socket_communication",
+                "Network Communication", "medium",
+                new String[]{"WSAStartup", "socket", "connect", "send", "recv"},
+                "Establishes network connection"));
+            
+            threatPatterns.add(new ThreatPattern("http_communication",
+                "HTTP Communication", "medium",
+                new String[]{"InternetOpen", "InternetConnect", "HttpOpenRequest"},
+                "Performs HTTP communication"));
+            
+            // File operations
+            threatPatterns.add(new ThreatPattern("file_encryption",
+                "Potential Ransomware", "critical",
+                new String[]{"FindFirstFile", "FindNextFile", "CryptEncrypt"},
+                "File enumeration combined with encryption"));
+            
+            // Analyze functions for these patterns
+            FunctionManager functionManager = program.getFunctionManager();
+            SymbolTable symbolTable = program.getSymbolTable();
+            ReferenceManager refManager = program.getReferenceManager();
+            
+            List<Map<String, Object>> detectedPatterns = new ArrayList<>();
+            
+            // Build API call map per function
+            Map<Function, Set<String>> functionAPIs = new LinkedHashMap<>();
+            
+            for (Function func : functionManager.getFunctions(true)) {
+                if (func.isThunk()) continue;
+                
+                Set<String> apis = new HashSet<>();
+                Listing listing = program.getListing();
+                InstructionIterator instrIter = listing.getInstructions(func.getBody(), true);
+                
+                while (instrIter.hasNext()) {
+                    Instruction instr = instrIter.next();
+                    if (instr.getFlowType().isCall()) {
+                        for (Reference ref : refManager.getReferencesFrom(instr.getAddress())) {
+                            if (ref.getReferenceType().isCall()) {
+                                Symbol sym = symbolTable.getPrimarySymbol(ref.getToAddress());
+                                if (sym != null) {
+                                    apis.add(sym.getName());
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (!apis.isEmpty()) {
+                    functionAPIs.put(func, apis);
+                }
+            }
+            
+            // Check each function against threat patterns
+            for (Map.Entry<Function, Set<String>> entry : functionAPIs.entrySet()) {
+                Function func = entry.getKey();
+                Set<String> apis = entry.getValue();
+                
+                for (ThreatPattern pattern : threatPatterns) {
+                    int matchCount = 0;
+                    List<String> matchedAPIs = new ArrayList<>();
+                    
+                    for (String requiredAPI : pattern.apis) {
+                        for (String funcAPI : apis) {
+                            if (funcAPI.toLowerCase().contains(requiredAPI.toLowerCase())) {
+                                matchCount++;
+                                matchedAPIs.add(funcAPI);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Require at least half of the pattern APIs to match
+                    if (matchCount >= Math.ceil(pattern.apis.length / 2.0) && matchCount >= 2) {
+                        double confidence = (double) matchCount / pattern.apis.length;
+                        
+                        Map<String, Object> detection = new LinkedHashMap<>();
+                        detection.put("pattern_id", pattern.id);
+                        detection.put("pattern_name", pattern.name);
+                        detection.put("severity", pattern.severity);
+                        detection.put("function", func.getName());
+                        detection.put("address", func.getEntryPoint().toString());
+                        detection.put("confidence", Math.round(confidence * 100.0) / 100.0);
+                        detection.put("matched_apis", matchedAPIs);
+                        detection.put("description", pattern.description);
+                        
+                        detectedPatterns.add(detection);
+                    }
+                }
+            }
+            
+            // Sort by severity and confidence
+            detectedPatterns.sort((a, b) -> {
+                int sevCompare = getSeverityRank((String)a.get("severity")) - getSeverityRank((String)b.get("severity"));
+                if (sevCompare != 0) return sevCompare;
+                return Double.compare((Double)b.get("confidence"), (Double)a.get("confidence"));
+            });
+            
+            // Build JSON response
             StringBuilder result = new StringBuilder();
-            result.append("{");
-
-            // Placeholder implementation
-            // Full implementation would detect patterns like:
-            // - VirtualAllocEx → WriteProcessMemory → CreateRemoteThread (process injection)
-            // - RegSetValueEx + Run key (persistence)
-            // - CreateToolhelp32Snapshot → Process32First/Next (process enumeration)
-
-            result.append("\"patterns\": [], ");
-            result.append("\"status\": \"Not yet implemented\", ");
-            result.append("\"note\": \"This endpoint requires API call sequence analysis and threat pattern matching\"");
+            result.append("{\n");
+            result.append("  \"total_patterns_detected\": ").append(detectedPatterns.size()).append(",\n");
+            result.append("  \"severity_summary\": {\n");
+            
+            // Count by severity
+            Map<String, Integer> sevCounts = new LinkedHashMap<>();
+            for (Map<String, Object> det : detectedPatterns) {
+                String sev = (String) det.get("severity");
+                sevCounts.put(sev, sevCounts.getOrDefault(sev, 0) + 1);
+            }
+            
+            int sevIdx = 0;
+            for (Map.Entry<String, Integer> entry : sevCounts.entrySet()) {
+                if (sevIdx++ > 0) result.append(",\n");
+                result.append("    \"").append(entry.getKey()).append("\": ").append(entry.getValue());
+            }
+            result.append("\n  },\n");
+            
+            result.append("  \"detected_patterns\": [\n");
+            for (int i = 0; i < Math.min(detectedPatterns.size(), 50); i++) {
+                Map<String, Object> det = detectedPatterns.get(i);
+                result.append("    {\n");
+                result.append("      \"pattern_id\": \"").append(det.get("pattern_id")).append("\",\n");
+                result.append("      \"pattern_name\": \"").append(escapeJson((String)det.get("pattern_name"))).append("\",\n");
+                result.append("      \"severity\": \"").append(det.get("severity")).append("\",\n");
+                result.append("      \"function\": \"").append(escapeJson((String)det.get("function"))).append("\",\n");
+                result.append("      \"address\": \"").append(det.get("address")).append("\",\n");
+                result.append("      \"confidence\": ").append(det.get("confidence")).append(",\n");
+                result.append("      \"matched_apis\": [");
+                @SuppressWarnings("unchecked")
+                List<String> matchedAPIs = (List<String>) det.get("matched_apis");
+                for (int j = 0; j < matchedAPIs.size(); j++) {
+                    if (j > 0) result.append(", ");
+                    result.append("\"").append(escapeJson(matchedAPIs.get(j))).append("\"");
+                }
+                result.append("],\n");
+                result.append("      \"description\": \"").append(escapeJson((String)det.get("description"))).append("\"\n");
+                result.append("    }");
+                if (i < Math.min(detectedPatterns.size(), 50) - 1) result.append(",");
+                result.append("\n");
+            }
+            
+            result.append("  ]\n");
             result.append("}");
 
             return result.toString();
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+    
+    /**
+     * Helper class for threat pattern definitions
+     */
+    private static class ThreatPattern {
+        String id;
+        String name;
+        String severity;
+        String[] apis;
+        String description;
+        
+        ThreatPattern(String id, String name, String severity, String[] apis, String description) {
+            this.id = id;
+            this.name = name;
+            this.severity = severity;
+            this.apis = apis;
+            this.description = description;
+        }
+    }
+    
+    /**
+     * Helper to rank severity for sorting
+     */
+    private int getSeverityRank(String severity) {
+        switch (severity) {
+            case "critical": return 0;
+            case "high": return 1;
+            case "medium": return 2;
+            case "low": return 3;
+            default: return 4;
         }
     }
 
@@ -10371,21 +11513,186 @@ public class GhidraMCPPlugin extends Plugin {
     private String extractIOCsWithContext() {
         Program program = getCurrentProgram();
         if (program == null) {
-            return "Error: No program loaded";
+            return "{\"error\": \"No program loaded\"}";
         }
 
         try {
+            List<Map<String, Object>> iocs = new ArrayList<>();
+            Listing listing = program.getListing();
+            FunctionManager functionManager = program.getFunctionManager();
+            
+            // Regex patterns for IOC extraction
+            Pattern ipv4Pattern = Pattern.compile("\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b");
+            Pattern urlPattern = Pattern.compile("https?://[\\w\\-._~:/?#\\[\\]@!$&'()*+,;=%]+", Pattern.CASE_INSENSITIVE);
+            Pattern domainPattern = Pattern.compile("\\b[a-zA-Z0-9][a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9]\\.[a-zA-Z]{2,}\\b");
+            Pattern emailPattern = Pattern.compile("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
+            Pattern registryPattern = Pattern.compile("(HKEY_[A-Z_]+|HKLM|HKCU|HKCR|HKU|HKCC)\\\\[\\w\\\\]+", Pattern.CASE_INSENSITIVE);
+            Pattern filePathPattern = Pattern.compile("([a-zA-Z]:\\\\[^\"<>|*?\\n]+|\\\\\\\\[\\w.]+\\\\[^\"<>|*?\\n]+)");
+            Pattern bitcoinPattern = Pattern.compile("\\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\\b");
+            Pattern md5Pattern = Pattern.compile("\\b[a-fA-F0-9]{32}\\b");
+            Pattern sha256Pattern = Pattern.compile("\\b[a-fA-F0-9]{64}\\b");
+            
+            // Scan defined strings
+            DataIterator dataIter = listing.getDefinedData(true);
+            while (dataIter.hasNext()) {
+                Data data = dataIter.next();
+                if (data.getDataType() instanceof StringDataType || 
+                    data.getDataType().getName().toLowerCase().contains("string")) {
+                    
+                    Object value = data.getValue();
+                    if (value != null) {
+                        String strValue = value.toString();
+                        Address addr = data.getAddress();
+                        
+                        // Find containing function for context
+                        Function containingFunc = functionManager.getFunctionContaining(addr);
+                        String funcContext = containingFunc != null ? containingFunc.getName() : "global";
+                        
+                        // Check each pattern
+                        checkAndAddIOC(iocs, strValue, ipv4Pattern, "ipv4", addr, funcContext);
+                        checkAndAddIOC(iocs, strValue, urlPattern, "url", addr, funcContext);
+                        checkAndAddIOC(iocs, strValue, domainPattern, "domain", addr, funcContext);
+                        checkAndAddIOC(iocs, strValue, emailPattern, "email", addr, funcContext);
+                        checkAndAddIOC(iocs, strValue, registryPattern, "registry_key", addr, funcContext);
+                        checkAndAddIOC(iocs, strValue, filePathPattern, "file_path", addr, funcContext);
+                        checkAndAddIOC(iocs, strValue, bitcoinPattern, "bitcoin_address", addr, funcContext);
+                        checkAndAddIOC(iocs, strValue, md5Pattern, "md5_hash", addr, funcContext);
+                        checkAndAddIOC(iocs, strValue, sha256Pattern, "sha256_hash", addr, funcContext);
+                    }
+                }
+            }
+            
+            // Calculate confidence scores
+            for (Map<String, Object> ioc : iocs) {
+                double confidence = calculateIOCConfidence(ioc, program);
+                ioc.put("confidence", Math.round(confidence * 100.0) / 100.0);
+            }
+            
+            // Sort by confidence descending
+            iocs.sort((a, b) -> Double.compare((Double)b.get("confidence"), (Double)a.get("confidence")));
+            
+            // Build JSON response
             StringBuilder result = new StringBuilder();
-            result.append("{");
-            result.append("\"iocs\": [], ");
-            result.append("\"status\": \"Not yet implemented\", ");
-            result.append("\"note\": \"This endpoint requires IOC extraction with usage context and confidence scoring\"");
+            result.append("{\n");
+            result.append("  \"total_iocs\": ").append(iocs.size()).append(",\n");
+            
+            // Summary by type
+            Map<String, Integer> typeCounts = new LinkedHashMap<>();
+            for (Map<String, Object> ioc : iocs) {
+                String type = (String) ioc.get("type");
+                typeCounts.put(type, typeCounts.getOrDefault(type, 0) + 1);
+            }
+            
+            result.append("  \"by_type\": {");
+            int typeIdx = 0;
+            for (Map.Entry<String, Integer> entry : typeCounts.entrySet()) {
+                if (typeIdx++ > 0) result.append(", ");
+                result.append("\"").append(entry.getKey()).append("\": ").append(entry.getValue());
+            }
+            result.append("},\n");
+            
+            result.append("  \"iocs\": [\n");
+            for (int i = 0; i < Math.min(iocs.size(), 100); i++) {
+                Map<String, Object> ioc = iocs.get(i);
+                result.append("    {");
+                result.append("\"type\": \"").append(ioc.get("type")).append("\", ");
+                result.append("\"value\": \"").append(escapeJson((String)ioc.get("value"))).append("\", ");
+                result.append("\"address\": \"").append(ioc.get("address")).append("\", ");
+                result.append("\"function_context\": \"").append(escapeJson((String)ioc.get("function_context"))).append("\", ");
+                result.append("\"confidence\": ").append(ioc.get("confidence"));
+                result.append("}");
+                if (i < Math.min(iocs.size(), 100) - 1) result.append(",");
+                result.append("\n");
+            }
+            
+            if (iocs.size() > 100) {
+                result.append("    {\"note\": \"").append(iocs.size() - 100).append(" additional IOCs truncated\"}\n");
+            }
+            
+            result.append("  ]\n");
             result.append("}");
 
             return result.toString();
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
         }
+    }
+    
+    /**
+     * Helper to check pattern and add IOC
+     */
+    private void checkAndAddIOC(List<Map<String, Object>> iocs, String value, Pattern pattern, 
+                                 String type, Address address, String funcContext) {
+        java.util.regex.Matcher matcher = pattern.matcher(value);
+        while (matcher.find()) {
+            String match = matcher.group();
+            // Skip common false positives
+            if (type.equals("ipv4") && (match.startsWith("0.") || match.startsWith("255."))) continue;
+            if (type.equals("domain") && match.length() < 4) continue;
+            
+            Map<String, Object> ioc = new LinkedHashMap<>();
+            ioc.put("type", type);
+            ioc.put("value", match);
+            ioc.put("address", address.toString());
+            ioc.put("function_context", funcContext);
+            iocs.add(ioc);
+        }
+    }
+    
+    /**
+     * Calculate confidence score for an IOC based on context
+     */
+    private double calculateIOCConfidence(Map<String, Object> ioc, Program program) {
+        String type = (String) ioc.get("type");
+        String value = (String) ioc.get("value");
+        String funcContext = (String) ioc.get("function_context");
+        
+        double confidence = 0.5; // Base confidence
+        
+        // Type-based adjustments
+        switch (type) {
+            case "url":
+            case "ipv4":
+                confidence += 0.2;
+                break;
+            case "registry_key":
+                if (value.toLowerCase().contains("run") || value.toLowerCase().contains("services")) {
+                    confidence += 0.3; // Persistence indicators
+                }
+                break;
+            case "bitcoin_address":
+                confidence += 0.4; // Strong indicator
+                break;
+            case "file_path":
+                if (value.toLowerCase().contains("temp") || value.toLowerCase().contains("appdata")) {
+                    confidence += 0.2;
+                }
+                break;
+        }
+        
+        // Function context adjustments
+        if (!funcContext.equals("global")) {
+            confidence += 0.1; // IOC used in actual function
+        }
+        
+        // Check for xrefs to increase confidence
+        try {
+            Address addr = program.getAddressFactory().getAddress((String) ioc.get("address"));
+            ReferenceManager refManager = program.getReferenceManager();
+            ReferenceIterator refs = refManager.getReferencesTo(addr);
+            int refCount = 0;
+            while (refs.hasNext() && refCount < 10) {
+                refs.next();
+                refCount++;
+            }
+            if (refCount > 0) {
+                confidence += 0.1 * Math.min(refCount, 3);
+            }
+        } catch (Exception e) {
+            // Ignore xref errors
+        }
+        
+        return Math.min(confidence, 1.0);
     }
 
     /**
@@ -10394,29 +11701,198 @@ public class GhidraMCPPlugin extends Plugin {
     private String detectMalwareBehaviors() {
         Program program = getCurrentProgram();
         if (program == null) {
-            return "Error: No program loaded";
+            return "{\"error\": \"No program loaded\"}";
         }
 
         try {
-            final StringBuilder result = new StringBuilder();
-            result.append("[\n");
-
-            // Placeholder implementation
-            // Full implementation would detect behaviors like:
-            // - Code injection techniques
-            // - Keylogging patterns
-            // - Network C2 communication
-            // - File/registry manipulation
-            // - Privilege escalation
-            // - Lateral movement
-
-            result.append("  {\"behavior\": \"Malware Behavior Detection\", \"status\": \"Not yet implemented\", ");
-            result.append("\"note\": \"This endpoint requires comprehensive behavioral analysis and pattern recognition\"}\n");
-            result.append("]");
+            List<Map<String, Object>> behaviors = new ArrayList<>();
+            FunctionManager functionManager = program.getFunctionManager();
+            SymbolTable symbolTable = program.getSymbolTable();
+            ReferenceManager refManager = program.getReferenceManager();
+            Listing listing = program.getListing();
+            
+            // Define behavior categories and their indicators
+            Map<String, String[]> behaviorIndicators = new LinkedHashMap<>();
+            
+            // Code injection
+            behaviorIndicators.put("code_injection", new String[]{
+                "VirtualAlloc", "VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread",
+                "NtWriteVirtualMemory", "RtlCreateUserThread", "QueueUserAPC"
+            });
+            
+            // Keylogging
+            behaviorIndicators.put("keylogging", new String[]{
+                "SetWindowsHookEx", "GetAsyncKeyState", "GetKeyState", "RegisterRawInputDevices"
+            });
+            
+            // Screen capture
+            behaviorIndicators.put("screen_capture", new String[]{
+                "GetDC", "GetWindowDC", "BitBlt", "CreateCompatibleBitmap", "GetDIBits"
+            });
+            
+            // Privilege escalation
+            behaviorIndicators.put("privilege_escalation", new String[]{
+                "AdjustTokenPrivileges", "LookupPrivilegeValue", "OpenProcessToken",
+                "ImpersonateLoggedOnUser", "DuplicateToken"
+            });
+            
+            // Defense evasion
+            behaviorIndicators.put("defense_evasion", new String[]{
+                "NtSetInformationThread", "NtQueryInformationProcess", "GetProcAddress",
+                "LoadLibrary", "VirtualProtect"
+            });
+            
+            // Lateral movement
+            behaviorIndicators.put("lateral_movement", new String[]{
+                "WNetAddConnection", "NetShareEnum", "WNetEnumResource"
+            });
+            
+            // Data exfiltration
+            behaviorIndicators.put("data_exfiltration", new String[]{
+                "InternetOpen", "HttpSendRequest", "FtpPutFile", "send", "WSASend"
+            });
+            
+            // Cryptographic operations
+            behaviorIndicators.put("crypto_operations", new String[]{
+                "CryptAcquireContext", "CryptGenKey", "CryptEncrypt", "CryptDecrypt",
+                "CryptImportKey", "CryptDeriveKey"
+            });
+            
+            // Process manipulation
+            behaviorIndicators.put("process_manipulation", new String[]{
+                "TerminateProcess", "SuspendThread", "ResumeThread", "NtSuspendProcess"
+            });
+            
+            // Check each function for behavior indicators
+            for (Function func : functionManager.getFunctions(true)) {
+                if (func.isThunk()) continue;
+                
+                Set<String> funcAPIs = new HashSet<>();
+                InstructionIterator instrIter = listing.getInstructions(func.getBody(), true);
+                
+                while (instrIter.hasNext()) {
+                    Instruction instr = instrIter.next();
+                    if (instr.getFlowType().isCall()) {
+                        for (Reference ref : refManager.getReferencesFrom(instr.getAddress())) {
+                            if (ref.getReferenceType().isCall()) {
+                                Symbol sym = symbolTable.getPrimarySymbol(ref.getToAddress());
+                                if (sym != null) {
+                                    funcAPIs.add(sym.getName());
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Check against behavior indicators
+                for (Map.Entry<String, String[]> entry : behaviorIndicators.entrySet()) {
+                    String behaviorType = entry.getKey();
+                    String[] indicators = entry.getValue();
+                    
+                    List<String> matchedIndicators = new ArrayList<>();
+                    for (String indicator : indicators) {
+                        for (String api : funcAPIs) {
+                            if (api.toLowerCase().contains(indicator.toLowerCase())) {
+                                matchedIndicators.add(api);
+                            }
+                        }
+                    }
+                    
+                    if (matchedIndicators.size() >= 2) {
+                        Map<String, Object> behavior = new LinkedHashMap<>();
+                        behavior.put("behavior_type", behaviorType);
+                        behavior.put("function", func.getName());
+                        behavior.put("address", func.getEntryPoint().toString());
+                        behavior.put("indicators", matchedIndicators);
+                        behavior.put("indicator_count", matchedIndicators.size());
+                        behavior.put("severity", getBehaviorSeverity(behaviorType));
+                        behaviors.add(behavior);
+                    }
+                }
+            }
+            
+            // Sort by severity and indicator count
+            behaviors.sort((a, b) -> {
+                int sevCompare = getSeverityRank((String)a.get("severity")) - getSeverityRank((String)b.get("severity"));
+                if (sevCompare != 0) return sevCompare;
+                return (Integer)b.get("indicator_count") - (Integer)a.get("indicator_count");
+            });
+            
+            // Build JSON response
+            StringBuilder result = new StringBuilder();
+            result.append("{\n");
+            result.append("  \"total_behaviors_detected\": ").append(behaviors.size()).append(",\n");
+            
+            // Summary by behavior type
+            Map<String, Integer> behaviorCounts = new LinkedHashMap<>();
+            for (Map<String, Object> behavior : behaviors) {
+                String type = (String) behavior.get("behavior_type");
+                behaviorCounts.put(type, behaviorCounts.getOrDefault(type, 0) + 1);
+            }
+            
+            result.append("  \"by_behavior_type\": {");
+            int typeIdx = 0;
+            for (Map.Entry<String, Integer> entry : behaviorCounts.entrySet()) {
+                if (typeIdx++ > 0) result.append(", ");
+                result.append("\"").append(entry.getKey()).append("\": ").append(entry.getValue());
+            }
+            result.append("},\n");
+            
+            result.append("  \"behaviors\": [\n");
+            for (int i = 0; i < Math.min(behaviors.size(), 100); i++) {
+                Map<String, Object> behavior = behaviors.get(i);
+                result.append("    {\n");
+                result.append("      \"behavior_type\": \"").append(behavior.get("behavior_type")).append("\",\n");
+                result.append("      \"severity\": \"").append(behavior.get("severity")).append("\",\n");
+                result.append("      \"function\": \"").append(escapeJson((String)behavior.get("function"))).append("\",\n");
+                result.append("      \"address\": \"").append(behavior.get("address")).append("\",\n");
+                result.append("      \"indicator_count\": ").append(behavior.get("indicator_count")).append(",\n");
+                result.append("      \"indicators\": [");
+                @SuppressWarnings("unchecked")
+                List<String> indicators = (List<String>) behavior.get("indicators");
+                for (int j = 0; j < indicators.size(); j++) {
+                    if (j > 0) result.append(", ");
+                    result.append("\"").append(escapeJson(indicators.get(j))).append("\"");
+                }
+                result.append("]\n");
+                result.append("    }");
+                if (i < Math.min(behaviors.size(), 100) - 1) result.append(",");
+                result.append("\n");
+            }
+            
+            if (behaviors.size() > 100) {
+                result.append("    {\"note\": \"").append(behaviors.size() - 100).append(" additional behaviors truncated\"}\n");
+            }
+            
+            result.append("  ]\n");
+            result.append("}");
 
             return result.toString();
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+    
+    /**
+     * Helper to get severity for behavior type
+     */
+    private String getBehaviorSeverity(String behaviorType) {
+        switch (behaviorType) {
+            case "code_injection":
+            case "privilege_escalation":
+                return "critical";
+            case "keylogging":
+            case "lateral_movement":
+            case "data_exfiltration":
+                return "high";
+            case "screen_capture":
+            case "defense_evasion":
+            case "crypto_operations":
+                return "medium";
+            case "process_manipulation":
+                return "medium";
+            default:
+                return "low";
         }
     }
 
@@ -11742,7 +13218,7 @@ public class GhidraMCPPlugin extends Plugin {
 
     /**
      * Individual variable type setting using setLocalVariableType (fallback method)
-     * NOW USES OPTIMIZED SINGLE-DECOMPILE METHOD (v1.9.5+)
+     * NOW USES OPTIMIZED SINGLE-DECOMPILE METHOD
      * This method was refactored to use batchSetVariableTypesOptimized() which decompiles
      * the function ONCE and applies all type changes within that single decompilation,
      * avoiding the repeated decompilation timeout issues that plagued the previous approach.
