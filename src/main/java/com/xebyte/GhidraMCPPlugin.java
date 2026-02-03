@@ -182,8 +182,8 @@ public class GhidraMCPPlugin extends Plugin {
 
         // Create new server - if port is in use, try to handle gracefully
         try {
-            server = HttpServer.create(new InetSocketAddress(port), 0);
-            Msg.info(this, "HTTP server created successfully on port " + port);
+            server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
+            Msg.info(this, "HTTP server created successfully on 127.0.0.1:" + port);
         } catch (java.net.BindException e) {
             Msg.error(this, "Port " + port + " is already in use. " +
                 "Another instance may be running or port is not released yet. " +
@@ -344,7 +344,12 @@ public class GhidraMCPPlugin extends Plugin {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             String programName = qparams.get("program");  // Optional: target specific program
-            sendResponse(exchange, decompileFunctionByAddress(address, programName));
+            String timeoutStr = qparams.get("timeout");   // Optional: timeout in seconds
+            int timeout = DECOMPILE_TIMEOUT_SECONDS;
+            if (timeoutStr != null && !timeoutStr.isEmpty()) {
+                try { timeout = Integer.parseInt(timeoutStr); } catch (NumberFormatException ignored) {}
+            }
+            sendResponse(exchange, decompileFunctionByAddress(address, programName, timeout));
         });
 
         server.createContext("/disassemble_function", exchange -> {
@@ -2271,7 +2276,7 @@ public class GhidraMCPPlugin extends Plugin {
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
-    private String decompileFunctionByAddress(String addressStr, String programName) {
+    private String decompileFunctionByAddress(String addressStr, String programName, int timeoutSeconds) {
         Object[] result = getProgramOrError(programName);
         Program program = (Program) result[0];
         if (program == null) return (String) result[1];
@@ -2284,7 +2289,7 @@ public class GhidraMCPPlugin extends Plugin {
 
             DecompInterface decomp = new DecompInterface();
             decomp.openProgram(program);
-            DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+            DecompileResults decompResult = decomp.decompileFunction(func, timeoutSeconds, new ConsoleTaskMonitor());
 
             if (decompResult == null) {
                 return "{\"error\": \"Decompiler returned null result for function at " + addressStr + "\"}";
@@ -2306,9 +2311,13 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
-    // Backward compatible overload for internal callers
+    // Backward compatible overloads for internal callers
+    private String decompileFunctionByAddress(String addressStr, String programName) {
+        return decompileFunctionByAddress(addressStr, programName, DECOMPILE_TIMEOUT_SECONDS);
+    }
+
     private String decompileFunctionByAddress(String addressStr) {
-        return decompileFunctionByAddress(addressStr, null);
+        return decompileFunctionByAddress(addressStr, null, DECOMPILE_TIMEOUT_SECONDS);
     }
 
     /**

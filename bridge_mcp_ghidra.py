@@ -1053,6 +1053,8 @@ def decompile_function(
                 params = {"address": func_address}
                 if program:
                     params["program"] = program
+                if timeout:
+                    params["timeout"] = str(timeout)
                 result = safe_get("decompile_function", params)
         else:
             address = sanitize_address(address)
@@ -1066,6 +1068,8 @@ def decompile_function(
                 params = {"address": address}
                 if program:
                     params["program"] = program
+                if timeout:
+                    params["timeout"] = str(timeout)
                 result = safe_get("decompile_function", params)
 
         # Convert list result to string if needed (safe_get returns list)

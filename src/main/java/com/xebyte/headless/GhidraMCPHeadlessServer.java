@@ -233,7 +233,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     }
 
     private void startServer() throws IOException {
-        server = HttpServer.create(new InetSocketAddress(port), 0);
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         registerEndpoints();
         server.setExecutor(java.util.concurrent.Executors.newFixedThreadPool(10));
         server.start();
