@@ -15,6 +15,8 @@ jobs:
       GHIDRA_LIBS: >-
         Features/Base/lib/Base.jar
         Features/Decompiler/lib/Decompiler.jar
+        Features/PDB/lib/PDB.jar
+        Features/FunctionID/lib/FunctionID.jar
         Framework/Docking/lib/Docking.jar
         Framework/Generic/lib/Generic.jar
         Framework/Project/lib/Project.jar
@@ -22,6 +24,9 @@ jobs:
         Framework/Utility/lib/Utility.jar
         Framework/Gui/lib/Gui.jar
         Framework/FileSystem/lib/FileSystem.jar
+        Framework/Graph/lib/Graph.jar
+        Framework/DB/lib/DB.jar
+        Framework/Emulation/lib/Emulation.jar
 
     steps:
     - uses: actions/checkout@v4
@@ -46,12 +51,12 @@ jobs:
         done
 
     - name: Build with Maven
-      run: mvn clean package assembly:single
+      run: mvn clean package assembly:single -DskipTests
 
     - name: Assemble release directory
       run: |
         mkdir release
-        cp target/GhidraMCP-*-SNAPSHOT.zip release/
+        cp target/GhidraMCP-*.zip release/ || { echo "No zip found in target/"; ls -la target/; exit 1; }
         cp bridge_mcp_ghidra.py release/
 
     - name: Upload artifact
