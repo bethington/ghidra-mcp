@@ -7,10 +7,20 @@ echo Copying Ghidra JAR files to project lib directory...
 :: Create lib directory if it doesn't exist
 if not exist "lib" mkdir lib
 
-:: Set source directory - use parameter if provided, otherwise use default
+:: Set source directory - use parameter if provided, otherwise check .env, then prompt
 if "%~1"=="" (
-    set GHIDRA_DIR=F:\ghidra_12.0.2_PUBLIC
-    echo Using default Ghidra directory: !GHIDRA_DIR!
+    :: Try to read GHIDRA_PATH from .env file
+    if exist ".env" (
+        for /f "tokens=1,* delims==" %%a in ('findstr /r "^GHIDRA_PATH=" .env') do set GHIDRA_DIR=%%b
+    )
+    if not defined GHIDRA_DIR (
+        echo ERROR: No Ghidra path specified.
+        echo.
+        echo Usage: copy-ghidra-libs.bat "C:\path\to\ghidra_12.0.2_PUBLIC"
+        echo    Or: Set GHIDRA_PATH in .env file ^(copy from .env.template^)
+        exit /b 1
+    )
+    echo Using GHIDRA_PATH from .env: !GHIDRA_DIR!
 ) else (
     set GHIDRA_DIR=%~1
     echo Using provided Ghidra directory: !GHIDRA_DIR!
