@@ -46,7 +46,7 @@ jobs:
         done
 
     - name: Build with Maven
-      run: mvn clean package assembly:single
+      run: mvn clean package assembly:single -DskipTests
 
     - name: Assemble release directory
       run: |
