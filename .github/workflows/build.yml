@@ -56,7 +56,7 @@ jobs:
     - name: Assemble release directory
       run: |
         mkdir release
-        cp target/GhidraMCP-*-SNAPSHOT.zip release/
+        cp target/GhidraMCP-*.zip release/ || { echo "No zip found in target/"; ls -la target/; exit 1; }
         cp bridge_mcp_ghidra.py release/
 
     - name: Upload artifact
