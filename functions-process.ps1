@@ -509,7 +509,8 @@ function Update-TodoFile {
     param(
         [string]$funcName,
         [string]$status,
-        [string]$programName = ""
+        [string]$programName = "",
+        [string]$address = ""
     )
 
     # Get global lock for atomic file update
@@ -521,15 +522,17 @@ function Update-TodoFile {
     try {
         $content = Get-Content $todoFile -Raw
         $escapedFuncName = [regex]::Escape($funcName)
+        $escapedAddress = if ($address) { [regex]::Escape($address) } else { "[0-9a-fA-F]+" }
 
         # Build the pattern to match - handle both old and new formats
+        # IMPORTANT: Match by BOTH function name AND address to handle duplicate names (e.g., Ordinal_220)
         if ($programName) {
             $escapedProgram = [regex]::Escape($programName)
-            $matchPattern = "\[\s*\]\s+$escapedProgram::$escapedFuncName\s+@"
-            $replaceWith = if ($status -eq "complete") { "[X] ${programName}::$funcName @" } else { "[!] ${programName}::$funcName @" }
+            $matchPattern = "\[\s*\]\s+$escapedProgram::$escapedFuncName\s+@\s*$escapedAddress"
+            $replaceWith = if ($status -eq "complete") { "[X] ${programName}::$funcName @ $address" } else { "[!] ${programName}::$funcName @ $address" }
         } else {
-            $matchPattern = "\[\s*\]\s+$escapedFuncName\s+@"
-            $replaceWith = if ($status -eq "complete") { "[X] $funcName @" } else { "[!] $funcName @" }
+            $matchPattern = "\[\s*\]\s+$escapedFuncName\s+@\s*$escapedAddress"
+            $replaceWith = if ($status -eq "complete") { "[X] $funcName @ $address" } else { "[!] $funcName @ $address" }
         }
 
         if ($status -eq "complete" -or $status -eq "failed") {
@@ -540,7 +543,7 @@ function Update-TodoFile {
 
         Set-Content $todoFile $updated -NoNewline
         $displayName = if ($programName) { "${programName}::$funcName" } else { $funcName }
-        Write-Log "Updated todo file: $displayName -> $status"
+        Write-Log "Updated todo file: $displayName @ $address -> $status"
         return $true
     } finally {
         Release-GlobalLock
@@ -2112,14 +2115,14 @@ while ($programQueue.Count -gt 0 -or $script:CurrentProgram) {
         # Check for string "skip" explicitly (PowerShell coerces types in -eq comparisons)
         if ($result -is [string] -and $result -eq "skip") {
             $skipCount++
-            Update-TodoFile $funcName "complete" $programName | Out-Null
+            Update-TodoFile $funcName "complete" $programName $address | Out-Null
             Write-WorkerHost "  Skipped (outside score filter)" "Gray"
         } elseif ($result -eq $true) {
             $successCount++
-            Update-TodoFile $funcName "complete" $programName | Out-Null
+            Update-TodoFile $funcName "complete" $programName $address | Out-Null
         } else {
             $failCount++
-            Update-TodoFile $funcName "failed" $programName | Out-Null
+            Update-TodoFile $funcName "failed" $programName $address | Out-Null
         }
 
         # Show progress summary with binary context
