@@ -3,7 +3,7 @@
 # Target: Ghidra 12.0.2
 
 param(
-    [string]$GhidraPath = "F:\ghidra_12.0.2_PUBLIC",
+    [string]$GhidraPath = "",
     [switch]$SkipBuild = $false,
     [switch]$SkipRestart = $false,
     [switch]$Verbose = $false
@@ -12,6 +12,53 @@ param(
 # Configuration
 $GhidraVersion = "12.0.2"
 $PluginVersion = "2.0.0"
+
+# Load .env file if it exists (local environment config)
+$envFile = Join-Path $PSScriptRoot ".env"
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
+            $key = $Matches[1].Trim()
+            $val = $Matches[2].Trim()
+            if ($val) {
+                [System.Environment]::SetEnvironmentVariable($key, $val, "Process")
+                if ($Verbose) { Write-Info "Loaded from .env: $key" }
+            }
+        }
+    }
+}
+
+# If GhidraPath not provided via parameter, try .env, then common locations
+if (-not $GhidraPath) {
+    $GhidraPath = [System.Environment]::GetEnvironmentVariable("GHIDRA_PATH", "Process")
+}
+if (-not $GhidraPath) {
+    # Auto-detect from common installation paths
+    $commonPaths = @(
+        "C:\ghidra_${GhidraVersion}_PUBLIC",
+        "$env:USERPROFILE\ghidra_${GhidraVersion}_PUBLIC",
+        "$env:ProgramFiles\ghidra_${GhidraVersion}_PUBLIC",
+        "D:\ghidra_${GhidraVersion}_PUBLIC",
+        "F:\ghidra_${GhidraVersion}_PUBLIC"
+    )
+    foreach ($path in $commonPaths) {
+        if (Test-Path "$path\ghidraRun.bat") {
+            $GhidraPath = $path
+            Write-Info "Auto-detected Ghidra at: $GhidraPath"
+            break
+        }
+    }
+}
+if (-not $GhidraPath) {
+    Write-Error "Ghidra installation not found."
+    Write-Info "Set GHIDRA_PATH in .env file, or pass -GhidraPath parameter:"
+    Write-Host "  .\deploy-to-ghidra.ps1 -GhidraPath 'C:\path\to\ghidra_${GhidraVersion}_PUBLIC'"
+    Write-Host ""
+    Write-Info "Or create a .env file from the template:"
+    Write-Host "  Copy-Item .env.template .env"
+    Write-Host "  # Edit .env and set GHIDRA_PATH"
+    exit 1
+}
 
 # Color output functions
 function Write-Success { param($msg) Write-Host "[SUCCESS] $msg" -ForegroundColor Green }

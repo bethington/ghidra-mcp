@@ -82,8 +82,8 @@ logger = logging.getLogger(__name__)
 
 mcp = FastMCP("ghidra-mcp")
 
-# Initialize ghidra_server_url with default value
-ghidra_server_url = DEFAULT_GHIDRA_SERVER
+# Initialize ghidra_server_url: env var > .env file > default
+ghidra_server_url = os.getenv("GHIDRA_SERVER_URL", DEFAULT_GHIDRA_SERVER)
 
 
 # Enhanced error classes

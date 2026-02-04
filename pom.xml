@@ -8,7 +8,7 @@
     <packaging>jar</packaging>
     <version>2.0.0</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v2.0.0: Label deletion endpoints for cleaning up orphan labels in typed arrays.</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v2.0.0: Security hardening, Ghidra 12.0.2 support, configurable decompile timeout, enhanced documentation.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.source>21</maven.compiler.source>

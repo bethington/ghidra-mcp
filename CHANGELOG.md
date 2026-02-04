@@ -6,21 +6,52 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v2.0.0 - 2026-02-03
 
-### Major Release - Label Management & Cleanup
+### Major Release - Security, Ghidra 12.0.2, Enhanced Documentation
+
+#### 🔒 Security
+- **Localhost binding**: HTTP server now binds to `127.0.0.1` instead of `0.0.0.0` in both GUI plugin and headless server — prevents accidental network exposure on shared networks
+- Addresses the same concern as [LaurieWired/GhidraMCP#125](https://github.com/LaurieWired/GhidraMCP/issues/125)
+
+#### ⚙️ Configurable Decompile Timeout
+- New optional `timeout` parameter on `/decompile_function` endpoint
+- Defaults to 60s — no behavior change for existing callers
+- Allows longer timeouts for complex functions (e.g., `?timeout=300`)
 
 #### 🏷️ Label Deletion Endpoints
 - **New `delete_label` tool**: Delete individual labels at specified addresses
 - **New `batch_delete_labels` tool**: Efficiently delete multiple labels in a single atomic operation
 - Essential for cleaning up orphan labels after applying array types to pointer tables
 
+#### 🔧 Environment Configuration
+- New `.env.template` with `GHIDRA_PATH` and other environment-specific settings
+- Deploy script reads `.env` file — no more hardcoded paths
+- Auto-detection of Ghidra installation from common paths
+- Python bridge respects `GHIDRA_SERVER_URL` environment variable
+
+#### 🚀 Ghidra 12.0.2 Support
+- Updated all dependencies and paths for Ghidra 12.0.2
+- Updated library dependency documentation (14 required JARs)
+
 #### 🛠️ Tool Count
 - **Total MCP Tools**: 110 fully implemented
+- **Java REST Endpoints**: 132 (additional endpoints available server-side)
 - **New tools added**: 2 (delete_label, batch_delete_labels)
 
 #### 📚 Documentation
-- Updated README with accurate tool count and API reference
+- Complete README rewrite with full tool listing organized by category
+- Added architecture overview, library dependency table, and project structure
 - Reorganized API documentation by category
-- Added comprehensive tool listings for all 110 MCP tools
+- Added comprehensive contributing guidelines
+
+#### 🧪 Testing
+- New unit tests for bridge utilities (`test_bridge_utils.py`)
+- New unit tests for MCP tools (`test_mcp_tools.py`)
+- Updated CI workflow to latest GitHub Actions versions
+
+#### 🧹 Cleanup
+- Removed superseded files: `cross_version_matcher.py`, `cross_version_verifier.py` (replaced by hash index system in v1.9.4)
+- Removed stale data files: `hash_matches_*.json`, `string_anchors.json`, `docs/KNOWN_ORDINALS.md`
+- Refactored workflow engine (`continuous_improvement.py`, `ghidra_manager.py`)
 
 ---
 
