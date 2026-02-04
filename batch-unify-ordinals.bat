@@ -4,7 +4,7 @@ REM Batch apply UnifyOrdinalNames script to all Storm.dll versions in Ghidra pro
 setlocal enabledelayedexpansion
 
 REM Configuration
-set GHIDRA_PATH=C:\Users\benam\tools\ghidra_11.4.1_PUBLIC
+set GHIDRA_PATH=C:\Users\benam\tools\ghidra_12.0.2_PUBLIC
 set SCRIPT_PATH=C:\Users\benam\source\mcp\ghidra-mcp\ghidra_scripts\UnifyOrdinalNames_ProjectFolder.java
 set PROJECT_PATH=C:\Users\benam\ghidra_projects\Diablo2
 

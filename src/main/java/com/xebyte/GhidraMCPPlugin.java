@@ -14520,7 +14520,7 @@ public class GhidraMCPPlugin extends Plugin {
             File scriptFile = null;
 
             String[] possibleDirs = {
-                System.getProperty("user.home") + "/.ghidra/.ghidra_11.4/Extensions/Ghidra/ghidra_scripts",
+                System.getProperty("user.home") + "/.ghidra/.ghidra_12.0/Extensions/Ghidra/ghidra_scripts",
                 System.getProperty("user.home") + "/.ghidra/.ghidra_11.x/Extensions/Ghidra/ghidra_scripts",
                 System.getenv("GHIDRA_USER_HOME") + "/Extensions/Ghidra/ghidra_scripts",
                 System.getProperty("user.dir") + "/ghidra_scripts",

@@ -16,7 +16,7 @@ on:
         default: true
 
 env:
-  GHIDRA_VERSION: 11.4.2
+  GHIDRA_VERSION: 12.0.2
   GHIDRA_DATE: 20250415
   GHIDRA_LIBS: >-
     Features/Base/lib/Base.jar
@@ -217,7 +217,7 @@ jobs:
         ## 🔧 Technical Specifications
         
         - **Java Version:** Java 21 LTS
-        - **Ghidra Version:** 11.4.2 (compatible)
+        - **Ghidra Version:** 12.0.2 (compatible)
         - **Python Version:** 3.8+ required
         - **Package:** com.xebyte.GhidraMCP
         - **License:** Apache 2.0
