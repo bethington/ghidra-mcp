@@ -10,12 +10,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      GHIDRA_VERSION: 11.4.2
-      GHIDRA_DATE: 20250415
+      GHIDRA_VERSION: 11.4.3
+      GHIDRA_DATE: 20251203
       GHIDRA_LIBS: >-
         Features/Base/lib/Base.jar
         Features/Decompiler/lib/Decompiler.jar
         Framework/Docking/lib/Docking.jar
+        Framework/FileSystem/lib/FileSystem.jar
         Framework/Generic/lib/Generic.jar
         Framework/Project/lib/Project.jar
         Framework/SoftwareModeling/lib/SoftwareModeling.jar
