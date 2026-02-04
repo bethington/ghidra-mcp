@@ -24,6 +24,50 @@ jobs:
         distribution: 'temurin'
         cache: maven
     
+    - name: Cache Ghidra installation
+      id: cache-ghidra
+      uses: actions/cache@v4
+      with:
+        path: /tmp/ghidra
+        key: ghidra-12.0.2-PUBLIC-20260129
+    
+    - name: Download Ghidra
+      if: steps.cache-ghidra.outputs.cache-hit != 'true'
+      run: |
+        echo "Downloading Ghidra 12.0.2..."
+        curl -sL -o /tmp/ghidra.zip \
+          "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.0.2_build/ghidra_12.0.2_PUBLIC_20260129.zip"
+        mkdir -p /tmp/ghidra
+        unzip -q /tmp/ghidra.zip -d /tmp/ghidra
+        rm /tmp/ghidra.zip
+    
+    - name: Copy Ghidra JARs to lib/
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        echo "Using Ghidra directory: $GHIDRA_DIR"
+        mkdir -p lib
+        
+        # Framework JARs
+        cp "$GHIDRA_DIR/Ghidra/Framework/Generic/lib/Generic.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Framework/SoftwareModeling/lib/SoftwareModeling.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Framework/Project/lib/Project.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Framework/Docking/lib/Docking.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Framework/Utility/lib/Utility.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Framework/Gui/lib/Gui.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Framework/FileSystem/lib/FileSystem.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Framework/Graph/lib/Graph.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Framework/DB/lib/DB.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Framework/Emulation/lib/Emulation.jar" lib/
+        
+        # Feature JARs
+        cp "$GHIDRA_DIR/Ghidra/Features/Base/lib/Base.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Features/Decompiler/lib/Decompiler.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Features/PDB/lib/PDB.jar" lib/
+        cp "$GHIDRA_DIR/Ghidra/Features/FunctionID/lib/FunctionID.jar" lib/
+        
+        echo "✅ Copied $(ls lib/*.jar | wc -l) Ghidra JARs to lib/"
+        ls -la lib/*.jar
+    
     - name: Build with Maven
       run: mvn clean package -q
     
