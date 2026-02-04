@@ -15,10 +15,10 @@ jobs:
         java-version: [ '21' ]
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Java
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v4
       with:
         java-version: ${{ matrix.java-version }}
         distribution: 'temurin'
@@ -32,7 +32,7 @@ jobs:
     
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: java-test-results
         path: target/surefire-reports/
@@ -45,10 +45,10 @@ jobs:
         python-version: [ '3.8', '3.9', '3.10', '3.11' ]
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
@@ -65,7 +65,7 @@ jobs:
     
     - name: Upload coverage
       if: always()
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v5
       with:
         files: ./coverage.xml
         flags: unittests
@@ -76,10 +76,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
     
@@ -98,13 +98,13 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Lint markdown
-      uses: nosborn/github-action-markdown-cli@v3.3.0
+      uses: DavidAnson/markdownlint-cli2-action@v19
       with:
-        files: .
-        configFile: '.markdownlintrc'
+        globs: '**/*.md'
+        config: '.markdownlintrc'
       continue-on-error: true
 
   build-status:
