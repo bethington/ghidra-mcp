@@ -34,7 +34,7 @@ Complete version history for the Ghidra MCP Server project.
 
 #### 🛠️ Tool Count
 - **Total MCP Tools**: 110 fully implemented
-- **Java REST Endpoints**: 132 (additional endpoints available server-side)
+- **Java REST Endpoints**: 133 (includes internal endpoints)
 - **New tools added**: 2 (delete_label, batch_delete_labels)
 
 #### 📚 Documentation

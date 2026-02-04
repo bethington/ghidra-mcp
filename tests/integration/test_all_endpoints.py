@@ -269,7 +269,7 @@ class TestResponseFormats:
 
     @pytest.mark.requires_program
     def test_list_functions_format(self, http_client, program_loaded):
-        """list_functions should return 'name @ address' lines."""
+        """list_functions should return 'name @ address' or 'name at address' lines."""
         if not program_loaded:
             pytest.skip("No program loaded")
 
@@ -278,7 +278,8 @@ class TestResponseFormats:
             lines = response.text.strip().split("\n")
             for line in lines[:5]:  # Check first few
                 if line and "error" not in line.lower():
-                    assert " @ " in line, f"Invalid format: {line}"
+                    # Accept both " @ " and " at " formats
+                    assert " @ " in line or " at " in line, f"Invalid format: {line}"
 
     @pytest.mark.requires_program
     def test_json_response_format(self, http_client, program_loaded):

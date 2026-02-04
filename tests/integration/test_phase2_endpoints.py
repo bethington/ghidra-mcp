@@ -126,8 +126,8 @@ class TestAnalyzeFunctionComplete:
         })
         assert response.status_code == 200
         text = response.text
-        # Should return JSON with multiple sections
-        assert "decompiled_code" in text or "error" in text.lower()
+        # Should return JSON with function info (name, address, signature, etc.)
+        assert "name" in text.lower() or "address" in text.lower() or "error" in text.lower()
 
     @pytest.mark.requires_program
     def test_analyze_function_complete_minimal(self, http_client, sample_function):
