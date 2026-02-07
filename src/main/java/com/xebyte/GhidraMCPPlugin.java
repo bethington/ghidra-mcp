@@ -231,191 +231,196 @@ public class GhidraMCPPlugin extends Plugin {
         // LISTING ENDPOINTS - All use list_ prefix with snake_case
         // ==========================================================================
 
-        server.createContext("/list_methods", exchange -> {
+        server.createContext("/list_methods", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, getAllFunctionNames(offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/list_classes", exchange -> {
+        server.createContext("/list_classes", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, getAllClassNames(offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/list_segments", exchange -> {
+        server.createContext("/list_segments", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, listSegments(offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/list_imports", exchange -> {
+        server.createContext("/list_imports", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, listImports(offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/list_exports", exchange -> {
+        server.createContext("/list_exports", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, listExports(offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/list_namespaces", exchange -> {
+        server.createContext("/list_namespaces", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, listNamespaces(offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/list_data_items", exchange -> {
+        server.createContext("/list_data_items", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, listDefinedData(offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/list_data_items_by_xrefs", exchange -> {
+        server.createContext("/list_data_items_by_xrefs", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit  = parseIntOrDefault(qparams.get("limit"),  100);
             String format = qparams.getOrDefault("format", "text");
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, listDataItemsByXrefs(offset, limit, format, programName));
-        });
+        }));
 
-        server.createContext("/list_functions", exchange -> {
+        server.createContext("/list_functions", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, listFunctions(programName));
-        });
+        }));
 
         // LIST_FUNCTIONS_ENHANCED - Returns JSON with thunk/external flags
-        server.createContext("/list_functions_enhanced", exchange -> {
+        server.createContext("/list_functions_enhanced", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = Integer.parseInt(qparams.getOrDefault("offset", "0"));
             int limit = Integer.parseInt(qparams.getOrDefault("limit", "10000"));
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, listFunctionsEnhanced(offset, limit, programName));
-        });
+        }));
 
         // ==========================================================================
         // RENAME ENDPOINTS - All use rename_ prefix with snake_case
         // ==========================================================================
 
-        server.createContext("/rename_function", exchange -> {
+        server.createContext("/rename_function", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String result = renameFunction(params.get("oldName"), params.get("newName"));
             sendResponse(exchange, result);
-        });
+        }));
 
-        server.createContext("/rename_data", exchange -> {
+        server.createContext("/rename_data", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String result = renameDataAtAddress(params.get("address"), params.get("newName"));
             sendResponse(exchange, result);
-        });
+        }));
 
-        server.createContext("/rename_variable", exchange -> {
+        server.createContext("/rename_variable", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String functionName = params.get("functionName");
             String oldName = params.get("oldName");
             String newName = params.get("newName");
             String result = renameVariableInFunction(functionName, oldName, newName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // ==========================================================================
         // SEARCH ENDPOINTS
         // ==========================================================================
 
-        server.createContext("/search_functions", exchange -> {
+        server.createContext("/search_functions", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String searchTerm = qparams.get("query");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, searchFunctionsByName(searchTerm, offset, limit, programName));
-        });
+        }));
 
         // ==========================================================================
         // GETTER ENDPOINTS - All use get_ prefix with snake_case
         // ==========================================================================
 
-        server.createContext("/get_function_by_address", exchange -> {
+        server.createContext("/get_function_by_address", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             String programName = qparams.get("program");
             sendResponse(exchange, getFunctionByAddress(address, programName));
-        });
+        }));
 
-        server.createContext("/get_current_address", exchange -> {
+        server.createContext("/get_current_address", safeHandler(exchange -> {
             sendResponse(exchange, getCurrentAddress());
-        });
+        }));
 
-        server.createContext("/get_current_function", exchange -> {
+        server.createContext("/get_current_function", safeHandler(exchange -> {
             sendResponse(exchange, getCurrentFunction());
-        });
+        }));
 
         // ==========================================================================
         // DECOMPILE/DISASSEMBLE ENDPOINTS
         // ==========================================================================
 
-        server.createContext("/decompile_function", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String address = qparams.get("address");
-            String programName = qparams.get("program");  // Optional: target specific program
-            String timeoutStr = qparams.get("timeout");   // Optional: timeout in seconds
-            int timeout = DECOMPILE_TIMEOUT_SECONDS;
-            if (timeoutStr != null && !timeoutStr.isEmpty()) {
-                try { timeout = Integer.parseInt(timeoutStr); } catch (NumberFormatException ignored) {}
+        server.createContext("/decompile_function", safeHandler(exchange -> {
+            try {
+                Map<String, String> qparams = parseQueryParams(exchange);
+                String address = qparams.get("address");
+                String programName = qparams.get("program");
+                String timeoutStr = qparams.get("timeout");
+                int timeout = DECOMPILE_TIMEOUT_SECONDS;
+                if (timeoutStr != null && !timeoutStr.isEmpty()) {
+                    try { timeout = Integer.parseInt(timeoutStr); } catch (NumberFormatException ignored) {}
+                }
+                sendResponse(exchange, decompileFunctionByAddress(address, programName, timeout));
+            } catch (Throwable e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
             }
-            sendResponse(exchange, decompileFunctionByAddress(address, programName, timeout));
-        });
+        }));
 
-        server.createContext("/disassemble_function", exchange -> {
+        server.createContext("/disassemble_function", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, disassembleFunction(address, programName));
-        });
+        }));
 
-        server.createContext("/set_decompiler_comment", exchange -> {
+        server.createContext("/set_decompiler_comment", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
             String comment = params.get("comment");
             String result = setDecompilerComment(address, comment);
             sendResponse(exchange, result);
-        });
+        }));
 
-        server.createContext("/set_disassembly_comment", exchange -> {
+        server.createContext("/set_disassembly_comment", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
             String comment = params.get("comment");
             String result = setDisassemblyComment(address, comment);
             sendResponse(exchange, result);
-        });
+        }));
 
-        server.createContext("/rename_function_by_address", exchange -> {
+        server.createContext("/rename_function_by_address", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String functionAddress = params.get("function_address");
             String newName = params.get("new_name");
             String result = renameFunctionByAddress(functionAddress, newName);
             sendResponse(exchange, result);
-        });
+        }));
 
-        server.createContext("/set_function_prototype", exchange -> {
+        server.createContext("/set_function_prototype", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String functionAddress = (String) params.get("function_address");
             String prototype = (String) params.get("prototype");
@@ -435,14 +440,14 @@ public class GhidraMCPPlugin extends Plugin {
                 // Return the detailed error message to the client
                 sendResponse(exchange, "Failed to set function prototype: " + result.getErrorMessage());
             }
-        });
+        }));
 
-        server.createContext("/list_calling_conventions", exchange -> {
+        server.createContext("/list_calling_conventions", safeHandler(exchange -> {
             String result = listCallingConventions();
             sendResponse(exchange, result);
-        });
+        }));
 
-        server.createContext("/set_local_variable_type", exchange -> {
+        server.createContext("/set_local_variable_type", safeHandler(exchange -> {
             try {
                 Map<String, String> params = parsePostParams(exchange);
                 String functionAddress = params.get("function_address");
@@ -459,9 +464,9 @@ public class GhidraMCPPlugin extends Plugin {
                 Msg.error(this, errorMsg, e);
                 sendResponse(exchange, errorMsg);
             }
-        });
+        }));
 
-        server.createContext("/set_function_no_return", exchange -> {
+        server.createContext("/set_function_no_return", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String functionAddress = params.get("function_address");
             String noReturnStr = params.get("no_return");
@@ -479,9 +484,9 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = setFunctionNoReturn(functionAddress, noReturn);
             sendResponse(exchange, result);
-        });
+        }));
 
-        server.createContext("/clear_instruction_flow_override", exchange -> {
+        server.createContext("/clear_instruction_flow_override", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String instructionAddress = params.get("address");
 
@@ -492,10 +497,10 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = clearInstructionFlowOverride(instructionAddress);
             sendResponse(exchange, result);
-        });
+        }));
 
         // Variable storage control endpoint (v1.7.0)
-        server.createContext("/set_variable_storage", exchange -> {
+        server.createContext("/set_variable_storage", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String functionAddress = params.get("function_address");
             String variableName = params.get("variable_name");
@@ -516,10 +521,10 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = setVariableStorage(functionAddress, variableName, storageSpec);
             sendResponse(exchange, result);
-        });
+        }));
 
         // Ghidra script execution endpoint (v1.7.0)
-        server.createContext("/run_script", exchange -> {
+        server.createContext("/run_script", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String scriptPath = params.get("script_path");
             String scriptArgs = params.get("args"); // Optional JSON arguments
@@ -531,230 +536,279 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = runGhidraScript(scriptPath, scriptArgs);
             sendResponse(exchange, result);
-        });
+        }));
+
+        server.createContext("/run_script_inline", safeHandler(exchange -> {
+            try {
+                Map<String, Object> params = parseJsonParams(exchange);
+                String code = (String) params.get("code");
+                String scriptArgs = (String) params.get("args");
+
+                if (code == null || code.isEmpty()) {
+                    sendResponse(exchange, "{\"error\": \"code parameter is required\"}");
+                    return;
+                }
+
+                // Determine class name from code or generate one
+                String className = "InlineScript_" + System.currentTimeMillis();
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("public\\s+class\\s+(\\w+)").matcher(code);
+                if (m.find()) {
+                    className = m.group(1);
+                }
+
+                // Write to temp file
+                File tempDir = new File(System.getProperty("java.io.tmpdir"), "ghidra_mcp_scripts");
+                tempDir.mkdirs();
+                File tempScript = new File(tempDir, className + ".java");
+                try {
+                    java.nio.file.Files.writeString(tempScript.toPath(), code);
+                    String result = runGhidraScript(tempScript.getAbsolutePath(), scriptArgs);
+                    sendResponse(exchange, result);
+                } catch (Throwable e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
+                } finally {
+                    tempScript.delete();
+                }
+            } catch (Throwable e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
+            }
+        }));
 
         // List available Ghidra scripts (v1.7.0)
-        server.createContext("/list_scripts", exchange -> {
+        server.createContext("/list_scripts", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String filter = qparams.get("filter"); // Optional filter
 
             String result = listGhidraScripts(filter);
             sendResponse(exchange, result);
-        });
+        }));
 
         // Force decompiler reanalysis (v1.7.0)
-        server.createContext("/force_decompile", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String functionAddress = params.get("function_address");
+        server.createContext("/force_decompile", safeHandler(exchange -> {
+            try {
+                Map<String, String> params = parsePostParams(exchange);
+                String functionAddress = params.get("function_address");
 
-            if (functionAddress == null || functionAddress.isEmpty()) {
-                sendResponse(exchange, "Error: function_address parameter is required");
-                return;
+                if (functionAddress == null || functionAddress.isEmpty()) {
+                    sendResponse(exchange, "Error: function_address parameter is required");
+                    return;
+                }
+
+                String result = forceDecompile(functionAddress);
+                sendResponse(exchange, result);
+            } catch (Throwable e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
             }
-
-            String result = forceDecompile(functionAddress);
-            sendResponse(exchange, result);
-        });
+        }));
 
         // ==========================================================================
         // XREF ENDPOINTS - All use get_ prefix with snake_case
         // ==========================================================================
 
-        server.createContext("/get_xrefs_to", exchange -> {
+        server.createContext("/get_xrefs_to", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, getXrefsTo(address, offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/get_xrefs_from", exchange -> {
+        server.createContext("/get_xrefs_from", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, getXrefsFrom(address, offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/get_function_xrefs", exchange -> {
+        server.createContext("/get_function_xrefs", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String name = qparams.get("name");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, getFunctionXrefs(name, offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/get_function_labels", exchange -> {
+        server.createContext("/get_function_labels", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String name = qparams.get("name");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 20);
             sendResponse(exchange, getFunctionLabels(name, offset, limit));
-        });
+        }));
 
-        server.createContext("/get_function_jump_targets", exchange -> {
+        server.createContext("/get_function_jump_targets", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String name = qparams.get("name");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             sendResponse(exchange, getFunctionJumpTargets(name, offset, limit));
-        });
+        }));
 
-        server.createContext("/rename_label", exchange -> {
+        server.createContext("/rename_label", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
             String oldName = params.get("old_name");
             String newName = params.get("new_name");
             String result = renameLabel(address, oldName, newName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // External location endpoints (v1.8.2)
-        server.createContext("/list_external_locations", exchange -> {
+        server.createContext("/list_external_locations", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String programName = qparams.get("program");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             sendResponse(exchange, listExternalLocations(offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/get_external_location", exchange -> {
+        server.createContext("/get_external_location", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             String dllName = qparams.get("dll_name");
             String programName = qparams.get("program");
             sendResponse(exchange, getExternalLocationDetails(address, dllName, programName));
-        });
+        }));
 
-        server.createContext("/rename_external_location", exchange -> {
+        server.createContext("/rename_external_location", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
             String newName = params.get("new_name");
             sendResponse(exchange, renameExternalLocation(address, newName));
-        });
+        }));
 
-        server.createContext("/create_label", exchange -> {
+        server.createContext("/create_label", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
             String name = params.get("name");
             String result = createLabel(address, name);
             sendResponse(exchange, result);
-        });
+        }));
 
         // BATCH_CREATE_LABELS - Create multiple labels in a single operation (v1.5.1)
-        server.createContext("/batch_create_labels", exchange -> {
+        server.createContext("/batch_create_labels", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             List<Map<String, String>> labels = convertToMapList(params.get("labels"));
             String result = batchCreateLabels(labels);
             sendResponse(exchange, result);
-        });
+        }));
 
-        server.createContext("/rename_or_label", exchange -> {
+        server.createContext("/rename_or_label", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
             String name = params.get("name");
             String result = renameOrLabel(address, name);
             sendResponse(exchange, result);
-        });
+        }));
 
         // DELETE_LABEL - Remove a label at an address
-        server.createContext("/delete_label", exchange -> {
+        server.createContext("/delete_label", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");
             String name = params.get("name");  // Optional: specific label name to delete
             String result = deleteLabel(address, name);
             sendResponse(exchange, result);
-        });
+        }));
 
         // BATCH_DELETE_LABELS - Delete multiple labels in a single operation
-        server.createContext("/batch_delete_labels", exchange -> {
+        server.createContext("/batch_delete_labels", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             List<Map<String, String>> labels = convertToMapList(params.get("labels"));
             String result = batchDeleteLabels(labels);
             sendResponse(exchange, result);
-        });
+        }));
 
         // ==========================================================================
         // CALL GRAPH ENDPOINTS - All use get_ prefix with snake_case
         // ==========================================================================
 
-        server.createContext("/get_function_callees", exchange -> {
+        server.createContext("/get_function_callees", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String name = qparams.get("name");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, getFunctionCallees(name, offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/get_function_callers", exchange -> {
+        server.createContext("/get_function_callers", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String name = qparams.get("name");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, getFunctionCallers(name, offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/get_function_call_graph", exchange -> {
+        server.createContext("/get_function_call_graph", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String name = qparams.get("name");
             int depth = parseIntOrDefault(qparams.get("depth"), 2);
             String direction = qparams.getOrDefault("direction", "both");
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, getFunctionCallGraph(name, depth, direction, programName));
-        });
+        }));
 
-        server.createContext("/get_full_call_graph", exchange -> {
+        server.createContext("/get_full_call_graph", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String format = qparams.getOrDefault("format", "edges");
             int limit = parseIntOrDefault(qparams.get("limit"), 1000);
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, getFullCallGraph(format, limit, programName));
-        });
+        }));
 
-        server.createContext("/analyze_call_graph", exchange -> {
+        server.createContext("/analyze_call_graph", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String startFunction = qparams.get("start_function");
             String endFunction = qparams.get("end_function");
             String analysisType = qparams.getOrDefault("analysis_type", "summary");
             String programName = qparams.get("program");
             sendResponse(exchange, analyzeCallGraph(startFunction, endFunction, analysisType, programName));
-        });
+        }));
 
         // ==========================================================================
         // DATA TYPE ENDPOINTS
         // ==========================================================================
 
-        server.createContext("/list_data_types", exchange -> {
+        server.createContext("/list_data_types", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String category = qparams.get("category");
             String programName = qparams.get("program");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             sendResponse(exchange, listDataTypes(category, offset, limit, programName));
-        });
+        }));
 
-        server.createContext("/create_struct", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String name = (String) params.get("name");
-            Object fieldsObj = params.get("fields");
-            String fieldsJson;
-            if (fieldsObj instanceof String) {
-                fieldsJson = (String) fieldsObj;
-            } else if (fieldsObj instanceof java.util.List) {
-                // Convert List to proper JSON array
-                fieldsJson = serializeListToJson((java.util.List<?>) fieldsObj);
-            } else {
-                fieldsJson = fieldsObj != null ? fieldsObj.toString() : null;
+        server.createContext("/create_struct", safeHandler(exchange -> {
+            try {
+                Map<String, Object> params = parseJsonParams(exchange);
+                String name = (String) params.get("name");
+                Object fieldsObj = params.get("fields");
+                String fieldsJson;
+                if (fieldsObj instanceof String) {
+                    fieldsJson = (String) fieldsObj;
+                } else if (fieldsObj instanceof java.util.List) {
+                    // Convert List to proper JSON array
+                    fieldsJson = serializeListToJson((java.util.List<?>) fieldsObj);
+                } else {
+                    fieldsJson = fieldsObj != null ? fieldsObj.toString() : null;
+                }
+                sendResponse(exchange, createStruct(name, fieldsJson));
+            } catch (Throwable e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
             }
-            sendResponse(exchange, createStruct(name, fieldsJson));
-        });
+        }));
 
-        server.createContext("/create_enum", exchange -> {
+        server.createContext("/create_enum", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String name = (String) params.get("name");
             Object valuesObj = params.get("values");
@@ -771,9 +825,9 @@ public class GhidraMCPPlugin extends Plugin {
             int size = (sizeObj instanceof Integer) ? (Integer) sizeObj :
                        parseIntOrDefault(sizeObj != null ? sizeObj.toString() : null, 4);
             sendResponse(exchange, createEnum(name, valuesJson, size));
-        });
+        }));
 
-        server.createContext("/apply_data_type", exchange -> {
+        server.createContext("/apply_data_type", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String address = (String) params.get("address");
             String typeName = (String) params.get("type_name");
@@ -781,60 +835,60 @@ public class GhidraMCPPlugin extends Plugin {
             boolean clearExisting = (clearObj instanceof Boolean) ? (Boolean) clearObj : 
                                    Boolean.parseBoolean(clearObj != null ? clearObj.toString() : "true");
             sendResponse(exchange, applyDataType(address, typeName, clearExisting));
-        });
+        }));
 
-        server.createContext("/list_strings", exchange -> {
+        server.createContext("/list_strings", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String filter = qparams.get("filter");
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, listDefinedStrings(offset, limit, filter, programName));
-        });
+        }));
 
         // New endpoints for missing IDA functionality
-        server.createContext("/check_connection", exchange -> {
+        server.createContext("/check_connection", safeHandler(exchange -> {
             sendResponse(exchange, checkConnection());
-        });
+        }));
 
-        server.createContext("/get_version", exchange -> {
+        server.createContext("/get_version", safeHandler(exchange -> {
             sendResponse(exchange, getVersion());
-        });
+        }));
 
-        server.createContext("/get_metadata", exchange -> {
+        server.createContext("/get_metadata", safeHandler(exchange -> {
             sendResponse(exchange, getMetadata());
-        });
+        }));
 
-        server.createContext("/convert_number", exchange -> {
+        server.createContext("/convert_number", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String text = qparams.get("text");
             int size = parseIntOrDefault(qparams.get("size"), 4);
             sendResponse(exchange, convertNumber(text, size));
-        });
+        }));
 
-        server.createContext("/list_globals", exchange -> {
+        server.createContext("/list_globals", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             String filter = qparams.get("filter");
             String programName = qparams.get("program");  // Optional: target specific program
             sendResponse(exchange, listGlobals(offset, limit, filter, programName));
-        });
+        }));
 
-        server.createContext("/rename_global_variable", exchange -> {
+        server.createContext("/rename_global_variable", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String oldName = params.get("old_name");
             String newName = params.get("new_name");
             String result = renameGlobalVariable(oldName, newName);
             sendResponse(exchange, result);
-        });
+        }));
 
-        server.createContext("/get_entry_points", exchange -> {
+        server.createContext("/get_entry_points", safeHandler(exchange -> {
             sendResponse(exchange, getEntryPoints());
-        });
+        }));
 
         // Data type analysis endpoints
-        server.createContext("/create_union", exchange -> {
+        server.createContext("/create_union", safeHandler(exchange -> {
             try {
                 Map<String, Object> params = parseJsonParams(exchange);
                 String name = (String) params.get("name");
@@ -852,74 +906,74 @@ public class GhidraMCPPlugin extends Plugin {
             } catch (Exception e) {
                 sendResponse(exchange, "Union endpoint error: " + e.getMessage());
             }
-        });
+        }));
 
-        server.createContext("/get_type_size", exchange -> {
+        server.createContext("/get_type_size", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String typeName = qparams.get("type_name");
             sendResponse(exchange, getTypeSize(typeName));
-        });
+        }));
 
-        server.createContext("/get_struct_layout", exchange -> {
+        server.createContext("/get_struct_layout", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String structName = qparams.get("struct_name");
             sendResponse(exchange, getStructLayout(structName));
-        });
+        }));
 
-        server.createContext("/search_data_types", exchange -> {
+        server.createContext("/search_data_types", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String pattern = qparams.get("pattern");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             sendResponse(exchange, searchDataTypes(pattern, offset, limit));
-        });
+        }));
 
-        server.createContext("/get_enum_values", exchange -> {
+        server.createContext("/get_enum_values", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String enumName = qparams.get("enum_name");
             sendResponse(exchange, getEnumValues(enumName));
-        });
+        }));
 
-        server.createContext("/create_typedef", exchange -> {
+        server.createContext("/create_typedef", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String name = (String) params.get("name");
             String baseType = (String) params.get("base_type");
             sendResponse(exchange, createTypedef(name, baseType));
-        });
+        }));
 
-        server.createContext("/clone_data_type", exchange -> {
+        server.createContext("/clone_data_type", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String sourceType = (String) params.get("source_type");
             String newName = (String) params.get("new_name");
             sendResponse(exchange, cloneDataType(sourceType, newName));
-        });
+        }));
 
         // Removed duplicate - see v1.5.0 VALIDATE_DATA_TYPE endpoint below
 
-        server.createContext("/import_data_types", exchange -> {
+        server.createContext("/import_data_types", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String source = (String) params.get("source");
             String format = (String) params.getOrDefault("format", "c");
             sendResponse(exchange, importDataTypes(source, format));
-        });
+        }));
 
         // New data structure management endpoints
-        server.createContext("/delete_data_type", exchange -> {
+        server.createContext("/delete_data_type", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String typeName = (String) params.get("type_name");
             sendResponse(exchange, deleteDataType(typeName));
-        });
+        }));
 
-        server.createContext("/modify_struct_field", exchange -> {
+        server.createContext("/modify_struct_field", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String structName = (String) params.get("struct_name");
             String fieldName = (String) params.get("field_name");
             String newType = (String) params.get("new_type");
             String newName = (String) params.get("new_name");
             sendResponse(exchange, modifyStructField(structName, fieldName, newType, newName));
-        });
+        }));
 
-        server.createContext("/add_struct_field", exchange -> {
+        server.createContext("/add_struct_field", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String structName = (String) params.get("struct_name");
             String fieldName = (String) params.get("field_name");
@@ -927,52 +981,76 @@ public class GhidraMCPPlugin extends Plugin {
             Object offsetObj = params.get("offset");
             int offset = (offsetObj instanceof Integer) ? (Integer) offsetObj : -1;
             sendResponse(exchange, addStructField(structName, fieldName, fieldType, offset));
-        });
+        }));
 
-        server.createContext("/remove_struct_field", exchange -> {
+        server.createContext("/remove_struct_field", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String structName = params.get("struct_name");
             String fieldName = params.get("field_name");
             sendResponse(exchange, removeStructField(structName, fieldName));
-        });
+        }));
 
-        server.createContext("/create_array_type", exchange -> {
+        server.createContext("/create_array_type", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String baseType = (String) params.get("base_type");
             Object lengthObj = params.get("length");
             int length = (lengthObj instanceof Integer) ? (Integer) lengthObj : 1;
             String name = (String) params.get("name");
             sendResponse(exchange, createArrayType(baseType, length, name));
-        });
+        }));
 
-        server.createContext("/create_pointer_type", exchange -> {
+        server.createContext("/create_pointer_type", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String baseType = params.get("base_type");
             String name = params.get("name");
             sendResponse(exchange, createPointerType(baseType, name));
-        });
+        }));
 
-        server.createContext("/create_data_type_category", exchange -> {
+        server.createContext("/create_data_type_category", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String categoryPath = params.get("category_path");
             sendResponse(exchange, createDataTypeCategory(categoryPath));
-        });
+        }));
 
-        server.createContext("/move_data_type_to_category", exchange -> {
+        server.createContext("/move_data_type_to_category", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String typeName = params.get("type_name");
             String categoryPath = params.get("category_path");
             sendResponse(exchange, moveDataTypeToCategory(typeName, categoryPath));
-        });
+        }));
 
-        server.createContext("/list_data_type_categories", exchange -> {
+        server.createContext("/list_data_type_categories", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
             sendResponse(exchange, listDataTypeCategories(offset, limit));
-        });
+        }));
 
-        server.createContext("/create_function_signature", exchange -> {
+        server.createContext("/delete_function", safeHandler(exchange -> {
+            try {
+                Map<String, Object> params = parseJsonParams(exchange);
+                String address = (String) params.get("address");
+                sendResponse(exchange, deleteFunctionAtAddress(address));
+            } catch (Exception e) {
+                sendResponse(exchange, "{\"error\": \"" + e.toString().replace("\"", "\\\"") + "\"}");
+            }
+        }));
+
+        server.createContext("/create_function", safeHandler(exchange -> {
+            try {
+                Map<String, Object> params = parseJsonParams(exchange);
+                String address = (String) params.get("address");
+                String name = (String) params.get("name");
+                Object dfObj = params.get("disassemble_first");
+                boolean disassembleFirst = dfObj == null || Boolean.TRUE.equals(dfObj) ||
+                    "true".equalsIgnoreCase(String.valueOf(dfObj));
+                sendResponse(exchange, createFunctionAtAddress(address, name, disassembleFirst));
+            } catch (Exception e) {
+                sendResponse(exchange, "{\"error\": \"" + e.toString().replace("\"", "\\\"") + "\"}");
+            }
+        }));
+
+        server.createContext("/create_function_signature", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String name = (String) params.get("name");
             String returnType = (String) params.get("return_type");
@@ -980,32 +1058,45 @@ public class GhidraMCPPlugin extends Plugin {
             String parametersJson = (parametersObj instanceof String) ? (String) parametersObj : 
                                    (parametersObj != null ? parametersObj.toString() : null);
             sendResponse(exchange, createFunctionSignature(name, returnType, parametersJson));
-        });
+        }));
 
         // Memory reading endpoint
-        server.createContext("/read_memory", exchange -> {
+        server.createContext("/read_memory", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             String lengthStr = qparams.get("length");
             String programName = qparams.get("program");
             int length = parseIntOrDefault(lengthStr, 16);
             sendResponse(exchange, readMemory(address, length, programName));
-        });
+        }));
+
+        server.createContext("/create_memory_block", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String name = (String) params.get("name");
+            String address = (String) params.get("address");
+            long size = params.get("size") != null ? ((Number) params.get("size")).longValue() : 0;
+            boolean read = parseBoolOrDefault(params.get("read"), true);
+            boolean write = parseBoolOrDefault(params.get("write"), true);
+            boolean execute = parseBoolOrDefault(params.get("execute"), false);
+            boolean isVolatile = parseBoolOrDefault(params.get("volatile"), false);
+            String comment = (String) params.get("comment");
+            sendResponse(exchange, createMemoryBlock(name, address, size, read, write, execute, isVolatile, comment));
+        }));
 
         // ==========================================================================
         // HIGH-PERFORMANCE DATA ANALYSIS ENDPOINTS (v1.3.0)
         // ==========================================================================
 
         // 1. GET_BULK_XREFS - Batch xref retrieval
-        server.createContext("/get_bulk_xrefs", exchange -> {
+        server.createContext("/get_bulk_xrefs", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             Object addressesObj = params.get("addresses");
             String result = getBulkXrefs(addressesObj);
             sendResponse(exchange, result);
-        });
+        }));
 
         // 2. ANALYZE_DATA_REGION - Comprehensive data region analysis
-        server.createContext("/analyze_data_region", exchange -> {
+        server.createContext("/analyze_data_region", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String address = (String) params.get("address");
             int maxScanBytes = parseIntOrDefault(String.valueOf(params.get("max_scan_bytes")), 1024);
@@ -1016,10 +1107,10 @@ public class GhidraMCPPlugin extends Plugin {
             String result = analyzeDataRegion(address, maxScanBytes, includeXrefMap,
                                               includeAssemblyPatterns, includeBoundaryDetection);
             sendResponse(exchange, result);
-        });
+        }));
 
         // 3. DETECT_ARRAY_BOUNDS - Array/table size detection
-        server.createContext("/detect_array_bounds", exchange -> {
+        server.createContext("/detect_array_bounds", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String address = (String) params.get("address");
             boolean analyzeLoopBounds = parseBoolOrDefault(params.get("analyze_loop_bounds"), true);
@@ -1028,10 +1119,10 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = detectArrayBounds(address, analyzeLoopBounds, analyzeIndexing, maxScanRange);
             sendResponse(exchange, result);
-        });
+        }));
 
         // 4. GET_ASSEMBLY_CONTEXT - Assembly pattern analysis
-        server.createContext("/get_assembly_context", exchange -> {
+        server.createContext("/get_assembly_context", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             Object xrefSourcesObj = params.get("xref_sources");
             int contextInstructions = parseIntOrDefault(String.valueOf(params.get("context_instructions")), 5);
@@ -1039,10 +1130,10 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = getAssemblyContext(xrefSourcesObj, contextInstructions, includePatternsObj);
             sendResponse(exchange, result);
-        });
+        }));
 
         // 6. APPLY_DATA_CLASSIFICATION - Atomic type application
-        server.createContext("/apply_data_classification", exchange -> {
+        server.createContext("/apply_data_classification", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String address = (String) params.get("address");
             String classification = (String) params.get("classification");
@@ -1052,12 +1143,12 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = applyDataClassification(address, classification, name, comment, typeDefinitionObj);
             sendResponse(exchange, result);
-        });
+        }));
 
         // === FIELD-LEVEL ANALYSIS ENDPOINTS (v1.4.0) ===
 
         // ANALYZE_STRUCT_FIELD_USAGE - Analyze how structure fields are accessed
-        server.createContext("/analyze_struct_field_usage", exchange -> {
+        server.createContext("/analyze_struct_field_usage", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String address = (String) params.get("address");
             String structName = (String) params.get("struct_name");
@@ -1065,10 +1156,10 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = analyzeStructFieldUsage(address, structName, maxFunctionsToAnalyze);
             sendResponse(exchange, result);
-        });
+        }));
 
         // GET_FIELD_ACCESS_CONTEXT - Get assembly/decompilation context for specific field offsets
-        server.createContext("/get_field_access_context", exchange -> {
+        server.createContext("/get_field_access_context", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String structAddress = (String) params.get("struct_address");
             int fieldOffset = parseIntOrDefault(String.valueOf(params.get("field_offset")), 0);
@@ -1076,20 +1167,20 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = getFieldAccessContext(structAddress, fieldOffset, numExamples);
             sendResponse(exchange, result);
-        });
+        }));
 
         // SUGGEST_FIELD_NAMES - AI-assisted field name suggestions based on usage patterns
-        server.createContext("/suggest_field_names", exchange -> {
+        server.createContext("/suggest_field_names", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String structAddress = (String) params.get("struct_address");
             int structSize = parseIntOrDefault(String.valueOf(params.get("struct_size")), 0);
 
             String result = suggestFieldNames(structAddress, structSize);
             sendResponse(exchange, result);
-        });
+        }));
 
         // 7. INSPECT_MEMORY_CONTENT - Memory content inspection with string detection
-        server.createContext("/inspect_memory_content", exchange -> {
+        server.createContext("/inspect_memory_content", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             int length = parseIntOrDefault(qparams.get("length"), 64);
@@ -1097,97 +1188,97 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = inspectMemoryContent(address, length, detectStrings);
             sendResponse(exchange, result);
-        });
+        }));
 
         // === MALWARE ANALYSIS ENDPOINTS ===
 
         // DETECT_CRYPTO_CONSTANTS - Identify crypto constants
-        server.createContext("/detect_crypto_constants", exchange -> {
+        server.createContext("/detect_crypto_constants", safeHandler(exchange -> {
             String result = detectCryptoConstants();
             sendResponse(exchange, result);
-        });
+        }));
 
         // SEARCH_BYTE_PATTERNS - Search for byte patterns with masks
-        server.createContext("/search_byte_patterns", exchange -> {
+        server.createContext("/search_byte_patterns", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String pattern = qparams.get("pattern");
             String mask = qparams.get("mask");
 
             String result = searchBytePatterns(pattern, mask);
             sendResponse(exchange, result);
-        });
+        }));
 
         // FIND_SIMILAR_FUNCTIONS - Find structurally similar functions
-        server.createContext("/find_similar_functions", exchange -> {
+        server.createContext("/find_similar_functions", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String targetFunction = qparams.get("target_function");
             double threshold = parseDoubleOrDefault(qparams.get("threshold"), 0.8);
 
             String result = findSimilarFunctions(targetFunction, threshold);
             sendResponse(exchange, result);
-        });
+        }));
 
         // ANALYZE_CONTROL_FLOW - Analyze function control flow complexity
-        server.createContext("/analyze_control_flow", exchange -> {
+        server.createContext("/analyze_control_flow", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionName = qparams.get("function_name");
 
             String result = analyzeControlFlow(functionName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // FIND_ANTI_ANALYSIS_TECHNIQUES - Detect anti-analysis/anti-debug techniques
-        server.createContext("/find_anti_analysis_techniques", exchange -> {
+        server.createContext("/find_anti_analysis_techniques", safeHandler(exchange -> {
             String result = findAntiAnalysisTechniques();
             sendResponse(exchange, result);
-        });
+        }));
 
         // BATCH_DECOMPILE - Decompile multiple functions at once
-        server.createContext("/batch_decompile", exchange -> {
+        server.createContext("/batch_decompile", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functions = qparams.get("functions");
 
             String result = batchDecompileFunctions(functions);
             sendResponse(exchange, result);
-        });
+        }));
 
         // FIND_DEAD_CODE - Identify unreachable code blocks
-        server.createContext("/find_dead_code", exchange -> {
+        server.createContext("/find_dead_code", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionName = qparams.get("function_name");
 
             String result = findDeadCode(functionName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // DECRYPT_STRINGS_AUTO - Auto-decrypt obfuscated strings
-        server.createContext("/decrypt_strings_auto", exchange -> {
+        server.createContext("/decrypt_strings_auto", safeHandler(exchange -> {
             String result = autoDecryptStrings();
             sendResponse(exchange, result);
-        });
+        }));
 
         // ANALYZE_API_CALL_CHAINS - Detect suspicious API call patterns
-        server.createContext("/analyze_api_call_chains", exchange -> {
+        server.createContext("/analyze_api_call_chains", safeHandler(exchange -> {
             String result = analyzeAPICallChains();
             sendResponse(exchange, result);
-        });
+        }));
 
         // EXTRACT_IOCS_WITH_CONTEXT - Enhanced IOC extraction with context
-        server.createContext("/extract_iocs_with_context", exchange -> {
+        server.createContext("/extract_iocs_with_context", safeHandler(exchange -> {
             String result = extractIOCsWithContext();
             sendResponse(exchange, result);
-        });
+        }));
 
         // DETECT_MALWARE_BEHAVIORS - Detect common malware behaviors
-        server.createContext("/detect_malware_behaviors", exchange -> {
+        server.createContext("/detect_malware_behaviors", safeHandler(exchange -> {
             String result = detectMalwareBehaviors();
             sendResponse(exchange, result);
-        });
+        }));
 
         // === WORKFLOW OPTIMIZATION ENDPOINTS (v1.5.0) ===
 
         // BATCH_SET_COMMENTS - Set multiple comments in a single operation
-        server.createContext("/batch_set_comments", exchange -> {
+        server.createContext("/batch_set_comments", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String functionAddress = (String) params.get("function_address");
 
@@ -1198,30 +1289,30 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = batchSetComments(functionAddress, decompilerComments, disassemblyComments, plateComment);
             sendResponse(exchange, result);
-        });
+        }));
 
         // SET_PLATE_COMMENT - Set function header/plate comment
-        server.createContext("/set_plate_comment", exchange -> {
+        server.createContext("/set_plate_comment", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String functionAddress = params.get("function_address");
             String comment = params.get("comment");
 
             String result = setPlateComment(functionAddress, comment);
             sendResponse(exchange, result);
-        });
+        }));
 
         // GET_FUNCTION_VARIABLES - List all variables in a function
-        server.createContext("/get_function_variables", exchange -> {
+        server.createContext("/get_function_variables", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionName = qparams.get("function_name");
             String programName = qparams.get("program");
 
             String result = getFunctionVariables(functionName, programName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // BATCH_RENAME_FUNCTION_COMPONENTS - Rename function and components atomically
-        server.createContext("/batch_rename_function_components", exchange -> {
+        server.createContext("/batch_rename_function_components", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String functionAddress = (String) params.get("function_address");
             String functionName = (String) params.get("function_name");
@@ -1233,29 +1324,63 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = batchRenameFunctionComponents(functionAddress, functionName, parameterRenames, localRenames, returnType);
             sendResponse(exchange, result);
-        });
+        }));
 
         // GET_VALID_DATA_TYPES - List valid Ghidra data type strings
-        server.createContext("/get_valid_data_types", exchange -> {
+        server.createContext("/get_valid_data_types", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String category = qparams.get("category");
 
             String result = getValidDataTypes(category);
             sendResponse(exchange, result);
-        });
+        }));
 
         // VALIDATE_DATA_TYPE - Validate data type applicability at address
-        server.createContext("/validate_data_type", exchange -> {
+        server.createContext("/validate_data_type", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
             String typeName = qparams.get("type_name");
 
             String result = validateDataType(address, typeName);
             sendResponse(exchange, result);
-        });
+        }));
+
+        // GET_DATA_TYPE_SIZE - Get the size in bytes of a data type
+        server.createContext("/get_data_type_size", safeHandler(exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String typeName = qparams.get("type_name");
+
+            if (typeName == null || typeName.isEmpty()) {
+                sendResponse(exchange, "{\"error\": \"type_name parameter is required\"}");
+                return;
+            }
+
+            Program program = getCurrentProgram();
+            if (program == null) {
+                sendResponse(exchange, "{\"error\": \"No program open\"}");
+                return;
+            }
+
+            DataType dt = resolveDataType(program.getDataTypeManager(), typeName);
+            if (dt == null) {
+                sendResponse(exchange, "{\"error\": \"Data type not found: " + typeName + "\"}");
+                return;
+            }
+
+            String category = dt.getCategoryPath().toString();
+            if (category.equals("/")) {
+                category = "builtin";
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\"type_name\": \"").append(dt.getName()).append("\", ");
+            sb.append("\"size\": ").append(dt.getLength()).append(", ");
+            sb.append("\"category\": \"").append(category.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"}");
+            sendResponse(exchange, sb.toString());
+        }));
 
         // ANALYZE_FUNCTION_COMPLETENESS - Check function documentation completeness
-        server.createContext("/analyze_function_completeness", exchange -> {
+        server.createContext("/analyze_function_completeness", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionAddress = qparams.get("function_address");
 
@@ -1284,10 +1409,10 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = analyzeFunctionCompleteness(functionAddress);
             sendResponse(exchange, result);
-        });
+        }));
 
         // FIND_NEXT_UNDEFINED_FUNCTION - Find next function needing analysis
-        server.createContext("/find_next_undefined_function", exchange -> {
+        server.createContext("/find_next_undefined_function", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String startAddress = qparams.get("start_address");
             String criteria = qparams.get("criteria");
@@ -1297,10 +1422,10 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = findNextUndefinedFunction(startAddress, criteria, pattern, direction, programName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // BATCH_SET_VARIABLE_TYPES - Set types for multiple variables
-        server.createContext("/batch_set_variable_types", exchange -> {
+        server.createContext("/batch_set_variable_types", safeHandler(exchange -> {
             try {
                 Map<String, Object> params = parseJsonParams(exchange);
                 String functionAddress = (String) params.get("function_address");
@@ -1326,10 +1451,10 @@ public class GhidraMCPPlugin extends Plugin {
                 sendResponse(exchange, errorMsg);
                 Msg.error(this, "Error in batch_set_variable_types endpoint", e);
             }
-        });
+        }));
 
         // NEW v1.6.0: BATCH_RENAME_VARIABLES - Rename multiple variables atomically
-        server.createContext("/batch_rename_variables", exchange -> {
+        server.createContext("/batch_rename_variables", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String functionAddress = (String) params.get("function_address");
 
@@ -1351,10 +1476,10 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = batchRenameVariables(functionAddress, variableRenames, forceIndividual);
             sendResponse(exchange, result);
-        });
+        }));
 
         // NEW v1.6.0: VALIDATE_FUNCTION_PROTOTYPE - Validate prototype before applying
-        server.createContext("/validate_function_prototype", exchange -> {
+        server.createContext("/validate_function_prototype", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionAddress = qparams.get("function_address");
             String prototype = qparams.get("prototype");
@@ -1362,28 +1487,28 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = validateFunctionPrototype(functionAddress, prototype, callingConvention);
             sendResponse(exchange, result);
-        });
+        }));
 
         // NEW v1.6.0: VALIDATE_DATA_TYPE_EXISTS - Check if type exists
-        server.createContext("/validate_data_type_exists", exchange -> {
+        server.createContext("/validate_data_type_exists", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String typeName = qparams.get("type_name");
 
             String result = validateDataTypeExists(typeName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // NEW v1.6.0: CAN_RENAME_AT_ADDRESS - Determine address type and operation
-        server.createContext("/can_rename_at_address", exchange -> {
+        server.createContext("/can_rename_at_address", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
 
             String result = canRenameAtAddress(address);
             sendResponse(exchange, result);
-        });
+        }));
 
         // NEW v1.6.0: ANALYZE_FUNCTION_COMPLETE - Comprehensive single-call analysis
-        server.createContext("/analyze_function_complete", exchange -> {
+        server.createContext("/analyze_function_complete", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String name = qparams.get("name");
             boolean includeXrefs = Boolean.parseBoolean(qparams.getOrDefault("include_xrefs", "true"));
@@ -1395,10 +1520,10 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, programName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // NEW v1.6.0: SEARCH_FUNCTIONS_ENHANCED - Advanced search with filtering
-        server.createContext("/search_functions_enhanced", exchange -> {
+        server.createContext("/search_functions_enhanced", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String namePattern = qparams.get("name_pattern");
             Integer minXrefs = qparams.get("min_xrefs") != null ? Integer.parseInt(qparams.get("min_xrefs")) : null;
@@ -1414,35 +1539,48 @@ public class GhidraMCPPlugin extends Plugin {
             String result = searchFunctionsEnhanced(namePattern, minXrefs, maxXrefs, callingConvention,
                 hasCustomName, regex, sortBy, offset, limit, programName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // NEW v1.7.1: DISASSEMBLE_BYTES - Disassemble a range of bytes
-        server.createContext("/disassemble_bytes", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String startAddress = (String) params.get("start_address");
-            String endAddress = (String) params.get("end_address");
-            Integer length = params.get("length") != null ? ((Number) params.get("length")).intValue() : null;
-            boolean restrictToExecuteMemory = params.get("restrict_to_execute_memory") != null ?
-                (Boolean) params.get("restrict_to_execute_memory") : true;
+        server.createContext("/disassemble_bytes", safeHandler(exchange -> {
+            try {
+                Map<String, Object> params = parseJsonParams(exchange);
+                String startAddress = (String) params.get("start_address");
+                String endAddress = (String) params.get("end_address");
+                Integer length = params.get("length") != null ? ((Number) params.get("length")).intValue() : null;
+                Object rtem = params.get("restrict_to_execute_memory");
+                boolean restrictToExecuteMemory = rtem == null || Boolean.TRUE.equals(rtem) ||
+                    "true".equalsIgnoreCase(String.valueOf(rtem));
 
-            String result = disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory);
-            sendResponse(exchange, result);
-        });
+                String result = disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory);
+                sendResponse(exchange, result);
+            } catch (Exception e) {
+                sendResponse(exchange, "{\"error\": \"" + e.toString().replace("\"", "\\\"") + "\"}");
+            }
+        }));
 
         // Script execution endpoint (v1.9.1)
-        server.createContext("/run_ghidra_script", exchange -> {
-            Map<String, Object> params = parseJsonParams(exchange);
-            String scriptName = (String) params.get("script_name");
-            int timeoutSeconds = ((Number) params.getOrDefault("timeout_seconds", 300)).intValue();
-            boolean captureOutput = (boolean) params.getOrDefault("capture_output", true);
+        server.createContext("/run_ghidra_script", safeHandler(exchange -> {
+            try {
+                Map<String, Object> params = parseJsonParams(exchange);
+                String scriptName = (String) params.get("script_name");
+                int timeoutSeconds = params.get("timeout_seconds") != null ?
+                    ((Number) params.get("timeout_seconds")).intValue() : 300;
+                Object coObj = params.get("capture_output");
+                boolean captureOutput = coObj == null || Boolean.TRUE.equals(coObj) ||
+                    "true".equalsIgnoreCase(String.valueOf(coObj));
 
-            String result = runGhidraScriptWithCapture(scriptName, timeoutSeconds, captureOutput);
-            sendResponse(exchange, result);
-        });
+                String result = runGhidraScriptWithCapture(scriptName, timeoutSeconds, captureOutput);
+                sendResponse(exchange, result);
+            } catch (Throwable e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
+            }
+        }));
 
         // BOOKMARK ENDPOINTS (v1.9.4) - Progress tracking via Ghidra bookmarks
         // SET_BOOKMARK - Create or update a bookmark at an address
-        server.createContext("/set_bookmark", exchange -> {
+        server.createContext("/set_bookmark", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String address = (String) params.get("address");
             String category = (String) params.get("category");
@@ -1450,81 +1588,109 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = setBookmark(address, category, comment);
             sendResponse(exchange, result);
-        });
+        }));
 
         // LIST_BOOKMARKS - List bookmarks, optionally filtered by category
-        server.createContext("/list_bookmarks", exchange -> {
+        server.createContext("/list_bookmarks", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String category = qparams.get("category");
             String address = qparams.get("address");
 
             String result = listBookmarks(category, address);
             sendResponse(exchange, result);
-        });
+        }));
 
         // DELETE_BOOKMARK - Delete a bookmark at an address
-        server.createContext("/delete_bookmark", exchange -> {
+        server.createContext("/delete_bookmark", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
             String address = (String) params.get("address");
             String category = (String) params.get("category");
 
             String result = deleteBookmark(address, category);
             sendResponse(exchange, result);
-        });
+        }));
 
         // ==================== PROGRAM MANAGEMENT ENDPOINTS ====================
-        
+
+        server.createContext("/save_program", safeHandler(exchange -> {
+            try {
+                sendResponse(exchange, saveCurrentProgram());
+            } catch (Throwable e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
+            }
+        }));
+
+        server.createContext("/exit_ghidra", safeHandler(exchange -> {
+            try {
+                // Save first, then exit
+                String saveResult = saveCurrentProgram();
+                sendResponse(exchange, "{\"success\": true, \"message\": \"Saving and exiting Ghidra\", \"save\": " + saveResult + "}");
+                // Schedule exit after response is sent
+                new Thread(() -> {
+                    try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+                    SwingUtilities.invokeLater(() -> {
+                        PluginTool t = getTool();
+                        if (t != null) t.close();
+                    });
+                }).start();
+            } catch (Throwable e) {
+                String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
+            }
+        }));
+
         // LIST_OPEN_PROGRAMS - List all currently open programs in Ghidra
-        server.createContext("/list_open_programs", exchange -> {
+        server.createContext("/list_open_programs", safeHandler(exchange -> {
             String result = listOpenPrograms();
             sendResponse(exchange, result);
-        });
+        }));
 
         // GET_CURRENT_PROGRAM_INFO - Get detailed info about the active program
-        server.createContext("/get_current_program_info", exchange -> {
+        server.createContext("/get_current_program_info", safeHandler(exchange -> {
             String result = getCurrentProgramInfo();
             sendResponse(exchange, result);
-        });
+        }));
 
         // SWITCH_PROGRAM - Switch MCP context to a different open program
-        server.createContext("/switch_program", exchange -> {
+        server.createContext("/switch_program", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String programName = qparams.get("name");
             String result = switchProgram(programName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // LIST_PROJECT_FILES - List all files in the current Ghidra project
-        server.createContext("/list_project_files", exchange -> {
+        server.createContext("/list_project_files", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String folder = qparams.get("folder");
             String result = listProjectFiles(folder);
             sendResponse(exchange, result);
-        });
+        }));
 
         // OPEN_PROGRAM - Open a program from the current project
-        server.createContext("/open_program", exchange -> {
+        server.createContext("/open_program", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String path = qparams.get("path");
             String result = openProgramFromProject(path);
             sendResponse(exchange, result);
-        });
+        }));
 
         // ==================================================================================
         // FUNCTION HASH INDEX - Cross-binary documentation propagation
         // ==================================================================================
 
         // GET_FUNCTION_HASH - Compute normalized opcode hash for a function
-        server.createContext("/get_function_hash", exchange -> {
+        server.createContext("/get_function_hash", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionAddress = qparams.get("address");
             String programName = qparams.get("program");
             String result = getFunctionHash(functionAddress, programName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // GET_BULK_FUNCTION_HASHES - Get hashes for multiple/all functions efficiently
-        server.createContext("/get_bulk_function_hashes", exchange -> {
+        server.createContext("/get_bulk_function_hashes", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
@@ -1532,50 +1698,50 @@ public class GhidraMCPPlugin extends Plugin {
             String programName = qparams.get("program");
             String result = getBulkFunctionHashes(offset, limit, filter, programName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // GET_FUNCTION_DOCUMENTATION - Export all documentation for a function
-        server.createContext("/get_function_documentation", exchange -> {
+        server.createContext("/get_function_documentation", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionAddress = qparams.get("address");
             String result = getFunctionDocumentation(functionAddress);
             sendResponse(exchange, result);
-        });
+        }));
 
         // APPLY_FUNCTION_DOCUMENTATION - Import documentation to a target function
-        server.createContext("/apply_function_documentation", exchange -> {
+        server.createContext("/apply_function_documentation", safeHandler(exchange -> {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             String result = applyFunctionDocumentation(body);
             sendResponse(exchange, result);
-        });
+        }));
 
         // ==================================================================================
         // CROSS-VERSION MATCHING TOOLS - Accelerate function documentation propagation
         // ==================================================================================
 
         // COMPARE_PROGRAMS_DOCUMENTATION - Compare documented vs undocumented counts across programs
-        server.createContext("/compare_programs_documentation", exchange -> {
+        server.createContext("/compare_programs_documentation", safeHandler(exchange -> {
             String result = compareProgramsDocumentation();
             sendResponse(exchange, result);
-        });
+        }));
 
         // FIND_UNDOCUMENTED_BY_STRING - Find FUN_* functions referencing a string
-        server.createContext("/find_undocumented_by_string", exchange -> {
+        server.createContext("/find_undocumented_by_string", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String stringAddress = qparams.get("address");
             String programName = qparams.get("program");
             String result = findUndocumentedByString(stringAddress, programName);
             sendResponse(exchange, result);
-        });
+        }));
 
         // BATCH_STRING_ANCHOR_REPORT - Generate report of source file strings and their FUN_* functions
-        server.createContext("/batch_string_anchor_report", exchange -> {
+        server.createContext("/batch_string_anchor_report", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String pattern = qparams.getOrDefault("pattern", ".cpp");
             String programName = qparams.get("program");
             String result = batchStringAnchorReport(pattern, programName);
             sendResponse(exchange, result);
-        });
+        }));
 
         server.setExecutor(null);
         new Thread(() -> {
@@ -2185,9 +2351,14 @@ public class GhidraMCPPlugin extends Plugin {
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
-            Function func = program.getFunctionManager().getFunctionAt(addr);
+            if (addr == null) return "Error: Invalid address: " + addressStr;
 
-            if (func == null) return "No function found at address " + addressStr;
+            Function func = program.getFunctionManager().getFunctionAt(addr);
+            if (func == null) {
+                func = program.getFunctionManager().getFunctionContaining(addr);
+            }
+
+            if (func == null) return "No function found at or containing address " + addressStr;
 
             return String.format("Function: %s at %s\nSignature: %s\nEntry: %s\nBody: %s - %s",
                 func.getName(),
@@ -2347,8 +2518,9 @@ public class GhidraMCPPlugin extends Plugin {
             }
             
             return decompResult.getDecompiledFunction().getC();
-        } catch (Exception e) {
-            return "{\"error\": \"Error decompiling function: " + escapeJson(e.getMessage()) + "\"}";
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            return "{\"error\": \"Error decompiling function: " + escapeJson(msg) + "\"}";
         }
     }
 
@@ -3608,8 +3780,8 @@ public class GhidraMCPPlugin extends Plugin {
                     decompiler.openProgram(program);
 
                     try {
-                        // Force a fresh decompilation
-                        decompiler.setSimplificationStyle("normalize");
+                        // Flush cached results to force fresh decompilation
+                        decompiler.flushCache();
                         DecompileResults results = decompiler.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
 
                         if (results == null || !results.decompileCompleted()) {
@@ -3646,13 +3818,15 @@ public class GhidraMCPPlugin extends Plugin {
                         decompiler.dispose();
                     }
 
-                } catch (Exception e) {
-                    resultMsg.append("Error: ").append(e.getMessage());
+                } catch (Throwable e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    resultMsg.append("Error: ").append(msg);
                     Msg.error(this, "Error forcing decompilation", e);
                 }
             });
-        } catch (InterruptedException | InvocationTargetException e) {
-            resultMsg.append("Error: Failed to execute on Swing thread: ").append(e.getMessage());
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            resultMsg.append("Error: Failed to execute on Swing thread: ").append(msg);
             Msg.error(this, "Failed to execute force decompile on Swing thread", e);
         }
 
@@ -3878,12 +4052,72 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
+     * Maps common C type names to Ghidra built-in DataType instances.
+     * These types exist as Java classes but may not be in the per-program DTM.
+     */
+    private DataType resolveWellKnownType(String typeName) {
+        switch (typeName.toLowerCase()) {
+            case "int":        return ghidra.program.model.data.IntegerDataType.dataType;
+            case "uint":       return ghidra.program.model.data.UnsignedIntegerDataType.dataType;
+            case "short":      return ghidra.program.model.data.ShortDataType.dataType;
+            case "ushort":     return ghidra.program.model.data.UnsignedShortDataType.dataType;
+            case "long":       return ghidra.program.model.data.LongDataType.dataType;
+            case "ulong":      return ghidra.program.model.data.UnsignedLongDataType.dataType;
+            case "longlong":
+            case "long long":  return ghidra.program.model.data.LongLongDataType.dataType;
+            case "char":       return ghidra.program.model.data.CharDataType.dataType;
+            case "uchar":      return ghidra.program.model.data.UnsignedCharDataType.dataType;
+            case "float":      return ghidra.program.model.data.FloatDataType.dataType;
+            case "double":     return ghidra.program.model.data.DoubleDataType.dataType;
+            case "bool":
+            case "boolean":    return ghidra.program.model.data.BooleanDataType.dataType;
+            case "void":       return ghidra.program.model.data.VoidDataType.dataType;
+            case "byte":       return ghidra.program.model.data.ByteDataType.dataType;
+            case "sbyte":      return ghidra.program.model.data.SignedByteDataType.dataType;
+            case "word":       return ghidra.program.model.data.WordDataType.dataType;
+            case "dword":      return ghidra.program.model.data.DWordDataType.dataType;
+            case "qword":      return ghidra.program.model.data.QWordDataType.dataType;
+            case "int8_t":
+            case "int8":       return ghidra.program.model.data.SignedByteDataType.dataType;
+            case "uint8_t":
+            case "uint8":      return ghidra.program.model.data.ByteDataType.dataType;
+            case "int16_t":
+            case "int16":      return ghidra.program.model.data.ShortDataType.dataType;
+            case "uint16_t":
+            case "uint16":     return ghidra.program.model.data.UnsignedShortDataType.dataType;
+            case "int32_t":
+            case "int32":      return ghidra.program.model.data.IntegerDataType.dataType;
+            case "uint32_t":
+            case "uint32":     return ghidra.program.model.data.UnsignedIntegerDataType.dataType;
+            case "int64_t":
+            case "int64":      return ghidra.program.model.data.LongLongDataType.dataType;
+            case "uint64_t":
+            case "uint64":     return ghidra.program.model.data.UnsignedLongLongDataType.dataType;
+            case "size_t":     return ghidra.program.model.data.UnsignedIntegerDataType.dataType;
+            case "unsigned int": return ghidra.program.model.data.UnsignedIntegerDataType.dataType;
+            case "unsigned short": return ghidra.program.model.data.UnsignedShortDataType.dataType;
+            case "unsigned long": return ghidra.program.model.data.UnsignedLongDataType.dataType;
+            case "unsigned char": return ghidra.program.model.data.UnsignedCharDataType.dataType;
+            case "signed char": return ghidra.program.model.data.SignedByteDataType.dataType;
+            default:           return null;
+        }
+    }
+
+    /**
      * Resolves a data type by name, handling common types and pointer types
      * @param dtm The data type manager
      * @param typeName The type name to resolve
      * @return The resolved DataType, or null if not found
      */
     private DataType resolveDataType(DataTypeManager dtm, String typeName) {
+        // ZERO: Map common C type names to Ghidra built-in DataType instances
+        // These types exist as Java classes but may not be registered in the per-program DTM
+        DataType wellKnown = resolveWellKnownType(typeName);
+        if (wellKnown != null) {
+            Msg.info(this, "Resolved well-known type: " + typeName + " -> " + wellKnown.getName());
+            return wellKnown;
+        }
+
         // FIRST: Try Ghidra builtin types in root category (prioritize over Windows types)
         // This ensures we use lowercase builtin types (uint, ushort, byte) instead of
         // Windows SDK types (UINT, USHORT, BYTE) when the type name matches
@@ -4549,6 +4783,47 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * List all currently open programs in Ghidra
      */
+    private String saveCurrentProgram() {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        final AtomicReference<String> errorMsg = new AtomicReference<>();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    ghidra.framework.model.DomainFile df = program.getDomainFile();
+                    if (df == null) {
+                        errorMsg.set("Program has no domain file");
+                        return;
+                    }
+                    df.save(new ConsoleTaskMonitor());
+                    result.append("{");
+                    result.append("\"success\": true, ");
+                    result.append("\"program\": \"").append(program.getName().replace("\"", "\\\"")).append("\", ");
+                    result.append("\"message\": \"Program saved successfully\"");
+                    result.append("}");
+                } catch (Throwable e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    errorMsg.set(msg);
+                    Msg.error(this, "Error saving program", e);
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+            }
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            return "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}";
+        }
+
+        return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
+    }
+
     private String listOpenPrograms() {
         ProgramManager pm = tool.getService(ProgramManager.class);
         if (pm == null) {
@@ -5481,40 +5756,33 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
+    /**
+     * Wraps an HttpHandler so that any Throwable is caught and returned as a JSON error response.
+     * This prevents uncaught exceptions from crashing the HTTP server and dropping connections.
+     */
+    private com.sun.net.httpserver.HttpHandler safeHandler(com.sun.net.httpserver.HttpHandler handler) {
+        return exchange -> {
+            try {
+                handler.handle(exchange);
+            } catch (Throwable e) {
+                try {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    String safeMsg = msg.replace("\\", "\\\\").replace("\"", "\\\"")
+                                       .replace("\n", "\\n").replace("\r", "\\r");
+                    sendResponse(exchange, "{\"error\": \"" + safeMsg + "\"}");
+                } catch (Throwable ignored) {
+                    // Last resort - response already sent or exchange broken
+                    Msg.error(this, "Failed to send error response", ignored);
+                }
+            }
+        };
+    }
+
     private void sendResponse(HttpExchange exchange, String response) throws IOException {
-        // Determine appropriate HTTP status code based on response content
-        int statusCode = 200;  // Default to success
-
-        if (response != null) {
-            String responseLower = response.toLowerCase();
-
-            // Check for warnings (limitations, not actual errors) - return 200 OK
-            if (response.startsWith("Warning:")) {
-                statusCode = 200;  // Success with warning message
-            }
-            // Check for known limitations - return 422 Unprocessable Entity
-            else if (responseLower.contains("type-setting limitations") ||
-                     responseLower.contains("stack-based local variables with 4-byte size may have type-setting limitations")) {
-                statusCode = 422;  // Unprocessable Entity - operation understood but cannot be processed
-            }
-            // Check for error indicators at the start of the response
-            else if (response.startsWith("Error") ||
-                response.startsWith("Failed") ||
-                response.startsWith("Invalid") ||
-                response.startsWith("Unknown field type:") ||
-                response.startsWith("No program loaded") ||
-                response.startsWith("No function found") ||
-                responseLower.startsWith("exception") ||
-                responseLower.contains("error:") && responseLower.indexOf("error:") < 50) {
-                statusCode = 500;  // Internal Server Error - unexpected failure
-            }
-            // Check for "not found" type errors
-            else if (responseLower.contains("not found") ||
-                     responseLower.contains("does not exist") ||
-                     responseLower.contains("no such")) {
-                statusCode = 404;  // Not Found
-            }
-        }
+        // Always return 200 — error information is in the response body.
+        // The MCP bridge parses the body for errors; non-200 codes cause
+        // misinterpretation (e.g. 404 treated as "endpoint not found").
+        int statusCode = 200;
 
         byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
         Headers headers = exchange.getResponseHeaders();
@@ -7066,23 +7334,51 @@ public class GhidraMCPPlugin extends Plugin {
                 return "Structure with name '" + name + "' already exists";
             }
 
+            // Pre-resolve all field types before entering the transaction
+            Map<FieldDefinition, DataType> resolvedTypes = new java.util.LinkedHashMap<>();
+            for (FieldDefinition field : fields) {
+                DataType fieldType = resolveDataType(dtm, field.type);
+                if (fieldType == null) {
+                    return "Unknown field type: " + field.type;
+                }
+                resolvedTypes.put(field, fieldType);
+            }
+
+            // Determine if any fields have explicit offsets
+            boolean hasOffsets = fields.stream().anyMatch(f -> f.offset >= 0);
+
+            // Calculate required struct size from field offsets
+            int requiredSize = 0;
+            if (hasOffsets) {
+                for (Map.Entry<FieldDefinition, DataType> entry : resolvedTypes.entrySet()) {
+                    int off = entry.getKey().offset;
+                    int len = entry.getValue().getLength();
+                    if (off >= 0 && off + len > requiredSize) {
+                        requiredSize = off + len;
+                    }
+                }
+            }
+            final int structInitSize = requiredSize;
+
             // Create the structure on Swing EDT thread (required for transactions)
             SwingUtilities.invokeAndWait(() -> {
                 int txId = program.startTransaction("Create Structure: " + name);
                 try {
                     ghidra.program.model.data.StructureDataType struct =
-                        new ghidra.program.model.data.StructureDataType(name, 0);
+                        new ghidra.program.model.data.StructureDataType(name, structInitSize);
 
-                    // Add fields sequentially for simplicity
-                    for (FieldDefinition field : fields) {
-                        DataType fieldType = resolveDataType(dtm, field.type);
-                        if (fieldType == null) {
-                            resultMsg.append("Unknown field type: ").append(field.type);
-                            return;
+                    for (Map.Entry<FieldDefinition, DataType> entry : resolvedTypes.entrySet()) {
+                        FieldDefinition field = entry.getKey();
+                        DataType fieldType = entry.getValue();
+
+                        if (field.offset >= 0 && hasOffsets) {
+                            // Place field at explicit offset
+                            struct.replaceAtOffset(field.offset, fieldType,
+                                fieldType.getLength(), field.name, "");
+                        } else {
+                            // Append to end
+                            struct.add(fieldType, fieldType.getLength(), field.name, "");
                         }
-
-                        // Add field to the end of the structure
-                        struct.add(fieldType, fieldType.getLength(), field.name, "");
                     }
 
                     // Add the structure to the data type manager
@@ -7093,8 +7389,9 @@ public class GhidraMCPPlugin extends Plugin {
                             .append(fields.size()).append(" fields, total size: ")
                             .append(createdStruct.getLength()).append(" bytes");
 
-                } catch (Exception e) {
-                    resultMsg.append("Error creating structure: ").append(e.getMessage());
+                } catch (Throwable e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    resultMsg.append("Error creating structure: ").append(msg);
                     Msg.error(this, "Error creating structure", e);
                 }
                 finally {
@@ -7112,10 +7409,9 @@ public class GhidraMCPPlugin extends Plugin {
                 }
             }
 
-        } catch (InterruptedException | InvocationTargetException e) {
-            return "Error: Failed to execute on Swing thread: " + e.getMessage();
-        } catch (Exception e) {
-            return "Error parsing fields JSON: " + e.getMessage();
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            return "Error: " + msg;
         }
 
         return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
@@ -8456,6 +8752,98 @@ public class GhidraMCPPlugin extends Plugin {
     // Backward compatibility overload
     private String readMemory(String addressStr, int length) {
         return readMemory(addressStr, length, null);
+    }
+
+    /**
+     * Create an uninitialized memory block (e.g., for MMIO/peripheral regions).
+     */
+    private String createMemoryBlock(String name, String addressStr, long size,
+                                     boolean read, boolean write, boolean execute,
+                                     boolean isVolatile, String comment) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+        if (name == null || name.isEmpty()) {
+            return "{\"error\": \"name parameter required\"}";
+        }
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "{\"error\": \"address parameter required\"}";
+        }
+        if (size <= 0) {
+            return "{\"error\": \"size must be positive\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        final AtomicReference<String> errorMsg = new AtomicReference<>();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Create memory block");
+                boolean success = false;
+                try {
+                    Address addr = program.getAddressFactory().getAddress(addressStr);
+                    if (addr == null) {
+                        errorMsg.set("Invalid address: " + addressStr);
+                        return;
+                    }
+
+                    // Check for overlap with existing blocks
+                    Address end = addr.add(size - 1);
+                    for (MemoryBlock existing : program.getMemory().getBlocks()) {
+                        if (existing.contains(addr) || existing.contains(end) ||
+                            (addr.compareTo(existing.getStart()) <= 0 && end.compareTo(existing.getEnd()) >= 0)) {
+                            errorMsg.set("Address range overlaps with existing block '" + existing.getName() +
+                                         "' (" + existing.getStart() + " - " + existing.getEnd() + ")");
+                            return;
+                        }
+                    }
+
+                    MemoryBlock block = program.getMemory().createUninitializedBlock(
+                        name, addr, size, false);
+
+                    block.setRead(read);
+                    block.setWrite(write);
+                    block.setExecute(execute);
+                    block.setVolatile(isVolatile);
+                    if (comment != null && !comment.isEmpty()) {
+                        block.setComment(comment);
+                    }
+
+                    success = true;
+                    result.append("{");
+                    result.append("\"success\": true, ");
+                    result.append("\"name\": \"").append(name.replace("\"", "\\\"")).append("\", ");
+                    result.append("\"start\": \"").append(block.getStart()).append("\", ");
+                    result.append("\"end\": \"").append(block.getEnd()).append("\", ");
+                    result.append("\"size\": ").append(block.getSize()).append(", ");
+                    result.append("\"permissions\": \"");
+                    result.append(read ? "r" : "-");
+                    result.append(write ? "w" : "-");
+                    result.append(execute ? "x" : "-");
+                    result.append("\", ");
+                    result.append("\"volatile\": ").append(isVolatile).append(", ");
+                    result.append("\"message\": \"Memory block '").append(name.replace("\"", "\\\""))
+                          .append("' created at ").append(addr).append("\"");
+                    result.append("}");
+                } catch (Throwable e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    errorMsg.set(msg);
+                    Msg.error(this, "Error creating memory block", e);
+                } finally {
+                    program.endTransaction(tx, success);
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+            }
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            return "{\"error\": \"Failed to execute on Swing thread: " + msg.replace("\"", "\\\"") + "\"}";
+        }
+
+        return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
     }
 
     /**
@@ -14266,8 +14654,9 @@ public class GhidraMCPPlugin extends Plugin {
                         Msg.error(this, "disassembleBytes: Disassembly command failed - " + cmd.getStatusMsg());
                     }
 
-                } catch (Exception e) {
-                    errorMsg.set("Exception during disassembly: " + e.getMessage());
+                } catch (Throwable e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    errorMsg.set("Exception during disassembly: " + msg);
                     Msg.error(this, "disassembleBytes: Exception during disassembly", e);
                 } finally {
                     program.endTransaction(tx, success);
@@ -14280,14 +14669,181 @@ public class GhidraMCPPlugin extends Plugin {
                 Msg.error(this, "disassembleBytes: Returning error response - " + errorMsg.get());
                 return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
             Msg.error(this, "disassembleBytes: Exception in outer try block", e);
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}";
         }
 
         String response = result.toString();
         Msg.debug(this, "disassembleBytes: Returning success response, length=" + response.length());
         return response;
+    }
+
+    /**
+     * Create a function at the specified address.
+     * Optionally disassembles bytes first and assigns a custom name.
+     *
+     * @param addressStr Starting address in hex format
+     * @param name Optional function name (null for auto-generated)
+     * @param disassembleFirst If true, disassemble bytes at address before creating function
+     * @return JSON result with function creation status
+     */
+    private String deleteFunctionAtAddress(String addressStr) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "{\"error\": \"address parameter required\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        final AtomicReference<String> errorMsg = new AtomicReference<>();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Delete function at address");
+                boolean success = false;
+                try {
+                    Address addr = program.getAddressFactory().getAddress(addressStr);
+                    if (addr == null) {
+                        errorMsg.set("Invalid address: " + addressStr);
+                        return;
+                    }
+
+                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    if (func == null) {
+                        errorMsg.set("No function found at address " + addressStr);
+                        return;
+                    }
+
+                    String funcName = func.getName();
+                    long bodySize = func.getBody().getNumAddresses();
+                    program.getFunctionManager().removeFunction(addr);
+                    success = true;
+
+                    result.append("{");
+                    result.append("\"success\": true, ");
+                    result.append("\"address\": \"").append(addr).append("\", ");
+                    result.append("\"deleted_function\": \"").append(funcName.replace("\"", "\\\"")).append("\", ");
+                    result.append("\"body_size\": ").append(bodySize).append(", ");
+                    result.append("\"message\": \"Function '").append(funcName.replace("\"", "\\\""))
+                          .append("' deleted at ").append(addr).append("\"");
+                    result.append("}");
+                } catch (Throwable e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    errorMsg.set("Exception deleting function: " + msg);
+                    Msg.error(this, "Error deleting function at " + addressStr, e);
+                } finally {
+                    program.endTransaction(tx, success);
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+            }
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            return "{\"error\": \"Failed to execute on Swing thread: " + msg.replace("\"", "\\\"") + "\"}";
+        }
+
+        return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
+    }
+
+    private String createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "{\"error\": \"address parameter required\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        final AtomicReference<String> errorMsg = new AtomicReference<>();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Create function at address");
+                boolean success = false;
+
+                try {
+                    Address addr = program.getAddressFactory().getAddress(addressStr);
+                    if (addr == null) {
+                        errorMsg.set("Invalid address: " + addressStr);
+                        return;
+                    }
+
+                    // Check if a function already exists at this address
+                    Function existing = program.getFunctionManager().getFunctionAt(addr);
+                    if (existing != null) {
+                        errorMsg.set("Function already exists at " + addressStr + ": " + existing.getName());
+                        return;
+                    }
+
+                    // Optionally disassemble first
+                    if (disassembleFirst) {
+                        if (program.getListing().getInstructionAt(addr) == null) {
+                            AddressSet addrSet = new AddressSet(addr, addr);
+                            ghidra.app.cmd.disassemble.DisassembleCommand disCmd =
+                                new ghidra.app.cmd.disassemble.DisassembleCommand(addrSet, null, true);
+                            if (!disCmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
+                                errorMsg.set("Failed to disassemble at " + addressStr + ": " + disCmd.getStatusMsg());
+                                return;
+                            }
+                        }
+                    }
+
+                    // Create the function using CreateFunctionCmd
+                    ghidra.app.cmd.function.CreateFunctionCmd cmd =
+                        new ghidra.app.cmd.function.CreateFunctionCmd(addr);
+                    if (!cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
+                        errorMsg.set("Failed to create function at " + addressStr + ": " + cmd.getStatusMsg());
+                        return;
+                    }
+
+                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    if (func == null) {
+                        errorMsg.set("Function creation reported success but function not found at " + addressStr);
+                        return;
+                    }
+
+                    // Optionally rename the function
+                    if (name != null && !name.isEmpty()) {
+                        func.setName(name, SourceType.USER_DEFINED);
+                    }
+
+                    success = true;
+                    String funcName = func.getName();
+                    result.append("{");
+                    result.append("\"success\": true, ");
+                    result.append("\"address\": \"").append(addr).append("\", ");
+                    result.append("\"function_name\": \"").append(funcName.replace("\"", "\\\"")).append("\", ");
+                    result.append("\"entry_point\": \"").append(func.getEntryPoint()).append("\", ");
+                    result.append("\"body_size\": ").append(func.getBody().getNumAddresses()).append(", ");
+                    result.append("\"message\": \"Function created successfully at ").append(addr).append("\"");
+                    result.append("}");
+
+                } catch (Throwable e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    errorMsg.set("Exception creating function: " + msg);
+                    Msg.error(this, "Error creating function at " + addressStr, e);
+                } finally {
+                    program.endTransaction(tx, success);
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+            }
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            return "{\"error\": \"Failed to execute on Swing thread: " + msg.replace("\"", "\\\"") + "\"}";
+        }
+
+        return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
     }
 
     private String generateScriptContent(String purpose, String workflowType, Map<String, Object> parameters) {
