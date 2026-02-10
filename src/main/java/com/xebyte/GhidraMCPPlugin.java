@@ -54,6 +54,8 @@ import ghidra.program.model.block.CodeBlockIterator;
 import ghidra.program.model.block.CodeBlockReference;
 import ghidra.program.model.block.CodeBlockReferenceIterator;
 
+import com.xebyte.core.BinaryComparisonService;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.Headers;
@@ -1753,6 +1755,48 @@ public class GhidraMCPPlugin extends Plugin {
             String pattern = qparams.getOrDefault("pattern", ".cpp");
             String programName = qparams.get("program");
             String result = batchStringAnchorReport(pattern, programName);
+            sendResponse(exchange, result);
+        }));
+
+        // FUZZY MATCHING & DIFF - Cross-binary function comparison
+        server.createContext("/get_function_signature", safeHandler(exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String address = qparams.get("address");
+            String programName = qparams.get("program");
+            String result = handleGetFunctionSignature(address, programName);
+            sendResponse(exchange, result);
+        }));
+
+        server.createContext("/find_similar_functions_fuzzy", safeHandler(exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String address = qparams.get("address");
+            String sourceProgramName = qparams.get("source_program");
+            String targetProgramName = qparams.get("target_program");
+            double threshold = parseDoubleOrDefault(qparams.get("threshold"), 0.7);
+            int limit = parseIntOrDefault(qparams.get("limit"), 20);
+            String result = handleFindSimilarFunctionsFuzzy(address, sourceProgramName, targetProgramName, threshold, limit);
+            sendResponse(exchange, result);
+        }));
+
+        server.createContext("/bulk_fuzzy_match", safeHandler(exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String sourceProgramName = qparams.get("source_program");
+            String targetProgramName = qparams.get("target_program");
+            double threshold = parseDoubleOrDefault(qparams.get("threshold"), 0.7);
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 50);
+            String filter = qparams.get("filter");
+            String result = handleBulkFuzzyMatch(sourceProgramName, targetProgramName, threshold, offset, limit, filter);
+            sendResponse(exchange, result);
+        }));
+
+        server.createContext("/diff_functions", safeHandler(exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String addressA = qparams.get("address_a");
+            String addressB = qparams.get("address_b");
+            String programA = qparams.get("program_a");
+            String programB = qparams.get("program_b");
+            String result = handleDiffFunctions(addressA, addressB, programA, programB);
             sendResponse(exchange, result);
         }));
 
@@ -15886,6 +15930,118 @@ public class GhidraMCPPlugin extends Plugin {
         }
 
         return result.toString();
+    }
+
+    // ==========================================================================
+    // FUZZY MATCHING & DIFF HANDLERS
+    // ==========================================================================
+
+    private String handleGetFunctionSignature(String addressStr, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr == null) return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+
+            Function func = program.getFunctionManager().getFunctionAt(addr);
+            if (func == null) return "{\"error\": \"No function at address: " + addressStr + "\"}";
+
+            BinaryComparisonService.FunctionSignature sig =
+                BinaryComparisonService.computeFunctionSignature(program, func, new ConsoleTaskMonitor());
+            return sig.toJson();
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    private String handleFindSimilarFunctionsFuzzy(String addressStr, String sourceProgramName,
+            String targetProgramName, double threshold, int limit) {
+        // Source program: use sourceProgramName if given, otherwise current program
+        Object[] srcResult = getProgramOrError(sourceProgramName);
+        Program srcProgram = (Program) srcResult[0];
+        if (srcProgram == null) return (String) srcResult[1];
+
+        // Target program is required
+        if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
+            return "{\"error\": \"target_program parameter is required\"}";
+        }
+        Object[] tgtResult = getProgramOrError(targetProgramName);
+        Program tgtProgram = (Program) tgtResult[0];
+        if (tgtProgram == null) return (String) tgtResult[1];
+
+        try {
+            Address addr = srcProgram.getAddressFactory().getAddress(addressStr);
+            if (addr == null) return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+
+            Function srcFunc = srcProgram.getFunctionManager().getFunctionAt(addr);
+            if (srcFunc == null) return "{\"error\": \"No function at address: " + addressStr + "\"}";
+
+            return BinaryComparisonService.findSimilarFunctionsJson(
+                srcProgram, srcFunc, tgtProgram, threshold, limit, new ConsoleTaskMonitor());
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    private String handleBulkFuzzyMatch(String sourceProgramName, String targetProgramName,
+            double threshold, int offset, int limit, String filter) {
+        if (sourceProgramName == null || sourceProgramName.trim().isEmpty()) {
+            return "{\"error\": \"source_program parameter is required\"}";
+        }
+        Object[] srcResult = getProgramOrError(sourceProgramName);
+        Program srcProgram = (Program) srcResult[0];
+        if (srcProgram == null) return (String) srcResult[1];
+
+        if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
+            return "{\"error\": \"target_program parameter is required\"}";
+        }
+        Object[] tgtResult = getProgramOrError(targetProgramName);
+        Program tgtProgram = (Program) tgtResult[0];
+        if (tgtProgram == null) return (String) tgtResult[1];
+
+        try {
+            return BinaryComparisonService.bulkFuzzyMatchJson(
+                srcProgram, tgtProgram, threshold, offset, limit, filter, new ConsoleTaskMonitor());
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    private String handleDiffFunctions(String addressA, String addressB, String programAName, String programBName) {
+        // Program A
+        Object[] resultA = getProgramOrError(programAName);
+        Program progA = (Program) resultA[0];
+        if (progA == null) return (String) resultA[1];
+
+        // Program B defaults to Program A if not specified
+        Program progB;
+        if (programBName == null || programBName.trim().isEmpty()) {
+            progB = progA;
+        } else {
+            Object[] resultB = getProgramOrError(programBName);
+            progB = (Program) resultB[0];
+            if (progB == null) return (String) resultB[1];
+        }
+
+        try {
+            Address addrA = progA.getAddressFactory().getAddress(addressA);
+            if (addrA == null) return "{\"error\": \"Invalid address_a: " + addressA + "\"}";
+
+            Address addrB = progB.getAddressFactory().getAddress(addressB);
+            if (addrB == null) return "{\"error\": \"Invalid address_b: " + addressB + "\"}";
+
+            Function funcA = progA.getFunctionManager().getFunctionAt(addrA);
+            if (funcA == null) return "{\"error\": \"No function at address_a: " + addressA + "\"}";
+
+            Function funcB = progB.getFunctionManager().getFunctionAt(addrB);
+            if (funcB == null) return "{\"error\": \"No function at address_b: " + addressB + "\"}";
+
+            return BinaryComparisonService.diffFunctionsJson(progA, funcA, progB, funcB, new ConsoleTaskMonitor());
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
     }
 
     @Override

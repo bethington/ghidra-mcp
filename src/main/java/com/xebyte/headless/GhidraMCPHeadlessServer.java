@@ -949,12 +949,52 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.canRenameAtAddress(address));
         });
 
+        // FUZZY MATCHING & DIFF
+        server.createContext("/get_function_signature", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String address = params.get("address");
+            String programName = params.get("program");
+            sendResponse(exchange, endpointHandler.getFunctionSignature(address, programName));
+        });
+
+        server.createContext("/find_similar_functions_fuzzy", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String address = params.get("address");
+            String sourceProgramName = params.get("source_program");
+            String targetProgramName = params.get("target_program");
+            double threshold = parseDoubleOrDefault(params.get("threshold"), 0.7);
+            int limit = parseIntOrDefault(params.get("limit"), 20);
+            sendResponse(exchange, endpointHandler.findSimilarFunctionsFuzzy(
+                address, sourceProgramName, targetProgramName, threshold, limit));
+        });
+
+        server.createContext("/bulk_fuzzy_match", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String sourceProgramName = params.get("source_program");
+            String targetProgramName = params.get("target_program");
+            double threshold = parseDoubleOrDefault(params.get("threshold"), 0.7);
+            int offset = parseIntOrDefault(params.get("offset"), 0);
+            int limit = parseIntOrDefault(params.get("limit"), 50);
+            String filter = params.get("filter");
+            sendResponse(exchange, endpointHandler.bulkFuzzyMatch(
+                sourceProgramName, targetProgramName, threshold, offset, limit, filter));
+        });
+
+        server.createContext("/diff_functions", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String addressA = params.get("address_a");
+            String addressB = params.get("address_b");
+            String programA = params.get("program_a");
+            String programB = params.get("program_b");
+            sendResponse(exchange, endpointHandler.diffFunctions(addressA, addressB, programA, programB));
+        });
+
         System.out.println("Registered " + countEndpoints() + " REST API endpoints");
     }
 
     private int countEndpoints() {
         // Count contexts registered - this is an approximation
-        return 87; // Number of endpoints registered above (40 + 9 Phase 1 + 11 Phase 2 + 15 Phase 3 + 12 Phase 4 endpoints)
+        return 91; // 87 + 4 fuzzy matching/diff endpoints
     }
 
     public void stop() {
@@ -1086,6 +1126,17 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             return defaultValue;
         }
         return Boolean.parseBoolean(value);
+    }
+
+    private double parseDoubleOrDefault(String value, double defaultValue) {
+        if (value == null || value.isEmpty()) {
+            return defaultValue;
+        }
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
     }
 
     // ==========================================================================
