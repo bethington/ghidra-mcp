@@ -5635,6 +5635,124 @@ def search_memory_strings(
 
 
 # ====================================================================================
+# UI NAVIGATION & CURSOR TOOLS - Interactive Ghidra session support
+# ====================================================================================
+
+
+@mcp.tool()
+def get_current_address() -> str:
+    """
+    Get the current cursor/selection address in Ghidra's listing view.
+
+    Returns the address where the user's cursor is currently positioned
+    in the Ghidra UI. Useful for:
+    - Understanding user's current focus
+    - Building context-aware suggestions
+    - Coordinating between manual and automated analysis
+
+    Returns:
+        JSON with current address and containing function (if any)
+
+    Example:
+        location = get_current_address()
+        # Returns: {"address": "0x401234", "function": "main", "in_function": true}
+    """
+    url = f"{ghidra_server_url}/get_current_address"
+    return make_request(url, method="GET")
+
+
+@mcp.tool()
+def get_current_function() -> str:
+    """
+    Get information about the function at the current cursor position.
+
+    Returns details about the function containing the cursor, including
+    its name, address range, signature, and basic metrics.
+
+    Returns:
+        JSON with function details or null if cursor is not in a function
+
+    Example:
+        func = get_current_function()
+        # Returns: {"name": "main", "entry": "0x401000", "signature": "int main(int, char**)", ...}
+    """
+    url = f"{ghidra_server_url}/get_current_function"
+    return make_request(url, method="GET")
+
+
+@mcp.tool()
+def set_bookmark(
+    address: str,
+    category: str = "Analysis",
+    comment: str = "",
+    bookmark_type: str = "Note"
+) -> str:
+    """
+    Set a bookmark at the specified address.
+
+    Creates a bookmark to mark interesting locations for later review.
+    Bookmarks persist with the program and are visible in Ghidra's
+    Bookmark window.
+
+    Args:
+        address: Address to bookmark (hex string)
+        category: Bookmark category for organization (default: "Analysis")
+        comment: Descriptive comment for the bookmark
+        bookmark_type: Type of bookmark - "Note", "Warning", "Error", "Info" (default: "Note")
+
+    Returns:
+        JSON confirmation of bookmark creation
+
+    Example:
+        # Mark an interesting function
+        set_bookmark("0x401000", "Crypto", "Possible encryption routine")
+
+        # Flag suspicious code
+        set_bookmark("0x402000", "Malware", "Anti-debug check", bookmark_type="Warning")
+    """
+    if not address:
+        raise GhidraValidationError("Address is required")
+
+    url = f"{ghidra_server_url}/set_bookmark"
+    params = {
+        "address": address,
+        "category": category,
+        "comment": comment,
+        "type": bookmark_type
+    }
+    return make_request(url, method="POST", json_data=params)
+
+
+@mcp.tool()
+def delete_bookmark(address: str, category: str = None) -> str:
+    """
+    Delete a bookmark at the specified address.
+
+    Removes a previously created bookmark. Can optionally filter by
+    category to delete only specific bookmarks.
+
+    Args:
+        address: Address of the bookmark to delete
+        category: Optional category filter (deletes all if not specified)
+
+    Returns:
+        JSON confirmation of deletion
+
+    Example:
+        delete_bookmark("0x401000")
+        delete_bookmark("0x401000", category="Analysis")
+    """
+    if not address:
+        raise GhidraValidationError("Address is required")
+
+    url = f"{ghidra_server_url}/delete_bookmark"
+    params = {"address": address}
+    if category:
+        params["category"] = category
+    return make_request(url, method="POST", json_data=params)
+
+
+# ====================================================================================
 # CROSS-VERSION MATCHING TOOLS - Accelerate function documentation propagation
 # ====================================================================================
 
