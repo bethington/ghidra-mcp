@@ -3410,7 +3410,7 @@ def get_enum_values(enum_name: str) -> list:
 
 
 @mcp.tool()
-def search_byte_patterns(pattern: str, mask: str = None) -> list:
+def search_byte_patterns(pattern: str, mask: str = None, program: str = None) -> list:
     """
     Search for byte patterns with optional wildcards (e.g., 'E8 ?? ?? ?? ??').
     Useful for finding shellcode, API calls, or specific instruction sequences.
@@ -3421,6 +3421,7 @@ def search_byte_patterns(pattern: str, mask: str = None) -> list:
     Args:
         pattern: Hexadecimal pattern to search for (e.g., "E8 ?? ?? ?? ??")
         mask: Optional mask for wildcards (use ? for wildcards)
+        program: Optional program name for multi-binary projects
 
     Returns:
         List of addresses where the pattern was found
@@ -3428,10 +3429,13 @@ def search_byte_patterns(pattern: str, mask: str = None) -> list:
     Example:
         search_byte_patterns("E8 ?? ?? ?? ??")  # Find all CALL instructions
         search_byte_patterns("558BEC")  # Find standard function prologue
+        search_byte_patterns("44324c4f44", program="Game.dll")  # Search in specific binary
     """
     params = {"pattern": pattern}
     if mask:
         params["mask"] = mask
+    if program:
+        params["program"] = program
     return safe_get("search_byte_patterns", params)
 
 
@@ -5538,6 +5542,95 @@ def open_program(path: str) -> str:
 
     url = f"{ghidra_server_url}/open_program"
     params = {"path": path}
+    return make_request(url, method="GET", params=params)
+
+
+# ====================================================================================
+# MEMORY OPERATIONS - Read and search raw memory bytes
+# ====================================================================================
+
+
+@mcp.tool()
+def read_memory(address: str, length: int = 256, program: str = None) -> str:
+    """
+    Read raw bytes from memory at the specified address.
+
+    Reads binary data directly from the program's memory space. Useful for:
+    - Examining data structures at specific addresses
+    - Reading string data that wasn't auto-detected
+    - Verifying patch locations before modification
+    - Extracting embedded resources or constants
+
+    Args:
+        address: Memory address to read from (hex string, e.g., "0x401000")
+        length: Number of bytes to read (default: 256, max recommended: 4096)
+        program: Optional program name for multi-binary projects
+
+    Returns:
+        JSON with address, bytes (hex string), ASCII representation, and length
+
+    Example:
+        # Read 64 bytes at address
+        data = read_memory("0x401000", 64)
+        # Returns: {"address": "0x401000", "bytes": "4d5a9000...", "ascii": "MZ...", "length": 64}
+
+        # Read from specific program in multi-binary project
+        data = read_memory("0x10001000", 128, program="Game.dll")
+    """
+    if not address:
+        raise GhidraValidationError("Address is required")
+    
+    url = f"{ghidra_server_url}/read_memory"
+    params = {"address": address, "length": length}
+    if program:
+        params["program"] = program
+    return make_request(url, method="GET", params=params)
+
+
+@mcp.tool()
+def search_memory_strings(
+    query: str, 
+    min_length: int = 4,
+    encoding: str = "ascii",
+    program: str = None
+) -> str:
+    """
+    Search for string patterns in program memory.
+
+    Searches for strings matching the query pattern. More flexible than
+    list_strings() as it can find strings that weren't auto-detected
+    during initial analysis.
+
+    Args:
+        query: String or regex pattern to search for
+        min_length: Minimum string length to consider (default: 4)
+        encoding: String encoding - "ascii", "utf8", "utf16" (default: "ascii")
+        program: Optional program name for multi-binary projects
+
+    Returns:
+        JSON with matching strings, their addresses, and context
+
+    Example:
+        # Find error messages
+        results = search_memory_strings("error")
+        
+        # Find version strings
+        results = search_memory_strings("v1\\.[0-9]+")
+        
+        # Find Unicode strings
+        results = search_memory_strings("Player", encoding="utf16")
+    """
+    if not query:
+        raise GhidraValidationError("Query string is required")
+    
+    url = f"{ghidra_server_url}/search_strings"
+    params = {
+        "query": query,
+        "min_length": min_length,
+        "encoding": encoding
+    }
+    if program:
+        params["program"] = program
     return make_request(url, method="GET", params=params)
 
 
