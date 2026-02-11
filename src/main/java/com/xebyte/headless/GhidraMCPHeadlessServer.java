@@ -614,6 +614,38 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.renameFunctionByAddress(address, newName));
         });
 
+        server.createContext("/save_program", exchange -> {
+            sendResponse(exchange, endpointHandler.saveCurrentProgram());
+        });
+
+        server.createContext("/delete_function", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String address = params.get("address");
+            sendResponse(exchange, endpointHandler.deleteFunctionAtAddress(address));
+        });
+
+        server.createContext("/create_function", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String address = params.get("address");
+            String name = params.get("name");
+            boolean disassembleFirst = !"false".equalsIgnoreCase(params.get("disassemble_first"));
+            sendResponse(exchange, endpointHandler.createFunctionAtAddress(address, name, disassembleFirst));
+        });
+
+        server.createContext("/create_memory_block", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String mbName = params.get("name");
+            String mbAddress = params.get("address");
+            long mbSize = params.get("size") != null ? Long.parseLong(params.get("size")) : 0;
+            boolean mbRead = !"false".equalsIgnoreCase(params.get("read"));
+            boolean mbWrite = !"false".equalsIgnoreCase(params.get("write"));
+            boolean mbExecute = "true".equalsIgnoreCase(params.get("execute"));
+            boolean mbVolatile = "true".equalsIgnoreCase(params.get("volatile"));
+            String mbComment = params.get("comment");
+            sendResponse(exchange, endpointHandler.createMemoryBlock(
+                mbName, mbAddress, mbSize, mbRead, mbWrite, mbExecute, mbVolatile, mbComment));
+        });
+
         server.createContext("/rename_data", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String address = params.get("address");

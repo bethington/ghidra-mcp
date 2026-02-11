@@ -638,6 +638,180 @@ public class HeadlessEndpointHandler {
         }
     }
 
+    public String saveCurrentProgram() {
+        Program program = getProgram(null);
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+        try {
+            return threadingStrategy.executeWrite(program, "Save program", () -> {
+                ghidra.framework.model.DomainFile df = program.getDomainFile();
+                if (df == null) {
+                    return "{\"error\": \"Program has no domain file\"}";
+                }
+                df.save(TaskMonitor.DUMMY);
+                return "{\"success\": true, \"program\": \"" + escapeJson(program.getName()) +
+                       "\", \"message\": \"Program saved successfully\"}";
+            });
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    public String deleteFunctionAtAddress(String addressStr) {
+        Program program = getProgram(null);
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "{\"error\": \"address parameter required\"}";
+        }
+
+        Address addr = parseAddress(program, addressStr);
+        if (addr == null) {
+            return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+        }
+
+        Function func = program.getFunctionManager().getFunctionAt(addr);
+        if (func == null) {
+            return "{\"error\": \"No function found at address " + addressStr + "\"}";
+        }
+
+        String funcName = func.getName();
+        long bodySize = func.getBody().getNumAddresses();
+
+        try {
+            return threadingStrategy.executeWrite(program, "Delete function at address", () -> {
+                program.getFunctionManager().removeFunction(addr);
+                return "{" +
+                    "\"success\": true, " +
+                    "\"address\": \"" + addr + "\", " +
+                    "\"deleted_function\": \"" + escapeJson(funcName) + "\", " +
+                    "\"body_size\": " + bodySize + ", " +
+                    "\"message\": \"Function '" + escapeJson(funcName) + "' deleted at " + addr + "\"" +
+                    "}";
+            });
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    public String createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
+        Program program = getProgram(null);
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "{\"error\": \"address parameter required\"}";
+        }
+
+        Address addr = parseAddress(program, addressStr);
+        if (addr == null) {
+            return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+        }
+
+        Function existing = program.getFunctionManager().getFunctionAt(addr);
+        if (existing != null) {
+            return "{\"error\": \"Function already exists at " + addressStr + ": " + existing.getName() + "\"}";
+        }
+
+        try {
+            return threadingStrategy.executeWrite(program, "Create function at address", () -> {
+                // Optionally disassemble first
+                if (disassembleFirst) {
+                    if (program.getListing().getInstructionAt(addr) == null) {
+                        ghidra.program.model.address.AddressSet addrSet =
+                            new ghidra.program.model.address.AddressSet(addr, addr);
+                        ghidra.app.cmd.disassemble.DisassembleCommand disCmd =
+                            new ghidra.app.cmd.disassemble.DisassembleCommand(addrSet, null, true);
+                        if (!disCmd.applyTo(program, TaskMonitor.DUMMY)) {
+                            return "{\"error\": \"Failed to disassemble at " + addressStr + ": " + disCmd.getStatusMsg() + "\"}";
+                        }
+                    }
+                }
+
+                ghidra.app.cmd.function.CreateFunctionCmd cmd =
+                    new ghidra.app.cmd.function.CreateFunctionCmd(addr);
+                if (!cmd.applyTo(program, TaskMonitor.DUMMY)) {
+                    return "{\"error\": \"Failed to create function at " + addressStr + ": " + cmd.getStatusMsg() + "\"}";
+                }
+
+                Function func = program.getFunctionManager().getFunctionAt(addr);
+                if (func == null) {
+                    return "{\"error\": \"Function creation reported success but function not found at " + addressStr + "\"}";
+                }
+
+                if (name != null && !name.isEmpty()) {
+                    func.setName(name, SourceType.USER_DEFINED);
+                }
+
+                String funcName = func.getName();
+                return "{" +
+                    "\"success\": true, " +
+                    "\"address\": \"" + addr + "\", " +
+                    "\"function_name\": \"" + escapeJson(funcName) + "\", " +
+                    "\"entry_point\": \"" + func.getEntryPoint() + "\", " +
+                    "\"body_size\": " + func.getBody().getNumAddresses() + ", " +
+                    "\"message\": \"Function created successfully at " + addr + "\"" +
+                    "}";
+            });
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    public String createMemoryBlock(String name, String addressStr, long size,
+                                    boolean read, boolean write, boolean execute,
+                                    boolean isVolatile, String comment) {
+        Program program = getProgram(null);
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+        if (name == null || name.isEmpty()) {
+            return "{\"error\": \"name parameter required\"}";
+        }
+        if (addressStr == null || addressStr.isEmpty()) {
+            return "{\"error\": \"address parameter required\"}";
+        }
+        if (size <= 0) {
+            return "{\"error\": \"size must be positive\"}";
+        }
+
+        Address addr = parseAddress(program, addressStr);
+        if (addr == null) {
+            return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+        }
+
+        try {
+            return threadingStrategy.executeWrite(program, "Create memory block", () -> {
+                MemoryBlock block = program.getMemory().createUninitializedBlock(
+                    name, addr, size, false);
+
+                block.setRead(read);
+                block.setWrite(write);
+                block.setExecute(execute);
+                block.setVolatile(isVolatile);
+                if (comment != null && !comment.isEmpty()) {
+                    block.setComment(comment);
+                }
+
+                return "{" +
+                    "\"success\": true, " +
+                    "\"name\": \"" + escapeJson(name) + "\", " +
+                    "\"start\": \"" + block.getStart() + "\", " +
+                    "\"end\": \"" + block.getEnd() + "\", " +
+                    "\"size\": " + block.getSize() + ", " +
+                    "\"permissions\": \"" + (read ? "r" : "-") + (write ? "w" : "-") + (execute ? "x" : "-") + "\", " +
+                    "\"volatile\": " + isVolatile + ", " +
+                    "\"message\": \"Memory block '" + escapeJson(name) + "' created at " + addr + "\"" +
+                    "}";
+            });
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
     public String renameData(String addressStr, String newName) {
         Program program = getProgram(null);
         if (program == null) {

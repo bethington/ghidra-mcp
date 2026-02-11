@@ -4702,6 +4702,58 @@ def disassemble_bytes(
 
 
 @mcp.tool()
+def save_program() -> str:
+    """
+    Save the current program in Ghidra.
+
+    Saves all pending changes to the Ghidra project database.
+    Call this before exiting Ghidra to ensure no work is lost.
+
+    Returns:
+        JSON with save status.
+    """
+    return safe_post_json("save_program", {})
+
+
+@mcp.tool()
+def exit_ghidra() -> str:
+    """
+    Save and exit Ghidra gracefully.
+
+    Saves the current program, then closes Ghidra. Use this instead of
+    killing the process to ensure all changes are persisted.
+
+    Returns:
+        JSON with save and exit status.
+    """
+    return safe_post_json("exit_ghidra", {})
+
+
+@mcp.tool()
+def delete_function(address: str) -> str:
+    """
+    Delete a function at the specified address.
+
+    Removes the function definition at the given address. Useful for
+    deleting degenerate 1-byte stub functions so they can be recreated
+    properly with create_function.
+
+    Args:
+        address: Address of the function entry point in hex format (e.g., "0x08011d34")
+
+    Returns:
+        JSON with deletion result including the name of the deleted function.
+
+    Examples:
+        delete_function("0x08011d34")
+    """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid address format: {address}")
+
+    return safe_post_json("delete_function", {"address": address})
+
+
+@mcp.tool()
 def create_function(
     address: str, name: str = None, disassemble_first: bool = True
 ) -> str:
@@ -4754,6 +4806,60 @@ def create_function(
     data = {k: v for k, v in data.items() if v is not None}
 
     return safe_post_json("create_function", data)
+
+
+@mcp.tool()
+def create_memory_block(
+    name: str,
+    address: str,
+    size: int,
+    read: bool = True,
+    write: bool = True,
+    execute: bool = False,
+    volatile: bool = False,
+    comment: str = None,
+) -> str:
+    """
+    Create an uninitialized memory block at the specified address.
+
+    Useful for defining peripheral MMIO regions, memory-mapped hardware
+    registers, or other address ranges that Ghidra doesn't know about.
+
+    Args:
+        name: Name for the memory block (e.g., "GPIOA", "USART1")
+        address: Start address in hex format (e.g., "0x40020000")
+        size: Size in bytes (e.g., 0x400 for 1KB)
+        read: Allow read access (default: True)
+        write: Allow write access (default: True)
+        execute: Allow execute access (default: False)
+        volatile: Mark as volatile memory (default: False)
+        comment: Optional description for the block
+
+    Returns:
+        JSON with block creation result including name, address range,
+        size, and permissions.
+
+    Examples:
+        create_memory_block("GPIOA", "0x40020000", 0x400)
+        create_memory_block("USART1", "0x40011000", 0x400, comment="USART1 registers")
+        create_memory_block("FLASH", "0x08000000", 0x80000, execute=True, write=False)
+    """
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid address format: {address}")
+
+    data = {
+        "name": name,
+        "address": address,
+        "size": size,
+        "read": read,
+        "write": write,
+        "execute": execute,
+        "volatile": volatile,
+    }
+    if comment is not None:
+        data["comment"] = comment
+
+    return safe_post_json("create_memory_block", data)
 
 
 # ========== SCRIPT GENERATION (v1.9.0) ==========
@@ -5071,6 +5177,43 @@ def run_ghidra_script(
         return json.dumps(parsed, indent=2)
     except:
         return result
+
+
+@mcp.tool()
+def run_script_inline(code: str, args: str = None) -> str:
+    """
+    Execute an inline Java snippet as a Ghidra script.
+
+    Sends Java source code directly to Ghidra for immediate execution
+    without needing a script file on disk. The code should be a complete
+    GhidraScript class.
+
+    Args:
+        code: Complete Java source code (must contain a class extending GhidraScript)
+        args: Optional space-separated arguments passed to the script
+
+    Returns:
+        Script execution output including console output and any errors.
+
+    Example:
+        run_script_inline('''
+        import ghidra.app.script.GhidraScript;
+        public class InlineTask extends GhidraScript {
+            @Override
+            public void run() throws Exception {
+                println("Functions: " + currentProgram.getFunctionManager().getFunctionCount());
+            }
+        }
+        ''')
+    """
+    if not code or not isinstance(code, str):
+        raise GhidraValidationError("code parameter is required")
+
+    data = {"code": code}
+    if args:
+        data["args"] = args
+
+    return safe_post_json("run_script_inline", data)
 
 
 @mcp.tool()
