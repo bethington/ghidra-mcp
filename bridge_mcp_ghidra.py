@@ -2633,7 +2633,7 @@ def list_scripts(filter: str = "") -> str:
     if filter:
         params["filter"] = filter
 
-    return safe_get("list_scripts", params)
+    return safe_get_json("list_scripts", params)
 
 
 @mcp.tool()
@@ -4921,8 +4921,9 @@ def save_ghidra_script(
             "script_name must be alphanumeric or underscore only"
         )
 
-    # Build path
-    script_dir = "ghidra_scripts"
+    # Build path — use ~/ghidra_scripts/ so scripts land where Ghidra's
+    # script manager and run_ghidra_script/run_script search
+    script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
     script_file = f"{script_name}.java"
     script_path = os.path.join(script_dir, script_file)
 
@@ -5014,7 +5015,7 @@ def list_ghidra_scripts(
     import json
     from datetime import datetime
 
-    script_dir = "ghidra_scripts"
+    script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
     scripts = []
 
     # Create directory if missing
@@ -5101,22 +5102,23 @@ def get_ghidra_script(script_name: str) -> str:
 
 @mcp.tool()
 def run_ghidra_script(
-    script_name: str, timeout_seconds: int = 300, capture_output: bool = True
+    script_name: str,
+    args: str = None,
+    timeout_seconds: int = 300,
+    capture_output: bool = True,
 ) -> str:
     """
-    Run a Ghidra script and capture all output including errors.
+    Run a Ghidra script by name and capture all output including errors.
 
-    This tool executes a Ghidra script via the REST API and captures:
-    - Complete console output (all println statements)
-    - Error messages with line numbers
-    - Execution time and statistics
-    - Exit code and status
-
-    **Key Feature**: Full error capture enables automatic script debugging.
-    AI can read error messages and automatically fix broken scripts.
+    Searches for the script in ~/ghidra_scripts/, ./ghidra_scripts/, and
+    absolute paths. Scripts from other locations are automatically copied
+    to ~/ghidra_scripts/ for OSGi class loading compatibility.
 
     Args:
-        script_name: Script name to execute (without .java extension)
+        script_name: Script name (e.g., "MyScript" or "MyScript.java") or absolute path
+        args: Optional space-separated arguments passed to the script via
+              getScriptArgs(). This prevents scripts from falling through to
+              askString() which opens a blocking GUI dialog.
         timeout_seconds: Max execution time (default: 5 minutes)
         capture_output: Capture console output (default: True)
 
@@ -5125,53 +5127,36 @@ def run_ghidra_script(
         {
             "success": true/false,
             "script_name": "DocumentFunctions",
+            "script_path": "/home/user/ghidra_scripts/DocumentFunctions.java",
             "execution_time_seconds": 45.2,
-            "console_output": "Processing...\nCompleted!",
-            "exit_code": 0,
-            "errors": [
-                {
-                    "type": "RuntimeException",
-                    "message": "Function not found",
-                    "line": 42
-                }
-            ],
-            "warnings": [
-                {
-                    "type": "Warning",
-                    "message": "Variable unused",
-                    "line": 15
-                }
-            ]
+            "console_output": "Processing...\\nCompleted!"
         }
 
-    Example - Basic Execution:
-        result = run_ghidra_script("DocumentFunctions")
-        print(result["console_output"])
+    Example:
+        # Run a script with no arguments
+        run_ghidra_script("DocumentFunctions")
 
-    Example - Automatic Troubleshooting:
-        result = run_ghidra_script("DocumentFunctions")
-        if result["errors"]:
-            # AI reads errors and fixes script
-            fixed_script = ai_fix_script(result["errors"])
-            update_ghidra_script("DocumentFunctions", fixed_script)
-            # Re-run to verify fix
-            result = run_ghidra_script("DocumentFunctions")
+        # Run a script with arguments (prevents askString() dialogs)
+        run_ghidra_script("ExportSymbols", args="/tmp/symbols.json")
+
+        # Run with multiple arguments
+        run_ghidra_script("RebaseScript", args="0x08000000 0x20000000")
     """
     import json
 
     if not script_name or not isinstance(script_name, str):
         raise GhidraValidationError("script_name is required")
 
-    # Call Java endpoint which handles actual execution
     payload = {
         "script_name": script_name,
         "timeout_seconds": timeout_seconds,
         "capture_output": capture_output,
     }
+    if args:
+        payload["args"] = args
 
     result = safe_post_json("run_ghidra_script", payload)
 
-    # Parse and format response
     try:
         parsed = json.loads(result)
         return json.dumps(parsed, indent=2)

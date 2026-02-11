@@ -549,27 +549,39 @@ public class GhidraMCPPlugin extends Plugin {
                     return;
                 }
 
-                // Determine class name from code or generate one
-                String className = "InlineScript_" + System.currentTimeMillis();
+                // Determine class name from code, prefix with _mcp_inline_ to avoid
+                // collisions with user scripts and make cleanup identifiable
+                String userClass = "InlineScript_" + System.currentTimeMillis();
                 java.util.regex.Matcher m = java.util.regex.Pattern
                     .compile("public\\s+class\\s+(\\w+)").matcher(code);
                 if (m.find()) {
-                    className = m.group(1);
+                    userClass = m.group(1);
                 }
+                String className = "_mcp_inline_" + userClass;
 
-                // Write to temp file
-                File tempDir = new File(System.getProperty("java.io.tmpdir"), "ghidra_mcp_scripts");
-                tempDir.mkdirs();
-                File tempScript = new File(tempDir, className + ".java");
+                // Rewrite the class name in the source so it compiles under the prefixed name
+                String rewrittenCode = code.replace("class " + userClass, "class " + className);
+
+                // Write to ~/ghidra_scripts/ so Ghidra's OSGi class loader can find the source bundle
+                File scriptDir = new File(System.getProperty("user.home"), "ghidra_scripts");
+                scriptDir.mkdirs();
+                File tempScript = new File(scriptDir, className + ".java");
                 try {
-                    java.nio.file.Files.writeString(tempScript.toPath(), code);
+                    java.nio.file.Files.writeString(tempScript.toPath(), rewrittenCode);
                     String result = runGhidraScript(tempScript.getAbsolutePath(), scriptArgs);
                     sendResponse(exchange, result);
                 } catch (Throwable e) {
                     String msg = e.getMessage() != null ? e.getMessage() : e.toString();
                     sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
                 } finally {
-                    tempScript.delete();
+                    // Clean up .java source and any .class file left by OSGi compiler
+                    if (!tempScript.delete()) {
+                        tempScript.deleteOnExit();
+                    }
+                    File classFile = new File(scriptDir, className + ".class");
+                    if (classFile.exists() && !classFile.delete()) {
+                        classFile.deleteOnExit();
+                    }
                 }
             } catch (Throwable e) {
                 String msg = e.getMessage() != null ? e.getMessage() : e.toString();
@@ -1559,18 +1571,19 @@ public class GhidraMCPPlugin extends Plugin {
             }
         }));
 
-        // Script execution endpoint (v1.9.1)
+        // Script execution endpoint (v1.9.1, fixed v2.0.1)
         server.createContext("/run_ghidra_script", safeHandler(exchange -> {
             try {
                 Map<String, Object> params = parseJsonParams(exchange);
                 String scriptName = (String) params.get("script_name");
+                String scriptArgs = (String) params.get("args");
                 int timeoutSeconds = params.get("timeout_seconds") != null ?
                     ((Number) params.get("timeout_seconds")).intValue() : 300;
                 Object coObj = params.get("capture_output");
                 boolean captureOutput = coObj == null || Boolean.TRUE.equals(coObj) ||
                     "true".equalsIgnoreCase(String.valueOf(coObj));
 
-                String result = runGhidraScriptWithCapture(scriptName, timeoutSeconds, captureOutput);
+                String result = runGhidraScriptWithCapture(scriptName, scriptArgs, timeoutSeconds, captureOutput);
                 sendResponse(exchange, result);
             } catch (Throwable e) {
                 String msg = e.getMessage() != null ? e.getMessage() : e.toString();
@@ -3549,10 +3562,13 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Run a Ghidra script programmatically (v1.7.0)
+     * Run a Ghidra script programmatically (v1.7.0, fixed v2.0.1)
      *
-     * @param scriptPath Path to the script file (.java or .py)
-     * @param scriptArgs Optional JSON string of arguments
+     * Fixes: Issue #1 (args support via setScriptArgs), Issue #2 (OSGi path
+     * resolution by copying to ~/ghidra_scripts/), Issue #5 (timeout protection).
+     *
+     * @param scriptPath Path to the script file (.java or .py), or just a filename
+     * @param scriptArgs Optional space-separated arguments for the script
      * @return Script output or error message
      */
     private String runGhidraScript(String scriptPath, String scriptArgs) {
@@ -3567,6 +3583,9 @@ public class GhidraMCPPlugin extends Plugin {
         final PrintStream originalOut = System.out;
         final PrintStream originalErr = System.err;
 
+        // Track whether we copied the script (for cleanup)
+        final File[] copiedScript = {null};
+
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
@@ -3574,60 +3593,81 @@ public class GhidraMCPPlugin extends Plugin {
                     PrintStream captureStream = new PrintStream(outputCapture);
                     System.setOut(captureStream);
                     System.setErr(captureStream);
-                    
+
                     resultMsg.append("=== GHIDRA SCRIPT EXECUTION ===\n");
                     resultMsg.append("Script: ").append(scriptPath).append("\n");
                     resultMsg.append("Program: ").append(program.getName()).append("\n");
                     resultMsg.append("Time: ").append(new Date().toString()).append("\n\n");
-                    
-                    // Find the script file
-                    generic.jar.ResourceFile scriptFile = null;
-                    
-                    // Try multiple locations for the script
+
+                    // Resolve script file — search standard locations
+                    File ghidraScriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
                     String[] possiblePaths = {
-                        scriptPath,  // Absolute path
-                        System.getProperty("user.home") + "/ghidra_scripts/" + scriptPath,
-                        System.getProperty("user.home") + "/ghidra_scripts/" + new File(scriptPath).getName(),
+                        scriptPath,  // Absolute or relative path as-is
+                        new File(ghidraScriptsDir, scriptPath).getPath(),
+                        new File(ghidraScriptsDir, new File(scriptPath).getName()).getPath(),
                         "./ghidra_scripts/" + scriptPath,
                         "./ghidra_scripts/" + new File(scriptPath).getName()
                     };
-                    
+
+                    File resolvedFile = null;
                     for (String path : possiblePaths) {
                         try {
-                            File candidateFile = new File(path);
-                            if (candidateFile.exists()) {
-                                scriptFile = new generic.jar.ResourceFile(candidateFile);
+                            File candidate = new File(path);
+                            if (candidate.exists() && candidate.isFile()) {
+                                resolvedFile = candidate;
                                 break;
                             }
                         } catch (Exception e) {
-                            // Continue trying other paths
+                            // Continue
                         }
                     }
-                    
-                    if (scriptFile == null || !scriptFile.exists()) {
-                        resultMsg.append("ERROR: Script file not found in any of these locations:\n");
+
+                    if (resolvedFile == null) {
+                        resultMsg.append("ERROR: Script file not found. Searched:\n");
                         for (String path : possiblePaths) {
                             resultMsg.append("  - ").append(path).append("\n");
                         }
                         return;
                     }
 
+                    // Issue #2 fix: If the script is NOT already in ~/ghidra_scripts/,
+                    // copy it there so Ghidra's OSGi class loader can find the source bundle.
+                    File scriptFileForExecution = resolvedFile;
+                    try {
+                        ghidraScriptsDir.mkdirs();
+                        String canonicalScriptsDir = ghidraScriptsDir.getCanonicalPath();
+                        String canonicalResolved = resolvedFile.getCanonicalPath();
+                        if (!canonicalResolved.startsWith(canonicalScriptsDir + File.separator)) {
+                            // Copy to ~/ghidra_scripts/
+                            File dest = new File(ghidraScriptsDir, resolvedFile.getName());
+                            java.nio.file.Files.copy(resolvedFile.toPath(), dest.toPath(),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                            scriptFileForExecution = dest;
+                            copiedScript[0] = dest;
+                            resultMsg.append("Copied to: ").append(dest.getAbsolutePath()).append("\n");
+                        }
+                    } catch (Exception e) {
+                        resultMsg.append("Warning: Could not copy script to ~/ghidra_scripts/: ").append(e.getMessage()).append("\n");
+                    }
+
+                    generic.jar.ResourceFile scriptFile = new generic.jar.ResourceFile(scriptFileForExecution);
+
                     resultMsg.append("Found script: ").append(scriptFile.getAbsolutePath()).append("\n");
                     resultMsg.append("Size: ").append(scriptFile.length()).append(" bytes\n\n");
-                    
+
                     // Get script provider
                     ghidra.app.script.GhidraScriptProvider provider = ghidra.app.script.GhidraScriptUtil.getProvider(scriptFile);
                     if (provider == null) {
                         resultMsg.append("ERROR: No script provider found for: ").append(scriptFile.getName()).append("\n");
                         return;
                     }
-                    
+
                     resultMsg.append("Script provider: ").append(provider.getClass().getSimpleName()).append("\n");
-                    
+
                     // Create script instance
                     StringWriter scriptWriter = new StringWriter();
                     PrintWriter scriptPrintWriter = new PrintWriter(scriptWriter);
-                    
+
                     ghidra.app.script.GhidraScript script = provider.getScriptInstance(scriptFile, scriptPrintWriter);
                     if (script == null) {
                         resultMsg.append("ERROR: Failed to create script instance\n");
@@ -3638,57 +3678,61 @@ public class GhidraMCPPlugin extends Plugin {
                     ghidra.program.util.ProgramLocation location = new ghidra.program.util.ProgramLocation(program, program.getMinAddress());
                     ghidra.framework.plugintool.PluginTool pluginTool = this.getTool();
                     ghidra.app.script.GhidraState scriptState = new ghidra.app.script.GhidraState(pluginTool, pluginTool.getProject(), program, location, null, null);
-                    
+
                     ghidra.util.task.TaskMonitor scriptMonitor = new ghidra.util.task.ConsoleTaskMonitor();
-                    
+
                     script.set(scriptState, scriptMonitor, scriptPrintWriter);
-                    
-                    resultMsg.append("\n--- SCRIPT OUTPUT ---\n");
-                    
-                    // Parse arguments if provided
+
+                    // Issue #1 + #5 fix: Parse and set script args BEFORE execution,
+                    // so getScriptArgs() returns them instead of falling through to askString()
                     String[] args = new String[0];
                     if (scriptArgs != null && !scriptArgs.trim().isEmpty()) {
-                        try {
-                            // Simple space-separated argument parsing
-                            args = scriptArgs.trim().split("\\s+");
-                        } catch (Exception e) {
-                            resultMsg.append("Warning: Could not parse arguments: ").append(scriptArgs).append("\n");
-                        }
+                        args = scriptArgs.trim().split("\\s+");
+                        script.setScriptArgs(args);
+                        resultMsg.append("Script args: ").append(Arrays.toString(args)).append("\n");
                     }
-                    
+
+                    resultMsg.append("\n--- SCRIPT OUTPUT ---\n");
+
                     // Execute the script
                     script.runScript(scriptFile.getName(), args);
-                    
+
                     // Get script output
                     String scriptOutput = scriptWriter.toString();
                     if (!scriptOutput.isEmpty()) {
                         resultMsg.append(scriptOutput).append("\n");
                     }
-                    
+
                     success.set(true);
                     resultMsg.append("\n=== SCRIPT COMPLETED SUCCESSFULLY ===\n");
-                    
+
                 } catch (Exception e) {
                     resultMsg.append("\n=== SCRIPT EXECUTION ERROR ===\n");
                     resultMsg.append("Error: ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append("\n");
-                    
-                    // Add stack trace for debugging
+
                     StringWriter sw = new StringWriter();
                     PrintWriter pw = new PrintWriter(sw);
                     e.printStackTrace(pw);
                     resultMsg.append("Stack trace:\n").append(sw.toString()).append("\n");
-                    
+
                     Msg.error(this, "Script execution failed: " + scriptPath, e);
                 } finally {
                     // Restore original output streams
                     System.setOut(originalOut);
                     System.setErr(originalErr);
-                    
+
                     // Append any captured console output
                     String capturedOutput = outputCapture.toString();
                     if (!capturedOutput.isEmpty()) {
                         resultMsg.append("\n--- CONSOLE OUTPUT ---\n");
                         resultMsg.append(capturedOutput).append("\n");
+                    }
+
+                    // Clean up copied script
+                    if (copiedScript[0] != null) {
+                        if (!copiedScript[0].delete()) {
+                            copiedScript[0].deleteOnExit();
+                        }
                     }
                 }
             });
@@ -4379,8 +4423,8 @@ public class GhidraMCPPlugin extends Plugin {
                         
                         // Handle different value types
                         if (value.startsWith("\"") && value.endsWith("\"")) {
-                            // String value
-                            result.put(key, value.substring(1, value.length() - 1));
+                            // String value — unescape JSON escape sequences
+                            result.put(key, unescapeJsonString(value.substring(1, value.length() - 1)));
                         } else if (value.startsWith("[") && value.endsWith("]")) {
                             // Array value - parse into List
                             result.put(key, parseJsonArray(value));
@@ -7835,6 +7879,48 @@ public class GhidraMCPPlugin extends Plugin {
                   .replace("\n", "\\n")
                   .replace("\r", "\\r")
                   .replace("\t", "\\t");
+    }
+
+    /**
+     * Unescape JSON string escape sequences: \n → newline, \" → quote, \\ → backslash, etc.
+     */
+    private static String unescapeJsonString(String s) {
+        if (s == null || s.isEmpty()) return s;
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' && i + 1 < s.length()) {
+                char next = s.charAt(i + 1);
+                switch (next) {
+                    case 'n':  sb.append('\n'); i++; break;
+                    case 'r':  sb.append('\r'); i++; break;
+                    case 't':  sb.append('\t'); i++; break;
+                    case '"':  sb.append('"');  i++; break;
+                    case '\\': sb.append('\\'); i++; break;
+                    case '/':  sb.append('/');  i++; break;
+                    case 'u':
+                        // Unicode escape: backslash-u + 4 hex digits
+                        if (i + 5 < s.length()) {
+                            try {
+                                int cp = Integer.parseInt(s.substring(i + 2, i + 6), 16);
+                                sb.append((char) cp);
+                                i += 5;
+                            } catch (NumberFormatException e) {
+                                sb.append(c); // malformed, keep as-is
+                            }
+                        } else {
+                            sb.append(c);
+                        }
+                        break;
+                    default:
+                        sb.append(c); // unknown escape, keep backslash
+                        break;
+                }
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -15060,7 +15146,7 @@ public class GhidraMCPPlugin extends Plugin {
      * this endpoint provides script discovery and validation. Full execution with output
      * capture should be done through Ghidra's Script Manager UI or headless mode.
      */
-    private String runGhidraScriptWithCapture(String scriptName, int timeoutSeconds, boolean captureOutput) {
+    private String runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput) {
         if (scriptName == null || scriptName.isEmpty()) {
             return "{\"success\": false, \"error\": \"Script name is required\"}";
         }
@@ -15071,95 +15157,64 @@ public class GhidraMCPPlugin extends Plugin {
         }
 
         try {
-            // Locate the script file in ghidra_scripts directory
-            // Try multiple common locations
+            // Locate the script file — search Ghidra's standard script directories
             File scriptFile = null;
+            String filename = scriptName;
+            // If no extension, try .java and .py
+            boolean hasExtension = scriptName.contains(".");
 
-            String[] possibleDirs = {
-                System.getProperty("user.home") + "/.ghidra/.ghidra_12.0/Extensions/Ghidra/ghidra_scripts",
-                System.getProperty("user.home") + "/.ghidra/.ghidra_11.x/Extensions/Ghidra/ghidra_scripts",
-                System.getenv("GHIDRA_USER_HOME") + "/Extensions/Ghidra/ghidra_scripts",
+            String[] searchDirs = {
+                System.getProperty("user.home") + "/ghidra_scripts",
                 System.getProperty("user.dir") + "/ghidra_scripts",
                 "./ghidra_scripts"
             };
 
-            String filename = scriptName.endsWith(".java") ? scriptName : scriptName + ".java";
+            String[] extensions = hasExtension ? new String[]{""} : new String[]{".java", ".py", ""};
 
-            for (String dirPath : possibleDirs) {
-                if (dirPath != null) {
-                    File candidate = new File(dirPath, filename);
+            for (String dirPath : searchDirs) {
+                if (dirPath == null) continue;
+                for (String ext : extensions) {
+                    File candidate = new File(dirPath, filename + ext);
                     if (candidate.exists()) {
                         scriptFile = candidate;
                         break;
                     }
                 }
+                if (scriptFile != null) break;
+            }
+
+            // Also try as absolute path
+            if (scriptFile == null) {
+                File candidate = new File(scriptName);
+                if (candidate.exists()) {
+                    scriptFile = candidate;
+                }
             }
 
             if (scriptFile == null) {
-                // List where we searched
                 StringBuilder searched = new StringBuilder();
-                for (String dir : possibleDirs) {
+                for (String dir : searchDirs) {
                     if (dir != null) searched.append(dir).append(", ");
                 }
                 return "{\"success\": false, \"error\": \"Script '" + escapeJsonString(filename) +
                        "' not found. Searched: " + escapeJsonString(searched.toString()) + "\"}";
             }
 
-            // Validate script file
+            // Execute the script via the existing execution method
             long startTime = System.currentTimeMillis();
-            List<Map<String, Object>> errors = new ArrayList<>();
-            List<Map<String, Object>> warnings = new ArrayList<>();
-            String consoleOutput = "";
-            int exitCode = 0;
-
-            try {
-                // Read script content for basic validation
-                byte[] scriptContent = new byte[(int) scriptFile.length()];
-                FileInputStream fis = new FileInputStream(scriptFile);
-                fis.read(scriptContent);
-                fis.close();
-
-                String scriptText = new String(scriptContent, StandardCharsets.UTF_8);
-                consoleOutput = "Script validation successful for: " + scriptFile.getAbsolutePath() + "\n";
-                consoleOutput += "Script size: " + scriptContent.length + " bytes\n";
-
-                // Check for common errors in script
-                if (!scriptText.contains("extends GhidraScript")) {
-                    Map<String, Object> warning = new HashMap<>();
-                    warning.put("type", "ValidationWarning");
-                    warning.put("message", "Script does not extend GhidraScript");
-                    warnings.add(warning);
-                }
-
-                consoleOutput += "\nTo run this script:\n";
-                consoleOutput += "1. Open Ghidra with your binary loaded\n";
-                consoleOutput += "2. Go to Window → Script Manager\n";
-                consoleOutput += "3. Find and select: " + scriptName + "\n";
-                consoleOutput += "4. Click the play button to execute\n";
-
-            } catch (Exception e) {
-                exitCode = 1;
-                Map<String, Object> error = new HashMap<>();
-                error.put("type", e.getClass().getSimpleName());
-                error.put("message", e.getMessage() != null ? e.getMessage() : "Unknown error");
-                errors.add(error);
-                consoleOutput = "Error validating script: " + e.getMessage();
-            }
-
+            String output = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs);
             double executionTime = (System.currentTimeMillis() - startTime) / 1000.0;
 
-            // Build response
+            boolean succeeded = output.contains("SCRIPT COMPLETED SUCCESSFULLY");
+
+            // Build JSON response
             StringBuilder response = new StringBuilder();
             response.append("{");
-            response.append("\"success\": ").append(exitCode == 0 ? "true" : "false").append(", ");
+            response.append("\"success\": ").append(succeeded).append(", ");
             response.append("\"script_name\": \"").append(escapeJsonString(scriptName)).append("\", ");
             response.append("\"script_path\": \"").append(escapeJsonString(scriptFile.getAbsolutePath())).append("\", ");
             response.append("\"execution_time_seconds\": ").append(String.format("%.2f", executionTime)).append(", ");
-            response.append("\"console_output\": \"").append(escapeJsonString(consoleOutput)).append("\", ");
-            response.append("\"exit_code\": ").append(exitCode).append(", ");
-            response.append("\"note\": \"Ghidra scripts run in Script Manager UI. See console_output for instructions.\", ");
-            response.append("\"errors\": ").append(jsonifyErrorList(errors)).append(", ");
-            response.append("\"warnings\": ").append(jsonifyErrorList(warnings));
+            response.append("\"console_output\": \"").append(escapeJsonString(output)).append("\"");
             response.append("}");
 
             return response.toString();
