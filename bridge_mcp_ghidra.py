@@ -46,6 +46,10 @@ ENDPOINT_TIMEOUTS = {
     "rename_function": 45,  # 45 seconds - function renames update xrefs
     "decompile_function": 45,  # 45 seconds - decompilation can be slow for large functions
     "disassemble_bytes": 120,  # 2 minutes - disassembly can be slow for large ranges
+    "bulk_fuzzy_match": 180,  # 3 minutes - cross-binary bulk matching
+    "find_similar_functions_fuzzy": 60,  # 1 minute - single function fuzzy search
+    "diff_functions": 30,  # 30 seconds - structured function diff
+    "get_function_signature": 10,  # 10 seconds - single signature extraction
     "default": 30,  # 30 seconds for all other operations
 }
 # Maximum retry attempts for transient failures (3 attempts with exponential backoff)
@@ -5793,6 +5797,246 @@ def get_bulk_function_hashes(
     if program:
         params["program"] = program
     return make_request(url, method="GET", params=params)
+
+
+# ====================================================================================
+# FUZZY FUNCTION MATCHING & DIFF - Cross-compiler function comparison
+# ====================================================================================
+
+
+@mcp.tool()
+def get_function_signature(address: str, program: str = None) -> str:
+    """
+    Get a function's feature signature for fuzzy matching.
+
+    Extracts a compiler-agnostic feature vector including callee names,
+    string constants, immediate values, basic block structure, and numeric
+    metrics. For ARM binaries, prologue/epilogue instructions are stripped
+    to focus on function logic rather than ABI conventions.
+
+    Args:
+        address: Function address in hex format (e.g., "0x08011d34")
+        program: Optional program name for multi-program support
+
+    Returns:
+        JSON with feature vector:
+        {
+            "function_name": "HAL_GPIO_Init",
+            "address": "0x08011d34",
+            "instruction_count": 87,
+            "basic_block_count": 12,
+            "callee_names": ["HAL_RCC_GetHCLKFreq", ...],
+            "string_constants": ["GPIO error", ...],
+            "immediate_values": [0x10, 0x20, ...],
+            "basic_block_hashes": ["a1b2c3...", ...],
+            "prologue_stripped": true,
+            "epilogue_stripped": true
+        }
+    """
+    if not address:
+        raise GhidraValidationError("Function address is required")
+
+    params = {"address": address}
+    if program:
+        params["program"] = program
+    return safe_get("get_function_signature", params)
+
+
+@mcp.tool()
+def find_similar_functions_fuzzy(
+    address: str,
+    target_program: str,
+    source_program: str = None,
+    threshold: float = 0.7,
+    limit: int = 20,
+) -> str:
+    """
+    Find functions in a target binary that are similar to a given source function.
+
+    Uses compiler-agnostic similarity scoring based on call graph, string
+    references, constants, and structural features. Designed for matching
+    functions across binaries compiled by different compilers where exact
+    hash matching fails.
+
+    Similarity weights (optimized for cross-compiler matching):
+    - 60% set features: callee names (50%), strings (30%), immediates (20%)
+    - 25% numeric features: instruction count, blocks, calls, complexity
+    - 15% structural: basic block hash overlap
+
+    Args:
+        address: Source function address in hex format (e.g., "0x08011d34")
+        target_program: Name of the target program to search in (required)
+        source_program: Name of the source program (default: current program)
+        threshold: Minimum similarity score 0.0-1.0 (default: 0.7)
+        limit: Maximum number of matches to return (default: 20)
+
+    Returns:
+        JSON with ranked matches:
+        {
+            "source": {"name": "HAL_GPIO_Init", "address": "0x08011d34"},
+            "target_program": "firmware.bin",
+            "total_matches": 3,
+            "matches": [
+                {"name": "FUN_0800a234", "address": "0x0800a234", "score": 0.92},
+                ...
+            ]
+        }
+
+    Example:
+        # Find matches for a documented function in another binary
+        find_similar_functions_fuzzy("0x08011d34", "firmware.bin")
+
+        # Stricter matching
+        find_similar_functions_fuzzy("0x08011d34", "firmware.bin", threshold=0.85)
+    """
+    if not address:
+        raise GhidraValidationError("Function address is required")
+    if not target_program:
+        raise GhidraValidationError("target_program is required")
+
+    params = {
+        "address": address,
+        "target_program": target_program,
+        "threshold": threshold,
+        "limit": limit,
+    }
+    if source_program:
+        params["source_program"] = source_program
+    return safe_get("find_similar_functions_fuzzy", params)
+
+
+@mcp.tool()
+def bulk_fuzzy_match(
+    source_program: str,
+    target_program: str,
+    threshold: float = 0.7,
+    offset: int = 0,
+    limit: int = 50,
+    filter: str = None,
+) -> str:
+    """
+    Find the best fuzzy match for each source function in a target binary.
+
+    Paginated bulk operation that compares every source function against all
+    target functions and returns the single best match per source function.
+    Pre-computes target signatures for efficiency.
+
+    Args:
+        source_program: Name of the source program (required)
+        target_program: Name of the target program (required)
+        threshold: Minimum similarity score 0.0-1.0 (default: 0.7)
+        offset: Skip this many source functions (for pagination)
+        limit: Process this many source functions per call (default: 50)
+        filter: "named" (only documented), "unnamed" (only FUN_*), or None for all
+
+    Returns:
+        JSON with best match per source function:
+        {
+            "source_program": "firmware_reconstructed.bin",
+            "target_program": "firmware.bin",
+            "total_source_functions": 234,
+            "offset": 0, "limit": 50,
+            "matches": [
+                {
+                    "source_name": "HAL_GPIO_Init",
+                    "source_address": "0x08011d34",
+                    "target_name": "FUN_0800a234",
+                    "target_address": "0x0800a234",
+                    "score": 0.92
+                },
+                ...
+            ]
+        }
+
+    Example:
+        # Match documented functions to find their counterparts
+        bulk_fuzzy_match("firmware_reconstructed.bin", "firmware.bin", filter="named")
+
+        # Page through all functions
+        bulk_fuzzy_match("src.bin", "tgt.bin", offset=0, limit=50)
+        bulk_fuzzy_match("src.bin", "tgt.bin", offset=50, limit=50)
+    """
+    if not source_program:
+        raise GhidraValidationError("source_program is required")
+    if not target_program:
+        raise GhidraValidationError("target_program is required")
+
+    params = {
+        "source_program": source_program,
+        "target_program": target_program,
+        "threshold": threshold,
+        "offset": offset,
+        "limit": limit,
+    }
+    if filter:
+        params["filter"] = filter
+    return safe_get("bulk_fuzzy_match", params)
+
+
+@mcp.tool()
+def diff_functions(
+    address_a: str,
+    address_b: str,
+    program_a: str = None,
+    program_b: str = None,
+) -> str:
+    """
+    Compute a structured diff between two functions.
+
+    Produces an instruction-level diff using LCS alignment with normalized
+    instructions. For ARM binaries, prologue/epilogue changes are reported
+    separately from body logic changes.
+
+    Args:
+        address_a: First function address in hex (e.g., "0x08011d34")
+        address_b: Second function address in hex (e.g., "0x0800a234")
+        program_a: Program name for function A (default: current program)
+        program_b: Program name for function B (default: same as program_a)
+
+    Returns:
+        JSON with structured diff:
+        {
+            "function_a": {"name": "HAL_GPIO_Init", "address": "...", "instruction_count": 87},
+            "function_b": {"name": "FUN_0800a234", "address": "...", "instruction_count": 91},
+            "summary": {
+                "similarity_score": 0.89,
+                "body_equal": 72, "body_added": 8, "body_removed": 4,
+                "prologue_changed": true, "epilogue_changed": false,
+                "calls_only_in_a": [], "calls_only_in_b": ["new_helper"],
+                "strings_only_in_a": [], "strings_only_in_b": []
+            },
+            "prologue_diff": [...],
+            "body_diff": [
+                {"type": "equal", "line": "MOV r0,r1"},
+                {"type": "removed", "line": "BL CALL_EXT"},
+                {"type": "added", "line": "BL CALL_EXT"},
+                ...
+            ],
+            "epilogue_diff": [...]
+        }
+
+    Example:
+        # Diff two versions of the same function across binaries
+        diff_functions("0x08011d34", "0x0800a234",
+                       program_a="firmware_v1.bin", program_b="firmware_v2.bin")
+
+        # Diff two functions in the same binary
+        diff_functions("0x08011d34", "0x08012000")
+    """
+    if not address_a:
+        raise GhidraValidationError("address_a is required")
+    if not address_b:
+        raise GhidraValidationError("address_b is required")
+
+    params = {
+        "address_a": address_a,
+        "address_b": address_b,
+    }
+    if program_a:
+        params["program_a"] = program_a
+    if program_b:
+        params["program_b"] = program_b
+    return safe_get("diff_functions", params)
 
 
 @mcp.tool()

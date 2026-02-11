@@ -15,6 +15,7 @@
  */
 package com.xebyte.headless;
 
+import com.xebyte.core.BinaryComparisonService;
 import com.xebyte.core.ProgramProvider;
 import com.xebyte.core.ThreadingStrategy;
 import ghidra.app.decompiler.DecompInterface;
@@ -4315,5 +4316,119 @@ public class HeadlessEndpointHandler {
             count++;
         }
         return count;
+    }
+
+    // ==========================================================================
+    // FUZZY MATCHING & DIFF
+    // ==========================================================================
+
+    /**
+     * Get function signature (feature vector) for fuzzy matching
+     */
+    public String getFunctionSignature(String addressStr, String programName) {
+        Program program = getProgram(programName);
+        if (program == null) return getProgramError(programName);
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr == null) return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+
+            Function func = program.getFunctionManager().getFunctionAt(addr);
+            if (func == null) return "{\"error\": \"No function at address: " + addressStr + "\"}";
+
+            BinaryComparisonService.FunctionSignature sig =
+                BinaryComparisonService.computeFunctionSignature(program, func, monitor);
+            return sig.toJson();
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * Find functions in target program similar to a source function
+     */
+    public String findSimilarFunctionsFuzzy(String addressStr, String sourceProgramName,
+            String targetProgramName, double threshold, int limit) {
+        Program srcProgram = getProgram(sourceProgramName);
+        if (srcProgram == null) return getProgramError(sourceProgramName);
+
+        if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
+            return "{\"error\": \"target_program parameter is required\"}";
+        }
+        Program tgtProgram = getProgram(targetProgramName);
+        if (tgtProgram == null) return getProgramError(targetProgramName);
+
+        try {
+            Address addr = srcProgram.getAddressFactory().getAddress(addressStr);
+            if (addr == null) return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+
+            Function srcFunc = srcProgram.getFunctionManager().getFunctionAt(addr);
+            if (srcFunc == null) return "{\"error\": \"No function at address: " + addressStr + "\"}";
+
+            return BinaryComparisonService.findSimilarFunctionsJson(
+                srcProgram, srcFunc, tgtProgram, threshold, limit, monitor);
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * Bulk fuzzy match: best match per source function in target program
+     */
+    public String bulkFuzzyMatch(String sourceProgramName, String targetProgramName,
+            double threshold, int offset, int limit, String filter) {
+        if (sourceProgramName == null || sourceProgramName.trim().isEmpty()) {
+            return "{\"error\": \"source_program parameter is required\"}";
+        }
+        Program srcProgram = getProgram(sourceProgramName);
+        if (srcProgram == null) return getProgramError(sourceProgramName);
+
+        if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
+            return "{\"error\": \"target_program parameter is required\"}";
+        }
+        Program tgtProgram = getProgram(targetProgramName);
+        if (tgtProgram == null) return getProgramError(targetProgramName);
+
+        try {
+            return BinaryComparisonService.bulkFuzzyMatchJson(
+                srcProgram, tgtProgram, threshold, offset, limit, filter, monitor);
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * Structured diff between two functions
+     */
+    public String diffFunctions(String addressA, String addressB,
+            String programAName, String programBName) {
+        Program progA = getProgram(programAName);
+        if (progA == null) return getProgramError(programAName);
+
+        Program progB;
+        if (programBName == null || programBName.trim().isEmpty()) {
+            progB = progA;
+        } else {
+            progB = getProgram(programBName);
+            if (progB == null) return getProgramError(programBName);
+        }
+
+        try {
+            Address addrA = progA.getAddressFactory().getAddress(addressA);
+            if (addrA == null) return "{\"error\": \"Invalid address_a: " + addressA + "\"}";
+
+            Address addrB = progB.getAddressFactory().getAddress(addressB);
+            if (addrB == null) return "{\"error\": \"Invalid address_b: " + addressB + "\"}";
+
+            Function funcA = progA.getFunctionManager().getFunctionAt(addrA);
+            if (funcA == null) return "{\"error\": \"No function at address_a: " + addressA + "\"}";
+
+            Function funcB = progB.getFunctionManager().getFunctionAt(addrB);
+            if (funcB == null) return "{\"error\": \"No function at address_b: " + addressB + "\"}";
+
+            return BinaryComparisonService.diffFunctionsJson(progA, funcA, progB, funcB, monitor);
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
     }
 }
