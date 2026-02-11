@@ -5753,6 +5753,175 @@ def delete_bookmark(address: str, category: str = None) -> str:
 
 
 # ====================================================================================
+# CONTROL FLOW & ANALYSIS TOOLS - Deep function analysis and complexity metrics
+# ====================================================================================
+
+
+@mcp.tool()
+def analyze_control_flow(function_name: str) -> str:
+    """
+    Analyze the control flow structure of a function.
+
+    Returns detailed control flow information including:
+    - Basic block count and boundaries
+    - Control flow edges (jumps, branches, calls)
+    - Cyclomatic complexity
+    - Loop detection
+    - Unreachable code detection
+
+    Args:
+        function_name: Name of function to analyze
+
+    Returns:
+        JSON with control flow graph data and complexity metrics
+
+    Example:
+        cfg = analyze_control_flow("decrypt_data")
+        # Returns: {
+        #   "function": "decrypt_data",
+        #   "basic_blocks": 15,
+        #   "edges": 22,
+        #   "cyclomatic_complexity": 8,
+        #   "loops": [{"start": "0x401050", "end": "0x401080"}],
+        #   "blocks": [{"start": "0x401000", "end": "0x401020", "type": "entry"}, ...]
+        # }
+    """
+    if not function_name:
+        raise GhidraValidationError("Function name is required")
+
+    url = f"{ghidra_server_url}/analyze_control_flow"
+    params = {"function_name": function_name}
+    return make_request(url, method="GET", params=params)
+
+
+@mcp.tool()
+def find_dead_code(function_name: str = None) -> str:
+    """
+    Find unreachable/dead code blocks in a function or entire program.
+
+    Identifies code that cannot be reached through normal execution flow,
+    which may indicate:
+    - Compiler artifacts
+    - Obfuscation/anti-analysis
+    - Legacy/removed features
+    - Bugs in the original code
+
+    Args:
+        function_name: Optional function to analyze. If not provided, scans entire program.
+
+    Returns:
+        JSON with list of unreachable code blocks and their addresses
+
+    Example:
+        dead = find_dead_code("main")
+        # Returns: {"dead_blocks": [{"address": "0x401500", "size": 32, "reason": "unreachable"}]}
+    """
+    url = f"{ghidra_server_url}/find_dead_code"
+    params = {}
+    if function_name:
+        params["function_name"] = function_name
+    return make_request(url, method="GET", params=params)
+
+
+@mcp.tool()
+def find_anti_analysis_techniques() -> str:
+    """
+    Detect anti-analysis and anti-debugging techniques in the binary.
+
+    Scans for common techniques used to hinder reverse engineering:
+    - IsDebuggerPresent checks
+    - Timing checks (rdtsc)
+    - Exception-based detection
+    - VM/sandbox detection
+    - Self-modifying code indicators
+    - API obfuscation
+
+    Returns:
+        JSON with detected techniques, their locations, and severity
+
+    Example:
+        techniques = find_anti_analysis_techniques()
+        # Returns: {
+        #   "techniques": [
+        #     {"type": "debugger_check", "address": "0x401000", "method": "IsDebuggerPresent"},
+        #     {"type": "timing_check", "address": "0x401100", "method": "rdtsc"}
+        #   ],
+        #   "severity": "medium"
+        # }
+    """
+    url = f"{ghidra_server_url}/find_anti_analysis_techniques"
+    return make_request(url, method="GET")
+
+
+@mcp.tool()
+def batch_decompile(functions: str) -> str:
+    """
+    Decompile multiple functions at once for bulk analysis.
+
+    Efficiently decompiles a list of functions, useful for:
+    - Comparing related functions
+    - Extracting code patterns
+    - Bulk documentation generation
+
+    Args:
+        functions: Comma-separated list of function names or addresses
+
+    Returns:
+        JSON with decompiled code for each function
+
+    Example:
+        code = batch_decompile("init_player,update_player,render_player")
+        # Returns: {"functions": [{"name": "init_player", "code": "void init_player()..."}, ...]}
+    """
+    if not functions:
+        raise GhidraValidationError("Function list is required")
+
+    url = f"{ghidra_server_url}/batch_decompile"
+    params = {"functions": functions}
+    return make_request(url, method="GET", params=params)
+
+
+@mcp.tool()
+def get_function_metrics(function_name: str = None, address: str = None) -> str:
+    """
+    Get complexity metrics for a function.
+
+    Returns quantitative metrics useful for:
+    - Identifying complex functions needing review
+    - Prioritizing reverse engineering effort
+    - Comparing function implementations across versions
+
+    Args:
+        function_name: Name of function to analyze
+        address: Or address of function (alternative to name)
+
+    Returns:
+        JSON with metrics:
+        - instruction_count: Total instructions
+        - basic_block_count: Number of basic blocks
+        - cyclomatic_complexity: McCabe complexity metric
+        - call_count: Number of function calls made
+        - string_count: Number of string references
+        - local_variable_count: Stack variables
+
+    Example:
+        metrics = get_function_metrics("decrypt_packet")
+        # Returns: {"cyclomatic_complexity": 12, "instruction_count": 156, ...}
+    """
+    if not function_name and not address:
+        raise GhidraValidationError("Either function_name or address is required")
+
+    # Use find_similar_functions with limit=1 to get metrics for single function
+    url = f"{ghidra_server_url}/find_similar_functions"
+    params = {"limit": 1}
+    if function_name:
+        params["function_name"] = function_name
+    else:
+        params["address"] = address
+    return make_request(url, method="GET", params=params)
+
+
+# ====================================================================================
 # CROSS-VERSION MATCHING TOOLS - Accelerate function documentation propagation
 # ====================================================================================
 
