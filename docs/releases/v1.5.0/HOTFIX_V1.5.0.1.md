@@ -151,7 +151,7 @@ ZIP:  F:\ghidra_11.4.2\Extensions\Ghidra\GhidraMCP-1.5.0.zip
 1. **Completely close Ghidra** (ensure process is terminated)
 2. **Wait 5 seconds** for port 8089 to be fully released
 3. **Restart Ghidra**
-4. **Enable the plugin** via File > Configure > Miscellaneous > GhidraMCP
+4. **Enable the plugin** via CodeBrowser > File > Configure... > Configure All Plugins > GhidraMCP
 
 ### If Port 8089 is Already in Use
 

@@ -149,7 +149,7 @@ See `KNOWN_ISSUES.md` for full details.
 mvn clean package assembly:single -DskipTests
 
 # Deploy to Ghidra
-.\deploy-to-ghidra.ps1
+.\ghidra-mcp-setup.ps1
 ```
 
 ### Manual Installation

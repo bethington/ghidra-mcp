@@ -35,7 +35,7 @@ mvn clean package assembly:single -DskipTests
 mvn clean compile -q
 
 # Deploy to Ghidra
-.\deploy-to-ghidra.ps1
+.\ghidra-mcp-setup.ps1
 
 # Build headless server
 mvn package -P headless -DskipTests
@@ -68,7 +68,7 @@ ghidra-mcp/
 │   ├── API_REFERENCE.md           # Complete API documentation
 │   ├── prompts/                   # Analysis workflow prompts
 │   └── releases/                  # Release documentation
-├── deploy-to-ghidra.ps1           # Deployment script
+├── ghidra-mcp-setup.ps1            # Deployment script
 └── functions-process.ps1          # Batch function processing
 ```
 
@@ -123,7 +123,7 @@ Located in `ghidra_scripts/`. Execute via:
 
 - **Plugin not loading**: Check `docs/troubleshooting/TROUBLESHOOTING_PLUGIN_LOAD.md`
 - **Connection issues**: Verify Ghidra is running with plugin enabled on port 8089
-- **Build failures**: Ensure `lib/` contains Ghidra JARs (run `copy-ghidra-libs.bat`)
+- **Build failures**: Install Ghidra JARs to local Maven repo (run `ghidra-mcp-setup.ps1 -SetupDeps`)
 
 ## Version History
 

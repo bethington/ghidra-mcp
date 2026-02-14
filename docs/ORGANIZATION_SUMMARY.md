@@ -75,7 +75,7 @@ Enhanced scripts documentation with:
   - bridge_mcp_ghidra.py, pom.xml, requirements.txt, etc.
   
 - **Build & Deployment** (4) - Stay in root
-  - deploy-to-ghidra.ps1, copy-ghidra-libs.bat, etc.
+  - ghidra-mcp-setup.ps1 (supports setup/build/deploy actions), etc.
   
 - **Data Files** (6) - Stay in root
   - game.json, dll_exports.json, etc.
