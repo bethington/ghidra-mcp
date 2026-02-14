@@ -158,8 +158,7 @@ PowerShell and Bash scripts use lowercase with separators:
 
 ```
 ✅ GOOD
-deploy-to-ghidra.ps1
-copy-ghidra-libs.bat
+ghidra-mcp-setup.ps1
 run_tests.sh
 build-docker.sh
 
@@ -268,7 +267,7 @@ ghidra-mcp/
 | **Python classes** | PascalCase | `class GhidraBridge` | PEP 8 convention |
 | **Python functions** | snake_case | `get_xrefs()` | PEP 8 convention |
 | **Python constants** | UPPER_SNAKE_CASE | `API_VERSION` | PEP 8 convention |
-| **Shell scripts** | kebab-case | `deploy-to-ghidra.ps1` | Shell convention |
+| **Shell scripts** | kebab-case | `ghidra-mcp-setup.ps1` | Shell convention |
 | **Config files** | lowercase.ext | `mcp-config.json` | Convention |
 | **Logs** | snake_case_date | `build_log_20251105.txt` | Readability |
 

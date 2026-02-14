@@ -40,7 +40,7 @@ BRIDGE_FILE = REPO_ROOT / "bridge_mcp_ghidra.py"
 JAVA_PLUGIN = (
     REPO_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "GhidraMCPPlugin.java"
 )
-DEPLOY_SCRIPT = REPO_ROOT / "deploy-to-ghidra.ps1"
+DEPLOY_SCRIPT = REPO_ROOT / "ghidra-mcp-setup.ps1"
 STATE_FILE = REPO_ROOT / "workflows" / ".improvement_state.json"
 LOG_DIR = REPO_ROOT / "workflows" / "logs"
 
@@ -364,9 +364,9 @@ class DeploymentManager:
             return False, str(e)
 
     def deploy_to_ghidra(self) -> Tuple[bool, str]:
-        """Run the deploy-to-ghidra.ps1 script."""
+        """Run the ghidra-mcp-setup.ps1 script."""
         if self.dry_run:
-            logger.info("[DRY RUN] Would run: deploy-to-ghidra.ps1")
+            logger.info("[DRY RUN] Would run: ghidra-mcp-setup.ps1")
             return True, "Dry run - deploy skipped"
 
         if not DEPLOY_SCRIPT.exists():

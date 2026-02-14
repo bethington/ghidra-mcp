@@ -184,14 +184,14 @@ cp target/GhidraMCP-1.9.2.zip $GHIDRA_INSTALL/Extensions/Ghidra/
 pip install -r requirements.txt
 
 # 6. Restart Ghidra and enable plugin
-# File → Configure → Miscellaneous → GhidraMCP ✅
+# CodeBrowser → File → Configure... → Configure All Plugins → GhidraMCP ✅
 ```
 
 ### Verification
 
 ```bash
 # Check version in Ghidra
-# Navigate to: File → Configure → Miscellaneous → GhidraMCP
+# Navigate to: CodeBrowser → File → Configure... → Configure All Plugins → GhidraMCP
 # Verify version: 1.9.2
 
 # Test MCP bridge

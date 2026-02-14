@@ -38,13 +38,13 @@ Ghidra MCP Server is a production-ready Model Context Protocol (MCP) server that
    - Two transport modes: stdio (default, for AI tools) and SSE (for web clients)
 
 3. **Java Build System** (Maven-based)
-   - System-scoped dependencies to Ghidra JARs in `lib/`
+  - Ghidra dependencies resolved from local Maven repository (`.m2`)
    - Custom assembly descriptor for Ghidra extension ZIP format
    - Fixed JAR name: `GhidraMCP.jar` (version-independent)
 
 ### Critical Architecture Details
 
-- **Ghidra libraries must be copied first**: Before building, run `copy-ghidra-libs.bat` on Windows to copy JARs from your Ghidra installation to `lib/`
+- **Ghidra libraries must be installed first**: Before building, run `ghidra-mcp-setup.ps1 -SetupDeps` on Windows to install JARs from your Ghidra installation into local Maven repo
 - **Plugin loads at Ghidra startup**: The Java plugin starts automatically when Ghidra launches if properly installed
 - **REST API is stateful**: All operations work on the currently open program in Ghidra's CodeBrowser
 - **MCP bridge is stateless**: Each MCP tool call translates to one or more HTTP requests
@@ -54,8 +54,8 @@ Ghidra MCP Server is a production-ready Model Context Protocol (MCP) server that
 ### Initial Setup
 
 ```bash
-# 1. Copy Ghidra libraries (required before first build)
-copy-ghidra-libs.bat "C:\path\to\ghidra"
+# 1. Install Ghidra libraries (required before first build)
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra"
 
 # 2. Install Python dependencies
 pip install -r requirements.txt
@@ -97,7 +97,7 @@ pytest tests/ --cov=src --cov-report=html
 Automated installation (recommended):
 ```powershell
 # Windows - automatically detects version and Ghidra installation
-.\deploy-to-ghidra.ps1
+.\ghidra-mcp-setup.ps1
 ```
 
 Manual installation:
@@ -272,7 +272,7 @@ git push --tags
 
 # 6. Deploy
 # Copy target/GhidraMCP-NEW_VERSION.zip to release/distribution
-# Or use: .\deploy-to-ghidra.ps1
+# Or use: .\ghidra-mcp-setup.ps1
 ```
 
 ### Key Principles
@@ -549,7 +549,7 @@ set_function_prototype(
 
 ## Important Constraints
 
-1. **Ghidra JARs are system-scoped**: Maven won't download them; they must exist in `lib/` before building
+1. **Ghidra JARs are local artifacts**: Maven won't download them from Central; they must be installed to `.m2` before building
 2. **Plugin requires Ghidra restart**: Changes to Java plugin only take effect after restarting Ghidra completely
 3. **Python 3.8+ required**: MCP framework uses modern Python features (async/await)
 4. **No concurrent program access**: Ghidra API is single-threaded; all operations serialize through Swing EDT
@@ -559,7 +559,7 @@ set_function_prototype(
 ## Troubleshooting
 
 ### Build fails with missing Ghidra JARs
-Run `copy-ghidra-libs.bat` to copy JARs from Ghidra installation to `lib/`
+Run `ghidra-mcp-setup.ps1 -SetupDeps` to install JARs from Ghidra installation to local Maven repository
 
 ### Plugin doesn't appear in Ghidra
 Verify JAR is in `<ghidra>/Extensions/Ghidra/` and restart Ghidra completely

@@ -631,7 +631,7 @@ git pull origin main
 mvn clean package assembly:single -DskipTests
 
 # 3. Deploy to Ghidra
-.\deploy-to-ghidra.ps1
+.\ghidra-mcp-setup.ps1
 
 # 4. Restart Ghidra
 ```
@@ -643,14 +643,14 @@ mvn clean package assembly:single -DskipTests
 git clone https://github.com/bethington/ghidra-mcp.git
 cd ghidra-mcp
 
-# 2. Copy Ghidra libraries
-copy-ghidra-libs.bat "C:\path\to\ghidra"
+# 2. Install Ghidra libraries
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra"
 
 # 3. Build plugin
 mvn clean package assembly:single
 
 # 4. Deploy
-.\deploy-to-ghidra.ps1
+.\ghidra-mcp-setup.ps1
 ```
 
 ---

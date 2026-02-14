@@ -341,7 +341,7 @@ mvn clean package assembly:single -DskipTests -q
 
 ### Quick Deployment (Recommended)
 ```powershell
-.\deploy-to-ghidra.ps1
+.\ghidra-mcp-setup.ps1
 ```
 
 This script will:
