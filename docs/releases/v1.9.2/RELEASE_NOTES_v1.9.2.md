@@ -194,7 +194,7 @@ mvn clean package assembly:single
 cp target/GhidraMCP-1.9.2.zip $GHIDRA_INSTALL/Extensions/Ghidra/
 
 # Restart Ghidra
-# Navigate to: File → Configure → Miscellaneous → GhidraMCP
+# Navigate to: CodeBrowser → File → Configure... → Configure All Plugins → GhidraMCP
 # Verify version shows 1.9.2
 ```
 

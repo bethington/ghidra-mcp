@@ -11,8 +11,7 @@
     <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v2.0.0: Security hardening, Ghidra 12.0.2 support, configurable decompile timeout, enhanced documentation.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <ghidra.version>12.0.2</ghidra.version>
         <!-- Build timestamp generated at compile time (format: yyyyMMdd-HHmmss) -->
@@ -41,69 +40,51 @@
         <url>http://github.com/bethington/ghidra-mcp/tree/main</url>
     </scm>
     <dependencies>
-        <!-- Ghidra JARs as system-scoped dependencies -->
+        <!-- Ghidra dependencies (installed locally via mvn install:install-file) -->
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>Generic</artifactId>
-            <version>12.0.2</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/Generic.jar</systemPath>
+            <version>${ghidra.version}</version>
         </dependency>
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>SoftwareModeling</artifactId>
-            <version>12.0.2</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/SoftwareModeling.jar</systemPath>
+            <version>${ghidra.version}</version>
         </dependency>
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>Project</artifactId>
-            <version>12.0.2</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/Project.jar</systemPath>
+            <version>${ghidra.version}</version>
         </dependency>
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>Docking</artifactId>
-            <version>12.0.2</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/Docking.jar</systemPath>
+            <version>${ghidra.version}</version>
         </dependency>
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>Decompiler</artifactId>
-            <version>12.0.2</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/Decompiler.jar</systemPath>
+            <version>${ghidra.version}</version>
         </dependency>
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>Utility</artifactId>
-            <version>12.0.2</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/Utility.jar</systemPath>
+            <version>${ghidra.version}</version>
         </dependency>
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>Base</artifactId>
-            <version>12.0.2</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/Base.jar</systemPath>
+            <version>${ghidra.version}</version>
         </dependency>
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>Gui</artifactId>
-            <version>12.0.2</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/Gui.jar</systemPath>
+            <version>${ghidra.version}</version>
         </dependency>
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>FileSystem</artifactId>
-            <version>12.0.2</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/FileSystem.jar</systemPath>
+            <version>${ghidra.version}</version>
         </dependency>
         <!-- JUnit (test only) -->
         <dependency>
@@ -114,6 +95,7 @@
         </dependency>
     </dependencies>
     <build>
+        <finalName>${project.artifactId}-${project.version}</finalName>
         <!-- Enable resource filtering for version substitution -->
         <resources>
             <resource>
@@ -140,9 +122,19 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>21</source>
-                    <target>21</target>
+                    <release>${maven.compiler.release}</release>
                     <encoding>UTF-8</encoding>
+                    <showWarnings>false</showWarnings>
+                </configuration>
+            </plugin>
+            <!-- Ensure deterministic resource/properties encoding -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <configuration>
+                    <encoding>${project.build.sourceEncoding}</encoding>
+                    <propertiesEncoding>${project.build.sourceEncoding}</propertiesEncoding>
                 </configuration>
             </plugin>
             <!-- Use custom MANIFEST.MF -->
@@ -153,8 +145,6 @@
                     <archive>
                         <manifestFile>src/main/resources/META-INF/MANIFEST.MF</manifestFile>
                     </archive>
-                    <!-- Set a fixed name for the JAR without version -->
-                    <finalName>GhidraMCP</finalName>
                     <!-- Exclude the App class -->
                     <excludes>
                         <exclude>**/App.class</exclude>
@@ -173,20 +163,9 @@
                     <descriptors>
                         <descriptor>src/assembly/ghidra-extension.xml</descriptor>
                     </descriptors>
-                    <!-- The name of the final zip -->
-                    <finalName>GhidraMCP-${project.version}</finalName>
                     <!-- Don't append the assembly ID -->
                     <appendAssemblyId>false</appendAssemblyId>
                 </configuration>
-                <executions>
-                    <execution>
-                        <id>make-assembly</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>single</goal>
-                        </goals>
-                    </execution>
-                </executions>
             </plugin>
             <!-- Copy dependencies to target/lib for the assembly -->
             <plugin>
@@ -229,7 +208,6 @@
                                     <classpathPrefix>lib/</classpathPrefix>
                                 </manifest>
                             </archive>
-                            <finalName>GhidraMCPHeadless</finalName>
                             <outputDirectory>${project.build.directory}</outputDirectory>
                         </configuration>
                     </plugin>
@@ -241,7 +219,6 @@
                             <descriptors>
                                 <descriptor>src/assembly/headless-jar.xml</descriptor>
                             </descriptors>
-                            <finalName>GhidraMCPHeadless-${project.version}</finalName>
                             <appendAssemblyId>false</appendAssemblyId>
                         </configuration>
                         <executions>

@@ -112,7 +112,7 @@ Added 7 new HTTP endpoint handlers and backend implementations:
 - **New in v1.6.0**: 7 tools (batch_rename_variables, validate_function_prototype, validate_data_type_exists, can_rename_at_address, analyze_function_complete, document_function_complete, search_functions_enhanced)
 
 ## Next Steps
-1. Deploy updated plugin to Ghidra using `deploy-to-ghidra.ps1`
+1. Deploy updated plugin to Ghidra using `ghidra-mcp-setup.ps1`
 2. Restart Ghidra to load new endpoints
 3. Test Python MCP bridge with new tools
 4. Run integration tests to verify all endpoints

@@ -18,8 +18,7 @@ ghidra-mcp/
 │   └── README.md                      # Project overview
 │
 ├── 🔨 Build & Deployment (Root)
-│   ├── deploy-to-ghidra.ps1          # Deploy plugin to Ghidra
-│   ├── copy-ghidra-libs.bat          # Copy Ghidra libraries
+│   ├── ghidra-mcp-setup.ps1           # Unified script: setup deps, build, deploy, clean
 │   ├── clean-install.ps1             # Clean installation script
 │   └── cleanup.ps1                   # Cleanup build artifacts
 │
@@ -216,8 +215,7 @@ Essential files that define the project and should remain at root level:
 
 ### Build & Deployment (Keep in Root)
 Scripts frequently used during development:
-- `deploy-to-ghidra.ps1`
-- `copy-ghidra-libs.bat`
+- `ghidra-mcp-setup.ps1`
 - `clean-install.ps1`
 - `cleanup.ps1`
 
@@ -356,7 +354,7 @@ After moving files:
 | Task | Location |
 |------|----------|
 | Start MCP server | `bridge_mcp_ghidra.py` |
-| Deploy plugin | `deploy-to-ghidra.ps1` |
+| Deploy plugin | `ghidra-mcp-setup.ps1` |
 | Run tests | `pytest tests/` |
 | Extract functions | `scripts/functions-extract.ps1` |
 | Process data | `scripts/data-process.ps1` |

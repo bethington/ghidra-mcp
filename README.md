@@ -42,38 +42,50 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 
 ### Installation
 
+> Recommended for Windows: use `ghidra-mcp-setup.ps1` as the primary entry point.
+> It handles prerequisite setup + build + deployment in one command.
+>
+> **Important:** `-SetupDeps` installs Maven/Ghidra JAR dependencies only.
+> `-Deploy` is the end-user command and (by default) also ensures Python requirements before build/deploy.
+
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/bethington/ghidra-mcp.git
    cd ghidra-mcp
    ```
 
-2. **Install Python dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Copy Ghidra libraries** (see [Library Dependencies](#library-dependencies) for full list):
-   ```bash
-   # Windows - run the provided batch script
-   copy-ghidra-libs.bat "C:\path\to\ghidra_12.0.2_PUBLIC"
-   
-   # Linux/Mac - copy manually from your Ghidra installation
-   # See Library Dependencies section below for all 14 required JARs
-   ```
-
-4. **Build the plugin:**
-   ```bash
-   mvn clean package assembly:single -DskipTests
-   ```
-
-5. **Deploy to Ghidra:**
+2. **Recommended: run environment preflight first:**
    ```powershell
-   # Windows (automated)
-   .\deploy-to-ghidra.ps1
+   .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+   ```
 
-   # Or manually copy to Ghidra Extensions
-   Copy-Item target\GhidraMCP-2.0.0.zip "C:\ghidra\Extensions\Ghidra\"
+3. **Build and deploy to Ghidra (single command):**
+   ```powershell
+   .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+   ```
+
+4. **Optional strict/manual mode** (advanced):
+   ```powershell
+   # Skip automatic prerequisite setup
+   .\ghidra-mcp-setup.ps1 -Deploy -NoAutoPrereqs -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+   ```
+
+5. **Show script help**:
+   ```powershell
+   .\ghidra-mcp-setup.ps1 -Help
+   # or
+   Get-Help .\ghidra-mcp-setup.ps1 -Detailed
+   ```
+
+6. **Optional build-only mode** (advanced/troubleshooting):
+   ```powershell
+   # Preferred: script-managed build-only
+   .\ghidra-mcp-setup.ps1 -BuildOnly
+   ```
+
+   ```bash
+   # Manual Maven build (requires Ghidra deps already installed in local .m2)
+   mvn clean package assembly:single -DskipTests
    ```
 
 ### Basic Usage
@@ -89,9 +101,11 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 ```
 
 #### In Ghidra
-1. Start Ghidra and load a binary
-2. Go to **Tools > GhidraMCP > Start MCP Server**
-3. The server runs on `http://127.0.0.1:8080/` by default
+1. Start Ghidra and open a **CodeBrowser** window
+2. In **CodeBrowser**, enable the plugin via **File > Configure > Configure All Plugins > GhidraMCP**
+3. Optional: configure custom port via **CodeBrowser > Edit > Tool Options > GhidraMCP HTTP Server**
+4. Start the server via **Tools > GhidraMCP > Start MCP Server**
+5. The server runs on `http://127.0.0.1:8089/` by default
 
 ## 📊 Production Performance
 
@@ -251,11 +265,54 @@ See [docs/README.md](docs/README.md) for complete documentation.
 
 ### Building from Source
 ```bash
-# Build the plugin (skip integration tests)
-mvn clean package assembly:single -DskipTests
+# Recommended: one command does setup + build + deploy
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
 
-# Deploy to Ghidra
-.\deploy-to-ghidra.ps1
+# Optional: build only (no deploy)
+.\ghidra-mcp-setup.ps1 -BuildOnly
+```
+
+### Script Command Reference
+
+Primary actions (choose one):
+- `-Deploy` (default): auto-setup prereqs, build, deploy
+- `-SetupDeps`: install Ghidra JARs into local `.m2` (Maven deps only; no Python package install)
+- `-BuildOnly`: build artifacts only
+- `-Clean`: remove build/cache artifacts and local Ghidra dependency folders in `.m2` for the active Ghidra version
+- `-Preflight`: validate tools, paths, required Ghidra jars, and write access without making changes
+
+Useful options:
+- `-GhidraPath "C:\ghidra_12.0.2_PUBLIC"`
+- `-GhidraVersion "12.0.2"`
+- `-StrictPreflight`
+- `-NoAutoPrereqs`
+- `-SkipBuild`
+- `-SkipRestart`
+- `-DryRun`
+- `-Force`
+- `-Verbose`
+- `-Help`
+
+Quick examples:
+
+```powershell
+# Standard deploy (recommended)
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+
+# First-time dependency setup only
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+
+# Build only
+.\ghidra-mcp-setup.ps1 -BuildOnly
+
+# Preflight checks only
+.\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+
+# Strict preflight (fails on warnings)
+.\ghidra-mcp-setup.ps1 -Preflight -StrictPreflight -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+
+# Show command help
+.\ghidra-mcp-setup.ps1 -Help
 ```
 
 ### Project Structure
@@ -263,7 +320,7 @@ mvn clean package assembly:single -DskipTests
 ghidra-mcp/
 ├── bridge_mcp_ghidra.py     # MCP server (Python)
 ├── src/main/java/           # Ghidra plugin (Java)
-├── lib/                     # Ghidra library dependencies
+├── lib/                     # Optional local workspace cache (not used by Maven resolution)
 ├── ghidra_scripts/          # 70+ automation scripts
 ├── docs/                    # Documentation
 │   ├── prompts/            # AI workflow prompts
@@ -275,13 +332,36 @@ ghidra-mcp/
 
 ### Library Dependencies
 
-The `lib/` folder must contain Ghidra JAR files for compilation. Run the provided script to copy them from your Ghidra installation:
+Ghidra JARs must be installed into your local Maven repository (`~/.m2/repository`) before compilation.
+This is a one-time setup per machine, and again when your Ghidra version changes.
+`-Deploy` now installs these automatically by default.
 
-```bash
+The tool enforces version consistency between:
+- `pom.xml` (`ghidra.version`)
+- `-GhidraVersion` (if provided)
+- `-GhidraPath` version segment (e.g., `ghidra_12.0.2_PUBLIC`)
+
+If these do not match, deployment fails fast with a clear error.
+
+### Troubleshooting: Version Mismatch
+
+If you see a version mismatch error, align all three values:
+1. `pom.xml` → `ghidra.version`
+2. `-GhidraVersion` (if used)
+3. `-GhidraPath` version segment (`ghidra_X.Y.Z_PUBLIC`)
+
+Then rerun:
+
+```powershell
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.2_PUBLIC" -GhidraVersion "12.0.2"
+```
+
+```powershell
 # Windows
-copy-ghidra-libs.bat "C:\path\to\ghidra_12.0.2_PUBLIC"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.2_PUBLIC"
 
-# Or manually copy from your Ghidra installation
+# Optional version override
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.2_PUBLIC" -GhidraVersion "12.0.2"
 ```
 
 **Required Libraries (14 JARs, ~37MB):**
@@ -303,7 +383,12 @@ copy-ghidra-libs.bat "C:\path\to\ghidra_12.0.2_PUBLIC"
 | **DB.jar** | `Framework/DB/lib/` | Database operations |
 | **Emulation.jar** | `Framework/Emulation/lib/` | P-code emulation |
 
-> **Note**: Libraries are NOT included in the repository (see `.gitignore`). You must copy them from your Ghidra installation before building.
+> **Note**: Libraries are NOT included in the repository (see `.gitignore`). You must install them from your Ghidra installation before building.
+
+> **Script roles**:
+> - `ghidra-mcp-setup.ps1`: unified automation script (`-SetupDeps`, `-BuildOnly`, `-Deploy`, `-Clean`)
+> - default `-Deploy` behavior: auto-setup prerequisites, then build and deploy
+> - use `-NoAutoPrereqs` for strict/manual prerequisite management
 
 ### Development Features
 - **Automated Deployment**: Version-aware deployment script

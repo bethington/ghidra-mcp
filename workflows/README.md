@@ -167,7 +167,7 @@ Changes are:
 1. Backed up before modification
 2. Tested with unit and integration tests
 3. Built with Maven (Java changes)
-4. Deployed via `deploy-to-ghidra.ps1`
+4. Deployed via `ghidra-mcp-setup.ps1`
 5. Rolled back if tests fail
 
 ## Curated Tool Set
