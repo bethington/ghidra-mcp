@@ -45,6 +45,7 @@ import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.PointerDataType;
 
+import ghidra.framework.Application;
 import ghidra.framework.options.Options;
 
 // Block model for control flow analysis
@@ -78,7 +79,7 @@ class VersionInfo {
     private static String APP_NAME = "GhidraMCP";
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 133;
+    private static final int ENDPOINT_COUNT = 144;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -127,7 +128,7 @@ class VersionInfo {
     category = PluginCategoryNames.ANALYSIS,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 133 endpoints for reverse engineering automation. " +
+                  "Provides 144 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +
@@ -8073,7 +8074,7 @@ public class GhidraMCPPlugin extends Plugin {
         version.append("  \"build_timestamp\": \"").append(VersionInfo.getBuildTimestamp()).append("\",\n");
         version.append("  \"build_number\": \"").append(VersionInfo.getBuildNumber()).append("\",\n");
         version.append("  \"full_version\": \"").append(VersionInfo.getFullVersion()).append("\",\n");
-        version.append("  \"ghidra_version\": \"12.0.2\",\n");
+        version.append("  \"ghidra_version\": \"").append(Application.getApplicationVersion()).append("\",\n");
         version.append("  \"java_version\": \"").append(System.getProperty("java.version")).append("\",\n");
         version.append("  \"endpoint_count\": ").append(VersionInfo.getEndpointCount()).append("\n");
         version.append("}");
