@@ -4,6 +4,32 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v2.0.1 - 2026-02-19
+
+### Patch Release - CI Fixes, Documentation, PowerShell Improvements
+
+#### 🔧 CI/Build Fixes
+- **Fixed CI workflow**: Ghidra JARs now properly installed to Maven repository instead of just copied to lib/ (PR #23)
+- **Proper Maven dependency management**: Works correctly with pom.xml changes from v2.0.0
+- **Version as single source of truth**: `ghidra.version` now uses Maven filtering from pom.xml (PR #20)
+- **Endpoint count updated**: Correctly reports 144 endpoints
+
+#### 📝 Documentation
+- **New troubleshooting section**: Comprehensive guide for common setup issues (PR #22)
+- **Verification steps**: Added curl commands to verify server is working
+- **Better error guidance**: Covers 500 errors, 404s, missing menus, and installation issues
+
+#### 🖥️ PowerShell Setup Script
+- **Fixed version sorting bug**: Now uses semantic version sorting instead of string sorting (PR #21)
+- **Correct Ghidra detection**: Properly selects `ghidra_12.0.2_PUBLIC` over `ghidra_12.0_PUBLIC`
+- Fixes issue #19
+
+#### 🐳 Docker Integration
+- Added as submodule to [re-universe](https://github.com/bethington/re-universe) platform
+- Enables AI-assisted analysis alongside BSim similarity matching
+
+---
+
 ## v2.0.0 - 2026-02-03
 
 ### Major Release - Security, Ghidra 12.0.2, Enhanced Documentation
