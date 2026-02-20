@@ -107,6 +107,83 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 4. Start the server via **Tools > GhidraMCP > Start MCP Server**
 5. The server runs on `http://127.0.0.1:8089/` by default
 
+#### Verify It's Working
+```bash
+# Quick health check
+curl http://127.0.0.1:8089/health
+# Expected: {"status":"ok","endpoints":144}
+
+# Get version info
+curl http://127.0.0.1:8089/get_version
+```
+
+## ❓ Troubleshooting
+
+### "GhidraMCP" menu not appearing in Tools
+
+**Cause:** Plugin not enabled or installed incorrectly.
+
+**Solution:**
+1. Verify extension is installed: **File > Install Extensions** — GhidraMCP should be listed
+2. Enable the plugin: **File > Configure > Configure All Plugins > GhidraMCP** (check the box)
+3. **Restart Ghidra** after installation/enabling
+
+### Server not responding / Connection refused
+
+**Cause:** Server not started or wrong port.
+
+**Solution:**
+1. Ensure you started the server: **Tools > GhidraMCP > Start MCP Server**
+2. Check configured port: **Edit > Tool Options > GhidraMCP HTTP Server**
+3. Check if port is in use:
+   ```bash
+   # Linux/macOS
+   lsof -i :8089
+   # Windows
+   netstat -ano | findstr :8089
+   ```
+4. Look for errors in Ghidra console: **Window > Console**
+
+### 500 Internal Server Errors
+
+**Cause:** Server-side exception, often due to missing program data.
+
+**Solution:**
+1. Ensure a binary is loaded in CodeBrowser
+2. Run auto-analysis first: **Analysis > Auto Analyze**
+3. Check Ghidra console (**Window > Console**) for Java exceptions
+4. Some operations require fully analyzed binaries
+
+### 404 Not Found Errors
+
+**Cause:** Endpoint doesn't exist or wrong URL.
+
+**Solution:**
+1. Verify endpoint exists: `curl http://127.0.0.1:8089/get_version`
+2. Check for typos in endpoint name
+3. Ensure you're using correct HTTP method (GET vs POST)
+
+### Extension not appearing in Install Extensions
+
+**Cause:** JAR file in wrong location.
+
+**Solution:**
+1. Manual install location: `~/.ghidra/ghidra_12.0.2_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
+2. Or use: **File > Install Extensions > Add** and select the ZIP file
+3. Ensure JAR/ZIP was built for your Ghidra version
+
+### Build fails with "Ghidra dependencies not found"
+
+**Cause:** Ghidra JARs not installed in local Maven repository.
+
+**Solution:**
+```powershell
+# Windows (recommended)
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+
+# Or manual install (see install-ghidra-deps.sh)
+```
+
 ## 📊 Production Performance
 
 - **MCP Tools**: 110 tools fully implemented
