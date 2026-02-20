@@ -51,11 +51,13 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
     private static final String VERSION = "1.9.4-headless";
     private static final int DEFAULT_PORT = 8089;
+    private static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
 
     private HttpServer server;
     private HeadlessProgramProvider programProvider;
     private DirectThreadingStrategy threadingStrategy;
     private int port = DEFAULT_PORT;
+    private String bindAddress = DEFAULT_BIND_ADDRESS;
     private boolean running = false;
 
     // Endpoint handler registry
@@ -112,6 +114,12 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     }
 
     private void parseArgs(String[] args) {
+        // Check environment variable for bind address (Docker container support)
+        String envBindAddress = System.getenv("GHIDRA_MCP_BIND_ADDRESS");
+        if (envBindAddress != null && !envBindAddress.isEmpty()) {
+            bindAddress = envBindAddress;
+        }
+        
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
                 case "--port":
@@ -122,6 +130,12 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
                         } catch (NumberFormatException e) {
                             System.err.println("Invalid port number: " + args[i]);
                         }
+                    }
+                    break;
+                case "--bind":
+                case "-b":
+                    if (i + 1 < args.length) {
+                        bindAddress = args[++i];
                     }
                     break;
                 case "--help":
@@ -145,20 +159,28 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         System.out.println();
         System.out.println("Options:");
         System.out.println("  --port, -p <port>      Server port (default: 8089)");
+        System.out.println("  --bind, -b <address>   Bind address (default: 127.0.0.1)");
+        System.out.println("                         Use 0.0.0.0 to allow remote connections");
         System.out.println("  --file, -f <file>      Binary file to load");
         System.out.println("  --project <path>       Ghidra project path");
         System.out.println("  --program <name>       Program name within project");
         System.out.println("  --help, -h             Show this help");
         System.out.println("  --version, -v          Show version");
         System.out.println();
+        System.out.println("Environment Variables:");
+        System.out.println("  GHIDRA_MCP_BIND_ADDRESS  Override bind address (for Docker)");
+        System.out.println();
         System.out.println("Examples:");
         System.out.println("  # Start server with no initial program");
         System.out.println("  java -jar GhidraMCPHeadless.jar --port 8089");
         System.out.println();
+        System.out.println("  # Start server accessible from Docker network");
+        System.out.println("  java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089");
+        System.out.println();
         System.out.println("  # Start server with a binary file");
         System.out.println("  java -jar GhidraMCPHeadless.jar --file /path/to/binary.exe");
         System.out.println();
-        System.out.println("REST API endpoints available at http://localhost:<port>/");
+        System.out.println("REST API endpoints available at http://<address>:<port>/");
     }
 
     private void initializeGhidra(GhidraApplicationLayout layout) throws Exception {
@@ -233,12 +255,12 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     }
 
     private void startServer() throws IOException {
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
+        server = HttpServer.create(new InetSocketAddress(bindAddress, port), 0);
         registerEndpoints();
         server.setExecutor(java.util.concurrent.Executors.newFixedThreadPool(10));
         server.start();
         running = true;
-        System.out.println("HTTP server started on port " + port);
+        System.out.println("HTTP server started on " + bindAddress + ":" + port);
     }
 
     private void registerEndpoints() {
