@@ -120,6 +120,29 @@ public class HeadlessEndpointHandler {
         return sb.toString();
     }
 
+    /**
+     * Health check endpoint for container orchestration (Docker, Kubernetes).
+     * Returns JSON with status, version, and program information.
+     */
+    public String getHealth() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"status\": \"healthy\",");
+        sb.append("\"version\": \"").append(VERSION).append("\",");
+        
+        // Check if any program is loaded
+        Program program = getProgram(null);
+        boolean programLoaded = (program != null);
+        sb.append("\"program_loaded\": ").append(programLoaded);
+        
+        if (programLoaded) {
+            sb.append(",\"program_name\": \"").append(escapeJson(program.getName())).append("\"");
+        }
+        
+        sb.append("}");
+        return sb.toString();
+    }
+
     public String getMetadata() {
         Program program = getProgram(null);
         if (program == null) {
