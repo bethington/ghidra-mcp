@@ -75,9 +75,9 @@ trap cleanup SIGTERM SIGINT
 # Build command arguments
 ARGS="--port ${PORT} --bind ${BIND_ADDRESS}"
 
-# Add any passed arguments
+# Append any passed arguments (don't replace)
 if [ "$#" -gt 0 ]; then
-    ARGS="$@"
+    ARGS="${ARGS} $@"
 fi
 
 # Check if a program file should be loaded
