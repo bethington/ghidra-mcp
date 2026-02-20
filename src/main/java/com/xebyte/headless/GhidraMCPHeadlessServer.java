@@ -264,9 +264,14 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     }
 
     private void registerEndpoints() {
-        // Health check endpoint
+        // Legacy health check endpoint (plain text)
         server.createContext("/check_connection", exchange -> {
             sendResponse(exchange, "Connection OK - GhidraMCP Headless Server v" + VERSION);
+        });
+
+        // Health check endpoint (JSON, for Docker/Kubernetes)
+        server.createContext("/health", exchange -> {
+            sendResponse(exchange, endpointHandler.getHealth());
         });
 
         // Version endpoint
