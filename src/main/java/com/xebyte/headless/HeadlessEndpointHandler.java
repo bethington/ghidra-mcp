@@ -1047,6 +1047,39 @@ public class HeadlessEndpointHandler {
         return "{\"error\": \"Close not supported in this mode\"}";
     }
 
+    /**
+     * Run auto-analysis on a program.
+     * This identifies functions, data types, strings, and other program structure.
+     *
+     * @param programName Optional program name (uses current if not specified)
+     * @return JSON with analysis statistics
+     */
+    public String runAnalysis(String programName) {
+        Program program = programProvider.getProgram(programName);
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        if (programProvider instanceof HeadlessProgramProvider) {
+            HeadlessProgramProvider hpp = (HeadlessProgramProvider) programProvider;
+            HeadlessProgramProvider.AnalysisResult result = hpp.runAnalysis(program);
+
+            StringBuilder json = new StringBuilder();
+            json.append("{");
+            json.append("\"success\": ").append(result.success).append(", ");
+            json.append("\"message\": \"").append(escapeJson(result.message)).append("\", ");
+            json.append("\"duration_ms\": ").append(result.durationMs).append(", ");
+            json.append("\"total_functions\": ").append(result.totalFunctions).append(", ");
+            json.append("\"new_functions\": ").append(result.newFunctions).append(", ");
+            json.append("\"program\": \"").append(escapeJson(program.getName())).append("\"");
+            json.append("}");
+
+            return json.toString();
+        }
+
+        return "{\"error\": \"Analysis not supported in this mode\"}";
+    }
+
     // ==========================================================================
     // PROJECT MANAGEMENT ENDPOINTS
     // ==========================================================================

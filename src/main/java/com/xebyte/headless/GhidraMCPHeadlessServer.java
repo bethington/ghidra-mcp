@@ -735,6 +735,12 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.closeProgram(name));
         });
 
+        server.createContext("/run_analysis", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String programName = params.get("program");
+            sendResponse(exchange, endpointHandler.runAnalysis(programName));
+        });
+
         // ==========================================================================
         // PROJECT MANAGEMENT ENDPOINTS (Headless-specific)
         // ==========================================================================

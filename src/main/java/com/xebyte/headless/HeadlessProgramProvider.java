@@ -16,6 +16,7 @@
 package com.xebyte.headless;
 
 import com.xebyte.core.ProgramProvider;
+import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.util.importer.AutoImporter;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.LoadResults;
@@ -24,6 +25,7 @@ import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
 import ghidra.framework.model.ProjectData;
+import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
@@ -471,5 +473,84 @@ public class HeadlessProgramProvider implements ProgramProvider {
      */
     public String getProjectName() {
         return project != null ? project.getName() : null;
+    }
+
+    /**
+     * Run auto-analysis on a program.
+     *
+     * @param program The program to analyze
+     * @return AnalysisResult with statistics about the analysis
+     */
+    public AnalysisResult runAnalysis(Program program) {
+        if (program == null) {
+            return new AnalysisResult(false, "No program specified", 0, 0, 0);
+        }
+
+        long startTime = System.currentTimeMillis();
+        int functionsBefore = program.getFunctionManager().getFunctionCount();
+        
+        try {
+            // Get the auto analysis manager for this program
+            AutoAnalysisManager analysisManager = AutoAnalysisManager.getAnalysisManager(program);
+            
+            // Start a transaction for the analysis
+            int transactionId = program.startTransaction("Auto Analysis");
+            boolean success = false;
+            
+            try {
+                // Analyze all addresses in the program
+                AddressSetView addresses = program.getMemory().getLoadedAndInitializedAddressSet();
+                
+                // Initialize analysis options (use defaults)
+                analysisManager.initializeOptions();
+                
+                // Schedule analysis for the entire program
+                analysisManager.reAnalyzeAll(addresses);
+                
+                // Wait for analysis to complete
+                analysisManager.startAnalysis(monitor);
+                
+                success = true;
+            } finally {
+                program.endTransaction(transactionId, success);
+            }
+            
+            long duration = System.currentTimeMillis() - startTime;
+            int functionsAfter = program.getFunctionManager().getFunctionCount();
+            int newFunctions = functionsAfter - functionsBefore;
+            
+            Msg.info(this, "Analysis completed in " + duration + "ms. " +
+                "Functions: " + functionsBefore + " -> " + functionsAfter + 
+                " (+" + newFunctions + ")");
+            
+            return new AnalysisResult(true, "Analysis completed successfully", 
+                duration, functionsAfter, newFunctions);
+                
+        } catch (Exception e) {
+            long duration = System.currentTimeMillis() - startTime;
+            Msg.error(this, "Analysis failed: " + e.getMessage(), e);
+            return new AnalysisResult(false, "Analysis failed: " + e.getMessage(), 
+                duration, program.getFunctionManager().getFunctionCount(), 0);
+        }
+    }
+
+    /**
+     * Result of running analysis on a program.
+     */
+    public static class AnalysisResult {
+        public final boolean success;
+        public final String message;
+        public final long durationMs;
+        public final int totalFunctions;
+        public final int newFunctions;
+
+        public AnalysisResult(boolean success, String message, long durationMs, 
+                              int totalFunctions, int newFunctions) {
+            this.success = success;
+            this.message = message;
+            this.durationMs = durationMs;
+            this.totalFunctions = totalFunctions;
+            this.newFunctions = newFunctions;
+        }
     }
 }

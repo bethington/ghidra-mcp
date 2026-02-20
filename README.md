@@ -491,6 +491,60 @@ Then rerun:
 - [Complete Changelog](CHANGELOG.md) - All version release notes
 - [Release Notes](docs/releases/) - Detailed release documentation
 
+## 🐳 Headless Server (Docker)
+
+GhidraMCP includes a headless server mode for automated analysis without the Ghidra GUI.
+
+### Quick Start with Docker
+
+```bash
+# Build and run
+docker-compose up -d ghidra-mcp
+
+# Test connection
+curl http://localhost:8089/check_connection
+# Connection OK - GhidraMCP Headless Server v1.9.4-headless
+```
+
+### Headless API Workflow
+
+```bash
+# 1. Load a binary
+curl -X POST -d "file=/data/program.exe" http://localhost:8089/load_program
+
+# 2. Run auto-analysis (identifies functions, strings, data types)
+curl -X POST http://localhost:8089/run_analysis
+
+# 3. List discovered functions
+curl "http://localhost:8089/list_functions?limit=20"
+
+# 4. Decompile a function
+curl "http://localhost:8089/decompile_function?address=0x401000"
+
+# 5. Get metadata
+curl http://localhost:8089/get_metadata
+```
+
+### Key Headless Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/load_program` | POST | Load binary file for analysis |
+| `/run_analysis` | POST | Run Ghidra auto-analysis |
+| `/list_functions` | GET | List all discovered functions |
+| `/list_exports` | GET | List exported symbols |
+| `/list_imports` | GET | List imported symbols |
+| `/decompile_function` | GET | Decompile function to C code |
+| `/create_function` | POST | Create function at address |
+| `/get_metadata` | GET | Get program metadata |
+
+### Configuration
+
+Environment variables for Docker:
+- `GHIDRA_MCP_PORT` - Server port (default: 8089)
+- `GHIDRA_MCP_BIND_ADDRESS` - Bind address (default: 0.0.0.0 in Docker)
+- `JAVA_OPTS` - JVM options (default: -Xmx4g -XX:+UseG1GC)
+
 ## 🤝 Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
