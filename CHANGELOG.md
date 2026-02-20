@@ -4,6 +4,41 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v2.0.2 - 2026-02-20
+
+### Patch Release - Ghidra 12.0.3 Support, Pagination for Large Functions
+
+#### 🚀 Ghidra 12.0.3 Support (PR #29)
+- **Full compatibility** with Ghidra 12.0.3 (released Feb 11, 2026)
+- Updated `pom.xml` target version
+- Updated Docker build configuration
+- Updated all GitHub Actions workflows
+- Updated documentation and setup scripts
+- Fixes issue #14 for users on latest Ghidra
+
+#### 📄 Pagination for Large Functions (PR #30)
+- **New `offset` and `limit` parameters** for `decompile_function()` and `disassemble_function()`
+- Prevents LLM context overflow when working with large functions
+- Pagination metadata header shows total lines and next offset
+- Backward compatible — only applies when parameters are specified
+- Fixes issue #7
+
+**Example usage:**
+```python
+# Get first 100 lines
+code = decompile_function(address='0x401000', offset=0, limit=100)
+
+# Get next chunk
+code = decompile_function(address='0x401000', offset=100, limit=100)
+```
+
+**Response includes metadata:**
+```c
+/* PAGINATION: lines 1-100 of 523 (use offset=100 for next chunk) */
+```
+
+---
+
 ## v2.0.1 - 2026-02-19
 
 ### Patch Release - CI Fixes, Documentation, PowerShell Improvements
