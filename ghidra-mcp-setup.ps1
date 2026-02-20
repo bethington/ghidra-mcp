@@ -878,9 +878,22 @@ if (Test-Path $jarSourcePath) {
     $ghidraUserBase = "$env:USERPROFILE\AppData\Roaming\ghidra"
 
     if (Test-Path $ghidraUserBase) {
-        # Find the most recent ghidra version directory
+        # Find the most recent ghidra version directory using semantic version sorting
+        # (String sorting incorrectly puts "12.0_" before "12.0.2_" because "_" > "." in ASCII)
         $ghidraVersionDirs = Get-ChildItem -Path $ghidraUserBase -Directory -Filter "ghidra_*" |
-                             Sort-Object Name -Descending
+            ForEach-Object {
+                # Extract version numbers for proper numerical sorting
+                if ($_.Name -match "ghidra_([0-9]+)\.([0-9]+)(?:\.([0-9]+))?") {
+                    [PSCustomObject]@{
+                        Name = $_.Name
+                        Major = [int]$Matches[1]
+                        Minor = [int]$Matches[2]
+                        Patch = if ($Matches[3]) { [int]$Matches[3] } else { 0 }
+                    }
+                }
+            } |
+            Sort-Object Major, Minor, Patch -Descending
+        
         if ($ghidraVersionDirs) {
             $ghidraVersionDir = $ghidraVersionDirs[0].Name
             Write-LogInfo "Detected Ghidra user config version: $ghidraVersionDir"
