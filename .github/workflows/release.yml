@@ -16,8 +16,8 @@ on:
         default: true
 
 env:
-  GHIDRA_VERSION: 12.0.2
-  GHIDRA_DATE: 20260129
+  GHIDRA_VERSION: 12.0.3
+  GHIDRA_DATE: 20260210
   GHIDRA_LIBS: >-
     Features/Base/lib/Base.jar
     Features/Decompiler/lib/Decompiler.jar
@@ -220,7 +220,7 @@ jobs:
         ## 🔧 Technical Specifications
         
         - **Java Version:** Java 21 LTS
-        - **Ghidra Version:** 12.0.2 (compatible)
+        - **Ghidra Version:** 12.0.3 (compatible)
         - **Python Version:** 3.8+ required
         - **Package:** com.xebyte.GhidraMCP
         - **License:** Apache 2.0

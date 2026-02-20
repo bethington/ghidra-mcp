@@ -8,12 +8,12 @@
     <packaging>jar</packaging>
     <version>2.0.1</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v2.0.0: Security hardening, Ghidra 12.0.2 support, configurable decompile timeout, enhanced documentation.</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v2.0.0: Security hardening, Ghidra 12.0.3 support, configurable decompile timeout, enhanced documentation.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <ghidra.version>12.0.2</ghidra.version>
+        <ghidra.version>12.0.3</ghidra.version>
         <!-- Build timestamp generated at compile time (format: yyyyMMdd-HHmmss) -->
         <build.timestamp>${maven.build.timestamp}</build.timestamp>
         <maven.build.timestamp.format>yyyyMMdd-HHmmss</maven.build.timestamp.format>
