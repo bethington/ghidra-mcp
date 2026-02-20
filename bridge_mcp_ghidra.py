@@ -1182,12 +1182,18 @@ def decompile_function(
     force: bool = False,
     timeout: int = None,
     program: str = None,
+    offset: int = 0,
+    limit: int = None,
 ) -> str:
     """
     Decompile a function by name or address and return the decompiled C code.
 
     This is the primary tool for retrieving decompiled pseudocode. It supports both
     function names and addresses, with optional cache refresh for seeing recent changes.
+
+    **Pagination (for large functions):**
+    Use offset and limit to paginate through large decompiled functions that might
+    overwhelm LLM context windows. The response includes pagination metadata.
 
     **When to Use Force Decompilation (force=True):**
     - After changing function signatures or prototypes
@@ -1203,9 +1209,13 @@ def decompile_function(
         timeout: Optional timeout in seconds (default: 45s, use higher for complex functions)
         program: Optional program name to query (e.g., "D2Client.dll").
                  If not specified, uses the currently active program.
+        offset: Line number to start from (0-indexed). Use for pagination. (default: 0)
+        limit: Maximum number of lines to return. If None, returns all lines.
+               Recommended: 100-200 lines per chunk to avoid context overflow.
 
     Returns:
-        Decompiled C code as a string
+        Decompiled C code as a string. When using pagination (offset/limit), includes
+        metadata header showing total lines, current range, and whether more data exists.
 
     Raises:
         GhidraValidationError: If neither name nor address provided, or address format invalid
@@ -1226,10 +1236,17 @@ def decompile_function(
         # Decompile from a specific program (cross-binary query)
         code = decompile_function(address="0x6fb00000", program="D2Common.dll")
 
+        # Paginate through a large function (first 100 lines)
+        code = decompile_function(address="0x6fb6aef0", offset=0, limit=100)
+
+        # Get next chunk (lines 100-199)
+        code = decompile_function(address="0x6fb6aef0", offset=100, limit=100)
+
     Performance Notes:
         - Cached calls: ~10-50ms
         - Fresh decompilation: ~100-500ms (depends on function complexity)
         - Use force=True only when necessary
+        - Use pagination for functions with 200+ lines to avoid context overflow
     """
     if not name and not address:
         raise GhidraValidationError("Either 'name' or 'address' parameter is required")
@@ -1291,6 +1308,24 @@ def decompile_function(
         # Convert list result to string if needed (safe_get returns list)
         if isinstance(result, list):
             result = "\n".join(result)
+
+        # Apply pagination if offset or limit specified
+        if offset > 0 or limit is not None:
+            lines = result.split("\n")
+            total_lines = len(lines)
+
+            # Apply offset and limit
+            end_idx = len(lines) if limit is None else min(offset + limit, len(lines))
+            paginated_lines = lines[offset:end_idx]
+
+            # Build pagination metadata header
+            has_more = end_idx < total_lines
+            metadata = f"/* PAGINATION: lines {offset + 1}-{end_idx} of {total_lines}"
+            if has_more:
+                metadata += f" (use offset={end_idx} for next chunk)"
+            metadata += " */\n\n"
+
+            result = metadata + "\n".join(paginated_lines)
 
         return result
     finally:
@@ -2146,17 +2181,41 @@ def get_current_selection() -> dict:
 
 
 @mcp.tool()
-def disassemble_function(address: str, program: str = None) -> list:
+def disassemble_function(
+    address: str,
+    program: str = None,
+    offset: int = 0,
+    limit: int = None,
+) -> list:
     """
     Get assembly code (address: instruction; comment) for a function.
+
+    **Pagination (for large functions):**
+    Use offset and limit to paginate through large disassembled functions that might
+    overwhelm LLM context windows. Recommended chunk size: 100-200 instructions.
 
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
         program: Optional program name to query (e.g., "D2Client.dll").
                  If not specified, uses the currently active program.
+        offset: Instruction index to start from (0-indexed). Use for pagination. (default: 0)
+        limit: Maximum number of instructions to return. If None, returns all.
+               Recommended: 100-200 instructions per chunk to avoid context overflow.
 
     Returns:
-        List of assembly instructions with addresses and comments
+        List of assembly instructions with addresses and comments.
+        When using pagination, first element is a metadata string showing total count
+        and pagination info.
+
+    Examples:
+        # Get all assembly for a function
+        asm = disassemble_function(address="0x1400010a0")
+
+        # Get first 100 instructions only
+        asm = disassemble_function(address="0x1400010a0", offset=0, limit=100)
+
+        # Get next 100 instructions
+        asm = disassemble_function(address="0x1400010a0", offset=100, limit=100)
     """
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
@@ -2164,7 +2223,26 @@ def disassemble_function(address: str, program: str = None) -> list:
     params = {"address": address}
     if program:
         params["program"] = program
-    return safe_get("disassemble_function", params)
+    result = safe_get("disassemble_function", params)
+
+    # Apply pagination if offset or limit specified
+    if offset > 0 or limit is not None:
+        total_instructions = len(result)
+
+        # Apply offset and limit
+        end_idx = len(result) if limit is None else min(offset + limit, len(result))
+        paginated = result[offset:end_idx]
+
+        # Add pagination metadata as first element
+        has_more = end_idx < total_instructions
+        metadata = f"/* PAGINATION: instructions {offset + 1}-{end_idx} of {total_instructions}"
+        if has_more:
+            metadata += f" (use offset={end_idx} for next chunk)"
+        metadata += " */"
+
+        return [metadata] + paginated
+
+    return result
 
 
 @mcp.tool()
