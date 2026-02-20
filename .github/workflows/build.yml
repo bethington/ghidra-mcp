@@ -42,13 +42,43 @@ jobs:
         wget --no-verbose -O ghidra.zip https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${{ env.GHIDRA_VERSION }}_build/ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC_${{ env.GHIDRA_DATE }}.zip
         7z x -bd ghidra.zip
 
-    - name: Copy Ghidra libs
+    - name: Install Ghidra JARs to Maven local repository
       run: |
-        mkdir -p ./lib
-        for libfile in ${{ env.GHIDRA_LIBS }}
-          do echo "Copying ${libfile} to lib/"
-          cp ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC/Ghidra/${libfile} ./lib/
-        done
+        GHIDRA_DIR="ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC"
+        
+        # Install Framework JARs
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Generic/lib/Generic.jar" \
+            -DgroupId=ghidra -DartifactId=Generic -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/SoftwareModeling/lib/SoftwareModeling.jar" \
+            -DgroupId=ghidra -DartifactId=SoftwareModeling -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Project/lib/Project.jar" \
+            -DgroupId=ghidra -DartifactId=Project -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Docking/lib/Docking.jar" \
+            -DgroupId=ghidra -DartifactId=Docking -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Utility/lib/Utility.jar" \
+            -DgroupId=ghidra -DartifactId=Utility -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Gui/lib/Gui.jar" \
+            -DgroupId=ghidra -DartifactId=Gui -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/FileSystem/lib/FileSystem.jar" \
+            -DgroupId=ghidra -DartifactId=FileSystem -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Graph/lib/Graph.jar" \
+            -DgroupId=ghidra -DartifactId=Graph -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/DB/lib/DB.jar" \
+            -DgroupId=ghidra -DartifactId=DB -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Emulation/lib/Emulation.jar" \
+            -DgroupId=ghidra -DartifactId=Emulation -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        
+        # Install Feature JARs
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/Base/lib/Base.jar" \
+            -DgroupId=ghidra -DartifactId=Base -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/Decompiler/lib/Decompiler.jar" \
+            -DgroupId=ghidra -DartifactId=Decompiler -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/PDB/lib/PDB.jar" \
+            -DgroupId=ghidra -DartifactId=PDB -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/FunctionID/lib/FunctionID.jar" \
+            -DgroupId=ghidra -DartifactId=FunctionID -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        
+        echo "✅ Installed Ghidra JARs to Maven local repository"
 
     - name: Build with Maven
       run: mvn clean package assembly:single -DskipTests
