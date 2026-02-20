@@ -45,7 +45,6 @@ import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.PointerDataType;
 
-import ghidra.framework.Application;
 import ghidra.framework.options.Options;
 
 // Block model for control flow analysis
@@ -77,6 +76,7 @@ import java.util.regex.Pattern;
 class VersionInfo {
     private static String VERSION = "2.0.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
+    private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
     private static final int ENDPOINT_COUNT = 144;
@@ -89,6 +89,7 @@ class VersionInfo {
                 props.load(input);
                 VERSION = props.getProperty("app.version", "2.0.0");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
+                GHIDRA_VERSION = props.getProperty("ghidra.version", "unknown");
                 BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
                 BUILD_NUMBER = props.getProperty("build.number", "0");
             }
@@ -103,6 +104,10 @@ class VersionInfo {
     
     public static String getAppName() {
         return APP_NAME;
+    }
+    
+    public static String getGhidraVersion() {
+        return GHIDRA_VERSION;
     }
     
     public static String getBuildTimestamp() {
@@ -8074,7 +8079,7 @@ public class GhidraMCPPlugin extends Plugin {
         version.append("  \"build_timestamp\": \"").append(VersionInfo.getBuildTimestamp()).append("\",\n");
         version.append("  \"build_number\": \"").append(VersionInfo.getBuildNumber()).append("\",\n");
         version.append("  \"full_version\": \"").append(VersionInfo.getFullVersion()).append("\",\n");
-        version.append("  \"ghidra_version\": \"").append(Application.getApplicationVersion()).append("\",\n");
+        version.append("  \"ghidra_version\": \"").append(VersionInfo.getGhidraVersion()).append("\",\n");
         version.append("  \"java_version\": \"").append(System.getProperty("java.version")).append("\",\n");
         version.append("  \"endpoint_count\": ").append(VersionInfo.getEndpointCount()).append("\n");
         version.append("}");
