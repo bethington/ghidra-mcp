@@ -32,7 +32,7 @@
             <directory>${project.build.directory}</directory>
             <includes>
                 <!-- Use the finalized JAR name from the maven-jar-plugin -->
-                <include>GhidraMCP.jar</include>
+                <include>${project.build.finalName}.jar</include>
             </includes>
             <outputDirectory>GhidraMCP/lib</outputDirectory>
         </fileSet>
