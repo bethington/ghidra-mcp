@@ -5,6 +5,7 @@ set -e
 
 # Configuration from environment variables
 PORT=${GHIDRA_MCP_PORT:-8089}
+BIND_ADDRESS=${GHIDRA_MCP_BIND_ADDRESS:-"0.0.0.0"}  # Default to all interfaces for Docker
 JAVA_OPTS=${JAVA_OPTS:-"-Xmx4g -XX:+UseG1GC"}
 GHIDRA_USER=${GHIDRA_USER:-""}  # Set to project owner name to bypass ownership checks
 
@@ -21,6 +22,7 @@ echo ""
 
 # Print configuration
 echo -e "${YELLOW}Configuration:${NC}"
+echo "  Bind Address: ${BIND_ADDRESS}"
 echo "  Port: ${PORT}"
 echo "  Java Options: ${JAVA_OPTS}"
 echo "  Ghidra Home: ${GHIDRA_HOME}"
