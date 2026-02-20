@@ -85,7 +85,8 @@ ENV JAVA_OPTS="-Xmx4g -XX:+UseG1GC"
 RUN mkdir -p /app /data /projects
 
 # Copy the built headless JAR (lib directory may not exist with system-scoped deps)
-COPY --from=builder /build/target/GhidraMCPHeadless.jar /app/GhidraMCP.jar
+# Copy the built JAR (naming may vary based on version)
+COPY --from=builder /build/target/GhidraMCP-*.jar /app/GhidraMCP.jar
 
 # Copy entrypoint script and fix line endings (Windows -> Unix)
 COPY docker/entrypoint.sh /app/
