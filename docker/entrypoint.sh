@@ -73,7 +73,7 @@ cleanup() {
 trap cleanup SIGTERM SIGINT
 
 # Build command arguments
-ARGS="--port ${PORT}"
+ARGS="--port ${PORT} --bind ${BIND_ADDRESS}"
 
 # Add any passed arguments
 if [ "$#" -gt 0 ]; then
