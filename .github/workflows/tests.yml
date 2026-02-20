@@ -41,32 +41,45 @@ jobs:
         unzip -q /tmp/ghidra.zip -d /tmp/ghidra
         rm /tmp/ghidra.zip
     
-    - name: Copy Ghidra JARs to lib/
+    - name: Install Ghidra JARs to Maven local repository
       run: |
         GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        GHIDRA_VERSION="12.0.2"
         echo "Using Ghidra directory: $GHIDRA_DIR"
-        mkdir -p lib
         
-        # Framework JARs
-        cp "$GHIDRA_DIR/Ghidra/Framework/Generic/lib/Generic.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Framework/SoftwareModeling/lib/SoftwareModeling.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Framework/Project/lib/Project.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Framework/Docking/lib/Docking.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Framework/Utility/lib/Utility.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Framework/Gui/lib/Gui.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Framework/FileSystem/lib/FileSystem.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Framework/Graph/lib/Graph.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Framework/DB/lib/DB.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Framework/Emulation/lib/Emulation.jar" lib/
+        # Install Framework JARs
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Generic/lib/Generic.jar" \
+            -DgroupId=ghidra -DartifactId=Generic -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/SoftwareModeling/lib/SoftwareModeling.jar" \
+            -DgroupId=ghidra -DartifactId=SoftwareModeling -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Project/lib/Project.jar" \
+            -DgroupId=ghidra -DartifactId=Project -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Docking/lib/Docking.jar" \
+            -DgroupId=ghidra -DartifactId=Docking -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Utility/lib/Utility.jar" \
+            -DgroupId=ghidra -DartifactId=Utility -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Gui/lib/Gui.jar" \
+            -DgroupId=ghidra -DartifactId=Gui -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/FileSystem/lib/FileSystem.jar" \
+            -DgroupId=ghidra -DartifactId=FileSystem -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Graph/lib/Graph.jar" \
+            -DgroupId=ghidra -DartifactId=Graph -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/DB/lib/DB.jar" \
+            -DgroupId=ghidra -DartifactId=DB -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Emulation/lib/Emulation.jar" \
+            -DgroupId=ghidra -DartifactId=Emulation -Dversion=$GHIDRA_VERSION -Dpackaging=jar
         
-        # Feature JARs
-        cp "$GHIDRA_DIR/Ghidra/Features/Base/lib/Base.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Features/Decompiler/lib/Decompiler.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Features/PDB/lib/PDB.jar" lib/
-        cp "$GHIDRA_DIR/Ghidra/Features/FunctionID/lib/FunctionID.jar" lib/
+        # Install Feature JARs
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/Base/lib/Base.jar" \
+            -DgroupId=ghidra -DartifactId=Base -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/Decompiler/lib/Decompiler.jar" \
+            -DgroupId=ghidra -DartifactId=Decompiler -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/PDB/lib/PDB.jar" \
+            -DgroupId=ghidra -DartifactId=PDB -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/FunctionID/lib/FunctionID.jar" \
+            -DgroupId=ghidra -DartifactId=FunctionID -Dversion=$GHIDRA_VERSION -Dpackaging=jar
         
-        echo "✅ Copied $(ls lib/*.jar | wc -l) Ghidra JARs to lib/"
-        ls -la lib/*.jar
+        echo "✅ Installed Ghidra JARs to Maven local repository"
     
     - name: Build with Maven
       run: mvn clean package assembly:single -q -DskipTests
