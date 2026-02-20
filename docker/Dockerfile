@@ -7,8 +7,8 @@
 FROM eclipse-temurin:21-jdk AS builder
 
 # Build arguments
-ARG GHIDRA_VERSION=12.0.2
-ARG GHIDRA_DATE=20260129
+ARG GHIDRA_VERSION=12.0.3
+ARG GHIDRA_DATE=20260210
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \

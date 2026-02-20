@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
-[![Ghidra Version](https://img.shields.io/badge/Ghidra-12.0.2-green.svg)](https://ghidra-sre.org/)
+[![Ghidra Version](https://img.shields.io/badge/Ghidra-12.0.3-green.svg)](https://ghidra-sre.org/)
 [![Version](https://img.shields.io/badge/Version-2.0.0-brightgreen.svg)](CHANGELOG.md)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
@@ -37,7 +37,7 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 
 - **Java 21 LTS** (OpenJDK recommended)
 - **Apache Maven 3.9+**
-- **Ghidra 12.0.2** (or compatible version)
+- **Ghidra 12.0.3** (or compatible version)
 - **Python 3.8+** with pip
 
 ### Installation
@@ -56,18 +56,18 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 
 2. **Recommended: run environment preflight first:**
    ```powershell
-   .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+   .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
    ```
 
 3. **Build and deploy to Ghidra (single command):**
    ```powershell
-   .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+   .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
    ```
 
 4. **Optional strict/manual mode** (advanced):
    ```powershell
    # Skip automatic prerequisite setup
-   .\ghidra-mcp-setup.ps1 -Deploy -NoAutoPrereqs -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+   .\ghidra-mcp-setup.ps1 -Deploy -NoAutoPrereqs -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
    ```
 
 5. **Show script help**:
@@ -168,7 +168,7 @@ curl http://127.0.0.1:8089/get_version
 **Cause:** JAR file in wrong location.
 
 **Solution:**
-1. Manual install location: `~/.ghidra/ghidra_12.0.2_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
+1. Manual install location: `~/.ghidra/ghidra_12.0.3_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
 2. Or use: **File > Install Extensions > Add** and select the ZIP file
 3. Ensure JAR/ZIP was built for your Ghidra version
 
@@ -179,7 +179,7 @@ curl http://127.0.0.1:8089/get_version
 **Solution:**
 ```powershell
 # Windows (recommended)
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
 
 # Or manual install (see install-ghidra-deps.sh)
 ```
@@ -343,7 +343,7 @@ See [docs/README.md](docs/README.md) for complete documentation.
 ### Building from Source
 ```bash
 # Recommended: one command does setup + build + deploy
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
 
 # Optional: build only (no deploy)
 .\ghidra-mcp-setup.ps1 -BuildOnly
@@ -359,8 +359,8 @@ Primary actions (choose one):
 - `-Preflight`: validate tools, paths, required Ghidra jars, and write access without making changes
 
 Useful options:
-- `-GhidraPath "C:\ghidra_12.0.2_PUBLIC"`
-- `-GhidraVersion "12.0.2"`
+- `-GhidraPath "C:\ghidra_12.0.3_PUBLIC"`
+- `-GhidraVersion "12.0.3"`
 - `-StrictPreflight`
 - `-NoAutoPrereqs`
 - `-SkipBuild`
@@ -374,19 +374,19 @@ Quick examples:
 
 ```powershell
 # Standard deploy (recommended)
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
 
 # First-time dependency setup only
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
 
 # Build only
 .\ghidra-mcp-setup.ps1 -BuildOnly
 
 # Preflight checks only
-.\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+.\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
 
 # Strict preflight (fails on warnings)
-.\ghidra-mcp-setup.ps1 -Preflight -StrictPreflight -GhidraPath "C:\ghidra_12.0.2_PUBLIC"
+.\ghidra-mcp-setup.ps1 -Preflight -StrictPreflight -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
 
 # Show command help
 .\ghidra-mcp-setup.ps1 -Help
@@ -416,7 +416,7 @@ This is a one-time setup per machine, and again when your Ghidra version changes
 The tool enforces version consistency between:
 - `pom.xml` (`ghidra.version`)
 - `-GhidraVersion` (if provided)
-- `-GhidraPath` version segment (e.g., `ghidra_12.0.2_PUBLIC`)
+- `-GhidraPath` version segment (e.g., `ghidra_12.0.3_PUBLIC`)
 
 If these do not match, deployment fails fast with a clear error.
 
@@ -430,15 +430,15 @@ If you see a version mismatch error, align all three values:
 Then rerun:
 
 ```powershell
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.2_PUBLIC" -GhidraVersion "12.0.2"
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC" -GhidraVersion "12.0.3"
 ```
 
 ```powershell
 # Windows
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.2_PUBLIC"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.3_PUBLIC"
 
 # Optional version override
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.2_PUBLIC" -GhidraVersion "12.0.2"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.3_PUBLIC" -GhidraVersion "12.0.3"
 ```
 
 **Required Libraries (14 JARs, ~37MB):**

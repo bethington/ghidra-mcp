@@ -265,7 +265,7 @@ These functions represent the core of Diablo II's entity system:
 
 - **Diablo II Version**: 1.13c
 - **Binary**: D2Common.dll
-- **Analysis Tool**: Ghidra 12.0.2
+- **Analysis Tool**: Ghidra 12.0.3
 - **Documentation Date**: 2025-10-23
 - **Status**: Complete and Current
 

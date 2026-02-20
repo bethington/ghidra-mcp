@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      GHIDRA_VERSION: 12.0.2
+      GHIDRA_VERSION: 12.0.3
       GHIDRA_DATE: 20260129
       GHIDRA_LIBS: >-
         Features/Base/lib/Base.jar

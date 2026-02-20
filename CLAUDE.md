@@ -8,7 +8,7 @@ Ghidra MCP is a production-ready Model Context Protocol (MCP) server that bridge
 - **Version**: 2.0.0 (see `pom.xml`)
 - **License**: Apache 2.0
 - **Java**: 21 LTS
-- **Ghidra**: 12.0.2
+- **Ghidra**: 12.0.3
 
 ## Architecture
 

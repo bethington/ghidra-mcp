@@ -8,7 +8,7 @@ Ghidra MCP Server is a production-ready Model Context Protocol (MCP) server that
 
 **Current Version**: Configured in `pom.xml`
 **Package**: com.xebyte
-**Ghidra Version**: 12.0.2
+**Ghidra Version**: 12.0.3
 **Java Version**: 21 LTS
 **Python Version**: 3.8+
 **MCP Protocol**: stdio (default) and SSE transports
@@ -193,7 +193,7 @@ These files work together to implement version management. **You only edit `pom.
 app.version=${project.version}  # Maven substitutes current version from pom.xml
 app.name=GhidraMCP
 app.description=Production-ready MCP server for Ghidra
-ghidra.version=12.0.2
+ghidra.version=12.0.3
 java.version=21
 ```
 

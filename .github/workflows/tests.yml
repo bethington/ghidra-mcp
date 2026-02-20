@@ -29,14 +29,14 @@ jobs:
       uses: actions/cache@v4
       with:
         path: /tmp/ghidra
-        key: ghidra-12.0.2-PUBLIC-20260129
+        key: ghidra-12.0.3-PUBLIC-20260210
     
     - name: Download Ghidra
       if: steps.cache-ghidra.outputs.cache-hit != 'true'
       run: |
-        echo "Downloading Ghidra 12.0.2..."
+        echo "Downloading Ghidra 12.0.3..."
         curl -sL -o /tmp/ghidra.zip \
-          "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.0.2_build/ghidra_12.0.2_PUBLIC_20260129.zip"
+          "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.0.3_build/ghidra_12.0.3_PUBLIC_20260210.zip"
         mkdir -p /tmp/ghidra
         unzip -q /tmp/ghidra.zip -d /tmp/ghidra
         rm /tmp/ghidra.zip
@@ -44,7 +44,7 @@ jobs:
     - name: Install Ghidra JARs to Maven local repository
       run: |
         GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
-        GHIDRA_VERSION="12.0.2"
+        GHIDRA_VERSION="12.0.3"
         echo "Using Ghidra directory: $GHIDRA_DIR"
         
         # Install Framework JARs
