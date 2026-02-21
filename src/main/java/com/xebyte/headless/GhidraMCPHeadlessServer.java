@@ -63,6 +63,9 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     // Endpoint handler registry
     private HeadlessEndpointHandler endpointHandler;
 
+    // Ghidra server connection manager
+    private GhidraServerManager serverManager;
+
     public static void main(String[] args) {
         GhidraMCPHeadlessServer server = new GhidraMCPHeadlessServer();
         try {
@@ -88,6 +91,9 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         // Create endpoint handler
         endpointHandler = new HeadlessEndpointHandler(programProvider, threadingStrategy);
+
+        // Create server manager for shared Ghidra server support
+        serverManager = new GhidraServerManager();
 
         // Load initial programs if specified
         loadInitialPrograms(args);
@@ -775,6 +781,26 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         });
 
         // ==========================================================================
+        // SHARED SERVER ENDPOINTS
+        // ==========================================================================
+
+        server.createContext("/server/connect", exchange -> {
+            sendResponse(exchange, serverManager.connect());
+        });
+
+        server.createContext("/server/status", exchange -> {
+            sendResponse(exchange, serverManager.getStatus());
+        });
+
+        server.createContext("/server/repositories", exchange -> {
+            sendResponse(exchange, serverManager.listRepositories());
+        });
+
+        server.createContext("/server/disconnect", exchange -> {
+            sendResponse(exchange, serverManager.disconnect());
+        });
+
+        // ==========================================================================
         // PHASE 3: DATA TYPE SYSTEM ENDPOINTS
         // ==========================================================================
 
@@ -1027,7 +1053,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
     private int countEndpoints() {
         // Count contexts registered - this is an approximation
-        return 91; // 87 + 4 fuzzy matching/diff endpoints
+        return 95; // 91 + 4 shared server endpoints
     }
 
     public void stop() {
@@ -1040,6 +1066,11 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             System.out.println("Stopping HTTP server...");
             server.stop(2);
             server = null;
+        }
+
+        if (serverManager != null && serverManager.isConnected()) {
+            System.out.println("Disconnecting from Ghidra server...");
+            serverManager.disconnect();
         }
 
         if (programProvider != null) {

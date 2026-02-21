@@ -9,6 +9,11 @@ BIND_ADDRESS=${GHIDRA_MCP_BIND_ADDRESS:-"0.0.0.0"}  # Default to all interfaces 
 JAVA_OPTS=${JAVA_OPTS:-"-Xmx4g -XX:+UseG1GC"}
 GHIDRA_USER=${GHIDRA_USER:-""}  # Set to project owner name to bypass ownership checks
 
+# Shared Ghidra server configuration
+GHIDRA_SERVER_HOST=${GHIDRA_SERVER_HOST:-""}
+GHIDRA_SERVER_PORT=${GHIDRA_SERVER_PORT:-""}
+GHIDRA_SERVER_USER=${GHIDRA_SERVER_USER:-""}
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -28,6 +33,13 @@ echo "  Java Options: ${JAVA_OPTS}"
 echo "  Ghidra Home: ${GHIDRA_HOME}"
 if [ -n "${GHIDRA_USER}" ]; then
     echo "  Ghidra User: ${GHIDRA_USER}"
+fi
+if [ -n "${GHIDRA_SERVER_HOST}" ]; then
+    echo "  Server Host: ${GHIDRA_SERVER_HOST}"
+    echo "  Server Port: ${GHIDRA_SERVER_PORT:-13100}"
+fi
+if [ -n "${GHIDRA_SERVER_USER}" ]; then
+    echo "  Server User: ${GHIDRA_SERVER_USER}"
 fi
 echo ""
 
