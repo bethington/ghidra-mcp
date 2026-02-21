@@ -800,6 +800,22 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, serverManager.disconnect());
         });
 
+        // Phase 2: Repository browsing endpoints
+        server.createContext("/server/repository/files", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String repo = params.get("repo");
+            String path = params.get("path");
+            if (path == null) path = "/";
+            sendResponse(exchange, serverManager.listRepositoryFiles(repo, path));
+        });
+
+        server.createContext("/server/repository/file", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String repo = params.get("repo");
+            String path = params.get("path");
+            sendResponse(exchange, serverManager.getFileInfo(repo, path));
+        });
+
         // ==========================================================================
         // PHASE 3: DATA TYPE SYSTEM ENDPOINTS
         // ==========================================================================

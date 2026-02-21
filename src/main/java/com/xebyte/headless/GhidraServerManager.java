@@ -17,11 +17,15 @@ package com.xebyte.headless;
 
 import ghidra.framework.client.ClientUtil;
 import ghidra.framework.client.ClientAuthenticator;
+import ghidra.framework.client.RepositoryAdapter;
 import ghidra.framework.client.RepositoryServerAdapter;
 import ghidra.framework.remote.AnonymousCallback;
+import ghidra.framework.remote.RepositoryItem;
 import ghidra.framework.remote.SSHSignatureCallback;
 
 import javax.security.auth.callback.*;
+import java.util.HashMap;
+import java.util.Map;
 import java.io.IOException;
 import java.net.Authenticator;
 
@@ -49,6 +53,7 @@ public class GhidraServerManager {
     private final char[] password;
 
     private RepositoryServerAdapter serverAdapter;
+    private final Map<String, RepositoryAdapter> repositoryCache = new HashMap<>();
     private volatile boolean connected = false;
     private String lastError;
     private static volatile boolean authenticatorRegistered = false;
@@ -220,6 +225,138 @@ public class GhidraServerManager {
         } catch (IOException e) {
             lastError = e.getMessage();
             return "{\"error\": \"Failed to list repositories: " + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * Get or create a RepositoryAdapter for the specified repository.
+     */
+    private RepositoryAdapter getRepository(String repoName) throws IOException {
+        if (!connected || serverAdapter == null) {
+            throw new IOException("Not connected to server");
+        }
+        
+        RepositoryAdapter repo = repositoryCache.get(repoName);
+        if (repo == null || !repo.isConnected()) {
+            repo = serverAdapter.getRepository(repoName);
+            if (repo != null) {
+                repo.connect();
+                repositoryCache.put(repoName, repo);
+            }
+        }
+        return repo;
+    }
+
+    /**
+     * List files and folders in a repository path.
+     * 
+     * @param repoName Repository name (e.g., "pd2")
+     * @param path Folder path (e.g., "/Classic/1.00" or "/" for root)
+     * @return JSON string with file/folder listing
+     */
+    public String listRepositoryFiles(String repoName, String path) {
+        if (!connected || serverAdapter == null) {
+            return "{\"error\": \"Not connected to server. Use /server/connect first.\"}";
+        }
+        
+        if (repoName == null || repoName.isEmpty()) {
+            return "{\"error\": \"Repository name required.\"}";
+        }
+        
+        if (path == null || path.isEmpty()) {
+            path = "/";
+        }
+        
+        try {
+            RepositoryAdapter repo = getRepository(repoName);
+            if (repo == null) {
+                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+            }
+            
+            // List folder contents
+            String[] subfolders = repo.getSubfolderList(path);
+            RepositoryItem[] items = repo.getItemList(path);
+            
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\"repository\": \"").append(escapeJson(repoName)).append("\"");
+            sb.append(", \"path\": \"").append(escapeJson(path)).append("\"");
+            
+            // Folders
+            sb.append(", \"folders\": [");
+            if (subfolders != null) {
+                for (int i = 0; i < subfolders.length; i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append("\"").append(escapeJson(subfolders[i])).append("\"");
+                }
+            }
+            sb.append("]");
+            
+            // Files
+            sb.append(", \"files\": [");
+            if (items != null) {
+                for (int i = 0; i < items.length; i++) {
+                    if (i > 0) sb.append(", ");
+                    RepositoryItem item = items[i];
+                    sb.append("{");
+                    sb.append("\"name\": \"").append(escapeJson(item.getName())).append("\"");
+                    sb.append(", \"path\": \"").append(escapeJson(item.getPathName())).append("\"");
+                    sb.append(", \"type\": \"").append(escapeJson(item.getContentType())).append("\"");
+                    sb.append(", \"version\": ").append(item.getVersion());
+                    sb.append("}");
+                }
+            }
+            sb.append("]");
+            
+            int totalCount = (subfolders != null ? subfolders.length : 0) + (items != null ? items.length : 0);
+            sb.append(", \"total_count\": ").append(totalCount);
+            sb.append("}");
+            
+            return sb.toString();
+        } catch (Exception e) {
+            lastError = e.getMessage();
+            return "{\"error\": \"Failed to list files: " + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * Get file metadata for a specific file in the repository.
+     */
+    public String getFileInfo(String repoName, String filePath) {
+        if (!connected || serverAdapter == null) {
+            return "{\"error\": \"Not connected to server. Use /server/connect first.\"}";
+        }
+        
+        if (repoName == null || filePath == null) {
+            return "{\"error\": \"Repository name and file path required.\"}";
+        }
+        
+        try {
+            RepositoryAdapter repo = getRepository(repoName);
+            if (repo == null) {
+                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+            }
+            
+            // Parse path to get parent folder and file name
+            int lastSlash = filePath.lastIndexOf('/');
+            String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
+            String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
+            
+            RepositoryItem item = repo.getItem(parentPath, fileName);
+            if (item == null) {
+                return "{\"error\": \"File not found: " + escapeJson(filePath) + "\"}";
+            }
+            
+            StringBuilder sb = new StringBuilder();
+            sb.append("{");
+            sb.append("\"name\": \"").append(escapeJson(item.getName())).append("\"");
+            sb.append(", \"path\": \"").append(escapeJson(item.getPathName())).append("\"");
+            sb.append(", \"type\": \"").append(escapeJson(item.getContentType())).append("\"");
+            sb.append(", \"version\": ").append(item.getVersion());
+            sb.append("}");
+            return sb.toString();
+        } catch (Exception e) {
+            lastError = e.getMessage();
+            return "{\"error\": \"Failed to get file info: " + escapeJson(e.getMessage()) + "\"}";
         }
     }
 
