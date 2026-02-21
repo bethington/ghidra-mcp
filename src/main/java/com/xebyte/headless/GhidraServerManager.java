@@ -16,10 +16,14 @@
 package com.xebyte.headless;
 
 import ghidra.framework.client.ClientUtil;
-import ghidra.framework.client.RepositoryAdapter;
+import ghidra.framework.client.ClientAuthenticator;
 import ghidra.framework.client.RepositoryServerAdapter;
+import ghidra.framework.remote.AnonymousCallback;
+import ghidra.framework.remote.SSHSignatureCallback;
 
+import javax.security.auth.callback.*;
 import java.io.IOException;
+import java.net.Authenticator;
 
 /**
  * Manages connections to a shared Ghidra repository server.
@@ -30,7 +34,8 @@ import java.io.IOException;
  * <ul>
  *   <li>GHIDRA_SERVER_HOST - Server hostname (default: localhost)</li>
  *   <li>GHIDRA_SERVER_PORT - Server port (default: 13100)</li>
- *   <li>GHIDRA_SERVER_USER - Service account username (optional)</li>
+ *   <li>GHIDRA_SERVER_USER - Service account username (required for auth)</li>
+ *   <li>GHIDRA_SERVER_PASSWORD - Service account password (required for auth)</li>
  * </ul>
  */
 public class GhidraServerManager {
@@ -41,21 +46,52 @@ public class GhidraServerManager {
     private final String host;
     private final int port;
     private final String user;
+    private final char[] password;
 
     private RepositoryServerAdapter serverAdapter;
     private volatile boolean connected = false;
     private String lastError;
+    private static volatile boolean authenticatorRegistered = false;
 
     public GhidraServerManager() {
         this.host = getEnvOrDefault("GHIDRA_SERVER_HOST", DEFAULT_HOST);
         this.port = parsePort(System.getenv("GHIDRA_SERVER_PORT"), DEFAULT_PORT);
         this.user = System.getenv("GHIDRA_SERVER_USER");
+        String pwd = System.getenv("GHIDRA_SERVER_PASSWORD");
+        this.password = (pwd != null) ? pwd.toCharArray() : null;
+        
+        // Register our custom authenticator
+        registerAuthenticator();
     }
 
-    public GhidraServerManager(String host, int port, String user) {
+    public GhidraServerManager(String host, int port, String user, String password) {
         this.host = (host != null && !host.isEmpty()) ? host : DEFAULT_HOST;
         this.port = port > 0 ? port : DEFAULT_PORT;
         this.user = user;
+        this.password = (password != null) ? password.toCharArray() : null;
+        
+        registerAuthenticator();
+    }
+
+    /**
+     * Register custom authenticator for headless server connections.
+     */
+    private synchronized void registerAuthenticator() {
+        if (authenticatorRegistered) {
+            return;
+        }
+        
+        if (user != null && password != null) {
+            try {
+                ClientUtil.setClientAuthenticator(new GhidraMCPAuthenticator(user, password));
+                authenticatorRegistered = true;
+                System.out.println("Registered GhidraMCP authenticator for user: " + user);
+            } catch (Exception e) {
+                System.err.println("Failed to register authenticator: " + e.getMessage());
+            }
+        } else {
+            System.out.println("No credentials configured - server connection will use anonymous/default auth");
+        }
     }
 
     /**
@@ -66,19 +102,26 @@ public class GhidraServerManager {
     public synchronized String connect() {
         if (connected && serverAdapter != null && serverAdapter.isConnected()) {
             return "{\"status\": \"already_connected\", \"host\": \"" + escapeJson(host)
-                    + "\", \"port\": " + port + "}";
+                    + "\", \"port\": " + port + ", \"user\": \"" + escapeJson(user) + "\"}";
+        }
+
+        // Verify credentials are configured
+        if (user == null || password == null) {
+            lastError = "Credentials not configured. Set GHIDRA_SERVER_USER and GHIDRA_SERVER_PASSWORD";
+            return "{\"status\": \"error\", \"error\": \"" + escapeJson(lastError) + "\"}";
         }
 
         try {
+            System.out.println("Connecting to Ghidra server at " + host + ":" + port + " as " + user);
             serverAdapter = ClientUtil.getRepositoryServer(host, port);
             serverAdapter.connect();
             connected = serverAdapter.isConnected();
             lastError = null;
 
             if (connected) {
-                System.out.println("Connected to Ghidra server at " + host + ":" + port);
+                System.out.println("Connected to Ghidra server at " + host + ":" + port + " as " + user);
                 return "{\"status\": \"connected\", \"host\": \"" + escapeJson(host)
-                        + "\", \"port\": " + port + "}";
+                        + "\", \"port\": " + port + ", \"user\": \"" + escapeJson(user) + "\"}";
             } else {
                 lastError = "Connection returned but server reports not connected";
                 return "{\"status\": \"error\", \"error\": \"" + escapeJson(lastError) + "\"}";
@@ -88,6 +131,7 @@ public class GhidraServerManager {
             lastError = e.getMessage();
             System.err.println("Failed to connect to Ghidra server at " + host + ":" + port
                     + " - " + e.getMessage());
+            e.printStackTrace();
             return "{\"status\": \"error\", \"error\": \"" + escapeJson(lastError)
                     + "\", \"host\": \"" + escapeJson(host) + "\", \"port\": " + port + "}";
         }
@@ -133,6 +177,8 @@ public class GhidraServerManager {
         if (user != null && !user.isEmpty()) {
             sb.append(", \"user\": \"").append(escapeJson(user)).append("\"");
         }
+        
+        sb.append(", \"credentials_configured\": ").append(user != null && password != null);
 
         if (connected && serverAdapter != null) {
             sb.append(", \"server_connected\": ").append(serverAdapter.isConnected());
@@ -221,5 +267,90 @@ public class GhidraServerManager {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
+    }
+
+    /**
+     * Custom authenticator for headless Ghidra server connections.
+     * Implements ClientAuthenticator to provide credentials without GUI interaction.
+     */
+    private static class GhidraMCPAuthenticator implements ClientAuthenticator {
+        private final String username;
+        private final char[] password;
+
+        public GhidraMCPAuthenticator(String username, char[] password) {
+            this.username = username;
+            this.password = password;
+        }
+
+        @Override
+        public boolean isSSHKeyAvailable() {
+            return false;
+        }
+
+        @Override
+        public boolean processSSHSignatureCallbacks(String serverName, NameCallback nameCb,
+                SSHSignatureCallback sshCb) {
+            // SSH key authentication not supported in this implementation
+            return false;
+        }
+
+        @Override
+        public boolean processPasswordCallbacks(String title, String serverType, String serverName,
+                boolean nameEditable, NameCallback nameCb, PasswordCallback passCb, 
+                ChoiceCallback choiceCb, AnonymousCallback anonymousCb, String loginError) {
+            try {
+                // Set the username
+                if (nameCb != null) {
+                    nameCb.setName(username);
+                }
+                
+                // Set the password
+                if (passCb != null) {
+                    passCb.setPassword(password);
+                }
+                
+                // Accept default choice if present
+                if (choiceCb != null) {
+                    choiceCb.setSelectedIndex(choiceCb.getDefaultChoice());
+                }
+                
+                // Don't use anonymous access since we have credentials
+                if (anonymousCb != null) {
+                    anonymousCb.setAnonymousAccessRequested(false);
+                }
+                
+                System.out.println("GhidraMCP authenticator provided credentials for user: " + username);
+                return true;
+            } catch (Exception e) {
+                System.err.println("Password callback failed: " + e.getMessage());
+                return false;
+            }
+        }
+
+        @Override
+        public boolean promptForReconnect(java.awt.Component parent, String message) {
+            // In headless mode, always attempt reconnect
+            System.out.println("Reconnect requested: " + message);
+            return true;
+        }
+
+        @Override
+        public char[] getNewPassword(java.awt.Component parent, String serverInfo, String user) {
+            // Password change not supported in headless mode
+            return null;
+        }
+
+        @Override
+        public Authenticator getAuthenticator() {
+            // Return null - we handle authentication via callbacks
+            return null;
+        }
+
+        @Override
+        public char[] getKeyStorePassword(String keystorePath, boolean passwordError) {
+            // KeyStore password not used - return null
+            // This is called when Ghidra needs to access a keystore for PKI authentication
+            return null;
+        }
     }
 }
