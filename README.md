@@ -12,20 +12,23 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 ## 🌟 Features
 
 ### Core MCP Integration
+
 - **Full MCP Compatibility** - Complete implementation of Model Context Protocol
 - **110 MCP Tools Available** - Comprehensive API surface for binary analysis
 - **Production-Ready Reliability** - Tested batch operations and atomic transactions
 - **Real-time Analysis** - Live integration with Ghidra's analysis engine
 
 ### Binary Analysis Capabilities
+
 - **Function Analysis** - Decompilation, call graphs, cross-references
 - **Data Structure Discovery** - Automatic struct/union/enum creation
-- **String Extraction** - Comprehensive string analysis and categorization  
+- **String Extraction** - Comprehensive string analysis and categorization
 - **Import/Export Analysis** - Symbol table and library dependency mapping
 - **Memory Mapping** - Complete memory layout documentation
 - **Cross-Binary Documentation** - Function hash matching across binary versions
 
 ### Development & Automation
+
 - **Automated Development Cycle** - Complete build-test-deploy-verify pipeline
 - **Ghidra Script Management** - Create, run, and manage Ghidra scripts via MCP
 - **Multi-Program Support** - Switch between and compare multiple open programs
@@ -49,28 +52,33 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 > `-Deploy` is the end-user command and (by default) also ensures Python requirements before build/deploy.
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/bethington/ghidra-mcp.git
    cd ghidra-mcp
    ```
 
 2. **Recommended: run environment preflight first:**
+
    ```powershell
    .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
    ```
 
 3. **Build and deploy to Ghidra (single command):**
+
    ```powershell
    .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
    ```
 
 4. **Optional strict/manual mode** (advanced):
+
    ```powershell
    # Skip automatic prerequisite setup
    .\ghidra-mcp-setup.ps1 -Deploy -NoAutoPrereqs -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
    ```
 
 5. **Show script help**:
+
    ```powershell
    .\ghidra-mcp-setup.ps1 -Help
    # or
@@ -78,6 +86,7 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
    ```
 
 6. **Optional build-only mode** (advanced/troubleshooting):
+
    ```powershell
    # Preferred: script-managed build-only
    .\ghidra-mcp-setup.ps1 -BuildOnly
@@ -88,19 +97,78 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
    mvn clean package assembly:single -DskipTests
    ```
 
+### Installation (Linux — Ubuntu/Debian)
+
+> Use `ghidra-mcp-setup.sh` as the primary entry point on Linux.
+> It handles prerequisite setup, Maven dependency installation, building, and deployment.
+
+1. **Clone the repository:**
+
+   ```bash
+   git clone https://github.com/bethington/ghidra-mcp.git
+   cd ghidra-mcp
+   ```
+
+2. **Install system prerequisites** (if not already installed):
+
+   ```bash
+   sudo apt update && sudo apt install -y openjdk-21-jdk maven python3 python3-pip curl jq unzip
+   ```
+
+3. **Run environment preflight:**
+
+   ```bash
+   ./ghidra-mcp-setup.sh --preflight --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   ```
+
+4. **Build and deploy to Ghidra (single command):**
+
+   ```bash
+   ./ghidra-mcp-setup.sh --deploy --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   ```
+
+   This will:
+   - Install Ghidra JAR dependencies into your local `~/.m2/repository`
+   - Build `GhidraMCP-<version>.zip` with Maven
+   - Extract the extension to `~/.config/ghidra/ghidra_<version>_PUBLIC/Extensions/`
+   - Update `preferences` with `LastExtensionImportDirectory`
+   - Install Python requirements
+
+5. **Optional: setup only Maven dependencies:**
+
+   ```bash
+   ./ghidra-mcp-setup.sh --setup-deps --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   ```
+
+6. **Show script help:**
+   ```bash
+   ./ghidra-mcp-setup.sh --help
+   ```
+
+> **Linux paths:** The extension is installed to `$HOME/.config/ghidra/ghidra_<version>_PUBLIC/Extensions/GhidraMCP/`.
+> Ghidra config files are in `$HOME/.config/ghidra/ghidra_<version>_PUBLIC/`.
+
+> **Additional helper scripts** (Linux equivalents of the PowerShell utilities):
+>
+> - `functions-extract.sh` — Extract functions via Ghidra REST API (uses `curl`/`jq`)
+> - `functions-process.sh` — Parallel function processing with Claude CLI
+
 ### Basic Usage
 
 #### Option 1: Stdio Transport (Recommended for AI tools)
+
 ```bash
 python bridge_mcp_ghidra.py
 ```
 
 #### Option 2: SSE Transport (Web/HTTP clients)
+
 ```bash
 python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 ```
 
 #### In Ghidra
+
 1. Start Ghidra and open a **CodeBrowser** window
 2. In **CodeBrowser**, enable the plugin via **File > Configure > Configure All Plugins > GhidraMCP**
 3. Optional: configure custom port via **CodeBrowser > Edit > Tool Options > GhidraMCP HTTP Server**
@@ -108,6 +176,7 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 5. The server runs on `http://127.0.0.1:8089/` by default
 
 #### Verify It's Working
+
 ```bash
 # Quick health check
 curl http://127.0.0.1:8089/health
@@ -124,6 +193,7 @@ curl http://127.0.0.1:8089/get_version
 **Cause:** Plugin not enabled or installed incorrectly.
 
 **Solution:**
+
 1. Verify extension is installed: **File > Install Extensions** — GhidraMCP should be listed
 2. Enable the plugin: **File > Configure > Configure All Plugins > GhidraMCP** (check the box)
 3. **Restart Ghidra** after installation/enabling
@@ -133,6 +203,7 @@ curl http://127.0.0.1:8089/get_version
 **Cause:** Server not started or wrong port.
 
 **Solution:**
+
 1. Ensure you started the server: **Tools > GhidraMCP > Start MCP Server**
 2. Check configured port: **Edit > Tool Options > GhidraMCP HTTP Server**
 3. Check if port is in use:
@@ -149,6 +220,7 @@ curl http://127.0.0.1:8089/get_version
 **Cause:** Server-side exception, often due to missing program data.
 
 **Solution:**
+
 1. Ensure a binary is loaded in CodeBrowser
 2. Run auto-analysis first: **Analysis > Auto Analyze**
 3. Check Ghidra console (**Window > Console**) for Java exceptions
@@ -159,6 +231,7 @@ curl http://127.0.0.1:8089/get_version
 **Cause:** Endpoint doesn't exist or wrong URL.
 
 **Solution:**
+
 1. Verify endpoint exists: `curl http://127.0.0.1:8089/get_version`
 2. Check for typos in endpoint name
 3. Ensure you're using correct HTTP method (GET vs POST)
@@ -168,6 +241,7 @@ curl http://127.0.0.1:8089/get_version
 **Cause:** JAR file in wrong location.
 
 **Solution:**
+
 1. Manual install location: `~/.ghidra/ghidra_12.0.3_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
 2. Or use: **File > Install Extensions > Add** and select the ZIP file
 3. Ensure JAR/ZIP was built for your Ghidra version
@@ -177,6 +251,7 @@ curl http://127.0.0.1:8089/get_version
 **Cause:** Ghidra JARs not installed in local Maven repository.
 
 **Solution:**
+
 ```powershell
 # Windows (recommended)
 .\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
@@ -195,12 +270,14 @@ curl http://127.0.0.1:8089/get_version
 ## 🛠️ API Reference
 
 ### Core Operations
+
 - `check_connection` - Verify MCP connectivity
 - `get_metadata` - Program metadata and info
 - `get_version` - Server version information
 - `get_entry_points` - Binary entry points discovery
 
 ### Function Analysis
+
 - `list_functions` - List all functions (paginated)
 - `search_functions_by_name` - Search functions by name/pattern
 - `search_functions_enhanced` - Advanced function search with filters
@@ -214,6 +291,7 @@ curl http://127.0.0.1:8089/get_version
 - `analyze_function_completeness` - Documentation completeness score
 
 ### Memory & Data
+
 - `list_segments` - Memory segments and layout
 - `get_function_by_address` - Function at address
 - `disassemble_function` - Disassembly listing
@@ -226,6 +304,7 @@ curl http://127.0.0.1:8089/get_version
 - `detect_array_bounds` - Detect array boundaries
 
 ### Cross-Binary Documentation (v1.9.4+)
+
 - `get_function_hash` - SHA-256 hash of normalized function opcodes
 - `get_bulk_function_hashes` - Paginated bulk hashing with filter
 - `get_function_documentation` - Export complete function documentation
@@ -235,6 +314,7 @@ curl http://127.0.0.1:8089/get_version
 - `propagate_documentation` - Apply docs to all matching instances
 
 ### Data Types & Structures
+
 - `list_data_types` - Available data types
 - `search_data_types` - Search for data types
 - `create_struct` - Create custom structure
@@ -250,6 +330,7 @@ curl http://127.0.0.1:8089/get_version
 - `get_valid_data_types` - Get list of valid Ghidra types
 
 ### Symbols & Labels
+
 - `list_imports` - Imported symbols and libraries
 - `list_exports` - Exported symbols and functions
 - `list_external_locations` - External location references
@@ -264,6 +345,7 @@ curl http://127.0.0.1:8089/get_version
 - `rename_or_label` - Rename or create label
 
 ### Renaming & Documentation
+
 - `rename_function` - Rename function by name
 - `rename_function_by_address` - Rename function by address
 - `rename_data` - Rename data item
@@ -278,6 +360,7 @@ curl http://127.0.0.1:8089/get_version
 - `batch_set_comments` - Bulk comment setting
 
 ### Type System
+
 - `set_function_prototype` - Set function signature
 - `set_local_variable_type` - Set variable type
 - `set_parameter_type` - Set parameter type
@@ -289,6 +372,7 @@ curl http://127.0.0.1:8089/get_version
 - `get_function_labels` - Get labels in function
 
 ### Ghidra Script Management
+
 - `list_scripts` - List available scripts
 - `run_script` - Run a script
 - `list_ghidra_scripts` - List custom Ghidra scripts
@@ -299,6 +383,7 @@ curl http://127.0.0.1:8089/get_version
 - `delete_ghidra_script` - Delete script
 
 ### Multi-Program Support
+
 - `list_open_programs` - List all open programs
 - `get_current_program_info` - Current program details
 - `switch_program` - Switch active program
@@ -307,6 +392,7 @@ curl http://127.0.0.1:8089/get_version
 - `compare_programs_documentation` - Compare documentation between programs
 
 ### Analysis Tools
+
 - `find_next_undefined_function` - Find undefined functions
 - `find_undocumented_by_string` - Find functions by string reference
 - `batch_string_anchor_report` - String anchor analysis
@@ -341,6 +427,7 @@ See [docs/README.md](docs/README.md) for complete documentation.
 ## 🔧 Development
 
 ### Building from Source
+
 ```bash
 # Recommended: one command does setup + build + deploy
 .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
@@ -352,6 +439,7 @@ See [docs/README.md](docs/README.md) for complete documentation.
 ### Script Command Reference
 
 Primary actions (choose one):
+
 - `-Deploy` (default): auto-setup prereqs, build, deploy
 - `-SetupDeps`: install Ghidra JARs into local `.m2` (Maven deps only; no Python package install)
 - `-BuildOnly`: build artifacts only
@@ -359,6 +447,7 @@ Primary actions (choose one):
 - `-Preflight`: validate tools, paths, required Ghidra jars, and write access without making changes
 
 Useful options:
+
 - `-GhidraPath "C:\ghidra_12.0.3_PUBLIC"`
 - `-GhidraVersion "12.0.3"`
 - `-StrictPreflight`
@@ -393,6 +482,7 @@ Quick examples:
 ```
 
 ### Project Structure
+
 ```
 ghidra-mcp/
 ├── bridge_mcp_ghidra.py     # MCP server (Python)
@@ -414,6 +504,7 @@ This is a one-time setup per machine, and again when your Ghidra version changes
 `-Deploy` now installs these automatically by default.
 
 The tool enforces version consistency between:
+
 - `pom.xml` (`ghidra.version`)
 - `-GhidraVersion` (if provided)
 - `-GhidraPath` version segment (e.g., `ghidra_12.0.3_PUBLIC`)
@@ -423,6 +514,7 @@ If these do not match, deployment fails fast with a clear error.
 ### Troubleshooting: Version Mismatch
 
 If you see a version mismatch error, align all three values:
+
 1. `pom.xml` → `ghidra.version`
 2. `-GhidraVersion` (if used)
 3. `-GhidraPath` version segment (`ghidra_X.Y.Z_PUBLIC`)
@@ -443,31 +535,33 @@ Then rerun:
 
 **Required Libraries (14 JARs, ~37MB):**
 
-| Library | Source Path | Purpose |
-|---------|------------|---------|
-| **Base.jar** | `Features/Base/lib/` | Core Ghidra functionality |
-| **Decompiler.jar** | `Features/Decompiler/lib/` | Decompilation engine |
-| **PDB.jar** | `Features/PDB/lib/` | Microsoft PDB symbol support |
-| **FunctionID.jar** | `Features/FunctionID/lib/` | Function identification |
-| **SoftwareModeling.jar** | `Framework/SoftwareModeling/lib/` | Program model API |
-| **Project.jar** | `Framework/Project/lib/` | Project management |
-| **Docking.jar** | `Framework/Docking/lib/` | UI docking framework |
-| **Generic.jar** | `Framework/Generic/lib/` | Generic utilities |
-| **Utility.jar** | `Framework/Utility/lib/` | Core utilities |
-| **Gui.jar** | `Framework/Gui/lib/` | GUI components |
-| **FileSystem.jar** | `Framework/FileSystem/lib/` | File system support |
-| **Graph.jar** | `Framework/Graph/lib/` | Graph/call graph analysis |
-| **DB.jar** | `Framework/DB/lib/` | Database operations |
-| **Emulation.jar** | `Framework/Emulation/lib/` | P-code emulation |
+| Library                  | Source Path                       | Purpose                      |
+| ------------------------ | --------------------------------- | ---------------------------- |
+| **Base.jar**             | `Features/Base/lib/`              | Core Ghidra functionality    |
+| **Decompiler.jar**       | `Features/Decompiler/lib/`        | Decompilation engine         |
+| **PDB.jar**              | `Features/PDB/lib/`               | Microsoft PDB symbol support |
+| **FunctionID.jar**       | `Features/FunctionID/lib/`        | Function identification      |
+| **SoftwareModeling.jar** | `Framework/SoftwareModeling/lib/` | Program model API            |
+| **Project.jar**          | `Framework/Project/lib/`          | Project management           |
+| **Docking.jar**          | `Framework/Docking/lib/`          | UI docking framework         |
+| **Generic.jar**          | `Framework/Generic/lib/`          | Generic utilities            |
+| **Utility.jar**          | `Framework/Utility/lib/`          | Core utilities               |
+| **Gui.jar**              | `Framework/Gui/lib/`              | GUI components               |
+| **FileSystem.jar**       | `Framework/FileSystem/lib/`       | File system support          |
+| **Graph.jar**            | `Framework/Graph/lib/`            | Graph/call graph analysis    |
+| **DB.jar**               | `Framework/DB/lib/`               | Database operations          |
+| **Emulation.jar**        | `Framework/Emulation/lib/`        | P-code emulation             |
 
 > **Note**: Libraries are NOT included in the repository (see `.gitignore`). You must install them from your Ghidra installation before building.
 
 > **Script roles**:
+>
 > - `ghidra-mcp-setup.ps1`: unified automation script (`-SetupDeps`, `-BuildOnly`, `-Deploy`, `-Clean`)
 > - default `-Deploy` behavior: auto-setup prerequisites, then build and deploy
 > - use `-NoAutoPrereqs` for strict/manual prerequisite management
 
 ### Development Features
+
 - **Automated Deployment**: Version-aware deployment script
 - **Batch Operations**: Reduces API calls by 93%
 - **Atomic Transactions**: All-or-nothing semantics
@@ -476,18 +570,21 @@ Then rerun:
 ## 📚 Documentation
 
 ### Core Documentation
+
 - [Documentation Index](docs/README.md) - Complete documentation navigation
 - [Project Structure](docs/PROJECT_STRUCTURE.md) - Project organization guide
 - [Naming Conventions](docs/NAMING_CONVENTIONS.md) - Code naming standards
 - [Hungarian Notation](docs/HUNGARIAN_NOTATION.md) - Variable naming guide
 
 ### AI Workflow Prompts
+
 - [Prompts Overview](docs/prompts/README.md) - AI prompting system guide
 - [Function Documentation Workflow](docs/prompts/FUNCTION_DOC_WORKFLOW_V4.md) - Complete workflow
 - [Quick Start Prompt](docs/prompts/QUICK_START_PROMPT.md) - Simplified beginner workflow
 - [Cross-Version Matching](docs/prompts/CROSS_VERSION_MATCHING_COMPREHENSIVE.md) - Hash-based matching
 
 ### Release History
+
 - [Complete Changelog](CHANGELOG.md) - All version release notes
 - [Release Notes](docs/releases/) - Detailed release documentation
 
@@ -527,20 +624,21 @@ curl http://localhost:8089/get_metadata
 
 ### Key Headless Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/load_program` | POST | Load binary file for analysis |
-| `/run_analysis` | POST | Run Ghidra auto-analysis |
-| `/list_functions` | GET | List all discovered functions |
-| `/list_exports` | GET | List exported symbols |
-| `/list_imports` | GET | List imported symbols |
-| `/decompile_function` | GET | Decompile function to C code |
-| `/create_function` | POST | Create function at address |
-| `/get_metadata` | GET | Get program metadata |
+| Endpoint              | Method | Description                   |
+| --------------------- | ------ | ----------------------------- |
+| `/load_program`       | POST   | Load binary file for analysis |
+| `/run_analysis`       | POST   | Run Ghidra auto-analysis      |
+| `/list_functions`     | GET    | List all discovered functions |
+| `/list_exports`       | GET    | List exported symbols         |
+| `/list_imports`       | GET    | List imported symbols         |
+| `/decompile_function` | GET    | Decompile function to C code  |
+| `/create_function`    | POST   | Create function at address    |
+| `/get_metadata`       | GET    | Get program metadata          |
 
 ### Configuration
 
 Environment variables for Docker:
+
 - `GHIDRA_MCP_PORT` - Server port (default: 8089)
 - `GHIDRA_MCP_BIND_ADDRESS` - Bind address (default: 0.0.0.0 in Docker)
 - `JAVA_OPTS` - JVM options (default: -Xmx4g -XX:+UseG1GC)
@@ -550,6 +648,7 @@ Environment variables for Docker:
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
 
 ### Quick Start
+
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Build and test your changes (`mvn clean package assembly:single -DskipTests`)
@@ -564,16 +663,16 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## 🏆 Production Status
 
-| Metric | Value |
-|--------|-------|
-| **Version** | 2.0.0 |
-| **MCP Tools** | 110 fully implemented |
-| **Compilation** | ✅ 100% success |
-| **Batch Efficiency** | 93% API call reduction |
-| **Ghidra Scripts** | 70+ automation scripts |
-| **Documentation** | Comprehensive with AI prompts |
+| Metric               | Value                         |
+| -------------------- | ----------------------------- |
+| **Version**          | 2.0.0                         |
+| **MCP Tools**        | 110 fully implemented         |
+| **Compilation**      | ✅ 100% success               |
+| **Batch Efficiency** | 93% API call reduction        |
+| **Ghidra Scripts**   | 70+ automation scripts        |
+| **Documentation**    | Comprehensive with AI prompts |
 
-See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.  
+See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
 ## 🙏 Acknowledgments
 
