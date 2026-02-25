@@ -500,7 +500,6 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 - **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (179 tools)
 - **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (147 GUI endpoints)
 - **GhidraMCPHeadlessServer** — Standalone headless server — 172 endpoints, no GUI required
-- **GhidraMCPHeadlessServer** — Standalone headless server — no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
