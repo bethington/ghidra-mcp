@@ -108,6 +108,56 @@ Most Ghidra MCP implementations give you a handful of read-only tools and call i
    mvn clean package assembly:single -DskipTests
    ```
 
+### Installation (Linux — Ubuntu/Debian)
+
+> Use `ghidra-mcp-setup.sh` as the primary entry point on Linux.
+> It handles prerequisite setup, Maven dependency installation, building, and deployment.
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/bethington/ghidra-mcp.git
+   cd ghidra-mcp
+   ```
+
+2. **Install system prerequisites** (if not already installed):
+   ```bash
+   sudo apt update && sudo apt install -y openjdk-21-jdk maven python3 python3-pip curl jq unzip
+   ```
+
+3. **Run environment preflight:**
+   ```bash
+   ./ghidra-mcp-setup.sh --preflight --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   ```
+
+4. **Build and deploy to Ghidra (single command):**
+   ```bash
+   ./ghidra-mcp-setup.sh --deploy --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   ```
+
+   This will:
+   - Install Ghidra JAR dependencies into your local `~/.m2/repository`
+   - Build `GhidraMCP-<version>.zip` with Maven
+   - Extract the extension to `~/.config/ghidra/ghidra_<version>_PUBLIC/Extensions/`
+   - Update `preferences` with `LastExtensionImportDirectory`
+   - Install Python requirements
+
+5. **Optional: setup only Maven dependencies:**
+   ```bash
+   ./ghidra-mcp-setup.sh --setup-deps --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   ```
+
+6. **Show script help:**
+   ```bash
+   ./ghidra-mcp-setup.sh --help
+   ```
+
+> **Linux paths:** The extension is installed to `$HOME/.config/ghidra/ghidra_<version>_PUBLIC/Extensions/GhidraMCP/`.
+> Ghidra config files are in `$HOME/.config/ghidra/ghidra_<version>_PUBLIC/`.
+
+> **Additional helper scripts** (Linux equivalents of the PowerShell utilities):
+> - `functions-extract.sh` — Extract functions via Ghidra REST API (uses `curl`/`jq`)
+> - `functions-process.sh` — Parallel function processing with Claude CLI
+
 ### Basic Usage
 
 #### Option 1: Stdio Transport (Recommended for AI tools)
