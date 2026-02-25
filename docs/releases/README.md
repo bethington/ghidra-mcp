@@ -8,7 +8,7 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 - **Major Release** - Headless server parity + 8 new tool categories
 - New categories: Project Lifecycle, Project Organization, Server Connection, Version Control, Version History, Admin, Analysis Control, Script Execution improvements
-- 179 MCP tools (up from 110), 147 GUI endpoints
+- 179 MCP tools (up from 110), 147 GUI endpoints, 172 headless endpoints
 - New `bump-version.ps1` for atomic version management across all project files
 - New `tests/unit/` suite for endpoint catalog consistency
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details

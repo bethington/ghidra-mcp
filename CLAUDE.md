@@ -22,7 +22,7 @@ AI/Automation Tools <-> MCP Bridge (bridge_mcp_ghidra.py) <-> Ghidra Plugin (Ghi
 |-----------|----------|---------|
 | Ghidra Plugin | `src/main/java/com/xebyte/GhidraMCPPlugin.java` | HTTP server exposing 147 Ghidra API endpoints |
 | MCP Bridge | `bridge_mcp_ghidra.py` | Translates MCP protocol to HTTP calls (179 tools) |
-| Headless Server | `src/main/java/com/xebyte/headless/` | Standalone server without Ghidra GUI |
+| Headless Server | `src/main/java/com/xebyte/headless/` | Standalone server without Ghidra GUI (172 endpoints) |
 | Core Abstractions | `src/main/java/com/xebyte/core/` | Shared interfaces (ProgramProvider, ThreadingStrategy) |
 
 ## Build Commands
@@ -130,7 +130,7 @@ Located in `ghidra_scripts/`. Execute via:
 ## Version History
 
 See `CHANGELOG.md` for complete history. Key releases:
-- v3.0.0: Headless parity, 8 new tool categories, 179 MCP tools, 147 GUI endpoints
+- v3.0.0: Headless parity, 8 new tool categories, 179 MCP tools, 147 GUI endpoints, 172 headless endpoints
 - v2.0.2: Ghidra 12.0.3 support, pagination for large functions
 - v2.0.0: Label deletion endpoints, documentation updates
 - v1.9.4: Function Hash Index for cross-binary documentation

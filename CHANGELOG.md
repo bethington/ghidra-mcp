@@ -54,7 +54,7 @@ Complete version history for the Ghidra MCP Server project.
 - **`tests/unit/`**: New unit test suite — endpoint catalog consistency, MCP tool functions, response schemas
 - **`.markdownlintrc`**: Markdown lint config for CI quality gate
 - **`mcp-config.json`**: Fixed env key to match bridge (`GHIDRA_SERVER_URL`)
-- Tool count: 179 MCP tools (up from 110), 147 GUI endpoints
+- Tool count: 179 MCP tools (up from 110), 147 GUI endpoints, 172 headless endpoints
 
 #### 🔌 GUI Plugin Additions
 - `/get_function_count` — quick function count without full listing
