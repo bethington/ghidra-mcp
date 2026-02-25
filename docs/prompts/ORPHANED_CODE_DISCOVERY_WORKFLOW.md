@@ -33,9 +33,10 @@ for each binary in scope:
 
 Execute the scanner script via `run_script_inline`. This scans gaps between consecutive known functions in executable memory segments.
 
-The scanner performs two passes per gap:
+The scanner performs three passes per gap:
 - **Pass 1**: Check for already-disassembled instructions not in any function (highest confidence)
 - **Pass 2**: Check raw bytes for known function prologue patterns (variable confidence)
+- **Pass 3**: Fallback — any non-padding bytes with a RET that Pass 2 missed (lowest confidence, catches MOVSX/MOVZX/byte-MOV starts)
 
 ```java
 import ghidra.app.script.GhidraScript;
@@ -51,7 +52,7 @@ public class FindOrphanedCode extends GhidraScript {
         Memory mem = currentProgram.getMemory();
         Listing listing = currentProgram.getListing();
 
-        println("=== Orphaned Code Scanner ===");
+        println("=== Orphaned Code Scanner v2 ===");
         println("Program: " + currentProgram.getName());
         println("Known functions: " + fm.getFunctionCount());
         println("");
@@ -63,6 +64,7 @@ public class FindOrphanedCode extends GhidraScript {
         int candidateNum = 0;
         int gapsScanned = 0;
         int paddingGaps = 0;
+        int pass3Hits = 0;
 
         for (int i = 0; i < funcs.size() - 1; i++) {
             Function cur = funcs.get(i);
@@ -134,7 +136,6 @@ public class FindOrphanedCode extends GhidraScript {
             if (off >= readSize) { paddingGaps++; continue; }
 
             String prologue = identifyPrologue(bytes, off, readSize);
-            if (prologue == null) continue;
 
             int retPos = -1;
             for (int r = off; r < readSize; r++) {
@@ -143,25 +144,53 @@ public class FindOrphanedCode extends GhidraScript {
             if (retPos < 0) continue;
 
             int estSize = retPos - off + 1;
-            String confidence = getConfidence(prologue, estSize);
-            if (confidence == null) continue;
 
-            candidateNum++;
-            Address addr = gapStart.add(off);
-            StringBuilder hex = new StringBuilder();
-            for (int h = off; h < Math.min(off + 20, readSize); h++) {
-                hex.append(String.format("%02X ", bytes[h]));
+            // Pass 2 hit: known prologue
+            if (prologue != null) {
+                String confidence = getConfidence(prologue, estSize);
+                if (confidence == null) continue;
+
+                candidateNum++;
+                Address addr = gapStart.add(off);
+                StringBuilder hex = new StringBuilder();
+                for (int h = off; h < Math.min(off + 20, readSize); h++) {
+                    hex.append(String.format("%02X ", bytes[h]));
+                }
+
+                println(String.format("#%d | %s (undisassembled) | 0x%s | ~%d bytes | prologue: %s | between: %s .. %s | %s",
+                    candidateNum, confidence, addr.toString(), estSize,
+                    prologue, cur.getName(), next.getName(),
+                    hex.toString().trim()));
+                continue;
             }
 
-            println(String.format("#%d | %s (undisassembled) | 0x%s | ~%d bytes | prologue: %s | between: %s .. %s | %s",
-                candidateNum, confidence, addr.toString(), estSize,
-                prologue, cur.getName(), next.getName(),
-                hex.toString().trim()));
+            // Pass 3: Unknown prologue fallback — non-padding bytes with RET
+            if (estSize >= 5) {
+                pass3Hits++;
+                candidateNum++;
+                Address addr = gapStart.add(off);
+                StringBuilder hex = new StringBuilder();
+                for (int h = off; h < Math.min(off + 24, readSize); h++) {
+                    hex.append(String.format("%02X ", bytes[h]));
+                }
+
+                // Count potential sub-functions: how many C3/C2 (RET) bytes in the gap
+                int retCount = 0;
+                for (int r = off; r < readSize; r++) {
+                    if (bytes[r] == (byte)0xC3 || bytes[r] == (byte)0xC2) retCount++;
+                }
+                String multi = retCount > 1 ? " | MULTI-RET(" + retCount + ")" : "";
+
+                println(String.format("#%d | REVIEW (unknown prologue, pass 3) | 0x%s | ~%d bytes | gap=%d | first: 0x%02X | between: %s .. %s%s | %s",
+                    candidateNum, addr.toString(), estSize, gapSize,
+                    bytes[off] & 0xFF, cur.getName(), next.getName(),
+                    multi, hex.toString().trim()));
+            }
         }
 
         println("");
-        println(String.format("=== DONE: %d candidates | %d gaps scanned | %d pure padding ===",
-            candidateNum, gapsScanned, paddingGaps));
+        println(String.format("=== DONE: %d candidates | %d gaps scanned | %d pure padding | %d pass-3 (review) ===",
+            candidateNum, gapsScanned, paddingGaps, pass3Hits));
     }
 
     private boolean isPad(byte b) {
@@ -169,22 +198,45 @@ public class FindOrphanedCode extends GhidraScript {
     }
 
     private String identifyPrologue(byte[] b, int off, int len) {
+        // Multi-byte patterns (check first)
         if (match(b, off, len, 0x8B, 0xFF, 0x55, 0x8B, 0xEC)) return "HOTPATCH+FRAME";
         if (match(b, off, len, 0x55, 0x8B, 0xEC)) return "PUSH_EBP+FRAME";
         if (match(b, off, len, 0x83, 0xEC)) return "SUB_ESP_IMM8";
         if (match(b, off, len, 0x81, 0xEC)) return "SUB_ESP_IMM32";
+
+        // Two-byte 0x0F prefix instructions (MOVSX, MOVZX, conditional)
+        if (match(b, off, len, 0x0F, 0xBE)) return "MOVSX_R32_R8";
+        if (match(b, off, len, 0x0F, 0xBF)) return "MOVSX_R32_R16";
+        if (match(b, off, len, 0x0F, 0xB6)) return "MOVZX_R32_R8";
+        if (match(b, off, len, 0x0F, 0xB7)) return "MOVZX_R32_R16";
+
         if (off < len) {
             int fb = b[off] & 0xFF;
+            // Standard frame setup
             if (fb == 0x55) return "PUSH_EBP";
+            // Callee-save registers
             if (fb == 0x56) return "PUSH_ESI";
             if (fb == 0x57) return "PUSH_EDI";
             if (fb == 0x53) return "PUSH_EBX";
             if (fb == 0x51) return "PUSH_ECX";
+            // Push immediate
             if (fb == 0x6A) return "PUSH_IMM8";
             if (fb == 0x68) return "PUSH_IMM32";
+            // MOV patterns
             if (fb == 0xB8) return "MOV_EAX_IMM32";
             if (fb == 0xA1) return "MOV_EAX_MEM";
-            if (fb == 0x8B) return "MOV_REG";
+            if (fb == 0x8B) return "MOV_R32_RM32";
+            if (fb == 0x8A) return "MOV_R8_RM8";
+            if (fb == 0x89) return "MOV_RM32_R32";
+            if (fb == 0x88) return "MOV_RM8_R8";
+            // Register zeroing / comparison
+            if (fb == 0x33) return "XOR_R32_RM32";
+            if (fb == 0x31) return "XOR_RM32_R32";
+            if (fb == 0x3B) return "CMP_R32_RM32";
+            if (fb == 0x85) return "TEST_R32_R32";
+            if (fb == 0xF6) return "TEST_RM8_IMM8";
+            if (fb == 0x80) return "ALU_RM8_IMM8";
+            // Control flow
             if (fb == 0xE8) return "CALL_REL32";
             if (fb == 0xE9) return "JMP_REL32";
         }
@@ -205,6 +257,10 @@ public class FindOrphanedCode extends GhidraScript {
         if (prologue.startsWith("SUB_ESP") && size >= 5) return "MEDIUM";
         if (prologue.startsWith("PUSH_E") && size >= 4) return "MEDIUM";
         if (prologue.equals("PUSH_ECX") && size >= 4) return "MEDIUM";
+        if (prologue.startsWith("MOVSX") || prologue.startsWith("MOVZX")) return "MEDIUM";
+        if (prologue.equals("MOV_R8_RM8") && size >= 5) return "MEDIUM";
+        if (prologue.equals("XOR_R32_RM32") && size >= 4) return "MEDIUM";
+        if (prologue.equals("TEST_R32_R32") && size >= 4) return "MEDIUM";
         if (size >= 5) return "LOW";
         return null;
     }
@@ -234,15 +290,19 @@ Classify each candidate into one of these types based on scanner output and quic
 - **Action**: `create_function` (will auto-disassemble) → decompile → set triage plate comment
 - **Priority**: High (almost certainly a real function)
 
-### Type D: Undisassembled — Callee-Save Prologue (MEDIUM)
-- **Pattern**: `PUSH_ESI`, `PUSH_EDI`, `PUSH_EBX`, `PUSH_ECX`, `SUB_ESP`
+### Type D: Undisassembled — Callee-Save / Operand Prologue (MEDIUM)
+- **Pattern**: `PUSH_ESI`, `PUSH_EDI`, `PUSH_EBX`, `PUSH_ECX`, `SUB_ESP`, `MOVSX_*`, `MOVZX_*`, `MOV_R8_RM8`, `XOR_R32_RM32`, `TEST_R32_R32`
 - **Confidence**: Medium — common but not unique to function starts
 - **Action**: `create_function` → decompile → verify the code makes sense as a standalone function
 - **Priority**: Medium
 - **Watch for**: Tail-call targets (code reachable only via JMP from another function — should NOT be a separate function)
+- **Common sub-patterns**:
+  - `MOVSX EAX, CL; MOV AL, [EAX+table]; AND EAX, mask; RET` — CRT character classification (MBCS `_ismbblead`, `_ismbbkana`, etc.)
+  - `MOV AL, [ECX]; PUSH ESI; MOVSX ESI, AL; ...` — CRT string/character utility
+  - `XOR EAX, EAX; ...` — register zeroing before conditional logic
 
 ### Type E: Undisassembled — Atypical Start (LOW)
-- **Pattern**: `MOV_REG`, `MOV_EAX_MEM`, `PUSH_IMM8`, `CALL_REL32`, etc.
+- **Pattern**: `MOV_R32_RM32`, `MOV_EAX_MEM`, `PUSH_IMM8`, `CALL_REL32`, `MOV_RM32_R32`, `MOV_RM8_R8`, `CMP_R32_RM32`, `ALU_RM8_IMM8`, etc.
 - **Confidence**: Low — could be data, jump table entries, or code fragments
 - **Action**: Inspect first. Use `inspect_memory_content` or `disassemble_bytes` to preview. Only create if the disassembly forms a coherent function.
 - **Priority**: Low
@@ -250,6 +310,17 @@ Classify each candidate into one of these types based on scanner output and quic
   - Bytes that look like address tables (consecutive 4-byte aligned values near the program's image base)
   - Very short sequences (< 8 bytes) that could be data padding
   - `JMP_REL32` alone (likely a thunk, but verify target exists)
+
+### Type G: Undisassembled — Unknown Prologue (REVIEW)
+- **Pattern**: Pass 3 hit — non-padding bytes with a RET instruction, but first byte doesn't match any known prologue pattern
+- **Confidence**: Requires manual review — the scanner cannot classify the start bytes
+- **Action**: Always inspect first with `disassemble_bytes` or `inspect_memory_content`. Check `MULTI-RET(N)` flag — if N > 1, the gap likely contains multiple adjacent functions
+- **Priority**: Low (but can contain real functions that use unusual instruction sequences)
+- **Common causes**:
+  - Compiler-specific optimizations (computed jumps, table-driven dispatchers)
+  - Functions starting with rare opcodes (e.g., `ENTER`, `LEA`, `XCHG`, `BSR/BSF`)
+  - Inline data followed by real code (the "function" starts mid-gap, not at the first non-padding byte)
+- **Red flags**: Same as Type E — verify it's not a data table before creating
 
 ### Type F: Getter / Converter / Thin Wrapper
 - **Pattern**: Any type, but estimated size < 15 bytes
@@ -262,7 +333,7 @@ Classify each candidate into one of these types based on scanner output and quic
 
 ## Step 3: Create Functions (Batch)
 
-Process candidates in order: Type B first, then C, D, F, A, E.
+Process candidates in order: Type B first, then C, D, F, A, E, G.
 
 For each approved candidate:
 
@@ -275,7 +346,7 @@ For each approved candidate:
 **Triage plate comment format** (plain text):
 ```
 [TRIAGE] Orphaned code discovered by scanner.
-Type: <A|B|C|D|E|F> — <type description>
+Type: <A|B|C|D|E|F|G> — <type description>
 Confidence: <HIGH|MEDIUM|LOW>
 Size: ~N bytes / N instructions
 Neighboring: <prev_function> .. <next_function>
@@ -309,6 +380,7 @@ Created: N functions
   Type D (callee-save prologue): N
   Type E (atypical): N
   Type F (getter/wrapper): N
+  Type G (unknown prologue): N
 Skipped: N (reason: data/jump table/fragment)
 Needs review: N (ambiguous candidates)
 Next: Re-run scanner to check for newly exposed gaps
@@ -342,6 +414,7 @@ Re-run the scanner once after batch creation. If new candidates appear, triage a
 - **Switch/case tables**: Data tables embedded in .text that look like valid instructions when disassembled. Verify with `get_xrefs_to` — if only referenced from a single function's switch dispatch, it's a case block, not a separate function.
 - **Linker padding**: `CC CC CC` (INT3) between functions is normal debug padding. The scanner already filters this. `00 00` padding is also filtered but could occasionally mask real code starting with `ADD [EAX], AL` (0x00 0x00) — very unlikely to be intentional code.
 - **Code after unconditional JMP**: Sometimes Ghidra stops analysis after a JMP, leaving subsequent code undefined. The function starting after the JMP may be legitimate.
+- **MULTI-RET gaps**: Pass 3 flags gaps containing multiple RET instructions (`MULTI-RET(N)`). These gaps typically contain N adjacent small functions packed together. After creating the first function, re-scan — the gap will split and the remaining functions become separate candidates. Common with CRT utility clusters (character classification, string helpers).
 
 ## Output
 

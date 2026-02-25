@@ -1,77 +1,71 @@
 # FUNCTION_DOC_WORKFLOW_V5_BATCH
 
-Batch-process multiple functions in parallel using subagents. Each subagent documents one function independently following FUNCTION_DOC_WORKFLOW_V5.md. The orchestrator coordinates dispatch and collects results.
-
-## When to Use
-
-- Processing a list of functions (e.g., from `list_functions` or `find_next_undefined_function`)
-- Documenting all functions in a call graph (`get_function_call_graph`)
-- Re-documenting functions with low completeness scores
-- Processing function groups by category (all init functions, all handlers, etc.)
-
-## Orchestrator Role
-
-1. **Select targets**: Identify functions to document (by address list, call graph, or completeness filter)
-2. **Dispatch subagents**: Launch one subagent per function using the Task tool
-3. **Collect results**: Gather DONE output from each subagent
-4. **Report summary**: Aggregate scores and changes
+Orchestrate parallel function documentation using subagents. Each subagent follows [FUNCTION_DOC_WORKFLOW_V5.md](FUNCTION_DOC_WORKFLOW_V5.md) independently. This document covers target selection, dispatch, and result collection only.
 
 ## Dispatch Pattern
-
-For each function, launch a subagent with the V5 workflow:
 
 ```
 Task(
   subagent_type: "general-purpose",
+  model: "sonnet",  // or "opus" for Public API / complex Init functions
   description: "Document FunctionName",
-  prompt: "Follow the instructions in docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md
-  to document the function at address 0xADDRESS.
-  The function is currently named 'FUN_XXXXXXXX' (or current name).
+  prompt: "Follow docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md to document the function
+  at address 0xADDRESS (currently named 'FUN_XXXXXXXX').
+  Skip get_current_selection() — the address is provided above.
   Apply all changes directly in Ghidra using MCP tools.
   Return the DONE output when complete."
 )
 ```
 
-**Parallelism**: Launch up to 3 subagents concurrently. MCP tools serialize at the Ghidra HTTP layer, so more than 3 risks timeouts without speed benefit.
+**Concurrency**: Max 3 subagents at once. MCP tools serialize at the Ghidra HTTP layer — more than 3 risks timeouts without speed benefit.
 
-**Model selection**: Use `model: "sonnet"` for Worker/Leaf/Utility functions. Use `model: "opus"` for Public API and complex Init functions that require deeper analysis.
+**Model selection**: `sonnet` for Worker/Leaf/Getter functions. `opus` for Public API, complex Init/Cleanup, and functions requiring deep algorithm analysis.
 
-## Target Selection Strategies
+## Target Selection
 
 ### By completeness score
-```
-1. Use analyze_function_completeness on candidate functions
-2. Sort by score ascending (worst first)
-3. Filter to score < 70%
-4. Dispatch subagents for each
-```
+1. Run `analyze_function_completeness` on candidates
+2. Filter to score < 70%, sort ascending (worst first)
+3. Dispatch subagents for each
 
-### By call graph (document callees first)
-```
-1. Start with target function
-2. Get call graph with get_function_call_graph
-3. Topological sort: leaf functions first, then their callers
-4. Dispatch in dependency order (leaves can be parallel)
-```
+### By call graph (callees first)
+1. `get_function_call_graph` on the target
+2. Topological sort: leaves first, then callers
+3. Dispatch leaves in parallel, then next tier
 
 ### By undocumented functions
-```
-1. Use find_next_undefined_function repeatedly
-2. Or list_functions filtered to FUN_* prefix
-3. Dispatch subagents for each batch
-```
+1. `list_functions` filtered to `FUN_*` prefix, or `find_next_undefined_function` repeatedly
+2. Dispatch in batches of 3
+
+### By neighborhood (address-adjacent)
+1. Pick a documented function as anchor
+2. `list_functions` to find adjacent `FUN_*` entries
+3. Useful after orphaned code discovery — process newly created functions in the same region
+
+## Practical Notes
+
+These issues come up repeatedly when running V5 at scale:
+
+- **`get_function_variables` returns empty after prototype changes**: Register-only variables lose Ghidra symbols. Call `force_decompile` first to refresh, then retry. Even if still empty, `rename_variables` works by matching names from decompiled output.
+- **`set_local_variable_type` "No HighVariable found"**: Common for stack arrays (e.g., `ushort[6]`) and decompiler-inferred composites. Skip on first failure — note in plate comment Special Cases. Do not retry.
+- **Storage still `undefined4` despite resolved display type**: The decompiler shows `int`/`dword`/`FILE*` but storage remains `undefined4`. Explicitly calling `set_local_variable_type` with the same type resolves it. Critical for reaching 100%.
+- **Unfixable deductions** (do not retry or flag for manual review):
+  - `this` void* in `__thiscall` — convention keyword, can't rename or type further
+  - HighVariable-unmappable arrays — decompiler limitation
+  - API-mandated void* params (e.g., `DllMain pvReserved`)
+  - Phantom variables (`extraout_*`, `in_*`)
+- **Trivial getters** (6 bytes, 2 instructions): 3 tool calls total — rename+prototype, plate comment, verify. Subagent overhead may not be worth it; consider documenting inline.
 
 ## Error Handling
 
-- If a subagent fails (timeout, connection error): retry once, then skip and log
-- If a subagent returns score < 50%: flag for manual review, do not re-dispatch automatically
-- Collect all failures into a summary report at the end
+- Subagent timeout/connection error: retry once, then skip and log
+- Score < 50%: flag for manual review, do not re-dispatch
+- Score 50-70% with only unfixable deductions (check `all_deductions_unfixable`): accept as complete
 
 ## Output
 
 ```
 BATCH COMPLETE: N functions documented
-Scores: FuncA=85%, FuncB=92%, FuncC=75%
-Skipped: FuncD (timeout), FuncE (score 45% - needs manual review)
-Total subagent calls: N
+Scores: FuncA=100%, FuncB=95%, FuncC=89% (unfixable: this void*)
+Skipped: FuncD (timeout), FuncE (45% - manual review)
 ```

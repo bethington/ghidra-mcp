@@ -5786,7 +5786,7 @@ public class GhidraMCPPlugin extends Plugin {
                 }
             }
             
-            CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), 0, 0, 0, 0, 0, 0, new ArrayList<>(), 0);
+            CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), 0, 0, 0, 0, 0, 0, new ArrayList<>(), 0, 0);
             double completenessScore = scoreResult.score;
             json.append("\"completeness_score\": ").append(completenessScore);
             
@@ -13572,7 +13572,7 @@ public class GhidraMCPPlugin extends Plugin {
                     double commentDensity = codeLineCount > 0 ? (inlineCommentCount * 10.0 / codeLineCount) : 0;
                     result.append("\"comment_density\": ").append(String.format("%.2f", commentDensity)).append(", ");
 
-                    CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity, typeQualityIssues, phantomVars.size());
+                    CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity, typeQualityIssues, phantomVars.size(), codeLineCount);
                     result.append("\"completeness_score\": ").append(scoreResult.score).append(", ");
                     result.append("\"effective_score\": ").append(scoreResult.effectiveScore).append(", ");
                     result.append("\"all_deductions_unfixable\": ").append(scoreResult.score < 100.0 && scoreResult.effectiveScore >= 100.0).append(", ");
@@ -13580,7 +13580,7 @@ public class GhidraMCPPlugin extends Plugin {
                     // Generate workflow-aligned recommendations
                     List<String> recommendations = generateWorkflowRecommendations(
                         func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues,
-                        unrenamedGlobals, undocumentedOrdinals, commentDensity, scoreResult
+                        unrenamedGlobals, undocumentedOrdinals, commentDensity, scoreResult, codeLineCount
                     );
 
                     result.append("\"recommendations\": [");
@@ -13838,7 +13838,7 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
-    private CompletenessScoreResult calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity, List<String> typeQualityIssues, int phantomCount) {
+    private CompletenessScoreResult calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity, List<String> typeQualityIssues, int phantomCount, int codeLineCount) {
         double score = 100.0;
         double unfixablePenalty = 0.0;
 
@@ -13856,7 +13856,7 @@ public class GhidraMCPPlugin extends Plugin {
         score -= (unrenamedGlobalsCount * 3);
         score -= (undocumentedOrdinalsCount * 2);
 
-        if (commentDensity < 1.0 && func.getComment() != null) {
+        if (commentDensity < 1.0 && func.getComment() != null && codeLineCount > 10) {
             score -= 5;
         }
 
@@ -13887,7 +13887,8 @@ public class GhidraMCPPlugin extends Plugin {
             List<String> unrenamedGlobals,
             List<String> undocumentedOrdinals,
             double commentDensity,
-            CompletenessScoreResult scoreResult) {
+            CompletenessScoreResult scoreResult,
+            int codeLineCount) {
 
         List<String> recommendations = new ArrayList<>();
 
@@ -14000,8 +14001,8 @@ public class GhidraMCPPlugin extends Plugin {
             }
         }
 
-        // Inline Comment Density Check
-        if (commentDensity < 0.67) { // Less than 1 comment per 15 lines
+        // Inline Comment Density Check (skip for small functions <= 10 code lines)
+        if (commentDensity < 0.67 && codeLineCount > 10) { // Less than 1 comment per 15 lines
             recommendations.add("LOW INLINE COMMENT DENSITY - Add more explanatory comments:");
             recommendations.add("1. Current density: " + String.format("%.2f", commentDensity) + " comments per 10 lines (target: 0.67+)");
             recommendations.add("2. Add inline comments for:");

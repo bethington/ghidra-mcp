@@ -1,250 +1,83 @@
-# Ghidra MCP Documentation Prompts
+# Ghidra MCP AI Workflow Prompts
 
-This directory contains optimized prompts for documenting binary code in Ghidra using the MCP tools. These prompts are designed to be used with Claude or other AI assistants to systematically reverse engineer and document functions.
+This directory contains battle-tested prompts for reverse engineering binary code in Ghidra using MCP tools. These workflows have been refined across hundreds of functions and represent the most efficient approaches we've found for AI-assisted binary analysis.
 
-⚠️ **NEW: Comprehensive Workflow Enhancement** - After documenting 4 complex Diablo II functions, the workflow was refined to eliminate missing globals and string constants. **All new documentation should follow the updated guidance below.**
+## Start Here
 
-## Quick Navigation
+| Goal | Prompt | Description |
+|------|--------|-------------|
+| **Document a function** | [FUNCTION_DOC_WORKFLOW_V5.md](FUNCTION_DOC_WORKFLOW_V5.md) | Primary workflow. 7-step process with Hungarian notation, type auditing, and verification scoring. |
+| **Document many functions** | [FUNCTION_DOC_WORKFLOW_V5_BATCH.md](FUNCTION_DOC_WORKFLOW_V5_BATCH.md) | Orchestrates parallel subagents, each running V5 independently. |
+| **Find undiscovered code** | [ORPHANED_CODE_DISCOVERY_WORKFLOW.md](ORPHANED_CODE_DISCOVERY_WORKFLOW.md) | Automated scanner for functions hiding in gaps between known code. |
+| **Investigate data types** | [DATA_TYPE_INVESTIGATION_WORKFLOW.md](DATA_TYPE_INVESTIGATION_WORKFLOW.md) | Systematic structure discovery and field analysis. |
+| **Quick start** | [QUICK_START_PROMPT.md](QUICK_START_PROMPT.md) | Simplified beginner workflow for getting started. |
 
-- **Starting a new function?** → Start with DOCUMENTATION_WORKFLOW_INDEX.md for the decision tree, then read OPTIMIZED_FUNCTION_DOCUMENTATION.md
-- **Missing global data?** → Use GLOBAL_DATA_NAMING_CHECKLIST.md
-- **Naming questions?** → Reference [NAMING_CONVENTIONS.md](../../NAMING_CONVENTIONS.md)
-- **Complete workflow guide?** → Read the new **BINARY_FUNCTION_DOCUMENTATION_COMPLETE_GUIDE.md** (comprehensive overview)
+## Function Documentation (V5 Workflow)
 
-## Available Prompts
+The V5 workflow is the current standard for function documentation. It was refined through extensive real-world use and addresses every failure mode we encountered in earlier versions (V1-V4).
 
-### ⭐ NEW: Complete Workflow Documentation (Start Here)
+**Key features:**
+- Strict ordering (naming/typing BEFORE comments — `set_function_prototype` wipes plate comments)
+- Batch operations (`rename_variables` dict, `batch_set_comments` for plate + PRE + EOL in one call)
+- Type audit that checks actual storage types, not just decompiler display types
+- Classification system (Thunk/Leaf/Worker/Init/Callback/API) to determine documentation depth
+- Built-in Hungarian notation reference
+- Verification scoring via `analyze_function_completeness`
 
-1. **BINARY_FUNCTION_DOCUMENTATION_COMPLETE_GUIDE.md** ⭐ **START HERE**
-   - Complete overview of the proven 12-step workflow
-   - Built from experience documenting 4 complex functions
-   - Includes gap analysis and fixes (prevents missing globals/strings)
-   - Lists all 14 completion criteria
-   - Troubleshooting guide for common issues
-   - Cross-references all supporting documents
-   - Best for: Understanding the complete workflow before starting
-   - Use when: First time with this project or want complete context
+### Supporting References
 
-2. **DOCUMENTATION_WORKFLOW_INDEX.md** ⭐ **QUICK REFERENCE**
-   - Decision tree for which tool to use when
-   - Quick reference for all MCP tools
-   - Naming convention quick reference
-   - Common patterns by function type
-   - Troubleshooting common issues
-   - Tool batch size limits and workarounds
-   - Best for: Fast lookups while working
-   - Use when: Need specific tool info or workflow step
+| File | Purpose |
+|------|---------|
+| [HUNGARIAN_NOTATION_REFERENCE.md](HUNGARIAN_NOTATION_REFERENCE.md) | Complete type-to-prefix mapping |
+| [STRING_LABELING_CONVENTION.md](STRING_LABELING_CONVENTION.md) | Hungarian notation for string labels |
+| [PLATE_COMMENT_FORMAT_GUIDE.md](PLATE_COMMENT_FORMAT_GUIDE.md) | Plate comment structure and formatting |
+| [PLATE_COMMENT_EXAMPLES.md](PLATE_COMMENT_EXAMPLES.md) | Real-world plate comment examples |
+| [FUNCTION_DOCUMENTATION_CHECKLIST.md](FUNCTION_DOCUMENTATION_CHECKLIST.md) | Quick checklist for documentation completeness |
+| [FUNCTION_NAMING_VALIDATION.md](FUNCTION_NAMING_VALIDATION.md) | PascalCase naming rules and validation |
 
-3. **GLOBAL_DATA_NAMING_CHECKLIST.md** ⭐ **CRITICAL FOR STEP 6**
-   - Systematic checklist for finding and renaming ALL global data
-   - Prevents missing string constants, buffers, configuration variables
-   - Explains difference between local rename_variable and global rename_or_label
-   - 5 categories of global data with naming patterns
-   - Search strategies for each category
-   - Integration with main 12-step workflow
-   - Best for: Completing step 6 (variables) properly
-   - Use when: Renaming variables in any function
+## Data Analysis Workflows
 
-### Core Documentation Workflows
+| File | Purpose |
+|------|---------|
+| [DATA_TYPE_INVESTIGATION_WORKFLOW.md](DATA_TYPE_INVESTIGATION_WORKFLOW.md) | Full structure discovery workflow |
+| [DATA_TYPE_INVESTIGATION_QUICK.md](DATA_TYPE_INVESTIGATION_QUICK.md) | Abbreviated version for simple types |
+| [DATA_DOCUMENTATION_TEMPLATE.md](DATA_DOCUMENTATION_TEMPLATE.md) | Template for documenting data structures |
+| [DATA_SECTION_WORKFLOW.md](DATA_SECTION_WORKFLOW.md) | Workflow for .data/.rdata section analysis |
+| [DATA_GLOBALS_COMPREHENSIVE_TYPING.md](DATA_GLOBALS_COMPREHENSIVE_TYPING.md) | Comprehensive global variable typing |
+| [GLOBAL_DATA_ANALYSIS_WORKFLOW.md](GLOBAL_DATA_ANALYSIS_WORKFLOW.md) | Global data naming and analysis |
+| [GLOBAL_DATA_NAMING_CHECKLIST.md](GLOBAL_DATA_NAMING_CHECKLIST.md) | Checklist for g_ prefix naming |
 
-4. **OPTIMIZED_FUNCTION_DOCUMENTATION.md** ⭐ **MAIN WORKFLOW**
-   - Most comprehensive and detailed workflow (updated with global data requirements)
-   - Complete step-by-step instructions for thorough function documentation
-   - Now includes explicit requirements for string constants and globals
-   - Verification steps and structure identification
-   - Best for: Detailed analysis requiring full documentation
-   - Use when: Working on critical functions or complex algorithms
+## Cross-Binary Workflows
 
-5. **UNIFIED_ANALYSIS_PROMPT.md**
-   - Combined function and data analysis workflow
-   - Comprehensive approach for complex binaries
-   - Best for: Full system analysis including structures
-   - Use when: Need to understand relationships between code and data
+| File | Purpose |
+|------|---------|
+| [CROSS_VERSION_MATCHING_COMPREHENSIVE.md](CROSS_VERSION_MATCHING_COMPREHENSIVE.md) | Full hash-based function matching workflow |
+| [CROSS_VERSION_FUNCTION_MATCHING.md](CROSS_VERSION_FUNCTION_MATCHING.md) | Quick cross-version matching guide |
+| [BINARY_DOCUMENTATION_ORDER.md](BINARY_DOCUMENTATION_ORDER.md) | Optimal order for documenting binary families |
 
-6. **ENHANCED_ANALYSIS_PROMPT.md**
-   - Advanced analysis techniques
-   - Specialized for data structure discovery and application
-   - Best for: Complex reverse engineering scenarios
-   - Use when: Standard workflow isn't sufficient
+## Additional Resources
 
-7. **QUICK_START_PROMPT.md**
-   - Simplified workflow for beginners
-   - Essential steps without advanced features
-   - Best for: Getting started quickly
-   - Use when: Learning the system or simple functions
+| File | Purpose |
+|------|---------|
+| [TOOL_USAGE_GUIDE.md](TOOL_USAGE_GUIDE.md) | MCP tool reference and usage patterns |
+| [DOCUMENTATION_WORKFLOW_INDEX.md](DOCUMENTATION_WORKFLOW_INDEX.md) | Decision tree for choosing the right workflow |
+| [PROTOTYPE_AUDIT_WORKFLOW.md](PROTOTYPE_AUDIT_WORKFLOW.md) | Function prototype validation workflow |
+| [PROMPT_COMMANDS.md](PROMPT_COMMANDS.md) | Slash command reference |
 
-### Formatting Guides
+## Archived Workflows
 
-8. **PLATE_COMMENT_FORMAT_GUIDE.md** ⭐ **ESSENTIAL**
-   - Exact template for creating structured function header comments
-   - Plain text format (Ghidra adds formatting automatically)
-   - Detailed formatting rules for all sections
-   - Best for: Creating consistent, professional plate comments
-   - Use when: You need to format function headers correctly
+These earlier workflow versions are preserved for reference. Use V5 for all new work.
 
-9. **PLATE_COMMENT_EXAMPLES.md** ⭐ **PRACTICAL**
-   - Real-world examples of properly formatted plate comments
-   - Multiple function types (validation, processing, initialization, etc.)
-   - Quick reference templates
-   - Best for: Seeing complete examples before creating your own
-   - Use when: You need inspiration or want to copy a template
-
-### Data Analysis
-
-10. **DATA_DOCUMENTATION_TEMPLATE.md**
-    - Comprehensive template for documenting data structures and global variables
-    - Includes usage analysis, structure context, and naming conventions
-    - Best for: Analyzing data regions and applying proper types
-    - Use when: Documenting global variables, tables, or data structures
-
-## Recommended Usage Workflow
-
-### For Beginners
-
-1. Start with **OPTIMIZED_FUNCTION_DOCUMENTATION.md** to understand the complete process
-2. Reference **PLATE_COMMENT_FORMAT_GUIDE.md** when creating function headers
-3. Use **PLATE_COMMENT_EXAMPLES.md** to see what good documentation looks like
-4. Practice on simple functions before moving to complex ones
-
-### For Experienced Users
-
-1. Use **SINGLE_FUNCTION_COMPLETE_DOCUMENTATION.md** as your primary reference
-2. Keep **PLATE_COMMENT_FORMAT_GUIDE.md** open for header formatting
-3. Refer to **PLATE_COMMENT_EXAMPLES.md** when documenting different function types
-4. Customize based on project-specific conventions
-
-### For High-Volume Documentation
-
-1. Use **analyze_function_complete** MCP tool for comprehensive analysis
-2. Follow **OPTIMIZED_FUNCTION_DOCUMENTATION.md** workflow
-3. Use **PLATE_COMMENT_EXAMPLES.md** templates for consistency
-4. Automate using batch tools (batch_rename_variables, batch_create_labels, etc.)
-
-## Plate Comment Format
-
-The plate comment format is a critical component of documentation. Here's the basic structure:
-
-```c
-/**********************************************************************************************
- * [Function summary - one clear sentence]                                                   *
- *                                                                                            *
- * Algorithm:                                                                                 *
- * 1. [First step]                                                                            *
- * 2. [Second step]                                                                           *
- * ...                                                                                        *
- *                                                                                            *
- * Parameters:                                                                                *
- *   paramName: [Description]                                                                 *
- *                                                                                            *
- * Returns:                                                                                   *
- *   [Type]: [What it means]                                                                  *
- *                                                                                            *
- * Special Cases:                                                                             *
- *   - [Edge cases and special handling]                                                      *
- *********************************************************************************************/
-```
-
-**Critical formatting rules:**
-- Each line must be exactly **96 characters** including newline
-- Content lines: ` * ` + content + ` *`
-- Top border: `/*` + 93 asterisks
-- Bottom border: 1 space + 94 asterisks + `*/`
-
-See **PLATE_COMMENT_FORMAT_GUIDE.md** for complete details and **PLATE_COMMENT_EXAMPLES.md** for working examples.
-
-## Diablo II Specific Conventions
-
-When working with Diablo II binaries, these prompts include specific guidance for:
-
-### Common Structures
-- **UnitAny**: dwType, dwUnitId, dwMode, pInventory, pStats, wX, wY
-- **Room1/Room2**: pRoom2, dwPosX, dwPosY, dwSizeX, dwSizeY, pLevel
-- **PlayerData**: szName, pNormalQuest, pNightmareQuest, pHellQuest
-- **ItemData**: dwQuality, dwItemFlags, wPrefix, wSuffix, BodyLocation
-- **MonsterData**: anEnchants, wUniqueNo, wName
-- **Inventory**: pOwner, pFirstItem, pCursorItem, dwItemCount
-
-### Naming Conventions (Hungarian Notation)
-- `dw`: DWORD (dwFlags, dwUnitId)
-- `p`/`lp`: Pointers (pNext, lpPlayerUnit)
-- `w`: WORD (wLevel, wStatIndex)
-- `n`: Counts (nCount, nMaxXCells)
-- `sz`: Strings (szName, szGameName)
-- `f`/`b`: Boolean (fSaved, bActive)
-
-## Integration with MCP Tools
-
-These prompts are designed to work with the following Ghidra MCP tools:
-
-### Analysis Tools
-- `analyze_function_complete`: Get all function info in one call
-- `analyze_data_region`: Analyze data structures
-- `detect_array_bounds`: Identify array sizes
-- `search_functions_enhanced`: Find functions to document
-
-### Documentation Tools
-- `set_plate_comment`: Add function header
-- `batch_set_comments`: Add multiple comments
-- `batch_create_labels`: Create jump target labels
-- `batch_rename_variables`: Rename multiple variables
-- `set_function_prototype`: Define function signature
-
-### Cross-Binary Documentation (v1.9.4+)
-- `get_function_hash`: Get normalized SHA-256 hash for matching across binaries
-- `get_bulk_function_hashes`: Paginated bulk hashing with filter (documented/undocumented/all)
-- `get_function_documentation`: Export complete function docs (name, prototype, comments, labels)
-- `apply_function_documentation`: Import documentation to target function
-- `build_function_hash_index`: Build persistent JSON index from programs
-- `lookup_function_by_hash`: Find matching functions in index
-- `propagate_documentation`: Apply docs to all matching instances
-
-### Verification Tools
-- `analyze_function_completeness`: Check documentation status
-- `validate_function_prototype`: Verify prototype syntax
-- `can_rename_at_address`: Check if rename will work
-
-## Tips for Effective Documentation
-
-1. **Always verify function boundaries first** - Incorrect boundaries lead to wrong analysis
-2. **Use batch operations** - Minimize API calls with batch_* tools
-3. **Cross-reference assembly** - Verify offsets match disassembly, not decompiler
-4. **Document structures inline** - Include structure layouts in plate comments
-5. **Name meaningfully** - Use descriptive names that explain purpose, not just type
-6. **Reference magic numbers** - Always explain hex values and sentinel values
-7. **Format consistently** - Use the plate comment template for every function
-
-## Common Issues and Solutions
-
-### Plate Comment Formatting
-- **Problem**: Lines don't align or exceed 96 characters
-- **Solution**: Use PLATE_COMMENT_FORMAT_GUIDE.md template exactly
-
-### Variable Rename Failures
-- **Problem**: "Variable not found" errors
-- **Solution**: Use analyze_function_complete to get exact variable names first
-
-### Offset Mismatches
-- **Problem**: Comments reference wrong offsets
-- **Solution**: Always verify against disassembly, not decompiler output
-
-### Connection Timeouts
-- **Problem**: batch_* operations timeout
-- **Solution**: Split into smaller batches or use individual operations
-
-## Contributing
-
-When creating new prompts or improving existing ones:
-
-1. Test the prompt on multiple function types
-2. Verify it produces consistent, accurate documentation
-3. Include examples and formatting guidelines
-4. Update this README to reference the new prompt
-5. Follow the existing structure and style
-
-## Version History
-
-- **v1.9.4**: Added cross-binary documentation propagation tools (Function Hash Index)
-- **v1.6.5**: Added PLATE_COMMENT_FORMAT_GUIDE.md and PLATE_COMMENT_EXAMPLES.md
-- **v1.6.0**: Added validation tools and enhanced search
-- **v1.5.1**: Added batch operation support
-- **v1.5.0**: Initial prompt collection
+| File | Status |
+|------|--------|
+| [FUNCTION_DOC_WORKFLOW_V4.md](FUNCTION_DOC_WORKFLOW_V4.md) | Superseded by V5 |
+| [FUNCTION_DOC_WORKFLOW_V4_COMPACT.md](FUNCTION_DOC_WORKFLOW_V4_COMPACT.md) | Superseded by V5 |
+| [FUNCTION_DOC_WORKFLOW_V4_SUBAGENT.md](FUNCTION_DOC_WORKFLOW_V4_SUBAGENT.md) | Superseded by V5 Batch |
+| [FUNCTION_DOC_WORKFLOW_V3.md](FUNCTION_DOC_WORKFLOW_V3.md) | Superseded by V4 |
+| [FUNCTION_DOC_WORKFLOW_V3_COMPACT.md](FUNCTION_DOC_WORKFLOW_V3_COMPACT.md) | Superseded by V4 |
+| [FUNCTION_DOC_WORKFLOW_V2.md](FUNCTION_DOC_WORKFLOW_V2.md) | Superseded by V3 |
+| [FUNCTION_DOC_WORKFLOW_V2_COMPACT.md](FUNCTION_DOC_WORKFLOW_V2_COMPACT.md) | Superseded by V3 |
+| [FUNCTION_DOC_WORKFLOW_V1.md](FUNCTION_DOC_WORKFLOW_V1.md) | Original version |
+| [UNIFIED_ANALYSIS_PROMPT.md](UNIFIED_ANALYSIS_PROMPT.md) | Early combined workflow |
+| [ENHANCED_ANALYSIS_PROMPT.md](ENHANCED_ANALYSIS_PROMPT.md) | Early advanced workflow |
+| [PLATE_DOCUMENTATION.md](PLATE_DOCUMENTATION.md) | Early plate comment guide |

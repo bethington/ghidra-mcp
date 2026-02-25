@@ -50,6 +50,8 @@ ENDPOINT_TIMEOUTS = {
     "find_similar_functions_fuzzy": 60,  # 1 minute - single function fuzzy search
     "diff_functions": 30,  # 30 seconds - structured function diff
     "get_function_signature": 10,  # 10 seconds - single signature extraction
+    "run_ghidra_script": 1800,  # 30 minutes - scripts can iterate entire projects
+    "run_script_inline": 1800,  # 30 minutes - inline scripts can also be long-running
     "default": 30,  # 30 seconds for all other operations
 }
 # Maximum retry attempts for transient failures (3 attempts with exponential backoff)

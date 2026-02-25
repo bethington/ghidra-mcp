@@ -7,7 +7,7 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 - **Repo**: https://github.com/bethington/ghidra-mcp
 - **Version**: 3.0.0
 - **Language**: Java (Ghidra extension) + Python (MCP bridge)
-- **Key feature**: 158 MCP tools for binary analysis, headless server support
+- **Key feature**: 179 MCP tools for binary analysis, headless server support, AI documentation workflows
 
 ## Directory Structure
 

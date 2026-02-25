@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Ghidra MCP is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It provides **158 MCP tools** for binary analysis automation.
+Ghidra MCP is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It provides **179 MCP tools** for binary analysis automation.
 
 - **Package**: `com.xebyte`
 - **Version**: 3.0.0 (see `pom.xml`)
@@ -20,8 +20,8 @@ AI/Automation Tools <-> MCP Bridge (bridge_mcp_ghidra.py) <-> Ghidra Plugin (Ghi
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Ghidra Plugin | `src/main/java/com/xebyte/GhidraMCPPlugin.java` | HTTP server exposing Ghidra APIs |
-| MCP Bridge | `bridge_mcp_ghidra.py` | Translates MCP protocol to HTTP calls |
+| Ghidra Plugin | `src/main/java/com/xebyte/GhidraMCPPlugin.java` | HTTP server exposing 147 Ghidra API endpoints |
+| MCP Bridge | `bridge_mcp_ghidra.py` | Translates MCP protocol to HTTP calls (179 tools) |
 | Headless Server | `src/main/java/com/xebyte/headless/` | Standalone server without Ghidra GUI |
 | Core Abstractions | `src/main/java/com/xebyte/core/` | Shared interfaces (ProgramProvider, ThreadingStrategy) |
 
@@ -74,7 +74,7 @@ ghidra-mcp/
 
 ## Key Documentation
 
-- **API Reference**: See README.md for complete tool listing (158 MCP tools)
+- **API Reference**: See README.md for complete tool listing (179 MCP tools)
 - **Workflow Prompts**: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md` - Function documentation workflow (V5)
 - **Batch Processing**: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5_BATCH.md` - Multi-function parallel documentation
 - **Data Analysis**: `docs/prompts/DATA_TYPE_INVESTIGATION_WORKFLOW.md`
@@ -130,7 +130,7 @@ Located in `ghidra_scripts/`. Execute via:
 ## Version History
 
 See `CHANGELOG.md` for complete history. Key releases:
-- v3.0.0: Headless parity, 8 new tool categories, 158 MCP tools, 148 GUI endpoints
+- v3.0.0: Headless parity, 8 new tool categories, 179 MCP tools, 147 GUI endpoints
 - v2.0.2: Ghidra 12.0.3 support, pagination for large functions
 - v2.0.0: Label deletion endpoints, documentation updates
 - v1.9.4: Function Hash Index for cross-binary documentation
