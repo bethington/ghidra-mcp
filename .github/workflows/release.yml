@@ -142,42 +142,35 @@ jobs:
         cp LICENSE release/ 2>/dev/null || echo "LICENSE file not found, skipping"
         
         # Create installation instructions
-        cat > release/INSTALLATION.md << 'EOF'
+        MCP_TOOLS=$(grep -c '@mcp.tool()' bridge_mcp_ghidra.py 2>/dev/null || echo "179")
+        cat > release/INSTALLATION.md << INSTEOF
         # GhidraMCP Installation Instructions
-        
+
         ## Quick Installation
-        
+
         1. **Install the Ghidra Plugin:**
-           - Copy `GhidraMCP-${{ steps.version.outputs.VERSION }}.zip` to your Ghidra installation directory under `Extensions/Ghidra/`
-           - Restart Ghidra and enable the plugin in File → Configure → Miscellaneous → GhidraMCP
-        
+           - In Ghidra: **File > Install Extensions > Add** and select \`GhidraMCP-${{ steps.version.outputs.VERSION }}.zip\`
+           - Restart Ghidra and enable the plugin: **File > Configure > Configure All Plugins > GhidraMCP**
+
         2. **Install Python Dependencies:**
-           ```bash
+           \`\`\`bash
            pip install -r requirements.txt
-           ```
-        
+           \`\`\`
+
         3. **Run the MCP Server:**
-           ```bash
+           \`\`\`bash
            python bridge_mcp_ghidra.py
-           ```
-        
+           \`\`\`
+
         ## What's Included
-        
-        - `GhidraMCP-${{ steps.version.outputs.VERSION }}.zip` - Main Ghidra plugin
-        - `bridge_mcp_ghidra.py` - MCP server with 157 tools
-        - `requirements.txt` - Python dependencies
-        - `README.md` - Complete documentation
-        - `INSTALLATION.md` - This installation guide
-        
-        ## Features
-        
-        - **157 MCP Tools** - Comprehensive binary analysis capabilities
-        - **Production Ready** - 100% success rate, enterprise-grade quality
-        - **Full Integration** - Seamless Ghidra integration with HTTP API
-        - **Comprehensive Testing** - Compilation verified, ensuring reliability
-        
-        For detailed documentation, see the README.md file.
-        EOF
+
+        - \`GhidraMCP-${{ steps.version.outputs.VERSION }}.zip\` - Ghidra extension
+        - \`bridge_mcp_ghidra.py\` - MCP server with ${MCP_TOOLS} tools
+        - \`requirements.txt\` - Python dependencies
+        - \`README.md\` - Complete documentation
+
+        For detailed documentation, see the [README](https://github.com/bethington/ghidra-mcp#readme).
+        INSTEOF
         
         echo "Release artifacts prepared:"
         ls -la release/
@@ -196,79 +189,47 @@ jobs:
     - name: Generate release notes
       id: release_notes
       run: |
-        cat > release_notes.md << 'EOF'
-        # GhidraMCP Release ${{ steps.version.outputs.VERSION }}
-        
-        Production-ready Model Context Protocol server for Ghidra reverse engineering platform.
-        
-        ## 🚀 What's New in ${{ steps.version.outputs.VERSION }}
-        
-        - **157 MCP Tools** - Complete binary analysis toolkit
-        - **163 Headless Endpoints** - Full analysis without Ghidra GUI
-        - **Enterprise Quality** - 100% success rate with comprehensive testing
-        - **Enhanced Performance** - Sub-second response times for most operations
-        - **Complete Documentation** - Professional-grade documentation and guides
-        
-        ## 📦 Installation
-        
-        1. Download `GhidraMCP-${{ steps.version.outputs.VERSION }}.zip`
-        2. Extract to Ghidra's `Extensions/Ghidra/` directory
-        3. Restart Ghidra and enable the plugin
-        4. Install Python dependencies: `pip install -r requirements.txt`
-        5. Run MCP server: `python bridge_mcp_ghidra.py`
-        
-        ## 🔧 Technical Specifications
-        
-        - **Java Version:** Java 21 LTS
-        - **Ghidra Version:** 12.0.3 (compatible)
-        - **Python Version:** 3.8+ required
-        - **Package:** com.xebyte.GhidraMCP
-        - **License:** Apache 2.0
-        
-        ## 📊 Quality Metrics
-        
-        - **Test Coverage:** Compilation verified
-        - **Java Tests:** Compilation verified
-        - **Endpoint Coverage:** 75% of endpoints verified
-        - **MCP Tools:** 157/157 tools available (100%)
-        - **Documentation:** Complete API reference and guides
-        
-        ## 🛠️ MCP Tools Categories
+        VERSION="${{ steps.version.outputs.VERSION }}"
+        # Count MCP tools dynamically from bridge
+        MCP_TOOLS=$(grep -c '@mcp.tool()' bridge_mcp_ghidra.py 2>/dev/null || echo "179")
+        # Count GUI endpoints dynamically from plugin
+        GUI_EPS=$(grep -c 'createContext(' src/main/java/com/xebyte/GhidraMCPPlugin.java 2>/dev/null || echo "147")
+        # Count headless endpoints dynamically
+        HEADLESS_EPS=$(grep -c 'createContext(' src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java 2>/dev/null || echo "172")
 
-        | Category | Description |
-        |----------|-------------|
-        | **Core System** | Connection, metadata, version, utilities |
-        | **Function Analysis** | Decompilation, call graphs, similarity, diffing |
-        | **Memory & Data** | Segments, xrefs, byte patterns, memory reads |
-        | **Data Types & Structures** | Structs, enums, arrays, categories |
-        | **Symbols & Labels** | Imports, exports, labels, namespaces |
-        | **Renaming & Documentation** | Rename, comments, bookmarks |
-        | **Type System** | Prototypes, variable types, calling conventions |
-        | **Script Management** | List, run, save, update Ghidra scripts |
-        | **Multi-Program / Project** | Open programs, project files, switch programs |
-        | **Project Lifecycle** | Create, open, close, delete projects |
-        | **Project Organization** | Folders, move/delete files |
-        | **Analysis Tools** | Security analysis, malware detection, IOC extraction |
-        | **Analysis Control** | List/configure/run analyzers |
-        | **Server Connection** | Connect to Ghidra Server, repositories |
-        | **Version Control** | Checkout, checkin, undo checkout |
-        | **Version History** | History, checkouts, specific versions |
-        | **Admin** | Users, permissions, terminate checkouts |
-        
-        ## 📚 Documentation
-        
-        - [API Reference](https://github.com/bethington/ghidra-mcp/blob/main/docs/API_REFERENCE.md) - Complete tool documentation
-        - [Development Guide](https://github.com/bethington/ghidra-mcp/blob/main/docs/DEVELOPMENT_GUIDE.md) - Setup and workflows
-        - [Installation Instructions](INSTALLATION.md) - Quick start guide
-        
-        ## 🔄 Upgrade Notes
-        
-        This release includes comprehensive improvements to code quality, documentation, and VS Code integration. All existing functionality is preserved with enhanced reliability and performance.
-        
-        ---
-        
-        **Full Changelog:** https://github.com/bethington/ghidra-mcp/compare/v1.1.0...v${{ steps.version.outputs.VERSION }}
-        EOF
+        cat > release_notes.md << GENEOF
+        # GhidraMCP Release ${VERSION}
+
+        Production-ready Model Context Protocol server for Ghidra reverse engineering platform.
+
+        ## By the Numbers
+
+        | Metric | Value |
+        |--------|-------|
+        | **MCP Tools** | ${MCP_TOOLS} |
+        | **GUI Endpoints** | ${GUI_EPS} |
+        | **Headless Endpoints** | ${HEADLESS_EPS} |
+        | **Java** | 21 LTS |
+        | **Ghidra** | ${{ env.GHIDRA_VERSION }} |
+
+        ## Installation
+
+        1. Download **GhidraMCP-${VERSION}.zip** below
+        2. In Ghidra: **File > Install Extensions > Add** and select the ZIP
+        3. Restart Ghidra, enable plugin: **File > Configure > Configure All Plugins > GhidraMCP**
+        4. Start server: **Tools > GhidraMCP > Start MCP Server**
+        5. Install Python bridge: \`pip install -r requirements.txt\`
+        6. Run: \`python bridge_mcp_ghidra.py\`
+
+        ## What's Included
+
+        - **GhidraMCP-${VERSION}.zip** — Ghidra extension (GUI plugin)
+        - **bridge_mcp_ghidra.py** — MCP protocol bridge (${MCP_TOOLS} tools)
+        - **requirements.txt** — Python dependencies
+
+        See [CHANGELOG.md](https://github.com/bethington/ghidra-mcp/blob/main/CHANGELOG.md) for detailed release notes.
+        See [README.md](https://github.com/bethington/ghidra-mcp#readme) for full documentation.
+        GENEOF
 
     - name: Debug release files
       run: |
@@ -282,12 +243,25 @@ jobs:
         echo "File checksums:"
         find release/ -type f -exec sha256sum {} \;
 
+    - name: Check if release already exists
+      id: check_release
+      run: |
+        if gh release view "${{ steps.version.outputs.TAG }}" --json body --jq '.body' 2>/dev/null | grep -q "By the Numbers"; then
+          echo "EXISTS=true" >> $GITHUB_OUTPUT
+          echo "Release exists with custom notes — will upload artifacts only"
+        else
+          echo "EXISTS=false" >> $GITHUB_OUTPUT
+          echo "No existing release or has default notes — will create with generated notes"
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.version.outputs.TAG }}
         name: "GhidraMCP ${{ steps.version.outputs.VERSION }}"
-        body_path: release_notes.md
+        body_path: ${{ steps.check_release.outputs.EXISTS == 'false' && 'release_notes.md' || '' }}
         files: |
           release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip
           release/bridge_mcp_ghidra.py
@@ -297,7 +271,7 @@ jobs:
           release/copy-ghidra-libs.bat
         draft: false
         prerelease: false
-        generate_release_notes: true
+        generate_release_notes: false
         fail_on_unmatched_files: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -317,7 +291,8 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
         echo "- **Plugin:** GhidraMCP-${{ steps.version.outputs.VERSION }}.zip" >> $GITHUB_STEP_SUMMARY
-        echo "- **MCP Server:** bridge_mcp_ghidra.py (157 tools)" >> $GITHUB_STEP_SUMMARY
+        MCP_TOOLS=$(grep -c '@mcp.tool()' bridge_mcp_ghidra.py 2>/dev/null || echo "179")
+        echo "- **MCP Server:** bridge_mcp_ghidra.py (${MCP_TOOLS} tools)" >> $GITHUB_STEP_SUMMARY
         echo "- **Dependencies:** requirements.txt" >> $GITHUB_STEP_SUMMARY
         echo "- **Documentation:** README.md, INSTALLATION.md" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
