@@ -516,7 +516,7 @@ public class BatchDocumentFunctions extends GhidraScript {
         }
 
         if (promptFile == null) {
-            println("ERROR: Could not find FUNCTION_DOC_WORKFLOW_V4.md prompt file");
+            println("ERROR: Could not find FUNCTION_DOC_WORKFLOW_V5.md prompt file");
             return;
         }
 
@@ -681,9 +681,8 @@ public class BatchDocumentFunctions extends GhidraScript {
 
     private String findPromptFile(String userHome) {
         String[] possiblePaths = {
-            userHome + "\\source\\mcp\\ghidra-mcp\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4.md",
-            userHome + "\\source\\mcp\\ghidra-mcp\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4_COMPACT.md",
-            System.getProperty("user.dir") + "\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4.md"
+            userHome + "\\source\\mcp\\ghidra-mcp\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V5.md",
+            System.getProperty("user.dir") + "\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V5.md"
         };
 
         for (String path : possiblePaths) {

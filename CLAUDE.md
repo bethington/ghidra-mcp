@@ -2,10 +2,10 @@
 
 ## Project Overview
 
-Ghidra MCP is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It provides **110 MCP tools** for binary analysis automation.
+Ghidra MCP is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It provides **158 MCP tools** for binary analysis automation.
 
 - **Package**: `com.xebyte`
-- **Version**: 2.0.0 (see `pom.xml`)
+- **Version**: 3.0.0 (see `pom.xml`)
 - **License**: Apache 2.0
 - **Java**: 21 LTS
 - **Ghidra**: 12.0.3
@@ -27,19 +27,19 @@ AI/Automation Tools <-> MCP Bridge (bridge_mcp_ghidra.py) <-> Ghidra Plugin (Ghi
 
 ## Build Commands
 
-```bash
-# Build the plugin (creates target/GhidraMCP-{version}.zip)
-mvn clean package assembly:single -DskipTests
+```powershell
+# Build and deploy (recommended — handles Maven, deps, and Ghidra restart)
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
 
-# Quick compile check
-mvn clean compile -q
+# Build only (no deploy)
+.\ghidra-mcp-setup.ps1 -BuildOnly
 
-# Deploy to Ghidra
-.\ghidra-mcp-setup.ps1
-
-# Build headless server
-mvn package -P headless -DskipTests
+# First-time dependency setup (install Ghidra JARs into local Maven repo)
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
 ```
+
+> **Note (Windows):** Maven (`mvn`) must be in your PATH or invoked via the setup script.
+> Maven is at `C:\Users\<user>\tools\apache-maven-3.9.6\bin\mvn.cmd` if installed by the setup script.
 
 ## Running the MCP Server
 
@@ -65,17 +65,18 @@ ghidra-mcp/
 ├── bridge_mcp_ghidra.py           # MCP protocol bridge
 ├── ghidra_scripts/                # Ghidra scripts (Java)
 ├── docs/
-│   ├── API_REFERENCE.md           # Complete API documentation
 │   ├── prompts/                   # Analysis workflow prompts
-│   └── releases/                  # Release documentation
+│   ├── releases/                  # Release documentation
+│   └── project-management/        # Project-level docs
 ├── ghidra-mcp-setup.ps1            # Deployment script
 └── functions-process.ps1          # Batch function processing
 ```
 
 ## Key Documentation
 
-- **API Reference**: See README.md for complete tool listing (110 MCP tools)
-- **Workflow Prompts**: `docs/prompts/FUNCTION_DOC_WORKFLOW_V4.md` - Function documentation workflow
+- **API Reference**: See README.md for complete tool listing (158 MCP tools)
+- **Workflow Prompts**: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md` - Function documentation workflow (V5)
+- **Batch Processing**: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5_BATCH.md` - Multi-function parallel documentation
 - **Data Analysis**: `docs/prompts/DATA_TYPE_INVESTIGATION_WORKFLOW.md`
 - **Tool Guide**: `docs/prompts/TOOL_USAGE_GUIDE.md`
 - **String Labeling**: `docs/prompts/STRING_LABELING_CONVENTION.md` - Hungarian notation for string labels
@@ -89,10 +90,11 @@ ghidra-mcp/
 - Transactions must be committed for Ghidra database changes
 
 ### Adding New Endpoints
-1. Add handler method in `GhidraMCPPlugin.java`
-2. Register in `createContextsForServer()`
+1. Add handler method in `GhidraMCPPlugin.java` (GUI plugin) and/or `HeadlessEndpointHandler.java`
+2. Register in `createContextsForServer()` (GUI) and/or `registerEndpoints()` (headless)
 3. Add corresponding MCP tool in `bridge_mcp_ghidra.py`
-4. Document in `docs/API_REFERENCE.md`
+4. Add entry to `tests/endpoints.json` with path, method, category, description
+5. Update `total_endpoints` count in `tests/endpoints.json`
 
 ### Testing
 - Tests: `src/test/java/com/xebyte/`
@@ -128,6 +130,8 @@ Located in `ghidra_scripts/`. Execute via:
 ## Version History
 
 See `CHANGELOG.md` for complete history. Key releases:
+- v3.0.0: Headless parity, 8 new tool categories, 158 MCP tools, 148 GUI endpoints
+- v2.0.2: Ghidra 12.0.3 support, pagination for large functions
 - v2.0.0: Label deletion endpoints, documentation updates
 - v1.9.4: Function Hash Index for cross-binary documentation
 - v1.7.x: Transaction fixes, variable storage control

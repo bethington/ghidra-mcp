@@ -4,7 +4,28 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v1.9.4 (Latest)
+### v3.0.0 (Latest)
+
+- **Major Release** - Headless server parity + 8 new tool categories
+- New categories: Project Lifecycle, Project Organization, Server Connection, Version Control, Version History, Admin, Analysis Control, Script Execution improvements
+- 158 MCP tools (up from 110), 148 GUI endpoints, 163 headless endpoints
+- New `bump-version.ps1` for atomic version management across all project files
+- New `tests/unit/` suite for endpoint catalog consistency
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
+### v2.0.2
+
+- Ghidra 12.0.3 support, pagination for large functions
+
+### v2.0.1
+
+- CI fixes, documentation improvements, PowerShell setup improvements
+
+### v2.0.0
+
+- Label deletion endpoints, documentation updates
+
+### v1.9.4
 
 - **Function Hash Index Release** - Cross-binary documentation propagation
 - New tools: `get_function_hash`, `get_bulk_function_hashes`, `get_function_documentation`, `apply_function_documentation`, `build_function_hash_index`, `lookup_function_by_hash`, `propagate_documentation`
@@ -72,6 +93,6 @@ Each release directory should contain:
 
 ## Navigation
 
-- For the latest release: See [v1.9.2/](v1.9.2/)
+- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v3.0.0)
 - For specific versions: Browse the version directories above
 - For overall project changes: See [CHANGELOG.md](../CHANGELOG.md) in the project root

@@ -125,7 +125,8 @@ jobs:
     - name: Run Python unit tests
       run: |
         # Run only unit tests (integration tests require a running MCP server)
-        pytest tests/unit/ -v --no-cov 2>/dev/null || echo "No pytest unit tests found"
+        # Includes: tool function tests, endpoint catalog consistency, response schema validation
+        pytest tests/unit/ -v --no-cov --tb=short
     
     - name: Upload coverage
       if: always()

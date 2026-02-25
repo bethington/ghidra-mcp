@@ -21,7 +21,23 @@ param(
     [Alias("Rescan")][switch]$ReEvaluate,
     [Alias("Cleanup")][switch]$CleanupScripts,
     [Alias("L")][switch]$Log,  # Enable logging, output files, checkpoints
-    [Alias("Pick", "Threshold")][switch]$PickThreshold  # Show popup to pick minimum completeness threshold
+    [Alias("Pick", "Threshold")][switch]$PickThreshold,  # Show popup to pick minimum completeness threshold
+    # Path overrides  -  useful for CI/CD or non-standard project layouts
+    [string]$TodoFilePath = ".\FunctionsTodo.txt",
+    [string]$LockDirPath = ".\locks",
+    [string]$OutputDirPath = ".\output",
+    # External binary priority order file (one binary name per line, # comments allowed)
+    # If not provided, the built-in Diablo2 order is used as a fallback
+    [string]$BinaryOrderFile = "",
+    # Skip pre-flight validation checks (claude in PATH, Ghidra health, prompt file)
+    [switch]$SkipPreFlight,
+    # Show INFO-level diagnostic messages on console without writing a log file.
+    # More granular than -Log (which writes everything to a file).
+    # Combine with -Log to get both console diagnostics AND the log file.
+    [Alias("D")][switch]$Diagnostic,
+    # Record timing for every major operation and print a breakdown at the end.
+    # Use with -DryRun to measure pre-processing overhead without calling Claude.
+    [Alias("P")][switch]$Profile
 )
 
 # Fast mode is default unless -Log is specified
@@ -30,6 +46,40 @@ $Fast = -not $Log
 # Log buffer for batch writes (reduces file I/O)
 $script:LogBuffer = [System.Collections.Generic.List[string]]::new()
 $script:LogFlushInterval = 10  # Flush every 10 entries
+
+# Error/warn accumulator  -  always populated regardless of -Log/-Diagnostic.
+# Printed as a "Problems this run" summary at end of worker execution.
+$script:ErrorEvents = [System.Collections.Generic.List[string]]::new()
+
+# Timing accumulator for -Profile mode.
+$script:Timings = [System.Collections.Generic.List[hashtable]]::new()
+
+# Todo file parse cache  -  avoids re-parsing on every loop iteration when unchanged.
+$script:TodoCacheMtime = $null
+$script:TodoCacheData  = $null
+
+function Measure-Op {
+    <#
+    .SYNOPSIS
+        Time a block of code and record it when -Profile is active.
+    .DESCRIPTION
+        When -Profile is not set this is a thin wrapper with no overhead.
+        Pass -PassThru to get the scriptblock return value back to the caller.
+    #>
+    param(
+        [string]$Name,
+        [scriptblock]$Block,
+        [switch]$PassThru
+    )
+    if (-not $Profile) {
+        if ($PassThru) { return (& $Block) } else { & $Block | Out-Null; return }
+    }
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $result = & $Block
+    $sw.Stop()
+    [void]$script:Timings.Add(@{ Op = $Name; Ms = [Math]::Round($sw.Elapsed.TotalMilliseconds, 1) })
+    if ($PassThru) { return $result }
+}
 
 # Model name - CLI accepts simple aliases directly
 $FullModelName = $Model
@@ -50,36 +100,34 @@ $script:CurrentProgram = $null
 $script:ProjectFolder = $null
 $script:GameVersion = $null
 
-$todoFile = ".\FunctionsTodo.txt"
-$promptFile = if ($Subagent) { 
-    ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4_SUBAGENT.md" 
-} elseif ($CompactPrompt) { 
-    ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4_COMPACT.md" 
-} else { 
-    ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4.md" 
+$todoFile = $TodoFilePath
+$promptFile = if ($Subagent) {
+    ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V5_BATCH.md"
+} elseif ($CompactPrompt) {
+    ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V5.md"
+} else {
+    ".\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V5.md"
 }
 $logFile = ".\\logs\\functions-process-worker$WorkerId-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 $checkpointFile = ".\\functions-progress-worker$WorkerId.json"
-$outputDir = ".\\output"
-$lockDir = ".\\locks"
-$globalLockFile = ".\\locks\\.global.lock"
+$outputDir = $OutputDirPath
+$lockDir = $LockDirPath
+$globalLockFile = Join-Path $lockDir ".global.lock"
 
 # Create directories if they don't exist
 New-Item -ItemType Directory -Force -Path ".\\logs" | Out-Null
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 New-Item -ItemType Directory -Force -Path $lockDir | Out-Null
 
-# Check if prompt file exists, if not use a default prompt
+# Prompt file is required  -  fail fast if missing
 if (-not (Test-Path $promptFile)) {
-    Write-Host "WARNING: Prompt file not found at $promptFile" -ForegroundColor Yellow
-    Write-Host "Using embedded default workflow prompt..." -ForegroundColor Yellow
-    $defaultPrompt = $true
-} else {
-    $defaultPrompt = $false
-    $promptSize = (Get-Content $promptFile -Raw).Length
-    $workflowType = if ($Subagent) { "V4-SUBAGENT" } elseif ($CompactPrompt) { "V4-COMPACT" } else { "V4" }
-    Write-Host "Using workflow $workflowType prompt ($promptSize chars, ~$([math]::Round($promptSize/4)) tokens)" -ForegroundColor Green
+    Write-Host "ERROR: Prompt file not found at $promptFile" -ForegroundColor Red
+    Write-Host "Use -Subagent or -CompactPrompt to select an alternate prompt, or create the missing file." -ForegroundColor Red
+    exit 1
 }
+$promptSize = (Get-Content $promptFile -Raw).Length
+$workflowType = if ($Subagent) { "V4-SUBAGENT" } elseif ($CompactPrompt) { "V4-COMPACT" } else { "V4" }
+Write-Host "Using workflow $workflowType prompt ($promptSize chars, ~$([math]::Round($promptSize/4)) tokens)" -ForegroundColor Green
 
 # Display active configuration summary (skip for coordinator spawned workers)
 if (-not $Coordinator -or $WorkerId -eq 0) {
@@ -122,14 +170,36 @@ if (-not $Coordinator -or $WorkerId -eq 0) {
 
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
-    if ($Fast) { return }  # Skip logging in fast mode
+
+    # Fast-exit for INFO in default mode — hot path, called many times per function
+    if ($Level -eq "INFO" -and $Fast -and -not $Diagnostic) { return }
+
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $logEntry = "[$timestamp] [Worker$WorkerId] [$Level] $Message"
-    
-    # Buffer log entries and flush periodically to reduce I/O
-    $script:LogBuffer.Add($logEntry)
-    if ($script:LogBuffer.Count -ge $script:LogFlushInterval) {
-        Flush-LogBuffer
+
+    # ERROR and WARN always echo to console  -  never silently dropped
+    switch ($Level) {
+        "ERROR" {
+            Write-Host $logEntry -ForegroundColor Red
+            [void]$script:ErrorEvents.Add($logEntry)
+        }
+        "WARN" {
+            Write-Host $logEntry -ForegroundColor Yellow
+        }
+        default {
+            # INFO: show on console only when -Diagnostic is set
+            if ($Diagnostic) {
+                Write-Host $logEntry -ForegroundColor DarkGray
+            }
+        }
+    }
+
+    # Write to file when -Log is enabled (existing behavior, unchanged)
+    if (-not $Fast) {
+        $script:LogBuffer.Add($logEntry)
+        if ($script:LogBuffer.Count -ge $script:LogFlushInterval) {
+            Flush-LogBuffer
+        }
     }
 }
 
@@ -167,18 +237,30 @@ function Show-Help {
     Write-Host "  -NoValidate            Skip post-processing validation"
     Write-Host "  -Compact, -C           Use compact prompt (~60% smaller)"
     Write-Host "  -Log, -L               Enable logging, output files, checkpoints"
+    Write-Host "  -Diagnostic, -D        Show INFO diagnostics on console (no log file)"
+    Write-Host "                         Combine with -Log to get both console + file"
+    Write-Host "  -Profile, -P           Record timing for every major operation."
+    Write-Host "                         Use -DryRun -Profile to benchmark without Claude."
     Write-Host "  -Subagent              Opus orchestrator + Haiku subagents"
     Write-Host "  -Rescan                Re-scan scores without Claude processing"
     Write-Host "  -Cleanup               Remove auto-generated Ghidra scripts"
     Write-Host "  -PickThreshold, -Pick  Show popup to select minimum completeness threshold"
     Write-Host "                         Functions below threshold added to reprocess list"
     Write-Host "  -Server <url>          Ghidra server URL (default: http://127.0.0.1:8089)"
+    Write-Host "  -SkipPreFlight         Skip startup validation checks"
     Write-Host "  -Help, -h, -?          Show this help"
+    Write-Host ""
+    Write-Host "OUTPUT VERBOSITY:"
+    Write-Host "  Default    Errors/warnings always shown; progress on console"
+    Write-Host "  -D         + INFO diagnostics on console (retry attempts, API calls, etc.)"
+    Write-Host "  -L         + full log written to .\logs\functions-process-workerN-*.log"
+    Write-Host "  -D -L      Both console diagnostics and log file"
     Write-Host ""
     Write-Host "EXAMPLES:"
     Write-Host "  .\functions-process.ps1 -w 6              # 6 parallel workers"
     Write-Host "  .\functions-process.ps1 -w 4 -C           # 4 workers, compact prompt"
     Write-Host "  .\functions-process.ps1 -w 4 -C -L        # 4 workers with logging"
+    Write-Host "  .\functions-process.ps1 -w 4 -D           # 4 workers with console diagnostics"
     Write-Host "  .\functions-process.ps1 -n 10 -m haiku    # 10 functions with Haiku"
     Write-Host "  .\functions-process.ps1 -1 -f FUN_6fab0  # Single specific function"
     Write-Host "  .\functions-process.ps1 -Rescan           # Re-scan scores only"
@@ -192,6 +274,7 @@ function Show-Help {
     Write-Host "NOTES:"
     Write-Host "  Workers claim functions via lock files to prevent collisions"
     Write-Host "  Progress tracked in completeness-tracking.json"
+    Write-Host "  Errors and MCP failures always shown regardless of verbosity flags"
     exit 0
 }
 
@@ -345,6 +428,56 @@ function Parse-TodoLine {
     return $null
 }
 
+function Invoke-GhidraApi {
+    <#
+    .SYNOPSIS
+        Invoke a Ghidra MCP endpoint with automatic retry on transient errors.
+    .PARAMETER Uri
+        Full URI to call.
+    .PARAMETER Method
+        HTTP method (GET or POST). Defaults to GET.
+    .PARAMETER Body
+        Optional hashtable body for POST requests (serialized to JSON).
+    .PARAMETER TimeoutSec
+        Per-attempt timeout in seconds. Defaults to 30.
+    .PARAMETER MaxAttempts
+        Total attempts before giving up. Defaults to 3.
+    #>
+    param(
+        [string]$Uri,
+        [string]$Method = "GET",
+        [object]$Body = $null,
+        [int]$TimeoutSec = 30,
+        [int]$MaxAttempts = 3
+    )
+
+    $delay = 500
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $params = @{
+                Uri         = $Uri
+                Method      = $Method
+                TimeoutSec  = $TimeoutSec
+                ErrorAction = 'Stop'
+            }
+            if ($null -ne $Body) {
+                $params.Body        = ($Body | ConvertTo-Json -Compress)
+                $params.ContentType = "application/json"
+            }
+            return Invoke-RestMethod @params
+        } catch {
+            $isTransient = $_.Exception.Message -match "(timeout|refused|reset|503|502|500)"
+            if ($attempt -lt $MaxAttempts -and $isTransient) {
+                Write-Log "Ghidra API call failed (attempt $attempt/$MaxAttempts): $($_.Exception.Message)  -  retrying in ${delay}ms" "WARN"
+                Start-Sleep -Milliseconds $delay
+                $delay = [Math]::Min($delay * 2, 10000)
+            } else {
+                throw
+            }
+        }
+    }
+}
+
 function Switch-GhidraProgram {
     <#
     .SYNOPSIS
@@ -373,7 +506,7 @@ function Switch-GhidraProgram {
 
     try {
         # First try switch_program (for already-open programs)
-        $response = Invoke-RestMethod -Uri "$GhidraServer/switch_program?name=$([uri]::EscapeDataString($switchPath))" -Method GET -TimeoutSec 30
+        $response = Invoke-GhidraApi -Uri "$GhidraServer/switch_program?name=$([uri]::EscapeDataString($switchPath))" -TimeoutSec 30
 
         if ($response.success -or $response -match "success") {
             $script:CurrentProgram = $programName
@@ -389,7 +522,7 @@ function Switch-GhidraProgram {
     # Try open_program to open a program from the project
     try {
         Write-WorkerHost "  Opening program from project..." "Gray"
-        $response = Invoke-RestMethod -Uri "$GhidraServer/open_program?path=$([uri]::EscapeDataString($switchPath))" -Method GET -TimeoutSec 60
+        $response = Invoke-GhidraApi -Uri "$GhidraServer/open_program?path=$([uri]::EscapeDataString($switchPath))" -TimeoutSec 60
 
         if ($response.success -or $response -match "success") {
             $script:CurrentProgram = $programName
@@ -404,7 +537,7 @@ function Switch-GhidraProgram {
     # Fallback: try with just program name
     try {
         Write-Log "Trying program name only: $programName"
-        $response = Invoke-RestMethod -Uri "$GhidraServer/switch_program?name=$([uri]::EscapeDataString($programName))" -Method GET -TimeoutSec 30
+        $response = Invoke-GhidraApi -Uri "$GhidraServer/switch_program?name=$([uri]::EscapeDataString($programName))" -TimeoutSec 30
 
         if ($response.success -or $response -match "success") {
             $script:CurrentProgram = $programName
@@ -485,17 +618,23 @@ function Clear-StaleLocks {
 }
 
 function Get-GlobalLock {
-    $retries = 50
-    while ($retries -gt 0) {
+    param([int]$TimeoutSeconds = 30)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $delay = 100  # Start at 100ms, double each attempt up to 5s
+
+    while ((Get-Date) -lt $deadline) {
         try {
             $fs = [System.IO.File]::Open($globalLockFile, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
             $fs.Close()
             return $true
         } catch {
-            $retries--
-            Start-Sleep -Milliseconds (Get-Random -Minimum 50 -Maximum 200)
+            Start-Sleep -Milliseconds $delay
+            $delay = [Math]::Min($delay * 2, 5000)
         }
     }
+
+    Write-Log "Global lock timeout after $TimeoutSeconds seconds" "ERROR"
     return $false
 }
 
@@ -1315,8 +1454,8 @@ function Process-Function {
         }
     }
     
-    # Validate prompt file exists
-    if (-not $defaultPrompt -and -not (Test-Path $promptFile)) {
+    # Validate prompt file exists (guard against deletion during a long run)
+    if (-not (Test-Path $promptFile)) {
         Write-WorkerHost "ERROR: Prompt file not found at $promptFile" "Red"
         $stopwatch.Stop()
         return $false
@@ -1361,12 +1500,16 @@ Use the attached workflow document to document $funcName$(if ($address) { " at 0
         while ($retryCount -lt $MaxRetries) {
             # Invoke Claude exactly like the fast working command:
             # echo "message" | claude --system-prompt-file "path" 2>&1
+            # Temporarily unset CLAUDECODE so nested claude invocations are allowed
+            $savedClaudeCode = $env:CLAUDECODE
+            $env:CLAUDECODE = $null
             if ($FullModelName) {
                 $output = echo $userMessage | claude --system-prompt-file $promptFile --model $FullModelName 2>&1
             } else {
                 $output = echo $userMessage | claude --system-prompt-file $promptFile 2>&1
             }
             $exitCode = $LASTEXITCODE
+            $env:CLAUDECODE = $savedClaudeCode
             
             # Check for rate limit message (5-hour limit)
             $outputStr = $output -join "`n"
@@ -1563,22 +1706,31 @@ Use the attached workflow document to document $funcName$(if ($address) { " at 0
                 Write-Host "  Completed: $newFuncName (Score: $scoreMatch%)" -ForegroundColor Green
             }
             
-            if (-not $Fast) {
-                # Save output file named after the NEW function name (not FUN_xxx)
-                $outputFile = Join-Path $outputDir "$newFuncName-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
-                $output | Out-File $outputFile -Encoding UTF8
-                Write-WorkerHost "  Output saved to: $outputFile" "Gray"
-                
-                # Check for MCP errors in the output
+            # MCP error detection: two-tier approach.
+            # Fast check (always): single regex catches the most common failures.
+            # Full scan (-D or -L only): 12 multiline patterns on large output is expensive.
+            $fastMcpHit = $outputStr -match 'GhidraValidationError|mcp_ghidra_\w+\s+(?:failed|error)|tool\s+(?:call|invocation)\s+(?:failed|error)'
+            if ($fastMcpHit) {
+                Write-WorkerHost "  MCP ERROR detected (run with -D for details)" "Red"
+                Write-Log "MCP error signal detected for ${funcName}" "ERROR"
+            }
+            if (-not $Fast -or $Diagnostic) {
                 $mcpErrors = Get-McpErrors -output $outputStr
                 if ($mcpErrors.Count -gt 0) {
-                    Write-WorkerHost "  MCP ERRORS DETECTED ($($mcpErrors.Count)):" "Red"
+                    Write-WorkerHost "  MCP ERRORS ($($mcpErrors.Count)):" "Red"
                     foreach ($err in $mcpErrors) {
                         Write-WorkerHost "    [$($err.Type)] $($err.Message)" "Red"
                         Write-Log "MCP Error for ${funcName}: [$($err.Type)] $($err.Message)" "ERROR"
                     }
                 }
-                
+            }
+
+            if (-not $Fast) {
+                # Save output file named after the NEW function name (not FUN_xxx)
+                $outputFile = Join-Path $outputDir "$newFuncName-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
+                $output | Out-File $outputFile -Encoding UTF8
+                Write-WorkerHost "  Output saved to: $outputFile" "Gray"
+
                 # Display workflow milestones achieved
                 $milestones = Get-WorkflowMilestones -output $outputStr
                 if ($milestones.Count -gt 0) {
@@ -1617,17 +1769,28 @@ Use the attached workflow document to document $funcName$(if ($address) { " at 0
             Write-Log "Function $funcName completed in $([math]::Round($stopwatch.Elapsed.TotalSeconds, 1)) seconds"
             return $true
         } else {
-            Write-WorkerHost "Failed after $MaxRetries attempts" "Red"
-            Write-Host $output
-            Write-Log "Failed to process $funcName after $MaxRetries attempts" "ERROR"
-            Write-Log "Error output: $output" "ERROR"
             $stopwatch.Stop()
-            Write-WorkerHost "Failed after $([math]::Round($stopwatch.Elapsed.TotalSeconds, 1))s" "Red"
+            Write-WorkerHost "Failed after $MaxRetries attempts ($([math]::Round($stopwatch.Elapsed.TotalSeconds, 1))s)" "Red"
+            Write-Log "Failed to process $funcName after $MaxRetries attempts" "ERROR"
+
+            # Show the tail of the output  -  enough context to diagnose without flooding the console.
+            # In -Diagnostic mode show more lines; in default mode show just the last 5.
+            $outputLines = ($output -join "`n") -split "`n" | Where-Object { $_ -match '\S' }
+            $tailCount = if ($Diagnostic) { 20 } else { 5 }
+            $tail = $outputLines | Select-Object -Last $tailCount
+            Write-WorkerHost "  Last output ($tailCount lines):" "DarkGray"
+            foreach ($line in $tail) {
+                Write-WorkerHost "    $line" "DarkGray"
+            }
+
+            # Full output goes to log file when -Log is active
+            Write-Log "Error output: $($output -join ' | ')" "ERROR"
             return $false
         }
     }
     catch {
-        Write-WorkerHost "Exception: $_" "Red"
+        Write-WorkerHost "Exception in Process-Function ${funcName}: $($_.Exception.Message)" "Red"
+        Write-Log "Unhandled exception processing ${funcName}: $($_.Exception.Message)`n$($_.ScriptStackTrace)" "ERROR"
         return $false
     }
 }
@@ -1665,6 +1828,9 @@ function Start-Coordinator {
     if ($Subagent) { $commonArgs += " -Subagent" }
     if ($CompactPrompt) { $commonArgs += " -CompactPrompt" }
     if ($Log) { $commonArgs += " -Log" }
+    if ($Diagnostic) { $commonArgs += " -Diagnostic" }
+    if ($Profile)    { $commonArgs += " -Profile" }
+    $commonArgs += " -SkipPreFlight"  # Coordinator already validated; workers skip redundant checks
     if ($Model) { $commonArgs += " -Model `"$Model`"" }
     $commonArgs += " -MaxRetries $MaxRetries"
     $commonArgs += " -DelayBetweenFunctions $DelayBetweenFunctions"
@@ -1775,6 +1941,64 @@ function Start-Coordinator {
     }
 }
 
+function Invoke-PreFlight {
+    <#
+    .SYNOPSIS
+        Validate runtime prerequisites before starting any processing.
+    .DESCRIPTION
+        Checks: GhidraServer URL format, claude CLI in PATH, Ghidra /health endpoint,
+        and todo file existence. Exits with code 1 on any hard failure.
+        Skip with -SkipPreFlight for CI environments that handle these externally.
+    #>
+    if ($SkipPreFlight) {
+        Write-Log "Pre-flight checks skipped (-SkipPreFlight)"
+        return
+    }
+
+    $failures = @()
+
+    # 1. Validate GhidraServer URL format
+    try {
+        $uri = [System.Uri]$GhidraServer
+        if ($uri.Scheme -notin @("http", "https")) {
+            $failures += "GhidraServer '$GhidraServer' must use http:// or https://"
+        }
+    } catch {
+        $failures += "GhidraServer '$GhidraServer' is not a valid URL: $($_.Exception.Message)"
+    }
+
+    # 2. Check claude CLI is available
+    $claudeCmd = Get-Command "claude" -ErrorAction SilentlyContinue
+    if (-not $claudeCmd) {
+        $failures += "'claude' not found in PATH  -  install Claude CLI before running this script"
+    }
+
+    # 3. Ping Ghidra via /get_version (lightweight, always registered by the plugin)
+    try {
+        $ver = Invoke-RestMethod -Uri "$GhidraServer/get_version" -Method GET -TimeoutSec 5 -ErrorAction Stop
+        Write-Log "Ghidra reachable: $($ver | ConvertTo-Json -Compress)"
+    } catch {
+        $failures += "Ghidra is not reachable at $GhidraServer - is the plugin running? ($($_.Exception.Message))"
+    }
+
+    # 4. Validate todo file (worker mode only  -  coordinator spawns workers that check this)
+    if (-not $Coordinator -and -not (Test-Path $todoFile)) {
+        $failures += "Todo file not found: $todoFile (use -TodoFilePath to specify an alternate path)"
+    }
+
+    if ($failures.Count -gt 0) {
+        Write-Host ""
+        Write-Host "=== PRE-FLIGHT FAILED ===" -ForegroundColor Red
+        foreach ($msg in $failures) {
+            Write-Host "  [FAIL] $msg" -ForegroundColor Red
+        }
+        Write-Host ""
+        exit 1
+    }
+
+    Write-Log "Pre-flight checks passed"
+}
+
 # ============================================================================
 # MAIN EXECUTION
 # ============================================================================
@@ -1798,6 +2022,8 @@ if ($PickThreshold) {
     Invoke-ThresholdFilter
     exit 0
 }
+
+Measure-Op "PreFlight" { Invoke-PreFlight }
 
 # Only become coordinator if:
 # 1. Workers > 1 (user wants parallel processing)
@@ -1859,34 +2085,51 @@ if ($Function) {
     exit 0
 }
 
-# Binary processing order based on BINARY_DOCUMENTATION_ORDER.md
-# Lower index = higher priority (process first due to fewer dependencies)
-$BINARY_ORDER = @(
-    "Storm.dll",           # 1 - Foundation
-    "Fog.dll",             # 2 - Foundation
-    "D2Lang.dll",          # 3 - Core Services
-    "D2CMP.dll",           # 4 - Core Services
-    "D2Common.dll",        # 5 - Game Foundation (CRITICAL)
-    "D2Sound.dll",         # 6 - Subsystems
-    "D2Win.dll",           # 7 - Subsystems
-    "D2Gfx.dll",           # 8 - Subsystems
-    "D2Gdi.dll",           # 9 - Subsystems
-    "D2Net.dll",           # 10 - Subsystems
-    "D2Multi.dll",         # 11 - High-Level
-    "Bnclient.dll",        # 12 - Battle.net
-    "D2MCPClient.dll",     # 13 - Battle.net
-    "D2Game.dll",          # 14 - High-Level (Server)
-    "D2Client.dll",        # 15 - High-Level (Client)
-    "D2DDraw.dll",         # 16 - Render Backend
-    "D2Direct3D.dll",      # 17 - Render Backend
-    "D2Glide.dll",         # 18 - Render Backend
-    "D2Launch.dll",        # 24 - Entry Point
-    "Game.exe",            # 25 - Entry Point
-    "BH.dll",              # 26 - Battle.net Helper
-    "PD2_EXT.dll",         # 27 - PD2 Extensions
-    "SGD2FreeRes.dll",     # 28 - PD2 Extensions
-    "SGD2FreeDisplayFix.dll" # 29 - PD2 Extensions
-)
+# Binary processing order  -  lower index = higher priority (processed first)
+# Load from -BinaryOrderFile if provided (one binary name per line, # comments allowed)
+# Falls back to the built-in Diablo2/PD2 order when no file is specified
+if ($BinaryOrderFile -and (Test-Path $BinaryOrderFile)) {
+    Write-Host "Loading binary order from: $BinaryOrderFile" -ForegroundColor Cyan
+    $BINARY_ORDER = Get-Content $BinaryOrderFile |
+        Where-Object { $_ -notmatch '^\s*#' -and $_ -match '\S' } |
+        ForEach-Object { $_.Trim() }
+    Write-Host "  Loaded $($BINARY_ORDER.Count) entries" -ForegroundColor Gray
+} elseif ($BinaryOrderFile) {
+    Write-Host "WARNING: -BinaryOrderFile '$BinaryOrderFile' not found, using built-in order" -ForegroundColor Yellow
+    $BINARY_ORDER = @()
+} else {
+    $BINARY_ORDER = @()
+}
+
+if ($BINARY_ORDER.Count -eq 0) {
+    # Built-in Diablo2 / Project Diablo 2 dependency order
+    $BINARY_ORDER = @(
+        "Storm.dll",              # 1  - Foundation
+        "Fog.dll",                # 2  - Foundation
+        "D2Lang.dll",             # 3  - Core Services
+        "D2CMP.dll",              # 4  - Core Services
+        "D2Common.dll",           # 5  - Game Foundation (CRITICAL)
+        "D2Sound.dll",            # 6  - Subsystems
+        "D2Win.dll",              # 7  - Subsystems
+        "D2Gfx.dll",              # 8  - Subsystems
+        "D2Gdi.dll",              # 9  - Subsystems
+        "D2Net.dll",              # 10 - Subsystems
+        "D2Multi.dll",            # 11 - High-Level
+        "Bnclient.dll",           # 12 - Battle.net
+        "D2MCPClient.dll",        # 13 - Battle.net
+        "D2Game.dll",             # 14 - High-Level (Server)
+        "D2Client.dll",           # 15 - High-Level (Client)
+        "D2DDraw.dll",            # 16 - Render Backend
+        "D2Direct3D.dll",         # 17 - Render Backend
+        "D2Glide.dll",            # 18 - Render Backend
+        "D2Launch.dll",           # 24 - Entry Point
+        "Game.exe",               # 25 - Entry Point
+        "BH.dll",                 # 26 - Battle.net Helper
+        "PD2_EXT.dll",            # 27 - PD2 Extensions
+        "SGD2FreeRes.dll",        # 28 - PD2 Extensions
+        "SGD2FreeDisplayFix.dll"  # 29 - PD2 Extensions
+    )
+}
 
 function Get-BinaryPriority {
     param([string]$binaryName)
@@ -1902,8 +2145,17 @@ function Get-FunctionsGroupedByBinary {
     .DESCRIPTION
         Returns a hashtable where keys are program names and values are arrays
         of parsed function data. Programs are ordered by BINARY_ORDER priority.
+        Uses a last-write-time cache so the file is only re-parsed when it actually
+        changed on disk  -  eliminates redundant I/O in the hot loop.
     #>
     param([string]$todoFilePath = $todoFile)
+
+    # Cache: skip re-parse if the file hasn't changed since the last call
+    $item  = Get-Item $todoFilePath -ErrorAction SilentlyContinue
+    $mtime = if ($item) { $item.LastWriteTimeUtc } else { $null }
+    if ($script:TodoCacheMtime -and $mtime -and $mtime -eq $script:TodoCacheMtime -and $script:TodoCacheData) {
+        return $script:TodoCacheData
+    }
 
     $content = Get-Content $todoFilePath
     $pending = $content | Where-Object { $_ -match '^\[ \] ' }
@@ -1939,10 +2191,14 @@ function Get-FunctionsGroupedByBinary {
         [array]::Reverse($orderedPrograms)
     }
 
-    return @{
+    $result = @{
         Programs = $orderedPrograms
         FunctionsByProgram = $byProgram
     }
+    # Store in cache keyed by file mtime
+    $script:TodoCacheMtime = $mtime
+    $script:TodoCacheData  = $result
+    return $result
 }
 
 # Main processing loop - processes one binary at a time
@@ -1954,7 +2210,7 @@ $currentBinaryProcessed = 0
 $failedPrograms = [System.Collections.Generic.HashSet[string]]::new()
 
 # Get initial grouping
-$groupedData = Get-FunctionsGroupedByBinary
+$groupedData = Measure-Op "InitialTodoParse" { Get-FunctionsGroupedByBinary } -PassThru
 $programQueue = [System.Collections.Generic.Queue[string]]::new([string[]]@($groupedData.Programs))
 
 Write-WorkerHost "=== Binary Processing Order ===" "Cyan"
@@ -1977,7 +2233,7 @@ while ($programQueue.Count -gt 0 -or $script:CurrentProgram) {
     }
 
     # Refresh the grouped data to get latest state
-    $groupedData = Get-FunctionsGroupedByBinary
+    $groupedData = Measure-Op "TodoParse" { Get-FunctionsGroupedByBinary } -PassThru
 
     # If no pending functions in any program, we're done
     $totalRemaining = 0
@@ -2025,7 +2281,8 @@ while ($programQueue.Count -gt 0 -or $script:CurrentProgram) {
         Write-WorkerHost "=== Switching to $targetProgram ($funcsInBinary functions) ===" "Cyan"
         $currentBinaryProcessed = 0
 
-        if (-not (Switch-GhidraProgram $targetProgram)) {
+        $switched = Measure-Op "SwitchProgram:$targetProgram" { Switch-GhidraProgram $targetProgram } -PassThru
+        if (-not $switched) {
             Write-WorkerHost "Failed to switch to $targetProgram, skipping this binary" "Red"
             # Add to failed programs so we don't keep retrying
             [void]$failedPrograms.Add($targetProgram)
@@ -2065,7 +2322,7 @@ while ($programQueue.Count -gt 0 -or $script:CurrentProgram) {
     }
 
     foreach ($parsed in $candidateFunctions) {
-        if (Try-ClaimFunction $parsed.FunctionName $parsed.Address $parsed.ProgramName) {
+        if (Measure-Op "ClaimFunction" { Try-ClaimFunction $parsed.FunctionName $parsed.Address $parsed.ProgramName } -PassThru) {
             $funcName = $parsed.FunctionName
             $address = $parsed.Address
             $programName = $parsed.ProgramName
@@ -2102,32 +2359,45 @@ while ($programQueue.Count -gt 0 -or $script:CurrentProgram) {
     }
 
     try {
-        $result = Process-Function $funcName $address $programName $issues
-
-        $processedCount++
-        $currentBinaryProcessed++
-
-        # Handle array results - take the last value (the actual return)
-        if ($result -is [array]) {
-            $result = $result[-1]
-        }
-
-        # Check for string "skip" explicitly (PowerShell coerces types in -eq comparisons)
-        if ($result -is [string] -and $result -eq "skip") {
-            $skipCount++
-            Update-TodoFile $funcName "complete" $programName $address | Out-Null
-            Write-WorkerHost "  Skipped (outside score filter)" "Gray"
-        } elseif ($result -eq $true) {
+        # DryRun: show what would be processed without invoking Claude
+        if ($DryRun) {
+            Write-WorkerHost "  DRY RUN: Would process $funcName @ $address ($programName)" "Cyan"
+            $processedCount++
+            $currentBinaryProcessed++
             $successCount++
-            Update-TodoFile $funcName "complete" $programName $address | Out-Null
         } else {
-            $failCount++
-            Update-TodoFile $funcName "failed" $programName $address | Out-Null
+            $result = Measure-Op "ProcessFunction:$funcName" { Process-Function $funcName $address $programName $issues } -PassThru
+
+            $processedCount++
+            $currentBinaryProcessed++
+
+            # Handle array results - take the last value (the actual return)
+            if ($result -is [array]) {
+                $result = $result[-1]
+            }
+
+            # Check for string "skip" explicitly (PowerShell coerces types in -eq comparisons)
+            if ($result -is [string] -and $result -eq "skip") {
+                $skipCount++
+                Measure-Op "UpdateTodo:skip" { Update-TodoFile $funcName "complete" $programName $address | Out-Null }
+                Write-WorkerHost "  Skipped (outside score filter)" "Gray"
+            } elseif ($result -eq $true) {
+                $successCount++
+                Measure-Op "UpdateTodo:complete" { Update-TodoFile $funcName "complete" $programName $address | Out-Null }
+            } else {
+                $failCount++
+                Measure-Op "UpdateTodo:failed" { Update-TodoFile $funcName "failed" $programName $address | Out-Null }
+            }
         }
 
         # Show progress summary with binary context
         $binaryRemaining = $binaryFunctions.Count - 1
         Write-WorkerHost "  [${targetProgram}: $currentBinaryProcessed done, $binaryRemaining left] [Total: $successCount success / $skipCount skipped / $failCount fail]" "DarkGray"
+
+        # Periodically sweep for stale locks left by crashed workers
+        if ($processedCount % 10 -eq 0) {
+            Measure-Op "StaleLockSweep" { Clear-StaleLocks -MaxAgeMinutes $STALE_LOCK_MINUTES }
+        }
     } finally {
         Release-FunctionLock $funcName $programName
     }
@@ -2157,6 +2427,51 @@ Write-WorkerHost "Skipped: $skipCount" "Yellow"
 Write-WorkerHost "Failed: $failCount" "Red"
 if ($Log) { Write-WorkerHost "Log file: $logFile" "Gray" }
 Write-WorkerHost "========================================" "Cyan"
+
+# Print all collected errors/warnings so they're easy to find after a long run
+if ($script:ErrorEvents.Count -gt 0) {
+    Write-Host ""
+    Write-Host "=== PROBLEMS THIS RUN ($($script:ErrorEvents.Count)) ===" -ForegroundColor Red
+    foreach ($evt in $script:ErrorEvents) {
+        Write-Host "  $evt" -ForegroundColor Red
+    }
+    Write-Host "========================================" -ForegroundColor Red
+}
+
+# Profile report  -  printed when -Profile is active
+if ($Profile -and $script:Timings.Count -gt 0) {
+    Write-Host ""
+    Write-Host "=== PROFILE REPORT ===" -ForegroundColor Magenta
+
+    # Aggregate by operation prefix (e.g. "ProcessFunction:*" -> "ProcessFunction")
+    $agg = @{}
+    foreach ($t in $script:Timings) {
+        $key = ($t.Op -split ':')[0]
+        if (-not $agg.ContainsKey($key)) {
+            $agg[$key] = @{ Count = 0; TotalMs = 0.0; MaxMs = 0.0 }
+        }
+        $agg[$key].Count++
+        $agg[$key].TotalMs += $t.Ms
+        if ($t.Ms -gt $agg[$key].MaxMs) { $agg[$key].MaxMs = $t.Ms }
+    }
+
+    $totalMs = 0.0; foreach ($t in $script:Timings) { $totalMs += $t.Ms }
+    Write-Host ("  {0,-30} {1,6} {2,10} {3,10} {4,8}" -f "Operation", "Calls", "Total(ms)", "Max(ms)", "% Time") -ForegroundColor Cyan
+    Write-Host ("  {0}" -f ("-" * 70)) -ForegroundColor DarkGray
+
+    $agg.GetEnumerator() | Sort-Object { $_.Value.TotalMs } -Descending | ForEach-Object {
+        $pct = if ($totalMs -gt 0) { [Math]::Round($_.Value.TotalMs / $totalMs * 100, 1) } else { 0 }
+        Write-Host ("  {0,-30} {1,6} {2,10} {3,10} {4,7}%" -f `
+            $_.Key, $_.Value.Count,
+            [Math]::Round($_.Value.TotalMs, 1),
+            [Math]::Round($_.Value.MaxMs, 1),
+            $pct)
+    }
+
+    Write-Host ("  {0}" -f ("-" * 70)) -ForegroundColor DarkGray
+    Write-Host ("  {0,-30} {1,6} {2,10}" -f "TOTAL", $script:Timings.Count, [Math]::Round($totalMs, 1)) -ForegroundColor Cyan
+    Write-Host "=======================================" -ForegroundColor Magenta
+}
 
 Write-Log "Worker completed: $processedCount processed, $successCount successful, $skipCount skipped, $failCount failed"
 Flush-LogBuffer  # Ensure all buffered logs are written

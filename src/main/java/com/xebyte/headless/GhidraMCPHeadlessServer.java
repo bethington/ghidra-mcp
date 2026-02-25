@@ -545,6 +545,15 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.batchSetComments(functionAddress, decompilerComments, disassemblyComments, plateComment));
         });
 
+        server.createContext("/clear_function_comments", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String functionAddress = params.get("function_address");
+            boolean clearPlate = !"false".equalsIgnoreCase(params.get("clear_plate"));
+            boolean clearPre = !"false".equalsIgnoreCase(params.get("clear_pre"));
+            boolean clearEol = !"false".equalsIgnoreCase(params.get("clear_eol"));
+            sendResponse(exchange, endpointHandler.clearFunctionComments(functionAddress, clearPlate, clearPre, clearEol));
+        });
+
         server.createContext("/batch_create_labels", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String labels = params.get("labels");
@@ -1064,12 +1073,460 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.diffFunctions(addressA, addressB, programA, programB));
         });
 
+        // ==========================================================================
+        // PROJECT LIFECYCLE ENDPOINTS
+        // ==========================================================================
+
+        server.createContext("/create_project", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String parentDir = params.get("parentDir");
+            String name = params.get("name");
+            sendResponse(exchange, endpointHandler.createProject(parentDir, name));
+        });
+
+        server.createContext("/delete_project", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.deleteProject(params.get("projectPath")));
+        });
+
+        server.createContext("/list_projects", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.listProjects(params.get("searchDir")));
+        });
+
+        // ==========================================================================
+        // PROJECT ORGANIZATION ENDPOINTS
+        // ==========================================================================
+
+        server.createContext("/create_folder", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.createFolder(params.get("path"), params.get("program")));
+        });
+
+        server.createContext("/move_file", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.moveFile(params.get("filePath"), params.get("destFolder")));
+        });
+
+        server.createContext("/move_folder", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.moveFolder(params.get("sourcePath"), params.get("destPath")));
+        });
+
+        server.createContext("/delete_file", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.deleteFile(params.get("filePath")));
+        });
+
+        // ==========================================================================
+        // SERVER VERSION CONTROL ENDPOINTS
+        // ==========================================================================
+
+        server.createContext("/server/repository/create", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, serverManager.createRepository(params.get("name")));
+        });
+
+        server.createContext("/server/version_control/checkout", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, serverManager.checkoutFile(params.get("repo"), params.get("path")));
+        });
+
+        server.createContext("/server/version_control/checkin", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            boolean keepCheckedOut = parseBooleanOrDefault(params.get("keepCheckedOut"), false);
+            sendResponse(exchange, serverManager.checkinFile(
+                params.get("repo"), params.get("path"), params.get("comment"), keepCheckedOut));
+        });
+
+        server.createContext("/server/version_control/undo_checkout", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, serverManager.undoCheckout(params.get("repo"), params.get("path")));
+        });
+
+        server.createContext("/server/version_control/add", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, serverManager.addToVersionControl(
+                params.get("repo"), params.get("path"), params.get("comment")));
+        });
+
+        // ==========================================================================
+        // SERVER VERSION HISTORY ENDPOINTS
+        // ==========================================================================
+
+        server.createContext("/server/version_history", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, serverManager.getVersionHistory(params.get("repo"), params.get("path")));
+        });
+
+        server.createContext("/server/checkouts", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, serverManager.getCheckouts(params.get("repo"), params.get("path")));
+        });
+
+        // ==========================================================================
+        // SERVER ADMIN ENDPOINTS
+        // ==========================================================================
+
+        server.createContext("/server/admin/terminate_checkout", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            long checkoutId = Long.parseLong(params.getOrDefault("checkoutId", "0"));
+            sendResponse(exchange, serverManager.terminateCheckout(
+                params.get("repo"), params.get("path"), checkoutId));
+        });
+
+        server.createContext("/server/admin/users", exchange -> {
+            sendResponse(exchange, serverManager.listServerUsers());
+        });
+
+        server.createContext("/server/admin/set_permissions", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            int accessLevel = parseIntOrDefault(params.get("accessLevel"), 1);
+            sendResponse(exchange, serverManager.setUserPermissions(
+                params.get("repo"), params.get("user"), accessLevel));
+        });
+
+        // ==========================================================================
+        // ANALYSIS CONTROL ENDPOINTS
+        // ==========================================================================
+
+        server.createContext("/list_analyzers", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.listAnalyzers(params.get("program")));
+        });
+
+        server.createContext("/configure_analyzer", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            Boolean enabled = params.containsKey("enabled") ?
+                parseBooleanOrDefault(params.get("enabled"), true) : null;
+            sendResponse(exchange, endpointHandler.configureAnalyzer(
+                params.get("program"), params.get("name"), enabled));
+        });
+
+        // ==========================================================================
+        // PORTED GUI ENDPOINTS (headless parity)
+        // ==========================================================================
+
+        server.createContext("/list_data_items_by_xrefs", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(params.get("offset"), 0);
+            int limit = parseIntOrDefault(params.get("limit"), 100);
+            String format = params.getOrDefault("format", "json");
+            sendResponse(exchange, endpointHandler.listDataItemsByXrefs(offset, limit, format, params.get("program")));
+        });
+
+        server.createContext("/list_functions_enhanced", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(params.get("offset"), 0);
+            int limit = parseIntOrDefault(params.get("limit"), 100);
+            sendResponse(exchange, endpointHandler.listFunctionsEnhanced(offset, limit, params.get("program")));
+        });
+
+        server.createContext("/set_function_no_return", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            boolean noReturn = parseBooleanOrDefault(params.get("noReturn"), true);
+            sendResponse(exchange, endpointHandler.setFunctionNoReturn(params.get("functionAddress"), noReturn));
+        });
+
+        server.createContext("/clear_instruction_flow_override", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.clearInstructionFlowOverride(params.get("address")));
+        });
+
+        server.createContext("/set_variable_storage", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.setVariableStorage(
+                params.get("functionAddress"), params.get("variableName"), params.get("storage")));
+        });
+
+        server.createContext("/disassemble_bytes", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            int length = parseIntOrDefault(params.get("length"), 16);
+            sendResponse(exchange, endpointHandler.disassembleBytes(
+                params.get("startAddress"), params.get("endAddress"), length, params.get("program")));
+        });
+
+        server.createContext("/get_function_documentation", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.getFunctionDocumentation(
+                params.get("functionAddress"), params.get("program")));
+        });
+
+        server.createContext("/apply_function_documentation", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.applyFunctionDocumentation(params.get("json_body")));
+        });
+
+        server.createContext("/compare_programs_documentation", exchange -> {
+            sendResponse(exchange, endpointHandler.compareProgramsDocumentation());
+        });
+
+        server.createContext("/find_undocumented_by_string", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.findUndocumentedByString(
+                params.get("stringAddress"), params.get("program")));
+        });
+
+        server.createContext("/get_function_call_graph", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int depth = parseIntOrDefault(params.get("depth"), 3);
+            String direction = params.getOrDefault("direction", "callees");
+            sendResponse(exchange, endpointHandler.getFunctionCallGraph(
+                params.get("functionAddress"), depth, direction, params.get("program")));
+        });
+
+        server.createContext("/get_full_call_graph", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int limit = parseIntOrDefault(params.get("limit"), 10000);
+            String format = params.getOrDefault("format", "edges");
+            sendResponse(exchange, endpointHandler.getFullCallGraph(limit, format, params.get("program")));
+        });
+
+        server.createContext("/get_function_jump_targets", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(params.get("offset"), 0);
+            int limit = parseIntOrDefault(params.get("limit"), 100);
+            sendResponse(exchange, endpointHandler.getFunctionJumpTargets(
+                params.get("functionAddress"), offset, limit, params.get("program")));
+        });
+
+        server.createContext("/get_function_labels", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(params.get("offset"), 0);
+            int limit = parseIntOrDefault(params.get("limit"), 100);
+            sendResponse(exchange, endpointHandler.getFunctionLabels(
+                params.get("functionAddress"), offset, limit, params.get("program")));
+        });
+
+        server.createContext("/get_type_size", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.getTypeSize(params.get("typeName"), params.get("program")));
+        });
+
+        server.createContext("/get_valid_data_types", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.getValidDataTypes(params.get("category")));
+        });
+
+        server.createContext("/list_external_locations", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(params.get("offset"), 0);
+            int limit = parseIntOrDefault(params.get("limit"), 100);
+            sendResponse(exchange, endpointHandler.listExternalLocations(offset, limit, params.get("program")));
+        });
+
+        server.createContext("/get_external_location", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.getExternalLocation(
+                params.get("address"), params.get("dllName"), params.get("program")));
+        });
+
+        server.createContext("/analyze_control_flow", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.analyzeControlFlow(
+                params.get("functionName"), params.get("program")));
+        });
+
+        server.createContext("/analyze_api_call_chains", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.analyzeApiCallChains(params.get("program")));
+        });
+
+        server.createContext("/analyze_function_completeness", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.analyzeFunctionCompleteness(
+                params.get("functionAddress"), params.get("program")));
+        });
+
+        server.createContext("/detect_malware_behaviors", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.detectMalwareBehaviors(params.get("program")));
+        });
+
+        server.createContext("/detect_crypto_constants", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.detectCryptoConstants(params.get("program")));
+        });
+
+        server.createContext("/find_anti_analysis_techniques", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.findAntiAnalysisTechniques(params.get("program")));
+        });
+
+        server.createContext("/find_dead_code", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.findDeadCode(
+                params.get("functionName"), params.get("program")));
+        });
+
+        server.createContext("/extract_iocs_with_context", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.extractIOCsWithContext(params.get("program")));
+        });
+
+        server.createContext("/batch_decompile", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.batchDecompileFunctions(
+                params.get("functions"), params.get("program")));
+        });
+
+        server.createContext("/batch_rename_function_components", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.batchRenameFunctionComponents(
+                params.get("functionAddress"), params.get("functionName"),
+                params.get("variables"), params.get("program")));
+        });
+
+        server.createContext("/batch_set_variable_types", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            boolean forceIndividual = parseBooleanOrDefault(params.get("forceIndividual"), false);
+            sendResponse(exchange, endpointHandler.batchSetVariableTypes(
+                params.get("functionAddress"), params.get("variableTypes"), forceIndividual, params.get("program")));
+        });
+
+        server.createContext("/batch_string_anchor_report", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.batchStringAnchorReport(
+                params.get("pattern"), params.get("program")));
+        });
+
+        server.createContext("/validate_function_prototype", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.validateFunctionPrototype(
+                params.get("functionAddress"), params.get("prototype"),
+                params.get("callingConvention"), params.get("program")));
+        });
+
+        server.createContext("/run_ghidra_script", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.runScript(params.get("script_path"), params.get("args")));
+        });
+
+        server.createContext("/run_script_inline", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.runScriptInline(params.get("code"), params.get("args")));
+        });
+
+        server.createContext("/list_bookmarks", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.listBookmarks(
+                params.get("category"), params.get("address"), params.get("program")));
+        });
+
+        server.createContext("/set_bookmark", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.setBookmark(
+                params.get("address"), params.get("category"), params.get("comment"), params.get("program")));
+        });
+
+        server.createContext("/delete_bookmark", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.deleteBookmark(
+                params.get("address"), params.get("category"), params.get("program")));
+        });
+
+        server.createContext("/exit_ghidra", exchange -> {
+            sendResponse(exchange, endpointHandler.exitServer());
+        });
+
+        server.createContext("/convert_number", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int size = parseIntOrDefault(params.get("size"), 64);
+            sendResponse(exchange, endpointHandler.convertNumber(params.get("text"), size));
+        });
+
+        server.createContext("/read_memory", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int length = parseIntOrDefault(params.get("length"), 64);
+            sendResponse(exchange, endpointHandler.readMemory(
+                params.get("address"), length, params.get("program")));
+        });
+
+        server.createContext("/create_data_type_category", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.createDataTypeCategory(params.get("categoryPath")));
+        });
+
+        server.createContext("/move_data_type_to_category", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.moveDataTypeToCategory(
+                params.get("typeName"), params.get("categoryPath"), params.get("program")));
+        });
+
+        server.createContext("/list_data_type_categories", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(params.get("offset"), 0);
+            int limit = parseIntOrDefault(params.get("limit"), 100);
+            sendResponse(exchange, endpointHandler.listDataTypeCategories(offset, limit, params.get("program")));
+        });
+
+        server.createContext("/import_data_types", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.importDataTypes(
+                params.get("source"), params.get("format"), params.get("program")));
+        });
+
+        // === PORTED FROM GUI PLUGIN ===
+
+        server.createContext("/create_label", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.createLabel(params.get("address"), params.get("name")));
+        });
+
+        server.createContext("/rename_label", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.renameLabel(
+                params.get("address"), params.get("old_name"), params.get("new_name")));
+        });
+
+        server.createContext("/rename_external_location", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.renameExternalLocation(
+                params.get("address"), params.get("new_name")));
+        });
+
+        server.createContext("/get_function_count", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.getFunctionCount(params.get("program")));
+        });
+
+        server.createContext("/inspect_memory_content", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int length = parseIntOrDefault(params.get("length"), 64);
+            boolean detectStrings = !"false".equalsIgnoreCase(params.get("detect_strings"));
+            sendResponse(exchange, endpointHandler.inspectMemoryContent(
+                params.get("address"), length, detectStrings, params.get("program")));
+        });
+
+        server.createContext("/search_strings", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            int offset = parseIntOrDefault(params.get("offset"), 0);
+            int limit = parseIntOrDefault(params.get("limit"), 100);
+            int minLength = parseIntOrDefault(params.get("min_length"), 4);
+            sendResponse(exchange, endpointHandler.searchStrings(
+                params.get("query"), minLength, params.get("encoding"), offset, limit, params.get("program")));
+        });
+
+        server.createContext("/find_similar_functions", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            double threshold = 0.8;
+            try { threshold = Double.parseDouble(params.get("threshold")); } catch (Exception ignored) {}
+            sendResponse(exchange, endpointHandler.findSimilarFunctions(
+                params.get("target_function"), threshold, params.get("program")));
+        });
+
+        server.createContext("/validate_data_type", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            sendResponse(exchange, endpointHandler.validateDataType(
+                params.get("address"), params.get("typeName"), params.get("program")));
+        });
+
         System.out.println("Registered " + countEndpoints() + " REST API endpoints");
     }
 
     private int countEndpoints() {
         // Count contexts registered - this is an approximation
-        return 95; // 91 + 4 shared server endpoints
+        return 171; // updated to reflect all registered endpoints
     }
 
     public void stop() {

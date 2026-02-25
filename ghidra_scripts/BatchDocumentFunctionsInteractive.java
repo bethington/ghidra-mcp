@@ -465,7 +465,7 @@ public class BatchDocumentFunctionsInteractive extends GhidraScript {
         if (mcpConfig == null || promptFile == null) {
             popup("Could not find required configuration files:\n" +
                   "- mcp-config.json\n" +
-                  "- FUNCTION_DOC_WORKFLOW_V4.md");
+                  "- FUNCTION_DOC_WORKFLOW_V5.md");
             return;
         }
 
@@ -546,8 +546,8 @@ public class BatchDocumentFunctionsInteractive extends GhidraScript {
 
     private String findPromptFile(String userHome) {
         String[] paths = {
-            userHome + "\\source\\mcp\\ghidra-mcp\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4.md",
-            "docs\\prompts\\FUNCTION_DOC_WORKFLOW_V4.md"
+            userHome + "\\source\\mcp\\ghidra-mcp\\docs\\prompts\\FUNCTION_DOC_WORKFLOW_V5.md",
+            "docs\\prompts\\FUNCTION_DOC_WORKFLOW_V5.md"
         };
         for (String p : paths) {
             if (new File(p).exists()) return p;

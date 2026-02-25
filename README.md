@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-12.0.3-green.svg)](https://ghidra-sre.org/)
-[![Version](https://img.shields.io/badge/Version-2.0.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-3.0.0-brightgreen.svg)](CHANGELOG.md)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
 
@@ -13,14 +13,14 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 
 ### Core MCP Integration
 - **Full MCP Compatibility** - Complete implementation of Model Context Protocol
-- **110 MCP Tools Available** - Comprehensive API surface for binary analysis
+- **158 MCP Tools Available** - Comprehensive API surface for binary analysis
 - **Production-Ready Reliability** - Tested batch operations and atomic transactions
 - **Real-time Analysis** - Live integration with Ghidra's analysis engine
 
 ### Binary Analysis Capabilities
 - **Function Analysis** - Decompilation, call graphs, cross-references
 - **Data Structure Discovery** - Automatic struct/union/enum creation
-- **String Extraction** - Comprehensive string analysis and categorization  
+- **String Extraction** - Comprehensive string analysis and categorization
 - **Import/Export Analysis** - Symbol table and library dependency mapping
 - **Memory Mapping** - Complete memory layout documentation
 - **Cross-Binary Documentation** - Function hash matching across binary versions
@@ -30,6 +30,8 @@ A production-ready Model Context Protocol (MCP) server that bridges Ghidra's pow
 - **Ghidra Script Management** - Create, run, and manage Ghidra scripts via MCP
 - **Multi-Program Support** - Switch between and compare multiple open programs
 - **Batch Operations** - Efficient bulk renaming, commenting, and typing
+- **Headless Server** - Full analysis without Ghidra GUI (Docker/CI friendly)
+- **Project & Version Control** - Create projects, manage files, Ghidra Server integration
 
 ## 🚀 Quick Start
 
@@ -186,7 +188,7 @@ curl http://127.0.0.1:8089/get_version
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 110 tools fully implemented
+- **MCP Tools**: 158 tools fully implemented
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -198,10 +200,14 @@ curl http://127.0.0.1:8089/get_version
 - `check_connection` - Verify MCP connectivity
 - `get_metadata` - Program metadata and info
 - `get_version` - Server version information
+- `get_function_count` - Return total function count for a program
 - `get_entry_points` - Binary entry points discovery
+- `convert_number` - Convert between hex/decimal/binary/octal
+- `read_memory` - Read raw bytes from memory
 
 ### Function Analysis
 - `list_functions` - List all functions (paginated)
+- `list_functions_enhanced` - List with isThunk/isExternal flags
 - `search_functions_by_name` - Search functions by name/pattern
 - `search_functions_enhanced` - Advanced function search with filters
 - `decompile_function` - Decompile function to C pseudocode
@@ -210,8 +216,16 @@ curl http://127.0.0.1:8089/get_version
 - `get_function_callees` - Get function callees
 - `get_function_call_graph` - Function relationship graph
 - `get_full_call_graph` - Complete call graph for program
+- `get_function_signature` - Get function prototype string
+- `get_function_hash` - SHA-256 hash of normalized function opcodes
+- `get_bulk_function_hashes` - Paginated bulk hashing with filter
 - `analyze_function_complete` - Comprehensive function analysis
 - `analyze_function_completeness` - Documentation completeness score
+- `find_similar_functions` - Find similar functions by similarity score
+- `find_similar_functions_fuzzy` - Fuzzy similarity matching
+- `bulk_fuzzy_match` - Bulk fuzzy match across all functions
+- `diff_functions` - Diff two functions side by side
+- `validate_function_prototype` - Validate a function prototype string
 
 ### Memory & Data
 - `list_segments` - Memory segments and layout
@@ -224,12 +238,13 @@ curl http://127.0.0.1:8089/get_version
 - `analyze_data_region` - Analyze memory region structure
 - `inspect_memory_content` - View raw memory content
 - `detect_array_bounds` - Detect array boundaries
+- `search_byte_patterns` - Search for byte patterns
+- `list_data_items_by_xrefs` - Data items sorted by xref count
 
-### Cross-Binary Documentation (v1.9.4+)
-- `get_function_hash` - SHA-256 hash of normalized function opcodes
-- `get_bulk_function_hashes` - Paginated bulk hashing with filter
+### Cross-Binary Documentation
 - `get_function_documentation` - Export complete function documentation
 - `apply_function_documentation` - Import documentation to target function
+- `compare_programs_documentation` - Compare documentation between programs
 - `build_function_hash_index` - Build persistent JSON index
 - `lookup_function_by_hash` - Find matching functions in index
 - `propagate_documentation` - Apply docs to all matching instances
@@ -237,6 +252,8 @@ curl http://127.0.0.1:8089/get_version
 ### Data Types & Structures
 - `list_data_types` - Available data types
 - `search_data_types` - Search for data types
+- `get_type_size` - Get byte size of a data type
+- `get_valid_data_types` - Get list of valid Ghidra builtin types
 - `create_struct` - Create custom structure
 - `add_struct_field` - Add field to structure
 - `modify_struct_field` - Modify existing field
@@ -247,13 +264,18 @@ curl http://127.0.0.1:8089/get_version
 - `apply_data_type` - Apply type to address
 - `delete_data_type` - Delete a data type
 - `consolidate_duplicate_types` - Merge duplicate types
-- `get_valid_data_types` - Get list of valid Ghidra types
+- `create_data_type_category` - Create a category folder in the type manager
+- `move_data_type_to_category` - Move a type to a different category
+- `list_data_type_categories` - List all data type categories
+- `import_data_types` - Import types from a GDT/header file
 
 ### Symbols & Labels
 - `list_imports` - Imported symbols and libraries
 - `list_exports` - Exported symbols and functions
 - `list_external_locations` - External location references
+- `get_external_location` - Specific external location detail
 - `list_strings` - Extracted strings with analysis
+- `search_memory_strings` - Search strings by regex/substring pattern
 - `list_namespaces` - Available namespaces
 - `list_globals` - Global variables
 - `create_label` - Create label at address
@@ -276,6 +298,9 @@ curl http://127.0.0.1:8089/get_version
 - `set_plate_comment` - Set function plate comment
 - `get_plate_comment` - Get function plate comment
 - `batch_set_comments` - Bulk comment setting
+- `list_bookmarks` - List all bookmarks
+- `set_bookmark` - Create or update a bookmark
+- `delete_bookmark` - Delete a bookmark
 
 ### Type System
 - `set_function_prototype` - Set function signature
@@ -284,6 +309,7 @@ curl http://127.0.0.1:8089/get_version
 - `batch_set_variable_types` - Bulk type setting
 - `set_variable_storage` - Control variable storage location
 - `set_function_no_return` - Mark function as non-returning
+- `clear_instruction_flow_override` - Clear flow override on instruction
 - `list_calling_conventions` - Available calling conventions
 - `get_function_variables` - Get all function variables
 - `get_function_labels` - Get labels in function
@@ -294,7 +320,8 @@ curl http://127.0.0.1:8089/get_version
 - `list_ghidra_scripts` - List custom Ghidra scripts
 - `save_ghidra_script` - Save new script
 - `get_ghidra_script` - Get script contents
-- `run_ghidra_script` - Execute Ghidra script
+- `run_ghidra_script` - Execute Ghidra script by name
+- `run_script_inline` - Execute inline script code
 - `update_ghidra_script` - Update existing script
 - `delete_ghidra_script` - Delete script
 
@@ -304,20 +331,68 @@ curl http://127.0.0.1:8089/get_version
 - `switch_program` - Switch active program
 - `list_project_files` - List project files
 - `open_program` - Open program from project
-- `compare_programs_documentation` - Compare documentation between programs
+
+### Project Lifecycle
+- `create_project` - Create a new Ghidra project
+- `open_project` - Open an existing project
+- `close_project` - Close the current project
+- `delete_project` - Delete a project
+- `list_projects` - List Ghidra projects in a directory
+
+### Project Organization
+- `create_folder` - Create a folder in the project tree
+- `move_file` - Move a domain file to another folder
+- `move_folder` - Move a folder to another location
+- `delete_file` - Delete a domain file from the project
 
 ### Analysis Tools
 - `find_next_undefined_function` - Find undefined functions
 - `find_undocumented_by_string` - Find functions by string reference
 - `batch_string_anchor_report` - String anchor analysis
-- `search_byte_patterns` - Search for byte patterns
 - `get_assembly_context` - Get assembly context
 - `analyze_struct_field_usage` - Analyze structure field access
 - `get_field_access_context` - Get field access patterns
 - `create_function` - Create function at address
 - `get_function_jump_target_addresses` - Get jump targets
+- `analyze_control_flow` - Cyclomatic complexity and loop detection
+- `analyze_call_graph` - Build function call graph
+- `analyze_api_call_chains` - Detect API call threat patterns
+- `detect_malware_behaviors` - Detect malware behavior categories
+- `detect_crypto_constants` - Find cryptographic constants
+- `find_anti_analysis_techniques` - Find anti-analysis techniques
+- `find_dead_code` - Detect unreachable code
+- `extract_iocs_with_context` - Extract IOCs from strings
+- `decrypt_strings_auto` - Automatically decrypt obfuscated strings
 
-See [docs/README.md](docs/README.md) for complete documentation.
+### Analysis Control
+- `list_analyzers` - List all available Ghidra analyzers
+- `configure_analyzer` - Enable/disable or configure an analyzer
+- `run_analysis` - Trigger Ghidra auto-analysis programmatically
+
+### Server Connection (Ghidra Server)
+- `connect_server` - Connect to a Ghidra Server
+- `disconnect_server` - Disconnect from Ghidra Server
+- `server_status` - Check server connection status
+- `list_repositories` - List repositories on the server
+- `create_repository` - Create a new repository
+
+### Version Control
+- `checkout_file` - Check out a file from version control
+- `checkin_file` - Check in a file with a comment
+- `undo_checkout` - Undo a checkout without committing
+- `add_to_version_control` - Add a file to version control
+
+### Version History
+- `get_version_history` - Get full version history for a file
+- `get_checkouts` - Get active checkout status
+- `get_specific_version` - Open a specific historical version
+
+### Admin
+- `terminate_checkout` - Forcibly terminate a user's checkout
+- `list_server_users` - List all users on the Ghidra Server
+- `set_user_permissions` - Set a user's repository access level
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## 🏗️ Architecture
 
@@ -329,14 +404,15 @@ See [docs/README.md](docs/README.md) for complete documentation.
 └─────────────────┘    └─────────────────┘    └─────────────────┘
         │                       │                       │
    MCP Protocol            HTTP REST              Ghidra API
-   (stdio/SSE)          (localhost:8080)      (Program, Listing)
+   (stdio/SSE)          (localhost:8089)      (Program, Listing)
 ```
 
 ### Components
 
 - **bridge_mcp_ghidra.py** - Python MCP server that translates MCP protocol to HTTP calls
-- **GhidraMCP.jar** - Ghidra plugin that exposes analysis capabilities via HTTP
-- **ghidra_scripts/** - Collection of 70+ automation scripts for common tasks
+- **GhidraMCP.jar** - Ghidra plugin that exposes analysis capabilities via HTTP (148 endpoints)
+- **GhidraMCPHeadlessServer** - Standalone headless server (163 endpoints) — no GUI required
+- **ghidra_scripts/** - Collection of automation scripts for common tasks
 
 ## 🔧 Development
 
@@ -347,6 +423,9 @@ See [docs/README.md](docs/README.md) for complete documentation.
 
 # Optional: build only (no deploy)
 .\ghidra-mcp-setup.ps1 -BuildOnly
+
+# Version bump (updates all 7 project files atomically)
+.\bump-version.ps1 -New X.Y.Z
 ```
 
 ### Script Command Reference
@@ -395,16 +474,21 @@ Quick examples:
 ### Project Structure
 ```
 ghidra-mcp/
-├── bridge_mcp_ghidra.py     # MCP server (Python)
-├── src/main/java/           # Ghidra plugin (Java)
-├── lib/                     # Optional local workspace cache (not used by Maven resolution)
-├── ghidra_scripts/          # 70+ automation scripts
+├── bridge_mcp_ghidra.py     # MCP server (Python, 158 tools)
+├── src/main/java/           # Ghidra plugin + headless server (Java)
+│   └── com/xebyte/
+│       ├── GhidraMCPPlugin.java         # GUI plugin (148 endpoints)
+│       ├── core/                        # Shared abstractions
+│       └── headless/                    # Headless server (163 endpoints)
+├── ghidra_scripts/          # Automation scripts
+├── tests/                   # Python unit tests + endpoint catalog
+│   ├── unit/               # Catalog consistency, schema, tool function tests
+│   └── endpoints.json      # Endpoint specification (168 entries)
 ├── docs/                    # Documentation
 │   ├── prompts/            # AI workflow prompts
 │   ├── releases/           # Version release notes
 │   └── project-management/ # Project docs
-├── examples/                # Example usage
-└── scripts/                 # Build/utility scripts
+└── .github/workflows/      # CI/CD pipelines
 ```
 
 ### Library Dependencies
@@ -483,7 +567,7 @@ Then rerun:
 
 ### AI Workflow Prompts
 - [Prompts Overview](docs/prompts/README.md) - AI prompting system guide
-- [Function Documentation Workflow](docs/prompts/FUNCTION_DOC_WORKFLOW_V4.md) - Complete workflow
+- [Function Documentation Workflow](docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md) - Complete workflow (V5)
 - [Quick Start Prompt](docs/prompts/QUICK_START_PROMPT.md) - Simplified beginner workflow
 - [Cross-Version Matching](docs/prompts/CROSS_VERSION_MATCHING_COMPREHENSIVE.md) - Hash-based matching
 
@@ -503,7 +587,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v1.9.4-headless
+# Connection OK - GhidraMCP Headless Server v3.0.0
 ```
 
 ### Headless API Workflow
@@ -537,6 +621,9 @@ curl http://localhost:8089/get_metadata
 | `/decompile_function` | GET | Decompile function to C code |
 | `/create_function` | POST | Create function at address |
 | `/get_metadata` | GET | Get program metadata |
+| `/create_project` | POST | Create a Ghidra project |
+| `/list_analyzers` | GET | List available analyzers |
+| `/server/status` | GET | Check Ghidra Server connection |
 
 ### Configuration
 
@@ -566,14 +653,16 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 2.0.0 |
-| **MCP Tools** | 110 fully implemented |
+| **Version** | 3.0.0 |
+| **MCP Tools** | 158 fully implemented |
+| **GUI Endpoints** | 148 (GhidraMCPPlugin) |
+| **Headless Endpoints** | 163 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |
 | **Batch Efficiency** | 93% API call reduction |
-| **Ghidra Scripts** | 70+ automation scripts |
+| **Ghidra Scripts** | Automation scripts included |
 | **Documentation** | Comprehensive with AI prompts |
 
-See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.  
+See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
 ## 🙏 Acknowledgments
 

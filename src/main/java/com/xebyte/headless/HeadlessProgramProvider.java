@@ -544,13 +544,346 @@ public class HeadlessProgramProvider implements ProgramProvider {
         public final int totalFunctions;
         public final int newFunctions;
 
-        public AnalysisResult(boolean success, String message, long durationMs, 
+        public AnalysisResult(boolean success, String message, long durationMs,
                               int totalFunctions, int newFunctions) {
             this.success = success;
             this.message = message;
             this.durationMs = durationMs;
             this.totalFunctions = totalFunctions;
             this.newFunctions = newFunctions;
+        }
+    }
+
+    /**
+     * Creates a new Ghidra project.
+     *
+     * @param parentDir The parent directory for the new project
+     * @param name The name of the new project
+     * @return true if the project was created successfully
+     */
+    public boolean createProject(String parentDir, String name) {
+        try {
+            File dir = new File(parentDir);
+            if (!dir.exists()) {
+                Msg.error(this, "Parent directory not found: " + parentDir);
+                return false;
+            }
+            if (project != null) {
+                closeProject();
+            }
+            ghidraProject = GhidraProject.createProject(parentDir, name, false);
+            project = ghidraProject.getProject();
+            Msg.info(this, "Created project: " + name + " in " + parentDir);
+            return project != null;
+        } catch (Exception e) {
+            Msg.error(this, "Error creating project: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Deletes a Ghidra project by path.
+     *
+     * @param projectPath Path to the .gpr file or project directory
+     * @return true if the project was deleted successfully
+     */
+    public boolean deleteProject(String projectPath) {
+        try {
+            File projectFile = new File(projectPath);
+            File projectDir;
+            String projectName;
+            if (projectPath.endsWith(".gpr")) {
+                projectDir = projectFile.getParentFile();
+                projectName = projectFile.getName().replace(".gpr", "");
+            } else {
+                projectDir = projectFile.getParentFile() != null ? projectFile.getParentFile() : projectFile;
+                projectName = projectFile.getName();
+            }
+            // Close if this is the currently open project
+            if (project != null && projectName.equals(project.getName())) {
+                closeProject();
+            }
+            ghidra.framework.model.ProjectLocator locator =
+                new ghidra.framework.model.ProjectLocator(projectDir.getAbsolutePath(), projectName);
+            // Delete project files (marker file + project directory)
+            java.io.File markerFile = locator.getMarkerFile();
+            java.io.File projectDirFile = locator.getProjectDir();
+            if (markerFile.exists()) markerFile.delete();
+            deleteRecursive(projectDirFile);
+            Msg.info(this, "Deleted project: " + projectName);
+            return true;
+        } catch (Exception e) {
+            Msg.error(this, "Error deleting project: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Scan a directory for .gpr files and return a list of ProjectInfo objects.
+     *
+     * @param searchDir The directory to search, or null/empty for the user home directory
+     * @return List of ProjectInfo objects representing found projects
+     */
+    public List<ProjectInfo> listProjects(String searchDir) {
+        List<ProjectInfo> result = new ArrayList<>();
+        try {
+            File dir = searchDir != null && !searchDir.isEmpty() ? new File(searchDir) : new File(System.getProperty("user.home"));
+            if (!dir.exists() || !dir.isDirectory()) {
+                return result;
+            }
+            scanForProjects(dir, result, 0, 3);
+        } catch (Exception e) {
+            Msg.error(this, "Error listing projects: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    private void scanForProjects(File dir, List<ProjectInfo> result, int depth, int maxDepth) {
+        if (depth > maxDepth) return;
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            if (f.isFile() && f.getName().endsWith(".gpr")) {
+                String name = f.getName().replace(".gpr", "");
+                boolean active = project != null && name.equals(project.getName());
+                result.add(new ProjectInfo(name, f.getAbsolutePath(), active));
+            } else if (f.isDirectory() && depth < maxDepth) {
+                scanForProjects(f, result, depth + 1, maxDepth);
+            }
+        }
+    }
+
+    /**
+     * Create a folder inside the current project.
+     *
+     * @param folderPath The path of the folder to create (e.g., "/subfolder/nested")
+     * @return true if the folder was created successfully
+     */
+    public boolean createFolder(String folderPath) {
+        if (project == null) {
+            Msg.error(this, "No project open");
+            return false;
+        }
+        try {
+            ProjectData projectData = project.getProjectData();
+            DomainFolder root = projectData.getRootFolder();
+            // Split path and create each segment
+            String[] parts = folderPath.replaceAll("^/+", "").split("/");
+            DomainFolder current = root;
+            for (String part : parts) {
+                if (part.isEmpty()) continue;
+                DomainFolder existing = current.getFolder(part);
+                if (existing != null) {
+                    current = existing;
+                } else {
+                    current = current.createFolder(part);
+                }
+            }
+            Msg.info(this, "Created folder: " + folderPath);
+            return true;
+        } catch (Exception e) {
+            Msg.error(this, "Error creating folder: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Move a domain file to another folder within the current project.
+     *
+     * @param filePath The project-relative path of the file to move
+     * @param destFolderPath The project-relative path of the destination folder
+     * @return true if the file was moved successfully
+     */
+    public boolean moveFile(String filePath, String destFolderPath) {
+        if (project == null) {
+            Msg.error(this, "No project open");
+            return false;
+        }
+        try {
+            ProjectData projectData = project.getProjectData();
+            DomainFile domainFile = projectData.getFile(filePath);
+            if (domainFile == null) {
+                Msg.error(this, "File not found: " + filePath);
+                return false;
+            }
+            DomainFolder destFolder = projectData.getFolder(destFolderPath);
+            if (destFolder == null) {
+                Msg.error(this, "Destination folder not found: " + destFolderPath);
+                return false;
+            }
+            domainFile.moveTo(destFolder);
+            Msg.info(this, "Moved " + filePath + " to " + destFolderPath);
+            return true;
+        } catch (Exception e) {
+            Msg.error(this, "Error moving file: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Move a domain folder to another parent folder within the current project.
+     *
+     * @param sourcePath The project-relative path of the folder to move
+     * @param destParentPath The project-relative path of the destination parent folder
+     * @return true if the folder was moved successfully
+     */
+    public boolean moveFolder(String sourcePath, String destParentPath) {
+        if (project == null) {
+            Msg.error(this, "No project open");
+            return false;
+        }
+        try {
+            ProjectData projectData = project.getProjectData();
+            DomainFolder sourceFolder = projectData.getFolder(sourcePath);
+            if (sourceFolder == null) {
+                Msg.error(this, "Source folder not found: " + sourcePath);
+                return false;
+            }
+            DomainFolder destParent = projectData.getFolder(destParentPath);
+            if (destParent == null) {
+                Msg.error(this, "Destination parent not found: " + destParentPath);
+                return false;
+            }
+            sourceFolder.moveTo(destParent);
+            Msg.info(this, "Moved folder " + sourcePath + " to " + destParentPath);
+            return true;
+        } catch (Exception e) {
+            Msg.error(this, "Error moving folder: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Delete a domain file from the current project.
+     *
+     * @param filePath The project-relative path of the file to delete
+     * @return true if the file was deleted successfully
+     */
+    public boolean deleteProjectFile(String filePath) {
+        if (project == null) {
+            Msg.error(this, "No project open");
+            return false;
+        }
+        try {
+            ProjectData projectData = project.getProjectData();
+            DomainFile domainFile = projectData.getFile(filePath);
+            if (domainFile == null) {
+                Msg.error(this, "File not found: " + filePath);
+                return false;
+            }
+            // Close it if currently open
+            String fileName = domainFile.getName();
+            Program openProg = openPrograms.get(fileName);
+            if (openProg != null) {
+                closeProgram(openProg);
+            }
+            domainFile.delete();
+            Msg.info(this, "Deleted file: " + filePath);
+            return true;
+        } catch (Exception e) {
+            Msg.error(this, "Error deleting file: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * List available analyzers for a program.
+     *
+     * @param program The program to list analyzers for
+     * @return List of AnalyzerInfo objects describing each analyzer
+     */
+    public List<AnalyzerInfo> listAnalyzers(Program program) {
+        List<AnalyzerInfo> result = new ArrayList<>();
+        if (program == null) return result;
+        try {
+            ghidra.framework.options.Options opts = program.getOptions(Program.ANALYSIS_PROPERTIES);
+            List<String> names = opts.getOptionNames();
+            for (String name : names) {
+                try {
+                    boolean enabled = opts.getBoolean(name, false);
+                    result.add(new AnalyzerInfo(name, "", enabled, ""));
+                } catch (Exception ignored) {
+                    // Option exists but is not a boolean (e.g. string option)
+                }
+            }
+        } catch (Exception e) {
+            Msg.error(this, "Error listing analyzers: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
+    /**
+     * Enable or disable an analyzer for a program.
+     *
+     * @param program The program to configure
+     * @param analyzerName The name of the analyzer
+     * @param enabled Whether to enable or disable the analyzer
+     * @return true if the analyzer was configured successfully
+     */
+    public boolean configureAnalyzer(Program program, String analyzerName, Boolean enabled) {
+        if (program == null || analyzerName == null) return false;
+        try {
+            ghidra.framework.options.Options opts = program.getOptions(Program.ANALYSIS_PROPERTIES);
+            if (!opts.contains(analyzerName)) {
+                Msg.error(this, "Analyzer not found: " + analyzerName);
+                return false;
+            }
+            int tx = program.startTransaction("Configure Analyzer");
+            try {
+                if (enabled != null) {
+                    opts.setBoolean(analyzerName, enabled);
+                }
+                program.endTransaction(tx, true);
+                Msg.info(this, "Configured analyzer: " + analyzerName + " enabled=" + enabled);
+                return true;
+            } catch (Exception e) {
+                program.endTransaction(tx, false);
+                throw e;
+            }
+        } catch (Exception e) {
+            Msg.error(this, "Error configuring analyzer: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Information about a Ghidra project found on disk.
+     */
+    public static class ProjectInfo {
+        public final String name;
+        public final String path;
+        public final boolean active;
+
+        public ProjectInfo(String name, String path, boolean active) {
+            this.name = name;
+            this.path = path;
+            this.active = active;
+        }
+    }
+
+    private void deleteRecursive(java.io.File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            java.io.File[] children = f.listFiles();
+            if (children != null) for (java.io.File child : children) deleteRecursive(child);
+        }
+        f.delete();
+    }
+
+    /**
+     * Information about a Ghidra analyzer.
+     */
+    public static class AnalyzerInfo {
+        public final String name;
+        public final String description;
+        public final boolean enabled;
+        public final String priority;
+
+        public AnalyzerInfo(String name, String description, boolean enabled, String priority) {
+            this.name = name;
+            this.description = description;
+            this.enabled = enabled;
+            this.priority = priority;
         }
     }
 }

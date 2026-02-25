@@ -4,14 +4,14 @@ Quick-reference commands for invoking analysis workflows. Copy and paste these p
 
 ## Function Documentation
 
-### Full Function Documentation Workflow
+### Full Function Documentation Workflow (V5)
 ```
-Follow the instructions contained in docs\prompts\FUNCTION_DOC_WORKFLOW_V4.md
+Follow the instructions contained in docs\prompts\FUNCTION_DOC_WORKFLOW_V5.md
 ```
 
-### Compact Function Documentation (Reduced Output)
+### Batch Function Documentation (V5 Multi-Function Parallel)
 ```
-Follow the instructions contained in docs\prompts\FUNCTION_DOC_WORKFLOW_V4_COMPACT.md
+Follow the instructions contained in docs\prompts\FUNCTION_DOC_WORKFLOW_V5_BATCH.md
 ```
 
 ### Function Naming Validation
@@ -135,7 +135,7 @@ Follow the instructions contained in docs\prompts\QUICK_START_PROMPT.md
 1. `BINARY_DOCUMENTATION_ORDER.md` - Determine analysis priority
 2. `DATA_SECTION_WORKFLOW.md` - Type and name globals
 3. `DATA_GLOBALS_COMPREHENSIVE_TYPING.md` - Eliminate orphan bytes
-4. `FUNCTION_DOC_WORKFLOW_V4.md` - Document functions
+4. `FUNCTION_DOC_WORKFLOW_V5.md` - Document functions
 5. `PROTOTYPE_AUDIT_WORKFLOW.md` - Validate prototypes
 
 ## Recommended Order for Cross-Version Propagation

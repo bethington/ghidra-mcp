@@ -57,7 +57,7 @@ function Write-LogError { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor
 
 # Configuration
 $DefaultGhidraVersion = "12.0.3"
-$PluginVersion = "2.0.0"
+$PluginVersion = "3.0.0"
 
 function Show-Usage {
     Write-Host ""

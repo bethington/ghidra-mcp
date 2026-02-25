@@ -4,6 +4,67 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v3.0.0 - 2026-02-23
+
+### Major Release — Headless Server Parity + New Tool Categories
+
+#### 🖥️ Headless Server Expansion
+- **Full headless parity**: Ported 50+ endpoints from GUI plugin to headless server
+- All analysis, batch operation, and documentation endpoints now available without Ghidra GUI
+- Script execution (`run_ghidra_script`, `run_script_inline`) works headlessly via `GhidraScriptUtil`
+- New `exitServer()` endpoint for graceful headless shutdown
+
+#### 📁 Project Lifecycle (New Category)
+- `create_project` — create a new Ghidra project programmatically
+- `delete_project` — delete a project by path
+- `list_projects` — enumerate Ghidra projects in a directory
+- `open_project` / `close_project` — now exposed as MCP tools
+
+#### 🗂️ Project Organization (New Category)
+- `create_folder` — create folders in project tree
+- `move_file` / `move_folder` — reorganize project contents
+- `delete_file` — remove domain files from project
+
+#### 🔗 Server Connection (New Category)
+- `connect_server` / `disconnect_server` — manage Ghidra Server connections
+- `server_status` — check server connectivity
+- `list_repositories` / `create_repository` — repository management
+
+#### 📌 Version Control (New Category)
+- `checkout_file` / `checkin_file` — file version control operations
+- `undo_checkout` / `add_to_version_control` — checkout management
+
+#### 📜 Version History (New Category)
+- `get_version_history` — full version history for a file
+- `get_checkouts` — active checkout status
+- `get_specific_version` — open a specific historical version
+
+#### 👤 Admin (New Category)
+- `terminate_checkout` — admin checkout termination
+- `list_server_users` — enumerate server users
+- `set_user_permissions` — manage user access levels
+
+#### ⚙️ Analysis Control (New Category)
+- `list_analyzers` — enumerate available Ghidra analyzers
+- `configure_analyzer` — enable/disable and configure analyzers
+- `run_analysis` — trigger analysis programmatically
+
+#### 🔧 Infrastructure
+- **`bump-version.ps1`**: Single-command version bump across all 7 project files
+- **`tests/unit/`**: New unit test suite — endpoint catalog consistency, MCP tool functions, response schemas
+- **`.markdownlintrc`**: Markdown lint config for CI quality gate
+- **`mcp-config.json`**: Fixed env key to match bridge (`GHIDRA_SERVER_URL`)
+- Tool count: 158 MCP tools (up from 110), 148 GUI endpoints
+
+#### 🔌 GUI Plugin Additions
+- `/get_function_count` — quick function count without full listing
+- `/search_strings` — regex/substring search over defined strings, returns JSON
+- `/list_analyzers` — enumerate all analyzers with enabled/disabled state
+- `/run_analysis` — trigger Ghidra auto-analysis programmatically
+- `get_function_count` MCP bridge tool added
+
+---
+
 ## v2.0.2 - 2026-02-20
 
 ### Patch Release - Ghidra 12.0.3 Support, Pagination for Large Functions

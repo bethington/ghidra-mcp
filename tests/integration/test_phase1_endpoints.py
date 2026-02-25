@@ -138,7 +138,8 @@ class TestFunctionPrototype:
         # Accept 200 with error, 400 (bad request), or 500 (server error)
         assert response.status_code in [200, 400, 500]
         if response.status_code == 200:
-            assert "error" in response.text.lower()
+            # Response may say "error", "failed", or "required" — all indicate failure
+            assert any(w in response.text.lower() for w in ("error", "failed", "required", "invalid"))
 
 
 class TestVariableType:

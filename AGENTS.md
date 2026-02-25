@@ -5,35 +5,39 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 ## Project Context
 
 - **Repo**: https://github.com/bethington/ghidra-mcp
-- **Version**: 2.0.2
-- **Stars**: 877+ ⭐
+- **Version**: 3.0.0
 - **Language**: Java (Ghidra extension) + Python (MCP bridge)
-- **Key feature**: 110 MCP tools for binary analysis
+- **Key feature**: 158 MCP tools for binary analysis, headless server support
 
 ## Directory Structure
 
-- `src/` — Java source for Ghidra extension
-- `scripts/` — Python MCP bridge and utilities  
-- `docker/` — Container configurations
-- `docs/` — Documentation
+- `src/` — Java source for Ghidra extension and headless server
+- `bridge_mcp_ghidra.py` — Python MCP bridge (main entry point)
+- `docs/` — Documentation and workflow prompts
+- `tests/` — Python unit tests and endpoint catalog
 - `CHANGELOG.md` — Version history
 
 ## Current Priorities
 
-1. Address Issue #9 — MCP bridge tools referencing non-existent endpoints
-2. Address Issue #14 — Ghidra 12.0.3 compatibility (may be upstream)
+1. Maintain headless server parity with GUI plugin endpoints
+2. Keep `tests/endpoints.json` in sync with Java endpoint registrations
 3. Maintain CI/CD pipeline health
 4. Community PR reviews
 
 ## Guidelines
 
-- Run tests before committing: `./gradlew test`
+- Run tests before committing: `pytest tests/unit/ -v --no-cov`
+- Build: `mvn clean package assembly:single -DskipTests`
+- Quick compile check: `mvn clean compile -q`
 - Follow existing code style
 - Update CHANGELOG.md for user-facing changes
 - Create PRs for review (don't push directly to main)
+- Use `bump-version.ps1 -New X.Y.Z` to bump version across all files atomically
 
 ## Commands
 
-- Build: `./gradlew build`
-- Test: `./gradlew test`
-- Docker: `docker compose up -d`
+- Build: `mvn clean package assembly:single -DskipTests`
+- Quick compile: `mvn clean compile -q`
+- Test (Python): `pytest tests/unit/ -v --no-cov`
+- Deploy: `.\ghidra-mcp-setup.ps1`
+- Version bump: `.\bump-version.ps1 -New X.Y.Z`

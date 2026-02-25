@@ -18,16 +18,6 @@ on:
 env:
   GHIDRA_VERSION: 12.0.3
   GHIDRA_DATE: 20260210
-  GHIDRA_LIBS: >-
-    Features/Base/lib/Base.jar
-    Features/Decompiler/lib/Decompiler.jar
-    Framework/Docking/lib/Docking.jar
-    Framework/Generic/lib/Generic.jar
-    Framework/Project/lib/Project.jar
-    Framework/SoftwareModeling/lib/SoftwareModeling.jar
-    Framework/Utility/lib/Utility.jar
-    Framework/Gui/lib/Gui.jar
-    Framework/FileSystem/lib/FileSystem.jar
 
 jobs:
   create-release:
@@ -74,16 +64,26 @@ jobs:
         wget --no-verbose -O ghidra.zip https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${{ env.GHIDRA_VERSION }}_build/ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC_${{ env.GHIDRA_DATE }}.zip
         7z x -bd ghidra.zip
 
-    - name: Copy Ghidra libraries
+    - name: Install Ghidra JARs to Maven local repository
       run: |
-        echo "Setting up Ghidra libraries..."
-        mkdir -p ./lib
-        for libfile in ${{ env.GHIDRA_LIBS }}; do
-          echo "Copying ${libfile} to lib/"
-          cp "ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC/Ghidra/${libfile}" ./lib/
-        done
-        echo "Library setup complete:"
-        ls -la ./lib/
+        GHIDRA_DIR="ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC"
+        GV="${{ env.GHIDRA_VERSION }}"
+        echo "Installing Ghidra JARs from ${GHIDRA_DIR}..."
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Generic/lib/Generic.jar"           -DgroupId=ghidra -DartifactId=Generic           -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/SoftwareModeling/lib/SoftwareModeling.jar" -DgroupId=ghidra -DartifactId=SoftwareModeling -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Project/lib/Project.jar"           -DgroupId=ghidra -DartifactId=Project           -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Docking/lib/Docking.jar"           -DgroupId=ghidra -DartifactId=Docking           -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Utility/lib/Utility.jar"           -DgroupId=ghidra -DartifactId=Utility           -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Gui/lib/Gui.jar"                   -DgroupId=ghidra -DartifactId=Gui               -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/FileSystem/lib/FileSystem.jar"     -DgroupId=ghidra -DartifactId=FileSystem       -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Graph/lib/Graph.jar"               -DgroupId=ghidra -DartifactId=Graph             -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/DB/lib/DB.jar"                     -DgroupId=ghidra -DartifactId=DB               -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Emulation/lib/Emulation.jar"       -DgroupId=ghidra -DartifactId=Emulation         -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/Base/lib/Base.jar"                  -DgroupId=ghidra -DartifactId=Base             -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/Decompiler/lib/Decompiler.jar"      -DgroupId=ghidra -DartifactId=Decompiler       -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/PDB/lib/PDB.jar"                    -DgroupId=ghidra -DartifactId=PDB               -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/FunctionID/lib/FunctionID.jar"      -DgroupId=ghidra -DartifactId=FunctionID       -Dversion=${GV} -Dpackaging=jar
+        echo "✅ Installed 14 Ghidra JARs to Maven local repository"
 
     - name: Build with Maven
       run: |
@@ -164,14 +164,14 @@ jobs:
         ## What's Included
         
         - `GhidraMCP-${{ steps.version.outputs.VERSION }}.zip` - Main Ghidra plugin
-        - `bridge_mcp_ghidra.py` - MCP server with 110 tools
+        - `bridge_mcp_ghidra.py` - MCP server with 157 tools
         - `requirements.txt` - Python dependencies
         - `README.md` - Complete documentation
         - `INSTALLATION.md` - This installation guide
         
         ## Features
         
-        - **110 MCP Tools** - Comprehensive binary analysis capabilities
+        - **157 MCP Tools** - Comprehensive binary analysis capabilities
         - **Production Ready** - 100% success rate, enterprise-grade quality
         - **Full Integration** - Seamless Ghidra integration with HTTP API
         - **Comprehensive Testing** - Compilation verified, ensuring reliability
@@ -203,11 +203,11 @@ jobs:
         
         ## 🚀 What's New in ${{ steps.version.outputs.VERSION }}
         
-        - **110 MCP Tools** - Complete binary analysis toolkit
+        - **157 MCP Tools** - Complete binary analysis toolkit
+        - **163 Headless Endpoints** - Full analysis without Ghidra GUI
         - **Enterprise Quality** - 100% success rate with comprehensive testing
         - **Enhanced Performance** - Sub-second response times for most operations
         - **Complete Documentation** - Professional-grade documentation and guides
-        - **VS Code Integration** - Full development environment support
         
         ## 📦 Installation
         
@@ -230,20 +230,30 @@ jobs:
         - **Test Coverage:** Compilation verified
         - **Java Tests:** Compilation verified
         - **Endpoint Coverage:** 75% of endpoints verified
-        - **MCP Tools:** 110/110 tools available (100%)
+        - **MCP Tools:** 157/157 tools available (100%)
         - **Documentation:** Complete API reference and guides
         
         ## 🛠️ MCP Tools Categories
-        
-        | Category | Tools | Description |
-        |----------|-------|-------------|
-        | **Core System** | 6 | Connection, metadata, utilities |
-        | **Function Analysis** | 19 | Discovery, analysis, modification |
-        | **Data Structures** | 16 | Types, structures, advanced tools |
-        | **Data Analysis** | 5 | Items, strings, cross-references |
-        | **Symbol Management** | 7 | Labels, globals, imports/exports |
-        | **Documentation** | 2 | Comments and annotations |
-        | **Advanced Features** | 2 | Call graphs, complex analysis |
+
+        | Category | Description |
+        |----------|-------------|
+        | **Core System** | Connection, metadata, version, utilities |
+        | **Function Analysis** | Decompilation, call graphs, similarity, diffing |
+        | **Memory & Data** | Segments, xrefs, byte patterns, memory reads |
+        | **Data Types & Structures** | Structs, enums, arrays, categories |
+        | **Symbols & Labels** | Imports, exports, labels, namespaces |
+        | **Renaming & Documentation** | Rename, comments, bookmarks |
+        | **Type System** | Prototypes, variable types, calling conventions |
+        | **Script Management** | List, run, save, update Ghidra scripts |
+        | **Multi-Program / Project** | Open programs, project files, switch programs |
+        | **Project Lifecycle** | Create, open, close, delete projects |
+        | **Project Organization** | Folders, move/delete files |
+        | **Analysis Tools** | Security analysis, malware detection, IOC extraction |
+        | **Analysis Control** | List/configure/run analyzers |
+        | **Server Connection** | Connect to Ghidra Server, repositories |
+        | **Version Control** | Checkout, checkin, undo checkout |
+        | **Version History** | History, checkouts, specific versions |
+        | **Admin** | Users, permissions, terminate checkouts |
         
         ## 📚 Documentation
         
@@ -307,7 +317,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
         echo "- **Plugin:** GhidraMCP-${{ steps.version.outputs.VERSION }}.zip" >> $GITHUB_STEP_SUMMARY
-        echo "- **MCP Server:** bridge_mcp_ghidra.py (57 tools)" >> $GITHUB_STEP_SUMMARY
+        echo "- **MCP Server:** bridge_mcp_ghidra.py (157 tools)" >> $GITHUB_STEP_SUMMARY
         echo "- **Dependencies:** requirements.txt" >> $GITHUB_STEP_SUMMARY
         echo "- **Documentation:** README.md, INSTALLATION.md" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY

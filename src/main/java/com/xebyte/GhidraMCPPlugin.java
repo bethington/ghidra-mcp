@@ -56,6 +56,9 @@ import ghidra.program.model.block.CodeBlockReferenceIterator;
 
 import com.xebyte.core.BinaryComparisonService;
 
+import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
+import ghidra.util.task.TaskMonitor;
+
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.Headers;
@@ -74,12 +77,12 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "2.0.0"; // Default fallback
+    private static String VERSION = "3.0.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 144;
+    private static final int ENDPOINT_COUNT = 146;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -87,7 +90,7 @@ class VersionInfo {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "2.0.0");
+                VERSION = props.getProperty("app.version", "3.0.0");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
                 GHIDRA_VERSION = props.getProperty("ghidra.version", "unknown");
                 BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
@@ -434,18 +437,37 @@ public class GhidraMCPPlugin extends Plugin {
             String prototype = (String) params.get("prototype");
             String callingConvention = (String) params.get("calling_convention");
 
+            // v3.0.1: Capture old prototype before applying changes
+            String oldPrototype = "";
+            if (functionAddress != null && !functionAddress.isEmpty()) {
+                Program prog = getCurrentProgram();
+                if (prog != null) {
+                    Address addr = prog.getAddressFactory().getAddress(functionAddress);
+                    if (addr != null) {
+                        Function func = prog.getFunctionManager().getFunctionAt(addr);
+                        if (func != null) {
+                            oldPrototype = func.getSignature().getPrototypeString();
+                        }
+                    }
+                }
+            }
+
             // Call the set prototype function and get detailed result
             PrototypeResult result = setFunctionPrototype(functionAddress, prototype, callingConvention);
 
             if (result.isSuccess()) {
-                // Even with successful operations, include any warning messages for debugging
-                String successMsg = "Function prototype set successfully";
+                String successMsg = "Successfully set prototype for function at " + functionAddress;
+                if (!oldPrototype.isEmpty()) {
+                    successMsg += "\nOld prototype: " + oldPrototype;
+                }
+                if (callingConvention != null && !callingConvention.isEmpty()) {
+                    successMsg += " with " + callingConvention + " calling convention";
+                }
                 if (!result.getErrorMessage().isEmpty()) {
                     successMsg += "\n\nWarnings/Debug Info:\n" + result.getErrorMessage();
                 }
                 sendResponse(exchange, successMsg);
             } else {
-                // Return the detailed error message to the client
                 sendResponse(exchange, "Failed to set function prototype: " + result.getErrorMessage());
             }
         }));
@@ -606,14 +628,22 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         }));
 
-        // Force decompiler reanalysis (v1.7.0)
+        // Force decompiler reanalysis (v1.7.0, v3.0.1: aligned GET params with headless/bridge)
         server.createContext("/force_decompile", safeHandler(exchange -> {
             try {
-                Map<String, String> params = parsePostParams(exchange);
-                String functionAddress = params.get("function_address");
+                Map<String, String> params = parseQueryParams(exchange);
+                String functionAddress = params.get("address");
+                // Fallback to legacy POST parameter name for backward compatibility
+                if (functionAddress == null || functionAddress.isEmpty()) {
+                    Map<String, String> postParams = parsePostParams(exchange);
+                    functionAddress = postParams.get("function_address");
+                    if (functionAddress == null || functionAddress.isEmpty()) {
+                        functionAddress = postParams.get("address");
+                    }
+                }
 
                 if (functionAddress == null || functionAddress.isEmpty()) {
-                    sendResponse(exchange, "Error: function_address parameter is required");
+                    sendResponse(exchange, "{\"error\": \"address parameter is required\"}");
                     return;
                 }
 
@@ -1004,9 +1034,9 @@ public class GhidraMCPPlugin extends Plugin {
         }));
 
         server.createContext("/remove_struct_field", safeHandler(exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String structName = params.get("struct_name");
-            String fieldName = params.get("field_name");
+            Map<String, Object> params = parseJsonParams(exchange);
+            String structName = (String) params.get("struct_name");
+            String fieldName = (String) params.get("field_name");
             sendResponse(exchange, removeStructField(structName, fieldName));
         }));
 
@@ -1212,12 +1242,6 @@ public class GhidraMCPPlugin extends Plugin {
 
         // === MALWARE ANALYSIS ENDPOINTS ===
 
-        // DETECT_CRYPTO_CONSTANTS - Identify crypto constants
-        server.createContext("/detect_crypto_constants", safeHandler(exchange -> {
-            String result = detectCryptoConstants();
-            sendResponse(exchange, result);
-        }));
-
         // SEARCH_BYTE_PATTERNS - Search for byte patterns with masks
         server.createContext("/search_byte_patterns", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
@@ -1271,12 +1295,6 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         }));
 
-        // DECRYPT_STRINGS_AUTO - Auto-decrypt obfuscated strings
-        server.createContext("/decrypt_strings_auto", safeHandler(exchange -> {
-            String result = autoDecryptStrings();
-            sendResponse(exchange, result);
-        }));
-
         // ANALYZE_API_CALL_CHAINS - Detect suspicious API call patterns
         server.createContext("/analyze_api_call_chains", safeHandler(exchange -> {
             String result = analyzeAPICallChains();
@@ -1311,6 +1329,18 @@ public class GhidraMCPPlugin extends Plugin {
             sendResponse(exchange, result);
         }));
 
+        // v3.0.1: Clear all comments (plate, PRE, EOL) for a function
+        server.createContext("/clear_function_comments", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String functionAddress = (String) params.get("function_address");
+            Boolean clearPlate = params.containsKey("clear_plate") ? Boolean.valueOf(params.get("clear_plate").toString()) : true;
+            Boolean clearPre = params.containsKey("clear_pre") ? Boolean.valueOf(params.get("clear_pre").toString()) : true;
+            Boolean clearEol = params.containsKey("clear_eol") ? Boolean.valueOf(params.get("clear_eol").toString()) : true;
+
+            String result = clearFunctionComments(functionAddress, clearPlate, clearPre, clearEol);
+            sendResponse(exchange, result);
+        }));
+
         // SET_PLATE_COMMENT - Set function header/plate comment
         server.createContext("/set_plate_comment", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -1325,7 +1355,26 @@ public class GhidraMCPPlugin extends Plugin {
         server.createContext("/get_function_variables", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionName = qparams.get("function_name");
+            String functionAddress = qparams.get("function_address");
             String programName = qparams.get("program");
+
+            // v3.0.1: Accept function_address as alternative to function_name
+            if ((functionName == null || functionName.isEmpty()) && functionAddress != null && !functionAddress.isEmpty()) {
+                Object[] programResult = getProgramOrError(programName);
+                Program prog = (Program) programResult[0];
+                if (prog != null) {
+                    Address addr = prog.getAddressFactory().getAddress(functionAddress);
+                    if (addr != null) {
+                        Function func = prog.getFunctionManager().getFunctionAt(addr);
+                        if (func == null) {
+                            func = prog.getFunctionManager().getFunctionContaining(addr);
+                        }
+                        if (func != null) {
+                            functionName = func.getName();
+                        }
+                    }
+                }
+            }
 
             String result = getFunctionVariables(functionName, programName);
             sendResponse(exchange, result);
@@ -1804,6 +1853,39 @@ public class GhidraMCPPlugin extends Plugin {
             String programB = qparams.get("program_b");
             String result = handleDiffFunctions(addressA, addressB, programA, programB);
             sendResponse(exchange, result);
+        }));
+
+        // ==================================================================================
+        // ANALYSIS CONTROL / UTILITY ENDPOINTS
+        // ==================================================================================
+
+        server.createContext("/get_function_count", safeHandler(exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String programName = qparams.get("program");
+            sendResponse(exchange, getFunctionCount(programName));
+        }));
+
+        server.createContext("/search_strings", safeHandler(exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String query = qparams.get("query");
+            int minLength = parseIntOrDefault(qparams.get("min_length"), 4);
+            String encoding = qparams.get("encoding");
+            int offset = parseIntOrDefault(qparams.get("offset"), 0);
+            int limit = parseIntOrDefault(qparams.get("limit"), 100);
+            String programName = qparams.get("program");
+            sendResponse(exchange, searchStrings(query, minLength, encoding, offset, limit, programName));
+        }));
+
+        server.createContext("/list_analyzers", safeHandler(exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String programName = qparams.get("program");
+            sendResponse(exchange, listAnalyzers(programName));
+        }));
+
+        server.createContext("/run_analysis", safeHandler(exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String programName = params.get("program");
+            sendResponse(exchange, runAnalysis(programName));
         }));
 
         server.setExecutor(null);
@@ -2806,12 +2888,30 @@ public class GhidraMCPPlugin extends Plugin {
             return new PrototypeResult(false, "Function prototype is required");
         }
 
+        // v3.0.1: Extract inline calling convention from prototype string if present
+        // Handles cases like "void __cdecl MyFunc(int x)" -> prototype="void MyFunc(int x)", cc="__cdecl"
+        String cleanPrototype = prototype;
+        String resolvedConvention = callingConvention;
+        String[] knownConventions = {"__cdecl", "__stdcall", "__thiscall", "__fastcall", "__vectorcall"};
+        for (String cc : knownConventions) {
+            if (cleanPrototype.contains(cc)) {
+                cleanPrototype = cleanPrototype.replace(cc, "").replaceAll("\\s+", " ").trim();
+                if (resolvedConvention == null || resolvedConvention.isEmpty()) {
+                    resolvedConvention = cc;
+                }
+                Msg.info(this, "Extracted calling convention '" + cc + "' from prototype string");
+                break;
+            }
+        }
+        final String finalPrototype = cleanPrototype;
+        final String finalConvention = resolvedConvention;
+
         final StringBuilder errorMessage = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
 
         try {
-            SwingUtilities.invokeAndWait(() -> 
-                applyFunctionPrototype(program, functionAddrStr, prototype, callingConvention, success, errorMessage));
+            SwingUtilities.invokeAndWait(() ->
+                applyFunctionPrototype(program, functionAddrStr, finalPrototype, finalConvention, success, errorMessage));
         } catch (InterruptedException | InvocationTargetException e) {
             String msg = "Failed to set function prototype on Swing thread: " + e.getMessage();
             errorMessage.append(msg);
@@ -2822,9 +2922,10 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
-     * Helper method that applies the function prototype within a transaction
+     * Helper method that applies the function prototype within a transaction.
+     * v3.0.1: Preserves existing plate comment across prototype changes.
      */
-    private void applyFunctionPrototype(Program program, String functionAddrStr, String prototype, 
+    private void applyFunctionPrototype(Program program, String functionAddrStr, String prototype,
                                        String callingConvention, AtomicBoolean success, StringBuilder errorMessage) {
         try {
             // Get the address and function
@@ -2840,33 +2941,31 @@ public class GhidraMCPPlugin extends Plugin {
 
             Msg.info(this, "Setting prototype for function " + func.getName() + ": " + prototype);
 
-            // Store original prototype as a comment for reference
-            addPrototypeComment(program, func, prototype);
+            // v3.0.1: Save existing plate comment before prototype change (which may wipe it)
+            String savedPlateComment = func.getComment();
 
             // Use ApplyFunctionSignatureCmd to parse and apply the signature
             parseFunctionSignatureAndApply(program, addr, prototype, callingConvention, success, errorMessage);
+
+            // v3.0.1: Restore plate comment if it was wiped by prototype change
+            if (savedPlateComment != null && !savedPlateComment.isEmpty()) {
+                String currentComment = func.getComment();
+                if (currentComment == null || currentComment.isEmpty() ||
+                    currentComment.startsWith("Setting prototype:")) {
+                    int txRestore = program.startTransaction("Restore plate comment after prototype");
+                    try {
+                        func.setComment(savedPlateComment);
+                        Msg.info(this, "Restored plate comment after prototype change for " + func.getName());
+                    } finally {
+                        program.endTransaction(txRestore, true);
+                    }
+                }
+            }
 
         } catch (Exception e) {
             String msg = "Error setting function prototype: " + e.getMessage();
             errorMessage.append(msg);
             Msg.error(this, msg, e);
-        }
-    }
-
-    /**
-     * Add a comment showing the prototype being set
-     */
-    @SuppressWarnings("deprecation")
-    private void addPrototypeComment(Program program, Function func, String prototype) {
-        int txComment = program.startTransaction("Add prototype comment");
-        try {
-            program.getListing().setComment(
-                func.getEntryPoint(), 
-                CodeUnit.PLATE_COMMENT, 
-                "Setting prototype: " + prototype
-            );
-        } finally {
-            program.endTransaction(txComment, true);
         }
     }
 
@@ -3151,7 +3250,9 @@ public class GhidraMCPPlugin extends Plugin {
                     if (updateVariableType(program, symbol, dataType, success, errorDetails)) {
                         resultMsg.append("Success: Changed type of variable '").append(variableName)
                                 .append("' from '").append(oldType).append("' to '")
-                                .append(dataType.getName()).append("'");
+                                .append(dataType.getName()).append("'")
+                                .append(". WARNING: Type changes trigger re-decompilation which may create new SSA variables. ")
+                                .append("Call get_function_variables after all type changes to discover any new variables.");
                     } else {
                         // Provide detailed error message including storage location
                         String storageInfo = "unknown";
@@ -4088,6 +4189,125 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
+     * Return the number of functions in the loaded program.
+     */
+    private String getFunctionCount(String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+        int count = program.getFunctionManager().getFunctionCount();
+        return "{\"function_count\": " + count + ", \"program\": \"" + escapeJson(program.getName()) + "\"}";
+    }
+
+    /**
+     * Search defined strings by a query substring / regex pattern.
+     * Returns JSON array of {address, value, encoding} objects.
+     */
+    private String searchStrings(String query, int minLength, String encoding, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+        if (query == null || query.isEmpty()) return "{\"error\": \"query parameter is required\"}";
+
+        Pattern pat;
+        try {
+            pat = Pattern.compile(query, Pattern.CASE_INSENSITIVE);
+        } catch (Exception e) {
+            return "{\"error\": \"Invalid regex: " + escapeJson(e.getMessage()) + "\"}";
+        }
+
+        List<String> results = new ArrayList<>();
+        DataIterator dataIt = program.getListing().getDefinedData(true);
+        while (dataIt.hasNext()) {
+            Data data = dataIt.next();
+            if (data == null || !isStringData(data)) continue;
+            String value = data.getValue() != null ? data.getValue().toString() : "";
+            if (value.length() < minLength) continue;
+            if (!pat.matcher(value).find()) continue;
+            String enc = (encoding != null && !encoding.isEmpty()) ? encoding : "ascii";
+            results.add("{\"address\": \"" + data.getAddress() + "\", \"value\": \"" + escapeJson(value) + "\", \"encoding\": \"" + enc + "\"}");
+        }
+
+        int total = results.size();
+        int from = Math.min(offset, total);
+        int to = Math.min(from + limit, total);
+        StringBuilder sb = new StringBuilder("{\"matches\": [");
+        for (int i = from; i < to; i++) {
+            if (i > from) sb.append(", ");
+            sb.append(results.get(i));
+        }
+        sb.append("], \"total\": ").append(total).append(", \"offset\": ").append(offset).append(", \"limit\": ").append(limit).append("}");
+        return sb.toString();
+    }
+
+    /**
+     * List all registered analyzers and their enabled/disabled state.
+     */
+    private String listAnalyzers(String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+
+        try {
+            Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
+            List<String> names = options.getOptionNames();
+            List<String> entries = new ArrayList<>();
+            for (String name : names) {
+                try {
+                    boolean enabled = options.getBoolean(name, false);
+                    entries.add("{\"name\": \"" + escapeJson(name) + "\", \"enabled\": " + enabled + "}");
+                } catch (Exception ignored) {
+                    // Not a boolean option — skip non-analyzer properties
+                }
+            }
+            StringBuilder sb = new StringBuilder("{\"analyzers\": [");
+            for (int i = 0; i < entries.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(entries.get(i));
+            }
+            sb.append("], \"count\": ").append(entries.size()).append("}");
+            return sb.toString();
+        } catch (Exception e) {
+            return "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * Trigger auto-analysis on the current or named program.
+     */
+    private String runAnalysis(String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+
+        try {
+            long start = System.currentTimeMillis();
+            int before = program.getFunctionManager().getFunctionCount();
+
+            AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+            int txId = program.startTransaction("Run Auto Analysis");
+            boolean success = false;
+            try {
+                mgr.initializeOptions();
+                mgr.reAnalyzeAll(program.getMemory().getLoadedAndInitializedAddressSet());
+                mgr.startAnalysis(TaskMonitor.DUMMY);
+                success = true;
+            } finally {
+                program.endTransaction(txId, success);
+            }
+
+            long duration = System.currentTimeMillis() - start;
+            int after = program.getFunctionManager().getFunctionCount();
+            return "{\"success\": true, \"duration_ms\": " + duration +
+                   ", \"total_functions\": " + after +
+                   ", \"new_functions\": " + (after - before) +
+                   ", \"program\": \"" + escapeJson(program.getName()) + "\"}";
+        } catch (Exception e) {
+            return "{\"error\": \"Analysis failed: " + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
      * Check if the given data is a string type
      */
     private boolean isStringData(Data data) {
@@ -4479,8 +4699,24 @@ public class GhidraMCPPlugin extends Plugin {
                             // Array value - parse into List
                             result.put(key, parseJsonArray(value));
                         } else if (value.startsWith("{") && value.endsWith("}")) {
-                            // Object value - keep as string for now
-                            result.put(key, value);
+                            // Object value - parse into nested Map
+                            Map<String, String> nestedMap = new LinkedHashMap<>();
+                            String inner = value.substring(1, value.length() - 1).trim();
+                            if (!inner.isEmpty()) {
+                                String[] nestedParts = splitJsonPairs(inner);
+                                for (String np : nestedParts) {
+                                    String[] nkv = np.split(":", 2);
+                                    if (nkv.length == 2) {
+                                        String nkey = nkv[0].trim().replaceAll("^\"|\"$", "");
+                                        String nval = nkv[1].trim();
+                                        if (nval.startsWith("\"") && nval.endsWith("\"")) {
+                                            nval = unescapeJsonString(nval.substring(1, nval.length() - 1));
+                                        }
+                                        nestedMap.put(nkey, nval);
+                                    }
+                                }
+                            }
+                            result.put(key, nestedMap);
                         } else if (value.matches("\\d+")) {
                             // Integer value
                             result.put(key, Integer.parseInt(value));
@@ -5550,7 +5786,8 @@ public class GhidraMCPPlugin extends Plugin {
                 }
             }
             
-            double completenessScore = calculateCompletenessScore(func, undefinedVars.size(), 0, 0, 0, 0, 0, 0);
+            CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), 0, 0, 0, 0, 0, 0, new ArrayList<>(), 0);
+            double completenessScore = scoreResult.score;
             json.append("\"completeness_score\": ").append(completenessScore);
             
             json.append("}");
@@ -11190,13 +11427,13 @@ public class GhidraMCPPlugin extends Plugin {
         
         try {
             // Count basic blocks and edges
-            CodeBlockIterator blockIter = blockModel.getCodeBlocksContaining(func.getBody(), null);
+            CodeBlockIterator blockIter = blockModel.getCodeBlocksContaining(func.getBody(), TaskMonitor.DUMMY);
             while (blockIter.hasNext()) {
                 CodeBlock block = blockIter.next();
                 metrics.basicBlockCount++;
-                
+
                 // Count outgoing edges for complexity calculation
-                CodeBlockReferenceIterator destIter = block.getDestinations(null);
+                CodeBlockReferenceIterator destIter = block.getDestinations(TaskMonitor.DUMMY);
                 while (destIter.hasNext()) {
                     destIter.next();
                     metrics.edgeCount++;
@@ -11312,14 +11549,14 @@ public class GhidraMCPPlugin extends Plugin {
             Set<Address> blockEntries = new HashSet<>();
             
             // First pass: collect all block entry points
-            CodeBlockIterator blockIter = blockModel.getCodeBlocksContaining(func.getBody(), null);
+            CodeBlockIterator blockIter = blockModel.getCodeBlocksContaining(func.getBody(), TaskMonitor.DUMMY);
             while (blockIter.hasNext()) {
                 CodeBlock block = blockIter.next();
                 blockEntries.add(block.getFirstStartAddress());
             }
-            
+
             // Second pass: detailed analysis
-            blockIter = blockModel.getCodeBlocksContaining(func.getBody(), null);
+            blockIter = blockModel.getCodeBlocksContaining(func.getBody(), TaskMonitor.DUMMY);
             while (blockIter.hasNext()) {
                 CodeBlock block = blockIter.next();
                 basicBlockCount++;
@@ -11333,7 +11570,7 @@ public class GhidraMCPPlugin extends Plugin {
                 boolean hasBackEdge = false;
                 List<String> successors = new ArrayList<>();
                 
-                CodeBlockReferenceIterator destIter = block.getDestinations(null);
+                CodeBlockReferenceIterator destIter = block.getDestinations(TaskMonitor.DUMMY);
                 while (destIter.hasNext()) {
                     CodeBlockReference ref = destIter.next();
                     outEdges++;
@@ -12438,24 +12675,35 @@ public class GhidraMCPPlugin extends Plugin {
         final AtomicReference<Integer> decompilerCount = new AtomicReference<>(0);
         final AtomicReference<Integer> disassemblyCount = new AtomicReference<>(0);
         final AtomicReference<Boolean> plateSet = new AtomicReference<>(false);
+        final AtomicReference<Integer> overwrittenCount = new AtomicReference<>(0);
 
         try {
             SwingUtilities.invokeAndWait(() -> {
                 int tx = program.startTransaction("Batch Set Comments");
                 try {
-                    // Set plate comment if provided (v1.6.5: Added !isEmpty and !"null" checks to prevent overwriting with null/empty)
-                    if (plateComment != null && !plateComment.isEmpty() && !plateComment.equals("null") && functionAddress != null) {
+                    // Set or clear plate comment (v3.0.1: null=skip, ""=clear, non-empty=set)
+                    // null or "null" string means don't touch; empty string means clear
+                    if (plateComment != null && !plateComment.equals("null") && functionAddress != null) {
                         Address funcAddr = program.getAddressFactory().getAddress(functionAddress);
                         if (funcAddr != null) {
                             Function func = program.getFunctionManager().getFunctionAt(funcAddr);
                             if (func != null) {
-                                func.setComment(plateComment);
+                                String existingPlate = func.getComment();
+                                if (existingPlate != null && !existingPlate.isEmpty()) {
+                                    overwrittenCount.getAndSet(overwrittenCount.get() + 1);
+                                }
+                                if (plateComment.isEmpty()) {
+                                    func.setComment(null);  // Clear plate comment
+                                } else {
+                                    func.setComment(plateComment);
+                                }
                                 plateSet.set(true);
                             }
                         }
                     }
 
-                    // Set decompiler comments (PRE_COMMENT)
+                    // Set decompiler comments (PRE_COMMENT) — v3.0.1: empty string clears comment
+                    Listing listing = program.getListing();
                     if (decompilerComments != null) {
                         for (Map<String, String> commentEntry : decompilerComments) {
                             String addr = commentEntry.get("address");
@@ -12463,14 +12711,19 @@ public class GhidraMCPPlugin extends Plugin {
                             if (addr != null && comment != null) {
                                 Address address = program.getAddressFactory().getAddress(addr);
                                 if (address != null) {
-                                    program.getListing().setComment(address, CodeUnit.PRE_COMMENT, comment);
+                                    String existing = listing.getComment(CodeUnit.PRE_COMMENT, address);
+                                    if (existing != null && !existing.isEmpty()) {
+                                        overwrittenCount.getAndSet(overwrittenCount.get() + 1);
+                                    }
+                                    listing.setComment(address, CodeUnit.PRE_COMMENT,
+                                            comment.isEmpty() ? null : comment);
                                     decompilerCount.getAndSet(decompilerCount.get() + 1);
                                 }
                             }
                         }
                     }
 
-                    // Set disassembly comments (EOL_COMMENT)
+                    // Set disassembly comments (EOL_COMMENT) — v3.0.1: empty string clears comment
                     if (disassemblyComments != null) {
                         for (Map<String, String> commentEntry : disassemblyComments) {
                             String addr = commentEntry.get("address");
@@ -12478,7 +12731,12 @@ public class GhidraMCPPlugin extends Plugin {
                             if (addr != null && comment != null) {
                                 Address address = program.getAddressFactory().getAddress(addr);
                                 if (address != null) {
-                                    program.getListing().setComment(address, CodeUnit.EOL_COMMENT, comment);
+                                    String existing = listing.getComment(CodeUnit.EOL_COMMENT, address);
+                                    if (existing != null && !existing.isEmpty()) {
+                                        overwrittenCount.getAndSet(overwrittenCount.get() + 1);
+                                    }
+                                    listing.setComment(address, CodeUnit.EOL_COMMENT,
+                                            comment.isEmpty() ? null : comment);
                                     disassemblyCount.getAndSet(disassemblyCount.get() + 1);
                                 }
                             }
@@ -12509,7 +12767,102 @@ public class GhidraMCPPlugin extends Plugin {
                 result.append("\"success\": true, ");
                 result.append("\"decompiler_comments_set\": ").append(decompilerCount.get()).append(", ");
                 result.append("\"disassembly_comments_set\": ").append(disassemblyCount.get()).append(", ");
-                result.append("\"plate_comment_set\": ").append(plateSet.get());
+                result.append("\"plate_comment_set\": ").append(plateSet.get()).append(", ");
+                result.append("\"plate_comment_cleared\": ").append(plateSet.get() && plateComment != null && plateComment.isEmpty()).append(", ");
+                result.append("\"comments_overwritten\": ").append(overwrittenCount.get());
+            }
+        } catch (Exception e) {
+            result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+        }
+
+        result.append("}");
+        return result.toString();
+    }
+
+    /**
+     * v3.0.1: Clear all comments (plate, PRE, EOL) within a function's address range.
+     * Useful for cleaning up stale comments before re-documenting a function.
+     */
+    @SuppressWarnings("deprecation")
+    private String clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol) {
+        Program program = getCurrentProgram();
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+
+        if (functionAddress == null || functionAddress.isEmpty()) {
+            return "{\"error\": \"function_address parameter is required\"}";
+        }
+
+        final StringBuilder result = new StringBuilder();
+        result.append("{");
+        final AtomicBoolean success = new AtomicBoolean(false);
+        final AtomicReference<Integer> preCleared = new AtomicReference<>(0);
+        final AtomicReference<Integer> eolCleared = new AtomicReference<>(0);
+        final AtomicReference<Boolean> plateCleared = new AtomicReference<>(false);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Clear Function Comments");
+                try {
+                    Address addr = program.getAddressFactory().getAddress(functionAddress);
+                    if (addr == null) {
+                        result.append("\"error\": \"Invalid address: ").append(functionAddress).append("\"");
+                        return;
+                    }
+
+                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    if (func == null) {
+                        result.append("\"error\": \"No function at address: ").append(functionAddress).append("\"");
+                        return;
+                    }
+
+                    // Clear plate comment
+                    if (clearPlate && func.getComment() != null) {
+                        func.setComment(null);
+                        plateCleared.set(true);
+                    }
+
+                    // Clear inline comments within the function body
+                    Listing listing = program.getListing();
+                    AddressSetView body = func.getBody();
+                    InstructionIterator instrIter = listing.getInstructions(body, true);
+
+                    while (instrIter.hasNext()) {
+                        Instruction instr = instrIter.next();
+                        Address instrAddr = instr.getAddress();
+
+                        if (clearPre) {
+                            String existing = listing.getComment(CodeUnit.PRE_COMMENT, instrAddr);
+                            if (existing != null) {
+                                listing.setComment(instrAddr, CodeUnit.PRE_COMMENT, null);
+                                preCleared.getAndSet(preCleared.get() + 1);
+                            }
+                        }
+
+                        if (clearEol) {
+                            String existing = listing.getComment(CodeUnit.EOL_COMMENT, instrAddr);
+                            if (existing != null) {
+                                listing.setComment(instrAddr, CodeUnit.EOL_COMMENT, null);
+                                eolCleared.getAndSet(eolCleared.get() + 1);
+                            }
+                        }
+                    }
+
+                    success.set(true);
+                } catch (Exception e) {
+                    result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+                    Msg.error(this, "Error clearing function comments", e);
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+
+            if (success.get()) {
+                result.append("\"success\": true, ");
+                result.append("\"plate_comment_cleared\": ").append(plateCleared.get()).append(", ");
+                result.append("\"pre_comments_cleared\": ").append(preCleared.get()).append(", ");
+                result.append("\"eol_comments_cleared\": ").append(eolCleared.get());
             }
         } catch (Exception e) {
             result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
@@ -12902,6 +13255,12 @@ public class GhidraMCPPlugin extends Plugin {
                     result.append("\"has_prototype\": ").append(func.getSignature() != null).append(", ");
                     result.append("\"has_calling_convention\": ").append(func.getCallingConvention() != null).append(", ");
 
+                    // v3.0.1: Check if return type is unresolved (undefined)
+                    String returnTypeName = func.getReturnType().getName();
+                    boolean returnTypeUndefined = returnTypeName.startsWith("undefined");
+                    result.append("\"return_type\": \"").append(escapeJson(returnTypeName)).append("\", ");
+                    result.append("\"return_type_resolved\": ").append(!returnTypeUndefined).append(", ");
+
                     // Enhanced plate comment validation
                     String plateComment = func.getComment();
                     boolean hasPlateComment = plateComment != null && !plateComment.isEmpty();
@@ -12923,6 +13282,7 @@ public class GhidraMCPPlugin extends Plugin {
                     // Check for undefined variables (both names and types)
                     // PRIORITY 1 FIX: Use decompilation-based variable detection to avoid phantom variables
                     List<String> undefinedVars = new ArrayList<>();
+                    List<String> phantomVars = new ArrayList<>();
                     boolean decompilationAvailable = false;
 
                     // Try to use decompilation-based detection (high-level API)
@@ -12947,11 +13307,20 @@ public class GhidraMCPPlugin extends Plugin {
 
                             // Check locals from HIGH-LEVEL decompiled symbol map (not low-level stack frame)
                             // This avoids phantom variables that exist in stack analysis but not decompilation
+                            java.util.Set<String> checkedVarNames = new java.util.HashSet<>();
                             Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
                             while (symbols.hasNext()) {
                                 ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
                                 String name = symbol.getName();
                                 String typeName = symbol.getDataType().getName();
+                                checkedVarNames.add(name);
+
+                                // v3.0.1: Skip phantom decompiler artifacts (extraout_*, in_*)
+                                // These cannot be renamed or typed — exclude from scoring
+                                if (name.startsWith("extraout_") || name.startsWith("in_")) {
+                                    phantomVars.add(name + " (type: " + typeName + ", phantom)");
+                                    continue;
+                                }
 
                                 // Check for generic local names (local_XX or XVar patterns)
                                 if (name.startsWith("local_") ||
@@ -12960,9 +13329,50 @@ public class GhidraMCPPlugin extends Plugin {
                                     undefinedVars.add(name + " (generic name)");
                                 }
 
-                                // Check for undefined data types
+                                // Check for undefined data types (decompiler display type)
                                 if (typeName.startsWith("undefined")) {
                                     undefinedVars.add(name + " (type: " + typeName + ")");
+                                }
+                            }
+
+                            // v3.0.1: Cross-check storage types from low-level Variable API
+                            // The decompiler may show resolved types (e.g. "short *") while the
+                            // actual storage type is still "undefined4". Catch these mismatches.
+                            for (Variable local : func.getLocalVariables()) {
+                                String localName = local.getName();
+                                String storageName = local.getDataType().getName();
+                                // Only check variables that exist in decompiled code (not stack phantoms)
+                                if (checkedVarNames.contains(localName) && storageName.startsWith("undefined")) {
+                                    String flag = localName + " (storage type: " + storageName + ", decompiler shows resolved type)";
+                                    if (!undefinedVars.contains(flag)) {
+                                        undefinedVars.add(flag);
+                                    }
+                                }
+                            }
+                            // Also check register-based HighSymbols whose storage type may be undefined
+                            // These may not appear in func.getLocalVariables() at all
+                            Iterator<ghidra.program.model.pcode.HighSymbol> storageCheckSymbols = highFunction.getLocalSymbolMap().getSymbols();
+                            while (storageCheckSymbols.hasNext()) {
+                                ghidra.program.model.pcode.HighSymbol sym = storageCheckSymbols.next();
+                                String symName = sym.getName();
+                                if (symName.startsWith("extraout_") || symName.startsWith("in_")) continue;
+                                ghidra.program.model.pcode.HighVariable highVar = sym.getHighVariable();
+                                if (highVar != null) {
+                                    // Get the representative varnode to check actual storage
+                                    ghidra.program.model.pcode.Varnode rep = highVar.getRepresentative();
+                                    if (rep != null && rep.getSize() > 0) {
+                                        // Check if the HighVariable's declared type differs from what Ghidra stores
+                                        DataType highType = highVar.getDataType();
+                                        DataType symType = sym.getDataType();
+                                        // If symbol storage reports undefined but decompiler infers a type
+                                        if (symType != null && symType.getName().startsWith("undefined") &&
+                                            highType != null && !highType.getName().startsWith("undefined")) {
+                                            String flag = symName + " (storage type: " + symType.getName() + ", decompiler shows: " + highType.getName() + ")";
+                                            if (!undefinedVars.stream().anyMatch(v -> v.startsWith(symName + " "))) {
+                                                undefinedVars.add(flag);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -12999,6 +13409,14 @@ public class GhidraMCPPlugin extends Plugin {
                     for (int i = 0; i < undefinedVars.size(); i++) {
                         if (i > 0) result.append(", ");
                         result.append("\"").append(undefinedVars.get(i)).append("\"");
+                    }
+                    result.append("], ");
+
+                    // v3.0.1: Report phantom variables separately (not counted in scoring)
+                    result.append("\"phantom_variables\": [");
+                    for (int i = 0; i < phantomVars.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(escapeJson(phantomVars.get(i))).append("\"");
                     }
                     result.append("], ");
 
@@ -13154,13 +13572,15 @@ public class GhidraMCPPlugin extends Plugin {
                     double commentDensity = codeLineCount > 0 ? (inlineCommentCount * 10.0 / codeLineCount) : 0;
                     result.append("\"comment_density\": ").append(String.format("%.2f", commentDensity)).append(", ");
 
-                    double completenessScore = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity);
-                    result.append("\"completeness_score\": ").append(completenessScore).append(", ");
+                    CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity, typeQualityIssues, phantomVars.size());
+                    result.append("\"completeness_score\": ").append(scoreResult.score).append(", ");
+                    result.append("\"effective_score\": ").append(scoreResult.effectiveScore).append(", ");
+                    result.append("\"all_deductions_unfixable\": ").append(scoreResult.score < 100.0 && scoreResult.effectiveScore >= 100.0).append(", ");
 
                     // Generate workflow-aligned recommendations
                     List<String> recommendations = generateWorkflowRecommendations(
-                        func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues, 
-                        unrenamedGlobals, undocumentedOrdinals, commentDensity, completenessScore
+                        func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues,
+                        unrenamedGlobals, undocumentedOrdinals, commentDensity, scoreResult
                     );
 
                     result.append("\"recommendations\": [");
@@ -13402,33 +13822,61 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
-    private double calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity) {
+    /**
+     * Score result containing both raw and effective scores.
+     * Effective score excludes unfixable deductions (void* on generic functions, phantoms).
+     */
+    private static class CompletenessScoreResult {
+        final double score;
+        final double effectiveScore;
+        final int unfixableDeductions;
+
+        CompletenessScoreResult(double score, double effectiveScore, int unfixableDeductions) {
+            this.score = score;
+            this.effectiveScore = effectiveScore;
+            this.unfixableDeductions = unfixableDeductions;
+        }
+    }
+
+    private CompletenessScoreResult calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity, List<String> typeQualityIssues, int phantomCount) {
         double score = 100.0;
+        double unfixablePenalty = 0.0;
 
         if (func.getName().startsWith("FUN_")) score -= 30;
         if (func.getSignature() == null) score -= 20;
         if (func.getCallingConvention() == null) score -= 10;
         if (func.getComment() == null) score -= 20;
+        // v3.0.1: Penalize undefined return type (must be resolved to void, int, uint, etc.)
+        if (func.getReturnType().getName().startsWith("undefined")) score -= 15;
         score -= (undefinedCount * 5);
-        score -= (plateCommentIssueCount * 5); // 5 points per plate comment issue
-        score -= (hungarianViolationCount * 3); // 3 points per Hungarian notation violation
-        score -= (typeQualityIssueCount * 15); // 15 points per type quality issue (void*, state-based names, duplicates) - HARD PENALTY to enforce identity-based naming
-        
-        // NEW: Penalties for unrenamed globals and undocumented ordinals
-        score -= (unrenamedGlobalsCount * 3); // 3 points per DAT_* global remaining
-        score -= (undocumentedOrdinalsCount * 2); // 2 points per undocumented Ordinal call
-        
-        // NEW: Penalty for low inline comment density (expect at least 1 comment per 10 lines)
+        score -= (plateCommentIssueCount * 5);
+        score -= (hungarianViolationCount * 3);
+        score -= (typeQualityIssueCount * 15);
+
+        score -= (unrenamedGlobalsCount * 3);
+        score -= (undocumentedOrdinalsCount * 2);
+
         if (commentDensity < 1.0 && func.getComment() != null) {
-            // Only penalize if function has a plate comment (meaning it's been partially documented)
-            score -= 5; // Penalty for sparse inline comments
+            score -= 5;
         }
 
-        return Math.max(0, score);
+        // Calculate unfixable penalty: void* on genuinely generic functions, phantom vars
+        // void* params are unfixable when the function is a generic memory/utility function
+        for (String issue : typeQualityIssues) {
+            if (issue.contains("Generic void*")) {
+                unfixablePenalty += 15;
+            }
+        }
+        // Phantom variables are always unfixable (already excluded from undefinedCount)
+
+        double rawScore = Math.max(0, score);
+        double effectiveScore = Math.min(100.0, rawScore + unfixablePenalty);
+
+        return new CompletenessScoreResult(rawScore, effectiveScore, (int) unfixablePenalty);
     }
 
     /**
-     * Generate workflow-aligned recommendations based on FUNCTION_DOC_WORKFLOW_V4.md
+     * Generate workflow-aligned recommendations based on FUNCTION_DOC_WORKFLOW_V5.md
      */
     private List<String> generateWorkflowRecommendations(
             Function func,
@@ -13439,14 +13887,29 @@ public class GhidraMCPPlugin extends Plugin {
             List<String> unrenamedGlobals,
             List<String> undocumentedOrdinals,
             double commentDensity,
-            double completenessScore) {
+            CompletenessScoreResult scoreResult) {
 
         List<String> recommendations = new ArrayList<>();
 
-        // If 100% complete, return early
-        if (completenessScore >= 100.0) {
+        // If 100% complete (raw), return early
+        if (scoreResult.score >= 100.0) {
             recommendations.add("Function is fully documented - no further action needed.");
             return recommendations;
+        }
+
+        // If all deductions are unfixable, report that and skip the full workflow
+        if (scoreResult.effectiveScore >= 100.0) {
+            recommendations.add("All remaining deductions are unfixable (void* on generic functions, phantom variables). No further action needed.");
+            return recommendations;
+        }
+
+        // CRITICAL: Undefined return type
+        if (func.getReturnType().getName().startsWith("undefined")) {
+            recommendations.add("UNDEFINED RETURN TYPE - Do not trust decompiler display. Verify EAX at RET instruction:");
+            recommendations.add("1. Current return type: " + func.getReturnType().getName() + " (unresolved)");
+            recommendations.add("2. Check disassembly: what value is in EAX at each RET instruction?");
+            recommendations.add("3. For wrappers: if callee returns non-void and EAX is not clobbered before RET, the wrapper returns the same type");
+            recommendations.add("4. Use set_function_prototype() to set the correct return type (void, int, uint, etc.)");
         }
 
         // CRITICAL: Unnamed DAT_* Globals (highest priority)
@@ -13468,9 +13931,9 @@ public class GhidraMCPPlugin extends Plugin {
             recommendations.add("4. Format: /* Ordinal_123 = StorageFunctionName - brief description */");
         }
 
-        // CRITICAL: Undefined Type Audit (FUNCTION_DOC_WORKFLOW_V4.md Phase 2: Type Audit)
+        // CRITICAL: Undefined Type Audit (FUNCTION_DOC_WORKFLOW_V5.md Step 3: Type Audit)
         if (!undefinedVars.isEmpty()) {
-            recommendations.add("UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V4.md Phase 2 'Type Audit' section:");
+            recommendations.add("UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V5.md Step 3 'Type Audit + Variable Renaming' section:");
             recommendations.add("1. Type Resolution: Apply type normalization before renaming:");
             recommendations.add("   - undefined1 -> byte (8-bit integer)");
             recommendations.add("   - undefined2 -> ushort/short (16-bit integer)");
@@ -13487,7 +13950,7 @@ public class GhidraMCPPlugin extends Plugin {
 
         // Plate Comment Issues
         if (!plateCommentIssues.isEmpty()) {
-            recommendations.add("PLATE COMMENT ISSUES - Follow FUNCTION_DOC_WORKFLOW_V4.md Phase 7 'Documentation' section:");
+            recommendations.add("PLATE COMMENT ISSUES - Follow FUNCTION_DOC_WORKFLOW_V5.md Step 6 'Plate Comment + Inline Comments' section:");
             for (String issue : plateCommentIssues) {
                 if (issue.contains("Missing Algorithm section")) {
                     recommendations.add("1. Add Algorithm section with numbered steps describing operations (validation, function calls, error handling)");
@@ -13506,7 +13969,7 @@ public class GhidraMCPPlugin extends Plugin {
 
         // Hungarian Notation Violations
         if (!hungarianViolations.isEmpty()) {
-            recommendations.add("HUNGARIAN NOTATION VIOLATIONS - Follow FUNCTION_DOC_WORKFLOW_V4.md Phase 5 'Variables' and docs/HUNGARIAN_NOTATION.md:");
+            recommendations.add("HUNGARIAN NOTATION VIOLATIONS - Follow FUNCTION_DOC_WORKFLOW_V5.md Step 3 'Type Audit + Variable Renaming' and docs/HUNGARIAN_NOTATION.md:");
             recommendations.add("1. Verify type-to-prefix mapping matches Ghidra type:");
             recommendations.add("   - byte -> b/by | char -> c/ch | bool -> f | short -> n/s | ushort -> w");
             recommendations.add("   - int -> n/i | uint -> dw | long -> l | ulong -> dw");
@@ -13521,7 +13984,7 @@ public class GhidraMCPPlugin extends Plugin {
 
         // Type Quality Issues
         if (!typeQualityIssues.isEmpty()) {
-            recommendations.add("TYPE QUALITY ISSUES - Follow FUNCTION_DOC_WORKFLOW_V4.md Phase 3 'Structures' section:");
+            recommendations.add("TYPE QUALITY ISSUES - Follow FUNCTION_DOC_WORKFLOW_V5.md Step 4 'Structures' section:");
             for (String issue : typeQualityIssues) {
                 if (issue.contains("Generic void*")) {
                     recommendations.add("1. Replace generic void* parameters with specific structure types using set_function_prototype()");
@@ -13550,20 +14013,16 @@ public class GhidraMCPPlugin extends Plugin {
             recommendations.add("3. Use set_decompiler_comment() for individual comments or batch_set_comments() for multiple");
         }
 
-        // General Workflow Guidance
-        if (completenessScore < 100.0) {
-            recommendations.add("COMPLETE WORKFLOW (FUNCTION_DOC_WORKFLOW_V4.md):");
-            recommendations.add("1. Initialization: Use analyze_function_complete() to gather decompiled code, xrefs, callees, callers, disassembly, variables");
-            recommendations.add("2. Undefined Type Audit: Check BOTH decompiled code AND disassembly (get_disassembly()) for all undefined types");
-            recommendations.add("3. Structure Identification: Create structures BEFORE renaming (create_struct, apply_data_type)");
-            recommendations.add("4. Function Naming: Use rename_function_by_address() with PascalCase");
-            recommendations.add("5. Prototype: Use set_function_prototype() with specific typed parameters");
-            recommendations.add("6. Labels: Use batch_create_labels() for jump targets (snake_case)");
-            recommendations.add("7. Variable Types: Use set_local_variable_type() with lowercase builtins");
-            recommendations.add("8. Variable Renaming: Use rename_variables() with Hungarian notation");
-            recommendations.add("9. Plate Comment: Use set_plate_comment() with Algorithm, Parameters, Returns sections");
-            recommendations.add("10. Inline Comments: Use batch_set_comments() for decompiler and disassembly comments");
-            recommendations.add("11. Verification: Re-run analyze_function_completeness() to confirm 100% score");
+        // General Workflow Guidance — only show if there are fixable issues
+        if (scoreResult.effectiveScore < 100.0) {
+            recommendations.add("COMPLETE WORKFLOW (FUNCTION_DOC_WORKFLOW_V5.md):");
+            recommendations.add("1. Initialize: get_current_selection() + analyze_function_complete() in parallel, classify function");
+            recommendations.add("2. Rename + Prototype: rename_function_by_address() (PascalCase) + set_function_prototype() in parallel");
+            recommendations.add("3. Type Audit + Variables: set_local_variable_type() then rename_variables() with Hungarian notation");
+            recommendations.add("4. Structures: search_data_types() or create_struct() if field-offset patterns found (skip if none)");
+            recommendations.add("5. Globals: rename_or_label() with g_ prefix for DAT_*/s_* references (skip if none)");
+            recommendations.add("6. Comments: batch_set_comments() with plate_comment + PRE_COMMENTs + EOL_COMMENTs in ONE call");
+            recommendations.add("7. Verify: analyze_function_completeness() once — accept phantom/void* deductions");
         }
 
         return recommendations;
@@ -14437,6 +14896,26 @@ public class GhidraMCPPlugin extends Plugin {
                     result.append("\"address\": \"").append(func.getEntryPoint().toString()).append("\", ");
                     result.append("\"signature\": \"").append(func.getSignature().toString().replace("\"", "\\\"")).append("\"");
 
+                    // v3.0.1: Flag undefined return type
+                    String retTypeName = func.getReturnType().getName();
+                    if (retTypeName.startsWith("undefined")) {
+                        result.append(", \"return_type_resolved\": false");
+                        result.append(", \"return_type_warning\": \"Return type is '").append(escapeJson(retTypeName))
+                              .append("' — verify EAX at RET. Do not trust decompiler void display.\"");
+                    } else {
+                        result.append(", \"return_type_resolved\": true");
+                    }
+
+                    // v3.0.1: Include decompiled code (previously only in headless version)
+                    DecompileResults decompResults = decompileFunction(func, finalProgram);
+                    if (decompResults != null && decompResults.decompileCompleted() &&
+                        decompResults.getDecompiledFunction() != null) {
+                        String decompiledCode = decompResults.getDecompiledFunction().getC();
+                        if (decompiledCode != null) {
+                            result.append(", \"decompiled_code\": \"").append(escapeJson(decompiledCode)).append("\"");
+                        }
+                    }
+
                     // Include xrefs
                     if (includeXrefs) {
                         result.append(", \"xrefs\": [");
@@ -14462,6 +14941,25 @@ public class GhidraMCPPlugin extends Plugin {
                             calleeCount++;
                         }
                         result.append("]");
+
+                        // v3.0.1: Wrapper return propagation hint
+                        // If function has exactly 1 callee and ≤15 instructions, check callee return type
+                        if (calleeCount == 1 && retTypeName.startsWith("undefined")) {
+                            Function callee = calledFuncs.iterator().next();
+                            String calleeRetType = callee.getReturnType().getName();
+                            if (!calleeRetType.equals("void") && !calleeRetType.startsWith("undefined")) {
+                                // Count instructions to confirm wrapper pattern
+                                Listing tmpListing = finalProgram.getListing();
+                                InstructionIterator tmpIter = tmpListing.getInstructions(func.getBody(), true);
+                                int instrTotal = 0;
+                                while (tmpIter.hasNext()) { tmpIter.next(); instrTotal++; }
+                                if (instrTotal <= 15) {
+                                    result.append(", \"wrapper_hint\": \"Callee '").append(escapeJson(callee.getName()))
+                                          .append("' returns ").append(escapeJson(calleeRetType))
+                                          .append(". This wrapper likely returns the same type — verify EAX is not clobbered before RET.\"");
+                                }
+                            }
+                        }
                     }
 
                     // Include callers
@@ -14494,21 +14992,61 @@ public class GhidraMCPPlugin extends Plugin {
                         result.append("]");
                     }
 
-                    // Include variables
+                    // Include variables (v3.0.1: use HighFunction for locals to capture register-based vars)
                     if (includeVariables) {
                         result.append(", \"parameters\": [");
                         Parameter[] params = func.getParameters();
                         for (int i = 0; i < params.length; i++) {
                             if (i > 0) result.append(", ");
-                            result.append("{\"name\": \"").append(params[i].getName()).append("\", ");
-                            result.append("\"type\": \"").append(params[i].getDataType().getName()).append("\"}");
+                            result.append("{\"name\": \"").append(escapeJson(params[i].getName())).append("\", ");
+                            result.append("\"type\": \"").append(escapeJson(params[i].getDataType().getName())).append("\", ");
+                            result.append("\"storage\": \"").append(escapeJson(params[i].getVariableStorage().toString())).append("\"}");
                         }
                         result.append("], \"locals\": [");
-                        Variable[] locals = func.getLocalVariables();
-                        for (int i = 0; i < locals.length; i++) {
-                            if (i > 0) result.append(", ");
-                            result.append("{\"name\": \"").append(locals[i].getName()).append("\", ");
-                            result.append("\"type\": \"").append(locals[i].getDataType().getName()).append("\"}");
+
+                        // Use HighFunction symbol map for locals (captures register-based and SSA variables)
+                        boolean firstLocal = true;
+                        if (decompResults != null && decompResults.decompileCompleted()) {
+                            ghidra.program.model.pcode.HighFunction highFunc = decompResults.getHighFunction();
+                            if (highFunc != null) {
+                                java.util.Iterator<ghidra.program.model.pcode.HighSymbol> symbols =
+                                    highFunc.getLocalSymbolMap().getSymbols();
+                                while (symbols.hasNext()) {
+                                    ghidra.program.model.pcode.HighSymbol sym = symbols.next();
+                                    if (!firstLocal) result.append(", ");
+                                    firstLocal = false;
+                                    String symName = sym.getName();
+                                    boolean isPhantom = symName.startsWith("extraout_") || symName.startsWith("in_");
+                                    // Get storage location from HighVariable
+                                    String storageStr = "";
+                                    ghidra.program.model.pcode.HighVariable highVar = sym.getHighVariable();
+                                    if (highVar != null && highVar.getRepresentative() != null) {
+                                        ghidra.program.model.pcode.Varnode rep = highVar.getRepresentative();
+                                        if (rep.getAddress() != null) {
+                                            storageStr = rep.getAddress().toString() + ":" + rep.getSize();
+                                        }
+                                    }
+                                    result.append("{\"name\": \"").append(escapeJson(symName)).append("\", ");
+                                    result.append("\"type\": \"").append(escapeJson(sym.getDataType().getName())).append("\", ");
+                                    result.append("\"storage\": \"").append(escapeJson(storageStr)).append("\", ");
+                                    result.append("\"is_phantom\": ").append(isPhantom).append(", ");
+                                    result.append("\"in_decompiled_code\": true}");
+                                }
+                            }
+                        }
+
+                        // Fallback: if decompilation unavailable, use low-level API
+                        if (decompResults == null || !decompResults.decompileCompleted()) {
+                            Variable[] locals = func.getLocalVariables();
+                            for (int i = 0; i < locals.length; i++) {
+                                if (!firstLocal) result.append(", ");
+                                firstLocal = false;
+                                result.append("{\"name\": \"").append(escapeJson(locals[i].getName())).append("\", ");
+                                result.append("\"type\": \"").append(escapeJson(locals[i].getDataType().getName())).append("\", ");
+                                result.append("\"storage\": \"").append(escapeJson(locals[i].getVariableStorage().toString())).append("\", ");
+                                result.append("\"is_phantom\": false, ");
+                                result.append("\"in_decompiled_code\": false}");
+                            }
                         }
                         result.append("]");
                     }
