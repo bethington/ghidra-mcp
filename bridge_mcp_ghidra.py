@@ -54,6 +54,8 @@ ENDPOINT_TIMEOUTS = {
     "find_similar_functions_fuzzy": 60,  # 1 minute - single function fuzzy search
     "diff_functions": 30,  # 30 seconds - structured function diff
     "get_function_signature": 10,  # 10 seconds - single signature extraction
+    "run_ghidra_script": 1800,  # 30 minutes - scripts can iterate entire projects
+    "run_script_inline": 1800,  # 30 minutes - inline scripts can also be long-running
     "default": 30,  # 30 seconds for all other operations
 }
 # Maximum retry attempts for transient failures (3 attempts with exponential backoff)
@@ -831,7 +833,6 @@ def cached_request(
 
             return result
 
-        wrapper.cache = cache  # Expose for cache invalidation (e.g., instance switch)
         return wrapper
 
     return decorator
@@ -1225,70 +1226,6 @@ def make_request(
 
 
 @mcp.tool()
-def list_instances() -> str:
-    """
-    List all running Ghidra instances discovered via Unix domain sockets.
-
-    Returns JSON with each instance's project name, PID, open programs, and socket path.
-    Also shows which instance is currently connected.
-    Useful for multi-instance setups where multiple Ghidra processes are running.
-    """
-    instances = discover_instances()
-    if not instances:
-        return json.dumps({"instances": [], "note": "No UDS instances found. Falling back to TCP."})
-    active = get_active_socket()
-    for inst in instances:
-        inst["connected"] = (inst["socket"] == active)
-    return json.dumps({"instances": instances}, indent=2)
-
-
-@mcp.tool()
-def connect_instance(project: str) -> str:
-    """
-    Switch the MCP bridge to a different Ghidra instance by project name.
-
-    Use list_instances() first to see available instances and their project names.
-    After connecting, all subsequent MCP tool calls will be routed to the selected instance.
-
-    Args:
-        project: Project name (or substring) to connect to (e.g., "test-project")
-
-    Returns:
-        JSON with connection result
-    """
-    global _active_socket
-    instances = discover_instances()
-    if not instances:
-        return json.dumps({"error": "No running Ghidra instances found"})
-
-    # Exact match first, then substring
-    match = None
-    for inst in instances:
-        if inst.get("project", "") == project:
-            match = inst
-            break
-    if not match:
-        for inst in instances:
-            if project.lower() in inst.get("project", "").lower():
-                match = inst
-                break
-    if not match:
-        available = [inst.get("project", "unknown") for inst in instances]
-        return json.dumps({"error": f"No instance matching '{project}'", "available": available})
-
-    _active_socket = match["socket"]
-    # Invalidate request cache since we switched instances
-    if hasattr(safe_get, "cache"):
-        safe_get.cache.clear()
-    return json.dumps({
-        "connected": True,
-        "project": match.get("project"),
-        "socket": match["socket"],
-        "pid": match.get("pid"),
-    })
-
-
-@mcp.tool()
 def list_functions(offset: int = 0, limit: int = 100, program: str = None) -> list:
     """
     List all function names in the program with pagination.
@@ -1339,12 +1276,18 @@ def decompile_function(
     force: bool = False,
     timeout: int = None,
     program: str = None,
+    offset: int = 0,
+    limit: int = None,
 ) -> str:
     """
     Decompile a function by name or address and return the decompiled C code.
 
     This is the primary tool for retrieving decompiled pseudocode. It supports both
     function names and addresses, with optional cache refresh for seeing recent changes.
+
+    **Pagination (for large functions):**
+    Use offset and limit to paginate through large decompiled functions that might
+    overwhelm LLM context windows. The response includes pagination metadata.
 
     **When to Use Force Decompilation (force=True):**
     - After changing function signatures or prototypes
@@ -1360,9 +1303,13 @@ def decompile_function(
         timeout: Optional timeout in seconds (default: 45s, use higher for complex functions)
         program: Optional program name to query (e.g., "D2Client.dll").
                  If not specified, uses the currently active program.
+        offset: Line number to start from (0-indexed). Use for pagination. (default: 0)
+        limit: Maximum number of lines to return. If None, returns all lines.
+               Recommended: 100-200 lines per chunk to avoid context overflow.
 
     Returns:
-        Decompiled C code as a string
+        Decompiled C code as a string. When using pagination (offset/limit), includes
+        metadata header showing total lines, current range, and whether more data exists.
 
     Raises:
         GhidraValidationError: If neither name nor address provided, or address format invalid
@@ -1383,10 +1330,17 @@ def decompile_function(
         # Decompile from a specific program (cross-binary query)
         code = decompile_function(address="0x6fb00000", program="D2Common.dll")
 
+        # Paginate through a large function (first 100 lines)
+        code = decompile_function(address="0x6fb6aef0", offset=0, limit=100)
+
+        # Get next chunk (lines 100-199)
+        code = decompile_function(address="0x6fb6aef0", offset=100, limit=100)
+
     Performance Notes:
         - Cached calls: ~10-50ms
         - Fresh decompilation: ~100-500ms (depends on function complexity)
         - Use force=True only when necessary
+        - Use pagination for functions with 200+ lines to avoid context overflow
     """
     if not name and not address:
         raise GhidraValidationError("Either 'name' or 'address' parameter is required")
@@ -1449,6 +1403,24 @@ def decompile_function(
         if isinstance(result, list):
             result = "\n".join(result)
 
+        # Apply pagination if offset or limit specified
+        if offset > 0 or limit is not None:
+            lines = result.split("\n")
+            total_lines = len(lines)
+
+            # Apply offset and limit
+            end_idx = len(lines) if limit is None else min(offset + limit, len(lines))
+            paginated_lines = lines[offset:end_idx]
+
+            # Build pagination metadata header
+            has_more = end_idx < total_lines
+            metadata = f"/* PAGINATION: lines {offset + 1}-{end_idx} of {total_lines}"
+            if has_more:
+                metadata += f" (use offset={end_idx} for next chunk)"
+            metadata += " */\n\n"
+
+            result = metadata + "\n".join(paginated_lines)
+
         return result
     finally:
         # Restore original timeout
@@ -1458,146 +1430,6 @@ def decompile_function(
             ENDPOINT_TIMEOUTS["force_decompile_by_name"] = original_timeout
 
 
-@mcp.tool()
-def get_decompiled_code(
-    function_address: str, refresh_cache: bool = False, timeout: int = None
-) -> str:
-    """
-    Get the decompiled C code for a function at the specified address.
-
-    **DEPRECATED**: Use decompile_function(address=...) instead. This tool is maintained
-    for backward compatibility but decompile_function() is the preferred unified tool.
-
-    Args:
-        function_address: Memory address of the function in hex format (e.g., "0x401000")
-        refresh_cache: If True, forces fresh decompilation (default: False)
-        timeout: Optional timeout in seconds for this operation
-
-    Returns:
-        str: Decompiled C pseudocode as a string
-
-    Note:
-        This is a convenience wrapper around decompile_function().
-        Prefer using: decompile_function(address="0x401000", force=True)
-    """
-    return decompile_function(
-        address=function_address, force=refresh_cache, timeout=timeout
-    )
-
-
-@mcp.tool()
-def get_disassembly(
-    function_address: str,
-    as_text: bool = False,
-    filter_mnemonics: str = None,
-    timeout: int = None,
-) -> list[str] | str:
-    """
-    Get the disassembled assembly code for a function at the specified address.
-
-    This is a simplified tool specifically designed for retrieving disassembly.
-    Use this when you need the assembly instructions of a function for low-level analysis.
-
-    Args:
-        function_address: Memory address of the function in hex format (e.g., "0x401000", "0x6fb6aef0")
-                         Accepts addresses with or without 0x prefix
-        as_text: If True, returns assembly as a single string with newlines; if False, returns list (default: False)
-        filter_mnemonics: Optional comma-separated instruction mnemonics to filter by
-                         (e.g., "CALL,JMP" shows only calls and jumps, "MOV" shows only moves)
-                         Case-insensitive
-        timeout: Optional timeout in seconds for this operation (overrides default)
-
-    Returns:
-        list[str] | str: List of assembly instructions (default) or single string with newlines if as_text=True
-                        Each line contains: address, instruction, and optional comment
-
-    Raises:
-        GhidraValidationError: If address format is invalid or no function found
-
-    Examples:
-        # Get disassembly as a list (default)
-        asm_lines = get_disassembly("0x401000")
-        # Returns: ["0x401000: PUSH EBP", "0x401001: MOV EBP,ESP", ...]
-
-        # Get disassembly as formatted text
-        asm_text = get_disassembly("0x401000", as_text=True)
-        # Returns: "0x401000: PUSH EBP\n0x401001: MOV EBP,ESP\n..."
-
-        # Filter to show only CALL and JMP instructions
-        calls_jumps = get_disassembly("0x401000", filter_mnemonics="CALL,JMP")
-        # Returns: ["0x401005: CALL 0x402000", "0x40100a: JMP 0x401020", ...]
-
-        # Show only MOV instructions as text
-        movs = get_disassembly("0x401000", as_text=True, filter_mnemonics="MOV")
-
-    Performance Notes:
-        - Disassembly is cached by Ghidra
-        - Filtering is done client-side after retrieval
-        - Use filter_mnemonics to reduce output size for large functions
-
-    Note:
-        This returns the same information as disassemble_function() but with a simpler name.
-        Use as_text=True for easier reading/display, or as_text=False (default) for programmatic parsing.
-    """
-    # Sanitize and validate address
-    function_address = sanitize_address(function_address)
-    if not validate_hex_address(function_address):
-        raise GhidraValidationError(
-            f"Invalid hexadecimal address format: {function_address}. "
-            f"Expected format: 0x followed by hex digits (e.g., '0x401000'). "
-            f"Use get_function_by_address() to verify the address."
-        )
-
-    # Verify function exists at this address
-    func_check = safe_get("get_function_by_address", {"address": function_address})
-    if not func_check or any(
-        "Error" in str(line) or "not found" in str(line).lower() for line in func_check
-    ):
-        raise GhidraValidationError(
-            f"No function found at address {function_address}. "
-            f"Verify the address using get_function_by_address() or "
-            f"use disassemble_bytes() to disassemble arbitrary memory regions."
-        )
-
-    # Apply custom timeout if specified
-    if timeout:
-        original_timeout = ENDPOINT_TIMEOUTS.get("disassemble_function", 30)
-        ENDPOINT_TIMEOUTS["disassemble_function"] = timeout
-
-    try:
-        result = safe_get("disassemble_function", {"address": function_address})
-
-        # Check for errors
-        if not result or (len(result) == 1 and "Error" in result[0]):
-            error_msg = result[0] if result else "Unknown error"
-            raise GhidraValidationError(
-                f"Failed to disassemble function at {function_address}: {error_msg}. "
-                f"Try using get_function_by_address() to verify the function exists."
-            )
-
-        # Apply mnemonic filter if specified
-        if filter_mnemonics:
-            mnemonics = [m.strip().upper() for m in filter_mnemonics.split(",")]
-            # Filter lines that contain any of the specified mnemonics
-            # Format is typically "address: mnemonic operands ; comment"
-            result = [
-                line
-                for line in result
-                if any(mnem in line.upper() for mnem in mnemonics)
-            ]
-
-            if not result:
-                logger.warning(
-                    f"No instructions matching '{filter_mnemonics}' found in function at {function_address}"
-                )
-
-        if as_text:
-            return "\n".join(result)
-        return result
-    finally:
-        # Restore original timeout
-        if timeout:
-            ENDPOINT_TIMEOUTS["disassemble_function"] = original_timeout
 
 
 @mcp.tool()
@@ -1890,7 +1722,10 @@ def rename_external_location(address: str, new_name: str) -> str:
         Rename "Ordinal_100" to actual function name:
         rename_external_location("0x6fb7e218", "sgptDataTables")
     """
-    params = {"address": validate_hex_address(address), "new_name": new_name}
+    address = sanitize_address(address)
+    if not validate_hex_address(address):
+        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+    params = {"address": address, "new_name": new_name}
     return safe_post("rename_external_location", params)
 
 
@@ -1985,30 +1820,6 @@ def list_data_items_by_xrefs(
     result = safe_get_json("list_data_items_by_xrefs", params)
     return result
 
-
-@mcp.tool()
-def search_functions_by_name(
-    query: str, offset: int = 0, limit: int = 100, program: str = None
-) -> list:
-    """
-    Search for functions whose name contains the given substring.
-
-    Args:
-        query: Search string to match against function names
-        offset: Pagination offset for starting position (default: 0)
-        limit: Maximum number of results to return (default: 100)
-        program: Optional program name to query (e.g., "D2Client.dll").
-                 If not specified, uses the currently active program.
-
-    Returns:
-        List of matching functions with their names and addresses
-    """
-    if not query:
-        raise GhidraValidationError("query string is required")
-    params = {"query": query, "offset": offset, "limit": limit}
-    if program:
-        params["program"] = program
-    return safe_get("search_functions", params)
 
 
 @mcp.tool()
@@ -2303,17 +2114,48 @@ def get_current_selection() -> dict:
 
 
 @mcp.tool()
-def disassemble_function(address: str, program: str = None) -> list:
+def disassemble_function(
+    address: str,
+    program: str = None,
+    offset: int = 0,
+    limit: int = None,
+    filter_mnemonics: str = None,
+) -> list:
     """
     Get assembly code (address: instruction; comment) for a function.
+
+    **Pagination (for large functions):**
+    Use offset and limit to paginate through large disassembled functions that might
+    overwhelm LLM context windows. Recommended chunk size: 100-200 instructions.
 
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
         program: Optional program name to query (e.g., "D2Client.dll").
                  If not specified, uses the currently active program.
+        offset: Instruction index to start from (0-indexed). Use for pagination. (default: 0)
+        limit: Maximum number of instructions to return. If None, returns all.
+               Recommended: 100-200 instructions per chunk to avoid context overflow.
+        filter_mnemonics: Optional comma-separated instruction mnemonics to filter by
+                         (e.g., "CALL,JMP" shows only calls and jumps, "MOV" shows only moves).
+                         Case-insensitive. Filtering is applied before pagination.
 
     Returns:
-        List of assembly instructions with addresses and comments
+        List of assembly instructions with addresses and comments.
+        When using pagination, first element is a metadata string showing total count
+        and pagination info.
+
+    Examples:
+        # Get all assembly for a function
+        asm = disassemble_function(address="0x1400010a0")
+
+        # Get first 100 instructions only
+        asm = disassemble_function(address="0x1400010a0", offset=0, limit=100)
+
+        # Get next 100 instructions
+        asm = disassemble_function(address="0x1400010a0", offset=100, limit=100)
+
+        # Filter to show only CALL and JMP instructions
+        calls = disassemble_function(address="0x1400010a0", filter_mnemonics="CALL,JMP")
     """
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
@@ -2321,7 +2163,35 @@ def disassemble_function(address: str, program: str = None) -> list:
     params = {"address": address}
     if program:
         params["program"] = program
-    return safe_get("disassemble_function", params)
+    result = safe_get("disassemble_function", params)
+
+    # Apply mnemonic filter if specified (before pagination)
+    if filter_mnemonics:
+        mnemonics = [m.strip().upper() for m in filter_mnemonics.split(",")]
+        result = [
+            line
+            for line in result
+            if any(mnem in line.upper() for mnem in mnemonics)
+        ]
+
+    # Apply pagination if offset or limit specified
+    if offset > 0 or limit is not None:
+        total_instructions = len(result)
+
+        # Apply offset and limit
+        end_idx = len(result) if limit is None else min(offset + limit, len(result))
+        paginated = result[offset:end_idx]
+
+        # Add pagination metadata as first element
+        has_more = end_idx < total_instructions
+        metadata = f"/* PAGINATION: instructions {offset + 1}-{end_idx} of {total_instructions}"
+        if has_more:
+            metadata += f" (use offset={end_idx} for next chunk)"
+        metadata += " */"
+
+        return [metadata] + paginated
+
+    return result
 
 
 @mcp.tool()
@@ -2511,9 +2381,8 @@ def set_function_prototype(
 
         # Provide actionable error messages
         if "success" in result.lower():
-            msg = f"Successfully set prototype for function at {function_address}"
-            if calling_convention:
-                msg += f" with {calling_convention} calling convention"
+            # v3.0.1: Pass through server response (includes old prototype) and append usage hint
+            msg = result.rstrip()
             msg += f"\nUse: get_decompiled_code('{function_address}', refresh_cache=True) to see changes"
             return msg
         elif "invalid calling convention" in result.lower():
@@ -2897,13 +2766,13 @@ def list_strings(
 
 
 @mcp.tool()
-def get_function_jump_target_addresses(
+def get_function_jump_targets(
     name: str, offset: int = 0, limit: int = 100
 ) -> list:
     """
     Get all jump target addresses from a function's disassembly.
 
-    This tool analyzes the disassembly of a specified function and extracts all addresses
+    Analyzes the disassembly of a specified function and extracts all addresses
     that are targets of conditional and unconditional jump instructions (JMP, JE, JNE, JZ, etc.).
 
     Args:
@@ -3445,10 +3314,16 @@ def check_connection() -> str:
     Returns:
         Connection status message
     """
-    result = "\n".join(safe_get("check_connection"))
-    if result.startswith("Error:") or result.startswith("Request failed:"):
-        return f"Connection failed: {result}"
-    return result
+    try:
+        response = session.get(
+            urljoin(ghidra_server_url, "check_connection"), timeout=REQUEST_TIMEOUT
+        )
+        if response.ok:
+            return response.text.strip()
+        else:
+            return f"Connection failed: HTTP {response.status_code}"
+    except Exception as e:
+        return f"Connection failed: {str(e)}"
 
 
 @mcp.tool()
@@ -3482,6 +3357,26 @@ def get_metadata() -> str:
         JSON string with program metadata
     """
     return "\n".join(safe_get("get_metadata"))
+
+
+@mcp.tool()
+def get_function_count(program: str = None) -> str:
+    """
+    Return the total number of functions in the loaded program.
+
+    Quickly retrieve the function count without listing all functions.
+    Useful for estimating analysis scope or monitoring analysis progress.
+
+    Args:
+        program: Optional program name for multi-binary projects
+
+    Returns:
+        JSON with function_count and program name
+    """
+    params = {}
+    if program:
+        params["program"] = program
+    return safe_get_json("get_function_count", params)
 
 
 @mcp.tool()
@@ -3561,7 +3456,7 @@ def get_enum_values(enum_name: str) -> list:
 
 
 @mcp.tool()
-def search_byte_patterns(pattern: str, mask: str = None) -> list:
+def search_byte_patterns(pattern: str, mask: str = None, program: str = None) -> list:
     """
     Search for byte patterns with optional wildcards (e.g., 'E8 ?? ?? ?? ??').
     Useful for finding shellcode, API calls, or specific instruction sequences.
@@ -3572,6 +3467,7 @@ def search_byte_patterns(pattern: str, mask: str = None) -> list:
     Args:
         pattern: Hexadecimal pattern to search for (e.g., "E8 ?? ?? ?? ??")
         mask: Optional mask for wildcards (use ? for wildcards)
+        program: Optional program name for multi-binary projects
 
     Returns:
         List of addresses where the pattern was found
@@ -3579,10 +3475,13 @@ def search_byte_patterns(pattern: str, mask: str = None) -> list:
     Example:
         search_byte_patterns("E8 ?? ?? ?? ??")  # Find all CALL instructions
         search_byte_patterns("558BEC")  # Find standard function prologue
+        search_byte_patterns("44324c4f44", program="Game.dll")  # Search in specific binary
     """
     params = {"pattern": pattern}
     if mask:
         params["mask"] = mask
+    if program:
+        params["program"] = program
     return safe_get("search_byte_patterns", params)
 
 
@@ -3656,7 +3555,7 @@ def consolidate_duplicate_types(base_type_name: str, auto_delete: bool = False) 
         4. Re-run with auto_delete=True to clean up
 
     Note:
-        This tool enforces FUNCTION_DOC_WORKFLOW_V4.md Phase 2 Type Audit requirements.
+        This tool enforces FUNCTION_DOC_WORKFLOW_V5.md Phase 2 Type Audit requirements.
         State-based types cause 15-point completeness score penalty per occurrence.
     """
     import json
@@ -4368,6 +4267,38 @@ def batch_set_comments(
 
 
 @mcp.tool()
+def clear_function_comments(
+    function_address: str,
+    clear_plate: bool = True,
+    clear_pre: bool = True,
+    clear_eol: bool = True,
+) -> str:
+    """
+    Clear all comments (plate, PRE, EOL) within a function's address range (v3.0.1).
+    Useful for cleaning up stale comments before re-documenting a function.
+
+    Args:
+        function_address: Function address in hex format (e.g., "0x401000")
+        clear_plate: Clear the plate (header) comment (default: True)
+        clear_pre: Clear all PRE_COMMENT (decompiler) comments (default: True)
+        clear_eol: Clear all EOL_COMMENT (disassembly) comments (default: True)
+
+    Returns:
+        JSON with counts of comments cleared per type
+    """
+    validate_hex_address(function_address)
+
+    payload = {
+        "function_address": function_address,
+        "clear_plate": clear_plate,
+        "clear_pre": clear_pre,
+        "clear_eol": clear_eol,
+    }
+
+    return safe_post_json("clear_function_comments", payload)
+
+
+@mcp.tool()
 def get_plate_comment(address: str) -> str:
     """
     Get function plate (header) comment.
@@ -4445,20 +4376,29 @@ def set_plate_comment(function_address: str, comment: str) -> str:
 
 
 @mcp.tool()
-def get_function_variables(function_name: str, program: str = None) -> str:
+def get_function_variables(function_name: str = None, function_address: str = None, program: str = None) -> str:
     """
     List all variables in a function including parameters and locals (v1.5.0).
 
     Args:
-        function_name: Name of the function
+        function_name: Name of the function (either name or address required)
+        function_address: Address of the function in hex (e.g., "0x401000") - alternative to name
         program: Optional program name to query (if not provided, uses current program)
 
     Returns:
-        JSON with function variables including names, types, and storage locations
+        JSON with function variables including names, types, storage locations,
+        and is_phantom flag indicating decompiler artifacts
     """
-    validate_function_name(function_name)
+    if not function_name and not function_address:
+        return '{"error": "Either function_name or function_address is required"}'
 
-    params = {"function_name": function_name}
+    params = {}
+    if function_name:
+        validate_function_name(function_name)
+        params["function_name"] = function_name
+    if function_address:
+        validate_hex_address(function_address)
+        params["function_address"] = function_address
     if program:
         params["program"] = program
     return safe_get_json("get_function_variables", params)
@@ -4522,7 +4462,7 @@ def analyze_function_completeness(function_address: str) -> str:
     Checks for custom names, prototypes, comments, undefined variables,
     plate comment structure, and Hungarian notation compliance.
 
-    **NEW**: Returns workflow-aligned recommendations based on FUNCTION_DOC_WORKFLOW_V4.md
+    **NEW**: Returns workflow-aligned recommendations based on FUNCTION_DOC_WORKFLOW_V5.md
     to guide users on exactly what steps to take to achieve 100% completeness.
 
     Args:
@@ -4536,7 +4476,7 @@ def analyze_function_completeness(function_address: str) -> str:
         - hungarian_notation_violations (type-to-prefix mismatches)
         - type_quality_issues (void* parameters, state-based type names)
         - completeness_score (0-100)
-        - recommendations (array of actionable steps aligned with FUNCTION_DOC_WORKFLOW_V4.md)
+        - recommendations (array of actionable steps aligned with FUNCTION_DOC_WORKFLOW_V5.md)
 
     Recommendations provide specific guidance on:
         - Type normalization (undefined1 -> byte, undefined4 -> uint/int/float)
@@ -4561,7 +4501,7 @@ def analyze_function_completeness(function_address: str) -> str:
           "type_quality_issues": [],
           "completeness_score": 85.0,
           "recommendations": [
-            "UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V4.md Phase 2 'Type Audit' section:",
+            "UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V5.md Phase 2 'Type Audit' section:",
             "1. Type Resolution: Apply type normalization before renaming:",
             "   - undefined4 -> uint/int/float/pointer (32-bit - check usage context)",
             "2. Use set_local_variable_type() with lowercase builtin types (uint, ushort, byte)",
@@ -5242,7 +5182,8 @@ def get_ghidra_script(script_name: str) -> str:
     if not script_name or not isinstance(script_name, str):
         raise GhidraValidationError("script_name is required")
 
-    script_path = os.path.join("ghidra_scripts", f"{script_name}.java")
+    script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
+    script_path = os.path.join(script_dir, f"{script_name}.java")
 
     if not os.path.exists(script_path):
         raise GhidraValidationError(f"Script not found: {script_name}")
@@ -5403,7 +5344,8 @@ def update_ghidra_script(
     if not new_content or not isinstance(new_content, str):
         raise GhidraValidationError("new_content is required")
 
-    script_path = os.path.join("ghidra_scripts", f"{script_name}.java")
+    script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
+    script_path = os.path.join(script_dir, f"{script_name}.java")
 
     if not os.path.exists(script_path):
         raise GhidraValidationError(f"Script not found: {script_name}")
@@ -5495,7 +5437,8 @@ def delete_ghidra_script(
             "confirm=True required for safety (prevents accidents)"
         )
 
-    script_path = os.path.join("ghidra_scripts", f"{script_name}.java")
+    script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
+    script_path = os.path.join(script_dir, f"{script_name}.java")
 
     if not os.path.exists(script_path):
         raise GhidraValidationError(f"Script not found: {script_name}")
@@ -5689,6 +5632,382 @@ def open_program(path: str) -> str:
 
     url = f"{ghidra_server_url}/open_program"
     params = {"path": path}
+    return make_request(url, method="GET", params=params)
+
+
+# ====================================================================================
+# MEMORY OPERATIONS - Read and search raw memory bytes
+# ====================================================================================
+
+
+@mcp.tool()
+def read_memory(address: str, length: int = 256, program: str = None) -> str:
+    """
+    Read raw bytes from memory at the specified address.
+
+    Reads binary data directly from the program's memory space. Useful for:
+    - Examining data structures at specific addresses
+    - Reading string data that wasn't auto-detected
+    - Verifying patch locations before modification
+    - Extracting embedded resources or constants
+
+    Args:
+        address: Memory address to read from (hex string, e.g., "0x401000")
+        length: Number of bytes to read (default: 256, max recommended: 4096)
+        program: Optional program name for multi-binary projects
+
+    Returns:
+        JSON with address, bytes (hex string), ASCII representation, and length
+
+    Example:
+        # Read 64 bytes at address
+        data = read_memory("0x401000", 64)
+        # Returns: {"address": "0x401000", "bytes": "4d5a9000...", "ascii": "MZ...", "length": 64}
+
+        # Read from specific program in multi-binary project
+        data = read_memory("0x10001000", 128, program="Game.dll")
+    """
+    if not address:
+        raise GhidraValidationError("Address is required")
+    
+    url = f"{ghidra_server_url}/read_memory"
+    params = {"address": address, "length": length}
+    if program:
+        params["program"] = program
+    return make_request(url, method="GET", params=params)
+
+
+@mcp.tool()
+def search_memory_strings(
+    query: str, 
+    min_length: int = 4,
+    encoding: str = "ascii",
+    program: str = None
+) -> str:
+    """
+    Search for string patterns in program memory.
+
+    Searches for strings matching the query pattern. More flexible than
+    list_strings() as it can find strings that weren't auto-detected
+    during initial analysis.
+
+    Args:
+        query: String or regex pattern to search for
+        min_length: Minimum string length to consider (default: 4)
+        encoding: String encoding - "ascii", "utf8", "utf16" (default: "ascii")
+        program: Optional program name for multi-binary projects
+
+    Returns:
+        JSON with matching strings, their addresses, and context
+
+    Example:
+        # Find error messages
+        results = search_memory_strings("error")
+        
+        # Find version strings
+        results = search_memory_strings("v1\\.[0-9]+")
+        
+        # Find Unicode strings
+        results = search_memory_strings("Player", encoding="utf16")
+    """
+    if not query:
+        raise GhidraValidationError("Query string is required")
+    
+    url = f"{ghidra_server_url}/search_strings"
+    params = {
+        "query": query,
+        "min_length": min_length,
+        "encoding": encoding
+    }
+    if program:
+        params["program"] = program
+    return make_request(url, method="GET", params=params)
+
+
+# ====================================================================================
+# UI NAVIGATION & CURSOR TOOLS - Interactive Ghidra session support
+# ====================================================================================
+
+
+@mcp.tool()
+def get_current_address() -> str:
+    """
+    Get the current cursor/selection address in Ghidra's listing view.
+
+    Returns the address where the user's cursor is currently positioned
+    in the Ghidra UI. Useful for:
+    - Understanding user's current focus
+    - Building context-aware suggestions
+    - Coordinating between manual and automated analysis
+
+    Returns:
+        JSON with current address and containing function (if any)
+
+    Example:
+        location = get_current_address()
+        # Returns: {"address": "0x401234", "function": "main", "in_function": true}
+    """
+    url = f"{ghidra_server_url}/get_current_address"
+    return make_request(url, method="GET")
+
+
+@mcp.tool()
+def get_current_function() -> str:
+    """
+    Get information about the function at the current cursor position.
+
+    Returns details about the function containing the cursor, including
+    its name, address range, signature, and basic metrics.
+
+    Returns:
+        JSON with function details or null if cursor is not in a function
+
+    Example:
+        func = get_current_function()
+        # Returns: {"name": "main", "entry": "0x401000", "signature": "int main(int, char**)", ...}
+    """
+    url = f"{ghidra_server_url}/get_current_function"
+    return make_request(url, method="GET")
+
+
+@mcp.tool()
+def set_bookmark(
+    address: str,
+    category: str = "Analysis",
+    comment: str = "",
+    bookmark_type: str = "Note"
+) -> str:
+    """
+    Set a bookmark at the specified address.
+
+    Creates a bookmark to mark interesting locations for later review.
+    Bookmarks persist with the program and are visible in Ghidra's
+    Bookmark window.
+
+    Args:
+        address: Address to bookmark (hex string)
+        category: Bookmark category for organization (default: "Analysis")
+        comment: Descriptive comment for the bookmark
+        bookmark_type: Type of bookmark - "Note", "Warning", "Error", "Info" (default: "Note")
+
+    Returns:
+        JSON confirmation of bookmark creation
+
+    Example:
+        # Mark an interesting function
+        set_bookmark("0x401000", "Crypto", "Possible encryption routine")
+
+        # Flag suspicious code
+        set_bookmark("0x402000", "Malware", "Anti-debug check", bookmark_type="Warning")
+    """
+    if not address:
+        raise GhidraValidationError("Address is required")
+
+    url = f"{ghidra_server_url}/set_bookmark"
+    params = {
+        "address": address,
+        "category": category,
+        "comment": comment,
+        "type": bookmark_type
+    }
+    return make_request(url, method="POST", data=json.dumps(params))
+
+
+@mcp.tool()
+def delete_bookmark(address: str, category: str = None) -> str:
+    """
+    Delete a bookmark at the specified address.
+
+    Removes a previously created bookmark. Can optionally filter by
+    category to delete only specific bookmarks.
+
+    Args:
+        address: Address of the bookmark to delete
+        category: Optional category filter (deletes all if not specified)
+
+    Returns:
+        JSON confirmation of deletion
+
+    Example:
+        delete_bookmark("0x401000")
+        delete_bookmark("0x401000", category="Analysis")
+    """
+    if not address:
+        raise GhidraValidationError("Address is required")
+
+    url = f"{ghidra_server_url}/delete_bookmark"
+    params = {"address": address}
+    if category:
+        params["category"] = category
+    return make_request(url, method="POST", data=json.dumps(params))
+
+
+# ====================================================================================
+# CONTROL FLOW & ANALYSIS TOOLS - Deep function analysis and complexity metrics
+# ====================================================================================
+
+
+@mcp.tool()
+def analyze_control_flow(function_name: str) -> str:
+    """
+    Analyze the control flow structure of a function.
+
+    Returns detailed control flow information including:
+    - Basic block count and boundaries
+    - Control flow edges (jumps, branches, calls)
+    - Cyclomatic complexity
+    - Loop detection
+    - Unreachable code detection
+
+    Args:
+        function_name: Name of function to analyze
+
+    Returns:
+        JSON with control flow graph data and complexity metrics
+
+    Example:
+        cfg = analyze_control_flow("decrypt_data")
+        # Returns: {
+        #   "function": "decrypt_data",
+        #   "basic_blocks": 15,
+        #   "edges": 22,
+        #   "cyclomatic_complexity": 8,
+        #   "loops": [{"start": "0x401050", "end": "0x401080"}],
+        #   "blocks": [{"start": "0x401000", "end": "0x401020", "type": "entry"}, ...]
+        # }
+    """
+    if not function_name:
+        raise GhidraValidationError("Function name is required")
+
+    url = f"{ghidra_server_url}/analyze_control_flow"
+    params = {"function_name": function_name}
+    return make_request(url, method="GET", params=params)
+
+
+@mcp.tool()
+def find_dead_code(function_name: str = None) -> str:
+    """
+    Find unreachable/dead code blocks in a function or entire program.
+
+    Identifies code that cannot be reached through normal execution flow,
+    which may indicate:
+    - Compiler artifacts
+    - Obfuscation/anti-analysis
+    - Legacy/removed features
+    - Bugs in the original code
+
+    Args:
+        function_name: Optional function to analyze. If not provided, scans entire program.
+
+    Returns:
+        JSON with list of unreachable code blocks and their addresses
+
+    Example:
+        dead = find_dead_code("main")
+        # Returns: {"dead_blocks": [{"address": "0x401500", "size": 32, "reason": "unreachable"}]}
+    """
+    url = f"{ghidra_server_url}/find_dead_code"
+    params = {}
+    if function_name:
+        params["function_name"] = function_name
+    return make_request(url, method="GET", params=params)
+
+
+@mcp.tool()
+def find_anti_analysis_techniques() -> str:
+    """
+    Detect anti-analysis and anti-debugging techniques in the binary.
+
+    Scans for common techniques used to hinder reverse engineering:
+    - IsDebuggerPresent checks
+    - Timing checks (rdtsc)
+    - Exception-based detection
+    - VM/sandbox detection
+    - Self-modifying code indicators
+    - API obfuscation
+
+    Returns:
+        JSON with detected techniques, their locations, and severity
+
+    Example:
+        techniques = find_anti_analysis_techniques()
+        # Returns: {
+        #   "techniques": [
+        #     {"type": "debugger_check", "address": "0x401000", "method": "IsDebuggerPresent"},
+        #     {"type": "timing_check", "address": "0x401100", "method": "rdtsc"}
+        #   ],
+        #   "severity": "medium"
+        # }
+    """
+    url = f"{ghidra_server_url}/find_anti_analysis_techniques"
+    return make_request(url, method="GET")
+
+
+@mcp.tool()
+def batch_decompile(functions: str) -> str:
+    """
+    Decompile multiple functions at once for bulk analysis.
+
+    Efficiently decompiles a list of functions, useful for:
+    - Comparing related functions
+    - Extracting code patterns
+    - Bulk documentation generation
+
+    Args:
+        functions: Comma-separated list of function names or addresses
+
+    Returns:
+        JSON with decompiled code for each function
+
+    Example:
+        code = batch_decompile("init_player,update_player,render_player")
+        # Returns: {"functions": [{"name": "init_player", "code": "void init_player()..."}, ...]}
+    """
+    if not functions:
+        raise GhidraValidationError("Function list is required")
+
+    url = f"{ghidra_server_url}/batch_decompile"
+    params = {"functions": functions}
+    return make_request(url, method="GET", params=params)
+
+
+@mcp.tool()
+def get_function_metrics(function_name: str = None, address: str = None) -> str:
+    """
+    Get complexity metrics for a function.
+
+    Returns quantitative metrics useful for:
+    - Identifying complex functions needing review
+    - Prioritizing reverse engineering effort
+    - Comparing function implementations across versions
+
+    Args:
+        function_name: Name of function to analyze
+        address: Or address of function (alternative to name)
+
+    Returns:
+        JSON with metrics:
+        - instruction_count: Total instructions
+        - basic_block_count: Number of basic blocks
+        - cyclomatic_complexity: McCabe complexity metric
+        - call_count: Number of function calls made
+        - string_count: Number of string references
+        - local_variable_count: Stack variables
+
+    Example:
+        metrics = get_function_metrics("decrypt_packet")
+        # Returns: {"cyclomatic_complexity": 12, "instruction_count": 156, ...}
+    """
+    if not function_name and not address:
+        raise GhidraValidationError("Either function_name or address is required")
+
+    # Use find_similar_functions with limit=1 to get metrics for single function
+    url = f"{ghidra_server_url}/find_similar_functions"
+    params = {"limit": 1}
+    if function_name:
+        params["target_function"] = function_name
+    elif address:
+        params["target_function"] = address
     return make_request(url, method="GET", params=params)
 
 
@@ -6053,7 +6372,7 @@ def find_similar_functions_fuzzy(
     }
     if source_program:
         params["source_program"] = source_program
-    return safe_get_json("find_similar_functions_fuzzy", params)
+    return safe_get("find_similar_functions_fuzzy", params)
 
 
 @mcp.tool()
@@ -6121,7 +6440,7 @@ def bulk_fuzzy_match(
     }
     if filter:
         params["filter"] = filter
-    return safe_get_json("bulk_fuzzy_match", params)
+    return safe_get("bulk_fuzzy_match", params)
 
 
 @mcp.tool()
@@ -6902,6 +7221,1241 @@ def propagate_documentation(
                 results["targets_skipped"] += 1
 
     return json.dumps(results)
+
+
+# ==========================================================================
+# SERVER CONNECTION TOOLS
+# ==========================================================================
+
+
+@mcp.tool()
+def connect_server() -> str:
+    """
+    Connect to the configured Ghidra shared server.
+
+    Establishes connection using GHIDRA_SERVER_HOST, GHIDRA_SERVER_PORT,
+    GHIDRA_SERVER_USER, and GHIDRA_SERVER_PASSWORD environment variables.
+
+    Returns:
+        JSON with connection status, host, port, and user.
+    """
+    return safe_post_json("server/connect", {})
+
+
+@mcp.tool()
+def disconnect_server() -> str:
+    """
+    Disconnect from the Ghidra shared server.
+
+    Returns:
+        JSON with disconnect status.
+    """
+    return safe_post_json("server/disconnect", {})
+
+
+@mcp.tool()
+def server_status() -> str:
+    """
+    Get the current Ghidra server connection status.
+
+    Returns:
+        JSON with connected state, host, port, user, and last error if any.
+    """
+    return safe_get_json("server/status", {})
+
+
+@mcp.tool()
+def list_repositories() -> str:
+    """
+    List available repositories on the connected Ghidra server.
+
+    Requires an active server connection (use connect_server first).
+
+    Returns:
+        JSON with list of repository names and count.
+    """
+    return safe_get_json("server/repositories", {})
+
+
+@mcp.tool()
+def create_repository(name: str) -> str:
+    """
+    Create a new repository on the connected Ghidra server.
+
+    Args:
+        name: Name of the new repository to create.
+
+    Returns:
+        JSON with creation status and repository name.
+    """
+    return safe_post_json("server/repository/create", {"name": name})
+
+
+# ==========================================================================
+# PROJECT LIFECYCLE TOOLS
+# ==========================================================================
+
+
+@mcp.tool()
+def create_project(parent_dir: str, name: str) -> str:
+    """
+    Create a new Ghidra project in the specified directory.
+
+    Creates a new .gpr project file and opens it as the current project.
+
+    Args:
+        parent_dir: Absolute path to the directory where the project will be created.
+        name: Name of the new project (no extension needed).
+
+    Returns:
+        JSON with creation status, name, and directory.
+
+    Example:
+        result = create_project("/projects", "MyAnalysis")
+    """
+    return safe_post_json("create_project", {"parentDir": parent_dir, "name": name})
+
+
+@mcp.tool()
+def open_project(project_path: str) -> str:
+    """
+    Open an existing Ghidra project.
+
+    Args:
+        project_path: Path to the .gpr file or directory containing it.
+                      Examples: "/projects/MyProject.gpr" or "/projects/MyProject"
+
+    Returns:
+        JSON with open status and project name.
+    """
+    return safe_get_json("open_project", {"path": project_path})
+
+
+@mcp.tool()
+def close_project() -> str:
+    """
+    Close the currently open Ghidra project.
+
+    Closes all open programs and releases the project lock.
+
+    Returns:
+        JSON with close status.
+    """
+    return safe_post_json("close_project", {})
+
+
+@mcp.tool()
+def delete_project(project_path: str) -> str:
+    """
+    Delete a Ghidra project from disk.
+
+    WARNING: This permanently deletes the project files. The project
+    will be closed first if it is currently open.
+
+    Args:
+        project_path: Path to the .gpr file or project directory.
+
+    Returns:
+        JSON with deletion status.
+    """
+    return safe_post_json("delete_project", {"projectPath": project_path})
+
+
+@mcp.tool()
+def list_projects(search_dir: str = None) -> str:
+    """
+    List Ghidra projects found in a directory tree.
+
+    Scans up to 3 directory levels deep for .gpr files.
+
+    Args:
+        search_dir: Directory to search. Defaults to user home directory.
+
+    Returns:
+        JSON with list of projects: name, path, active (bool), count.
+    """
+    params = {}
+    if search_dir:
+        params["searchDir"] = search_dir
+    return safe_get_json("list_projects", params)
+
+
+# ==========================================================================
+# PROJECT ORGANIZATION TOOLS
+# ==========================================================================
+
+
+@mcp.tool()
+def create_folder(path: str) -> str:
+    """
+    Create a folder in the current Ghidra project.
+
+    Creates all intermediate folders in the path if they don't exist.
+
+    Args:
+        path: Folder path to create (e.g., "/dlls/x64" or "analysis").
+
+    Returns:
+        JSON with creation status and path.
+    """
+    return safe_post_json("create_folder", {"path": path})
+
+
+@mcp.tool()
+def move_file(file_path: str, dest_folder: str) -> str:
+    """
+    Move a file within the current Ghidra project.
+
+    Args:
+        file_path: Current path of the file in the project (e.g., "/Game.exe").
+        dest_folder: Destination folder path (e.g., "/archived").
+
+    Returns:
+        JSON with move status, from, and to paths.
+    """
+    return safe_post_json("move_file", {"filePath": file_path, "destFolder": dest_folder})
+
+
+@mcp.tool()
+def move_folder(source_path: str, dest_path: str) -> str:
+    """
+    Move a folder within the current Ghidra project.
+
+    Args:
+        source_path: Current path of the folder (e.g., "/old_dlls").
+        dest_path: Destination parent folder path (e.g., "/archive").
+
+    Returns:
+        JSON with move status.
+    """
+    return safe_post_json("move_folder", {"sourcePath": source_path, "destPath": dest_path})
+
+
+@mcp.tool()
+def delete_file(file_path: str) -> str:
+    """
+    Delete a file from the current Ghidra project.
+
+    WARNING: This permanently removes the file from the project.
+    The file will be closed first if it is currently open.
+
+    Args:
+        file_path: Project path of the file to delete (e.g., "/temp/Game.exe").
+
+    Returns:
+        JSON with deletion status.
+    """
+    return safe_post_json("delete_file", {"filePath": file_path})
+
+
+# ==========================================================================
+# VERSION CONTROL TOOLS
+# ==========================================================================
+
+
+@mcp.tool()
+def checkout_file(repo: str, path: str) -> str:
+    """
+    Check out a file from a Ghidra shared server repository for exclusive editing.
+
+    Requires an active server connection (use connect_server first).
+
+    Args:
+        repo: Repository name (e.g., "MyProject").
+        path: File path within the repository (e.g., "/Game.exe").
+
+    Returns:
+        JSON with checkout status.
+    """
+    return safe_post_json("server/version_control/checkout", {"repo": repo, "path": path})
+
+
+@mcp.tool()
+def checkin_file(repo: str, path: str, comment: str, keep_checked_out: bool = False) -> str:
+    """
+    Check in a file to a Ghidra shared server repository.
+
+    Args:
+        repo: Repository name.
+        path: File path within the repository.
+        comment: Check-in comment describing the changes.
+        keep_checked_out: If True, file remains checked out after check-in.
+
+    Returns:
+        JSON with check-in status.
+    """
+    return safe_post_json("server/version_control/checkin", {
+        "repo": repo, "path": path, "comment": comment,
+        "keepCheckedOut": str(keep_checked_out).lower()
+    })
+
+
+@mcp.tool()
+def undo_checkout(repo: str, path: str) -> str:
+    """
+    Undo a checkout, discarding any local changes to the file.
+
+    Args:
+        repo: Repository name.
+        path: File path within the repository.
+
+    Returns:
+        JSON with undo status.
+    """
+    return safe_post_json("server/version_control/undo_checkout", {"repo": repo, "path": path})
+
+
+@mcp.tool()
+def add_to_version_control(repo: str, path: str, comment: str) -> str:
+    """
+    Add a file to version control on the Ghidra server for the first time.
+
+    Args:
+        repo: Repository name where the file will be added.
+        path: File path within the repository.
+        comment: Initial version comment.
+
+    Returns:
+        JSON with status and next steps.
+    """
+    return safe_post_json("server/version_control/add", {
+        "repo": repo, "path": path, "comment": comment
+    })
+
+
+# ==========================================================================
+# VERSION HISTORY TOOLS
+# ==========================================================================
+
+
+@mcp.tool()
+def get_version_history(repo: str, path: str) -> str:
+    """
+    Get the version history of a file in a Ghidra server repository.
+
+    Args:
+        repo: Repository name.
+        path: File path within the repository.
+
+    Returns:
+        JSON with list of versions: version number, user, comment, date.
+    """
+    return safe_get_json("server/version_history", {"repo": repo, "path": path})
+
+
+@mcp.tool()
+def get_checkouts(repo: str, path: str) -> str:
+    """
+    Get current active checkouts for a file in a repository.
+
+    Args:
+        repo: Repository name.
+        path: File path within the repository.
+
+    Returns:
+        JSON with list of active checkouts: user, project, checkout_id, version.
+    """
+    return safe_get_json("server/checkouts", {"repo": repo, "path": path})
+
+
+# ==========================================================================
+# ADMIN TOOLS
+# ==========================================================================
+
+
+@mcp.tool()
+def terminate_checkout(repo: str, path: str, checkout_id: int) -> str:
+    """
+    Admin: forcibly terminate another user's checkout.
+
+    Requires server admin privileges.
+
+    Args:
+        repo: Repository name.
+        path: File path within the repository.
+        checkout_id: The checkout ID to terminate (from get_checkouts).
+
+    Returns:
+        JSON with termination status.
+    """
+    return safe_post_json("server/admin/terminate_checkout", {
+        "repo": repo, "path": path, "checkoutId": str(checkout_id)
+    })
+
+
+@mcp.tool()
+def list_server_users() -> str:
+    """
+    Admin: list all users registered on the Ghidra server.
+
+    Requires server admin privileges and active connection.
+
+    Returns:
+        JSON with list of users: name, is_admin, count.
+    """
+    return safe_get_json("server/admin/users", {})
+
+
+@mcp.tool()
+def set_user_permissions(repo: str, user: str, access_level: int) -> str:
+    """
+    Admin: set a user's access level for a repository.
+
+    Requires server admin privileges.
+
+    Args:
+        repo: Repository name.
+        user: Username to update.
+        access_level: Access level (0=no_access, 1=read_only, 2=read_write, 3=admin).
+
+    Returns:
+        JSON with permission update status.
+    """
+    return safe_post_json("server/admin/set_permissions", {
+        "repo": repo, "user": user, "accessLevel": str(access_level)
+    })
+
+
+# ==========================================================================
+# ANALYSIS CONTROL TOOLS
+# ==========================================================================
+
+
+@mcp.tool()
+def list_analyzers(program: str = None) -> str:
+    """
+    List all available analyzers for the current program.
+
+    Shows each analyzer's name, description, enabled state, and priority.
+
+    Args:
+        program: Optional program name for multi-binary analysis.
+
+    Returns:
+        JSON with list of analyzers and their current configuration.
+
+    Example:
+        analyzers = list_analyzers()
+        # Returns: {"analyzers": [{"name": "ASCII Strings", "enabled": true, ...}], "count": N}
+    """
+    params = {}
+    if program:
+        params["program"] = program
+    return safe_get_json("list_analyzers", params)
+
+
+@mcp.tool()
+def configure_analyzer(analyzer_name: str, enabled: bool = None, program: str = None) -> str:
+    """
+    Enable or disable a specific analyzer for a program.
+
+    Changes take effect on the next call to run_analysis.
+
+    Args:
+        analyzer_name: Name of the analyzer to configure (from list_analyzers).
+        enabled: True to enable, False to disable. Required.
+        program: Optional program name for multi-binary analysis.
+
+    Returns:
+        JSON with configuration status.
+
+    Example:
+        # Disable demangling to speed up analysis
+        configure_analyzer("Demangler GNU", enabled=False)
+    """
+    data = {"name": analyzer_name}
+    if enabled is not None:
+        data["enabled"] = str(enabled).lower()
+    if program:
+        data["program"] = program
+    return safe_post_json("configure_analyzer", data)
+
+
+@mcp.tool()
+def run_analysis(program: str = None) -> str:
+    """
+    Run auto-analysis on the current program.
+
+    Triggers Ghidra's full auto-analysis pipeline. This may take a while
+    for large binaries. Use list_analyzers/configure_analyzer to control
+    which analyzers run before calling this.
+
+    Args:
+        program: Optional program name for multi-binary analysis.
+
+    Returns:
+        JSON with analysis result: success, duration_ms, total_functions, new_functions.
+
+    Example:
+        result = run_analysis()
+        # Returns: {"success": true, "duration_ms": 12500, "total_functions": 847, ...}
+    """
+    data = {}
+    if program:
+        data["program"] = program
+    return safe_post_json("run_analysis", data)
+
+
+# ==========================================================================
+# NEWLY EXPOSED HEADLESS ENDPOINTS (previously headless-only, now bridged)
+# ==========================================================================
+
+
+@mcp.tool()
+def list_functions_enhanced(
+    program: str = None,
+    offset: int = 0,
+    limit: int = 100
+) -> str:
+    """
+    List functions with enhanced metadata including thunk and external flags.
+
+    Args:
+        program: Optional program name for multi-binary analysis.
+        offset: Pagination offset.
+        limit: Maximum results to return.
+
+    Returns:
+        JSON array of functions with name, address, isThunk, isExternal fields.
+    """
+    params = {"offset": offset, "limit": limit}
+    if program:
+        params["program"] = program
+    return safe_get_json("list_functions_enhanced", params)
+
+
+# ========== DATA TYPE MANAGEMENT ==========
+
+
+@mcp.tool()
+def create_typedef(name: str, base_type: str) -> str:
+    """
+    Create a typedef (type alias) data type.
+
+    Args:
+        name: Name for the new typedef (e.g., "pUnit")
+        base_type: Base type to alias (e.g., "UnitAny *", "int", "DWORD")
+
+    Returns:
+        Success message with typedef details or error message
+    """
+    return safe_post_json("create_typedef", {"name": name, "baseType": base_type})
+
+
+@mcp.tool()
+def create_union(name: str, fields: list) -> str:
+    """
+    Create a union data type with specified fields.
+
+    Unions store all fields at the same memory offset (overlapping), unlike structs.
+
+    Args:
+        name: Name for the new union (must be unique)
+        fields: List of field definitions as dictionaries with:
+                - name (required): Field name
+                - type (required): Field data type (e.g., "int", "float", "char[16]")
+
+    Returns:
+        Success message with union details or error message
+
+    Examples:
+        fields = [
+            {"name": "asInt", "type": "int"},
+            {"name": "asFloat", "type": "float"},
+            {"name": "asBytes", "type": "byte[4]"}
+        ]
+        result = create_union("NumberVariant", fields)
+    """
+    return safe_post_json("create_union", {"name": name, "fields": fields})
+
+
+@mcp.tool()
+def create_pointer_type(base_type: str, name: str = None) -> str:
+    """
+    Create a pointer data type wrapping a base type.
+
+    Args:
+        base_type: Base type to create pointer for (e.g., "int", "UnitAny", "void")
+        name: Optional custom name for the pointer type
+
+    Returns:
+        Success message with pointer type details or error message
+    """
+    data = {"baseType": base_type}
+    if name:
+        data["name"] = name
+    return safe_post_json("create_pointer_type", data)
+
+
+@mcp.tool()
+def clone_data_type(source_type: str, new_name: str) -> str:
+    """
+    Clone an existing data type with a new name.
+
+    Creates a copy of an existing struct, enum, union, or other data type.
+    Useful for creating variants of complex types without recreating them.
+
+    Args:
+        source_type: Name of the existing data type to clone
+        new_name: Name for the cloned type (must be unique)
+
+    Returns:
+        Success message with cloned type details or error message
+    """
+    return safe_post_json(
+        "clone_data_type", {"sourceType": source_type, "newName": new_name}
+    )
+
+
+@mcp.tool()
+def create_data_type_category(category_path: str) -> str:
+    """
+    Create a new category (folder) in the data type manager.
+
+    Categories organize data types into a hierarchy, similar to folders.
+
+    Args:
+        category_path: Category path to create (e.g., "/MyTypes/Structures")
+
+    Returns:
+        Success message or error message
+    """
+    return safe_post_json(
+        "create_data_type_category", {"categoryPath": category_path}
+    )
+
+
+@mcp.tool()
+def list_data_type_categories(
+    offset: int = 0, limit: int = 100
+) -> list:
+    """
+    List all data type categories (folders) in the program.
+
+    Args:
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of categories to return (default: 100)
+
+    Returns:
+        List of category paths in the data type manager
+    """
+    return safe_get(
+        "list_data_type_categories", {"offset": offset, "limit": limit}
+    )
+
+
+@mcp.tool()
+def move_data_type_to_category(type_name: str, category_path: str) -> str:
+    """
+    Move an existing data type to a different category.
+
+    Args:
+        type_name: Name of the data type to move
+        category_path: Target category path (e.g., "/MyTypes/Structures")
+
+    Returns:
+        Success message or error message
+    """
+    return safe_post_json(
+        "move_data_type_to_category",
+        {"typeName": type_name, "categoryPath": category_path},
+    )
+
+
+@mcp.tool()
+def get_struct_layout(struct_name: str) -> str:
+    """
+    Get the detailed field layout of a structure data type.
+
+    Returns a formatted view showing each field's offset, size, type, and name.
+    Useful for visualizing struct organization.
+
+    Args:
+        struct_name: Name of the structure to inspect
+
+    Returns:
+        Formatted struct layout with offset, size, type, and name for each field
+    """
+    return safe_get_json("get_struct_layout", {"structName": struct_name})
+
+
+@mcp.tool()
+def import_data_types(source: str, format: str = "gdt") -> str:
+    """
+    Import data types from an external source file.
+
+    Args:
+        source: Path to the data type source file (e.g., a .gdt file)
+        format: Import format (default: "gdt")
+
+    Returns:
+        Import results or error message
+    """
+    return safe_post_json(
+        "import_data_types", {"source": source, "format": format}
+    )
+
+
+# ========== VALIDATION & PRE-FLIGHT ==========
+
+
+@mcp.tool()
+def validate_data_type(address: str, type_name: str) -> str:
+    """
+    Validate whether a data type can be applied at a specific memory address.
+
+    Pre-flight check before apply_data_type(). Checks memory availability,
+    alignment, and type compatibility.
+
+    Args:
+        address: Memory address to check (e.g., "0x401000")
+        type_name: Data type name to validate (e.g., "MyStruct", "int")
+
+    Returns:
+        JSON with validation results including compatibility and any warnings
+    """
+    return safe_get_json(
+        "validate_data_type", {"address": address, "typeName": type_name}
+    )
+
+
+@mcp.tool()
+def validate_function_prototype(
+    function_address: str, prototype: str, calling_convention: str = None
+) -> str:
+    """
+    Validate a function prototype before applying it.
+
+    Pre-flight check before set_function_prototype(). Validates syntax,
+    calling convention, and parameter types without modifying anything.
+
+    Args:
+        function_address: Address of the function to validate against
+        prototype: Prototype string (e.g., "int __stdcall MyFunc(int a, char *b)")
+        calling_convention: Optional calling convention to validate
+
+    Returns:
+        JSON with validation results, any syntax errors, and warnings
+    """
+    params = {"functionAddress": function_address, "prototype": prototype}
+    if calling_convention:
+        params["callingConvention"] = calling_convention
+    return safe_get_json("validate_function_prototype", params)
+
+
+@mcp.tool()
+def can_rename_at_address(address: str) -> str:
+    """
+    Check what can be renamed at a given address.
+
+    Determines whether the address contains a function, data, or undefined bytes,
+    and suggests which rename tool to use. Use this before renaming to avoid errors.
+
+    Args:
+        address: Memory address to check (e.g., "0x401000")
+
+    Returns:
+        JSON with rename type ("function", "defined_data", or "undefined"),
+        current name, and suggested tool to use
+    """
+    return safe_get_json("can_rename_at_address", {"address": address})
+
+
+# ========== DECOMPILATION ==========
+
+
+@mcp.tool()
+def force_decompile(address: str, program: str = None) -> str:
+    """
+    Force fresh decompilation of a function, bypassing the cache.
+
+    Use this after renaming variables, changing types, or modifying function
+    signatures to see updated decompiled output.
+
+    Args:
+        address: Memory address of the function (e.g., "0x401000")
+        program: Optional program name for multi-program support
+
+    Returns:
+        Freshly decompiled C pseudocode
+    """
+    params = {"address": address}
+    if program:
+        params["program"] = program
+    return safe_get_json("force_decompile", params)
+
+
+@mcp.tool()
+def clear_instruction_flow_override(address: str) -> str:
+    """
+    Clear a flow override on an instruction at the given address.
+
+    Repairs Ghidra's overly-aggressive noreturn classification, allowing code
+    after the instruction to be reanalyzed and included in functions.
+
+    Args:
+        address: Address of the instruction with the flow override (e.g., "0x401000")
+
+    Returns:
+        Success or error message
+    """
+    return safe_post_json(
+        "clear_instruction_flow_override", {"address": address}
+    )
+
+
+# ========== LISTING & BOOKMARKS ==========
+
+
+@mcp.tool()
+def list_bookmarks(
+    category: str = None, address: str = None, offset: int = 0, limit: int = 100
+) -> list:
+    """
+    List bookmarks in the program.
+
+    Bookmarks are user-set markers for tracking analysis progress. This complements
+    set_bookmark and delete_bookmark by allowing you to query existing bookmarks.
+
+    Args:
+        category: Optional filter by bookmark category
+        address: Optional filter by specific address
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of bookmarks to return (default: 100)
+
+    Returns:
+        List of bookmarks with address, category, comment, and type
+    """
+    params = {"offset": offset, "limit": limit}
+    if category:
+        params["category"] = category
+    if address:
+        params["address"] = address
+    return safe_get("list_bookmarks", params)
+
+
+# ========== SECURITY ANALYSIS ==========
+
+
+@mcp.tool()
+def analyze_api_call_chains(program: str = None) -> str:
+    """
+    Identify suspicious API call chain patterns for threat detection.
+
+    Scans functions for known threat patterns including process injection,
+    persistence mechanisms, credential theft, network operations, and
+    ransomware-like file operations. Returns matched patterns with severity levels.
+
+    Args:
+        program: Optional program name for multi-program support
+
+    Returns:
+        JSON with detected threat patterns, matched functions, and severity levels
+    """
+    params = {}
+    if program:
+        params["program"] = program
+    return safe_get_json("analyze_api_call_chains", params)
+
+
+@mcp.tool()
+def detect_malware_behaviors(program: str = None) -> str:
+    """
+    Analyze functions for malware behavior indicators.
+
+    Scans for 10 categories of suspicious behavior: code injection, keylogging,
+    screen capture, privilege escalation, defense evasion, lateral movement,
+    data exfiltration, cryptographic operations, process manipulation, and more.
+
+    Args:
+        program: Optional program name for multi-program support
+
+    Returns:
+        JSON with detected behaviors, risk scores, and matched API patterns
+    """
+    params = {}
+    if program:
+        params["program"] = program
+    return safe_get_json("detect_malware_behaviors", params)
+
+
+@mcp.tool()
+def extract_iocs_with_context(program: str = None) -> str:
+    """
+    Extract Indicators of Compromise (IOCs) from program string data.
+
+    Identifies IPv4 addresses, URLs, domains, emails, registry keys, file paths,
+    Bitcoin addresses, and MD5/SHA256 hashes. Includes confidence scoring and
+    the containing function for each IOC.
+
+    Args:
+        program: Optional program name for multi-program support
+
+    Returns:
+        JSON with IOC type, value, address, containing function, and confidence score
+    """
+    params = {}
+    if program:
+        params["program"] = program
+    return safe_get_json("extract_iocs_with_context", params)
+
+
+# ========== GUI-ONLY ANALYSIS ==========
+
+
+@mcp.tool()
+def suggest_field_names(address: str, size: int = None) -> str:
+    """
+    Get AI-assisted field name suggestions for a structure at an address.
+
+    Analyzes structure fields and generates name suggestions based on
+    field types and usage patterns.
+
+    Args:
+        address: Address of the structure instance
+        size: Optional structure size in bytes
+
+    Returns:
+        JSON with field offset, type, current name, and suggested names
+    """
+    params = {"address": address}
+    if size:
+        params["size"] = size
+    return safe_get_json("suggest_field_names", params)
+
+
+@mcp.tool()
+def apply_data_classification(
+    address: str, classification: str, type_definition: dict = None
+) -> str:
+    """
+    Apply data type classification at an address with naming and comments in one atomic call.
+
+    Combines type application, label creation, and commenting into a single transaction.
+    Classifications: PRIMITIVE, STRUCTURE, ARRAY, ENUM.
+
+    Args:
+        address: Memory address to classify (e.g., "0x401000")
+        classification: Classification type (PRIMITIVE, STRUCTURE, ARRAY, ENUM)
+        type_definition: Optional type definition dict with details for the classification
+
+    Returns:
+        Success message with applied classification details or error message
+    """
+    data = {"address": address, "classification": classification}
+    if type_definition:
+        data["type_definition"] = type_definition
+    return safe_post_json("apply_data_classification", data)
+
+
+@mcp.tool()
+def analyze_call_graph(
+    mode: str = "cycles", source: str = None, target: str = None, program: str = None
+) -> str:
+    """
+    Analyze call graph relationships with advanced graph algorithms.
+
+    Three analysis modes:
+    - "cycles": Detect recursive call cycles using DFS
+    - "path": Find shortest call path between two functions (requires source and target)
+    - "strongly_connected": Identify strongly connected components
+
+    Args:
+        mode: Analysis mode ("cycles", "path", or "strongly_connected")
+        source: Source function name (required for "path" mode)
+        target: Target function name (required for "path" mode)
+        program: Optional program name for multi-program support
+
+    Returns:
+        JSON with analysis results depending on mode
+    """
+    params = {"mode": mode}
+    if source:
+        params["source"] = source
+    if target:
+        params["target"] = target
+    if program:
+        params["program"] = program
+    return safe_get_json("analyze_call_graph", params)
+
+
+# ========== SERVER REPOSITORY BROWSING ==========
+
+
+@mcp.tool()
+def list_repository_files(repo: str, folder: str = "/") -> str:
+    """
+    List files in a Ghidra shared server repository folder.
+
+    Requires an active server connection (use connect_server first).
+
+    Args:
+        repo: Repository name (e.g., "MyProject")
+        folder: Folder path within the repository (default: "/")
+
+    Returns:
+        JSON with list of files and folders in the repository
+    """
+    return safe_get_json(
+        "server/repository/files", {"repo": repo, "folder": folder}
+    )
+
+
+@mcp.tool()
+def get_repository_file(repo: str, path: str) -> str:
+    """
+    Get metadata for a specific file in a Ghidra shared server repository.
+
+    Requires an active server connection (use connect_server first).
+
+    Args:
+        repo: Repository name (e.g., "MyProject")
+        path: File path within the repository (e.g., "/Game.exe")
+
+    Returns:
+        JSON with file metadata (name, version, size, checkout status, etc.)
+    """
+    return safe_get_json(
+        "server/repository/file", {"repo": repo, "path": path}
+    )
+
+
+# ========== UDS INSTANCE MANAGEMENT ==========
+
+
+@mcp.tool()
+def list_instances() -> str:
+    """
+    List all running Ghidra instances discovered via Unix domain sockets.
+
+    Returns JSON with each instance's project name, PID, open programs, and socket path.
+    Also shows which instance is currently connected.
+    Useful for multi-instance setups where multiple Ghidra processes are running.
+    """
+    instances = discover_instances()
+    if not instances:
+        return json.dumps({"instances": [], "note": "No UDS instances found. Falling back to TCP."})
+    active = get_active_socket()
+    for inst in instances:
+        inst["connected"] = (inst["socket"] == active)
+    return json.dumps({"instances": instances}, indent=2)
+
+
+@mcp.tool()
+def connect_instance(project: str) -> str:
+    """
+    Switch the MCP bridge to a different Ghidra instance by project name.
+
+    Use list_instances() first to see available instances and their project names.
+    After connecting, all subsequent MCP tool calls will be routed to the selected instance.
+
+    Args:
+        project: Project name (or substring) to connect to (e.g., "test-project")
+
+    Returns:
+        JSON with connection result
+    """
+    global _active_socket
+    instances = discover_instances()
+    if not instances:
+        return json.dumps({"error": "No running Ghidra instances found"})
+
+    # Exact match first, then substring
+    match = None
+    for inst in instances:
+        if inst.get("project", "") == project:
+            match = inst
+            break
+    if not match:
+        for inst in instances:
+            if project.lower() in inst.get("project", "").lower():
+                match = inst
+                break
+    if not match:
+        available = [inst.get("project", "unknown") for inst in instances]
+        return json.dumps({"error": f"No instance matching '{project}'", "available": available})
+
+    _active_socket = match["socket"]
+    # Invalidate request cache since we switched instances
+    if hasattr(safe_get, "cache"):
+        safe_get.cache.clear()
+    return json.dumps({
+        "connected": True,
+        "project": match.get("project"),
+        "socket": match["socket"],
+        "pid": match.get("pid"),
+    })
+
+
+# ========== CONVENIENCE ALIASES ==========
+
+
+@mcp.tool()
+def get_decompiled_code(
+    function_address: str, refresh_cache: bool = False, timeout: int = None
+) -> str:
+    """
+    Get the decompiled C code for a function at the specified address.
+
+    **DEPRECATED**: Use decompile_function(address=...) instead. This tool is maintained
+    for backward compatibility but decompile_function() is the preferred unified tool.
+
+    Args:
+        function_address: Memory address of the function in hex format (e.g., "0x401000")
+        refresh_cache: If True, forces fresh decompilation (default: False)
+        timeout: Optional timeout in seconds for this operation
+
+    Returns:
+        str: Decompiled C pseudocode as a string
+
+    Note:
+        This is a convenience wrapper around decompile_function().
+        Prefer using: decompile_function(address="0x401000", force=True)
+    """
+    return decompile_function(
+        address=function_address, force=refresh_cache, timeout=timeout
+    )
+
+
+@mcp.tool()
+def get_disassembly(
+    function_address: str,
+    as_text: bool = False,
+    filter_mnemonics: str = None,
+    timeout: int = None,
+) -> list[str] | str:
+    """
+    Get the disassembled assembly code for a function at the specified address.
+
+    This is a simplified tool specifically designed for retrieving disassembly.
+    Use this when you need the assembly instructions of a function for low-level analysis.
+
+    Args:
+        function_address: Memory address of the function in hex format (e.g., "0x401000", "0x6fb6aef0")
+                         Accepts addresses with or without 0x prefix
+        as_text: If True, returns assembly as a single string with newlines; if False, returns list (default: False)
+        filter_mnemonics: Optional comma-separated instruction mnemonics to filter by
+                         (e.g., "CALL,JMP" shows only calls and jumps, "MOV" shows only moves)
+                         Case-insensitive
+        timeout: Optional timeout in seconds for this operation (overrides default)
+
+    Returns:
+        list[str] | str: List of assembly instructions (default) or single string with newlines if as_text=True
+                        Each line contains: address, instruction, and optional comment
+
+    Raises:
+        GhidraValidationError: If address format is invalid or no function found
+
+    Note:
+        This returns the same information as disassemble_function() but with a simpler name.
+        Use as_text=True for easier reading/display, or as_text=False (default) for programmatic parsing.
+    """
+    # Sanitize and validate address
+    function_address = sanitize_address(function_address)
+    if not validate_hex_address(function_address):
+        raise GhidraValidationError(
+            f"Invalid hexadecimal address format: {function_address}. "
+            f"Expected format: 0x followed by hex digits (e.g., '0x401000'). "
+            f"Use get_function_by_address() to verify the address."
+        )
+
+    # Verify function exists at this address
+    func_check = safe_get("get_function_by_address", {"address": function_address})
+    if not func_check or any(
+        "Error" in str(line) or "not found" in str(line).lower() for line in func_check
+    ):
+        raise GhidraValidationError(
+            f"No function found at address {function_address}. "
+            f"Verify the address using get_function_by_address() or "
+            f"use disassemble_bytes() to disassemble arbitrary memory regions."
+        )
+
+    # Apply custom timeout if specified
+    if timeout:
+        original_timeout = ENDPOINT_TIMEOUTS.get("disassemble_function", 30)
+        ENDPOINT_TIMEOUTS["disassemble_function"] = timeout
+
+    try:
+        result = safe_get("disassemble_function", {"address": function_address})
+
+        # Check for errors
+        if not result or (len(result) == 1 and "Error" in result[0]):
+            error_msg = result[0] if result else "Unknown error"
+            raise GhidraValidationError(
+                f"Failed to disassemble function at {function_address}: {error_msg}. "
+                f"Try using get_function_by_address() to verify the function exists."
+            )
+
+        # Apply mnemonic filter if specified
+        if filter_mnemonics:
+            mnemonics = [m.strip().upper() for m in filter_mnemonics.split(",")]
+            # Filter lines that contain any of the specified mnemonics
+            result = [
+                line
+                for line in result
+                if any(mnem in line.upper() for mnem in mnemonics)
+            ]
+
+            if not result:
+                logger.warning(
+                    f"No instructions matching '{filter_mnemonics}' found in function at {function_address}"
+                )
+
+        if as_text:
+            return "\n".join(result)
+        return result
+    finally:
+        # Restore original timeout
+        if timeout:
+            ENDPOINT_TIMEOUTS["disassemble_function"] = original_timeout
+
+
+@mcp.tool()
+def get_function_jump_target_addresses(
+    name: str, offset: int = 0, limit: int = 100
+) -> list:
+    """
+    Get all jump target addresses from a function's disassembly.
+
+    This tool analyzes the disassembly of a specified function and extracts all addresses
+    that are targets of conditional and unconditional jump instructions (JMP, JE, JNE, JZ, etc.).
+
+    Args:
+        name: Function name to analyze for jump targets
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of jump targets to return (default: 100)
+
+    Returns:
+        List of jump target addresses found in the function's disassembly
+    """
+    return safe_get(
+        "get_function_jump_targets", {"name": name, "offset": offset, "limit": limit}
+    )
+
+
+@mcp.tool()
+def search_functions_by_name(
+    query: str, offset: int = 0, limit: int = 100, program: str = None
+) -> list:
+    """
+    Search for functions whose name contains the given substring.
+
+    Args:
+        query: Search string to match against function names
+        offset: Pagination offset for starting position (default: 0)
+        limit: Maximum number of results to return (default: 100)
+        program: Optional program name to query (e.g., "D2Client.dll").
+                 If not specified, uses the currently active program.
+
+    Returns:
+        List of matching functions with their names and addresses
+    """
+    if not query:
+        raise GhidraValidationError("query string is required")
+    params = {"query": query, "offset": offset, "limit": limit}
+    if program:
+        params["program"] = program
+    return safe_get("search_functions", params)
 
 
 # ========== MAIN ==========
