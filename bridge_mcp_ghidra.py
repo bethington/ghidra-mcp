@@ -6372,7 +6372,7 @@ def find_similar_functions_fuzzy(
     }
     if source_program:
         params["source_program"] = source_program
-    return safe_get("find_similar_functions_fuzzy", params)
+    return safe_get_json("find_similar_functions_fuzzy", params)
 
 
 @mcp.tool()
@@ -6440,7 +6440,7 @@ def bulk_fuzzy_match(
     }
     if filter:
         params["filter"] = filter
-    return safe_get("bulk_fuzzy_match", params)
+    return safe_get_json("bulk_fuzzy_match", params)
 
 
 @mcp.tool()

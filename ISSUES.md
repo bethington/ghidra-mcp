@@ -51,8 +51,9 @@ dismiss it manually in the Ghidra GUI.
 
 ## 6. ~~`run_script_inline` previously wrote corrupted scripts~~ **FIXED**
 
-**Fix**: Added `unescapeJsonString()` to properly convert JSON escape sequences. Also
-switched to `_mcp_inline_` prefix, `~/ghidra_scripts/` for OSGi compat, and `.class` cleanup.
+**Fix**: Originally added explicit `unescapeJsonString()`. After the Gson migration,
+JSON body parsing via `JsonHelper.parseBody()` handles unescaping automatically.
+Also: `_mcp_inline_` prefix, `~/ghidra_scripts/` for OSGi compat, and `.class` cleanup.
 
 ---
 
