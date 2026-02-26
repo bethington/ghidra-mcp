@@ -150,32 +150,11 @@ a transaction of its own since it's a read-only persistence operation.
 
 ---
 
-## 14. `open_program` / `list_open_programs` / `switch_program` fail with "ProgramManager service not available"
+## 14. ~~`open_program` / `list_open_programs` / `switch_program` fail with "ProgramManager service not available"~~ **FIXED**
 
-**Status**: Open.
-
-**Problem**: When a program is open in CodeBrowser, `check_connection` succeeds and
-reports the active program. However, `list_open_programs`, `open_program`, and
-`switch_program` all fail with `"ProgramManager service not available"`.
-
-This makes it impossible to switch between programs in a multi-binary project via MCP.
-The user must manually open/switch programs in Ghidra's GUI.
-
-**Reproduction**:
-1. Open Ghidra project with multiple programs (e.g., keyboard firmware + dongle + BLE SoC)
-2. Open one program in CodeBrowser
-3. `check_connection` → succeeds, reports current program
-4. `list_open_programs` → `"ProgramManager service not available"`
-5. `open_program("/other_binary.bin")` → same error
-6. `switch_program("other_binary.bin")` → same error
-
-**Expected**: These tools should be able to open and switch between project files
-without manual GUI interaction, especially since issue #11 was fixed to allow
-the plugin to run at the application level.
-
-**Likely cause**: The `ProgramManager` service is only available in certain tool
-contexts. The `ApplicationLevelPlugin` fix (#11) starts the MCP server from the
-FrontEndTool, but `ProgramManager` may only be registered by the CodeBrowser tool.
-The endpoint may need to use a different API path to open/switch programs
-(e.g., `tool.getDomainFile()` + `ProgramManager.openProgram()` from the active
-CodeBrowser instance rather than looking up ProgramManager as an OSGi service).
+**Fix**: Replaced direct `getActiveTool().getService(ProgramManager.class)` calls with
+`MultiToolProgramProvider` methods that search across all registered CodeBrowser windows.
+`listOpenPrograms()` and `switchProgram()` now use `programProvider.getAllOpenPrograms()`
+/ `programProvider.setCurrentProgram()`. `openProgramFromProject()` uses a new
+`findProgramManager()` helper that finds a ProgramManager from any registered tool.
+Also fixed `getProgramOrError()` and `compareDocumentation` with the same pattern.

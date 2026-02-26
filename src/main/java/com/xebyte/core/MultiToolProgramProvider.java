@@ -123,6 +123,23 @@ public class MultiToolProgramProvider implements ProgramProvider {
     }
 
     /**
+     * Find a ProgramManager from any registered tool (active tool preferred).
+     * Returns null only if no tool has a ProgramManager (e.g., only FrontEndTool registered).
+     */
+    public ProgramManager findProgramManager() {
+        PluginTool active = getActiveTool();
+        if (active != null) {
+            ProgramManager pm = active.getService(ProgramManager.class);
+            if (pm != null) return pm;
+        }
+        for (PluginTool tool : tools.values()) {
+            ProgramManager pm = tool.getService(ProgramManager.class);
+            if (pm != null) return pm;
+        }
+        return null;
+    }
+
+    /**
      * Get the currently active PluginTool (the one whose window was last focused).
      */
     public PluginTool getActiveTool() {
