@@ -1902,11 +1902,8 @@ public class EndpointRouter {
         Program program = getProgram(programName);
         
         if (program == null && programName != null && !programName.trim().isEmpty()) {
-            ProgramManager pm = getActiveTool().getService(ProgramManager.class);
             var available = new ArrayList<String>();
-            if (pm != null) {
-                for (Program p : pm.getAllOpenPrograms()) available.add(p.getName());
-            }
+            for (Program p : programProvider.getAllOpenPrograms()) available.add(p.getName());
             var err = new LinkedHashMap<String, Object>();
             err.put("error", "Program not found: " + programName);
             err.put("available_programs", available);
@@ -1966,13 +1963,8 @@ public class EndpointRouter {
     }
 
     private Response listOpenPrograms() {
-        ProgramManager pm = getActiveTool().getService(ProgramManager.class);
-        if (pm == null) {
-            return errorJson("ProgramManager service not available");
-        }
-
-        Program[] programs = pm.getAllOpenPrograms();
-        Program currentProgram = pm.getCurrentProgram();
+        Program[] programs = programProvider.getAllOpenPrograms();
+        Program currentProgram = programProvider.getCurrentProgram();
 
         var list = new ArrayList<>();
         for (Program prog : programs) {
@@ -2062,35 +2054,12 @@ public class EndpointRouter {
             return errorJson("Program name is required");
         }
 
-        ProgramManager pm = getActiveTool().getService(ProgramManager.class);
-        if (pm == null) {
-            return errorJson("ProgramManager service not available");
-        }
-        
-        Program[] programs = pm.getAllOpenPrograms();
-        Program targetProgram = null;
-        
-        // Find program by name (case-insensitive match)
-        for (Program prog : programs) {
-            if (prog.getName().equalsIgnoreCase(programName.trim())) {
-                targetProgram = prog;
-                break;
-            }
-        }
-        
-        // If not found by exact name, try partial match on path
-        if (targetProgram == null) {
-            for (Program prog : programs) {
-                if (prog.getDomainFile().getPathname().toLowerCase().contains(programName.toLowerCase())) {
-                    targetProgram = prog;
-                    break;
-                }
-            }
-        }
-        
+        // Use MultiToolProgramProvider which searches across all CodeBrowser windows
+        Program targetProgram = programProvider.getProgram(programName);
+
         if (targetProgram == null) {
             var available = new ArrayList<String>();
-            for (Program prog : programs) {
+            for (Program prog : programProvider.getAllOpenPrograms()) {
                 available.add(prog.getName());
             }
             final var requestedName = programName;
@@ -2101,8 +2070,8 @@ public class EndpointRouter {
             });
         }
 
-        // Switch to the target program
-        pm.setCurrentProgram(targetProgram);
+        // Switch to the target program (finds owning tool and sets it there)
+        programProvider.setCurrentProgram(targetProgram);
 
         final var switchedTo = targetProgram.getName();
         final var switchedPath = targetProgram.getDomainFile().getPathname();
@@ -2198,17 +2167,11 @@ public class EndpointRouter {
             return errorJson("File not found in project: " + path);
         }
 
-        // Check if already open
-        ProgramManager pm = getActiveTool().getService(ProgramManager.class);
-        if (pm == null) {
-            return errorJson("ProgramManager service not available");
-        }
-
-        Program[] openPrograms = pm.getAllOpenPrograms();
-        for (Program prog : openPrograms) {
+        // Check if already open across all tools
+        for (Program prog : programProvider.getAllOpenPrograms()) {
             if (prog.getDomainFile().getPathname().equals(path)) {
                 // Already open, just switch to it
-                pm.setCurrentProgram(prog);
+                programProvider.setCurrentProgram(prog);
                 final var alreadyName = prog.getName();
                 final var alreadyPath = path;
                 return new Response.Ok(new Object() {
@@ -2218,6 +2181,12 @@ public class EndpointRouter {
                     String prog_path = alreadyPath;
                 });
             }
+        }
+
+        // Need a ProgramManager to open new programs — find one from any tool
+        ProgramManager pm = programProvider.findProgramManager();
+        if (pm == null) {
+            return errorJson("No CodeBrowser window available to open programs");
         }
 
         // Open the program
@@ -7613,13 +7582,8 @@ public class EndpointRouter {
                 return errorJson("Tool not available");
             }
 
-            ProgramManager programManager = getActiveTool().getService(ProgramManager.class);
-            if (programManager == null) {
-                return errorJson("ProgramManager not available");
-            }
-
-            Program[] allPrograms = programManager.getAllOpenPrograms();
-            Program currentProgram = programManager.getCurrentProgram();
+            Program[] allPrograms = programProvider.getAllOpenPrograms();
+            Program currentProgram = programProvider.getCurrentProgram();
 
             List<Map<String, Object>> programs = new ArrayList<>();
             for (Program prog : allPrograms) {
