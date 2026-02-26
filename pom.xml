@@ -86,6 +86,13 @@
             <artifactId>FileSystem</artifactId>
             <version>${ghidra.version}</version>
         </dependency>
+        <!-- Gson (bundled with Ghidra at runtime, needed for compile) -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.9.0</version>
+            <scope>provided</scope>
+        </dependency>
         <!-- JUnit (test only) -->
         <dependency>
             <groupId>junit</groupId>
