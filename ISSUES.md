@@ -98,25 +98,12 @@ result
 
 ---
 
-## 9. `run_script_inline` OSGi class loading fails for complex scripts
+## 9. ~~`run_script_inline` OSGi class loading fails for complex scripts~~ **FIXED**
 
-**Status**: Open / intermittent.
-
-**Problem**: Inline scripts that reference service classes (e.g., `ProgramManager`,
-`ProjectDataService`) sometimes fail with OSGi `ClassNotFoundException` even though
-the same code works fine when saved as a named script via `save_ghidra_script` +
-`run_ghidra_script`.
-
-```
-GhidraScriptLoadException: The class could not be found.
-_mcp_inline_CrossMatchByBytes not found by 38876517 [5]
-```
-
-**Workaround**: Save complex scripts with `save_ghidra_script` and run them with
-`run_ghidra_script` instead of using `run_script_inline`.
-
-**Likely cause**: The `_mcp_inline_` prefix or the temporary compilation context may
-interfere with OSGi bundle resolution for imported packages.
+**Fix**: Replaced fixed `_mcp_inline_` prefix with unique-per-invocation class names
+(`Mcp_<nanoTime hex>`). The old fixed prefix caused OSGi class cache collisions — the
+bundle resolver cached a stale classloader for `_mcp_inline_*` classes, then failed
+to resolve imports on subsequent runs with different dependencies.
 
 ---
 

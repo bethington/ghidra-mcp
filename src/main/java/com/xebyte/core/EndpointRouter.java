@@ -356,14 +356,20 @@ public class EndpointRouter {
                 return;
             }
 
-            String userClass = "InlineScript_" + System.currentTimeMillis();
+            // Generate a unique class name per invocation to avoid OSGi class cache collisions
+            String uid = Long.toHexString(System.nanoTime());
+            String userClass = null;
             java.util.regex.Matcher m = java.util.regex.Pattern
                 .compile("public\\s+class\\s+(\\w+)").matcher(code);
             if (m.find()) {
                 userClass = m.group(1);
             }
-            String className = "_mcp_inline_" + userClass;
-            String rewrittenCode = code.replace("class " + userClass, "class " + className);
+            String className = "Mcp_" + uid;
+            String rewrittenCode = userClass != null
+                ? code.replace("class " + userClass, "class " + className)
+                : "import ghidra.app.script.GhidraScript;\npublic class " + className
+                  + " extends GhidraScript {\n  public void run() throws Exception {\n"
+                  + code + "\n  }\n}\n";
 
             File scriptDir = new File(System.getProperty("user.home"), "ghidra_scripts");
             scriptDir.mkdirs();
