@@ -10,6 +10,8 @@ These tests run WITHOUT requiring a Ghidra server.
 They parse source files statically and cross-reference.
 """
 
+from __future__ import annotations
+
 import json
 import re
 import sys
@@ -20,8 +22,9 @@ import pytest
 # Project root
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
-# Source file paths
+# Source file paths — check both monolith and refactored layouts
 JAVA_PLUGIN_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "GhidraMCPPlugin.java"
+JAVA_ROUTER_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "core" / "EndpointRouter.java"
 JAVA_HEADLESS_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "headless" / "GhidraMCPHeadlessServer.java"
 PYTHON_BRIDGE_PATH = PROJECT_ROOT / "bridge_mcp_ghidra.py"
 ENDPOINTS_JSON_PATH = PROJECT_ROOT / "tests" / "endpoints.json"
@@ -32,15 +35,27 @@ ENDPOINTS_JSON_PATH = PROJECT_ROOT / "tests" / "endpoints.json"
 # =============================================================================
 
 def extract_java_endpoints() -> set[str]:
-    """Extract all endpoint paths from Java server.createContext() calls."""
-    if not JAVA_PLUGIN_PATH.exists():
-        pytest.skip(f"Java source not found: {JAVA_PLUGIN_PATH}")
+    """Extract all endpoint paths from Java source files.
 
-    content = JAVA_PLUGIN_PATH.read_text(encoding="utf-8")
-    # Match: server.createContext("/endpoint_name",
-    pattern = re.compile(r'server\.createContext\(\s*"(/[^"]+)"')
-    matches = pattern.findall(content)
-    return set(matches)
+    Supports both the monolith layout (all in GhidraMCPPlugin.java) and the
+    refactored layout (EndpointRouter.java with declarative Ep table + raw
+    createContext calls).
+    """
+    endpoints: set[str] = set()
+    create_context_re = re.compile(r'server\.createContext\(\s*"(/[^"]+)"')
+    # Declarative table: new Ep.Get0("/path", ...) or new Ep.JsonPost("/path", ...)
+    ep_table_re = re.compile(r'new\s+Ep\.\w+\(\s*"(/[^"]+)"')
+
+    for path in (JAVA_PLUGIN_PATH, JAVA_ROUTER_PATH):
+        if path.exists():
+            content = path.read_text(encoding="utf-8")
+            endpoints.update(create_context_re.findall(content))
+            endpoints.update(ep_table_re.findall(content))
+
+    if not endpoints:
+        pytest.skip("No Java endpoint registrations found")
+
+    return endpoints
 
 
 def extract_python_http_endpoints() -> set[str]:
@@ -138,6 +153,7 @@ class TestJavaToEndpointsJson:
         known_internal = {
             "/force_decompile",  # Internal variant used by decompile_function(force=True)
             "/get_plate_comment",  # GET variant for plate comment retrieval
+            "/decrypt_strings_auto",  # Custom fork endpoint not in upstream endpoints.json
         }
         unexpected_missing = missing_from_json - known_internal
 
