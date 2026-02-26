@@ -5,11 +5,9 @@ import com.google.gson.GsonBuilder;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -22,34 +20,14 @@ public final class JsonHelper {
 
     private JsonHelper() {}
 
-    /** Serialize any object to JSON (lists, maps, primitives). */
+    /** Expose the shared Gson instance for toJsonTree() etc. */
+    public static Gson gson() {
+        return GSON;
+    }
+
+    /** Serialize any object to JSON (lists, maps, primitives, JsonElements). */
     public static String toJson(Object o) {
-        if (o == null) return "null";
-        // Anonymous inner classes (new Object() { ... }) can't be reflectively accessed
-        // by Gson in OSGi environments. Convert them to Maps first.
-        if (isAnonymousObject(o)) {
-            return GSON.toJson(anonymousToMap(o));
-        }
         return GSON.toJson(o);
-    }
-
-    /** Check if an object is an anonymous class extending Object directly. */
-    private static boolean isAnonymousObject(Object o) {
-        Class<?> clazz = o.getClass();
-        return clazz.isAnonymousClass() && clazz.getSuperclass() == Object.class;
-    }
-
-    /** Reflect an anonymous Object's declared fields into a LinkedHashMap. */
-    private static Map<String, Object> anonymousToMap(Object o) {
-        Map<String, Object> map = new LinkedHashMap<>();
-        for (Field f : o.getClass().getDeclaredFields()) {
-            if (f.isSynthetic()) continue;  // Skip compiler-generated fields (this$0 etc.)
-            try {
-                f.setAccessible(true);
-                map.put(f.getName(), f.get(o));
-            } catch (Exception ignored) {}
-        }
-        return map;
     }
 
     /** Parse a JSON object from a request body InputStream. Returns empty map for blank input. */
