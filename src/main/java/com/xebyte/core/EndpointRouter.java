@@ -2196,16 +2196,23 @@ public class EndpointRouter {
             return errorJson("No CodeBrowser window available to open programs");
         }
 
-        // Open the program
+        // Open via DomainFile overload — OPEN_CURRENT makes it the active program.
+        // This bypasses the manual getDomainObject + openProgram(Program) path and
+        // lets ProgramManagerPlugin handle the open lifecycle properly.
         try {
-            Program program = (Program) domainFile.getDomainObject(this, false, false, ghidra.util.task.TaskMonitor.DUMMY);
+            Program program = pm.openProgram(domainFile, ProgramManager.OPEN_CURRENT);
             if (program == null) {
                 return errorJson("Failed to open program: " + path);
             }
 
-            // Add to tool and set as current
-            pm.openProgram(program);
-            pm.setCurrentProgram(program);
+            // Auto-analyze silently if not yet analyzed, suppressing the "Analyze?" dialog
+            ghidra.app.plugin.core.analysis.AutoAnalysisManager mgr =
+                ghidra.app.plugin.core.analysis.AutoAnalysisManager.getAnalysisManager(program);
+            if (mgr != null && !mgr.isAnalyzing()) {
+                mgr.initializeOptions();
+                mgr.reAnalyzeAll(program.getMemory());
+                mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+            }
 
             final var openedName = program.getName();
             final var openedPath = path;
