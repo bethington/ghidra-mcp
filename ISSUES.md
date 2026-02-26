@@ -49,13 +49,100 @@ dismiss it manually in the Ghidra GUI.
 
 ---
 
-## 6. `run_script_inline` previously wrote corrupted scripts (FIXED)
+## 6. ~~`run_script_inline` previously wrote corrupted scripts~~ **FIXED**
 
-**Problem**: `parseJsonParams()` did not unescape JSON string escapes (`\n`, `\"`, `\\`),
-so inline script code was written with literal backslash-n instead of newlines. Every
-inline script failed Java compilation.
+**Fix**: Added `unescapeJsonString()` to properly convert JSON escape sequences. Also
+switched to `_mcp_inline_` prefix, `~/ghidra_scripts/` for OSGi compat, and `.class` cleanup.
 
-**Fix**: Added `unescapeJsonString()` to properly convert JSON escape sequences. Also:
-- Inline scripts now use `_mcp_inline_` prefix to avoid collisions with user scripts
-- Scripts are written to `~/ghidra_scripts/` (not `/tmp/`) for OSGi compatibility
-- Cleanup deletes both `.java` and `.class` files, with `deleteOnExit()` fallback
+---
+
+## 7. ~~`bulk_fuzzy_match` returns list instead of string (Pydantic validation error)~~ **FIXED**
+
+**Fix**: Changed `safe_get()` to `safe_get_json()` in `bridge_mcp_ghidra.py`.
+
+**Problem**: `bulk_fuzzy_match()` returns a Python `list` but the Pydantic output model
+expects `str`. This causes a validation error:
+
+```
+1 validation error for bulk_fuzzy_matchOutput
+result
+  Input should be a valid string [type=string_type, input_value=['{"source_program": "fir...}]}'], input_type=list
+```
+
+**Reproduction**: Any call to `bulk_fuzzy_match()` with two open programs fails:
+```python
+bulk_fuzzy_match("firmware_reconstructed.bin", "dongle_working_256k.bin", filter="named", threshold=0.7)
+```
+
+**Likely fix**: Same pattern as issue #4 — the endpoint function returns a `list` but needs
+to return `str` (JSON string). Use `safe_get_json()` instead of `safe_get()`, or
+`json.dumps()` the result before returning.
+
+---
+
+## 8. ~~`find_similar_functions_fuzzy` same list-vs-string validation error~~ **FIXED**
+
+**Fix**: Changed `safe_get()` to `safe_get_json()` in `bridge_mcp_ghidra.py`.
+
+**Problem**: Identical to issue #7 — `find_similar_functions_fuzzy()` returns a `list`
+but Pydantic expects `str`.
+
+```
+1 validation error for find_similar_functions_fuzzyOutput
+result
+  Input should be a valid string [type=string_type, input_value=['{"source": {"name": "ve...es": 0, "matches": []}'], input_type=list
+```
+
+**Likely fix**: Same as #7 — wrap result with `json.dumps()` or use `safe_get_json()`.
+
+---
+
+## 9. `run_script_inline` OSGi class loading fails for complex scripts
+
+**Status**: Open / intermittent.
+
+**Problem**: Inline scripts that reference service classes (e.g., `ProgramManager`,
+`ProjectDataService`) sometimes fail with OSGi `ClassNotFoundException` even though
+the same code works fine when saved as a named script via `save_ghidra_script` +
+`run_ghidra_script`.
+
+```
+GhidraScriptLoadException: The class could not be found.
+_mcp_inline_CrossMatchByBytes not found by 38876517 [5]
+```
+
+**Workaround**: Save complex scripts with `save_ghidra_script` and run them with
+`run_ghidra_script` instead of using `run_script_inline`.
+
+**Likely cause**: The `_mcp_inline_` prefix or the temporary compilation context may
+interfere with OSGi bundle resolution for imported packages.
+
+---
+
+## 10. ~~Multi-program tools fail with "Endpoint not found: //switch_program"~~ **FIXED**
+
+**Fix**: Removed trailing `/` from `DEFAULT_GHIDRA_SERVER` (`"http://127.0.0.1:8089/"` →
+`"http://127.0.0.1:8089"`). The f-string URLs now produce correct single-slash paths.
+
+---
+
+## 11. ~~Instance not discoverable until a program is opened in CodeBrowser~~ **FIXED**
+
+**Fix**: Made `GhidraMCPPlugin` implement `ApplicationLevelPlugin` (marker interface).
+The FrontEndTool now auto-loads the plugin when the project window opens, starting the
+MCP server before any program is opened in CodeBrowser.
+
+---
+
+## 12. ~~`add_struct_field` ignores `offset` parameter — always appends~~ **FIXED**
+
+**Fix**: Changed `insertAtOffset` to `replaceAtOffset` (matching `create_struct` pattern).
+Struct is grown with padding bytes if needed before replacing at the target offset.
+
+---
+
+## 13. ~~`save_program` fails with "Unable to lock due to active transaction"~~ **FIXED**
+
+**Fix**: Moved `df.save()` out of the `executeWrite` transaction wrapper. Save needs an
+exclusive lock which cannot be acquired while a transaction is active — it doesn't need
+a transaction of its own since it's a read-only persistence operation.
