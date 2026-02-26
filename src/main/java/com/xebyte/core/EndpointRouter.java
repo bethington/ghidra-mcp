@@ -1,5 +1,6 @@
 package com.xebyte.core;
 
+import com.google.gson.JsonObject;
 import com.xebyte.VersionInfo;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
@@ -692,9 +693,9 @@ public class EndpointRouter {
 
         ProgramLocation location = service.getCurrentLocation();
         if (location == null) return errorJson("No current location");
-        return new Response.Ok(new Object() {
-            final String address = location.getAddress().toString();
-        });
+        JsonObject _jo1 = new JsonObject();
+        _jo1.addProperty("address", location.getAddress().toString());
+        return new Response.Ok(_jo1);
     }
 
     /**
@@ -713,11 +714,11 @@ public class EndpointRouter {
         Function func = program.getFunctionManager().getFunctionContaining(location.getAddress());
         if (func == null) return errorJson("No function at current location: " + location.getAddress());
 
-        return new Response.Ok(new Object() {
-            final String name = func.getName();
-            final String address = func.getEntryPoint().toString();
-            final String signature = func.getSignature().toString();
-        });
+        JsonObject _jo2 = new JsonObject();
+        _jo2.addProperty("name", func.getName());
+        _jo2.addProperty("address", func.getEntryPoint().toString());
+        _jo2.addProperty("signature", func.getSignature().toString());
+        return new Response.Ok(_jo2);
     }
 
     /**
@@ -741,12 +742,12 @@ public class EndpointRouter {
             if (count >= limit) break;
 
             final var f = func;
-            functions.add(new Object() {
-                String name = f.getName();
-                String address = f.getEntryPoint().toString();
-                boolean isThunk = f.isThunk();
-                boolean isExternal = f.isExternal();
-            });
+            JsonObject _jo3 = new JsonObject();
+            _jo3.addProperty("name", f.getName());
+            _jo3.addProperty("address", f.getEntryPoint().toString());
+            _jo3.addProperty("isThunk", f.isThunk());
+            _jo3.addProperty("isExternal", f.isExternal());
+            functions.add(_jo3);
             count++;
         }
 
@@ -1945,11 +1946,11 @@ public class EndpointRouter {
                     }
                     df.save(new ConsoleTaskMonitor());
                     final var name = program.getName();
-                    result.set(new Response.Ok(new Object() {
-                        boolean success = true;
-                        String program_name = name;
-                        String message = "Program saved successfully";
-                    }));
+                    JsonObject _jo4 = new JsonObject();
+                    _jo4.addProperty("success", true);
+                    _jo4.addProperty("program_name", name);
+                    _jo4.addProperty("message", "Program saved successfully");
+                    result.set(new Response.Ok(_jo4));
                 } catch (Throwable e) {
                     String msg = e.getMessage() != null ? e.getMessage() : e.toString();
                     errorMsg.set(msg);
@@ -1983,27 +1984,27 @@ public class EndpointRouter {
             final var imageBase = prog.getImageBase().toString();
             final var memSize = prog.getMemory().getSize();
             final var funcCount = prog.getFunctionManager().getFunctionCount();
-            list.add(new Object() {
-                String prog_name = name;
-                String prog_path = path;
-                boolean is_current = isCurrent;
-                String executable_path = execPath;
-                String language_id = language;
-                String compiler_id = compiler;
-                String image_base = imageBase;
-                long memory_size = memSize;
-                int function_count = funcCount;
-            });
+            JsonObject _jo5 = new JsonObject();
+            _jo5.addProperty("prog_name", name);
+            _jo5.addProperty("prog_path", path);
+            _jo5.addProperty("is_current", isCurrent);
+            _jo5.addProperty("executable_path", execPath);
+            _jo5.addProperty("language_id", language);
+            _jo5.addProperty("compiler_id", compiler);
+            _jo5.addProperty("image_base", imageBase);
+            _jo5.addProperty("memory_size", memSize);
+            _jo5.addProperty("function_count", funcCount);
+            list.add(_jo5);
         }
 
         final var progList = list;
         final var count = programs.length;
         final var currentName = currentProgram != null ? currentProgram.getName() : "";
-        return new Response.Ok(new Object() {
-            List<?> program_list = progList;
-            int program_count = count;
-            String current_program = currentName;
-        });
+        JsonObject _jo6 = new JsonObject();
+        _jo6.add("program_list", JsonHelper.gson().toJsonTree(progList));
+        _jo6.addProperty("program_count", count);
+        _jo6.addProperty("current_program", currentName);
+        return new Response.Ok(_jo6);
     }
 
     /**
@@ -2032,24 +2033,24 @@ public class EndpointRouter {
         final var creationDate = program.getCreationDate() != null ? program.getCreationDate().toString() : "unknown";
         final var memBlockCount = program.getMemory().getBlocks().length;
 
-        return new Response.Ok(new Object() {
-            String prog_name = name;
-            String prog_path = path;
-            String executable_path = execPath;
-            String executable_format = execFormat;
-            String language_id = language;
-            String compiler_id = compiler;
-            int address_size = addrSize;
-            String image_base = imageBase;
-            String min_address = minAddr;
-            String max_address = maxAddr;
-            long memory_size = memSize;
-            int function_count = funcCount;
-            int symbol_count = symCount;
-            int data_type_count = dtCount;
-            String creation_date = creationDate;
-            int memory_block_count = memBlockCount;
-        });
+        JsonObject _jo7 = new JsonObject();
+        _jo7.addProperty("prog_name", name);
+        _jo7.addProperty("prog_path", path);
+        _jo7.addProperty("executable_path", execPath);
+        _jo7.addProperty("executable_format", execFormat);
+        _jo7.addProperty("language_id", language);
+        _jo7.addProperty("compiler_id", compiler);
+        _jo7.addProperty("address_size", addrSize);
+        _jo7.addProperty("image_base", imageBase);
+        _jo7.addProperty("min_address", minAddr);
+        _jo7.addProperty("max_address", maxAddr);
+        _jo7.addProperty("memory_size", memSize);
+        _jo7.addProperty("function_count", funcCount);
+        _jo7.addProperty("symbol_count", symCount);
+        _jo7.addProperty("data_type_count", dtCount);
+        _jo7.addProperty("creation_date", creationDate);
+        _jo7.addProperty("memory_block_count", memBlockCount);
+        return new Response.Ok(_jo7);
     }
 
     /**
@@ -2070,10 +2071,10 @@ public class EndpointRouter {
             }
             final var requestedName = programName;
             final var availableList = available;
-            return new Response.Ok(new Object() {
-                String error = "Program not found: " + requestedName;
-                List<String> available_programs = availableList;
-            });
+            JsonObject _jo8 = new JsonObject();
+            _jo8.addProperty("error", "Program not found: " + requestedName);
+            _jo8.add("available_programs", JsonHelper.gson().toJsonTree(availableList));
+            return new Response.Ok(_jo8);
         }
 
         // Switch to the target program (finds owning tool and sets it there)
@@ -2081,11 +2082,11 @@ public class EndpointRouter {
 
         final var switchedTo = targetProgram.getName();
         final var switchedPath = targetProgram.getDomainFile().getPathname();
-        return new Response.Ok(new Object() {
-            boolean success = true;
-            String switched_to = switchedTo;
-            String path = switchedPath;
-        });
+        JsonObject _jo9 = new JsonObject();
+        _jo9.addProperty("success", true);
+        _jo9.addProperty("switched_to", switchedTo);
+        _jo9.addProperty("path", switchedPath);
+        return new Response.Ok(_jo9);
     }
 
     /**
@@ -2131,26 +2132,26 @@ public class EndpointRouter {
             final var fver = file.getVersion();
             final var fro = file.isReadOnly();
             final var fversioned = file.isVersioned();
-            fileList.add(new Object() {
-                String name = fname;
-                String path = fpath;
-                String content_type = ftype;
-                int version = fver;
-                boolean is_read_only = fro;
-                boolean is_versioned = fversioned;
-            });
+            JsonObject _jo10 = new JsonObject();
+            _jo10.addProperty("name", fname);
+            _jo10.addProperty("path", fpath);
+            _jo10.addProperty("content_type", ftype);
+            _jo10.addProperty("version", fver);
+            _jo10.addProperty("is_read_only", fro);
+            _jo10.addProperty("is_versioned", fversioned);
+            fileList.add(_jo10);
         }
 
         final var projName = project.getName();
         final var currFolder = targetFolder.getPathname();
         final var folders = folderNames;
         final var files = fileList;
-        return new Response.Ok(new Object() {
-            String project_name = projName;
-            String current_folder = currFolder;
-            List<String> sub_folders = folders;
-            List<?> project_files = files;
-        });
+        JsonObject _jo11 = new JsonObject();
+        _jo11.addProperty("project_name", projName);
+        _jo11.addProperty("current_folder", currFolder);
+        _jo11.add("sub_folders", JsonHelper.gson().toJsonTree(folders));
+        _jo11.add("project_files", JsonHelper.gson().toJsonTree(files));
+        return new Response.Ok(_jo11);
     }
 
     /**
@@ -2180,12 +2181,12 @@ public class EndpointRouter {
                 programProvider.setCurrentProgram(prog);
                 final var alreadyName = prog.getName();
                 final var alreadyPath = path;
-                return new Response.Ok(new Object() {
-                    boolean success = true;
-                    String message = "Program already open, switched to it";
-                    String name = alreadyName;
-                    String prog_path = alreadyPath;
-                });
+                JsonObject _jo12 = new JsonObject();
+                _jo12.addProperty("success", true);
+                _jo12.addProperty("message", "Program already open, switched to it");
+                _jo12.addProperty("name", alreadyName);
+                _jo12.addProperty("prog_path", alreadyPath);
+                return new Response.Ok(_jo12);
             }
         }
 
@@ -2216,13 +2217,13 @@ public class EndpointRouter {
             final var openedName = program.getName();
             final var openedPath = path;
             final var funcCount = program.getFunctionManager().getFunctionCount();
-            return new Response.Ok(new Object() {
-                boolean success = true;
-                String message = "Program opened successfully";
-                String name = openedName;
-                String prog_path = openedPath;
-                int function_count = funcCount;
-            });
+            JsonObject _jo13 = new JsonObject();
+            _jo13.addProperty("success", true);
+            _jo13.addProperty("message", "Program opened successfully");
+            _jo13.addProperty("name", openedName);
+            _jo13.addProperty("prog_path", openedPath);
+            _jo13.addProperty("function_count", funcCount);
+            return new Response.Ok(_jo13);
         } catch (Exception e) {
             return errorJson("Failed to open program: " + e.getMessage());
         }
@@ -2363,12 +2364,12 @@ public class EndpointRouter {
             final var pName = p.getName();
             final var pType = p.getDataType().getName();
             final var pComment = p.getComment();
-            paramList.add(new Object() {
-                int ordinal = pOrdinal;
-                String name = pName;
-                String type = pType;
-                String comment = pComment;
-            });
+            JsonObject _jo14 = new JsonObject();
+            _jo14.addProperty("ordinal", pOrdinal);
+            _jo14.addProperty("name", pName);
+            _jo14.addProperty("type", pType);
+            _jo14.addProperty("comment", pComment);
+            paramList.add(_jo14);
         }
 
         // Local variables (from decompilation if available)
@@ -2387,11 +2388,11 @@ public class EndpointRouter {
                     final var storage = (highVar != null && highVar.getRepresentative() != null)
                             ? highVar.getRepresentative().toString()
                             : null;
-                    localVarList.add(new Object() {
-                        String name = symName;
-                        String type = symType;
-                        String var_storage = storage;
-                    });
+                    JsonObject _jo15 = new JsonObject();
+                    _jo15.addProperty("name", symName);
+                    _jo15.addProperty("type", symType);
+                    _jo15.addProperty("var_storage", storage);
+                    localVarList.add(_jo15);
                 }
             }
         }
@@ -2408,11 +2409,11 @@ public class EndpointRouter {
                 final var relOffset = cAddr.subtract(funcStart);
                 final var eol = eolComment;
                 final var pre = preComment;
-                commentList.add(new Object() {
-                    long relative_offset = relOffset;
-                    String eol_comment = eol;
-                    String pre_comment = pre;
-                });
+                JsonObject _jo16 = new JsonObject();
+                _jo16.addProperty("relative_offset", relOffset);
+                _jo16.addProperty("eol_comment", eol);
+                _jo16.addProperty("pre_comment", pre);
+                commentList.add(_jo16);
             }
         }
 
@@ -2425,10 +2426,10 @@ public class EndpointRouter {
                 if (sym.getSymbolType() == SymbolType.LABEL && !sym.getName().equals(func.getName())) {
                     final var relOffset = lAddr.subtract(funcStart);
                     final var symName = sym.getName();
-                    labelList.add(new Object() {
-                        long relative_offset = relOffset;
-                        String name = symName;
-                    });
+                    JsonObject _jo17 = new JsonObject();
+                    _jo17.addProperty("relative_offset", relOffset);
+                    _jo17.addProperty("name", symName);
+                    labelList.add(_jo17);
                 }
             }
         }
@@ -2449,20 +2450,20 @@ public class EndpointRouter {
         final var localVars = localVarList;
         final var comments = commentList;
         final var labels = labelList;
-        return new Response.Ok(new Object() {
-            String func_hash = hash;
-            String source_program = sourceProg;
-            String source_address = sourceAddr;
-            String function_name = funcName;
-            String return_type = returnType;
-            String calling_convention = callingConvention;
-            String plate_comment = plateComment;
-            List<?> parameters = params;
-            List<?> local_variables = localVars;
-            List<?> func_comments = comments;
-            List<?> func_labels = labels;
-            double doc_completeness_score = completenessScore;
-        });
+        JsonObject _jo18 = new JsonObject();
+        _jo18.addProperty("func_hash", hash);
+        _jo18.addProperty("source_program", sourceProg);
+        _jo18.addProperty("source_address", sourceAddr);
+        _jo18.addProperty("function_name", funcName);
+        _jo18.addProperty("return_type", returnType);
+        _jo18.addProperty("calling_convention", callingConvention);
+        _jo18.addProperty("plate_comment", plateComment);
+        _jo18.add("parameters", JsonHelper.gson().toJsonTree(params));
+        _jo18.add("local_variables", JsonHelper.gson().toJsonTree(localVars));
+        _jo18.add("func_comments", JsonHelper.gson().toJsonTree(comments));
+        _jo18.add("func_labels", JsonHelper.gson().toJsonTree(labels));
+        _jo18.addProperty("doc_completeness_score", completenessScore);
+        return new Response.Ok(_jo18);
     }
 
     /**
@@ -2576,12 +2577,12 @@ public class EndpointRouter {
             final var funcName = func.getName();
             final var addrStr = addr.toString();
             final var changes = changesApplied.get();
-            return new Response.Ok(new Object() {
-                boolean success = true;
-                int changes_applied = changes;
-                String function = funcName;
-                String address = addrStr;
-            });
+            JsonObject _jo19 = new JsonObject();
+            _jo19.addProperty("success", true);
+            _jo19.addProperty("changes_applied", changes);
+            _jo19.addProperty("function", funcName);
+            _jo19.addProperty("address", addrStr);
+            return new Response.Ok(_jo19);
         } else {
             return errorJson(errorMsg.get() != null ? errorMsg.get() : "Unknown error");
         }
@@ -2840,17 +2841,19 @@ public class EndpointRouter {
                 final var addr = symbol.getAddress().toString();
                 final var name = symbol.getName();
                 final var source = symbol.getSource().toString();
-                list.add(new Object() {
-                    String address = addr;
-                    String label_name = name;
-                    String label_source = source;
-                });
+                JsonObject _jo20 = new JsonObject();
+                _jo20.addProperty("address", addr);
+                _jo20.addProperty("label_name", name);
+                _jo20.addProperty("label_source", source);
+                list.add(_jo20);
                 count++;
             }
         }
 
         final var items = list;
-        return new Response.Ok(new Object() { List<?> labels = items; });
+        JsonObject _jo21 = new JsonObject();
+        _jo21.add("labels", JsonHelper.gson().toJsonTree(items));
+        return new Response.Ok(_jo21);
     }
 
     /**
@@ -2979,15 +2982,17 @@ public class EndpointRouter {
                 context = symbol != null ? symbol.getName() : null;
             }
 
-            list.add(new Object() {
-                String address = addrStr;
-                String label = context;
-            });
+            JsonObject _jo22 = new JsonObject();
+            _jo22.addProperty("address", addrStr);
+            _jo22.addProperty("label", context);
+            list.add(_jo22);
             count++;
         }
 
         final var items = list;
-        return new Response.Ok(new Object() { List<?> jump_targets = items; });
+        JsonObject _jo23 = new JsonObject();
+        _jo23.add("jump_targets", JsonHelper.gson().toJsonTree(items));
+        return new Response.Ok(_jo23);
     }
 
     /**
@@ -3154,13 +3159,13 @@ public class EndpointRouter {
         final int skipped = skipCount.get();
         final int failed = errorCount.get();
         final var errs = List.copyOf(errors);
-        return new Response.Ok(new Object() {
-            boolean success = true;
-            int labels_created = created;
-            int labels_skipped = skipped;
-            int labels_failed = failed;
-            List<String> errors = errs.isEmpty() ? null : errs;
-        });
+        JsonObject _jo24 = new JsonObject();
+        _jo24.addProperty("success", true);
+        _jo24.addProperty("labels_created", created);
+        _jo24.addProperty("labels_skipped", skipped);
+        _jo24.addProperty("labels_failed", failed);
+        _jo24.add("errors", JsonHelper.gson().toJsonTree(errs.isEmpty() ? null : errs));
+        return new Response.Ok(_jo24);
     }
 
     /**
@@ -3191,10 +3196,10 @@ public class EndpointRouter {
 
             if (symbols == null || symbols.length == 0) {
                 final var msg = "No symbols found at address " + addressStr;
-                return new Response.Ok(new Object() {
-                    boolean success = false;
-                    String message = msg;
-                });
+                JsonObject _jo25 = new JsonObject();
+                _jo25.addProperty("success", false);
+                _jo25.addProperty("message", msg);
+                return new Response.Ok(_jo25);
             }
 
             final AtomicInteger deletedCount = new AtomicInteger(0);
@@ -3231,12 +3236,12 @@ public class EndpointRouter {
             final int count = deletedCount.get();
             final var names = List.copyOf(deletedNames);
             final var errs = List.copyOf(errors);
-            return new Response.Ok(new Object() {
-                boolean success = ok;
-                int deleted_count = count;
-                List<String> deleted_names = names;
-                List<String> errors = errs.isEmpty() ? null : errs;
-            });
+            JsonObject _jo26 = new JsonObject();
+            _jo26.addProperty("success", ok);
+            _jo26.addProperty("deleted_count", count);
+            _jo26.add("deleted_names", JsonHelper.gson().toJsonTree(names));
+            _jo26.add("errors", JsonHelper.gson().toJsonTree(errs.isEmpty() ? null : errs));
+            return new Response.Ok(_jo26);
 
         } catch (Exception e) {
             return errorJson(e.getMessage());
@@ -3329,13 +3334,13 @@ public class EndpointRouter {
         final int skipped = skippedCount.get();
         final int errCount = errorCount.get();
         final var errs = errors.isEmpty() ? null : List.copyOf(errors.subList(0, Math.min(errors.size(), 10)));
-        return new Response.Ok(new Object() {
-            boolean success = true;
-            int labels_deleted = deleted;
-            int labels_skipped = skipped;
-            int errors_count = errCount;
-            List<String> errors = errs;
-        });
+        JsonObject _jo27 = new JsonObject();
+        _jo27.addProperty("success", true);
+        _jo27.addProperty("labels_deleted", deleted);
+        _jo27.addProperty("labels_skipped", skipped);
+        _jo27.addProperty("errors_count", errCount);
+        _jo27.add("errors", JsonHelper.gson().toJsonTree(errs));
+        return new Response.Ok(_jo27);
     }
 
     /**
@@ -3377,15 +3382,17 @@ public class EndpointRouter {
             final var caller = entry.getKey();
             for (String callee : entry.getValue()) {
                 final var calleeName = callee;
-                edges.add(new Object() {
-                    String from = caller;
-                    String to = calleeName;
-                });
+                JsonObject _jo28 = new JsonObject();
+                _jo28.addProperty("from", caller);
+                _jo28.addProperty("to", calleeName);
+                edges.add(_jo28);
             }
         }
 
         final var edgeList = edges;
-        return new Response.Ok(new Object() { List<?> call_edges = edgeList; });
+        JsonObject _jo29 = new JsonObject();
+        _jo29.add("call_edges", JsonHelper.gson().toJsonTree(edgeList));
+        return new Response.Ok(_jo29);
     }
 
     /**
@@ -3547,14 +3554,16 @@ public class EndpointRouter {
                 final var caller = entry.getKey();
                 for (String callee : entry.getValue()) {
                     final var calleeName = callee;
-                    edges.add(new Object() {
-                        String from = caller;
-                        String to = calleeName;
-                    });
+                    JsonObject _jo30 = new JsonObject();
+                    _jo30.addProperty("from", caller);
+                    _jo30.addProperty("to", calleeName);
+                    edges.add(_jo30);
                 }
             }
             final var edgeList = edges;
-            return new Response.Ok(new Object() { List<?> call_edges = edgeList; });
+            JsonObject _jo31 = new JsonObject();
+            _jo31.add("call_edges", JsonHelper.gson().toJsonTree(edgeList));
+            return new Response.Ok(_jo31);
         }
     }
 
@@ -3608,22 +3617,24 @@ public class EndpointRouter {
                 var cycleObjs = new ArrayList<>();
                 for (int i = 0; i < Math.min(cycles.size(), 20); i++) {
                     final var path = List.copyOf(cycles.get(i));
-                    cycleObjs.add(new Object() {
-                        int length = path.size();
-                        List<String> path_nodes = path;
-                    });
+                    JsonObject _jo32 = new JsonObject();
+                    _jo32.addProperty("length", path.size());
+                    _jo32.add("path_nodes", JsonHelper.gson().toJsonTree(path));
+                    cycleObjs.add(_jo32);
                 }
                 if (cycles.size() > 20) {
                     final var note = (cycles.size() - 20) + " additional cycles omitted";
-                    cycleObjs.add(new Object() { String note_message = note; });
+                    JsonObject _jo33 = new JsonObject();
+                    _jo33.addProperty("note_message", note);
+                    cycleObjs.add(_jo33);
                 }
                 final int total = cycles.size();
                 final var cycleList = cycleObjs;
-                return new Response.Ok(new Object() {
-                    String analysis_type = "cycle_detection";
-                    int cycles_found = total;
-                    List<?> cycles = cycleList;
-                });
+                JsonObject _jo34 = new JsonObject();
+                _jo34.addProperty("analysis_type", "cycle_detection");
+                _jo34.addProperty("cycles_found", total);
+                _jo34.add("cycles", JsonHelper.gson().toJsonTree(cycleList));
+                return new Response.Ok(_jo34);
 
             } else if ("path".equals(analysisType) && startFunction != null && endFunction != null) {
                 List<String> path = findShortestPath(callGraph, startFunction, endFunction);
@@ -3632,22 +3643,22 @@ public class EndpointRouter {
                 if (path != null) {
                     final int pathLen = path.size() - 1;
                     final var pathList = List.copyOf(path);
-                    return new Response.Ok(new Object() {
-                        String analysis_type = "path_finding";
-                        String start_function = start;
-                        String end_function = end;
-                        boolean path_found = true;
-                        int path_length = pathLen;
-                        List<String> path_nodes = pathList;
-                    });
+                    JsonObject _jo35 = new JsonObject();
+                    _jo35.addProperty("analysis_type", "path_finding");
+                    _jo35.addProperty("start_function", start);
+                    _jo35.addProperty("end_function", end);
+                    _jo35.addProperty("path_found", true);
+                    _jo35.addProperty("path_length", pathLen);
+                    _jo35.add("path_nodes", JsonHelper.gson().toJsonTree(pathList));
+                    return new Response.Ok(_jo35);
                 } else {
-                    return new Response.Ok(new Object() {
-                        String analysis_type = "path_finding";
-                        String start_function = start;
-                        String end_function = end;
-                        boolean path_found = false;
-                        String message = "No path exists between the specified functions";
-                    });
+                    JsonObject _jo36 = new JsonObject();
+                    _jo36.addProperty("analysis_type", "path_finding");
+                    _jo36.addProperty("start_function", start);
+                    _jo36.addProperty("end_function", end);
+                    _jo36.addProperty("path_found", false);
+                    _jo36.addProperty("message", "No path exists between the specified functions");
+                    return new Response.Ok(_jo36);
                 }
 
             } else if ("strongly_connected".equals(analysisType)) {
@@ -3668,20 +3679,20 @@ public class EndpointRouter {
                     }
                     if (sz > 10) funcs.add("..." + (sz - 10) + " more");
                     final var funcList = List.copyOf(funcs);
-                    components.add(new Object() {
-                        int size = sz;
-                        List<String> functions = funcList;
-                    });
+                    JsonObject _jo37 = new JsonObject();
+                    _jo37.addProperty("size", sz);
+                    _jo37.add("functions", JsonHelper.gson().toJsonTree(funcList));
+                    components.add(_jo37);
                 }
                 final int totalSccs = sccs.size();
                 final int nonTrivial = nonTrivialSCCs.size();
                 final var compList = components;
-                return new Response.Ok(new Object() {
-                    String analysis_type = "strongly_connected_components";
-                    int total_sccs = totalSccs;
-                    int non_trivial_sccs = nonTrivial;
-                    List<?> components = compList;
-                });
+                JsonObject _jo38 = new JsonObject();
+                _jo38.addProperty("analysis_type", "strongly_connected_components");
+                _jo38.addProperty("total_sccs", totalSccs);
+                _jo38.addProperty("non_trivial_sccs", nonTrivial);
+                _jo38.add("components", JsonHelper.gson().toJsonTree(compList));
+                return new Response.Ok(_jo38);
 
             } else if ("entry_points".equals(analysisType)) {
                 Set<String> allFunctions = new HashSet<>(functionAddresses.keySet());
@@ -3695,25 +3706,27 @@ public class EndpointRouter {
                 for (String ep : entryPoints) {
                     if (idx++ >= 50) {
                         final var note = (entryPoints.size() - 50) + " more entry points";
-                        epObjs.add(new Object() { String note_message = note; });
+                        JsonObject _jo39 = new JsonObject();
+                        _jo39.addProperty("note_message", note);
+                        epObjs.add(_jo39);
                         break;
                     }
                     final var name = ep;
                     final var addr = functionAddresses.getOrDefault(ep, "unknown");
-                    epObjs.add(new Object() {
-                        String function_name = name;
-                        String address = addr;
-                    });
+                    JsonObject _jo40 = new JsonObject();
+                    _jo40.addProperty("function_name", name);
+                    _jo40.addProperty("address", addr);
+                    epObjs.add(_jo40);
                 }
                 final int totalFuncs = allFunctions.size();
                 final int epCount = entryPoints.size();
                 final var epList = epObjs;
-                return new Response.Ok(new Object() {
-                    String analysis_type = "entry_point_detection";
-                    int total_functions = totalFuncs;
-                    int entry_points_found = epCount;
-                    List<?> entry_points = epList;
-                });
+                JsonObject _jo41 = new JsonObject();
+                _jo41.addProperty("analysis_type", "entry_point_detection");
+                _jo41.addProperty("total_functions", totalFuncs);
+                _jo41.addProperty("entry_points_found", epCount);
+                _jo41.add("entry_points", JsonHelper.gson().toJsonTree(epList));
+                return new Response.Ok(_jo41);
 
             } else if ("leaf_functions".equals(analysisType)) {
                 Set<String> leafFunctions = new HashSet<>(functionAddresses.keySet());
@@ -3724,23 +3737,25 @@ public class EndpointRouter {
                 for (String lf : leafFunctions) {
                     if (idx++ >= 50) {
                         final var note = (leafFunctions.size() - 50) + " more leaf functions";
-                        lfObjs.add(new Object() { String note_message = note; });
+                        JsonObject _jo42 = new JsonObject();
+                        _jo42.addProperty("note_message", note);
+                        lfObjs.add(_jo42);
                         break;
                     }
                     final var name = lf;
                     final var addr = functionAddresses.getOrDefault(lf, "unknown");
-                    lfObjs.add(new Object() {
-                        String function_name = name;
-                        String address = addr;
-                    });
+                    JsonObject _jo43 = new JsonObject();
+                    _jo43.addProperty("function_name", name);
+                    _jo43.addProperty("address", addr);
+                    lfObjs.add(_jo43);
                 }
                 final int lfCount = leafFunctions.size();
                 final var lfList = lfObjs;
-                return new Response.Ok(new Object() {
-                    String analysis_type = "leaf_function_detection";
-                    int leaf_functions_found = lfCount;
-                    List<?> leaf_functions = lfList;
-                });
+                JsonObject _jo44 = new JsonObject();
+                _jo44.addProperty("analysis_type", "leaf_function_detection");
+                _jo44.addProperty("leaf_functions_found", lfCount);
+                _jo44.add("leaf_functions", JsonHelper.gson().toJsonTree(lfList));
+                return new Response.Ok(_jo44);
 
             } else {
                 // Default: summary statistics
@@ -3776,22 +3791,22 @@ public class EndpointRouter {
                 final int maxOut = maxOutDegree;
                 final var maxInFunc = maxInDegreeFunc;
                 final int maxIn = maxInDegree;
-                return new Response.Ok(new Object() {
-                    String analysis_type = "summary";
-                    int total_functions = totFuncs;
-                    int functions_with_calls = funcsWithCalls;
-                    int total_call_edges = totEdges;
-                    Object max_out_degree = new Object() {
-                        String function = maxOutFunc;
-                        int calls = maxOut;
-                    };
-                    Object max_in_degree = new Object() {
-                        String function = maxInFunc;
-                        int called_by = maxIn;
-                    };
-                    List<String> available_analyses = List.of(
-                        "cycles", "path", "strongly_connected", "entry_points", "leaf_functions");
-                });
+                JsonObject _jo_maxOut = new JsonObject();
+                _jo_maxOut.addProperty("function", maxOutFunc);
+                _jo_maxOut.addProperty("calls", maxOut);
+                JsonObject _jo_maxIn = new JsonObject();
+                _jo_maxIn.addProperty("function", maxInFunc);
+                _jo_maxIn.addProperty("called_by", maxIn);
+                JsonObject _jo_summary = new JsonObject();
+                _jo_summary.addProperty("analysis_type", "summary");
+                _jo_summary.addProperty("total_functions", totFuncs);
+                _jo_summary.addProperty("functions_with_calls", funcsWithCalls);
+                _jo_summary.addProperty("total_call_edges", totEdges);
+                _jo_summary.add("max_out_degree", _jo_maxOut);
+                _jo_summary.add("max_in_degree", _jo_maxIn);
+                _jo_summary.add("available_analyses", JsonHelper.gson().toJsonTree(List.of(
+                    "cycles", "path", "strongly_connected", "entry_points", "leaf_functions")));
+                return new Response.Ok(_jo_summary);
             }
 
         } catch (Exception e) {
@@ -3962,11 +3977,11 @@ public class EndpointRouter {
         Program program = getCurrentProgram();
         String programName = program != null ? program.getName() : null;
         boolean loaded = program != null;
-        return new Response.Ok(new Object() {
-            boolean connected = true;
-            boolean program_loaded = loaded;
-            String program_name = programName;
-        });
+        JsonObject _jo47 = new JsonObject();
+        _jo47.addProperty("connected", true);
+        _jo47.addProperty("program_loaded", loaded);
+        _jo47.addProperty("program_name", programName);
+        return new Response.Ok(_jo47);
     }
 
     /**
@@ -3980,16 +3995,16 @@ public class EndpointRouter {
         String fullVersion = VersionInfo.getFullVersion();
         String javaVersion = System.getProperty("java.version");
         int endpointCount = VersionInfo.getEndpointCount();
-        return new Response.Ok(new Object() {
-            String plugin_version = pluginVersion;
-            String plugin_name = pluginName;
-            String build_timestamp = buildTimestamp;
-            String build_number = buildNumber;
-            String full_version = fullVersion;
-            String ghidra_version = "12.0.2";
-            String java_version = javaVersion;
-            int endpoint_count = endpointCount;
-        });
+        JsonObject _jo48 = new JsonObject();
+        _jo48.addProperty("plugin_version", pluginVersion);
+        _jo48.addProperty("plugin_name", pluginName);
+        _jo48.addProperty("build_timestamp", buildTimestamp);
+        _jo48.addProperty("build_number", buildNumber);
+        _jo48.addProperty("full_version", fullVersion);
+        _jo48.addProperty("ghidra_version", "12.0.2");
+        _jo48.addProperty("java_version", javaVersion);
+        _jo48.addProperty("endpoint_count", endpointCount);
+        return new Response.Ok(_jo48);
     }
 
     /**
@@ -4022,20 +4037,20 @@ public class EndpointRouter {
         int functionCount = program.getFunctionManager().getFunctionCount();
         int symbolCount = program.getSymbolTable().getNumSymbols();
 
-        return new Response.Ok(new Object() {
-            String program_name = programName;
-            String executable_path = executablePath;
-            String arch = architecture;
-            String comp = compiler;
-            String lang = language;
-            String endianness = endian;
-            int address_size_bits = addressSize;
-            String base_address = baseAddress;
-            int memory_block_count = memoryBlocks;
-            long total_memory_size_bytes = totalMemorySize;
-            int function_count = functionCount;
-            int symbol_count = symbolCount;
-        });
+        JsonObject _jo49 = new JsonObject();
+        _jo49.addProperty("program_name", programName);
+        _jo49.addProperty("executable_path", executablePath);
+        _jo49.addProperty("arch", architecture);
+        _jo49.addProperty("comp", compiler);
+        _jo49.addProperty("lang", language);
+        _jo49.addProperty("endianness", endian);
+        _jo49.addProperty("address_size_bits", addressSize);
+        _jo49.addProperty("base_address", baseAddress);
+        _jo49.addProperty("memory_block_count", memoryBlocks);
+        _jo49.addProperty("total_memory_size_bytes", totalMemorySize);
+        _jo49.addProperty("function_count", functionCount);
+        _jo49.addProperty("symbol_count", symbolCount);
+        return new Response.Ok(_jo49);
     }
 
     /**
@@ -4095,17 +4110,17 @@ public class EndpointRouter {
             final String finalOctal = octalValue;
             final String finalHexPadded = hexPadded;
 
-            return new Response.Ok(new Object() {
-                String input = finalInput;
-                String input_type = finalInputType;
-                int size_bytes = finalSize;
-                String decimal_unsigned = finalDecimalUnsigned;
-                Long decimal_signed = finalDecimalSigned;
-                String hexadecimal = finalHex;
-                String binary = finalBinary;
-                String octal = finalOctal;
-                String hex_padded = finalHexPadded;
-            });
+            JsonObject _jo50 = new JsonObject();
+            _jo50.addProperty("input", finalInput);
+            _jo50.addProperty("input_type", finalInputType);
+            _jo50.addProperty("size_bytes", finalSize);
+            _jo50.addProperty("decimal_unsigned", finalDecimalUnsigned);
+            _jo50.addProperty("decimal_signed", finalDecimalSigned);
+            _jo50.addProperty("hexadecimal", finalHex);
+            _jo50.addProperty("binary", finalBinary);
+            _jo50.addProperty("octal", finalOctal);
+            _jo50.addProperty("hex_padded", finalHexPadded);
+            return new Response.Ok(_jo50);
 
         } catch (NumberFormatException e) {
             return errorJson("Invalid number format: " + text);
@@ -4162,12 +4177,12 @@ public class EndpointRouter {
         if (!memoryAvailable) {
             final String rangeStart = addr.toString();
             final String rangeEnd = endAddr.toString();
-            return new Response.Ok(new Object() {
-                String address = addressStr;
-                String type_name = typeName;
-                boolean memory_available = false;
-                String required_range = rangeStart + " - " + rangeEnd;
-            });
+            JsonObject _jo51 = new JsonObject();
+            _jo51.addProperty("address", addressStr);
+            _jo51.addProperty("type_name", typeName);
+            _jo51.addProperty("memory_available", false);
+            _jo51.addProperty("required_range", rangeStart + " - " + rangeEnd);
+            return new Response.Ok(_jo51);
         }
 
         long alignment = dataType.getAlignment();
@@ -4183,17 +4198,17 @@ public class EndpointRouter {
         final String conflictType = conflictingType;
         final String alignWarn = alignmentWarning;
 
-        return new Response.Ok(new Object() {
-            String address = addressStr;
-            String type_name = typeName;
-            boolean memory_available = true;
-            String range = rangeStr;
-            int size_bytes = typeSize;
-            boolean properly_aligned = aligned;
-            String alignment_warning = alignWarn;
-            boolean has_conflicting_data = hasConflict;
-            String conflicting_data_type = conflictType;
-        });
+        JsonObject _jo52 = new JsonObject();
+        _jo52.addProperty("address", addressStr);
+        _jo52.addProperty("type_name", typeName);
+        _jo52.addProperty("memory_available", true);
+        _jo52.addProperty("range", rangeStr);
+        _jo52.addProperty("size_bytes", typeSize);
+        _jo52.addProperty("properly_aligned", aligned);
+        _jo52.addProperty("alignment_warning", alignWarn);
+        _jo52.addProperty("has_conflicting_data", hasConflict);
+        _jo52.addProperty("conflicting_data_type", conflictType);
+        return new Response.Ok(_jo52);
     }
 
     /**
@@ -4227,12 +4242,12 @@ public class EndpointRouter {
         final int[] finalData = dataInts;
         final String hexStr = hexBuilder.toString();
 
-        return new Response.Ok(new Object() {
-            String addr = addrStr;
-            int read_length = finalBytesRead;
-            int[] data = finalData;
-            String hex = hexStr;
-        });
+        JsonObject _jo53 = new JsonObject();
+        _jo53.addProperty("addr", addrStr);
+        _jo53.addProperty("read_length", finalBytesRead);
+        _jo53.add("data", JsonHelper.gson().toJsonTree(finalData));
+        _jo53.addProperty("hex", hexStr);
+        return new Response.Ok(_jo53);
     }
     
     /**
@@ -4290,11 +4305,11 @@ public class EndpointRouter {
                     dataType.setCategoryPath(catPath);
                     txSuccess.set(true);
 
-                    result.set(new Response.Ok(new Object() {
-                        boolean success = true;
-                        String type_name = typeName;
-                        String category = categoryPath;
-                    }));
+                    JsonObject _jo54 = new JsonObject();
+                    _jo54.addProperty("success", true);
+                    _jo54.addProperty("type_name", typeName);
+                    _jo54.addProperty("category", categoryPath);
+                    result.set(new Response.Ok(_jo54));
 
                 } catch (Exception e) {
                     result.set(errorJson("Error moving data type: " + e.getMessage()));
@@ -4394,12 +4409,12 @@ public class EndpointRouter {
 
                     String addedName = addedFuncDef.getName();
                     String warning = paramWarning.get();
-                    result.set(new Response.Ok(new Object() {
-                        boolean success = true;
-                        String function_name = addedName;
-                        String return_type = returnType;
-                        String parameter_warning = warning;
-                    }));
+                    JsonObject _jo55 = new JsonObject();
+                    _jo55.addProperty("success", true);
+                    _jo55.addProperty("function_name", addedName);
+                    _jo55.addProperty("return_type", returnType);
+                    _jo55.addProperty("parameter_warning", warning);
+                    result.set(new Response.Ok(_jo55));
 
                 } catch (Exception e) {
                     result.set(errorJson("Error creating function signature: " + e.getMessage()));
@@ -6840,12 +6855,12 @@ public class EndpointRouter {
      */
     private Response batchSetVariableTypesOptimized(String functionAddress, Map<String, String> variableTypes) {
         if (variableTypes == null || variableTypes.isEmpty()) {
-            return new Response.Ok(new Object() {
-                boolean success = true;
-                String method = "optimized";
-                int variables_typed = 0;
-                int variables_failed = 0;
-            });
+            JsonObject _jo56 = new JsonObject();
+            _jo56.addProperty("success", true);
+            _jo56.addProperty("method", "optimized");
+            _jo56.addProperty("variables_typed", 0);
+            _jo56.addProperty("variables_failed", 0);
+            return new Response.Ok(_jo56);
         }
 
         final AtomicInteger variablesTyped = new AtomicInteger(0);
@@ -6884,13 +6899,13 @@ public class EndpointRouter {
         int typed = variablesTyped.get();
         int failed = variablesFailed.get();
         List<String> errorsCopy = new ArrayList<>(errors);
-        return new Response.Ok(new Object() {
-            boolean success = failed == 0 && typed > 0;
-            String method = "optimized";
-            int variables_typed = typed;
-            int variables_failed = failed;
-            List<String> errors = errorsCopy.isEmpty() ? null : errorsCopy;
-        });
+        JsonObject _jo57 = new JsonObject();
+        _jo57.addProperty("success", failed == 0 && typed > 0);
+        _jo57.addProperty("method", "optimized");
+        _jo57.addProperty("variables_typed", typed);
+        _jo57.addProperty("variables_failed", failed);
+        _jo57.add("errors", JsonHelper.gson().toJsonTree(errorsCopy.isEmpty() ? null : errorsCopy));
+        return new Response.Ok(_jo57);
     }
 
 
@@ -6953,22 +6968,31 @@ public class EndpointRouter {
             });
 
             if (exceptionMsg.get() != null) {
-                return new Response.Ok(new Object() { boolean valid = false; String error = exceptionMsg.get(); });
+                JsonObject _jo58 = new JsonObject();
+                _jo58.addProperty("valid", false);
+                _jo58.addProperty("error", exceptionMsg.get());
+                return new Response.Ok(_jo58);
             }
         } catch (Exception e) {
-            return new Response.Ok(new Object() { boolean valid = false; String error = e.getMessage(); });
+            JsonObject _jo59 = new JsonObject();
+            _jo59.addProperty("valid", false);
+            _jo59.addProperty("error", e.getMessage());
+            return new Response.Ok(_jo59);
         }
 
         if (validationError.get() != null) {
             String err = validationError.get();
-            return new Response.Ok(new Object() { boolean valid = false; String error = err; });
+            JsonObject _jo60 = new JsonObject();
+            _jo60.addProperty("valid", false);
+            _jo60.addProperty("error", err);
+            return new Response.Ok(_jo60);
         }
 
         List<String> warningList = warningsRef.get();
-        return new Response.Ok(new Object() {
-            boolean valid = true;
-            List<String> warnings = warningList;
-        });
+        JsonObject _jo61 = new JsonObject();
+        _jo61.addProperty("valid", true);
+        _jo61.add("warnings", JsonHelper.gson().toJsonTree(warningList));
+        return new Response.Ok(_jo61);
     }
 
     /**
@@ -7004,13 +7028,15 @@ public class EndpointRouter {
         if (dt != null) {
             String dtCategory = dt.getCategoryPath().getPath();
             int dtSize = dt.getLength();
-            return new Response.Ok(new Object() {
-                boolean exists = true;
-                String category = dtCategory;
-                int size = dtSize;
-            });
+            JsonObject _jo62 = new JsonObject();
+            _jo62.addProperty("exists", true);
+            _jo62.addProperty("category", dtCategory);
+            _jo62.addProperty("size", dtSize);
+            return new Response.Ok(_jo62);
         }
-        return new Response.Ok(new Object() { boolean exists = false; });
+        JsonObject _jo63 = new JsonObject();
+        _jo63.addProperty("exists", false);
+        return new Response.Ok(_jo63);
     }
 
 
@@ -7156,13 +7182,13 @@ public class EndpointRouter {
         String endStr = endAddrRef.get();
         long numBytes = bytesDisassembled.get();
         Msg.debug(this, "disassembleBytes: Returning success response");
-        return new Response.Ok(new Object() {
-            boolean success = true;
-            String start_address = startStr;
-            String end_address = endStr;
-            long bytes_disassembled = numBytes;
-            String message = "Successfully disassembled " + numBytes + " byte(s)";
-        });
+        JsonObject _jo64 = new JsonObject();
+        _jo64.addProperty("success", true);
+        _jo64.addProperty("start_address", startStr);
+        _jo64.addProperty("end_address", endStr);
+        _jo64.addProperty("bytes_disassembled", numBytes);
+        _jo64.addProperty("message", "Successfully disassembled " + numBytes + " byte(s)");
+        return new Response.Ok(_jo64);
     }
 
 
@@ -7231,10 +7257,10 @@ public class EndpointRouter {
                 if (dir != null) searched.append(dir).append(", ");
             }
             String searchedStr = searched.toString();
-            return new Response.Ok(new Object() {
-                boolean success = false;
-                String error = "Script '" + filename + "' not found. Searched: " + searchedStr;
-            });
+            JsonObject _jo65 = new JsonObject();
+            _jo65.addProperty("success", false);
+            _jo65.addProperty("error", "Script '" + filename + "' not found. Searched: " + searchedStr);
+            return new Response.Ok(_jo65);
         }
 
         long startTime = System.currentTimeMillis();
@@ -7248,13 +7274,13 @@ public class EndpointRouter {
         boolean succeeded = Boolean.TRUE.equals(scriptResult.get("success"));
         String scriptPath = scriptFile.getAbsolutePath();
         String execTimeStr = String.format("%.2f", executionTime);
-        return new Response.Ok(new Object() {
-            boolean success = succeeded;
-            String script_name = scriptName;
-            String script_path = scriptPath;
-            String execution_time_seconds = execTimeStr;
-            String console_output = output;
-        });
+        JsonObject _jo66 = new JsonObject();
+        _jo66.addProperty("success", succeeded);
+        _jo66.addProperty("script_name", scriptName);
+        _jo66.addProperty("script_path", scriptPath);
+        _jo66.addProperty("execution_time_seconds", execTimeStr);
+        _jo66.addProperty("console_output", output);
+        return new Response.Ok(_jo66);
 
     }
 
@@ -7272,7 +7298,10 @@ public class EndpointRouter {
             return errorJson("No program loaded");
         }
         if (addressStr == null || addressStr.isEmpty()) {
-            return new Response.Ok(new Object() { boolean success = false; String error = "Address is required"; });
+            JsonObject _jo67 = new JsonObject();
+            _jo67.addProperty("success", false);
+            _jo67.addProperty("error", "Address is required");
+            return new Response.Ok(_jo67);
         }
         if (category == null || category.isEmpty()) {
             category = "Note";
@@ -7283,7 +7312,10 @@ public class EndpointRouter {
 
         Address addr = program.getAddressFactory().getAddress(addressStr);
         if (addr == null) {
-            return new Response.Ok(new Object() { boolean success = false; String error = "Invalid address: " + addressStr; });
+            JsonObject _jo68 = new JsonObject();
+            _jo68.addProperty("success", false);
+            _jo68.addProperty("error", "Invalid address: " + addressStr);
+            return new Response.Ok(_jo68);
         }
 
         BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -7300,12 +7332,12 @@ public class EndpointRouter {
             bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
             program.endTransaction(transactionId, true);
 
-            return new Response.Ok(new Object() {
-                boolean success = true;
-                String address = addrStr;
-                String category = finalCategory;
-                String comment = finalComment;
-            });
+            JsonObject _jo69 = new JsonObject();
+            _jo69.addProperty("success", true);
+            _jo69.addProperty("address", addrStr);
+            _jo69.addProperty("category", finalCategory);
+            _jo69.addProperty("comment", finalComment);
+            return new Response.Ok(_jo69);
 
         } catch (Exception e) {
             program.endTransaction(transactionId, false);
@@ -7329,7 +7361,10 @@ public class EndpointRouter {
         if (addressStr != null && !addressStr.isEmpty()) {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             if (addr == null) {
-                return new Response.Ok(new Object() { boolean success = false; String error = "Invalid address: " + addressStr; });
+                JsonObject _jo70 = new JsonObject();
+                _jo70.addProperty("success", false);
+                _jo70.addProperty("error", "Invalid address: " + addressStr);
+                return new Response.Ok(_jo70);
             }
 
             Bookmark[] bms = bookmarkManager.getBookmarks(addr);
@@ -7363,11 +7398,10 @@ public class EndpointRouter {
 
         List<Map<String, Object>> bmList = bookmarks;
         int bmCount = bookmarks.size();
-        return new Response.Ok(new Object() {
-            boolean success = true;
-            List<Map<String, Object>> bookmarks = bmList;
-            int count = bmCount;
-        });
+        JsonObject _jo71 = new JsonObject();
+        _jo71.addProperty("success", true);
+        _jo71.addProperty("count", bmCount);
+        return new Response.Ok(_jo71);
 
     }
 
@@ -7380,12 +7414,18 @@ public class EndpointRouter {
             return errorJson("No program loaded");
         }
         if (addressStr == null || addressStr.isEmpty()) {
-            return new Response.Ok(new Object() { boolean success = false; String error = "Address is required"; });
+            JsonObject _jo72 = new JsonObject();
+            _jo72.addProperty("success", false);
+            _jo72.addProperty("error", "Address is required");
+            return new Response.Ok(_jo72);
         }
 
         Address addr = program.getAddressFactory().getAddress(addressStr);
         if (addr == null) {
-            return new Response.Ok(new Object() { boolean success = false; String error = "Invalid address: " + addressStr; });
+            JsonObject _jo73 = new JsonObject();
+            _jo73.addProperty("success", false);
+            _jo73.addProperty("error", "Invalid address: " + addressStr);
+            return new Response.Ok(_jo73);
         }
 
         BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -7405,11 +7445,11 @@ public class EndpointRouter {
             program.endTransaction(transactionId, true);
             String addrStr = addr.toString();
             int deletedCount = deleted;
-            return new Response.Ok(new Object() {
-                boolean success = true;
-                int deleted = deletedCount;
-                String address = addrStr;
-            });
+            JsonObject _jo74 = new JsonObject();
+            _jo74.addProperty("success", true);
+            _jo74.addProperty("deleted", deletedCount);
+            _jo74.addProperty("address", addrStr);
+            return new Response.Ok(_jo74);
 
         } catch (Exception e) {
             program.endTransaction(transactionId, false);
@@ -7499,17 +7539,20 @@ public class EndpointRouter {
             String errMsg = dllName != null && !dllName.isEmpty()
                 ? "External location not found in DLL"
                 : "External location not found at address " + errAddr;
-            return new Response.Ok(new Object() { String address = errAddr; String error = errMsg; });
+            JsonObject _jo75 = new JsonObject();
+            _jo75.addProperty("address", errAddr);
+            _jo75.addProperty("error", errMsg);
+            return new Response.Ok(_jo75);
         }
 
         String resultLabel = foundLabel;
         String resultDll = foundDll;
         String resultAddr = address;
-        return new Response.Ok(new Object() {
-            String address = resultAddr;
-            String dll_name = resultDll;
-            String label = resultLabel;
-        });
+        JsonObject _jo76 = new JsonObject();
+        _jo76.addProperty("address", resultAddr);
+        _jo76.addProperty("dll_name", resultDll);
+        _jo76.addProperty("label", resultLabel);
+        return new Response.Ok(_jo76);
     }
     
 
@@ -7560,12 +7603,12 @@ public class EndpointRouter {
 
                         if (success.get()) {
                             String resultDll = finalLibName;
-                            return new Response.Ok(new Object() {
-                                boolean success = true;
-                                String old_name = oldName;
-                                String new_name = newName;
-                                String dll = resultDll;
-                            });
+                            JsonObject _jo77 = new JsonObject();
+                            _jo77.addProperty("success", true);
+                            _jo77.addProperty("old_name", oldName);
+                            _jo77.addProperty("new_name", newName);
+                            _jo77.addProperty("dll", resultDll);
+                            return new Response.Ok(_jo77);
                         } else {
                             return errorJson(errorMsg.get() != null ? errorMsg.get() : "Unknown error");
                         }
@@ -7629,10 +7672,9 @@ public class EndpointRouter {
 
             List<Map<String, Object>> programList = programs;
             int progCount = allPrograms.length;
-            return new Response.Ok(new Object() {
-                List<Map<String, Object>> programs = programList;
-                int count = progCount;
-            });
+            JsonObject _jo78 = new JsonObject();
+            _jo78.addProperty("count", progCount);
+            return new Response.Ok(_jo78);
 
         } catch (Exception e) {
             return errorJson(e.getMessage());
@@ -7699,13 +7741,12 @@ public class EndpointRouter {
             int undocCount = undocumentedFunctions.size();
             int documentedCount = docCount;
             int totalCount = seenFunctions.size();
-            return new Response.Ok(new Object() {
-                String string_address = strAddr;
-                List<Map<String, String>> undocumented_functions = undocList;
-                int undocumented_count = undocCount;
-                int documented_count = documentedCount;
-                int total_referencing_functions = totalCount;
-            });
+            JsonObject _jo79 = new JsonObject();
+            _jo79.addProperty("string_address", strAddr);
+            _jo79.addProperty("undocumented_count", undocCount);
+            _jo79.addProperty("documented_count", documentedCount);
+            _jo79.addProperty("total_referencing_functions", totalCount);
+            return new Response.Ok(_jo79);
 
         } catch (Exception e) {
             return errorJson(e.getMessage());
@@ -7795,12 +7836,11 @@ public class EndpointRouter {
             int anchorCount = anchors.size();
             int totalUndoc = totalUndocumented;
             String patternStr = finalPattern;
-            return new Response.Ok(new Object() {
-                String pattern = patternStr;
-                List<Map<String, Object>> anchors = anchorList;
-                int total_anchors = anchorCount;
-                int total_undocumented_functions = totalUndoc;
-            });
+            JsonObject _jo80 = new JsonObject();
+            _jo80.addProperty("pattern", patternStr);
+            _jo80.addProperty("total_anchors", anchorCount);
+            _jo80.addProperty("total_undocumented_functions", totalUndoc);
+            return new Response.Ok(_jo80);
 
         } catch (Exception e) {
             return errorJson(e.getMessage());

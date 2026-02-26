@@ -15,6 +15,8 @@
  */
 package com.xebyte.core.services;
 
+import com.google.gson.JsonObject;
+import com.xebyte.core.JsonHelper;
 import com.xebyte.core.ProgramProvider;
 import com.xebyte.core.Response;
 import com.xebyte.core.ThreadingStrategy;
@@ -304,23 +306,23 @@ public class FunctionService extends BaseService {
             return Response.err("Function not found: " + functionName);
         }
 
-        List<Object> params = new ArrayList<>();
+        List<JsonObject> params = new ArrayList<>();
         for (Parameter p : func.getParameters()) {
-            params.add(new Object() {
-                final String name = p.getName();
-                final String type = p.getDataType().getName();
-                final int ordinal = p.getOrdinal();
-                final String storage = p.getVariableStorage().toString();
-            });
+            JsonObject pObj = new JsonObject();
+            pObj.addProperty("name", p.getName());
+            pObj.addProperty("type", p.getDataType().getName());
+            pObj.addProperty("ordinal", p.getOrdinal());
+            pObj.addProperty("storage", p.getVariableStorage().toString());
+            params.add(pObj);
         }
 
-        List<Object> locals = new ArrayList<>();
+        List<JsonObject> locals = new ArrayList<>();
         for (Variable v : func.getLocalVariables()) {
-            locals.add(new Object() {
-                final String name = v.getName();
-                final String type = v.getDataType().getName();
-                final String storage = v.getVariableStorage().toString();
-            });
+            JsonObject vObj = new JsonObject();
+            vObj.addProperty("name", v.getName());
+            vObj.addProperty("type", v.getDataType().getName());
+            vObj.addProperty("storage", v.getVariableStorage().toString());
+            locals.add(vObj);
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
