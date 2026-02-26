@@ -40,7 +40,7 @@
         <url>http://github.com/bethington/ghidra-mcp/tree/main</url>
     </scm>
     <dependencies>
-        <!-- Ghidra dependencies (installed locally via mvn install:install-file) -->
+        <!-- Ghidra dependencies (installed locally via mvn install:install-file) -->         
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>Generic</artifactId>
@@ -84,6 +84,11 @@
         <dependency>
             <groupId>ghidra</groupId>
             <artifactId>FileSystem</artifactId>
+            <version>${ghidra.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ghidra</groupId>
+            <artifactId>Help</artifactId>
             <version>${ghidra.version}</version>
         </dependency>
         <!-- JUnit (test only) -->
