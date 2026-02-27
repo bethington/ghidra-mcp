@@ -25,6 +25,9 @@ pytest-benchmark>=4.0.0
 coverage>=7.0.0
 pytest-json-report>=1.5.0
 
+# YAML parsing (workflow validation tests)
+pyyaml>=6.0.0
+
 # Development and debugging
 pytest-pdb>=0.2.0
 pytest-picked>=0.4.6
