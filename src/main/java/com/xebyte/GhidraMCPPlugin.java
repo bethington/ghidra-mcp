@@ -685,18 +685,22 @@ public class GhidraMCPPlugin extends Plugin {
                     return;
                 }
 
-                // Determine class name from code, prefix with _mcp_inline_ to avoid
-                // collisions with user scripts and make cleanup identifiable
-                String userClass = "InlineScript_" + System.currentTimeMillis();
+                // Generate a unique class name per invocation to avoid OSGi class cache collisions.
+                // The fixed _mcp_inline_ prefix caused the bundle resolver to cache a stale
+                // classloader, failing on subsequent runs with different dependencies.
+                String uid = Long.toHexString(System.nanoTime());
+                String userClass = null;
                 java.util.regex.Matcher m = java.util.regex.Pattern
                     .compile("public\\s+class\\s+(\\w+)").matcher(code);
                 if (m.find()) {
                     userClass = m.group(1);
                 }
-                String className = "_mcp_inline_" + userClass;
-
-                // Rewrite the class name in the source so it compiles under the prefixed name
-                String rewrittenCode = code.replace("class " + userClass, "class " + className);
+                String className = "Mcp_" + uid;
+                String rewrittenCode = userClass != null
+                    ? code.replace("class " + userClass, "class " + className)
+                    : "import ghidra.app.script.GhidraScript;\npublic class " + className
+                      + " extends GhidraScript {\n  public void run() throws Exception {\n"
+                      + code + "\n  }\n}\n";
 
                 // Write to ~/ghidra_scripts/ so Ghidra's OSGi class loader can find the source bundle
                 File scriptDir = new File(System.getProperty("user.home"), "ghidra_scripts");
