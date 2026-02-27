@@ -4425,10 +4425,31 @@ def analyze_function_completeness(function_address: str) -> str:
 
 
 @mcp.tool()
+def batch_analyze_completeness(addresses: list[str]) -> str:
+    """
+    Analyze completeness for multiple functions in a single call.
+    Returns all completeness scores, deductions, and recommendations at once,
+    avoiding the overhead of individual analyze_function_completeness calls.
+
+    Args:
+        addresses: List of hex addresses (e.g., ["0x10001000", "0x10002000"])
+
+    Returns:
+        JSON with results array containing completeness data for each function
+    """
+    if not addresses:
+        return '{"error": "addresses list cannot be empty"}'
+    for addr in addresses:
+        validate_hex_address(addr)
+
+    return safe_post_json("batch_analyze_completeness", {"addresses": addresses})
+
+
+@mcp.tool()
 def find_next_undefined_function(
     start_address: str = None,
     criteria: str = "name_pattern",
-    pattern: str = "FUN_",
+    pattern: str = None,
     direction: str = "ascending",
     program: str = None,
 ) -> str:
@@ -4439,7 +4460,7 @@ def find_next_undefined_function(
     Args:
         start_address: Starting address for search (default: program min address)
         criteria: Search criteria (default: "name_pattern")
-        pattern: Name pattern to match (default: "FUN_")
+        pattern: Name pattern to match (default: all auto-generated names: FUN_, Ordinal_, thunk_FUN_, thunk_Ordinal_). Provide a specific prefix like "FUN_" or "Ordinal_" to narrow the search.
         direction: Search direction "ascending" or "descending" (default: "ascending")
         program: Optional program name to query (if not provided, uses current program)
 
@@ -4452,9 +4473,10 @@ def find_next_undefined_function(
     params = {
         "start_address": start_address,
         "criteria": criteria,
-        "pattern": pattern,
         "direction": direction,
     }
+    if pattern:
+        params["pattern"] = pattern
     if program:
         params["program"] = program
     return safe_get_json("find_next_undefined_function", params)

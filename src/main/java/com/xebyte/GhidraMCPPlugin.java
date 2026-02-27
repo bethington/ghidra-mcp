@@ -86,7 +86,7 @@ class VersionInfo {
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 148;
+    private static final int ENDPOINT_COUNT = 149;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -149,7 +149,10 @@ class VersionInfo {
 )
 public class GhidraMCPPlugin extends Plugin {
 
-    private HttpServer server;
+    // Static singleton: one HTTP server shared across all CodeBrowser windows (fixes #35)
+    private static HttpServer server;
+    private static int instanceCount = 0;
+    private boolean ownsServer = false; // true if this instance started the server
     private static final String OPTION_CATEGORY_NAME = "GhidraMCP HTTP Server";
     private static final String PORT_OPTION_NAME = "Server Port";
     private static final int DEFAULT_PORT = 8089;
@@ -185,6 +188,7 @@ public class GhidraMCPPlugin extends Plugin {
 
     public GhidraMCPPlugin(PluginTool tool) {
         super(tool);
+        instanceCount++;
         Msg.info(this, "============================================");
         Msg.info(this, "GhidraMCP " + VersionInfo.getFullVersion());
         Msg.info(this, "Endpoints: " + VersionInfo.getEndpointCount());
@@ -197,20 +201,26 @@ public class GhidraMCPPlugin extends Plugin {
             "The network port number the embedded HTTP server will listen on. " +
             "Requires Ghidra restart or plugin reload to take effect after changing.");
 
-        try {
-            startServer();
-            Msg.info(this, "GhidraMCPPlugin loaded successfully with HTTP server on port " +
-                options.getInt(PORT_OPTION_NAME, DEFAULT_PORT));
-        }
-        catch (IOException e) {
-            Msg.error(this, "Failed to start HTTP server: " + e.getMessage(), e);
-            Msg.showError(this, null, "GhidraMCP Server Error",
-                "Failed to start MCP server on port " + options.getInt(PORT_OPTION_NAME, DEFAULT_PORT) +
-                ".\n\nThe port may already be in use. Try:\n" +
-                "1. Restarting Ghidra\n" +
-                "2. Changing the port in Edit > Tool Options > GhidraMCP\n" +
-                "3. Checking if another Ghidra instance is running\n\n" +
-                "Error: " + e.getMessage());
+        // Only start server if not already running (fixes #35: multi-window port collision)
+        if (server != null && isServerRunning()) {
+            Msg.info(this, "GhidraMCP HTTP server already running — sharing with this CodeBrowser window.");
+        } else {
+            try {
+                startServer();
+                ownsServer = true;
+                Msg.info(this, "GhidraMCPPlugin loaded successfully with HTTP server on port " +
+                    options.getInt(PORT_OPTION_NAME, DEFAULT_PORT));
+            }
+            catch (IOException e) {
+                Msg.error(this, "Failed to start HTTP server: " + e.getMessage(), e);
+                Msg.showError(this, null, "GhidraMCP Server Error",
+                    "Failed to start MCP server on port " + options.getInt(PORT_OPTION_NAME, DEFAULT_PORT) +
+                    ".\n\nThe port may already be in use. Try:\n" +
+                    "1. Restarting Ghidra\n" +
+                    "2. Changing the port in Edit > Tool Options > GhidraMCP\n" +
+                    "3. Checking if another Ghidra instance is running\n\n" +
+                    "Error: " + e.getMessage());
+            }
         }
 
         createMenuActions();
@@ -1630,6 +1640,52 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = analyzeFunctionCompleteness(functionAddress);
             sendResponse(exchange, result);
+        }));
+
+        // BATCH_ANALYZE_COMPLETENESS - Analyze completeness for multiple functions at once
+        server.createContext("/batch_analyze_completeness", safeHandler(exchange -> {
+            try {
+                Map<String, Object> params = parseJsonParams(exchange);
+                @SuppressWarnings("unchecked")
+                java.util.List<String> addresses = (java.util.List<String>) params.get("addresses");
+                if (addresses == null || addresses.isEmpty()) {
+                    sendResponse(exchange, "{\"error\": \"Missing required parameter: addresses (JSON array of hex addresses)\"}");
+                    return;
+                }
+
+                // Refresh decompiler cache once for all functions
+                Program program = getCurrentProgram();
+                if (program != null) {
+                    try {
+                        DecompInterface tempDecomp = new DecompInterface();
+                        tempDecomp.openProgram(program);
+                        tempDecomp.flushCache();
+                        for (String addr : addresses) {
+                            Address a = program.getAddressFactory().getAddress(addr);
+                            if (a != null) {
+                                Function f = program.getFunctionManager().getFunctionAt(a);
+                                if (f != null) {
+                                    tempDecomp.decompileFunction(f, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                                }
+                            }
+                        }
+                        tempDecomp.dispose();
+                    } catch (Exception e) {
+                        Msg.warn(this, "Failed to refresh cache for batch completeness: " + e.getMessage());
+                    }
+                }
+
+                StringBuilder sb = new StringBuilder();
+                sb.append("{\"results\": [");
+                for (int i = 0; i < addresses.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(analyzeFunctionCompleteness(addresses.get(i)));
+                }
+                sb.append("], \"count\": ").append(addresses.size()).append("}");
+                sendResponse(exchange, sb.toString());
+            } catch (Exception e) {
+                sendResponse(exchange, "{\"error\": \"" + escapeJson(e.getMessage()) + "\"}");
+            }
         }));
 
         // FIND_NEXT_UNDEFINED_FUNCTION - Find next function needing analysis
@@ -5593,7 +5649,7 @@ public class GhidraMCPPlugin extends Plugin {
             json.append("\"hash\": \"").append(hash).append("\", ");
             json.append("\"instruction_count\": ").append(instructionCount).append(", ");
             json.append("\"size_bytes\": ").append(functionSize).append(", ");
-            json.append("\"has_custom_name\": ").append(!func.getName().startsWith("FUN_")).append(", ");
+            json.append("\"has_custom_name\": ").append(!isAutoGeneratedName(func.getName())).append(", ");
             json.append("\"program\": \"").append(escapeJson(program.getName())).append("\"");
             json.append("}");
             
@@ -5746,8 +5802,7 @@ public class GhidraMCPPlugin extends Plugin {
 
             for (Function func : funcMgr.getFunctions(true)) {
                 // Apply filter
-                boolean isDocumented = !func.getName().startsWith("FUN_") && 
-                                       !func.getName().startsWith("thunk_") &&
+                boolean isDocumented = !isAutoGeneratedName(func.getName()) &&
                                        !func.getName().startsWith("switch");
                 
                 if ("documented".equals(filter) && !isDocumented) continue;
@@ -5937,7 +5992,7 @@ public class GhidraMCPPlugin extends Plugin {
                 }
             }
             
-            CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), 0, 0, 0, 0, 0, 0, new ArrayList<>(), 0, 0, 0, 0);
+            CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), 0, 0, 0, 0, 0, 0, new ArrayList<>(), 0, 0, 0, 0, func.isThunk());
             double completenessScore = scoreResult.score;
             json.append("\"completeness_score\": ").append(completenessScore);
             
@@ -9988,6 +10043,15 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     /**
+     * Check if a function name is auto-generated (not user-assigned).
+     * Covers FUN_, Ordinal_, and thunk variants of both.
+     */
+    private static boolean isAutoGeneratedName(String name) {
+        return name.startsWith("FUN_") || name.startsWith("Ordinal_") ||
+               name.startsWith("thunk_FUN_") || name.startsWith("thunk_Ordinal_");
+    }
+
+    /**
      * 1. GET_BULK_XREFS - Retrieve xrefs for multiple addresses in one call
      */
     private String getBulkXrefs(Object addressesObj) {
@@ -13401,9 +13465,9 @@ public class GhidraMCPPlugin extends Plugin {
                     }
 
                     // Detect thunk functions (single JMP instruction, no real body)
+                    // Covers: Ghidra-tagged thunks, single-JMP stubs, and IAT thunks (JMP dword ptr [IAT])
                     boolean isThunk = func.isThunk();
                     if (!isThunk) {
-                        // Also detect non-tagged thunks: function body is a single unconditional JMP
                         ghidra.program.model.listing.InstructionIterator instrIter =
                             program.getListing().getInstructions(func.getBody(), true);
                         if (instrIter.hasNext()) {
@@ -13417,7 +13481,7 @@ public class GhidraMCPPlugin extends Plugin {
                     result.append("{");
                     result.append("\"function_name\": \"").append(func.getName()).append("\", ");
                     result.append("\"is_thunk\": ").append(isThunk).append(", ");
-                    result.append("\"has_custom_name\": ").append(!func.getName().startsWith("FUN_")).append(", ");
+                    result.append("\"has_custom_name\": ").append(!isAutoGeneratedName(func.getName())).append(", ");
                     result.append("\"has_prototype\": ").append(func.getSignature() != null).append(", ");
                     result.append("\"has_calling_convention\": ").append(func.getCallingConvention() != null).append(", ");
 
@@ -13435,7 +13499,7 @@ public class GhidraMCPPlugin extends Plugin {
                     // Validate plate comment structure and content
                     List<String> plateCommentIssues = new ArrayList<>();
                     if (hasPlateComment) {
-                        validatePlateCommentStructure(plateComment, plateCommentIssues);
+                        validatePlateCommentStructure(plateComment, plateCommentIssues, isThunk);
                     }
 
                     result.append("\"plate_comment_issues\": [");
@@ -13486,6 +13550,11 @@ public class GhidraMCPPlugin extends Plugin {
 
                             // localVarNames already built above (hoisted for Hungarian check access)
 
+                            // v3.2.2: For thunks with no real locals, skip local variable checks entirely.
+                            // The decompiler projects the callee body's variables through the thunk view,
+                            // but these are display artifacts — the thunk has no actual locals to fix.
+                            boolean thunkWithNoLocals = isThunk && localVarNames.isEmpty();
+
                             Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
                             while (symbols.hasNext()) {
                                 ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
@@ -13500,7 +13569,13 @@ public class GhidraMCPPlugin extends Plugin {
                                     continue;
                                 }
 
-                                // v3.2.1: For thunks, all locals are from the callee — unfixable at thunk level
+                                // v3.2.2: Thunks with no real locals — all decompiler variables are
+                                // body-projected artifacts. Skip entirely (don't penalize at all).
+                                if (thunkWithNoLocals) {
+                                    continue;
+                                }
+
+                                // v3.2.1: For thunks with some locals, or register-only vars
                                 boolean isRegisterOnly = isThunk || !localVarNames.contains(name);
 
                                 // Check for generic local names (local_XX or XVar patterns)
@@ -13724,34 +13799,49 @@ public class GhidraMCPPlugin extends Plugin {
                             }
                             unrenamedGlobals.addAll(foundDats);
                             
-                            // Find Ordinal_XXXXX calls without nearby comments
-                            // v3.1.1: Check current line AND adjacent lines for comments,
-                            // since PRE_COMMENTs appear on the line above the code
-                            java.util.regex.Pattern ordinalPattern = java.util.regex.Pattern.compile("Ordinal_\\d+");
-                            java.util.regex.Matcher ordinalMatcher = ordinalPattern.matcher(decompiledCode);
-                            java.util.Set<String> foundOrdinals = new java.util.HashSet<>();
-                            while (ordinalMatcher.find()) {
-                                String ordinal = ordinalMatcher.group();
-                                int pos = ordinalMatcher.start();
-                                int lineStart = decompiledCode.lastIndexOf('\n', pos);
-                                int lineEnd = decompiledCode.indexOf('\n', pos);
-                                if (lineEnd == -1) lineEnd = decompiledCode.length();
-                                String currentLine = decompiledCode.substring(lineStart + 1, lineEnd);
-                                // Check current line for inline comment
-                                if (currentLine.contains("/*") || currentLine.contains("//")) {
-                                    continue; // Documented on same line
+                            // Find undocumented Ordinal calls in the function body
+                            // v3.2.2: Use callee-based detection instead of text scanning.
+                            // This correctly counts only functions THIS function calls (not callers
+                            // mentioned in the plate comment) and excludes self-referencing artifacts
+                            // from unresolved IAT indirect jumps.
+                            java.util.Set<String> calleeOrdinals = new java.util.HashSet<>();
+                            for (Function callee : func.getCalledFunctions(new ConsoleTaskMonitor())) {
+                                if (callee.getName().startsWith("Ordinal_")) {
+                                    calleeOrdinals.add(callee.getName());
                                 }
-                                // Check previous line for PRE_COMMENT containing this ordinal
-                                if (lineStart > 0) {
-                                    int prevLineStart = decompiledCode.lastIndexOf('\n', lineStart - 1);
-                                    String prevLine = decompiledCode.substring(prevLineStart + 1, lineStart).trim();
-                                    if ((prevLine.contains("/*") || prevLine.contains("//")) && prevLine.contains(ordinal)) {
-                                        continue; // Documented via PRE_COMMENT on previous line
+                            }
+
+                            // For each callee ordinal, check if it has a nearby comment in the decompiled body
+                            int bodyStart = decompiledCode.indexOf('{');
+                            String bodyCode = bodyStart >= 0 ? decompiledCode.substring(bodyStart) : decompiledCode;
+
+                            for (String ordinal : calleeOrdinals) {
+                                java.util.regex.Pattern ordinalPattern = java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(ordinal));
+                                java.util.regex.Matcher ordinalMatcher = ordinalPattern.matcher(bodyCode);
+                                boolean documented = false;
+                                while (ordinalMatcher.find()) {
+                                    int pos = ordinalMatcher.start();
+                                    int lineStart = bodyCode.lastIndexOf('\n', pos);
+                                    int lineEnd = bodyCode.indexOf('\n', pos);
+                                    if (lineEnd == -1) lineEnd = bodyCode.length();
+                                    String currentLine = bodyCode.substring(Math.max(0, lineStart + 1), lineEnd);
+                                    if (currentLine.contains("/*") || currentLine.contains("//")) {
+                                        documented = true;
+                                        break;
+                                    }
+                                    if (lineStart > 0) {
+                                        int prevLineStart = bodyCode.lastIndexOf('\n', lineStart - 1);
+                                        String prevLine = bodyCode.substring(Math.max(0, prevLineStart + 1), lineStart).trim();
+                                        if ((prevLine.contains("/*") || prevLine.contains("//")) && prevLine.contains(ordinal)) {
+                                            documented = true;
+                                            break;
+                                        }
                                     }
                                 }
-                                foundOrdinals.add(ordinal);
+                                if (!documented) {
+                                    undocumentedOrdinals.add(ordinal);
+                                }
                             }
-                            undocumentedOrdinals.addAll(foundOrdinals);
                         }
                     }
                     
@@ -13792,7 +13882,7 @@ public class GhidraMCPPlugin extends Plugin {
                     double commentDensity = codeLineCount > 0 ? (totalCommentCount * 10.0 / codeLineCount) : 0;
                     result.append("\"comment_density\": ").append(String.format("%.2f", commentDensity)).append(", ");
 
-                    CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity, typeQualityIssues, phantomVars.size(), codeLineCount, unfixableUndefinedCount, unfixableHungarianCount);
+                    CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity, typeQualityIssues, phantomVars.size(), codeLineCount, unfixableUndefinedCount, unfixableHungarianCount, isThunk);
                     result.append("\"completeness_score\": ").append(scoreResult.score).append(", ");
                     result.append("\"effective_score\": ").append(scoreResult.effectiveScore).append(", ");
                     result.append("\"all_deductions_unfixable\": ").append(scoreResult.score < 100.0 && scoreResult.effectiveScore >= 100.0).append(", ");
@@ -13800,7 +13890,7 @@ public class GhidraMCPPlugin extends Plugin {
                     // Generate workflow-aligned recommendations
                     List<String> recommendations = generateWorkflowRecommendations(
                         func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues,
-                        unrenamedGlobals, undocumentedOrdinals, commentDensity, scoreResult, codeLineCount
+                        unrenamedGlobals, undocumentedOrdinals, commentDensity, scoreResult, codeLineCount, isThunk
                     );
 
                     result.append("\"recommendations\": [");
@@ -13983,9 +14073,19 @@ public class GhidraMCPPlugin extends Plugin {
     /**
      * Validate plate comment structure and content quality
      */
-    private void validatePlateCommentStructure(String plateComment, List<String> issues) {
+    private void validatePlateCommentStructure(String plateComment, List<String> issues, boolean isThunk) {
         if (plateComment == null || plateComment.isEmpty()) {
             issues.add("Plate comment is empty");
+            return;
+        }
+
+        // v3.2.2: Thunks only require: identifies as thunk/stub + references body address.
+        // No minimum line count, Algorithm, or Returns sections needed for forwarding stubs.
+        if (isThunk) {
+            String lower = plateComment.toLowerCase();
+            if (!lower.contains("thunk") && !lower.contains("stub") && !lower.contains("forwarding") && !lower.contains("jmp")) {
+                issues.add("Thunk plate comment should identify function as a forwarding stub");
+            }
             return;
         }
 
@@ -14059,11 +14159,11 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
-    private CompletenessScoreResult calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity, List<String> typeQualityIssues, int phantomCount, int codeLineCount, int unfixableUndefinedCount, int unfixableHungarianCount) {
+    private CompletenessScoreResult calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity, List<String> typeQualityIssues, int phantomCount, int codeLineCount, int unfixableUndefinedCount, int unfixableHungarianCount, boolean isThunk) {
         double score = 100.0;
         double unfixablePenalty = 0.0;
 
-        if (func.getName().startsWith("FUN_")) score -= 30;
+        if (isAutoGeneratedName(func.getName())) score -= 30;
         if (func.getSignature() == null) score -= 20;
         if (func.getCallingConvention() == null) score -= 10;
         if (func.getComment() == null) score -= 20;
@@ -14077,7 +14177,7 @@ public class GhidraMCPPlugin extends Plugin {
         score -= (unrenamedGlobalsCount * 3);
         score -= (undocumentedOrdinalsCount * 2);
 
-        if (commentDensity < 1.0 && func.getComment() != null && codeLineCount > 10) {
+        if (commentDensity < 1.0 && func.getComment() != null && codeLineCount > 10 && !isThunk) {
             score -= 5;
         }
 
@@ -14113,7 +14213,8 @@ public class GhidraMCPPlugin extends Plugin {
             List<String> undocumentedOrdinals,
             double commentDensity,
             CompletenessScoreResult scoreResult,
-            int codeLineCount) {
+            int codeLineCount,
+            boolean isThunk) {
 
         List<String> recommendations = new ArrayList<>();
 
@@ -14226,8 +14327,8 @@ public class GhidraMCPPlugin extends Plugin {
             }
         }
 
-        // Inline Comment Density Check (skip for small functions <= 10 code lines)
-        if (commentDensity < 0.67 && codeLineCount > 10) { // Less than 1 comment per 15 lines
+        // Inline Comment Density Check (skip for small functions <= 10 code lines, and for thunks)
+        if (commentDensity < 0.67 && codeLineCount > 10 && !isThunk) { // Less than 1 comment per 15 lines
             recommendations.add("LOW INLINE COMMENT DENSITY - Add more explanatory comments:");
             recommendations.add("1. Current density: " + String.format("%.2f", commentDensity) + " comments per 10 lines (target: 0.67+)");
             recommendations.add("2. Add inline comments for:");
@@ -14278,7 +14379,7 @@ public class GhidraMCPPlugin extends Plugin {
                         finalProgram.getAddressFactory().getAddress(startAddress) :
                         finalProgram.getMinAddress();
 
-                    String searchPattern = pattern != null ? pattern : "FUN_";
+                    String searchPattern = pattern; // null means match all auto-generated names
                     boolean ascending = !"descending".equals(direction);
 
                     FunctionIterator iter = ascending ?
@@ -14288,7 +14389,10 @@ public class GhidraMCPPlugin extends Plugin {
                     Function found = null;
                     while (iter.hasNext()) {
                         Function func = iter.next();
-                        if (func.getName().startsWith(searchPattern)) {
+                        boolean matches = (searchPattern != null)
+                            ? func.getName().startsWith(searchPattern)
+                            : isAutoGeneratedName(func.getName());
+                        if (matches) {
                             found = func;
                             break;
                         }
@@ -15347,7 +15451,7 @@ public class GhidraMCPPlugin extends Plugin {
 
                         // Filter by custom name
                         if (hasCustomName != null) {
-                            boolean isCustom = !func.getName().startsWith("FUN_");
+                            boolean isCustom = !isAutoGeneratedName(func.getName());
                             if (hasCustomName != isCustom) {
                                 continue;
                             }
@@ -16482,7 +16586,7 @@ public class GhidraMCPPlugin extends Plugin {
                 FunctionManager funcMgr = prog.getFunctionManager();
                 for (Function func : funcMgr.getFunctions(true)) {
                     total++;
-                    if (func.getName().startsWith("FUN_") || func.getName().startsWith("thunk_FUN_")) {
+                    if (isAutoGeneratedName(func.getName())) {
                         undocumented++;
                     } else {
                         documented++;
@@ -16560,7 +16664,7 @@ public class GhidraMCPPlugin extends Plugin {
                     if (!seenFunctions.contains(funcName)) {
                         seenFunctions.add(funcName);
 
-                        if (funcName.startsWith("FUN_") || funcName.startsWith("thunk_FUN_")) {
+                        if (isAutoGeneratedName(funcName)) {
                             if (!first) result.append(", ");
                             first = false;
                             undocCount++;
@@ -16642,7 +16746,7 @@ public class GhidraMCPPlugin extends Plugin {
                                 Function func = funcMgr.getFunctionContaining(ref.getFromAddress());
                                 if (func != null) {
                                     String funcName = func.getName();
-                                    if (funcName.startsWith("FUN_") || funcName.startsWith("thunk_FUN_")) {
+                                    if (isAutoGeneratedName(funcName)) {
                                         undocFuncs.add(funcName + "@" + func.getEntryPoint().toString());
                                     } else {
                                         docFuncs.add(funcName);
@@ -16816,7 +16920,14 @@ public class GhidraMCPPlugin extends Plugin {
 
     @Override
     public void dispose() {
-        stopServer();
+        instanceCount--;
+        // Only stop the server when the last plugin instance is disposed
+        if (instanceCount <= 0) {
+            stopServer();
+            instanceCount = 0;
+        } else {
+            Msg.info(this, "GhidraMCP: " + instanceCount + " CodeBrowser window(s) still active, keeping server running.");
+        }
         if (startServerAction != null) {
             tool.removeAction(startServerAction);
         }

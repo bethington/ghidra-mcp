@@ -1,7 +1,7 @@
 {
   "version": "3.2.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 180,
+  "total_endpoints": 181,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -136,6 +136,7 @@
     {"path": "/inspect_memory_content", "method": "GET", "category": "analysis", "params": ["address", "length", "detect_strings", "program"], "description": "Inspect memory bytes"},
     {"path": "/read_memory", "method": "GET", "category": "analysis", "params": ["address", "length", "format"], "description": "Read raw memory"},
     {"path": "/analyze_function_completeness", "method": "GET", "category": "analysis", "params": ["function_address"], "description": "Analyze documentation completeness"},
+    {"path": "/batch_analyze_completeness", "method": "POST", "category": "analysis", "params": ["addresses"], "description": "Batch analyze completeness for multiple functions"},
     {"path": "/analyze_function_complete", "method": "GET", "category": "analysis", "params": ["name", "include_xrefs", "include_callees", "include_callers", "include_disasm", "include_variables", "program"], "description": "Complete function analysis"},
     {"path": "/find_next_undefined_function", "method": "GET", "category": "analysis", "params": ["start_address", "criteria", "pattern", "direction", "program"], "description": "Find next undefined function"},
     {"path": "/can_rename_at_address", "method": "GET", "category": "analysis", "params": ["address"], "description": "Check if address can be renamed"},

@@ -8,7 +8,7 @@
     <packaging>jar</packaging>
     <version>3.2.0</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v3.2.0: 179 MCP tools, Tools menu server control, headless server parity, Ghidra Server integration, project lifecycle management, analysis control, and battle-tested AI documentation workflows.</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v3.2.0: 180 MCP tools, Tools menu server control, headless server parity, Ghidra Server integration, project lifecycle management, analysis control, and battle-tested AI documentation workflows.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.release>21</maven.compiler.release>

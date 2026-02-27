@@ -42,6 +42,11 @@ Task(
   5. Apply variable renaming/typing on the BODY address only (thunks have no locals)
   The thunk plate comment should note it is a forwarding stub with the body address.
 
+  NAME COLLISION CHECK: Before choosing a function name, call search_functions_enhanced
+  with name_pattern='YourChosenName' to verify no other function already has that name.
+  If a collision exists, differentiate by behavior (e.g., SetUnitState vs
+  SetUnitStatePersistent) or by scope (e.g., GetLevel vs GetSkillLevel).
+
   Return the DONE output when complete."
 )
 ```
@@ -66,12 +71,12 @@ Task(
 3. Dispatch leaves in parallel, then next tier
 
 ### By undocumented functions
-1. `list_functions` filtered to `FUN_*` prefix, or `find_next_undefined_function` repeatedly
+1. `list_functions` filtered to `FUN_*` or `Ordinal_*` prefix, or `find_next_undefined_function` repeatedly (default finds both `FUN_*` and `Ordinal_*`)
 2. Dispatch in batches of 3
 
 ### By neighborhood (address-adjacent)
 1. Pick a documented function as anchor
-2. `list_functions` to find adjacent `FUN_*` entries
+2. `list_functions` to find adjacent `FUN_*` / `Ordinal_*` entries
 3. Useful after orphaned code discovery — process newly created functions in the same region
 
 ## Practical Notes
@@ -92,6 +97,8 @@ These issues come up repeatedly when running V5 at scale:
 - **Trivial getters** (6 bytes, 2 instructions): 3 tool calls total — rename+prototype, plate comment, verify. Subagent overhead may not be worth it; consider documenting inline.
 - **Thunk-only documentation**: Common failure mode where subagents rename the thunk (JMP stub) but not the implementation body. The body function stays named `Ordinal_XXXXX` or `FUN_XXXXX` with no plate comment. The dispatch prompt now explicitly requires documenting both addresses. Auditors should verify by running `analyze_function_completeness` on the body address, not just the thunk.
 - **Disassembly EOL comments vs decompiler comments**: The completeness checker now counts both decompiler inline comments AND disassembly EOL comments toward comment density. Subagents applying only EOL comments previously scored 0% density — this is fixed in v3.2.1.
+- **Name collisions across parallel subagents**: Subagents choosing names independently may assign the same name to different functions (e.g., two different ordinals both named `SetUnitState` despite different semantics). The dispatch prompt now includes a NAME COLLISION CHECK step. Auditors should search for duplicate function names after each batch.
+- **Checker false positives on thunks (v3.2.2 fixes)**: The checker no longer penalizes thunk stubs for body-projected variables when the thunk has no real locals, no longer requires full plate comment sections (Algorithm/Parameters/Returns) for thunks, and only counts callee ordinals (not callers mentioned in plate comments).
 
 ## Error Handling
 
