@@ -298,7 +298,7 @@ install_ghidra_dependencies() {
     local -a artifact_names=(
         "Base" "Decompiler" "Docking" "Generic" "Project"
         "SoftwareModeling" "Utility" "Gui" "FileSystem" "Graph"
-        "DB" "Emulation" "PDB" "FunctionID"
+        "DB" "Emulation" "PDB" "FunctionID" "Help"
     )
     local -a artifact_paths=(
         "Ghidra/Features/Base/lib/Base.jar"
@@ -315,6 +315,7 @@ install_ghidra_dependencies() {
         "Ghidra/Framework/Emulation/lib/Emulation.jar"
         "Ghidra/Features/PDB/lib/PDB.jar"
         "Ghidra/Features/FunctionID/lib/FunctionID.jar"
+        "Ghidra/Framework/Help/lib/Help.jar"
     )
 
     local quiet_flag=""
@@ -411,7 +412,7 @@ invoke_clean_action() {
     local artifacts=(
         "Base" "Decompiler" "Docking" "Generic" "Project"
         "SoftwareModeling" "Utility" "Gui" "FileSystem" "Graph"
-        "DB" "Emulation" "PDB" "FunctionID"
+        "DB" "Emulation" "PDB" "FunctionID" "Help"
     )
 
     local m2_root="$HOME/.m2/repository/ghidra"
@@ -524,6 +525,7 @@ invoke_preflight_checks() {
             "Ghidra/Framework/Emulation/lib/Emulation.jar"
             "Ghidra/Features/PDB/lib/PDB.jar"
             "Ghidra/Features/FunctionID/lib/FunctionID.jar"
+            "Ghidra/Framework/Help/lib/Help.jar"
         )
         for rel in "${required_jars[@]}"; do
             local full="${resolved_ghidra_path}/${rel}"

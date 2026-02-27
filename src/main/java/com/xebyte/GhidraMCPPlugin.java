@@ -47,6 +47,10 @@ import ghidra.program.model.data.PointerDataType;
 
 import ghidra.framework.options.Options;
 
+import docking.action.DockingAction;
+import docking.action.MenuData;
+import docking.ActionContext;
+
 // Block model for control flow analysis
 import ghidra.program.model.block.BasicBlockModel;
 import ghidra.program.model.block.CodeBlock;
@@ -77,7 +81,7 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "3.0.0"; // Default fallback
+    private static String VERSION = "3.1.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
@@ -90,7 +94,7 @@ class VersionInfo {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "3.0.0");
+                VERSION = props.getProperty("app.version", "3.1.0");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
                 GHIDRA_VERSION = props.getProperty("ghidra.version", "unknown");
                 BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
@@ -164,6 +168,12 @@ public class GhidraMCPPlugin extends Plugin {
     private static final int HTTP_IDLE_TIMEOUT_SECONDS = 300;        // 5 minutes for idle connections
     private static final int BATCH_OPERATION_CHUNK_SIZE = 20;        // Process batch operations in chunks of 20
 
+    // Menu actions for Tools > GhidraMCP submenu
+    private DockingAction startServerAction;
+    private DockingAction stopServerAction;
+    private DockingAction restartServerAction;
+    private DockingAction serverStatusAction;
+
     // C language keywords to filter from field name suggestions
     private static final Set<String> C_KEYWORDS = Set.of(
         "if", "else", "for", "while", "do", "switch", "case", "default",
@@ -202,6 +212,102 @@ public class GhidraMCPPlugin extends Plugin {
                 "3. Checking if another Ghidra instance is running\n\n" +
                 "Error: " + e.getMessage());
         }
+
+        createMenuActions();
+    }
+
+    private boolean isServerRunning() {
+        return server != null;
+    }
+
+    private void stopServer() {
+        if (server != null) {
+            Msg.info(this, "Stopping GhidraMCP HTTP server...");
+            try {
+                server.stop(1);
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            server = null;
+            Msg.info(this, "GhidraMCP HTTP server stopped.");
+        }
+    }
+
+    private void updateMenuActionStates() {
+        boolean running = isServerRunning();
+        startServerAction.setEnabled(!running);
+        stopServerAction.setEnabled(running);
+        restartServerAction.setEnabled(running);
+    }
+
+    private void createMenuActions() {
+        startServerAction = new DockingAction("Start Server", getName()) {
+            @Override
+            public void actionPerformed(ActionContext context) {
+                try {
+                    startServer();
+                    updateMenuActionStates();
+                    Options options = tool.getOptions(OPTION_CATEGORY_NAME);
+                    int port = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
+                    Msg.showInfo(getClass(), null, "GhidraMCP", "Server started on port " + port + ".");
+                } catch (IOException e) {
+                    Msg.showError(getClass(), null, "GhidraMCP", "Failed to start server: " + e.getMessage());
+                }
+            }
+        };
+        startServerAction.setMenuBarData(new MenuData(new String[]{"Tools", "GhidraMCP", "Start Server"}));
+
+        stopServerAction = new DockingAction("Stop Server", getName()) {
+            @Override
+            public void actionPerformed(ActionContext context) {
+                stopServer();
+                updateMenuActionStates();
+                Msg.showInfo(getClass(), null, "GhidraMCP", "Server stopped.");
+            }
+        };
+        stopServerAction.setMenuBarData(new MenuData(new String[]{"Tools", "GhidraMCP", "Stop Server"}));
+
+        restartServerAction = new DockingAction("Restart Server", getName()) {
+            @Override
+            public void actionPerformed(ActionContext context) {
+                stopServer();
+                try {
+                    startServer();
+                    updateMenuActionStates();
+                    Options options = tool.getOptions(OPTION_CATEGORY_NAME);
+                    int port = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
+                    Msg.showInfo(getClass(), null, "GhidraMCP", "Server restarted on port " + port + ".");
+                } catch (IOException e) {
+                    updateMenuActionStates();
+                    Msg.showError(getClass(), null, "GhidraMCP", "Failed to restart server: " + e.getMessage());
+                }
+            }
+        };
+        restartServerAction.setMenuBarData(new MenuData(new String[]{"Tools", "GhidraMCP", "Restart Server"}));
+
+        serverStatusAction = new DockingAction("Server Status", getName()) {
+            @Override
+            public void actionPerformed(ActionContext context) {
+                Options options = tool.getOptions(OPTION_CATEGORY_NAME);
+                int port = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
+                String status = isServerRunning() ? "Running" : "Stopped";
+                String message = "GhidraMCP Server Status\n\n" +
+                    "Status: " + status + "\n" +
+                    "Port: " + port + "\n" +
+                    "Version: " + VersionInfo.getFullVersion() + "\n" +
+                    "Endpoints: " + VersionInfo.getEndpointCount();
+                Msg.showInfo(getClass(), null, "GhidraMCP", message);
+            }
+        };
+        serverStatusAction.setMenuBarData(new MenuData(new String[]{"Tools", "GhidraMCP", "Server Status"}));
+
+        tool.addAction(startServerAction);
+        tool.addAction(stopServerAction);
+        tool.addAction(restartServerAction);
+        tool.addAction(serverStatusAction);
+
+        updateMenuActionStates();
     }
 
     private void startServer() throws IOException {
@@ -16606,17 +16712,18 @@ public class GhidraMCPPlugin extends Plugin {
 
     @Override
     public void dispose() {
-        if (server != null) {
-            Msg.info(this, "Stopping GhidraMCP HTTP server...");
-            try {
-                server.stop(1); // Stop with a small delay (e.g., 1 second) for connections to finish
-                // Give the server time to fully release the port
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            server = null; // Nullify the reference
-            Msg.info(this, "GhidraMCP HTTP server stopped.");
+        stopServer();
+        if (startServerAction != null) {
+            tool.removeAction(startServerAction);
+        }
+        if (stopServerAction != null) {
+            tool.removeAction(stopServerAction);
+        }
+        if (restartServerAction != null) {
+            tool.removeAction(restartServerAction);
+        }
+        if (serverStatusAction != null) {
+            tool.removeAction(serverStatusAction);
         }
         super.dispose();
     }

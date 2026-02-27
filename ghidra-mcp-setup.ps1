@@ -393,7 +393,8 @@ function Install-GhidraDependencies {
         @{ Artifact = "DB";               RelPath = "Ghidra\Framework\DB\lib\DB.jar" },
         @{ Artifact = "Emulation";        RelPath = "Ghidra\Framework\Emulation\lib\Emulation.jar" },
         @{ Artifact = "PDB";              RelPath = "Ghidra\Features\PDB\lib\PDB.jar" },
-        @{ Artifact = "FunctionID";       RelPath = "Ghidra\Features\FunctionID\lib\FunctionID.jar" }
+        @{ Artifact = "FunctionID";       RelPath = "Ghidra\Features\FunctionID\lib\FunctionID.jar" },
+        @{ Artifact = "Help";             RelPath = "Ghidra\Framework\Help\lib\Help.jar" }
     )
 
     foreach ($dep in $deps) {
@@ -622,7 +623,8 @@ function Invoke-PreflightChecks {
             "Ghidra\Framework\DB\lib\DB.jar",
             "Ghidra\Framework\Emulation\lib\Emulation.jar",
             "Ghidra\Features\PDB\lib\PDB.jar",
-            "Ghidra\Features\FunctionID\lib\FunctionID.jar"
+            "Ghidra\Features\FunctionID\lib\FunctionID.jar",
+            "Ghidra\Framework\Help\lib\Help.jar"
         )
         foreach ($rel in $requiredJarPaths) {
             $full = Join-Path $ResolvedGhidraPath $rel
