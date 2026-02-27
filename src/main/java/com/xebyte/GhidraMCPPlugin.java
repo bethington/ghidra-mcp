@@ -13489,6 +13489,10 @@ public class GhidraMCPPlugin extends Plugin {
                                             String flag = symName + " (storage type: " + symType.getName() + ", decompiler shows: " + highType.getName() + ")";
                                             if (!undefinedVars.stream().anyMatch(v -> v.startsWith(symName + " "))) {
                                                 undefinedVars.add(flag);
+                                                // v3.1.1: Track as unfixable if register-only (not in func.getLocalVariables())
+                                                if (!localVarNames.contains(symName)) {
+                                                    unfixableUndefinedCount++;
+                                                }
                                             }
                                         }
                                     }
@@ -13650,21 +13654,31 @@ public class GhidraMCPPlugin extends Plugin {
                             unrenamedGlobals.addAll(foundDats);
                             
                             // Find Ordinal_XXXXX calls without nearby comments
+                            // v3.1.1: Check current line AND adjacent lines for comments,
+                            // since PRE_COMMENTs appear on the line above the code
                             java.util.regex.Pattern ordinalPattern = java.util.regex.Pattern.compile("Ordinal_\\d+");
                             java.util.regex.Matcher ordinalMatcher = ordinalPattern.matcher(decompiledCode);
                             java.util.Set<String> foundOrdinals = new java.util.HashSet<>();
                             while (ordinalMatcher.find()) {
                                 String ordinal = ordinalMatcher.group();
-                                // Check if there's a comment on the same line or nearby
                                 int pos = ordinalMatcher.start();
                                 int lineStart = decompiledCode.lastIndexOf('\n', pos);
                                 int lineEnd = decompiledCode.indexOf('\n', pos);
                                 if (lineEnd == -1) lineEnd = decompiledCode.length();
-                                String line = decompiledCode.substring(lineStart + 1, lineEnd);
-                                // If no comment on the line containing the ordinal, flag it
-                                if (!line.contains("/*") && !line.contains("//")) {
-                                    foundOrdinals.add(ordinal);
+                                String currentLine = decompiledCode.substring(lineStart + 1, lineEnd);
+                                // Check current line for inline comment
+                                if (currentLine.contains("/*") || currentLine.contains("//")) {
+                                    continue; // Documented on same line
                                 }
+                                // Check previous line for PRE_COMMENT containing this ordinal
+                                if (lineStart > 0) {
+                                    int prevLineStart = decompiledCode.lastIndexOf('\n', lineStart - 1);
+                                    String prevLine = decompiledCode.substring(prevLineStart + 1, lineStart).trim();
+                                    if ((prevLine.contains("/*") || prevLine.contains("//")) && prevLine.contains(ordinal)) {
+                                        continue; // Documented via PRE_COMMENT on previous line
+                                    }
+                                }
+                                foundOrdinals.add(ordinal);
                             }
                             undocumentedOrdinals.addAll(foundOrdinals);
                         }
@@ -13805,17 +13819,18 @@ public class GhidraMCPPlugin extends Plugin {
             case "char": return "c|ch";
             case "bool": return "f";
             case "short": return "n|s";
-            case "ushort": return "w";
+            case "ushort": case "word": return "w";
             case "int": return "n|i";
-            case "uint": return "dw";
+            case "uint": case "dword": return "dw";
             case "long": return "l";
             case "ulong": return "dw";
             case "longlong": return "ll";
-            case "ulonglong": return "qw";
+            case "ulonglong": case "qword": return "qw";
             case "float": return "fl";
             case "double": return "d";
             case "float10": return "ld";
             case "HANDLE": return "h";
+            case "BOOL": return "f";
             default:
                 // Unknown type (might be structure or custom type)
                 return null;

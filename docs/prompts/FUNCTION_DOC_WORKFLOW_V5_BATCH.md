@@ -24,6 +24,15 @@ Task(
   at address 0xADDRESS (currently named 'FUN_XXXXXXXX').
   Skip get_current_selection() — the address is provided above.
   Apply all changes directly in Ghidra using MCP tools.
+
+  CRITICAL: In Step 3, you MUST call get_function_variables to check actual
+  storage types. The decompiler may display 'int' or 'short *' while storage
+  is still 'undefined4'. Call set_local_variable_type for EVERY variable with
+  undefined storage BEFORE renaming. If a variable is used as a pointer
+  (dereferenced, offset arithmetic), type it as 'int *' not 'int'.
+  After typing, call get_function_variables again to verify no undefined
+  storage remains, then rename all variables in a single rename_variables call.
+
   Return the DONE output when complete."
 )
 ```
@@ -70,6 +79,7 @@ These issues come up repeatedly when running V5 at scale:
   - Phantom variables (`extraout_*`, `in_*`)
   - Register-only SSA variables (e.g., `pDVar1`): no entry in `func.getLocalVariables()`, cannot be renamed or retyped. The checker now detects these and boosts `effective_score` accordingly.
   - `firstUseOffset` constraint: stack SSA variables at non-zero offsets that block `set_local_variable_type` and `rename_variables`. Detected at runtime (subagent gets error), not statically by the checker.
+- **`p`-prefix variable typed as `int` instead of `int *`**: Recurring pattern where subagents name a variable with a pointer prefix (e.g., `pPool`, `pRecord`) but leave the type as `int` instead of `int *`. If a variable is dereferenced or has offset arithmetic in the decompiled code, it must be typed as a pointer. The dispatch prompt now emphasizes this but auditors should verify.
 - **Trivial getters** (6 bytes, 2 instructions): 3 tool calls total — rename+prototype, plate comment, verify. Subagent overhead may not be worth it; consider documenting inline.
 
 ## Error Handling
