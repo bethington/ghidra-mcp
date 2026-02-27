@@ -298,6 +298,7 @@ curl http://127.0.0.1:8089/get_version
 - `get_function_xrefs` - Get function cross-references
 - `analyze_function_complete` - Comprehensive function analysis
 - `analyze_function_completeness` - Documentation completeness score
+- `batch_analyze_completeness` - Batch completeness analysis for multiple functions
 - `find_similar_functions_fuzzy` - Fuzzy similarity matching
 - `bulk_fuzzy_match` - Bulk fuzzy match across all functions
 - `diff_functions` - Diff two functions side by side
@@ -499,7 +500,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 - **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (180 tools)
 - **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (149 GUI endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 172 endpoints, no GUI required
+- **GhidraMCPHeadlessServer** — Standalone headless server — 173 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
@@ -566,7 +567,7 @@ ghidra-mcp/
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
 │       ├── GhidraMCPPlugin.java         # GUI plugin (149 endpoints)
-│       ├── headless/                    # Headless server (172 endpoints)
+│       ├── headless/                    # Headless server (173 endpoints)
 │       └── core/                        # Shared abstractions
 ├── ghidra_scripts/          # Automation scripts
 ├── tests/                   # Python unit tests + endpoint catalog

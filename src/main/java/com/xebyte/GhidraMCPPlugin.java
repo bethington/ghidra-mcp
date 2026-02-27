@@ -140,7 +140,7 @@ class VersionInfo {
     category = PluginCategoryNames.ANALYSIS,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
-                  "Provides 144 endpoints for reverse engineering automation. " +
+                  "Provides 149 endpoints for reverse engineering automation. " +
                   "Port configurable via Tool Options. " +
                   "Features: function analysis, decompilation, symbol management, cross-references, label operations, " +
                   "high-performance batch data analysis, field-level structure analysis, advanced call graph analysis, " +
@@ -13511,7 +13511,7 @@ public class GhidraMCPPlugin extends Plugin {
 
                     // Check for undefined variables (both names and types)
                     // PRIORITY 1 FIX: Use decompilation-based variable detection to avoid phantom variables
-                    // v3.2.1: For thunk functions (single JMP), all decompiler variables belong to the
+                    // v3.2.0: For thunk functions (single JMP), all decompiler variables belong to the
                     // callee body, not this function. Mark them all as unfixable at the thunk level.
                     List<String> undefinedVars = new ArrayList<>();
                     List<String> phantomVars = new ArrayList<>();
@@ -13550,7 +13550,7 @@ public class GhidraMCPPlugin extends Plugin {
 
                             // localVarNames already built above (hoisted for Hungarian check access)
 
-                            // v3.2.2: For thunks with no real locals, skip local variable checks entirely.
+                            // v3.2.0: For thunks with no real locals, skip local variable checks entirely.
                             // The decompiler projects the callee body's variables through the thunk view,
                             // but these are display artifacts — the thunk has no actual locals to fix.
                             boolean thunkWithNoLocals = isThunk && localVarNames.isEmpty();
@@ -13569,13 +13569,13 @@ public class GhidraMCPPlugin extends Plugin {
                                     continue;
                                 }
 
-                                // v3.2.2: Thunks with no real locals — all decompiler variables are
+                                // v3.2.0: Thunks with no real locals — all decompiler variables are
                                 // body-projected artifacts. Skip entirely (don't penalize at all).
                                 if (thunkWithNoLocals) {
                                     continue;
                                 }
 
-                                // v3.2.1: For thunks with some locals, or register-only vars
+                                // v3.2.0: For thunks with some locals, or register-only vars
                                 boolean isRegisterOnly = isThunk || !localVarNames.contains(name);
 
                                 // Check for generic local names (local_XX or XVar patterns)
@@ -13684,7 +13684,7 @@ public class GhidraMCPPlugin extends Plugin {
 
                     // Check Hungarian notation compliance
                     // PRIORITY 1 FIX: Use same decompilation-based detection for consistency
-                    // v3.2.1: Track unfixable Hungarian violations (register-only/thunk variables)
+                    // v3.2.0: Track unfixable Hungarian violations (register-only/thunk variables)
                     List<String> hungarianViolations = new ArrayList<>();
                     int unfixableHungarianCount = 0;
                     for (Parameter param : func.getParameters()) {
@@ -13800,7 +13800,7 @@ public class GhidraMCPPlugin extends Plugin {
                             unrenamedGlobals.addAll(foundDats);
                             
                             // Find undocumented Ordinal calls in the function body
-                            // v3.2.2: Use callee-based detection instead of text scanning.
+                            // v3.2.0: Use callee-based detection instead of text scanning.
                             // This correctly counts only functions THIS function calls (not callers
                             // mentioned in the plate comment) and excludes self-referencing artifacts
                             // from unresolved IAT indirect jumps.
@@ -14079,7 +14079,7 @@ public class GhidraMCPPlugin extends Plugin {
             return;
         }
 
-        // v3.2.2: Thunks only require: identifies as thunk/stub + references body address.
+        // v3.2.0: Thunks only require: identifies as thunk/stub + references body address.
         // No minimum line count, Algorithm, or Returns sections needed for forwarding stubs.
         if (isThunk) {
             String lower = plateComment.toLowerCase();
@@ -14191,7 +14191,7 @@ public class GhidraMCPPlugin extends Plugin {
         // Register-only SSA variables (not in func.getLocalVariables()) cannot be renamed
         // or retyped via Ghidra's API — each deduction is 5 points
         unfixablePenalty += (unfixableUndefinedCount * 5);
-        // v3.2.1: Hungarian violations on register-only/thunk variables are also unfixable
+        // v3.2.0: Hungarian violations on register-only/thunk variables are also unfixable
         unfixablePenalty += (unfixableHungarianCount * 3);
 
         double rawScore = Math.max(0, score);
