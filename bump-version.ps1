@@ -8,8 +8,14 @@ Updates the plugin version string in every file that contains it:
   - src/main/java/com/xebyte/GhidraMCPPlugin.java   (fallback strings)
   - ghidra-mcp-setup.ps1                             ($PluginVersion)
   - tests/endpoints.json
-  - CLAUDE.md
-  - README.md
+  - CLAUDE.md                                        (**Version**: line)
+  - README.md                                        (version table + badge)
+  - AGENTS.md                                        (**Version**: line)
+  - docs/releases/README.md                          ((Latest) heading + footer)
+
+Files NOT managed (dynamic via Maven filtering at build time):
+  - src/main/resources/extension.properties           (uses ${project.version})
+  - src/main/resources/version.properties             (uses ${project.version})
 
 Does NOT touch the Ghidra version (ghidra.version in pom.xml).
 Optionally creates a git tag.
@@ -69,7 +75,17 @@ $rules = @(
     # CLAUDE.md - **Version**: 2.0.x
     @{ File = 'CLAUDE.md';                                                     Pat = '\*\*Version\*\*:\s*' + [regex]::Escape($Old);            Rep = ('**Version**: ' + $New) },
     # README.md - | **Version** | 2.0.x |
-    @{ File = 'README.md';                                                     Pat = '\|\s*\*\*Version\*\*\s*\|\s*' + [regex]::Escape($Old) + '\s*\|'; Rep = ('| **Version** | ' + $New + ' |') }
+    @{ File = 'README.md';                                                     Pat = '\|\s*\*\*Version\*\*\s*\|\s*' + [regex]::Escape($Old) + '\s*\|'; Rep = ('| **Version** | ' + $New + ' |') },
+    # README.md - badge Version-X.Y.Z-brightgreen
+    @{ File = 'README.md';                                                     Pat = 'Version-' + [regex]::Escape($Old) + '-brightgreen';        Rep = ('Version-' + $New + '-brightgreen') },
+    # AGENTS.md - **Version**: X.Y.Z
+    @{ File = 'AGENTS.md';                                                     Pat = '\*\*Version\*\*:\s*' + [regex]::Escape($Old);              Rep = ('**Version**: ' + $New) },
+    # docs/releases/README.md - ### vX.Y.Z (Latest)
+    @{ File = 'docs\releases\README.md';                                       Pat = '### v' + [regex]::Escape($Old) + ' \(Latest\)';            Rep = ('### v' + $New + ' (Latest)') },
+    # docs/releases/README.md - footer (vX.Y.Z)
+    @{ File = 'docs\releases\README.md';                                       Pat = '\(v' + [regex]::Escape($Old) + '\)';                       Rep = ('(v' + $New + ')') },
+    # README.md - headless curl example output "GhidraMCP Headless Server vX.Y.Z"
+    @{ File = 'README.md';                                                     Pat = 'GhidraMCP Headless Server v' + [regex]::Escape($Old);      Rep = ('GhidraMCP Headless Server v' + $New) }
 )
 
 $changed = 0

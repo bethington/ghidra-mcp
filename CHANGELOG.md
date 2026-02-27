@@ -4,6 +4,41 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v3.2.0 - 2026-02-27
+
+### Bug Fixes + Version Management
+
+#### Bug Fixes (Cherry-picked from PR #38)
+- **Fixed trailing slash in DEFAULT_GHIDRA_SERVER** -- `urljoin` path resolution was broken when the base URL ended with `/`
+- **Fixed fuzzy match JSON parsing** -- `find_similar_functions_fuzzy` and `bulk_fuzzy_match` now use `safe_get_json` instead of `safe_get`, which was splitting JSON responses on newlines and destroying structure
+- **Fixed OSGi class cache collisions for inline scripts** -- Inline scripts now use unique class names (`Mcp_<hex>`) per invocation instead of the fixed `_mcp_inline_` prefix, which caused the OSGi bundle resolver to cache stale classloaders
+
+#### Infrastructure
+- **Fixed ENDPOINT_COUNT** -- Corrected from 146 to 147 to match actual `createContext` registration count
+- **Centralized version in extension.properties** -- Description now uses `${project.version}` Maven filtering instead of hardcoded version string
+- **Expanded bump-version.ps1** -- Now covers 11 files (up from 7): added README badge, AGENTS.md, docs/releases/README.md. Extension.properties is now Maven-dynamic.
+- **Version consistency audit** -- Fixed stale 3.0.0 references across ghidra-mcp-setup.ps1, tests/endpoints.json, README.md, AGENTS.md, and docs/releases/README.md
+
+---
+
+## v3.1.0 - 2026-02-26
+
+### Feature Release -- Server Control Menu + Completeness Checker Fixes
+
+#### New Features
+- **Tools > GhidraMCP server control menu** -- Start/stop/restart the HTTP server from Ghidra's Tools menu with status indicator
+- **Deployment automation** -- TCD auto-activation patches tool config for plugin auto-enable; AutoOpen launches project on Ghidra startup; ServerPassword auto-fills server auth dialog
+- **Batch workflow improvements** -- Strengthened dispatch prompt with explicit storage type resolution instructions; added practical note for p-prefix pointer pattern
+
+#### Bug Fixes
+- **Completeness checker: register-only SSA variables** -- Variables with `unique:` storage that can't be renamed/retyped via Ghidra API are now tracked as unfixable, boosting `effective_score` accordingly
+- **Completeness checker: ordinal PRE_COMMENT detection** -- Ordinals documented via `set_decompiler_comment` appear on the line above the code in decompiled output; checker now checks previous line for PRE_COMMENT
+- **Completeness checker: Hungarian notation types** -- Added `dword`/`uint` (dw), `word`/`ushort` (w), `qword`/`ulonglong` (qw), `BOOL` (f) to expected prefix mappings
+- **CI Help.jar fix** -- Added Help.jar dependency to all CI workflow configurations (build.yml, release.yml, tests.yml)
+- **Dropped Python 3.8/3.9** -- CI matrix now targets Python 3.10+ only
+
+---
+
 ## v3.0.0 - 2026-02-23
 
 ### Major Release — Headless Server Parity + New Tool Categories

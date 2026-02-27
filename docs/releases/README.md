@@ -4,7 +4,22 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v3.0.0 (Latest)
+### v3.2.0 (Latest)
+
+- **Bug Fixes + Version Management** - Cherry-picked fixes from PR #38
+- Fixed trailing slash, fuzzy match JSON parsing, OSGi class naming for inline scripts
+- Centralized version management: `extension.properties` now Maven-dynamic, `bump-version.ps1` covers 11 files
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
+### v3.1.0
+
+- **Feature Release** - Server control menu + deployment automation
+- Tools > GhidraMCP menu for server start/stop/restart
+- Deployment automation (TCD auto-activation, AutoOpen, ServerPassword)
+- Completeness checker accuracy improvements (ordinals, storage types, Hungarian notation)
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
+### v3.0.0
 
 - **Major Release** - Headless server parity + 8 new tool categories
 - New categories: Project Lifecycle, Project Organization, Server Connection, Version Control, Version History, Admin, Analysis Control, Script Execution improvements
@@ -93,6 +108,6 @@ Each release directory should contain:
 
 ## Navigation
 
-- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v3.0.0)
+- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v3.2.0)
 - For specific versions: Browse the version directories above
 - For overall project changes: See [CHANGELOG.md](../CHANGELOG.md) in the project root
