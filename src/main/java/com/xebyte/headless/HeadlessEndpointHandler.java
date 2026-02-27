@@ -1904,6 +1904,34 @@ public class HeadlessEndpointHandler {
     }
 
     /**
+     * Get a function's plate (header) comment.
+     */
+    public String getPlateComment(String address) {
+        Program program = getProgram(null);
+        if (program == null) {
+            return "{\"error\": \"No program loaded\"}";
+        }
+        if (address == null || address.isEmpty()) {
+            return "{\"error\": \"address parameter is required\"}";
+        }
+        Address addr = program.getAddressFactory().getAddress(address);
+        if (addr == null) {
+            return "{\"error\": \"Invalid address: " + address + "\"}";
+        }
+        Function func = program.getFunctionManager().getFunctionAt(addr);
+        if (func == null) {
+            func = program.getFunctionManager().getFunctionContaining(addr);
+        }
+        if (func == null) {
+            return "{\"error\": \"No function at address: " + address + "\"}";
+        }
+        String plateComment = func.getComment();
+        return "{\"address\": \"" + func.getEntryPoint().toString() + "\", " +
+               "\"function_name\": \"" + escapeJson(func.getName()) + "\", " +
+               "\"comment\": " + (plateComment != null ? "\"" + escapeJson(plateComment) + "\"" : "null") + "}";
+    }
+
+    /**
      * Set a function's plate (header) comment.
      */
     public String setPlateComment(String functionAddress, String comment) {

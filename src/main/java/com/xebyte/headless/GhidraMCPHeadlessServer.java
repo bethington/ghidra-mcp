@@ -525,6 +525,12 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.batchRenameVariables(functionAddress, variableRenames));
         });
 
+        server.createContext("/get_plate_comment", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String address = params.get("address");
+            sendResponse(exchange, endpointHandler.getPlateComment(address));
+        });
+
         server.createContext("/set_plate_comment", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String functionAddress = params.get("function_address");

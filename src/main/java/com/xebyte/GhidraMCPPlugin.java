@@ -86,7 +86,7 @@ class VersionInfo {
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 147;
+    private static final int ENDPOINT_COUNT = 148;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -1449,6 +1449,48 @@ public class GhidraMCPPlugin extends Plugin {
 
             String result = clearFunctionComments(functionAddress, clearPlate, clearPre, clearEol);
             sendResponse(exchange, result);
+        }));
+
+        // GET_PLATE_COMMENT - Get function header/plate comment
+        server.createContext("/get_plate_comment", safeHandler(exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String address = qparams.get("address");
+            String programName = qparams.get("program");
+
+            Object[] programResult = getProgramOrError(programName);
+            Program prog = (Program) programResult[0];
+            if (prog == null) {
+                sendResponse(exchange, (String) programResult[1]);
+                return;
+            }
+
+            if (address == null || address.isEmpty()) {
+                sendResponse(exchange, "{\"error\": \"address parameter is required\"}");
+                return;
+            }
+
+            Address addr = prog.getAddressFactory().getAddress(address);
+            if (addr == null) {
+                sendResponse(exchange, "{\"error\": \"Invalid address: " + address + "\"}");
+                return;
+            }
+
+            Function func = prog.getFunctionManager().getFunctionAt(addr);
+            if (func == null) {
+                func = prog.getFunctionManager().getFunctionContaining(addr);
+            }
+            if (func == null) {
+                sendResponse(exchange, "{\"error\": \"No function at address: " + address + "\"}");
+                return;
+            }
+
+            String comment = func.getComment();
+            StringBuilder json = new StringBuilder("{");
+            json.append("\"address\": \"").append(func.getEntryPoint().toString()).append("\", ");
+            json.append("\"function_name\": \"").append(escapeJson(func.getName())).append("\", ");
+            json.append("\"comment\": ").append(comment != null ? "\"" + escapeJson(comment) + "\"" : "null");
+            json.append("}");
+            sendResponse(exchange, json.toString());
         }));
 
         // SET_PLATE_COMMENT - Set function header/plate comment
@@ -5895,7 +5937,7 @@ public class GhidraMCPPlugin extends Plugin {
                 }
             }
             
-            CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), 0, 0, 0, 0, 0, 0, new ArrayList<>(), 0, 0, 0);
+            CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), 0, 0, 0, 0, 0, 0, new ArrayList<>(), 0, 0, 0, 0);
             double completenessScore = scoreResult.score;
             json.append("\"completeness_score\": ").append(completenessScore);
             
@@ -13358,8 +13400,23 @@ public class GhidraMCPPlugin extends Plugin {
                         return;
                     }
 
+                    // Detect thunk functions (single JMP instruction, no real body)
+                    boolean isThunk = func.isThunk();
+                    if (!isThunk) {
+                        // Also detect non-tagged thunks: function body is a single unconditional JMP
+                        ghidra.program.model.listing.InstructionIterator instrIter =
+                            program.getListing().getInstructions(func.getBody(), true);
+                        if (instrIter.hasNext()) {
+                            ghidra.program.model.listing.Instruction firstInstr = instrIter.next();
+                            if (!instrIter.hasNext() && firstInstr.getMnemonicString().equals("JMP")) {
+                                isThunk = true;
+                            }
+                        }
+                    }
+
                     result.append("{");
                     result.append("\"function_name\": \"").append(func.getName()).append("\", ");
+                    result.append("\"is_thunk\": ").append(isThunk).append(", ");
                     result.append("\"has_custom_name\": ").append(!func.getName().startsWith("FUN_")).append(", ");
                     result.append("\"has_prototype\": ").append(func.getSignature() != null).append(", ");
                     result.append("\"has_calling_convention\": ").append(func.getCallingConvention() != null).append(", ");
@@ -13390,10 +13447,18 @@ public class GhidraMCPPlugin extends Plugin {
 
                     // Check for undefined variables (both names and types)
                     // PRIORITY 1 FIX: Use decompilation-based variable detection to avoid phantom variables
+                    // v3.2.1: For thunk functions (single JMP), all decompiler variables belong to the
+                    // callee body, not this function. Mark them all as unfixable at the thunk level.
                     List<String> undefinedVars = new ArrayList<>();
                     List<String> phantomVars = new ArrayList<>();
                     int unfixableUndefinedCount = 0;
                     boolean decompilationAvailable = false;
+
+                    // Build set of variable names from low-level Variable API (hoisted for use in Hungarian check)
+                    java.util.Set<String> localVarNames = new java.util.HashSet<>();
+                    for (Variable local : func.getLocalVariables()) {
+                        localVarNames.add(local.getName());
+                    }
 
                     // Try to use decompilation-based detection (high-level API)
                     DecompileResults decompResults = decompileFunction(func, program);
@@ -13419,13 +13484,7 @@ public class GhidraMCPPlugin extends Plugin {
                             // This avoids phantom variables that exist in stack analysis but not decompilation
                             java.util.Set<String> checkedVarNames = new java.util.HashSet<>();
 
-                            // Build set of variable names from low-level Variable API
-                            // Variables NOT in this set are register-only SSA artifacts that
-                            // cannot be renamed or retyped via Ghidra's API
-                            java.util.Set<String> localVarNames = new java.util.HashSet<>();
-                            for (Variable local : func.getLocalVariables()) {
-                                localVarNames.add(local.getName());
-                            }
+                            // localVarNames already built above (hoisted for Hungarian check access)
 
                             Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
                             while (symbols.hasNext()) {
@@ -13441,7 +13500,8 @@ public class GhidraMCPPlugin extends Plugin {
                                     continue;
                                 }
 
-                                boolean isRegisterOnly = !localVarNames.contains(name);
+                                // v3.2.1: For thunks, all locals are from the callee — unfixable at thunk level
+                                boolean isRegisterOnly = isThunk || !localVarNames.contains(name);
 
                                 // Check for generic local names (local_XX or XVar patterns)
                                 if (name.startsWith("local_") ||
@@ -13549,7 +13609,9 @@ public class GhidraMCPPlugin extends Plugin {
 
                     // Check Hungarian notation compliance
                     // PRIORITY 1 FIX: Use same decompilation-based detection for consistency
+                    // v3.2.1: Track unfixable Hungarian violations (register-only/thunk variables)
                     List<String> hungarianViolations = new ArrayList<>();
+                    int unfixableHungarianCount = 0;
                     for (Parameter param : func.getParameters()) {
                         validateHungarianNotation(param.getName(), param.getDataType().getName(), false, hungarianViolations);
                     }
@@ -13560,7 +13622,12 @@ public class GhidraMCPPlugin extends Plugin {
                         Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
                         while (symbols.hasNext()) {
                             ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
+                            int prevSize = hungarianViolations.size();
                             validateHungarianNotation(symbol.getName(), symbol.getDataType().getName(), false, hungarianViolations);
+                            // If a new violation was added and the variable is register-only or thunk-owned, it's unfixable
+                            if (hungarianViolations.size() > prevSize && (isThunk || !localVarNames.contains(symbol.getName()))) {
+                                unfixableHungarianCount += (hungarianViolations.size() - prevSize);
+                            }
                         }
                     } else {
                         // Fallback to low-level API
@@ -13688,6 +13755,21 @@ public class GhidraMCPPlugin extends Plugin {
                         }
                     }
                     
+                    // Count disassembly EOL comments within function body
+                    int disasmCommentCount = 0;
+                    ghidra.program.model.listing.InstructionIterator disasmIter =
+                        program.getListing().getInstructions(func.getBody(), true);
+                    while (disasmIter.hasNext()) {
+                        ghidra.program.model.listing.Instruction instr = disasmIter.next();
+                        String eolComment = program.getListing().getComment(
+                            ghidra.program.model.listing.CodeUnit.EOL_COMMENT, instr.getAddress());
+                        if (eolComment != null && !eolComment.isEmpty()) {
+                            disasmCommentCount++;
+                        }
+                    }
+                    // Include disassembly comments in total for density calculation
+                    int totalCommentCount = inlineCommentCount + disasmCommentCount;
+
                     result.append("\"unrenamed_globals\": [");
                     for (int i = 0; i < unrenamedGlobals.size(); i++) {
                         if (i > 0) result.append(", ");
@@ -13703,13 +13785,14 @@ public class GhidraMCPPlugin extends Plugin {
                     result.append("], ");
                     
                     result.append("\"inline_comment_count\": ").append(inlineCommentCount).append(", ");
+                    result.append("\"disasm_comment_count\": ").append(disasmCommentCount).append(", ");
                     result.append("\"code_line_count\": ").append(codeLineCount).append(", ");
-                    
-                    // Calculate comment density (comments per 10 lines of code)
-                    double commentDensity = codeLineCount > 0 ? (inlineCommentCount * 10.0 / codeLineCount) : 0;
+
+                    // Calculate comment density using total comments (decompiler + disassembly)
+                    double commentDensity = codeLineCount > 0 ? (totalCommentCount * 10.0 / codeLineCount) : 0;
                     result.append("\"comment_density\": ").append(String.format("%.2f", commentDensity)).append(", ");
 
-                    CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity, typeQualityIssues, phantomVars.size(), codeLineCount, unfixableUndefinedCount);
+                    CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity, typeQualityIssues, phantomVars.size(), codeLineCount, unfixableUndefinedCount, unfixableHungarianCount);
                     result.append("\"completeness_score\": ").append(scoreResult.score).append(", ");
                     result.append("\"effective_score\": ").append(scoreResult.effectiveScore).append(", ");
                     result.append("\"all_deductions_unfixable\": ").append(scoreResult.score < 100.0 && scoreResult.effectiveScore >= 100.0).append(", ");
@@ -13976,7 +14059,7 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
-    private CompletenessScoreResult calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity, List<String> typeQualityIssues, int phantomCount, int codeLineCount, int unfixableUndefinedCount) {
+    private CompletenessScoreResult calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity, List<String> typeQualityIssues, int phantomCount, int codeLineCount, int unfixableUndefinedCount, int unfixableHungarianCount) {
         double score = 100.0;
         double unfixablePenalty = 0.0;
 
@@ -13999,7 +14082,7 @@ public class GhidraMCPPlugin extends Plugin {
         }
 
         // Calculate unfixable penalty: void* on genuinely generic functions, phantom vars,
-        // and register-only SSA variables that have no backing storage in Ghidra's database
+        // register-only SSA variables, and thunk-owned callee variables
         for (String issue : typeQualityIssues) {
             if (issue.contains("Generic void*")) {
                 unfixablePenalty += 15;
@@ -14008,6 +14091,8 @@ public class GhidraMCPPlugin extends Plugin {
         // Register-only SSA variables (not in func.getLocalVariables()) cannot be renamed
         // or retyped via Ghidra's API — each deduction is 5 points
         unfixablePenalty += (unfixableUndefinedCount * 5);
+        // v3.2.1: Hungarian violations on register-only/thunk variables are also unfixable
+        unfixablePenalty += (unfixableHungarianCount * 3);
 
         double rawScore = Math.max(0, score);
         double effectiveScore = Math.min(100.0, rawScore + unfixablePenalty);

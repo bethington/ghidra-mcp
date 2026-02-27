@@ -33,6 +33,15 @@ Task(
   After typing, call get_function_variables again to verify no undefined
   storage remains, then rename all variables in a single rename_variables call.
 
+  THUNK HANDLING: If the function is a single JMP instruction (thunk/forwarding
+  stub), you MUST also document the implementation body it jumps to:
+  1. Decompile the thunk to find the target address (shown in decompiled output)
+  2. Apply rename_function_by_address to BOTH the thunk AND the body address
+  3. Apply set_function_prototype to BOTH addresses
+  4. Apply plate comment to BOTH addresses (use set_plate_comment on each)
+  5. Apply variable renaming/typing on the BODY address only (thunks have no locals)
+  The thunk plate comment should note it is a forwarding stub with the body address.
+
   Return the DONE output when complete."
 )
 ```
@@ -81,6 +90,8 @@ These issues come up repeatedly when running V5 at scale:
   - `firstUseOffset` constraint: stack SSA variables at non-zero offsets that block `set_local_variable_type` and `rename_variables`. Detected at runtime (subagent gets error), not statically by the checker.
 - **`p`-prefix variable typed as `int` instead of `int *`**: Recurring pattern where subagents name a variable with a pointer prefix (e.g., `pPool`, `pRecord`) but leave the type as `int` instead of `int *`. If a variable is dereferenced or has offset arithmetic in the decompiled code, it must be typed as a pointer. The dispatch prompt now emphasizes this but auditors should verify.
 - **Trivial getters** (6 bytes, 2 instructions): 3 tool calls total — rename+prototype, plate comment, verify. Subagent overhead may not be worth it; consider documenting inline.
+- **Thunk-only documentation**: Common failure mode where subagents rename the thunk (JMP stub) but not the implementation body. The body function stays named `Ordinal_XXXXX` or `FUN_XXXXX` with no plate comment. The dispatch prompt now explicitly requires documenting both addresses. Auditors should verify by running `analyze_function_completeness` on the body address, not just the thunk.
+- **Disassembly EOL comments vs decompiler comments**: The completeness checker now counts both decompiler inline comments AND disassembly EOL comments toward comment density. Subagents applying only EOL comments previously scored 0% density — this is fixed in v3.2.1.
 
 ## Error Handling
 

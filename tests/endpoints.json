@@ -1,7 +1,7 @@
 {
   "version": "3.2.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 179,
+  "total_endpoints": 180,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -87,6 +87,7 @@
 
     {"path": "/set_decompiler_comment", "method": "POST", "category": "comment", "params": ["address", "comment"], "description": "Set PRE_COMMENT"},
     {"path": "/set_disassembly_comment", "method": "POST", "category": "comment", "params": ["address", "comment"], "description": "Set EOL_COMMENT"},
+    {"path": "/get_plate_comment", "method": "GET", "category": "comment", "params": ["address"], "description": "Get plate comment"},
     {"path": "/set_plate_comment", "method": "POST", "category": "comment", "params": ["function_address", "comment"], "description": "Set plate comment"},
     {"path": "/batch_set_comments", "method": "POST", "category": "comment", "params": ["function_address", "decompiler_comments", "disassembly_comments", "plate_comment"], "description": "Set multiple comments"},
     {"path": "/clear_function_comments", "method": "POST", "category": "comment", "params": ["function_address", "clear_plate", "clear_pre", "clear_eol"], "description": "Clear all comments for a function"},
