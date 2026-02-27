@@ -3227,14 +3227,13 @@ public class GhidraMCPPlugin extends Plugin {
                         return;
                     }
 
-                    // Get high variable
+                    // Get high variable — may be null for EBP-pinned / SSA-only symbols.
+                    // updateDBVariable works without a HighVariable (rename path proves this),
+                    // so we skip the null guard and fall through to updateVariableType directly.
                     HighVariable highVar = symbol.getHighVariable();
-                    if (highVar == null) {
-                        resultMsg.append("Error: No HighVariable found for symbol: ").append(variableName);
-                        return;
-                    }
-
-                    String oldType = highVar.getDataType().getName();
+                    String oldType = highVar != null
+                        ? highVar.getDataType().getName()
+                        : symbol.getDataType().getName();
 
                     // Find the data type
                     DataTypeManager dtm = program.getDataTypeManager();
@@ -5786,7 +5785,7 @@ public class GhidraMCPPlugin extends Plugin {
                 }
             }
             
-            CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), 0, 0, 0, 0, 0, 0, new ArrayList<>(), 0, 0);
+            CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), 0, 0, 0, 0, 0, 0, new ArrayList<>(), 0, 0, 0);
             double completenessScore = scoreResult.score;
             json.append("\"completeness_score\": ").append(completenessScore);
             
@@ -13283,6 +13282,7 @@ public class GhidraMCPPlugin extends Plugin {
                     // PRIORITY 1 FIX: Use decompilation-based variable detection to avoid phantom variables
                     List<String> undefinedVars = new ArrayList<>();
                     List<String> phantomVars = new ArrayList<>();
+                    int unfixableUndefinedCount = 0;
                     boolean decompilationAvailable = false;
 
                     // Try to use decompilation-based detection (high-level API)
@@ -13308,6 +13308,15 @@ public class GhidraMCPPlugin extends Plugin {
                             // Check locals from HIGH-LEVEL decompiled symbol map (not low-level stack frame)
                             // This avoids phantom variables that exist in stack analysis but not decompilation
                             java.util.Set<String> checkedVarNames = new java.util.HashSet<>();
+
+                            // Build set of variable names from low-level Variable API
+                            // Variables NOT in this set are register-only SSA artifacts that
+                            // cannot be renamed or retyped via Ghidra's API
+                            java.util.Set<String> localVarNames = new java.util.HashSet<>();
+                            for (Variable local : func.getLocalVariables()) {
+                                localVarNames.add(local.getName());
+                            }
+
                             Iterator<ghidra.program.model.pcode.HighSymbol> symbols = highFunction.getLocalSymbolMap().getSymbols();
                             while (symbols.hasNext()) {
                                 ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
@@ -13322,16 +13331,20 @@ public class GhidraMCPPlugin extends Plugin {
                                     continue;
                                 }
 
+                                boolean isRegisterOnly = !localVarNames.contains(name);
+
                                 // Check for generic local names (local_XX or XVar patterns)
                                 if (name.startsWith("local_") ||
                                     name.matches(".*Var\\d+") ||  // pvVar1, iVar2, etc.
                                     name.matches("(i|u|d|f|p|b)Var\\d+")) {  // specific type patterns
                                     undefinedVars.add(name + " (generic name)");
+                                    if (isRegisterOnly) unfixableUndefinedCount++;
                                 }
 
                                 // Check for undefined data types (decompiler display type)
                                 if (typeName.startsWith("undefined")) {
                                     undefinedVars.add(name + " (type: " + typeName + ")");
+                                    if (isRegisterOnly) unfixableUndefinedCount++;
                                 }
                             }
 
@@ -13572,7 +13585,7 @@ public class GhidraMCPPlugin extends Plugin {
                     double commentDensity = codeLineCount > 0 ? (inlineCommentCount * 10.0 / codeLineCount) : 0;
                     result.append("\"comment_density\": ").append(String.format("%.2f", commentDensity)).append(", ");
 
-                    CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity, typeQualityIssues, phantomVars.size(), codeLineCount);
+                    CompletenessScoreResult scoreResult = calculateCompletenessScore(func, undefinedVars.size(), plateCommentIssues.size(), hungarianViolations.size(), typeQualityIssues.size(), unrenamedGlobals.size(), undocumentedOrdinals.size(), commentDensity, typeQualityIssues, phantomVars.size(), codeLineCount, unfixableUndefinedCount);
                     result.append("\"completeness_score\": ").append(scoreResult.score).append(", ");
                     result.append("\"effective_score\": ").append(scoreResult.effectiveScore).append(", ");
                     result.append("\"all_deductions_unfixable\": ").append(scoreResult.score < 100.0 && scoreResult.effectiveScore >= 100.0).append(", ");
@@ -13838,7 +13851,7 @@ public class GhidraMCPPlugin extends Plugin {
         }
     }
 
-    private CompletenessScoreResult calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity, List<String> typeQualityIssues, int phantomCount, int codeLineCount) {
+    private CompletenessScoreResult calculateCompletenessScore(Function func, int undefinedCount, int plateCommentIssueCount, int hungarianViolationCount, int typeQualityIssueCount, int unrenamedGlobalsCount, int undocumentedOrdinalsCount, double commentDensity, List<String> typeQualityIssues, int phantomCount, int codeLineCount, int unfixableUndefinedCount) {
         double score = 100.0;
         double unfixablePenalty = 0.0;
 
@@ -13860,14 +13873,16 @@ public class GhidraMCPPlugin extends Plugin {
             score -= 5;
         }
 
-        // Calculate unfixable penalty: void* on genuinely generic functions, phantom vars
-        // void* params are unfixable when the function is a generic memory/utility function
+        // Calculate unfixable penalty: void* on genuinely generic functions, phantom vars,
+        // and register-only SSA variables that have no backing storage in Ghidra's database
         for (String issue : typeQualityIssues) {
             if (issue.contains("Generic void*")) {
                 unfixablePenalty += 15;
             }
         }
-        // Phantom variables are always unfixable (already excluded from undefinedCount)
+        // Register-only SSA variables (not in func.getLocalVariables()) cannot be renamed
+        // or retyped via Ghidra's API — each deduction is 5 points
+        unfixablePenalty += (unfixableUndefinedCount * 5);
 
         double rawScore = Math.max(0, score);
         double effectiveScore = Math.min(100.0, rawScore + unfixablePenalty);

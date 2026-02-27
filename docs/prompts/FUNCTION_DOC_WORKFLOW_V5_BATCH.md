@@ -2,6 +2,17 @@
 
 Orchestrate parallel function documentation using subagents. Each subagent follows [FUNCTION_DOC_WORKFLOW_V5.md](FUNCTION_DOC_WORKFLOW_V5.md) independently. This document covers target selection, dispatch, and result collection only.
 
+## Pre-flight Check
+
+Before dispatching any subagents, verify Ghidra is running and the plugin is accessible:
+
+1. Call `check_connection` MCP tool
+2. If it returns successfully, proceed with dispatch
+3. If connection refused: **stop immediately** and inform the user. Do not dispatch subagents - they will all fail with the same connection error. Suggest:
+   - Start Ghidra and open a program in CodeBrowser
+   - Run `ghidra-mcp-setup.ps1 -Deploy` to auto-activate the plugin
+   - Verify the MCP server is started (Tools > GhidraMCP > Start MCP Server)
+
 ## Dispatch Pattern
 
 ```
@@ -19,7 +30,10 @@ Task(
 
 **Concurrency**: Max 3 subagents at once. MCP tools serialize at the Ghidra HTTP layer — more than 3 risks timeouts without speed benefit.
 
-**Model selection**: `sonnet` for Worker/Leaf/Getter functions. `opus` for Public API, complex Init/Cleanup, and functions requiring deep algorithm analysis.
+**Model selection**: `sonnet` is the default for all functions. It produces A-grade documentation on 90%+ of CRT/game functions at ~5x lower cost than `opus`. Use `opus` only when:
+- Function has 40+ decompiled lines with deep algorithm analysis needed
+- First-pass Sonnet score is below 85% on a non-trivial function
+- Function is a Public API entry point requiring cross-binary context
 
 ## Target Selection
 
@@ -54,6 +68,8 @@ These issues come up repeatedly when running V5 at scale:
   - HighVariable-unmappable arrays — decompiler limitation
   - API-mandated void* params (e.g., `DllMain pvReserved`)
   - Phantom variables (`extraout_*`, `in_*`)
+  - Register-only SSA variables (e.g., `pDVar1`): no entry in `func.getLocalVariables()`, cannot be renamed or retyped. The checker now detects these and boosts `effective_score` accordingly.
+  - `firstUseOffset` constraint: stack SSA variables at non-zero offsets that block `set_local_variable_type` and `rename_variables`. Detected at runtime (subagent gets error), not statically by the checker.
 - **Trivial getters** (6 bytes, 2 instructions): 3 tool calls total — rename+prototype, plate comment, verify. Subagent overhead may not be worth it; consider documenting inline.
 
 ## Error Handling

@@ -46,7 +46,9 @@ param(
     [switch]$SkipRestart = $false,
     [switch]$NoAutoPrereqs = $false,
     [switch]$DryRun = $false,
-    [switch]$Force = $false
+    [switch]$Force = $false,
+    [string]$AutoOpen = "",
+    [string]$ServerPassword = ""
 )
 
 # Color output functions
@@ -77,6 +79,8 @@ function Show-Usage {
     Write-Host "  -NoAutoPrereqs   Disable automatic prerequisite setup during deploy"
     Write-Host "  -SkipBuild       Deploy existing artifact without rebuilding"
     Write-Host "  -SkipRestart     Do not restart Ghidra after deployment"
+    Write-Host "  -AutoOpen        Auto-open program on restart (e.g., 'F:\GhidraProjects\diablo2|/LoD/1.00/D2Common.dll')"
+    Write-Host "  -ServerPassword  Auto-fill Ghidra server password dialog on startup"
     Write-Host "  -Force           Reinstall dependencies even if already present"
     Write-Host "  -DryRun          Print actions without executing commands"
     Write-Host "  -Verbose         Verbose logging"
@@ -971,34 +975,43 @@ if (Test-Path $bridgeSourcePath) {
     Write-LogWarning "Python bridge not found: $bridgeSourcePath"
 }
 
-# Check for user preferences directory
-$userDir = "$env:USERPROFILE\.ghidra"
-if (Test-Path $userDir) {
-    # Try to find and update plugin preferences
-    $prefsPattern = "$userDir\*\preferences\*\plugins.xml"
-    $prefsFiles = Get-ChildItem -Path $prefsPattern -Recurse -ErrorAction SilentlyContinue
-    
-    if ($prefsFiles) {
-        Write-LogInfo "Found Ghidra preferences files, attempting to enable plugin..."
-        foreach ($prefsFile in $prefsFiles) {
-            try {
-                [xml]$xmlContent = Get-Content $prefsFile.FullName
-                $pluginNode = $xmlContent.SelectSingleNode("//PLUGIN[@NAME='GhidraMCPPlugin']")
-                
-                if ($pluginNode) {
-                    $pluginNode.SetAttribute("ENABLED", "true")
-                    if ($PSCmdlet.ShouldProcess($prefsFile.FullName, "Update plugin enabled setting in preferences")) {
-                        $xmlContent.Save($prefsFile.FullName)
-                        Write-LogSuccess "Enabled GhidraMCP plugin in: $($prefsFile.Name)"
+# Auto-activate GhidraMCP in CodeBrowser tool configuration
+# Ghidra stores active plugins as <INCLUDE CLASS="..."> entries in _code_browser.tcd
+$ghidraUserDir = "$env:APPDATA\ghidra"
+if (Test-Path $ghidraUserDir) {
+    $tcdFiles = Get-ChildItem -Path "$ghidraUserDir\*\tools\_code_browser.tcd" -ErrorAction SilentlyContinue
+
+    foreach ($tcdFile in $tcdFiles) {
+        try {
+            $tcdContent = Get-Content $tcdFile.FullName -Raw -Encoding UTF8
+            $pluginClass = "com.xebyte.GhidraMCPPlugin"
+
+            if ($tcdContent -match [regex]::Escape($pluginClass)) {
+                Write-LogSuccess "GhidraMCP already activated in: $($tcdFile.FullName)"
+            } else {
+                # Insert a new PACKAGE block for GhidraMCP after the last existing PACKAGE
+                $insertPattern = '(<PACKAGE NAME="[^"]*"[^/]*/>|</PACKAGE>)(\s*<PLUGIN_STATE)'
+                $replacement = "`$1`n        <PACKAGE NAME=`"GhidraMCP`">`n            <INCLUDE CLASS=`"$pluginClass`" />`n        </PACKAGE>`$2"
+
+                $newContent = $tcdContent -replace $insertPattern, $replacement
+
+                if ($newContent -ne $tcdContent) {
+                    if ($PSCmdlet.ShouldProcess($tcdFile.FullName, "Add GhidraMCP plugin to CodeBrowser tool config")) {
+                        Set-Content -Path $tcdFile.FullName -Value $newContent -Encoding UTF8 -NoNewline
+                        Write-LogSuccess "Auto-activated GhidraMCP in CodeBrowser: $($tcdFile.FullName)"
                     }
                 } else {
-                    Write-Verbose "GhidraMCP plugin not found in: $($prefsFile.Name)"
+                    Write-LogWarning "Could not find insertion point in: $($tcdFile.FullName)"
+                    Write-LogInfo "You may need to manually activate: File > Configure > Configure All Plugins > GhidraMCP"
                 }
-            } catch {
-                Write-Verbose "Could not modify preferences file: $($prefsFile.Name)"
             }
+        } catch {
+            Write-LogWarning "Could not modify tool config: $($_.Exception.Message)"
+            Write-LogInfo "You may need to manually activate: File > Configure > Configure All Plugins > GhidraMCP"
         }
     }
+} else {
+    Write-Verbose "Ghidra user directory not found at: $ghidraUserDir"
 }
 
 # Create quick reference message
@@ -1019,11 +1032,10 @@ if ($NoAutoPrereqs) {
 } else {
     Write-Host "1. Python dependencies were auto-checked/installed."
 }
-Write-Host "2. Start Ghidra"
-Write-Host "3. If plugin isn't automatically enabled:"
+Write-Host "2. Start Ghidra (plugin is auto-activated in CodeBrowser)"
+Write-Host "3. If plugin isn't loaded after a fresh Ghidra install:"
 Write-Host "      - In CodeBrowser: File > Configure > Configure All Plugins > GhidraMCP"
 Write-Host "      - Check the checkbox to enable"
-Write-Host "      - Click OK and restart Ghidra"
 Write-Host "4. To configure the server port:"
 Write-Host "      - In CodeBrowser: Edit > Tool Options > GhidraMCP HTTP Server"
 Write-Host ""
@@ -1064,12 +1076,48 @@ if (Test-Path $destinationPath) {
             Start-Sleep -Seconds 2
         }
         
-        # Start Ghidra
+        # If AutoOpen specified, inject RUNNING_TOOL into projectState before launch.
+        # This makes Ghidra restore CodeBrowser with the target program on startup.
+        # Format: "ProjectDir\ProjectName|/folder/file"
+        # Example: "F:\GhidraProjects\diablo2|/LoD/1.00/D2Common.dll"
+        if ($AutoOpen -and $AutoOpen.Contains("|")) {
+            $parts = $AutoOpen.Split("|", 2)
+            $projectPath = $parts[0]
+            $filePath = $parts[1]
+            $projectStateFile = "$projectPath.rep\projectState"
+
+            if (Test-Path $projectStateFile) {
+                try {
+                    [xml]$projectState = Get-Content $projectStateFile -Encoding UTF8
+                    $workspace = $projectState.SelectSingleNode("//WORKSPACE[@NAME='Workspace']")
+                    if ($workspace -and -not $workspace.SelectSingleNode("RUNNING_TOOL")) {
+                        $runningTool = $projectState.CreateElement("RUNNING_TOOL")
+                        $runningTool.SetAttribute("TOOL_NAME", "CodeBrowser")
+
+                        $dataState = $projectState.CreateElement("DATA_STATE")
+                        $openFile = $projectState.CreateElement("OPEN_FILE")
+                        $openFile.SetAttribute("NAME", $filePath)
+                        $openFile.SetAttribute("TOOL_INSTANCE", "")
+                        $dataState.AppendChild($openFile) | Out-Null
+                        $runningTool.AppendChild($dataState) | Out-Null
+                        $workspace.AppendChild($runningTool) | Out-Null
+
+                        if ($PSCmdlet.ShouldProcess($projectStateFile, "Inject CodeBrowser auto-open for $filePath")) {
+                            $projectState.Save($projectStateFile)
+                            Write-LogSuccess "Injected auto-open: CodeBrowser with $filePath"
+                        }
+                    }
+                } catch {
+                    Write-LogWarning "Could not inject auto-open: $($_.Exception.Message)"
+                }
+            }
+        }
+
         Write-LogInfo "Starting Ghidra..."
         if ($PSCmdlet.ShouldProcess("$GhidraPath\ghidraRun.bat", "Start Ghidra")) {
             Start-Process "$GhidraPath\ghidraRun.bat" -WorkingDirectory $GhidraPath
         }
-        
+
         # Wait a moment and verify it started
         Start-Sleep -Seconds 3
         $newProcs = Get-GhidraProcesses
@@ -1078,6 +1126,220 @@ if (Test-Path $destinationPath) {
             Write-LogSuccess "The updated plugin (v$version) is now available."
         } else {
             Write-LogInfo "Ghidra launch initiated - it may take a moment to fully start."
+        }
+
+        # Auto-fill server password dialog if requested.
+        # Password resolution order: -ServerPassword param > GHIDRA_SERVER_PASSWORD env var > .ghidra-cred file
+        $resolvedPassword = $ServerPassword
+        if (-not $resolvedPassword) {
+            $resolvedPassword = $env:GHIDRA_SERVER_PASSWORD
+        }
+        if (-not $resolvedPassword) {
+            $credFile = Join-Path $PSScriptRoot ".ghidra-cred"
+            if (Test-Path $credFile) {
+                $resolvedPassword = (Get-Content $credFile -Raw -ErrorAction SilentlyContinue).Trim()
+            }
+        }
+        if ($resolvedPassword) {
+            $ServerPassword = $resolvedPassword
+        }
+        if ($ServerPassword) {
+            Write-LogInfo "Waiting for server password dialog (up to 120s)..."
+            $autoFillJob = Start-Job -ScriptBlock {
+                param($password)
+                Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+public class GhidraDialogAutomation {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, string lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    public const uint WM_SETTEXT = 0x000C;
+    public const uint WM_GETTEXT = 0x000D;
+    public const uint BM_CLICK = 0x00F5;
+    public const int SW_RESTORE = 9;
+
+    public static IntPtr FindDialogWindow(string titleSubstring) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((hWnd, lParam) => {
+            if (!IsWindowVisible(hWnd)) return true;
+            StringBuilder title = new StringBuilder(256);
+            GetWindowText(hWnd, title, 256);
+            if (title.ToString().IndexOf(titleSubstring, StringComparison.OrdinalIgnoreCase) >= 0) {
+                found = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    public static IntPtr[] FindChildrenByClass(IntPtr parent, string className) {
+        var results = new System.Collections.Generic.List<IntPtr>();
+        EnumChildWindows(parent, (hWnd, lParam) => {
+            StringBuilder cls = new StringBuilder(256);
+            GetClassName(hWnd, cls, 256);
+            if (cls.ToString().Contains(className)) {
+                results.Add(hWnd);
+            }
+            return true;
+        }, IntPtr.Zero);
+        return results.ToArray();
+    }
+
+    public static IntPtr[] FindAllChildren(IntPtr parent) {
+        var results = new System.Collections.Generic.List<IntPtr>();
+        EnumChildWindows(parent, (hWnd, lParam) => {
+            results.Add(hWnd);
+            return true;
+        }, IntPtr.Zero);
+        return results.ToArray();
+    }
+}
+"@
+
+                $maxWait = 120
+                $elapsed = 0
+                $found = $false
+
+                while ($elapsed -lt $maxWait -and -not $found) {
+                    Start-Sleep -Seconds 2
+                    $elapsed += 2
+
+                    # Look for the Ghidra server auth dialog (Java Swing JDialog).
+                    # Title is "Repository Server Authentication" or similar.
+                    $dialogHwnd = [GhidraDialogAutomation]::FindDialogWindow("Server Authentication")
+                    if ($dialogHwnd -eq [IntPtr]::Zero) {
+                        $dialogHwnd = [GhidraDialogAutomation]::FindDialogWindow("Password")
+                    }
+                    if ($dialogHwnd -eq [IntPtr]::Zero) {
+                        $dialogHwnd = [GhidraDialogAutomation]::FindDialogWindow("Authentication")
+                    }
+
+                    if ($dialogHwnd -ne [IntPtr]::Zero) {
+                        Add-Type -AssemblyName System.Windows.Forms
+
+                        # Bring dialog to foreground (retry - SetForegroundWindow
+                        # can fail on first attempt due to Windows focus rules)
+                        for ($retry = 0; $retry -lt 3; $retry++) {
+                            [GhidraDialogAutomation]::ShowWindow($dialogHwnd, 9)
+                            Start-Sleep -Milliseconds 200
+                            [GhidraDialogAutomation]::SetForegroundWindow($dialogHwnd)
+                            Start-Sleep -Milliseconds 300
+                        }
+
+                        # Small delay for the dialog to fully accept focus
+                        Start-Sleep -Milliseconds 500
+
+                        # Ghidra's ServerPasswordPrompt dialog layout:
+                        # - Server info label (not focusable)
+                        # - Username field (pre-filled from preferences, has initial focus)
+                        # - Password field (empty)
+                        # - OK / Cancel buttons
+                        # Tab from username to password field, then type and submit.
+                        [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
+                        Start-Sleep -Milliseconds 200
+
+                        # Type the password (escape SendKeys special chars: +^%~(){})
+                        $escaped = $password -replace '([+^%~(){}])', '{$1}'
+                        [System.Windows.Forms.SendKeys]::SendWait($escaped)
+                        Start-Sleep -Milliseconds 300
+
+                        # Press Enter to submit (equivalent to clicking OK)
+                        [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+                        Start-Sleep -Milliseconds 500
+
+                        # Verify dialog dismissed (check if window is gone)
+                        $stillThere = [GhidraDialogAutomation]::FindDialogWindow("Server Authentication")
+                        if ($stillThere -ne [IntPtr]::Zero) {
+                            # Dialog still visible - may have landed on wrong field.
+                            # Try again: click into dialog, use Shift+Tab to go back,
+                            # then Tab forward to ensure password field.
+                            Write-Output "INFO: Dialog still visible, retrying..."
+                            [GhidraDialogAutomation]::SetForegroundWindow($stillThere)
+                            Start-Sleep -Milliseconds 300
+                            # Shift+Tab back to username, then Tab to password
+                            [System.Windows.Forms.SendKeys]::SendWait("+{TAB}+{TAB}+{TAB}")
+                            Start-Sleep -Milliseconds 200
+                            [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
+                            Start-Sleep -Milliseconds 200
+                            [System.Windows.Forms.SendKeys]::SendWait($escaped)
+                            Start-Sleep -Milliseconds 300
+                            [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+                        }
+
+                        $found = $true
+                        Write-Output "SUCCESS: Password dialog found and filled after ${elapsed}s"
+                    }
+                }
+
+                if (-not $found) {
+                    Write-Output "TIMEOUT: Password dialog not found within ${maxWait}s"
+                }
+            } -ArgumentList $ServerPassword
+
+            # Wait for the background job (non-blocking check loop)
+            $jobTimeout = 130
+            $jobElapsed = 0
+            while ($autoFillJob.State -eq 'Running' -and $jobElapsed -lt $jobTimeout) {
+                Start-Sleep -Seconds 5
+                $jobElapsed += 5
+                # Show any partial output
+                $partialOutput = Receive-Job $autoFillJob -ErrorAction SilentlyContinue
+                if ($partialOutput) {
+                    foreach ($line in $partialOutput) {
+                        if ($line -match "^SUCCESS") {
+                            Write-LogSuccess ($line -replace "^SUCCESS: ", "")
+                        } elseif ($line -match "^TIMEOUT") {
+                            Write-LogWarning ($line -replace "^TIMEOUT: ", "")
+                        } else {
+                            Write-LogInfo $line
+                        }
+                    }
+                }
+            }
+
+            # Collect final output
+            $finalOutput = Receive-Job $autoFillJob -ErrorAction SilentlyContinue
+            if ($finalOutput) {
+                foreach ($line in $finalOutput) {
+                    if ($line -match "^SUCCESS") {
+                        Write-LogSuccess ($line -replace "^SUCCESS: ", "")
+                    } elseif ($line -match "^TIMEOUT") {
+                        Write-LogWarning ($line -replace "^TIMEOUT: ", "")
+                    }
+                }
+            }
+            Remove-Job $autoFillJob -Force -ErrorAction SilentlyContinue
         }
     } else {
         if ($ghidraWasRunning) {

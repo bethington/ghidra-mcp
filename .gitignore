@@ -233,6 +233,7 @@ application-local.yaml
 *.pfx
 secrets/
 private/
+.ghidra-cred
 
 # Database files
 *.db
