@@ -83,7 +83,8 @@ jobs:
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/Decompiler/lib/Decompiler.jar"      -DgroupId=ghidra -DartifactId=Decompiler       -Dversion=${GV} -Dpackaging=jar
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/PDB/lib/PDB.jar"                    -DgroupId=ghidra -DartifactId=PDB               -Dversion=${GV} -Dpackaging=jar
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/FunctionID/lib/FunctionID.jar"      -DgroupId=ghidra -DartifactId=FunctionID       -Dversion=${GV} -Dpackaging=jar
-        echo "✅ Installed 14 Ghidra JARs to Maven local repository"
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Help/lib/Help.jar"              -DgroupId=ghidra -DartifactId=Help             -Dversion=${GV} -Dpackaging=jar
+        echo "✅ Installed 15 Ghidra JARs to Maven local repository"
 
     - name: Build with Maven
       run: |

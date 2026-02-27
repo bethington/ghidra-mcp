@@ -68,7 +68,9 @@ jobs:
             -DgroupId=ghidra -DartifactId=DB -Dversion=$GHIDRA_VERSION -Dpackaging=jar
         mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Emulation/lib/Emulation.jar" \
             -DgroupId=ghidra -DartifactId=Emulation -Dversion=$GHIDRA_VERSION -Dpackaging=jar
-        
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Help/lib/Help.jar" \
+            -DgroupId=ghidra -DartifactId=Help -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+
         # Install Feature JARs
         mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/Base/lib/Base.jar" \
             -DgroupId=ghidra -DartifactId=Base -Dversion=$GHIDRA_VERSION -Dpackaging=jar
