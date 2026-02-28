@@ -979,51 +979,67 @@ if (Test-Path $bridgeSourcePath) {
 
 # Auto-activate GhidraMCP in FrontEnd (Project Manager) configuration
 # v4.1: Plugin loads in FrontEnd via the Utility package (ApplicationLevelPlugin)
-# The "Utility" package is present in FrontEndTool.xml by default; the plugin
-# is discovered automatically via @PluginInfo(packageName = UtilityPluginPackage.NAME)
-# After first launch, enable via: File > Configure > Utility > check GhidraMCP
+# Patches FrontEndTool.xml to explicitly include the plugin class in the Utility package
 $ghidraUserDir = "$env:APPDATA\ghidra"
 if (Test-Path $ghidraUserDir) {
     $pluginClass = "com.xebyte.GhidraMCPPlugin"
 
-    # --- Step 1: Verify FrontEndTool.xml has Utility package ---
+    # --- Step 1: Patch FrontEndTool.xml to auto-load GhidraMCPPlugin ---
     $frontEndFiles = Get-ChildItem -Path "$ghidraUserDir\*\FrontEndTool.xml" -ErrorAction SilentlyContinue
 
     foreach ($feFile in $frontEndFiles) {
         try {
             $feContent = Get-Content $feFile.FullName -Raw -Encoding UTF8
+            $modified = $false
 
-            if ($feContent -match 'PACKAGE NAME="Utility"') {
-                Write-LogSuccess "FrontEnd Utility package present (GhidraMCP auto-discovers): $($feFile.FullName)"
-            } else {
-                # Utility package missing (unusual) - add it
-                $insertPattern = '(<PACKAGE NAME="[^"]*"\s*/>)(\s*<ROOT_NODE)'
-                $replacement = "`$1`n            <PACKAGE NAME=`"Utility`" />`$2"
-
-                $newContent = $feContent -replace $insertPattern, $replacement
-
-                if ($newContent -ne $feContent) {
-                    if ($PSCmdlet.ShouldProcess($feFile.FullName, "Add Utility package to FrontEnd config")) {
-                        Set-Content -Path $feFile.FullName -Value $newContent -Encoding UTF8 -NoNewline
-                        Write-LogSuccess "Added Utility package to FrontEnd config: $($feFile.FullName)"
-                    }
-                } else {
-                    Write-LogWarning "Could not find insertion point in FrontEnd config: $($feFile.FullName)"
-                    Write-LogInfo "Enable manually: File > Configure > Utility > check GhidraMCP"
+            # Clean up stale Developer/GhidraMCP package entries (from earlier versions)
+            foreach ($stalePkg in @('Developer', 'GhidraMCP')) {
+                if ($feContent -match "PACKAGE NAME=`"$stalePkg`"") {
+                    # Remove self-closing form: <PACKAGE NAME="X" />
+                    $feContent = $feContent -replace "\s*<PACKAGE NAME=`"$stalePkg`"\s*/>\s*", "`n"
+                    # Remove block form: <PACKAGE NAME="X">...</PACKAGE>
+                    $feContent = $feContent -replace "(?s)\s*<PACKAGE NAME=`"$stalePkg`">\s*.*?</PACKAGE>\s*", "`n"
+                    $modified = $true
+                    Write-LogInfo "Cleaned stale $stalePkg package entry from FrontEnd config"
                 }
             }
 
-            # Clean up stale Developer package entries (from earlier versions)
-            if ($feContent -match 'PACKAGE NAME="Developer"') {
-                $cleanPattern = '\s*<PACKAGE NAME="Developer"\s*/>'
-                $cleanContent = $feContent -replace $cleanPattern, ''
-                if ($cleanContent -ne $feContent) {
-                    Set-Content -Path $feFile.FullName -Value $cleanContent -Encoding UTF8 -NoNewline
-                    Write-LogInfo "Cleaned stale Developer package entry from FrontEnd config"
+            # Check if plugin is already included in the Utility package
+            if ($feContent -match [regex]::Escape($pluginClass)) {
+                Write-LogSuccess "GhidraMCPPlugin already configured in FrontEnd: $($feFile.FullName)"
+            } elseif ($feContent -match '<PACKAGE NAME="Utility"\s*/>') {
+                # Utility package exists as self-closing tag - expand it with INCLUDE
+                $feContent = $feContent -replace '<PACKAGE NAME="Utility"\s*/>', @"
+<PACKAGE NAME="Utility">
+                <INCLUDE CLASS="$pluginClass" />
+            </PACKAGE>
+"@
+                $modified = $true
+                Write-LogSuccess "Added GhidraMCPPlugin to FrontEnd Utility package: $($feFile.FullName)"
+            } elseif ($feContent -match '<PACKAGE NAME="Utility">') {
+                # Utility package exists as block - add INCLUDE inside it
+                $feContent = $feContent -replace '(<PACKAGE NAME="Utility">)', "`$1`n                <INCLUDE CLASS=`"$pluginClass`" />"
+                $modified = $true
+                Write-LogSuccess "Added GhidraMCPPlugin to existing FrontEnd Utility block: $($feFile.FullName)"
+            } else {
+                # No Utility package at all (unusual) - add the whole block
+                $feContent = $feContent -replace '(<ROOT_NODE)', @"
+<PACKAGE NAME="Utility">
+                <INCLUDE CLASS="$pluginClass" />
+            </PACKAGE>
+            `$1
+"@
+                $modified = $true
+                Write-LogSuccess "Added Utility package with GhidraMCPPlugin to FrontEnd config: $($feFile.FullName)"
+            }
+
+            if ($modified) {
+                if ($PSCmdlet.ShouldProcess($feFile.FullName, "Patch FrontEnd config for GhidraMCPPlugin")) {
+                    Set-Content -Path $feFile.FullName -Value $feContent -Encoding UTF8 -NoNewline
                 }
             }
         } catch {
-            Write-LogWarning "Could not verify FrontEnd config: $($_.Exception.Message)"
+            Write-LogWarning "Could not patch FrontEnd config: $($_.Exception.Message)"
             Write-LogInfo "Enable manually: File > Configure > Utility > check GhidraMCP"
         }
     }
