@@ -5163,22 +5163,30 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
             if (codeBrowser != null && domainFile != null) {
                 // Existing CodeBrowser found - open the file in it
-                ghidra.app.services.ProgramManager pm = codeBrowser.getService(ghidra.app.services.ProgramManager.class);
-                Program program = (Program) domainFile.getDomainObject(this, false, false, TaskMonitor.DUMMY);
-                pm.openProgram(program);
-                pm.setCurrentProgram(program);
+                final ghidra.app.services.ProgramManager pm = codeBrowser.getService(ghidra.app.services.ProgramManager.class);
+                final Program program = (Program) domainFile.getDomainObject(this, false, false, TaskMonitor.DUMMY);
+                javax.swing.SwingUtilities.invokeAndWait(() -> {
+                    pm.openProgram(program);
+                    pm.setCurrentProgram(program);
+                });
                 return "{\"success\": true, \"message\": \"Opened in existing CodeBrowser\", " +
                     "\"tool\": \"" + escapeJson(codeBrowser.getName()) + "\", " +
                     "\"program\": \"" + escapeJson(program.getName()) + "\", " +
                     "\"path\": \"" + escapeJson(filePath) + "\"}";
             } else if (domainFile != null) {
-                // No CodeBrowser running - launch one with the file
-                ts.launchDefaultTool(Collections.singletonList(domainFile));
+                // No CodeBrowser running - launch one with the file (must run on EDT)
+                final DomainFile df = domainFile;
+                final String fp = filePath;
+                javax.swing.SwingUtilities.invokeAndWait(() -> {
+                    ts.launchDefaultTool(Collections.singletonList(df));
+                });
                 return "{\"success\": true, \"message\": \"Launched new CodeBrowser\", " +
-                    "\"path\": \"" + escapeJson(filePath) + "\"}";
+                    "\"path\": \"" + escapeJson(fp) + "\"}";
             } else {
-                // No file specified - just launch empty CodeBrowser
-                ts.launchDefaultTool(Collections.emptyList());
+                // No file specified - just launch empty CodeBrowser (must run on EDT)
+                javax.swing.SwingUtilities.invokeAndWait(() -> {
+                    ts.launchDefaultTool(Collections.emptyList());
+                });
                 return "{\"success\": true, \"message\": \"Launched new CodeBrowser (no file)\"}";
             }
         } catch (Exception e) {

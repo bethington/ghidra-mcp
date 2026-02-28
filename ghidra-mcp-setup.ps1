@@ -879,35 +879,52 @@ if (-not (Test-Path $jarSourcePath)) {
     }
 }
 if (Test-Path $jarSourcePath) {
-    # Detect Ghidra version from installation path
+    # Detect Ghidra user config directory matching the target installation
     $ghidraVersionDir = $null
     $ghidraUserBase = "$env:USERPROFILE\AppData\Roaming\ghidra"
 
     if (Test-Path $ghidraUserBase) {
-        # Find the most recent ghidra version directory using semantic version sorting
-        # (String sorting incorrectly puts "12.0_" before "12.0.3_" because "_" > "." in ASCII)
-        $ghidraVersionDirs = Get-ChildItem -Path $ghidraUserBase -Directory -Filter "ghidra_*" |
-            ForEach-Object {
-                # Extract version numbers for proper numerical sorting
-                if ($_.Name -match "ghidra_([0-9]+)\.([0-9]+)(?:\.([0-9]+))?") {
-                    [PSCustomObject]@{
-                        Name = $_.Name
-                        Major = [int]$Matches[1]
-                        Minor = [int]$Matches[2]
-                        Patch = if ($Matches[3]) { [int]$Matches[3] } else { 0 }
+        # Extract version from GhidraPath (e.g., "F:\ghidra_12.0.3_PUBLIC" -> "12.0.3")
+        $targetVersion = $null
+        if ($GhidraPath -match "ghidra_([0-9.]+)") {
+            $targetVersion = $Matches[1]
+        }
+
+        if ($targetVersion) {
+            # Find user config dir matching the target Ghidra version (e.g., ghidra_12.0.3_PUBLIC)
+            $matchingDirs = Get-ChildItem -Path $ghidraUserBase -Directory -Filter "ghidra_${targetVersion}*"
+            if ($matchingDirs) {
+                # Prefer PUBLIC over DEV if multiple matches
+                $publicDir = $matchingDirs | Where-Object { $_.Name -match "PUBLIC" } | Select-Object -First 1
+                $ghidraVersionDir = if ($publicDir) { $publicDir.Name } else { $matchingDirs[0].Name }
+                Write-LogInfo "Detected Ghidra user config version: $ghidraVersionDir (matching $targetVersion)"
+            }
+        }
+
+        if (-not $ghidraVersionDir) {
+            # Fallback: use highest version directory
+            $ghidraVersionDirs = Get-ChildItem -Path $ghidraUserBase -Directory -Filter "ghidra_*" |
+                ForEach-Object {
+                    if ($_.Name -match "ghidra_([0-9]+)\.([0-9]+)(?:\.([0-9]+))?") {
+                        [PSCustomObject]@{
+                            Name = $_.Name
+                            Major = [int]$Matches[1]
+                            Minor = [int]$Matches[2]
+                            Patch = if ($Matches[3]) { [int]$Matches[3] } else { 0 }
+                        }
                     }
-                }
-            } |
-            Sort-Object Major, Minor, Patch -Descending
-        
-        if ($ghidraVersionDirs) {
-            $ghidraVersionDir = $ghidraVersionDirs[0].Name
-            Write-LogInfo "Detected Ghidra user config version: $ghidraVersionDir"
+                } |
+                Sort-Object Major, Minor, Patch -Descending
+
+            if ($ghidraVersionDirs) {
+                $ghidraVersionDir = $ghidraVersionDirs[0].Name
+                Write-LogInfo "Using highest Ghidra user config version: $ghidraVersionDir"
+            }
         }
     }
 
     if (-not $ghidraVersionDir) {
-        # Fallback: extract version from Ghidra installation path
+        # Last resort: construct from GhidraPath
         if ($GhidraPath -match "ghidra_([0-9.]+)") {
             $ghidraVersionDir = "ghidra_$($Matches[1])_PUBLIC"
         } else {
