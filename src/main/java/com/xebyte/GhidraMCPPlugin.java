@@ -25,7 +25,7 @@ import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.services.CodeViewerService;
-import ghidra.app.services.ProgramManager;
+
 import ghidra.app.script.GhidraScriptUtil;
 import ghidra.app.script.GhidraScript;
 import ghidra.app.script.GhidraScriptProvider;
@@ -59,6 +59,9 @@ import ghidra.program.model.block.CodeBlockReference;
 import ghidra.program.model.block.CodeBlockReferenceIterator;
 
 import com.xebyte.core.BinaryComparisonService;
+import com.xebyte.core.FrontEndProgramProvider;
+
+import ghidra.framework.main.ApplicationLevelPlugin;
 
 import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
@@ -143,8 +146,8 @@ class VersionInfo {
 
 @PluginInfo(
     status = PluginStatus.RELEASED,
-    packageName = ghidra.app.DeveloperPluginPackage.NAME,
-    category = PluginCategoryNames.ANALYSIS,
+    packageName = ghidra.framework.main.UtilityPluginPackage.NAME,
+    category = PluginCategoryNames.COMMON,
     shortDescription = "GhidraMCP - HTTP server plugin",
     description = "GhidraMCP - Starts an embedded HTTP server to expose program data via REST API and MCP bridge. " +
                   "Provides 165 endpoints for reverse engineering automation. " +
@@ -154,7 +157,7 @@ class VersionInfo {
                   "malware analysis (IOC extraction, behavior detection, anti-analysis detection), and Ghidra script automation. " +
                   "See https://github.com/bethington/ghidra-mcp for documentation and version history."
 )
-public class GhidraMCPPlugin extends Plugin {
+public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
     // Static singleton: one HTTP server shared across all CodeBrowser windows (fixes #35)
     private static HttpServer server;
@@ -193,6 +196,9 @@ public class GhidraMCPPlugin extends Plugin {
         "signed", "unsigned", "volatile", "inline", "restrict"
     );
 
+    // Program provider for on-demand program access (FrontEnd mode)
+    private final FrontEndProgramProvider programProvider;
+
     // Service layer for delegated operations
     private final com.xebyte.core.ListingService listingService;
     private final com.xebyte.core.CommentService commentService;
@@ -209,9 +215,9 @@ public class GhidraMCPPlugin extends Plugin {
         super(tool);
         instanceCount++;
 
-        // Initialize service layer
-        com.xebyte.core.ProgramProvider programProvider = new com.xebyte.core.GuiProgramProvider(tool);
-        com.xebyte.core.ThreadingStrategy threadingStrategy = new com.xebyte.core.SwingThreadingStrategy();
+        // Initialize service layer — FrontEnd mode: opens programs on-demand from project
+        this.programProvider = new FrontEndProgramProvider(tool, this);
+        com.xebyte.core.ThreadingStrategy threadingStrategy = new com.xebyte.headless.DirectThreadingStrategy();
         this.listingService = new com.xebyte.core.ListingService(programProvider);
         this.commentService = new com.xebyte.core.CommentService(programProvider, threadingStrategy);
         this.symbolLabelService = new com.xebyte.core.SymbolLabelService(programProvider, threadingStrategy);
@@ -236,7 +242,7 @@ public class GhidraMCPPlugin extends Plugin {
 
         // Only start server if not already running (fixes #35: multi-window port collision)
         if (server != null && isServerRunning()) {
-            Msg.info(this, "GhidraMCP HTTP server already running — sharing with this CodeBrowser window.");
+            Msg.info(this, "GhidraMCP HTTP server already running — sharing with this tool window.");
         } else {
             try {
                 startServer();
@@ -2195,31 +2201,31 @@ public class GhidraMCPPlugin extends Plugin {
         // --- Version Control Operations (4 endpoints) ---
 
         server.createContext("/server/version_control/checkout", safeHandler(exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String filePath = params.get("path");
-            boolean exclusive = Boolean.parseBoolean(params.getOrDefault("exclusive", "true"));
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            boolean exclusive = Boolean.parseBoolean(params.getOrDefault("exclusive", "true").toString());
             sendResponse(exchange, checkoutProjectFile(filePath, exclusive));
         }));
 
         server.createContext("/server/version_control/checkin", safeHandler(exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String filePath = params.get("path");
-            String comment = params.getOrDefault("comment", "Checked in via GhidraMCP");
-            boolean keepCheckedOut = Boolean.parseBoolean(params.getOrDefault("keepCheckedOut", "false"));
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            String comment = params.getOrDefault("comment", "Checked in via GhidraMCP").toString();
+            boolean keepCheckedOut = Boolean.parseBoolean(params.getOrDefault("keepCheckedOut", "false").toString());
             sendResponse(exchange, checkinProjectFile(filePath, comment, keepCheckedOut));
         }));
 
         server.createContext("/server/version_control/undo_checkout", safeHandler(exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String filePath = params.get("path");
-            boolean keep = Boolean.parseBoolean(params.getOrDefault("keep", "false"));
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            boolean keep = Boolean.parseBoolean(params.getOrDefault("keep", "false").toString());
             sendResponse(exchange, undoCheckoutProjectFile(filePath, keep));
         }));
 
         server.createContext("/server/version_control/add", safeHandler(exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String filePath = params.get("path");
-            String comment = params.getOrDefault("comment", "Added via GhidraMCP");
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            String comment = params.getOrDefault("comment", "Added via GhidraMCP").toString();
             sendResponse(exchange, addToVersionControl(filePath, comment));
         }));
 
@@ -2241,8 +2247,8 @@ public class GhidraMCPPlugin extends Plugin {
         // --- Admin Operations (3 endpoints) ---
 
         server.createContext("/server/admin/terminate_checkout", safeHandler(exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String filePath = params.get("path");
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
             sendResponse(exchange, terminateFileCheckout(filePath));
         }));
 
@@ -3303,92 +3309,51 @@ public class GhidraMCPPlugin extends Plugin {
     }
 
     public Program getCurrentProgram() {
-        ProgramManager pm = tool.getService(ProgramManager.class);
-        return pm != null ? pm.getCurrentProgram() : null;
+        return programProvider.getCurrentProgram();
     }
 
     /**
      * Get a program by name, or return the current program if name is null/empty.
-     * This allows endpoints to optionally target a specific open program without
-     * requiring a switch_program call first.
-     * 
-     * @param programName The name of the program to find (case-insensitive), or null/empty for current program
+     * Delegates to FrontEndProgramProvider which checks CodeBrowser, cache, and project.
+     *
+     * @param programName The name or project path (e.g., "/LoD/1.00/D2Common.dll"), or null/empty for current
      * @return The requested program, or null if not found
      */
     public Program getProgram(String programName) {
-        // If no name specified, return current program (backward compatible behavior)
-        if (programName == null || programName.trim().isEmpty()) {
-            return getCurrentProgram();
-        }
-        
-        ProgramManager pm = tool.getService(ProgramManager.class);
-        if (pm == null) {
-            return null;
-        }
-        
-        Program[] programs = pm.getAllOpenPrograms();
-        String searchName = programName.trim();
-        
-        // Try exact name match first (case-insensitive)
-        for (Program prog : programs) {
-            if (prog.getName().equalsIgnoreCase(searchName)) {
-                return prog;
-            }
-        }
-        
-        // Try partial match on path (for nested project paths like "/LoD/1.07/D2Client.dll")
-        for (Program prog : programs) {
-            String path = prog.getDomainFile().getPathname();
-            if (path.toLowerCase().contains(searchName.toLowerCase())) {
-                return prog;
-            }
-        }
-        
-        // Try match without extension (e.g., "D2Client" matches "D2Client.dll")
-        for (Program prog : programs) {
-            String name = prog.getName();
-            String nameWithoutExt = name.contains(".") ? name.substring(0, name.lastIndexOf('.')) : name;
-            if (nameWithoutExt.equalsIgnoreCase(searchName)) {
-                return prog;
-            }
-        }
-        
-        return null;  // Not found
+        return programProvider.resolveProgram(programName);
     }
 
     /**
      * Get a program by name with error message if not found.
      * Returns a JSON error string if the program cannot be found.
-     * 
+     *
      * @param programName The name of the program to find
      * @return A 2-element array: [0] = Program (or null), [1] = error message (or null if found)
      */
     public Object[] getProgramOrError(String programName) {
         Program program = getProgram(programName);
-        
+
         if (program == null && programName != null && !programName.trim().isEmpty()) {
             // Program was explicitly requested but not found - provide helpful error
-            ProgramManager pm = tool.getService(ProgramManager.class);
             StringBuilder error = new StringBuilder();
             error.append("{\"error\": \"Program not found: ").append(escapeJson(programName)).append("\", ");
+            error.append("\"hint\": \"Use full project path (e.g., /LoD/1.00/D2Common.dll) to open on-demand\", ");
             error.append("\"available_programs\": [");
-            
-            if (pm != null) {
-                Program[] programs = pm.getAllOpenPrograms();
-                for (int i = 0; i < programs.length; i++) {
-                    if (i > 0) error.append(", ");
-                    error.append("\"").append(escapeJson(programs[i].getName())).append("\"");
-                }
+
+            Program[] programs = programProvider.getAllOpenPrograms();
+            for (int i = 0; i < programs.length; i++) {
+                if (i > 0) error.append(", ");
+                error.append("\"").append(escapeJson(programs[i].getName())).append("\"");
             }
             error.append("]}");
-            
+
             return new Object[] { null, error.toString() };
         }
-        
+
         if (program == null) {
-            return new Object[] { null, "{\"error\": \"No program currently loaded\"}" };
+            return new Object[] { null, "{\"error\": \"No program currently loaded. Use the 'program' parameter with a project path to open one.\"}" };
         }
-        
+
         return new Object[] { program, null };
     }
 
@@ -5040,9 +5005,10 @@ public class GhidraMCPPlugin extends Plugin {
         // Only stop the server when the last plugin instance is disposed
         if (instanceCount <= 0) {
             stopServer();
+            programProvider.releaseAll();
             instanceCount = 0;
         } else {
-            Msg.info(this, "GhidraMCP: " + instanceCount + " CodeBrowser window(s) still active, keeping server running.");
+            Msg.info(this, "GhidraMCP: " + instanceCount + " tool window(s) still active, keeping server running.");
         }
         if (startServerAction != null) {
             tool.removeAction(startServerAction);

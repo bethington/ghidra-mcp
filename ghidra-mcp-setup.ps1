@@ -977,39 +977,67 @@ if (Test-Path $bridgeSourcePath) {
     Write-LogWarning "Python bridge not found: $bridgeSourcePath"
 }
 
-# Auto-activate GhidraMCP in CodeBrowser tool configuration
-# Ghidra stores active plugins as <INCLUDE CLASS="..."> entries in _code_browser.tcd
+# Auto-activate GhidraMCP in FrontEnd (Project Manager) configuration
+# v4.1: Plugin now loads in the FrontEnd tool, not CodeBrowser
+# FrontEndTool.xml uses <PACKAGE NAME="..." /> entries under <TOOL>
 $ghidraUserDir = "$env:APPDATA\ghidra"
 if (Test-Path $ghidraUserDir) {
+    $pluginClass = "com.xebyte.GhidraMCPPlugin"
+
+    # --- Step 1: Activate in FrontEndTool.xml ---
+    $frontEndFiles = Get-ChildItem -Path "$ghidraUserDir\*\FrontEndTool.xml" -ErrorAction SilentlyContinue
+
+    foreach ($feFile in $frontEndFiles) {
+        try {
+            $feContent = Get-Content $feFile.FullName -Raw -Encoding UTF8
+
+            if ($feContent -match 'PACKAGE NAME="Developer"') {
+                Write-LogSuccess "GhidraMCP already activated in FrontEnd: $($feFile.FullName)"
+            } else {
+                # Insert Developer package (contains GhidraMCPPlugin) after the last existing PACKAGE entry
+                # FrontEndTool.xml format: <PACKAGE NAME="Utility" /> followed by <ROOT_NODE
+                $insertPattern = '(<PACKAGE NAME="[^"]*"\s*/>)(\s*<ROOT_NODE)'
+                $replacement = "`$1`n            <PACKAGE NAME=`"Developer`" />`$2"
+
+                $newContent = $feContent -replace $insertPattern, $replacement
+
+                if ($newContent -ne $feContent) {
+                    if ($PSCmdlet.ShouldProcess($feFile.FullName, "Add GhidraMCP plugin to FrontEnd config")) {
+                        Set-Content -Path $feFile.FullName -Value $newContent -Encoding UTF8 -NoNewline
+                        Write-LogSuccess "Auto-activated GhidraMCP in FrontEnd: $($feFile.FullName)"
+                    }
+                } else {
+                    Write-LogWarning "Could not find insertion point in FrontEnd config: $($feFile.FullName)"
+                    Write-LogInfo "You may need to manually activate: File > Configure in Ghidra Project Manager"
+                }
+            }
+        } catch {
+            Write-LogWarning "Could not modify FrontEnd config: $($_.Exception.Message)"
+            Write-LogInfo "You may need to manually activate: File > Configure in Ghidra Project Manager"
+        }
+    }
+
+    # --- Step 2: Remove from CodeBrowser TCD (no longer needed there) ---
     $tcdFiles = Get-ChildItem -Path "$ghidraUserDir\*\tools\_code_browser.tcd" -ErrorAction SilentlyContinue
 
     foreach ($tcdFile in $tcdFiles) {
         try {
             $tcdContent = Get-Content $tcdFile.FullName -Raw -Encoding UTF8
-            $pluginClass = "com.xebyte.GhidraMCPPlugin"
 
             if ($tcdContent -match [regex]::Escape($pluginClass)) {
-                Write-LogSuccess "GhidraMCP already activated in: $($tcdFile.FullName)"
-            } else {
-                # Insert a new PACKAGE block for GhidraMCP after the last existing PACKAGE
-                $insertPattern = '(<PACKAGE NAME="[^"]*"[^/]*/>|</PACKAGE>)(\s*<PLUGIN_STATE)'
-                $replacement = "`$1`n        <PACKAGE NAME=`"GhidraMCP`">`n            <INCLUDE CLASS=`"$pluginClass`" />`n        </PACKAGE>`$2"
-
-                $newContent = $tcdContent -replace $insertPattern, $replacement
+                # Remove the GhidraMCP PACKAGE block from CodeBrowser
+                $removePattern = '\s*<PACKAGE NAME="GhidraMCP">\s*<INCLUDE CLASS="com\.xebyte\.GhidraMCPPlugin"\s*/>\s*</PACKAGE>'
+                $newContent = $tcdContent -replace $removePattern, ''
 
                 if ($newContent -ne $tcdContent) {
-                    if ($PSCmdlet.ShouldProcess($tcdFile.FullName, "Add GhidraMCP plugin to CodeBrowser tool config")) {
+                    if ($PSCmdlet.ShouldProcess($tcdFile.FullName, "Remove GhidraMCP from CodeBrowser (now in FrontEnd)")) {
                         Set-Content -Path $tcdFile.FullName -Value $newContent -Encoding UTF8 -NoNewline
-                        Write-LogSuccess "Auto-activated GhidraMCP in CodeBrowser: $($tcdFile.FullName)"
+                        Write-LogSuccess "Removed GhidraMCP from CodeBrowser (now loads from FrontEnd): $($tcdFile.FullName)"
                     }
-                } else {
-                    Write-LogWarning "Could not find insertion point in: $($tcdFile.FullName)"
-                    Write-LogInfo "You may need to manually activate: File > Configure > Configure All Plugins > GhidraMCP"
                 }
             }
         } catch {
-            Write-LogWarning "Could not modify tool config: $($_.Exception.Message)"
-            Write-LogInfo "You may need to manually activate: File > Configure > Configure All Plugins > GhidraMCP"
+            Write-LogWarning "Could not clean CodeBrowser config: $($_.Exception.Message)"
         }
     }
 } else {
