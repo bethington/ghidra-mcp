@@ -1187,6 +1187,25 @@ if (Test-Path $destinationPath) {
             }
         }
 
+        # Programmatic server authentication via env var.
+        # Password resolution order: -ServerPassword param > GHIDRA_SERVER_PASSWORD env var > .ghidra-cred file
+        # The GhidraMCPPlugin constructor reads GHIDRA_SERVER_PASSWORD and registers a
+        # ClientAuthenticator that handles server auth without GUI dialogs.
+        $resolvedPassword = $ServerPassword
+        if (-not $resolvedPassword) {
+            $resolvedPassword = $env:GHIDRA_SERVER_PASSWORD
+        }
+        if (-not $resolvedPassword) {
+            $credFile = Join-Path $PSScriptRoot ".ghidra-cred"
+            if (Test-Path $credFile) {
+                $resolvedPassword = (Get-Content $credFile -Raw -ErrorAction SilentlyContinue).Trim()
+            }
+        }
+        if ($resolvedPassword) {
+            $env:GHIDRA_SERVER_PASSWORD = $resolvedPassword
+            Write-LogInfo "Server credentials configured via GHIDRA_SERVER_PASSWORD (auth dialog will be bypassed)"
+        }
+
         Write-LogInfo "Starting Ghidra..."
         if ($PSCmdlet.ShouldProcess("$GhidraPath\ghidraRun.bat", "Start Ghidra")) {
             Start-Process "$GhidraPath\ghidraRun.bat" -WorkingDirectory $GhidraPath
@@ -1200,220 +1219,6 @@ if (Test-Path $destinationPath) {
             Write-LogSuccess "The updated plugin (v$version) is now available."
         } else {
             Write-LogInfo "Ghidra launch initiated - it may take a moment to fully start."
-        }
-
-        # Auto-fill server password dialog if requested.
-        # Password resolution order: -ServerPassword param > GHIDRA_SERVER_PASSWORD env var > .ghidra-cred file
-        $resolvedPassword = $ServerPassword
-        if (-not $resolvedPassword) {
-            $resolvedPassword = $env:GHIDRA_SERVER_PASSWORD
-        }
-        if (-not $resolvedPassword) {
-            $credFile = Join-Path $PSScriptRoot ".ghidra-cred"
-            if (Test-Path $credFile) {
-                $resolvedPassword = (Get-Content $credFile -Raw -ErrorAction SilentlyContinue).Trim()
-            }
-        }
-        if ($resolvedPassword) {
-            $ServerPassword = $resolvedPassword
-        }
-        if ($ServerPassword) {
-            Write-LogInfo "Waiting for server password dialog (up to 120s)..."
-            $autoFillJob = Start-Job -ScriptBlock {
-                param($password)
-                Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading;
-
-public class GhidraDialogAutomation {
-    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
-
-    [DllImport("user32.dll")]
-    public static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    public static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, string lParam);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    public static extern bool IsWindowVisible(IntPtr hWnd);
-
-    public const uint WM_SETTEXT = 0x000C;
-    public const uint WM_GETTEXT = 0x000D;
-    public const uint BM_CLICK = 0x00F5;
-    public const int SW_RESTORE = 9;
-
-    public static IntPtr FindDialogWindow(string titleSubstring) {
-        IntPtr found = IntPtr.Zero;
-        EnumWindows((hWnd, lParam) => {
-            if (!IsWindowVisible(hWnd)) return true;
-            StringBuilder title = new StringBuilder(256);
-            GetWindowText(hWnd, title, 256);
-            if (title.ToString().IndexOf(titleSubstring, StringComparison.OrdinalIgnoreCase) >= 0) {
-                found = hWnd;
-                return false;
-            }
-            return true;
-        }, IntPtr.Zero);
-        return found;
-    }
-
-    public static IntPtr[] FindChildrenByClass(IntPtr parent, string className) {
-        var results = new System.Collections.Generic.List<IntPtr>();
-        EnumChildWindows(parent, (hWnd, lParam) => {
-            StringBuilder cls = new StringBuilder(256);
-            GetClassName(hWnd, cls, 256);
-            if (cls.ToString().Contains(className)) {
-                results.Add(hWnd);
-            }
-            return true;
-        }, IntPtr.Zero);
-        return results.ToArray();
-    }
-
-    public static IntPtr[] FindAllChildren(IntPtr parent) {
-        var results = new System.Collections.Generic.List<IntPtr>();
-        EnumChildWindows(parent, (hWnd, lParam) => {
-            results.Add(hWnd);
-            return true;
-        }, IntPtr.Zero);
-        return results.ToArray();
-    }
-}
-"@
-
-                $maxWait = 120
-                $elapsed = 0
-                $found = $false
-
-                while ($elapsed -lt $maxWait -and -not $found) {
-                    Start-Sleep -Seconds 2
-                    $elapsed += 2
-
-                    # Look for the Ghidra server auth dialog (Java Swing JDialog).
-                    # Title is "Repository Server Authentication" or similar.
-                    $dialogHwnd = [GhidraDialogAutomation]::FindDialogWindow("Server Authentication")
-                    if ($dialogHwnd -eq [IntPtr]::Zero) {
-                        $dialogHwnd = [GhidraDialogAutomation]::FindDialogWindow("Password")
-                    }
-                    if ($dialogHwnd -eq [IntPtr]::Zero) {
-                        $dialogHwnd = [GhidraDialogAutomation]::FindDialogWindow("Authentication")
-                    }
-
-                    if ($dialogHwnd -ne [IntPtr]::Zero) {
-                        Add-Type -AssemblyName System.Windows.Forms
-
-                        # Bring dialog to foreground (retry - SetForegroundWindow
-                        # can fail on first attempt due to Windows focus rules)
-                        for ($retry = 0; $retry -lt 3; $retry++) {
-                            [GhidraDialogAutomation]::ShowWindow($dialogHwnd, 9)
-                            Start-Sleep -Milliseconds 200
-                            [GhidraDialogAutomation]::SetForegroundWindow($dialogHwnd)
-                            Start-Sleep -Milliseconds 300
-                        }
-
-                        # Small delay for the dialog to fully accept focus
-                        Start-Sleep -Milliseconds 500
-
-                        # Ghidra's ServerPasswordPrompt dialog layout:
-                        # - Server info label (not focusable)
-                        # - Username field (pre-filled from preferences, has initial focus)
-                        # - Password field (empty)
-                        # - OK / Cancel buttons
-                        # Tab from username to password field, then type and submit.
-                        [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
-                        Start-Sleep -Milliseconds 200
-
-                        # Type the password (escape SendKeys special chars: +^%~(){})
-                        $escaped = $password -replace '([+^%~(){}])', '{$1}'
-                        [System.Windows.Forms.SendKeys]::SendWait($escaped)
-                        Start-Sleep -Milliseconds 300
-
-                        # Press Enter to submit (equivalent to clicking OK)
-                        [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-                        Start-Sleep -Milliseconds 500
-
-                        # Verify dialog dismissed (check if window is gone)
-                        $stillThere = [GhidraDialogAutomation]::FindDialogWindow("Server Authentication")
-                        if ($stillThere -ne [IntPtr]::Zero) {
-                            # Dialog still visible - may have landed on wrong field.
-                            # Try again: click into dialog, use Shift+Tab to go back,
-                            # then Tab forward to ensure password field.
-                            Write-Output "INFO: Dialog still visible, retrying..."
-                            [GhidraDialogAutomation]::SetForegroundWindow($stillThere)
-                            Start-Sleep -Milliseconds 300
-                            # Shift+Tab back to username, then Tab to password
-                            [System.Windows.Forms.SendKeys]::SendWait("+{TAB}+{TAB}+{TAB}")
-                            Start-Sleep -Milliseconds 200
-                            [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
-                            Start-Sleep -Milliseconds 200
-                            [System.Windows.Forms.SendKeys]::SendWait($escaped)
-                            Start-Sleep -Milliseconds 300
-                            [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-                        }
-
-                        $found = $true
-                        Write-Output "SUCCESS: Password dialog found and filled after ${elapsed}s"
-                    }
-                }
-
-                if (-not $found) {
-                    Write-Output "TIMEOUT: Password dialog not found within ${maxWait}s"
-                }
-            } -ArgumentList $ServerPassword
-
-            # Wait for the background job (non-blocking check loop)
-            $jobTimeout = 130
-            $jobElapsed = 0
-            while ($autoFillJob.State -eq 'Running' -and $jobElapsed -lt $jobTimeout) {
-                Start-Sleep -Seconds 5
-                $jobElapsed += 5
-                # Show any partial output
-                $partialOutput = Receive-Job $autoFillJob -ErrorAction SilentlyContinue
-                if ($partialOutput) {
-                    foreach ($line in $partialOutput) {
-                        if ($line -match "^SUCCESS") {
-                            Write-LogSuccess ($line -replace "^SUCCESS: ", "")
-                        } elseif ($line -match "^TIMEOUT") {
-                            Write-LogWarning ($line -replace "^TIMEOUT: ", "")
-                        } else {
-                            Write-LogInfo $line
-                        }
-                    }
-                }
-            }
-
-            # Collect final output
-            $finalOutput = Receive-Job $autoFillJob -ErrorAction SilentlyContinue
-            if ($finalOutput) {
-                foreach ($line in $finalOutput) {
-                    if ($line -match "^SUCCESS") {
-                        Write-LogSuccess ($line -replace "^SUCCESS: ", "")
-                    } elseif ($line -match "^TIMEOUT") {
-                        Write-LogWarning ($line -replace "^TIMEOUT: ", "")
-                    }
-                }
-            }
-            Remove-Job $autoFillJob -Force -ErrorAction SilentlyContinue
         }
     } else {
         if ($ghidraWasRunning) {

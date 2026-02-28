@@ -7372,6 +7372,29 @@ def launch_codebrowser(path: str = None) -> str:
     return safe_post_json("tool/launch_codebrowser", params)
 
 
+@mcp.tool()
+def authenticate_server(username: str = None, password: str = "") -> str:
+    """
+    Register credentials for Ghidra server authentication.
+
+    Bypasses the GUI password dialog by registering a programmatic authenticator.
+    Once registered, all subsequent server operations (connecting to shared projects,
+    version control, etc.) use these credentials automatically.
+
+    Args:
+        username: Server username. Optional - defaults to Ghidra's saved username
+                  or the system user if not specified.
+        password: Server password. Required.
+
+    Returns:
+        JSON with success status and registered username.
+    """
+    params = {"password": password}
+    if username:
+        params["username"] = username
+    return safe_post_json("server/authenticate", params)
+
+
 # ==========================================================================
 # PROJECT ORGANIZATION TOOLS
 # ==========================================================================

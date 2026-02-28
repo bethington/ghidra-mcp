@@ -96,7 +96,7 @@ class VersionInfo {
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 168;
+    private static final int ENDPOINT_COUNT = 169;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -199,6 +199,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     // Program provider for on-demand program access (FrontEnd mode)
     private final FrontEndProgramProvider programProvider;
 
+    // Server authenticator for programmatic login (bypasses GUI password dialog)
+    private com.xebyte.core.GhidraMCPAuthenticator authenticator;
+
     // Service layer for delegated operations
     private final com.xebyte.core.ListingService listingService;
     private final com.xebyte.core.CommentService commentService;
@@ -232,6 +235,22 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         Msg.info(this, "GhidraMCP " + VersionInfo.getFullVersion());
         Msg.info(this, "Endpoints: " + VersionInfo.getEndpointCount());
         Msg.info(this, "============================================");
+
+        // Auto-register server authenticator if credentials are available via env vars.
+        // This intercepts Ghidra's server auth dialog before the project connects.
+        String serverUser = System.getenv("GHIDRA_SERVER_USER");
+        String serverPass = System.getenv("GHIDRA_SERVER_PASSWORD");
+        if (serverUser == null || serverUser.isEmpty()) {
+            serverUser = ghidra.framework.preferences.Preferences.getProperty("PasswordPrompt.Name");
+        }
+        if (serverUser == null || serverUser.isEmpty()) {
+            serverUser = System.getProperty("user.name");
+        }
+        if (serverPass != null && !serverPass.isEmpty()) {
+            this.authenticator = new com.xebyte.core.GhidraMCPAuthenticator(serverUser, serverPass.toCharArray());
+            ghidra.framework.client.ClientUtil.setClientAuthenticator(this.authenticator);
+            Msg.info(this, "GhidraMCP: Registered server authenticator for user: " + serverUser);
+        }
 
         // Register the configuration option
         Options options = tool.getOptions(OPTION_CATEGORY_NAME);
@@ -2261,7 +2280,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }));
 
         // ==========================================================================
-        // PROJECT & TOOL MANAGEMENT ENDPOINTS (3 endpoints)
+        // PROJECT & TOOL MANAGEMENT ENDPOINTS (4 endpoints)
         // FrontEnd-level operations for project and tool management
         // ==========================================================================
 
@@ -2280,6 +2299,14 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             Map<String, Object> params = parseJsonParams(exchange);
             String filePath = params.get("path") != null ? params.get("path").toString() : null;
             sendResponse(exchange, launchCodeBrowser(filePath));
+        }));
+
+        // SERVER_AUTHENTICATE - Register credentials for programmatic server authentication
+        server.createContext("/server/authenticate", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String username = params.get("username") != null ? params.get("username").toString() : null;
+            String password = params.get("password") != null ? params.get("password").toString() : null;
+            sendResponse(exchange, authenticateServer(username, password));
         }));
 
         server.setExecutor(null);
@@ -5191,6 +5218,38 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             }
         } catch (Exception e) {
             return "{\"error\": \"Failed to launch CodeBrowser: " + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    private String authenticateServer(String username, String password) {
+        try {
+            if (password == null || password.isEmpty()) {
+                return "{\"error\": \"Password is required\"}";
+            }
+            // Resolve username if not provided
+            if (username == null || username.isEmpty()) {
+                username = ghidra.framework.preferences.Preferences.getProperty("PasswordPrompt.Name");
+            }
+            if (username == null || username.isEmpty()) {
+                username = System.getProperty("user.name");
+            }
+
+            char[] passwordChars = password.toCharArray();
+            if (this.authenticator != null) {
+                // Update existing authenticator
+                this.authenticator.updateCredentials(username, passwordChars);
+                Msg.info(this, "GhidraMCP: Updated server credentials for user: " + username);
+            } else {
+                // Create and register new authenticator
+                this.authenticator = new com.xebyte.core.GhidraMCPAuthenticator(username, passwordChars);
+                ghidra.framework.client.ClientUtil.setClientAuthenticator(this.authenticator);
+                Msg.info(this, "GhidraMCP: Registered server authenticator for user: " + username);
+            }
+
+            return "{\"success\": true, \"message\": \"Server credentials registered\", " +
+                "\"username\": \"" + escapeJson(username) + "\"}";
+        } catch (Exception e) {
+            return "{\"error\": \"Failed to register authenticator: " + escapeJson(e.getMessage()) + "\"}";
         }
     }
 

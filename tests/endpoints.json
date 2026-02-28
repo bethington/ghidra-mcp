@@ -1,7 +1,7 @@
 {
   "version": "4.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 184,
+  "total_endpoints": 185,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -224,6 +224,8 @@
 
     {"path": "/project/info", "method": "GET", "category": "project", "params": [], "description": "Get detailed project info including running tools and open programs"},
     {"path": "/tool/running_tools", "method": "GET", "category": "utility", "params": [], "description": "List all running Ghidra tool windows"},
-    {"path": "/tool/launch_codebrowser", "method": "POST", "category": "utility", "params": ["path"], "description": "Open a file in CodeBrowser, launching a new one if needed"}
+    {"path": "/tool/launch_codebrowser", "method": "POST", "category": "utility", "params": ["path"], "description": "Open a file in CodeBrowser, launching a new one if needed"},
+
+    {"path": "/server/authenticate", "method": "POST", "category": "server", "params": ["username", "password"], "description": "Register server credentials for programmatic authentication"}
   ]
 }

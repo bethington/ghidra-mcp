@@ -15,23 +15,19 @@
  */
 package com.xebyte.headless;
 
+import com.xebyte.core.GhidraMCPAuthenticator;
 import ghidra.framework.client.ClientUtil;
-import ghidra.framework.client.ClientAuthenticator;
 import ghidra.framework.client.RepositoryAdapter;
 import ghidra.framework.client.RepositoryServerAdapter;
-import ghidra.framework.remote.AnonymousCallback;
 import ghidra.framework.remote.RepositoryItem;
-import ghidra.framework.remote.SSHSignatureCallback;
 import ghidra.framework.remote.User;
 import ghidra.framework.store.CheckoutType;
 import ghidra.framework.store.ItemCheckoutStatus;
 import ghidra.framework.store.Version;
 
-import javax.security.auth.callback.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.io.IOException;
-import java.net.Authenticator;
 
 /**
  * Manages connections to a shared Ghidra repository server.
@@ -730,90 +726,5 @@ public class GhidraServerManager {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
-    }
-
-    /**
-     * Custom authenticator for headless Ghidra server connections.
-     * Implements ClientAuthenticator to provide credentials without GUI interaction.
-     */
-    private static class GhidraMCPAuthenticator implements ClientAuthenticator {
-        private final String username;
-        private final char[] password;
-
-        public GhidraMCPAuthenticator(String username, char[] password) {
-            this.username = username;
-            this.password = password;
-        }
-
-        @Override
-        public boolean isSSHKeyAvailable() {
-            return false;
-        }
-
-        @Override
-        public boolean processSSHSignatureCallbacks(String serverName, NameCallback nameCb,
-                SSHSignatureCallback sshCb) {
-            // SSH key authentication not supported in this implementation
-            return false;
-        }
-
-        @Override
-        public boolean processPasswordCallbacks(String title, String serverType, String serverName,
-                boolean nameEditable, NameCallback nameCb, PasswordCallback passCb, 
-                ChoiceCallback choiceCb, AnonymousCallback anonymousCb, String loginError) {
-            try {
-                // Set the username
-                if (nameCb != null) {
-                    nameCb.setName(username);
-                }
-                
-                // Set the password
-                if (passCb != null) {
-                    passCb.setPassword(password);
-                }
-                
-                // Accept default choice if present
-                if (choiceCb != null) {
-                    choiceCb.setSelectedIndex(choiceCb.getDefaultChoice());
-                }
-                
-                // Don't use anonymous access since we have credentials
-                if (anonymousCb != null) {
-                    anonymousCb.setAnonymousAccessRequested(false);
-                }
-                
-                System.out.println("GhidraMCP authenticator provided credentials for user: " + username);
-                return true;
-            } catch (Exception e) {
-                System.err.println("Password callback failed: " + e.getMessage());
-                return false;
-            }
-        }
-
-        @Override
-        public boolean promptForReconnect(java.awt.Component parent, String message) {
-            // In headless mode, always attempt reconnect
-            System.out.println("Reconnect requested: " + message);
-            return true;
-        }
-
-        @Override
-        public char[] getNewPassword(java.awt.Component parent, String serverInfo, String user) {
-            // Password change not supported in headless mode
-            return null;
-        }
-
-        @Override
-        public Authenticator getAuthenticator() {
-            // Return null - we handle authentication via callbacks
-            return null;
-        }
-
-        @Override
-        public char[] getKeyStorePassword(String keystorePath, boolean passwordError) {
-            // KeyStore password not used - return null
-            // This is called when Ghidra needs to access a keystore for PKI authentication
-            return null;
-        }
     }
 }
