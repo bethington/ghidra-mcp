@@ -1,7 +1,7 @@
 {
   "version": "4.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 181,
+  "total_endpoints": 184,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -220,6 +220,10 @@
     {"path": "/server/admin/terminate_checkout", "method": "POST", "category": "server", "params": ["repo", "path", "user", "checkoutId"], "description": "Terminate a user checkout"},
 
     {"path": "/server/repository/files", "method": "GET", "category": "server", "params": ["repo", "path"], "description": "List files in a server repository folder"},
-    {"path": "/server/repository/file", "method": "GET", "category": "server", "params": ["repo", "path"], "description": "Get file info from a server repository"}
+    {"path": "/server/repository/file", "method": "GET", "category": "server", "params": ["repo", "path"], "description": "Get file info from a server repository"},
+
+    {"path": "/project/info", "method": "GET", "category": "project", "params": [], "description": "Get detailed project info including running tools and open programs"},
+    {"path": "/tool/running_tools", "method": "GET", "category": "utility", "params": [], "description": "List all running Ghidra tool windows"},
+    {"path": "/tool/launch_codebrowser", "method": "POST", "category": "utility", "params": ["path"], "description": "Open a file in CodeBrowser, launching a new one if needed"}
   ]
 }

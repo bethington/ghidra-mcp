@@ -96,7 +96,7 @@ class VersionInfo {
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 165;
+    private static final int ENDPOINT_COUNT = 168;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -2258,6 +2258,28 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
         server.createContext("/server/admin/set_permissions", safeHandler(exchange -> {
             sendResponse(exchange, "{\"error\": \"Permission management requires headless mode with direct server connection.\"}");
+        }));
+
+        // ==========================================================================
+        // PROJECT & TOOL MANAGEMENT ENDPOINTS (3 endpoints)
+        // FrontEnd-level operations for project and tool management
+        // ==========================================================================
+
+        // PROJECT_INFO - Get detailed project info including running tools
+        server.createContext("/project/info", safeHandler(exchange -> {
+            sendResponse(exchange, getProjectInfo());
+        }));
+
+        // TOOL_RUNNING_TOOLS - List all running Ghidra tools
+        server.createContext("/tool/running_tools", safeHandler(exchange -> {
+            sendResponse(exchange, getRunningTools());
+        }));
+
+        // TOOL_LAUNCH_CODEBROWSER - Open a file in CodeBrowser (launches if needed)
+        server.createContext("/tool/launch_codebrowser", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String filePath = params.get("path") != null ? params.get("path").toString() : null;
+            sendResponse(exchange, launchCodeBrowser(filePath));
         }));
 
         server.setExecutor(null);
@@ -4996,6 +5018,171 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 "\"terminated_count\": " + terminated + ", \"total_checkouts\": " + checkouts.length + "}";
         } catch (Exception e) {
             return "{\"error\": \"Terminate checkout failed: " + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    // ==========================================================================
+    // PROJECT & TOOL MANAGEMENT HELPERS
+    // ==========================================================================
+
+    private String getProjectInfo() {
+        Project project = tool.getProject();
+        if (project == null) {
+            return "{\"error\": \"No project open\"}";
+        }
+        ProjectData data = project.getProjectData();
+        RepositoryAdapter repo = getProjectRepository();
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"project\": \"").append(escapeJson(project.getName())).append("\"");
+        sb.append(", \"shared\": ").append(repo != null);
+        if (repo != null) {
+            try {
+                sb.append(", \"server_connected\": ").append(repo.isConnected());
+                sb.append(", \"server_info\": \"").append(escapeJson(repo.getServerInfo().toString())).append("\"");
+            } catch (Exception e) {
+                sb.append(", \"server_connected\": false");
+            }
+        }
+        sb.append(", \"file_count\": ").append(data.getFileCount());
+
+        // Open programs
+        Program[] openProgs = programProvider.getAllOpenPrograms();
+        sb.append(", \"open_programs\": [");
+        for (int i = 0; i < openProgs.length; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("\"").append(escapeJson(openProgs[i].getName())).append("\"");
+        }
+        sb.append("]");
+        sb.append(", \"open_program_count\": ").append(openProgs.length);
+
+        // Current program
+        Program current = programProvider.getCurrentProgram();
+        if (current != null) {
+            sb.append(", \"current_program\": \"").append(escapeJson(current.getName())).append("\"");
+        }
+
+        // Running tools
+        try {
+            ghidra.framework.model.ToolManager tm = project.getToolManager();
+            if (tm != null) {
+                PluginTool[] tools = tm.getRunningTools();
+                sb.append(", \"running_tools\": [");
+                boolean hasCodeBrowser = false;
+                for (int i = 0; i < tools.length; i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append("\"").append(escapeJson(tools[i].getName())).append("\"");
+                    if (tools[i].getService(ghidra.app.services.ProgramManager.class) != null) {
+                        hasCodeBrowser = true;
+                    }
+                }
+                sb.append("]");
+                sb.append(", \"codebrowser_active\": ").append(hasCodeBrowser);
+            }
+        } catch (Exception e) {
+            // ToolManager not available
+        }
+
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private String getRunningTools() {
+        Project project = tool.getProject();
+        if (project == null) {
+            return "{\"error\": \"No project open\"}";
+        }
+        try {
+            ghidra.framework.model.ToolManager tm = project.getToolManager();
+            if (tm == null) {
+                return "{\"error\": \"ToolManager not available\"}";
+            }
+            PluginTool[] tools = tm.getRunningTools();
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\"tools\": [");
+            for (int i = 0; i < tools.length; i++) {
+                if (i > 0) sb.append(", ");
+                sb.append("{\"name\": \"").append(escapeJson(tools[i].getName())).append("\"");
+                sb.append(", \"instance\": \"").append(escapeJson(tools[i].getInstanceName())).append("\"");
+                ghidra.app.services.ProgramManager pm = tools[i].getService(ghidra.app.services.ProgramManager.class);
+                if (pm != null) {
+                    sb.append(", \"has_program_manager\": true");
+                    Program current = pm.getCurrentProgram();
+                    if (current != null) {
+                        sb.append(", \"current_program\": \"").append(escapeJson(current.getName())).append("\"");
+                    }
+                    Program[] progs = pm.getAllOpenPrograms();
+                    sb.append(", \"open_programs\": [");
+                    for (int j = 0; j < progs.length; j++) {
+                        if (j > 0) sb.append(", ");
+                        sb.append("\"").append(escapeJson(progs[j].getName())).append("\"");
+                    }
+                    sb.append("]");
+                } else {
+                    sb.append(", \"has_program_manager\": false");
+                }
+                sb.append("}");
+            }
+            sb.append("], \"count\": ").append(tools.length).append("}");
+            return sb.toString();
+        } catch (Exception e) {
+            return "{\"error\": \"Failed to list tools: " + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    private String launchCodeBrowser(String filePath) {
+        Project project = tool.getProject();
+        if (project == null) {
+            return "{\"error\": \"No project open\"}";
+        }
+
+        DomainFile domainFile = null;
+        if (filePath != null && !filePath.trim().isEmpty()) {
+            domainFile = project.getProjectData().getFile(filePath);
+            if (domainFile == null) {
+                return "{\"error\": \"File not found in project: " + escapeJson(filePath) + "\"}";
+            }
+        }
+
+        try {
+            ghidra.framework.model.ToolServices ts = project.getToolServices();
+            if (ts == null) {
+                return "{\"error\": \"ToolServices not available\"}";
+            }
+
+            // Find existing CodeBrowser or launch a new one
+            ghidra.framework.model.ToolManager tm = project.getToolManager();
+            PluginTool codeBrowser = null;
+            if (tm != null) {
+                for (PluginTool runningTool : tm.getRunningTools()) {
+                    if (runningTool.getService(ghidra.app.services.ProgramManager.class) != null) {
+                        codeBrowser = runningTool;
+                        break;
+                    }
+                }
+            }
+
+            if (codeBrowser != null && domainFile != null) {
+                // Existing CodeBrowser found - open the file in it
+                ghidra.app.services.ProgramManager pm = codeBrowser.getService(ghidra.app.services.ProgramManager.class);
+                Program program = (Program) domainFile.getDomainObject(this, false, false, TaskMonitor.DUMMY);
+                pm.openProgram(program);
+                pm.setCurrentProgram(program);
+                return "{\"success\": true, \"message\": \"Opened in existing CodeBrowser\", " +
+                    "\"tool\": \"" + escapeJson(codeBrowser.getName()) + "\", " +
+                    "\"program\": \"" + escapeJson(program.getName()) + "\", " +
+                    "\"path\": \"" + escapeJson(filePath) + "\"}";
+            } else if (domainFile != null) {
+                // No CodeBrowser running - launch one with the file
+                ts.launchDefaultTool(Collections.singletonList(domainFile));
+                return "{\"success\": true, \"message\": \"Launched new CodeBrowser\", " +
+                    "\"path\": \"" + escapeJson(filePath) + "\"}";
+            } else {
+                // No file specified - just launch empty CodeBrowser
+                ts.launchDefaultTool(Collections.emptyList());
+                return "{\"success\": true, \"message\": \"Launched new CodeBrowser (no file)\"}";
+            }
+        } catch (Exception e) {
+            return "{\"error\": \"Failed to launch CodeBrowser: " + escapeJson(e.getMessage()) + "\"}";
         }
     }
 

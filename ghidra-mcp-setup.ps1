@@ -978,42 +978,53 @@ if (Test-Path $bridgeSourcePath) {
 }
 
 # Auto-activate GhidraMCP in FrontEnd (Project Manager) configuration
-# v4.1: Plugin now loads in the FrontEnd tool, not CodeBrowser
-# FrontEndTool.xml uses <PACKAGE NAME="..." /> entries under <TOOL>
+# v4.1: Plugin loads in FrontEnd via the Utility package (ApplicationLevelPlugin)
+# The "Utility" package is present in FrontEndTool.xml by default; the plugin
+# is discovered automatically via @PluginInfo(packageName = UtilityPluginPackage.NAME)
+# After first launch, enable via: File > Configure > Utility > check GhidraMCP
 $ghidraUserDir = "$env:APPDATA\ghidra"
 if (Test-Path $ghidraUserDir) {
     $pluginClass = "com.xebyte.GhidraMCPPlugin"
 
-    # --- Step 1: Activate in FrontEndTool.xml ---
+    # --- Step 1: Verify FrontEndTool.xml has Utility package ---
     $frontEndFiles = Get-ChildItem -Path "$ghidraUserDir\*\FrontEndTool.xml" -ErrorAction SilentlyContinue
 
     foreach ($feFile in $frontEndFiles) {
         try {
             $feContent = Get-Content $feFile.FullName -Raw -Encoding UTF8
 
-            if ($feContent -match 'PACKAGE NAME="Developer"') {
-                Write-LogSuccess "GhidraMCP already activated in FrontEnd: $($feFile.FullName)"
+            if ($feContent -match 'PACKAGE NAME="Utility"') {
+                Write-LogSuccess "FrontEnd Utility package present (GhidraMCP auto-discovers): $($feFile.FullName)"
             } else {
-                # Insert Developer package (contains GhidraMCPPlugin) after the last existing PACKAGE entry
-                # FrontEndTool.xml format: <PACKAGE NAME="Utility" /> followed by <ROOT_NODE
+                # Utility package missing (unusual) - add it
                 $insertPattern = '(<PACKAGE NAME="[^"]*"\s*/>)(\s*<ROOT_NODE)'
-                $replacement = "`$1`n            <PACKAGE NAME=`"Developer`" />`$2"
+                $replacement = "`$1`n            <PACKAGE NAME=`"Utility`" />`$2"
 
                 $newContent = $feContent -replace $insertPattern, $replacement
 
                 if ($newContent -ne $feContent) {
-                    if ($PSCmdlet.ShouldProcess($feFile.FullName, "Add GhidraMCP plugin to FrontEnd config")) {
+                    if ($PSCmdlet.ShouldProcess($feFile.FullName, "Add Utility package to FrontEnd config")) {
                         Set-Content -Path $feFile.FullName -Value $newContent -Encoding UTF8 -NoNewline
-                        Write-LogSuccess "Auto-activated GhidraMCP in FrontEnd: $($feFile.FullName)"
+                        Write-LogSuccess "Added Utility package to FrontEnd config: $($feFile.FullName)"
                     }
                 } else {
                     Write-LogWarning "Could not find insertion point in FrontEnd config: $($feFile.FullName)"
-                    Write-LogInfo "You may need to manually activate: File > Configure in Ghidra Project Manager"
+                    Write-LogInfo "Enable manually: File > Configure > Utility > check GhidraMCP"
+                }
+            }
+
+            # Clean up stale Developer package entries (from earlier versions)
+            if ($feContent -match 'PACKAGE NAME="Developer"') {
+                $cleanPattern = '\s*<PACKAGE NAME="Developer"\s*/>'
+                $cleanContent = $feContent -replace $cleanPattern, ''
+                if ($cleanContent -ne $feContent) {
+                    Set-Content -Path $feFile.FullName -Value $cleanContent -Encoding UTF8 -NoNewline
+                    Write-LogInfo "Cleaned stale Developer package entry from FrontEnd config"
                 }
             }
         } catch {
-            Write-LogWarning "Could not modify FrontEnd config: $($_.Exception.Message)"
-            Write-LogInfo "You may need to manually activate: File > Configure in Ghidra Project Manager"
+            Write-LogWarning "Could not verify FrontEnd config: $($_.Exception.Message)"
+            Write-LogInfo "Enable manually: File > Configure > Utility > check GhidraMCP"
         }
     }
 

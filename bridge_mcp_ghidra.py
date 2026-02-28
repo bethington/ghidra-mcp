@@ -7316,6 +7316,63 @@ def list_projects(search_dir: str = None) -> str:
 
 
 # ==========================================================================
+# PROJECT & TOOL MANAGEMENT (FrontEnd)
+# ==========================================================================
+
+
+@mcp.tool()
+def project_info() -> str:
+    """
+    Get detailed information about the current Ghidra project.
+
+    Returns project name, shared/server status, open programs, running tools,
+    and whether CodeBrowser is active. Works from the FrontEnd (Project Manager)
+    without needing CodeBrowser open.
+
+    Returns:
+        JSON with project name, shared status, server info, file count,
+        open programs, running tools, and codebrowser_active flag.
+    """
+    return safe_get_json("project/info", {})
+
+
+@mcp.tool()
+def list_running_tools() -> str:
+    """
+    List all currently running Ghidra tool windows.
+
+    Shows each tool's name, instance, whether it has a ProgramManager
+    (i.e. is a CodeBrowser), and what programs are open in it.
+
+    Returns:
+        JSON with tools array and count.
+    """
+    return safe_get_json("tool/running_tools", {})
+
+
+@mcp.tool()
+def launch_codebrowser(path: str = None) -> str:
+    """
+    Open a file in CodeBrowser, launching a new CodeBrowser if needed.
+
+    If a CodeBrowser is already running, opens the file in it.
+    If no CodeBrowser is running, launches a new one.
+    If no path is specified, launches an empty CodeBrowser.
+
+    Args:
+        path: Project path to the file to open (e.g., "/LoD/1.00/D2Common.dll").
+              Optional - omit to launch empty CodeBrowser.
+
+    Returns:
+        JSON with success status and tool/program details.
+    """
+    params = {}
+    if path:
+        params["path"] = path
+    return safe_post_json("tool/launch_codebrowser", params)
+
+
+# ==========================================================================
 # PROJECT ORGANIZATION TOOLS
 # ==========================================================================
 
