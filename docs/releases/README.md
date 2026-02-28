@@ -4,7 +4,7 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v3.2.0 (Latest)
+### v4.0.0 (Latest)
 
 - **Bug Fixes + Version Management** - Cherry-picked fixes from PR #38
 - Fixed trailing slash, fuzzy match JSON parsing, OSGi class naming for inline scripts
@@ -108,6 +108,6 @@ Each release directory should contain:
 
 ## Navigation
 
-- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v3.2.0)
+- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v4.0.0)
 - For specific versions: Browse the version directories above
 - For overall project changes: See [CHANGELOG.md](../CHANGELOG.md) in the project root

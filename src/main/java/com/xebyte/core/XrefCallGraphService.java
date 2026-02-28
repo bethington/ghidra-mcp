@@ -1,0 +1,1255 @@
+package com.xebyte.core;
+
+import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressSetView;
+import ghidra.program.model.listing.*;
+import ghidra.program.model.symbol.*;
+
+import java.util.*;
+
+/**
+ * Service for cross-reference and call graph operations: xrefs to/from, function callees/callers,
+ * call graph traversal, cycle detection, path finding, and bulk xref analysis.
+ * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
+ */
+public class XrefCallGraphService {
+
+    private final ProgramProvider programProvider;
+    private final ThreadingStrategy threadingStrategy;
+
+    public XrefCallGraphService(ProgramProvider programProvider, ThreadingStrategy threadingStrategy) {
+        this.programProvider = programProvider;
+        this.threadingStrategy = threadingStrategy;
+    }
+
+    private Object[] getProgramOrError(String programName) {
+        Program program = null;
+        if (programName != null && !programName.isEmpty()) {
+            program = programProvider.resolveProgram(programName);
+        } else {
+            program = programProvider.getCurrentProgram();
+        }
+        if (program == null) {
+            String available = "";
+            Program[] all = programProvider.getAllOpenPrograms();
+            if (all != null && all.length > 0) {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < all.length; i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(all[i].getName());
+                }
+                available = " Available programs: " + sb;
+            }
+            String error = programName != null && !programName.isEmpty()
+                    ? ServiceUtils.programNotFoundError(programName) + available
+                    : "No program loaded." + available;
+            return new Object[]{null, error};
+        }
+        return new Object[]{program, null};
+    }
+
+    // -----------------------------------------------------------------------
+    // Xref Methods
+    // -----------------------------------------------------------------------
+
+    /**
+     * Get all references to a specific address (xref to)
+     */
+    public String getXrefsTo(String addressStr, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+        if (addressStr == null || addressStr.isEmpty()) return "Address is required";
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            ReferenceManager refManager = program.getReferenceManager();
+
+            ReferenceIterator refIter = refManager.getReferencesTo(addr);
+
+            List<String> refs = new ArrayList<>();
+            while (refIter.hasNext()) {
+                Reference ref = refIter.next();
+                Address fromAddr = ref.getFromAddress();
+                RefType refType = ref.getReferenceType();
+
+                Function fromFunc = program.getFunctionManager().getFunctionContaining(fromAddr);
+                String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
+
+                refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
+            }
+
+            // Return meaningful message if no references found
+            if (refs.isEmpty()) {
+                return "No references found to address: " + addressStr;
+            }
+
+            return ServiceUtils.paginateList(refs, offset, limit);
+        } catch (Exception e) {
+            return "Error getting references to address: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Get all references from a specific address (xref from)
+     */
+    public String getXrefsFrom(String addressStr, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+        if (addressStr == null || addressStr.isEmpty()) return "Address is required";
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            ReferenceManager refManager = program.getReferenceManager();
+
+            Reference[] references = refManager.getReferencesFrom(addr);
+
+            List<String> refs = new ArrayList<>();
+            for (Reference ref : references) {
+                Address toAddr = ref.getToAddress();
+                RefType refType = ref.getReferenceType();
+
+                String targetInfo = "";
+                Function toFunc = program.getFunctionManager().getFunctionAt(toAddr);
+                if (toFunc != null) {
+                    targetInfo = " to function " + toFunc.getName();
+                } else {
+                    Data data = program.getListing().getDataAt(toAddr);
+                    if (data != null) {
+                        targetInfo = " to data " + (data.getLabel() != null ? data.getLabel() : data.getPathName());
+                    }
+                }
+
+                refs.add(String.format("To %s%s [%s]", toAddr, targetInfo, refType.getName()));
+            }
+
+            // Return meaningful message if no references found
+            if (refs.isEmpty()) {
+                return "No references found from address: " + addressStr;
+            }
+
+            return ServiceUtils.paginateList(refs, offset, limit);
+        } catch (Exception e) {
+            return "Error getting references from address: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Get all references to a specific function by name
+     */
+    public String getFunctionXrefs(String functionName, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+        if (functionName == null || functionName.isEmpty()) return "Function name is required";
+
+        try {
+            List<String> refs = new ArrayList<>();
+            FunctionManager funcManager = program.getFunctionManager();
+            for (Function function : funcManager.getFunctions(true)) {
+                if (function.getName().equals(functionName)) {
+                    Address entryPoint = function.getEntryPoint();
+                    ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
+
+                    while (refIter.hasNext()) {
+                        Reference ref = refIter.next();
+                        Address fromAddr = ref.getFromAddress();
+                        RefType refType = ref.getReferenceType();
+
+                        Function fromFunc = funcManager.getFunctionContaining(fromAddr);
+                        String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
+
+                        refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
+                    }
+                }
+            }
+
+            if (refs.isEmpty()) {
+                return "No references found to function: " + functionName;
+            }
+
+            return ServiceUtils.paginateList(refs, offset, limit);
+        } catch (Exception e) {
+            return "Error getting function references: " + e.getMessage();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Jump Target Methods
+    // -----------------------------------------------------------------------
+
+    /**
+     * Get all jump target addresses from a function's disassembly
+     */
+    public String getFunctionJumpTargets(String functionName, int offset, int limit) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return "No program loaded";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        FunctionManager functionManager = program.getFunctionManager();
+
+        // Find the function by name
+        Function function = null;
+        for (Function f : functionManager.getFunctions(true)) {
+            if (f.getName().equals(functionName)) {
+                function = f;
+                break;
+            }
+        }
+
+        if (function == null) {
+            return "Function not found: " + functionName;
+        }
+
+        AddressSetView functionBody = function.getBody();
+        Listing listing = program.getListing();
+        Set<Address> jumpTargets = new HashSet<>();
+
+        // Iterate through all instructions in the function
+        InstructionIterator instructions = listing.getInstructions(functionBody, true);
+        while (instructions.hasNext()) {
+            Instruction instr = instructions.next();
+
+            // Check if this is a jump instruction
+            if (instr.getFlowType().isJump()) {
+                // Get all reference addresses from this instruction
+                Reference[] references = instr.getReferencesFrom();
+                for (Reference ref : references) {
+                    Address targetAddr = ref.getToAddress();
+                    // Only include targets within the function or program space
+                    if (targetAddr != null && program.getMemory().contains(targetAddr)) {
+                        jumpTargets.add(targetAddr);
+                    }
+                }
+
+                // Also check for fall-through addresses for conditional jumps
+                if (instr.getFlowType().isConditional()) {
+                    Address fallThroughAddr = instr.getFallThrough();
+                    if (fallThroughAddr != null) {
+                        jumpTargets.add(fallThroughAddr);
+                    }
+                }
+            }
+        }
+
+        // Convert to sorted list and apply pagination
+        List<Address> sortedTargets = new ArrayList<>(jumpTargets);
+        Collections.sort(sortedTargets);
+
+        int count = 0;
+        int skipped = 0;
+
+        for (Address target : sortedTargets) {
+            if (count >= limit) break;
+
+            if (skipped < offset) {
+                skipped++;
+                continue;
+            }
+
+            if (sb.length() > 0) {
+                sb.append("\n");
+            }
+
+            // Add context about what's at this address
+            String context = "";
+            Function targetFunc = functionManager.getFunctionContaining(target);
+            if (targetFunc != null) {
+                context = " (in " + targetFunc.getName() + ")";
+            } else {
+                // Check if there's a label at this address
+                Symbol symbol = program.getSymbolTable().getPrimarySymbol(target);
+                if (symbol != null) {
+                    context = " (" + symbol.getName() + ")";
+                }
+            }
+
+            sb.append(target.toString()).append(context);
+            count++;
+        }
+
+        if (sb.length() == 0) {
+            return "No jump targets found in function: " + functionName;
+        }
+
+        return sb.toString();
+    }
+
+    // -----------------------------------------------------------------------
+    // Callee/Caller Methods
+    // -----------------------------------------------------------------------
+
+    /**
+     * Get all functions called by the specified function (callees)
+     */
+    public String getFunctionCallees(String functionName, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+
+        StringBuilder sb = new StringBuilder();
+        FunctionManager functionManager = program.getFunctionManager();
+
+        // Find the function by name
+        Function function = null;
+        for (Function f : functionManager.getFunctions(true)) {
+            if (f.getName().equals(functionName)) {
+                function = f;
+                break;
+            }
+        }
+
+        if (function == null) {
+            return "Function not found: " + functionName;
+        }
+
+        Set<Function> callees = new HashSet<>();
+        AddressSetView functionBody = function.getBody();
+        Listing listing = program.getListing();
+        ReferenceManager refManager = program.getReferenceManager();
+
+        // Iterate through all instructions in the function
+        InstructionIterator instructions = listing.getInstructions(functionBody, true);
+        while (instructions.hasNext()) {
+            Instruction instr = instructions.next();
+
+            // Check if this is a call instruction
+            if (instr.getFlowType().isCall()) {
+                // Get all reference addresses from this instruction
+                Reference[] references = refManager.getReferencesFrom(instr.getAddress());
+                for (Reference ref : references) {
+                    if (ref.getReferenceType().isCall()) {
+                        Address targetAddr = ref.getToAddress();
+                        Function targetFunc = functionManager.getFunctionAt(targetAddr);
+                        if (targetFunc != null) {
+                            callees.add(targetFunc);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Convert to sorted list and apply pagination
+        List<Function> sortedCallees = new ArrayList<>(callees);
+        sortedCallees.sort((f1, f2) -> f1.getName().compareTo(f2.getName()));
+
+        int count = 0;
+        int skipped = 0;
+
+        for (Function callee : sortedCallees) {
+            if (count >= limit) break;
+
+            if (skipped < offset) {
+                skipped++;
+                continue;
+            }
+
+            if (sb.length() > 0) {
+                sb.append("\n");
+            }
+
+            sb.append(String.format("%s @ %s", callee.getName(), callee.getEntryPoint()));
+            count++;
+        }
+
+        if (sb.length() == 0) {
+            return "No callees found for function: " + functionName;
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * Get all functions that call the specified function (callers)
+     */
+    public String getFunctionCallers(String functionName, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+
+        StringBuilder sb = new StringBuilder();
+        FunctionManager functionManager = program.getFunctionManager();
+
+        // Find the function by name
+        Function targetFunction = null;
+        for (Function f : functionManager.getFunctions(true)) {
+            if (f.getName().equals(functionName)) {
+                targetFunction = f;
+                break;
+            }
+        }
+
+        if (targetFunction == null) {
+            return "Function not found: " + functionName;
+        }
+
+        Set<Function> callers = new HashSet<>();
+        ReferenceManager refManager = program.getReferenceManager();
+
+        // Get all references to this function's entry point
+        ReferenceIterator refIter = refManager.getReferencesTo(targetFunction.getEntryPoint());
+        while (refIter.hasNext()) {
+            Reference ref = refIter.next();
+            if (ref.getReferenceType().isCall()) {
+                Address fromAddr = ref.getFromAddress();
+                Function callerFunc = functionManager.getFunctionContaining(fromAddr);
+                if (callerFunc != null) {
+                    callers.add(callerFunc);
+                }
+            }
+        }
+
+        // Convert to sorted list and apply pagination
+        List<Function> sortedCallers = new ArrayList<>(callers);
+        sortedCallers.sort((f1, f2) -> f1.getName().compareTo(f2.getName()));
+
+        int count = 0;
+        int skipped = 0;
+
+        for (Function caller : sortedCallers) {
+            if (count >= limit) break;
+
+            if (skipped < offset) {
+                skipped++;
+                continue;
+            }
+
+            if (sb.length() > 0) {
+                sb.append("\n");
+            }
+
+            sb.append(String.format("%s @ %s", caller.getName(), caller.getEntryPoint()));
+            count++;
+        }
+
+        if (sb.length() == 0) {
+            return "No callers found for function: " + functionName;
+        }
+
+        return sb.toString();
+    }
+
+    // -----------------------------------------------------------------------
+    // Call Graph Methods
+    // -----------------------------------------------------------------------
+
+    /**
+     * Get a call graph subgraph centered on the specified function
+     */
+    public String getFunctionCallGraph(String functionName, int depth, String direction, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+
+        StringBuilder sb = new StringBuilder();
+        FunctionManager functionManager = program.getFunctionManager();
+
+        // Find the function by name
+        Function rootFunction = null;
+        for (Function f : functionManager.getFunctions(true)) {
+            if (f.getName().equals(functionName)) {
+                rootFunction = f;
+                break;
+            }
+        }
+
+        if (rootFunction == null) {
+            return "Function not found: " + functionName;
+        }
+
+        Set<String> visited = new HashSet<>();
+        Map<String, Set<String>> callGraph = new HashMap<>();
+
+        // Build call graph based on direction
+        if ("callees".equals(direction) || "both".equals(direction)) {
+            buildCallGraphCallees(rootFunction, depth, visited, callGraph, functionManager);
+        }
+
+        if ("callers".equals(direction) || "both".equals(direction)) {
+            visited.clear(); // Reset for callers traversal
+            buildCallGraphCallers(rootFunction, depth, visited, callGraph, functionManager);
+        }
+
+        // Format output as edges
+        for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+            String caller = entry.getKey();
+            for (String callee : entry.getValue()) {
+                if (sb.length() > 0) {
+                    sb.append("\n");
+                }
+                sb.append(caller).append(" -> ").append(callee);
+            }
+        }
+
+        if (sb.length() == 0) {
+            return "No call graph relationships found for function: " + functionName;
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * Helper method to build call graph for callees (what this function calls)
+     */
+    private void buildCallGraphCallees(Function function, int depth, Set<String> visited,
+                                     Map<String, Set<String>> callGraph, FunctionManager functionManager) {
+        if (depth <= 0 || visited.contains(function.getName())) {
+            return;
+        }
+
+        visited.add(function.getName());
+        Set<String> callees = new HashSet<>();
+
+        // Find callees of this function
+        AddressSetView functionBody = function.getBody();
+        Program program = programProvider.getCurrentProgram();
+        Listing listing = program.getListing();
+        ReferenceManager refManager = program.getReferenceManager();
+
+        InstructionIterator instructions = listing.getInstructions(functionBody, true);
+        while (instructions.hasNext()) {
+            Instruction instr = instructions.next();
+
+            if (instr.getFlowType().isCall()) {
+                Reference[] references = refManager.getReferencesFrom(instr.getAddress());
+                for (Reference ref : references) {
+                    if (ref.getReferenceType().isCall()) {
+                        Address targetAddr = ref.getToAddress();
+                        Function targetFunc = functionManager.getFunctionAt(targetAddr);
+                        if (targetFunc != null) {
+                            callees.add(targetFunc.getName());
+                            // Recursively build graph for callees
+                            buildCallGraphCallees(targetFunc, depth - 1, visited, callGraph, functionManager);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!callees.isEmpty()) {
+            callGraph.put(function.getName(), callees);
+        }
+    }
+
+    /**
+     * Helper method to build call graph for callers (what calls this function)
+     */
+    private void buildCallGraphCallers(Function function, int depth, Set<String> visited,
+                                     Map<String, Set<String>> callGraph, FunctionManager functionManager) {
+        if (depth <= 0 || visited.contains(function.getName())) {
+            return;
+        }
+
+        visited.add(function.getName());
+        Program program = programProvider.getCurrentProgram();
+        ReferenceManager refManager = program.getReferenceManager();
+
+        // Find callers of this function
+        ReferenceIterator refIter = refManager.getReferencesTo(function.getEntryPoint());
+        while (refIter.hasNext()) {
+            Reference ref = refIter.next();
+            if (ref.getReferenceType().isCall()) {
+                Address fromAddr = ref.getFromAddress();
+                Function callerFunc = functionManager.getFunctionContaining(fromAddr);
+                if (callerFunc != null) {
+                    String callerName = callerFunc.getName();
+                    callGraph.computeIfAbsent(callerName, k -> new HashSet<>()).add(function.getName());
+                    // Recursively build graph for callers
+                    buildCallGraphCallers(callerFunc, depth - 1, visited, callGraph, functionManager);
+                }
+            }
+        }
+    }
+
+    /**
+     * Get the complete call graph for the entire program
+     */
+    public String getFullCallGraph(String format, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+
+        StringBuilder sb = new StringBuilder();
+        FunctionManager functionManager = program.getFunctionManager();
+        ReferenceManager refManager = program.getReferenceManager();
+        Listing listing = program.getListing();
+
+        Map<String, Set<String>> callGraph = new HashMap<>();
+        int relationshipCount = 0;
+
+        // Build complete call graph
+        for (Function function : functionManager.getFunctions(true)) {
+            if (relationshipCount >= limit) {
+                break;
+            }
+
+            String functionName = function.getName();
+            Set<String> callees = new HashSet<>();
+
+            // Find all functions called by this function
+            AddressSetView functionBody = function.getBody();
+            InstructionIterator instructions = listing.getInstructions(functionBody, true);
+
+            while (instructions.hasNext() && relationshipCount < limit) {
+                Instruction instr = instructions.next();
+
+                if (instr.getFlowType().isCall()) {
+                    Reference[] references = refManager.getReferencesFrom(instr.getAddress());
+                    for (Reference ref : references) {
+                        if (ref.getReferenceType().isCall()) {
+                            Address targetAddr = ref.getToAddress();
+                            Function targetFunc = functionManager.getFunctionAt(targetAddr);
+                            if (targetFunc != null) {
+                                callees.add(targetFunc.getName());
+                                relationshipCount++;
+                                if (relationshipCount >= limit) {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!callees.isEmpty()) {
+                callGraph.put(functionName, callees);
+            }
+        }
+
+        // Format output based on requested format
+        if ("dot".equals(format)) {
+            sb.append("digraph CallGraph {\n");
+            sb.append("  rankdir=TB;\n");
+            sb.append("  node [shape=box];\n");
+            for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+                String caller = entry.getKey().replace("\"", "\\\"");
+                for (String callee : entry.getValue()) {
+                    callee = callee.replace("\"", "\\\"");
+                    sb.append("  \"").append(caller).append("\" -> \"").append(callee).append("\";\n");
+                }
+            }
+            sb.append("}");
+        } else if ("mermaid".equals(format)) {
+            sb.append("graph TD\n");
+            for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+                String caller = entry.getKey().replace(" ", "_");
+                for (String callee : entry.getValue()) {
+                    callee = callee.replace(" ", "_");
+                    sb.append("  ").append(caller).append(" --> ").append(callee).append("\n");
+                }
+            }
+        } else if ("adjacency".equals(format)) {
+            for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+                if (sb.length() > 0) {
+                    sb.append("\n");
+                }
+                sb.append(entry.getKey()).append(": ");
+                sb.append(String.join(", ", entry.getValue()));
+            }
+        } else { // Default "edges" format
+            for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+                String caller = entry.getKey();
+                for (String callee : entry.getValue()) {
+                    if (sb.length() > 0) {
+                        sb.append("\n");
+                    }
+                    sb.append(caller).append(" -> ").append(callee);
+                }
+            }
+        }
+
+        if (sb.length() == 0) {
+            return "No call relationships found in the program";
+        }
+
+        return sb.toString();
+    }
+
+    // -----------------------------------------------------------------------
+    // Call Graph Analysis Methods
+    // -----------------------------------------------------------------------
+
+    /**
+     * Enhanced call graph analysis with cycle detection and path finding
+     * Provides advanced graph algorithms for understanding function relationships
+     */
+    public String analyzeCallGraph(String startFunction, String endFunction, String analysisType, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
+
+        try {
+            FunctionManager functionManager = program.getFunctionManager();
+            ReferenceManager refManager = program.getReferenceManager();
+
+            // Build adjacency list representation of call graph
+            Map<String, Set<String>> callGraph = new LinkedHashMap<>();
+            Map<String, String> functionAddresses = new LinkedHashMap<>();
+
+            for (Function func : functionManager.getFunctions(true)) {
+                if (func.isThunk()) continue;
+
+                String funcName = func.getName();
+                functionAddresses.put(funcName, func.getEntryPoint().toString());
+                Set<String> callees = new HashSet<>();
+
+                Listing listing = program.getListing();
+                InstructionIterator instrIter = listing.getInstructions(func.getBody(), true);
+
+                while (instrIter.hasNext()) {
+                    Instruction instr = instrIter.next();
+                    if (instr.getFlowType().isCall()) {
+                        for (Reference ref : refManager.getReferencesFrom(instr.getAddress())) {
+                            if (ref.getReferenceType().isCall()) {
+                                Function calledFunc = functionManager.getFunctionAt(ref.getToAddress());
+                                if (calledFunc != null && !calledFunc.isThunk()) {
+                                    callees.add(calledFunc.getName());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!callees.isEmpty()) {
+                    callGraph.put(funcName, callees);
+                }
+            }
+
+            StringBuilder result = new StringBuilder();
+            result.append("{\n");
+
+            if ("cycles".equals(analysisType)) {
+                // Detect cycles in the call graph using DFS
+                List<List<String>> cycles = findCycles(callGraph);
+
+                result.append("  \"analysis_type\": \"cycle_detection\",\n");
+                result.append("  \"cycles_found\": ").append(cycles.size()).append(",\n");
+                result.append("  \"cycles\": [\n");
+
+                for (int i = 0; i < Math.min(cycles.size(), 20); i++) {
+                    List<String> cycle = cycles.get(i);
+                    result.append("    {");
+                    result.append("\"length\": ").append(cycle.size()).append(", ");
+                    result.append("\"path\": [");
+                    for (int j = 0; j < cycle.size(); j++) {
+                        if (j > 0) result.append(", ");
+                        result.append("\"").append(ServiceUtils.escapeJson(cycle.get(j))).append("\"");
+                    }
+                    result.append("]}");
+                    if (i < Math.min(cycles.size(), 20) - 1) result.append(",");
+                    result.append("\n");
+                }
+
+                if (cycles.size() > 20) {
+                    result.append("    {\"note\": \"").append(cycles.size() - 20).append(" additional cycles omitted\"}\n");
+                }
+                result.append("  ]\n");
+
+            } else if ("path".equals(analysisType) && startFunction != null && endFunction != null) {
+                // Find shortest path between two functions using BFS
+                List<String> path = findShortestPath(callGraph, startFunction, endFunction);
+
+                result.append("  \"analysis_type\": \"path_finding\",\n");
+                result.append("  \"start_function\": \"").append(ServiceUtils.escapeJson(startFunction)).append("\",\n");
+                result.append("  \"end_function\": \"").append(ServiceUtils.escapeJson(endFunction)).append("\",\n");
+
+                if (path != null) {
+                    result.append("  \"path_found\": true,\n");
+                    result.append("  \"path_length\": ").append(path.size() - 1).append(",\n");
+                    result.append("  \"path\": [");
+                    for (int i = 0; i < path.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(ServiceUtils.escapeJson(path.get(i))).append("\"");
+                    }
+                    result.append("]\n");
+                } else {
+                    result.append("  \"path_found\": false,\n");
+                    result.append("  \"message\": \"No path exists between the specified functions\"\n");
+                }
+
+            } else if ("strongly_connected".equals(analysisType)) {
+                // Find strongly connected components using Kosaraju's algorithm
+                List<Set<String>> sccs = findStronglyConnectedComponents(callGraph);
+
+                // Filter to only non-trivial SCCs (size > 1)
+                List<Set<String>> nonTrivialSCCs = new ArrayList<>();
+                for (Set<String> scc : sccs) {
+                    if (scc.size() > 1) {
+                        nonTrivialSCCs.add(scc);
+                    }
+                }
+
+                result.append("  \"analysis_type\": \"strongly_connected_components\",\n");
+                result.append("  \"total_sccs\": ").append(sccs.size()).append(",\n");
+                result.append("  \"non_trivial_sccs\": ").append(nonTrivialSCCs.size()).append(",\n");
+                result.append("  \"components\": [\n");
+
+                for (int i = 0; i < Math.min(nonTrivialSCCs.size(), 20); i++) {
+                    Set<String> scc = nonTrivialSCCs.get(i);
+                    result.append("    {");
+                    result.append("\"size\": ").append(scc.size()).append(", ");
+                    result.append("\"functions\": [");
+                    int j = 0;
+                    for (String func : scc) {
+                        if (j++ > 0) result.append(", ");
+                        if (j <= 10) {
+                            result.append("\"").append(ServiceUtils.escapeJson(func)).append("\"");
+                        }
+                    }
+                    if (scc.size() > 10) {
+                        result.append(", \"...").append(scc.size() - 10).append(" more\"");
+                    }
+                    result.append("]}");
+                    if (i < Math.min(nonTrivialSCCs.size(), 20) - 1) result.append(",");
+                    result.append("\n");
+                }
+
+                result.append("  ]\n");
+
+            } else if ("entry_points".equals(analysisType)) {
+                // Find functions that are never called (potential entry points)
+                Set<String> allFunctions = new HashSet<>(functionAddresses.keySet());
+                Set<String> calledFunctions = new HashSet<>();
+                for (Set<String> callees : callGraph.values()) {
+                    calledFunctions.addAll(callees);
+                }
+
+                Set<String> entryPoints = new HashSet<>(allFunctions);
+                entryPoints.removeAll(calledFunctions);
+
+                result.append("  \"analysis_type\": \"entry_point_detection\",\n");
+                result.append("  \"total_functions\": ").append(allFunctions.size()).append(",\n");
+                result.append("  \"entry_points_found\": ").append(entryPoints.size()).append(",\n");
+                result.append("  \"entry_points\": [\n");
+
+                int idx = 0;
+                for (String ep : entryPoints) {
+                    if (idx >= 50) {
+                        result.append("    {\"note\": \"").append(entryPoints.size() - 50).append(" more entry points\"}\n");
+                        break;
+                    }
+                    result.append("    {\"name\": \"").append(ServiceUtils.escapeJson(ep)).append("\", ");
+                    result.append("\"address\": \"").append(functionAddresses.getOrDefault(ep, "unknown")).append("\"}");
+                    if (idx < Math.min(entryPoints.size(), 50) - 1) result.append(",");
+                    result.append("\n");
+                    idx++;
+                }
+
+                result.append("  ]\n");
+
+            } else if ("leaf_functions".equals(analysisType)) {
+                // Find functions that don't call any other functions
+                Set<String> leafFunctions = new HashSet<>(functionAddresses.keySet());
+                leafFunctions.removeAll(callGraph.keySet());
+
+                result.append("  \"analysis_type\": \"leaf_function_detection\",\n");
+                result.append("  \"leaf_functions_found\": ").append(leafFunctions.size()).append(",\n");
+                result.append("  \"leaf_functions\": [\n");
+
+                int idx = 0;
+                for (String lf : leafFunctions) {
+                    if (idx >= 50) {
+                        result.append("    {\"note\": \"").append(leafFunctions.size() - 50).append(" more leaf functions\"}\n");
+                        break;
+                    }
+                    result.append("    {\"name\": \"").append(ServiceUtils.escapeJson(lf)).append("\", ");
+                    result.append("\"address\": \"").append(functionAddresses.getOrDefault(lf, "unknown")).append("\"}");
+                    if (idx < Math.min(leafFunctions.size(), 50) - 1) result.append(",");
+                    result.append("\n");
+                    idx++;
+                }
+
+                result.append("  ]\n");
+
+            } else {
+                // Default: summary statistics
+                int totalEdges = 0;
+                int maxOutDegree = 0;
+                String maxOutDegreeFunc = "";
+                Map<String, Integer> inDegree = new HashMap<>();
+
+                for (Map.Entry<String, Set<String>> entry : callGraph.entrySet()) {
+                    totalEdges += entry.getValue().size();
+                    if (entry.getValue().size() > maxOutDegree) {
+                        maxOutDegree = entry.getValue().size();
+                        maxOutDegreeFunc = entry.getKey();
+                    }
+                    for (String callee : entry.getValue()) {
+                        inDegree.put(callee, inDegree.getOrDefault(callee, 0) + 1);
+                    }
+                }
+
+                int maxInDegree = 0;
+                String maxInDegreeFunc = "";
+                for (Map.Entry<String, Integer> entry : inDegree.entrySet()) {
+                    if (entry.getValue() > maxInDegree) {
+                        maxInDegree = entry.getValue();
+                        maxInDegreeFunc = entry.getKey();
+                    }
+                }
+
+                result.append("  \"analysis_type\": \"summary\",\n");
+                result.append("  \"total_functions\": ").append(functionAddresses.size()).append(",\n");
+                result.append("  \"functions_with_calls\": ").append(callGraph.size()).append(",\n");
+                result.append("  \"total_call_edges\": ").append(totalEdges).append(",\n");
+                result.append("  \"max_out_degree\": {\"function\": \"").append(ServiceUtils.escapeJson(maxOutDegreeFunc));
+                result.append("\", \"calls\": ").append(maxOutDegree).append("},\n");
+                result.append("  \"max_in_degree\": {\"function\": \"").append(ServiceUtils.escapeJson(maxInDegreeFunc));
+                result.append("\", \"called_by\": ").append(maxInDegree).append("},\n");
+                result.append("  \"available_analyses\": [\"cycles\", \"path\", \"strongly_connected\", \"entry_points\", \"leaf_functions\"]\n");
+            }
+
+            result.append("}");
+            return result.toString();
+
+        } catch (Exception e) {
+            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Graph Algorithm Helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Find cycles in directed graph using DFS
+     */
+    private List<List<String>> findCycles(Map<String, Set<String>> graph) {
+        List<List<String>> cycles = new ArrayList<>();
+        Set<String> visited = new HashSet<>();
+        Set<String> recStack = new HashSet<>();
+        Map<String, String> parent = new HashMap<>();
+
+        for (String node : graph.keySet()) {
+            if (!visited.contains(node)) {
+                findCyclesDFS(node, graph, visited, recStack, parent, cycles);
+            }
+        }
+
+        return cycles;
+    }
+
+    private void findCyclesDFS(String node, Map<String, Set<String>> graph, Set<String> visited,
+                               Set<String> recStack, Map<String, String> parent, List<List<String>> cycles) {
+        visited.add(node);
+        recStack.add(node);
+
+        Set<String> neighbors = graph.getOrDefault(node, Collections.emptySet());
+        for (String neighbor : neighbors) {
+            if (!visited.contains(neighbor)) {
+                parent.put(neighbor, node);
+                findCyclesDFS(neighbor, graph, visited, recStack, parent, cycles);
+            } else if (recStack.contains(neighbor)) {
+                // Found a cycle - reconstruct it
+                List<String> cycle = new ArrayList<>();
+                cycle.add(neighbor);
+                String current = node;
+                while (current != null && !current.equals(neighbor)) {
+                    cycle.add(0, current);
+                    current = parent.get(current);
+                }
+                cycle.add(0, neighbor);
+                if (cycles.size() < 100) { // Limit cycles
+                    cycles.add(cycle);
+                }
+            }
+        }
+
+        recStack.remove(node);
+    }
+
+    /**
+     * Find shortest path using BFS
+     */
+    private List<String> findShortestPath(Map<String, Set<String>> graph, String start, String end) {
+        if (start.equals(end)) {
+            return Arrays.asList(start);
+        }
+
+        Queue<String> queue = new LinkedList<>();
+        Map<String, String> parent = new HashMap<>();
+        Set<String> visited = new HashSet<>();
+
+        queue.add(start);
+        visited.add(start);
+
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            Set<String> neighbors = graph.getOrDefault(current, Collections.emptySet());
+
+            for (String neighbor : neighbors) {
+                if (!visited.contains(neighbor)) {
+                    visited.add(neighbor);
+                    parent.put(neighbor, current);
+
+                    if (neighbor.equals(end)) {
+                        // Reconstruct path
+                        List<String> path = new ArrayList<>();
+                        String node = end;
+                        while (node != null) {
+                            path.add(0, node);
+                            node = parent.get(node);
+                        }
+                        return path;
+                    }
+
+                    queue.add(neighbor);
+                }
+            }
+        }
+
+        return null; // No path found
+    }
+
+    /**
+     * Find strongly connected components using Kosaraju's algorithm
+     */
+    private List<Set<String>> findStronglyConnectedComponents(Map<String, Set<String>> graph) {
+        // Step 1: Fill vertices in stack according to finishing times
+        Stack<String> stack = new Stack<>();
+        Set<String> visited = new HashSet<>();
+
+        // Get all nodes
+        Set<String> allNodes = new HashSet<>(graph.keySet());
+        for (Set<String> neighbors : graph.values()) {
+            allNodes.addAll(neighbors);
+        }
+
+        for (String node : allNodes) {
+            if (!visited.contains(node)) {
+                fillOrder(node, graph, visited, stack);
+            }
+        }
+
+        // Step 2: Create reversed graph
+        Map<String, Set<String>> reversedGraph = new HashMap<>();
+        for (Map.Entry<String, Set<String>> entry : graph.entrySet()) {
+            for (String neighbor : entry.getValue()) {
+                reversedGraph.computeIfAbsent(neighbor, k -> new HashSet<>()).add(entry.getKey());
+            }
+        }
+
+        // Step 3: Process vertices in order of decreasing finish time
+        visited.clear();
+        List<Set<String>> sccs = new ArrayList<>();
+
+        while (!stack.isEmpty()) {
+            String node = stack.pop();
+            if (!visited.contains(node)) {
+                Set<String> scc = new HashSet<>();
+                dfsCollect(node, reversedGraph, visited, scc);
+                sccs.add(scc);
+            }
+        }
+
+        return sccs;
+    }
+
+    private void fillOrder(String node, Map<String, Set<String>> graph, Set<String> visited, Stack<String> stack) {
+        visited.add(node);
+        Set<String> neighbors = graph.getOrDefault(node, Collections.emptySet());
+        for (String neighbor : neighbors) {
+            if (!visited.contains(neighbor)) {
+                fillOrder(neighbor, graph, visited, stack);
+            }
+        }
+        stack.push(node);
+    }
+
+    private void dfsCollect(String node, Map<String, Set<String>> graph, Set<String> visited, Set<String> component) {
+        visited.add(node);
+        component.add(node);
+        Set<String> neighbors = graph.getOrDefault(node, Collections.emptySet());
+        for (String neighbor : neighbors) {
+            if (!visited.contains(neighbor)) {
+                dfsCollect(neighbor, graph, visited, component);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Bulk Xref Methods
+    // -----------------------------------------------------------------------
+
+    /**
+     * Retrieve xrefs for multiple addresses in one call
+     */
+    public String getBulkXrefs(Object addressesObj) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) return "{\"error\": \"No program loaded\"}";
+
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+
+        try {
+            List<String> addresses = new ArrayList<>();
+
+            // Parse addresses array
+            if (addressesObj instanceof List) {
+                for (Object addr : (List<?>) addressesObj) {
+                    if (addr != null) {
+                        addresses.add(addr.toString());
+                    }
+                }
+            } else if (addressesObj instanceof String) {
+                // Handle comma-separated string
+                String[] parts = ((String) addressesObj).split(",");
+                for (String part : parts) {
+                    addresses.add(part.trim());
+                }
+            }
+
+            ReferenceManager refMgr = program.getReferenceManager();
+            boolean first = true;
+
+            for (String addrStr : addresses) {
+                if (!first) json.append(",");
+                first = false;
+
+                json.append("\"").append(addrStr).append("\": [");
+
+                try {
+                    Address addr = program.getAddressFactory().getAddress(addrStr);
+                    if (addr != null) {
+                        ReferenceIterator refIter = refMgr.getReferencesTo(addr);
+                        boolean firstRef = true;
+
+                        while (refIter.hasNext()) {
+                            Reference ref = refIter.next();
+                            if (!firstRef) json.append(",");
+                            firstRef = false;
+
+                            json.append("{");
+                            json.append("\"from\": \"").append(ref.getFromAddress().toString()).append("\",");
+                            json.append("\"type\": \"").append(ref.getReferenceType().getName()).append("\"");
+                            json.append("}");
+                        }
+                    }
+                } catch (Exception e) {
+                    // Address parsing failed, return empty array
+                }
+
+                json.append("]");
+            }
+        } catch (Exception e) {
+            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+        }
+
+        json.append("}");
+        return json.toString();
+    }
+
+    /**
+     * Assembly pattern analysis - get assembly context around xref source addresses
+     */
+    public String getAssemblyContext(Object xrefSourcesObj, int contextInstructions,
+                                      Object includePatternsObj) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) return "{\"error\": \"No program loaded\"}";
+
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+
+        try {
+            List<String> xrefSources = new ArrayList<>();
+
+            if (xrefSourcesObj instanceof List) {
+                for (Object addr : (List<?>) xrefSourcesObj) {
+                    if (addr != null) {
+                        xrefSources.add(addr.toString());
+                    }
+                }
+            }
+
+            Listing listing = program.getListing();
+            boolean first = true;
+
+            for (String addrStr : xrefSources) {
+                if (!first) json.append(",");
+                first = false;
+
+                json.append("\"").append(addrStr).append("\": {");
+
+                try {
+                    Address addr = program.getAddressFactory().getAddress(addrStr);
+                    if (addr != null) {
+                        Instruction instr = listing.getInstructionAt(addr);
+
+                        json.append("\"address\": \"").append(addrStr).append("\",");
+
+                        // Get the instruction at this address
+                        if (instr != null) {
+                            json.append("\"instruction\": \"").append(ServiceUtils.escapeJson(instr.toString())).append("\",");
+
+                            // Get context before
+                            json.append("\"context_before\": [");
+                            Address prevAddr = addr;
+                            for (int i = 0; i < contextInstructions; i++) {
+                                Instruction prevInstr = listing.getInstructionBefore(prevAddr);
+                                if (prevInstr == null) break;
+                                prevAddr = prevInstr.getAddress();
+                                if (i > 0) json.append(",");
+                                json.append("\"").append(prevAddr).append(": ").append(ServiceUtils.escapeJson(prevInstr.toString())).append("\"");
+                            }
+                            json.append("],");
+
+                            // Get context after
+                            json.append("\"context_after\": [");
+                            Address nextAddr = addr;
+                            for (int i = 0; i < contextInstructions; i++) {
+                                Instruction nextInstr = listing.getInstructionAfter(nextAddr);
+                                if (nextInstr == null) break;
+                                nextAddr = nextInstr.getAddress();
+                                if (i > 0) json.append(",");
+                                json.append("\"").append(nextAddr).append(": ").append(ServiceUtils.escapeJson(nextInstr.toString())).append("\"");
+                            }
+                            json.append("],");
+
+                            // Detect patterns
+                            String mnemonic = instr.getMnemonicString().toUpperCase();
+                            json.append("\"mnemonic\": \"").append(mnemonic).append("\",");
+
+                            List<String> patterns = new ArrayList<>();
+                            if (mnemonic.equals("MOV") || mnemonic.equals("LEA")) {
+                                patterns.add("data_access");
+                            }
+                            if (mnemonic.equals("CMP") || mnemonic.equals("TEST")) {
+                                patterns.add("comparison");
+                            }
+                            if (mnemonic.equals("IMUL") || mnemonic.equals("SHL") || mnemonic.equals("SHR")) {
+                                patterns.add("arithmetic");
+                            }
+                            if (mnemonic.equals("PUSH") || mnemonic.equals("POP")) {
+                                patterns.add("stack_operation");
+                            }
+                            if (mnemonic.startsWith("J") || mnemonic.equals("CALL")) {
+                                patterns.add("control_flow");
+                            }
+
+                            json.append("\"patterns_detected\": [");
+                            for (int i = 0; i < patterns.size(); i++) {
+                                if (i > 0) json.append(",");
+                                json.append("\"").append(patterns.get(i)).append("\"");
+                            }
+                            json.append("]");
+                        } else {
+                            json.append("\"error\": \"No instruction at address\"");
+                        }
+                    }
+                } catch (Exception e) {
+                    json.append("\"error\": \"").append(ServiceUtils.escapeJson(e.getMessage())).append("\"");
+                }
+
+                json.append("}");
+            }
+        } catch (Exception e) {
+            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+        }
+
+        json.append("}");
+        return json.toString();
+    }
+}

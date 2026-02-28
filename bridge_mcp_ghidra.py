@@ -5532,7 +5532,7 @@ def list_project_files(folder: str = None) -> str:
 
 
 @mcp.tool()
-def open_program(path: str) -> str:
+def open_program(path: str, auto_analyze: bool = False) -> str:
     """
     Open a program from the current Ghidra project.
 
@@ -5543,9 +5543,12 @@ def open_program(path: str) -> str:
     Args:
         path: Project path to the program (e.g., "/Game.exe" or "/dlls/D2Client.dll")
               Use list_project_files() to see available paths.
+        auto_analyze: If True, automatically trigger Ghidra's auto-analysis after
+                      opening the program. This runs all configured analyzers.
+                      Default: False.
 
     Returns:
-        JSON with success status, program name, and basic info
+        JSON with success status, program name, auto_analyzed flag, and basic info
 
     Raises:
         GhidraValidationError: If path not provided or file not found
@@ -5554,14 +5557,16 @@ def open_program(path: str) -> str:
         # Open a program from project
         result = open_program("/D2Client.dll")
 
-        # Now it's the active program
-        info = get_current_program_info()
+        # Open and auto-analyze
+        result = open_program("/D2Client.dll", auto_analyze=True)
     """
     if not path:
         raise GhidraValidationError("Program path is required")
 
     url = f"{ghidra_server_url}/open_program"
     params = {"path": path}
+    if auto_analyze:
+        params["auto_analyze"] = "true"
     return make_request(url, method="GET", params=params)
 
 

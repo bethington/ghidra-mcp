@@ -5,7 +5,7 @@
 Ghidra MCP is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It provides **180 MCP tools** for binary analysis automation.
 
 - **Package**: `com.xebyte`
-- **Version**: 3.2.0 (see `pom.xml`)
+- **Version**: 4.0.0 (see `pom.xml`)
 - **License**: Apache 2.0
 - **Java**: 21 LTS
 - **Ghidra**: 12.0.3
@@ -20,10 +20,31 @@ AI/Automation Tools <-> MCP Bridge (bridge_mcp_ghidra.py) <-> Ghidra Plugin (Ghi
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Ghidra Plugin | `src/main/java/com/xebyte/GhidraMCPPlugin.java` | HTTP server exposing 149 Ghidra API endpoints |
+| Ghidra Plugin | `src/main/java/com/xebyte/GhidraMCPPlugin.java` | HTTP server + endpoint wiring (~4,650 lines), delegates to services |
 | MCP Bridge | `bridge_mcp_ghidra.py` | Translates MCP protocol to HTTP calls (180 tools) |
 | Headless Server | `src/main/java/com/xebyte/headless/` | Standalone server without Ghidra GUI (173 endpoints) |
-| Core Abstractions | `src/main/java/com/xebyte/core/` | Shared interfaces (ProgramProvider, ThreadingStrategy) |
+| Service Layer | `src/main/java/com/xebyte/core/` | 12 shared service classes with business logic (~15K lines) |
+
+### Service Layer (v4.0.0)
+
+Business logic is in `com.xebyte.core/` service classes, shared between GUI and headless modes:
+
+| Service | Lines | Responsibility |
+|---------|-------|----------------|
+| `ServiceUtils` | ~670 | Shared static utilities (escapeJson, paginateList, convertNumber) |
+| `ListingService` | ~720 | Listing/enumeration endpoints |
+| `FunctionService` | ~2,400 | Decompilation, rename, prototype, batch operations |
+| `CommentService` | ~430 | Decompiler/disassembly/plate comments |
+| `SymbolLabelService` | ~815 | Labels, data rename, globals, external locations |
+| `XrefCallGraphService` | ~1,260 | Cross-references, call graphs |
+| `DataTypeService` | ~2,580 | Struct/enum/union CRUD, validation |
+| `AnalysisService` | ~2,510 | Completeness, control flow, similarity |
+| `DocumentationHashService` | ~1,130 | Function hashing, cross-binary docs |
+| `MalwareSecurityService` | ~940 | Anti-analysis detection, IOCs |
+| `ProgramScriptService` | ~1,340 | Program management, scripts, memory |
+| `BinaryComparisonService` | ~1,050 | Cross-binary comparison (static methods) |
+
+Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`. GUI uses `GuiProgramProvider` + `SwingThreadingStrategy`; headless uses `HeadlessProgramProvider` + `DirectThreadingStrategy`.
 
 ## Build Commands
 

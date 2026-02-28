@@ -4,6 +4,40 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v4.0.0 - 2026-02-28
+
+### Major Release -- Service Layer Architecture Refactor
+
+#### Architecture Refactor
+- **Monolith decomposition**: Extracted shared business logic from `GhidraMCPPlugin.java` (16,945 lines) into 12 focused service classes under `com.xebyte.core/`
+- **Plugin reduced 73%**: `GhidraMCPPlugin.java` went from 16,945 to 4,650 lines (server lifecycle, HTTP wiring, and GUI-only endpoints remain)
+- **Headless reduced 67%**: `HeadlessEndpointHandler.java` went from 6,452 to 2,153 lines by delegating to the same shared services
+- **Zero breaking changes**: All HTTP endpoint paths, parameter names, and JSON response formats are unchanged. The MCP bridge and all clients work without modification
+
+#### New Service Classes
+- `ServiceUtils` -- shared static utilities (escapeJson, paginateList, resolveDataType, convertNumber)
+- `ListingService` -- listing/enumeration endpoints (list_methods, list_functions, list_classes, etc.)
+- `FunctionService` -- decompilation, rename, prototype, variable management, batch operations
+- `CommentService` -- decompiler/disassembly/plate comments
+- `SymbolLabelService` -- labels, data rename, globals, external locations
+- `XrefCallGraphService` -- cross-references, call graphs
+- `DataTypeService` -- struct/enum/union CRUD, validation, field analysis
+- `AnalysisService` -- completeness analysis, control flow, similarity, analyzers
+- `DocumentationHashService` -- function hashing, cross-binary documentation
+- `MalwareSecurityService` -- anti-analysis detection, IOCs, malware behaviors
+- `ProgramScriptService` -- program management, scripts, memory, bookmarks, metadata
+
+#### New Feature
+- **Auto-analyze on open_program**: `open_program` endpoint now accepts optional `auto_analyze=true` parameter to trigger Ghidra's auto-analysis after opening a program (inspired by PR #42 from @heeen)
+
+#### Design Decisions
+- Instance-based services with constructor injection (`ProgramProvider` + `ThreadingStrategy`)
+- GUI mode uses `GuiProgramProvider` + `SwingThreadingStrategy`; headless uses `HeadlessProgramProvider` + `DirectThreadingStrategy`
+- Services return JSON strings (same as before); `Response` sealed interface deferred to v5.0
+- Existing `createContext()` endpoint registration pattern preserved (grep-friendly, proven)
+
+---
+
 ## v3.2.0 - 2026-02-27
 
 ### Bug Fixes + Version Management
