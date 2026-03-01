@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "created": null,
+  "last_updated": null,
+  "iteration": 0,
+  "phase": "survey",
+  "paused": false,
+  "pause_reason": null,
+  "session": {
+    "started": null,
+    "functions_documented": 0,
+    "functions_failed": 0,
+    "avg_score": 0,
+    "propagations": 0
+  },
+  "current_batch": [],
+  "completed": [],
+  "needs_work": [],
+  "tool_errors": {},
+  "strategy_stats": {
+    "callee_first": { "count": 0, "avg_score": 0 },
+    "high_xref": { "count": 0, "avg_score": 0 },
+    "neighborhood": { "count": 0, "avg_score": 0 },
+    "worst_score": { "count": 0, "avg_score": 0 }
+  },
+  "programs_indexed": [],
+  "hash_index_built": false
+}
