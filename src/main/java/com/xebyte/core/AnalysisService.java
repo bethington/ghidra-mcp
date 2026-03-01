@@ -1358,7 +1358,7 @@ public class AnalysisService {
                     List<String> hungarianViolations = new ArrayList<>();
                     int unfixableHungarianCount = 0;
                     for (Parameter param : func.getParameters()) {
-                        validateHungarianNotation(param.getName(), param.getDataType().getName(), false, hungarianViolations);
+                        validateHungarianNotation(param.getName(), param.getDataType().getName(), false, true, hungarianViolations);
                     }
 
                     // Use decompilation-based locals if available, otherwise fallback to low-level API
@@ -1368,7 +1368,7 @@ public class AnalysisService {
                         while (symbols.hasNext()) {
                             ghidra.program.model.pcode.HighSymbol symbol = symbols.next();
                             int prevSize = hungarianViolations.size();
-                            validateHungarianNotation(symbol.getName(), symbol.getDataType().getName(), false, hungarianViolations);
+                            validateHungarianNotation(symbol.getName(), symbol.getDataType().getName(), false, false, hungarianViolations);
                             // If a new violation was added and the variable is register-only or thunk-owned, it's unfixable
                             if (hungarianViolations.size() > prevSize && (isThunk || !localVarNames.contains(symbol.getName()))) {
                                 unfixableHungarianCount += (hungarianViolations.size() - prevSize);
@@ -1377,7 +1377,7 @@ public class AnalysisService {
                     } else {
                         // Fallback to low-level API
                         for (Variable local : func.getLocalVariables()) {
-                            validateHungarianNotation(local.getName(), local.getDataType().getName(), false, hungarianViolations);
+                            validateHungarianNotation(local.getName(), local.getDataType().getName(), false, false, hungarianViolations);
                         }
                     }
 
@@ -1556,6 +1556,9 @@ public class AnalysisService {
                     result.append("\"completeness_score\": ").append(scoreResult.score).append(", ");
                     result.append("\"effective_score\": ").append(scoreResult.effectiveScore).append(", ");
                     result.append("\"all_deductions_unfixable\": ").append(scoreResult.score < 100.0 && scoreResult.effectiveScore >= 100.0).append(", ");
+
+                    // PROP-0002: Report whether function has renameable variables (not register-only SSA)
+                    result.append("\"has_renameable_variables\": ").append(!localVarNames.isEmpty()).append(", ");
 
                     // Generate workflow-aligned recommendations
                     List<String> recommendations = generateWorkflowRecommendations(
@@ -2283,7 +2286,7 @@ public class AnalysisService {
     /**
      * Validate Hungarian notation compliance for variables
      */
-    private void validateHungarianNotation(String varName, String typeName, boolean isGlobal, List<String> violations) {
+    private void validateHungarianNotation(String varName, String typeName, boolean isGlobal, boolean isParameter, List<String> violations) {
         // Skip generic/default names - they're already caught by undefined variable check
         if (varName.startsWith("param_") || varName.startsWith("local_") ||
             varName.startsWith("iVar") || varName.startsWith("uVar") ||
@@ -2329,6 +2332,13 @@ public class AnalysisService {
         }
 
         if (!hasCorrectPrefix) {
+            // PROP-0001: Allow p-prefix on int/uint/undefined4 parameters (pointer-passed-as-int pattern
+            // common in game DLLs where ordinal exports receive all params as int)
+            if (isParameter && !isGlobal && varName.length() > 1 && varName.startsWith("p") &&
+                Character.isUpperCase(varName.charAt(1)) &&
+                (baseTypeName.equals("int") || baseTypeName.equals("uint") || baseTypeName.equals("undefined4") || baseTypeName.equals("dword"))) {
+                return; // Valid: pointer-semantic parameter typed as int
+            }
             violations.add(varName + " (type: " + typeName + ", expected prefix: " + fullExpectedPrefix + ")");
         }
     }

@@ -41,7 +41,7 @@ import ghidra.app.cmd.disassemble.DisassembleCommand;
  */
 public class HeadlessEndpointHandler {
 
-    private static final String VERSION = "1.9.4-headless";
+    private static final String VERSION = "4.0.0-headless";
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
     private final TaskMonitor monitor;

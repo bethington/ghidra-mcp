@@ -6,9 +6,18 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ### v4.0.0 (Latest)
 
+- **Major Release** - Service layer architecture refactor
+- Extracted 12 shared service classes from monolith (`com.xebyte.core/`)
+- Plugin reduced 69% (16,945 to 5,273 lines), headless reduced 67% (6,452 to 2,153 lines)
+- Zero breaking changes to HTTP API or MCP tools
+- 184 MCP tools, 169 GUI endpoints, 173 headless endpoints
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
+### v3.2.0
+
 - **Bug Fixes + Version Management** - Cherry-picked fixes from PR #38
 - Fixed trailing slash, fuzzy match JSON parsing, OSGi class naming for inline scripts
-- Centralized version management: `extension.properties` now Maven-dynamic, `bump-version.ps1` covers 11 files
+- Completeness checker overhaul, batch_analyze_completeness endpoint, multi-window fix
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details
 
 ### v3.1.0
