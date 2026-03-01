@@ -10,6 +10,7 @@ import ghidra.util.Msg;
 import javax.swing.SwingUtilities;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,36 +31,6 @@ public class SymbolLabelService {
         this.threadingStrategy = threadingStrategy;
     }
 
-    // ========================================================================
-    // Program resolution helper
-    // ========================================================================
-
-    private Object[] getProgramOrError(String programName) {
-        Program program = null;
-        if (programName != null && !programName.isEmpty()) {
-            program = programProvider.resolveProgram(programName);
-        } else {
-            program = programProvider.getCurrentProgram();
-        }
-        if (program == null) {
-            String available = "";
-            Program[] all = programProvider.getAllOpenPrograms();
-            if (all != null && all.length > 0) {
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < all.length; i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append(all[i].getName());
-                }
-                available = " Available programs: " + sb;
-            }
-            String error = programName != null && !programName.isEmpty()
-                    ? ServiceUtils.programNotFoundError(programName) + available
-                    : "No program loaded." + available;
-            return new Object[]{null, error};
-        }
-        return new Object[]{program, null};
-    }
-
     // -----------------------------------------------------------------------
     // Label Methods
     // -----------------------------------------------------------------------
@@ -67,15 +38,10 @@ public class SymbolLabelService {
     /**
      * List all labels within a function's address range.
      */
-    public String getFunctionLabels(String functionName, int offset, int limit) {
-        return getFunctionLabels(functionName, offset, limit, null);
-    }
-
-    public String getFunctionLabels(String functionName, int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response getFunctionLabels(String functionName, int offset, int limit) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return (String) programResult[1];
+            return Response.err("No program loaded");
         }
 
         StringBuilder sb = new StringBuilder();
@@ -92,7 +58,7 @@ public class SymbolLabelService {
         }
 
         if (function == null) {
-            return "Function not found: " + functionName;
+            return Response.err("Function not found: " + functionName);
         }
 
         AddressSetView functionBody = function.getBody();
@@ -123,30 +89,25 @@ public class SymbolLabelService {
         }
 
         if (sb.length() == 0) {
-            return "No labels found in function: " + functionName;
+            return Response.text("No labels found in function: " + functionName);
         }
 
-        return sb.toString();
+        return Response.text(sb.toString());
     }
 
     /**
      * Rename a label at the specified address.
      */
-    public String renameLabel(String addressStr, String oldName, String newName) {
-        return renameLabel(addressStr, oldName, newName, null);
-    }
-
-    public String renameLabel(String addressStr, String oldName, String newName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response renameLabel(String addressStr, String oldName, String newName) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return (String) programResult[1];
+            return Response.err("No program loaded");
         }
 
         try {
             Address address = program.getAddressFactory().getAddress(addressStr);
             if (address == null) {
-                return "Invalid address: " + addressStr;
+                return Response.err("Invalid address: " + addressStr);
             }
 
             SymbolTable symbolTable = program.getSymbolTable();
@@ -162,13 +123,13 @@ public class SymbolLabelService {
             }
 
             if (targetSymbol == null) {
-                return "Label not found: " + oldName + " at address " + addressStr;
+                return Response.err("Label not found: " + oldName + " at address " + addressStr);
             }
 
             // Check if new name already exists at this address
             for (Symbol symbol : symbols) {
                 if (symbol.getName().equals(newName) && symbol.getSymbolType() == SymbolType.LABEL) {
-                    return "Label with name '" + newName + "' already exists at address " + addressStr;
+                    return Response.err("Label with name '" + newName + "' already exists at address " + addressStr);
                 }
             }
 
@@ -176,44 +137,39 @@ public class SymbolLabelService {
             int transactionId = program.startTransaction("Rename Label");
             try {
                 targetSymbol.setName(newName, SourceType.USER_DEFINED);
-                return "Successfully renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr;
+                return Response.text("Successfully renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr);
             } catch (Exception e) {
-                return "Error renaming label: " + e.getMessage();
+                return Response.err("Error renaming label: " + e.getMessage());
             } finally {
                 program.endTransaction(transactionId, true);
             }
 
         } catch (Exception e) {
-            return "Error processing request: " + e.getMessage();
+            return Response.err("Error processing request: " + e.getMessage());
         }
     }
 
     /**
      * Create a new label at the specified address.
      */
-    public String createLabel(String addressStr, String labelName) {
-        return createLabel(addressStr, labelName, null);
-    }
-
-    public String createLabel(String addressStr, String labelName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response createLabel(String addressStr, String labelName) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return (String) programResult[1];
+            return Response.err("No program loaded");
         }
 
         if (addressStr == null || addressStr.isEmpty()) {
-            return "Address is required";
+            return Response.err("Address is required");
         }
 
         if (labelName == null || labelName.isEmpty()) {
-            return "Label name is required";
+            return Response.err("Label name is required");
         }
 
         try {
             Address address = program.getAddressFactory().getAddress(addressStr);
             if (address == null) {
-                return "Invalid address: " + addressStr;
+                return Response.err("Invalid address: " + addressStr);
             }
 
             SymbolTable symbolTable = program.getSymbolTable();
@@ -222,7 +178,7 @@ public class SymbolLabelService {
             Symbol[] existingSymbols = symbolTable.getSymbols(address);
             for (Symbol symbol : existingSymbols) {
                 if (symbol.getName().equals(labelName) && symbol.getSymbolType() == SymbolType.LABEL) {
-                    return "Label '" + labelName + "' already exists at address " + addressStr;
+                    return Response.err("Label '" + labelName + "' already exists at address " + addressStr);
                 }
             }
 
@@ -241,41 +197,34 @@ public class SymbolLabelService {
             try {
                 Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
                 if (newSymbol != null) {
-                    return "Successfully created label '" + labelName + "' at address " + addressStr;
+                    return Response.text("Successfully created label '" + labelName + "' at address " + addressStr);
                 } else {
-                    return "Failed to create label '" + labelName + "' at address " + addressStr;
+                    return Response.err("Failed to create label '" + labelName + "' at address " + addressStr);
                 }
             } catch (Exception e) {
-                return "Error creating label: " + e.getMessage();
+                return Response.err("Error creating label: " + e.getMessage());
             } finally {
                 program.endTransaction(transactionId, true);
             }
 
         } catch (Exception e) {
-            return "Error processing request: " + e.getMessage();
+            return Response.err("Error processing request: " + e.getMessage());
         }
     }
 
     /**
      * Batch create multiple labels in a single transaction.
      */
-    public String batchCreateLabels(List<Map<String, String>> labels) {
-        return batchCreateLabels(labels, null);
-    }
-
-    public String batchCreateLabels(List<Map<String, String>> labels, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response batchCreateLabels(List<Map<String, String>> labels) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return (String) programResult[1];
+            return Response.err("No program loaded");
         }
 
         if (labels == null || labels.isEmpty()) {
-            return "{\"error\": \"No labels provided\"}";
+            return Response.err("No labels provided");
         }
 
-        final StringBuilder result = new StringBuilder();
-        result.append("{");
         final AtomicInteger successCount = new AtomicInteger(0);
         final AtomicInteger skipCount = new AtomicInteger(0);
         final AtomicInteger errorCount = new AtomicInteger(0);
@@ -350,54 +299,42 @@ public class SymbolLabelService {
                 }
             });
 
-            result.append("\"success\": true, ");
-            result.append("\"labels_created\": ").append(successCount.get()).append(", ");
-            result.append("\"labels_skipped\": ").append(skipCount.get()).append(", ");
-            result.append("\"labels_failed\": ").append(errorCount.get());
-
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", true);
+            result.put("labels_created", successCount.get());
+            result.put("labels_skipped", skipCount.get());
+            result.put("labels_failed", errorCount.get());
             if (!errors.isEmpty()) {
-                result.append(", \"errors\": [");
-                for (int i = 0; i < errors.size(); i++) {
-                    if (i > 0) result.append(", ");
-                    result.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
-                }
-                result.append("]");
+                result.put("errors", errors);
             }
+            return Response.ok(result);
 
         } catch (Exception e) {
-            result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+            return Response.err(e.getMessage());
         }
-
-        result.append("}");
-        return result.toString();
     }
 
     /**
      * Intelligently rename data or create label based on whether data is defined.
      */
-    public String renameOrLabel(String addressStr, String newName) {
-        return renameOrLabel(addressStr, newName, null);
-    }
-
-    public String renameOrLabel(String addressStr, String newName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response renameOrLabel(String addressStr, String newName) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return (String) programResult[1];
+            return Response.err("No program loaded");
         }
 
         if (addressStr == null || addressStr.isEmpty()) {
-            return "Error: Address is required";
+            return Response.err("Address is required");
         }
 
         if (newName == null || newName.isEmpty()) {
-            return "Error: Name is required";
+            return Response.err("Name is required");
         }
 
         try {
             Address address = program.getAddressFactory().getAddress(addressStr);
             if (address == null) {
-                return "Error: Invalid address: " + addressStr;
+                return Response.err("Invalid address: " + addressStr);
             }
 
             Listing listing = program.getListing();
@@ -405,46 +342,44 @@ public class SymbolLabelService {
 
             if (data != null) {
                 // Defined data exists - use rename_data logic
-                return renameDataAtAddress(addressStr, newName, programName);
+                return renameDataAtAddress(addressStr, newName);
             } else {
                 // No defined data - use create_label logic
-                return createLabel(addressStr, newName, programName);
+                return createLabel(addressStr, newName);
             }
 
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Delete a label at the specified address.
      */
-    public String deleteLabel(String addressStr, String labelName) {
-        return deleteLabel(addressStr, labelName, null);
-    }
-
-    public String deleteLabel(String addressStr, String labelName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response deleteLabel(String addressStr, String labelName) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return (String) programResult[1];
+            return Response.err("No program loaded");
         }
 
         if (addressStr == null || addressStr.isEmpty()) {
-            return "{\"error\": \"Address is required\"}";
+            return Response.err("Address is required");
         }
 
         try {
             Address address = program.getAddressFactory().getAddress(addressStr);
             if (address == null) {
-                return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+                return Response.err("Invalid address: " + addressStr);
             }
 
             SymbolTable symbolTable = program.getSymbolTable();
             Symbol[] symbols = symbolTable.getSymbols(address);
 
             if (symbols == null || symbols.length == 0) {
-                return "{\"success\": false, \"message\": \"No symbols found at address " + addressStr + "\"}";
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("success", false);
+                result.put("message", "No symbols found at address " + addressStr);
+                return Response.ok(result);
             }
 
             final AtomicInteger deletedCount = new AtomicInteger(0);
@@ -483,47 +418,31 @@ public class SymbolLabelService {
                 }
             });
 
-            StringBuilder resultBuilder = new StringBuilder();
-            resultBuilder.append("{\"success\": ").append(deletedCount.get() > 0);
-            resultBuilder.append(", \"deleted_count\": ").append(deletedCount.get());
-            resultBuilder.append(", \"deleted_names\": [");
-            for (int i = 0; i < deletedNames.size(); i++) {
-                if (i > 0) resultBuilder.append(", ");
-                resultBuilder.append("\"").append(deletedNames.get(i).replace("\"", "\\\"")).append("\"");
-            }
-            resultBuilder.append("]");
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", deletedCount.get() > 0);
+            result.put("deleted_count", deletedCount.get());
+            result.put("deleted_names", deletedNames);
             if (!errors.isEmpty()) {
-                resultBuilder.append(", \"errors\": [");
-                for (int i = 0; i < errors.size(); i++) {
-                    if (i > 0) resultBuilder.append(", ");
-                    resultBuilder.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
-                }
-                resultBuilder.append("]");
+                result.put("errors", errors);
             }
-            resultBuilder.append("}");
-            return resultBuilder.toString();
+            return Response.ok(result);
 
         } catch (Exception e) {
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Batch delete multiple labels in a single transaction.
      */
-    public String batchDeleteLabels(List<Map<String, String>> labels) {
-        return batchDeleteLabels(labels, null);
-    }
-
-    public String batchDeleteLabels(List<Map<String, String>> labels, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response batchDeleteLabels(List<Map<String, String>> labels) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return (String) programResult[1];
+            return Response.err("No program loaded");
         }
 
         if (labels == null || labels.isEmpty()) {
-            return "{\"error\": \"No labels provided\"}";
+            return Response.err("No labels provided");
         }
 
         final AtomicInteger deletedCount = new AtomicInteger(0);
@@ -593,24 +512,18 @@ public class SymbolLabelService {
                 }
             });
 
-            StringBuilder result = new StringBuilder();
-            result.append("{\"success\": true");
-            result.append(", \"labels_deleted\": ").append(deletedCount.get());
-            result.append(", \"labels_skipped\": ").append(skippedCount.get());
-            result.append(", \"errors_count\": ").append(errorCount.get());
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", true);
+            result.put("labels_deleted", deletedCount.get());
+            result.put("labels_skipped", skippedCount.get());
+            result.put("errors_count", errorCount.get());
             if (!errors.isEmpty()) {
-                result.append(", \"errors\": [");
-                for (int i = 0; i < Math.min(errors.size(), 10); i++) {  // Limit to first 10 errors
-                    if (i > 0) result.append(", ");
-                    result.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
-                }
-                result.append("]");
+                result.put("errors", errors.subList(0, Math.min(errors.size(), 10)));
             }
-            result.append("}");
-            return result.toString();
+            return Response.ok(result);
 
         } catch (Exception e) {
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
@@ -621,18 +534,13 @@ public class SymbolLabelService {
     /**
      * Rename defined data symbols at an address.
      */
-    public String renameDataAtAddress(String addressStr, String newName) {
-        return renameDataAtAddress(addressStr, newName, null);
-    }
-
-    public String renameDataAtAddress(String addressStr, String newName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response renameDataAtAddress(String addressStr, String newName) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return (String) programResult[1];
+            return Response.err("No program loaded");
         }
 
-        final StringBuilder resultMsg = new StringBuilder();
+        final AtomicReference<Response> responseRef = new AtomicReference<>(Response.err("Unknown failure"));
 
         try {
             SwingUtilities.invokeAndWait(() -> {
@@ -641,7 +549,7 @@ public class SymbolLabelService {
                 try {
                     Address addr = program.getAddressFactory().getAddress(addressStr);
                     if (addr == null) {
-                        resultMsg.append("Error: Invalid address: ").append(addressStr);
+                        responseRef.set(Response.err("Invalid address: " + addressStr));
                         return;
                     }
 
@@ -654,23 +562,23 @@ public class SymbolLabelService {
                         Symbol symbol = symTable.getPrimarySymbol(addr);
                         if (symbol != null) {
                             symbol.setName(newName, SourceType.USER_DEFINED);
-                            resultMsg.append("Success: Renamed defined data at ").append(addressStr)
-                                    .append(" to '").append(newName).append("'");
+                            responseRef.set(Response.text("Success: Renamed defined data at " + addressStr +
+                                    " to '" + newName + "'"));
                             success = true;
                         } else {
                             symTable.createLabel(addr, newName, SourceType.USER_DEFINED);
-                            resultMsg.append("Success: Created label '").append(newName)
-                                    .append("' at ").append(addressStr);
+                            responseRef.set(Response.text("Success: Created label '" + newName +
+                                    "' at " + addressStr));
                             success = true;
                         }
                     } else {
                         // No defined data at this address
-                        resultMsg.append("Error: No defined data at address ").append(addressStr)
-                                .append(". Use create_label for undefined addresses.");
+                        responseRef.set(Response.err("No defined data at address " + addressStr +
+                                ". Use create_label for undefined addresses."));
                     }
                 }
                 catch (Exception e) {
-                    resultMsg.append("Error: ").append(e.getMessage());
+                    responseRef.set(Response.err(e.getMessage()));
                     Msg.error(this, "Rename data error", e);
                 }
                 finally {
@@ -679,33 +587,28 @@ public class SymbolLabelService {
             });
         }
         catch (InterruptedException | InvocationTargetException e) {
-            resultMsg.append("Error: Failed to execute rename on Swing thread: ").append(e.getMessage());
+            responseRef.set(Response.err("Failed to execute rename on Swing thread: " + e.getMessage()));
             Msg.error(this, "Failed to execute rename data on Swing thread", e);
         }
 
-        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        return responseRef.get();
     }
 
     /**
      * Rename a global variable/symbol.
      */
-    public String renameGlobalVariable(String oldName, String newName) {
-        return renameGlobalVariable(oldName, newName, null);
-    }
-
-    public String renameGlobalVariable(String oldName, String newName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response renameGlobalVariable(String oldName, String newName) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return (String) programResult[1];
+            return Response.err("No program loaded");
         }
 
         if (oldName == null || oldName.isEmpty()) {
-            return "Error: Old variable name is required";
+            return Response.err("Old variable name is required");
         }
 
         if (newName == null || newName.isEmpty()) {
-            return "Error: New variable name is required";
+            return Response.err("New variable name is required");
         }
 
         int txId = program.startTransaction("Rename Global Variable");
@@ -730,7 +633,7 @@ public class SymbolLabelService {
 
             if (symbols.isEmpty()) {
                 program.endTransaction(txId, false);
-                return "Error: Global variable '" + oldName + "' not found";
+                return Response.err("Global variable '" + oldName + "' not found");
             }
 
             // Rename the first matching symbol
@@ -739,13 +642,13 @@ public class SymbolLabelService {
             symbol.setName(newName, SourceType.USER_DEFINED);
 
             program.endTransaction(txId, true);
-            return "Success: Renamed global variable '" + oldName + "' to '" + newName +
-                   "' at " + symbolAddr;
+            return Response.text("Success: Renamed global variable '" + oldName + "' to '" + newName +
+                   "' at " + symbolAddr);
 
         } catch (Exception e) {
             program.endTransaction(txId, false);
             Msg.error(this, "Error renaming global variable: " + e.getMessage());
-            return "Error: " + e.getMessage();
+            return Response.err(e.getMessage());
         }
     }
 
@@ -757,16 +660,9 @@ public class SymbolLabelService {
      * Rename an external location (e.g., change Ordinal_123 to a real function name).
      * Uses SwingUtilities.invokeAndWait + transaction for thread safety.
      */
-    public String renameExternalLocation(String address, String newName) {
-        return renameExternalLocation(address, newName, null);
-    }
-
-    public String renameExternalLocation(String address, String newName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response renameExternalLocation(String address, String newName) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) return Response.err("No program loaded");
 
         try {
             Address addr = program.getAddressFactory().getAddress(address);
@@ -808,20 +704,23 @@ public class SymbolLabelService {
                         }
 
                         if (success.get()) {
-                            return "{\"success\": true, \"old_name\": \"" + ServiceUtils.escapeJson(oldName) +
-                                   "\", \"new_name\": \"" + ServiceUtils.escapeJson(newName) +
-                                   "\", \"dll\": \"" + finalLibName + "\"}";
+                            Map<String, Object> result = new LinkedHashMap<>();
+                            result.put("success", true);
+                            result.put("old_name", oldName);
+                            result.put("new_name", newName);
+                            result.put("dll", finalLibName);
+                            return Response.ok(result);
                         } else {
-                            return "{\"error\": \"" + (errorMsg.get() != null ? errorMsg.get().replace("\"", "\\\"") : "Unknown error") + "\"}";
+                            return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown error");
                         }
                     }
                 }
             }
 
-            return "{\"error\": \"External location not found at address " + address + "\"}";
+            return Response.err("External location not found at address " + address);
         } catch (Exception e) {
             Msg.error(this, "Exception in renameExternalLocation: " + e.getMessage());
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
@@ -833,18 +732,13 @@ public class SymbolLabelService {
      * Determine if address has data/code and suggest the appropriate rename operation.
      * Read-only detection using SwingUtilities.invokeAndWait for thread safety.
      */
-    public String canRenameAtAddress(String addressStr) {
-        return canRenameAtAddress(addressStr, null);
-    }
-
-    public String canRenameAtAddress(String addressStr, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response canRenameAtAddress(String addressStr) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return (String) programResult[1];
+            return Response.err("No program loaded");
         }
 
-        final StringBuilder result = new StringBuilder();
+        final AtomicReference<Response> responseRef = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
@@ -852,51 +746,55 @@ public class SymbolLabelService {
                 try {
                     Address addr = program.getAddressFactory().getAddress(addressStr);
                     if (addr == null) {
-                        result.append("{\"can_rename\": false, \"error\": \"Invalid address\"}");
+                        Map<String, Object> result = new LinkedHashMap<>();
+                        result.put("can_rename", false);
+                        result.put("error", "Invalid address");
+                        responseRef.set(Response.ok(result));
                         return;
                     }
 
-                    result.append("{\"can_rename\": true");
+                    Map<String, Object> result = new LinkedHashMap<>();
+                    result.put("can_rename", true);
 
                     // Check if it's a function
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func != null) {
-                        result.append(", \"type\": \"function\"");
-                        result.append(", \"suggested_operation\": \"rename_function\"");
-                        result.append(", \"current_name\": \"").append(func.getName()).append("\"");
-                        result.append("}");
+                        result.put("type", "function");
+                        result.put("suggested_operation", "rename_function");
+                        result.put("current_name", func.getName());
+                        responseRef.set(Response.ok(result));
                         return;
                     }
 
                     // Check if it's defined data
                     Data data = program.getListing().getDefinedDataAt(addr);
                     if (data != null) {
-                        result.append(", \"type\": \"defined_data\"");
-                        result.append(", \"suggested_operation\": \"rename_data\"");
+                        result.put("type", "defined_data");
+                        result.put("suggested_operation", "rename_data");
                         Symbol symbol = program.getSymbolTable().getPrimarySymbol(addr);
                         if (symbol != null) {
-                            result.append(", \"current_name\": \"").append(symbol.getName()).append("\"");
+                            result.put("current_name", symbol.getName());
                         }
-                        result.append("}");
+                        responseRef.set(Response.ok(result));
                         return;
                     }
 
                     // Check if it's undefined (can create label)
-                    result.append(", \"type\": \"undefined\"");
-                    result.append(", \"suggested_operation\": \"create_label\"");
-                    result.append("}");
+                    result.put("type", "undefined");
+                    result.put("suggested_operation", "create_label");
+                    responseRef.set(Response.ok(result));
                 } catch (Exception e) {
                     errorMsg.set(e.getMessage());
                 }
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Exception e) {
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
 
-        return result.toString();
+        return responseRef.get();
     }
 }

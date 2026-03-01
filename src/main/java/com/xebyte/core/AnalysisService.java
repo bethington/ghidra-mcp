@@ -59,51 +59,6 @@ public class AnalysisService {
     }
 
     // ========================================================================
-    // Function classification utility
-    // ========================================================================
-
-    /**
-     * Classify a function's type for documentation workflow routing.
-     * Returns one of: "thunk", "leaf", "wrapper", "worker", "api_export", "stub".
-     */
-    public static String classifyFunction(Function func, Program program) {
-        // Check for thunk (single JMP instruction or Ghidra-tagged thunk)
-        if (func.isThunk()) return "thunk";
-
-        InstructionIterator instrIter = program.getListing().getInstructions(func.getBody(), true);
-        int instrCount = 0;
-        String firstMnemonic = null;
-        while (instrIter.hasNext()) {
-            ghidra.program.model.listing.Instruction instr = instrIter.next();
-            if (instrCount == 0) firstMnemonic = instr.getMnemonicString();
-            instrCount++;
-        }
-
-        // Single-JMP stub (not tagged by Ghidra but functionally a thunk)
-        if (instrCount == 1 && "JMP".equals(firstMnemonic)) return "thunk";
-
-        // Stub: 1-3 instructions (NOP/RET patterns)
-        if (instrCount <= 3) return "stub";
-
-        // Check for exported ordinal (API export)
-        Symbol sym = func.getSymbol();
-        if (sym != null && sym.isExternalEntryPoint()) return "api_export";
-
-        // Check callees
-        Set<Function> callees = func.getCalledFunctions(null);
-        boolean hasCallees = callees != null && !callees.isEmpty();
-
-        // Leaf: no calls to other functions
-        if (!hasCallees) return "leaf";
-
-        // Wrapper: exactly 1 callee and <= 15 instructions
-        if (callees.size() == 1 && instrCount <= 15) return "wrapper";
-
-        // Default: worker (has callees and significant body)
-        return "worker";
-    }
-
-    // ========================================================================
     // Program resolution helper
     // ========================================================================
 
@@ -131,6 +86,31 @@ public class AnalysisService {
             return new Object[]{null, error};
         }
         return new Object[]{program, null};
+    }
+
+    /**
+     * Classify a function's type for documentation workflow routing.
+     * Returns one of: "thunk", "leaf", "wrapper", "worker", "api_export", "stub".
+     */
+    public static String classifyFunction(Function func, Program program) {
+        if (func.isThunk()) return "thunk";
+        ghidra.program.model.listing.InstructionIterator instrIter = program.getListing().getInstructions(func.getBody(), true);
+        int instrCount = 0;
+        String firstMnemonic = null;
+        while (instrIter.hasNext()) {
+            ghidra.program.model.listing.Instruction instr = instrIter.next();
+            if (instrCount == 0) firstMnemonic = instr.getMnemonicString();
+            instrCount++;
+        }
+        if (instrCount == 1 && "JMP".equals(firstMnemonic)) return "thunk";
+        if (instrCount <= 3) return "stub";
+        Symbol sym = func.getSymbol();
+        if (sym != null && sym.isExternalEntryPoint()) return "api_export";
+        Set<Function> callees = func.getCalledFunctions(null);
+        boolean hasCallees = callees != null && !callees.isEmpty();
+        if (!hasCallees) return "leaf";
+        if (callees.size() == 1 && instrCount <= 15) return "wrapper";
+        return "worker";
     }
 
     // ========================================================================
@@ -169,42 +149,42 @@ public class AnalysisService {
     // Public endpoint methods
     // ========================================================================
 
-    public String listAnalyzers(String programName) {
+    public Response listAnalyzers(String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+        if (program == null) return Response.err((String) programResult[1]);
 
         try {
             Options options = program.getOptions(Program.ANALYSIS_PROPERTIES);
             List<String> names = options.getOptionNames();
-            List<String> entries = new ArrayList<>();
+            List<Map<String, Object>> analyzerList = new ArrayList<>();
             for (String name : names) {
                 try {
                     boolean enabled = options.getBoolean(name, false);
-                    entries.add("{\"name\": \"" + ServiceUtils.escapeJson(name) + "\", \"enabled\": " + enabled + "}");
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("name", name);
+                    entry.put("enabled", enabled);
+                    analyzerList.add(entry);
                 } catch (Exception ignored) {
                     // Not a boolean option -- skip non-analyzer properties
                 }
             }
-            StringBuilder sb = new StringBuilder("{\"analyzers\": [");
-            for (int i = 0; i < entries.size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(entries.get(i));
-            }
-            sb.append("], \"count\": ").append(entries.size()).append("}");
-            return sb.toString();
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("analyzers", analyzerList);
+            result.put("count", analyzerList.size());
+            return Response.ok(result);
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Trigger auto-analysis on the current or named program.
      */
-    public String runAnalysis(String programName) {
+    public Response runAnalysis(String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+        if (program == null) return Response.err((String) programResult[1]);
 
         try {
             long start = System.currentTimeMillis();
@@ -224,32 +204,28 @@ public class AnalysisService {
 
             long duration = System.currentTimeMillis() - start;
             int after = program.getFunctionManager().getFunctionCount();
-            return "{\"success\": true, \"duration_ms\": " + duration +
-                   ", \"total_functions\": " + after +
-                   ", \"new_functions\": " + (after - before) +
-                   ", \"program\": \"" + ServiceUtils.escapeJson(program.getName()) + "\"}";
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("success", true);
+            result.put("duration_ms", duration);
+            result.put("total_functions", after);
+            result.put("new_functions", after - before);
+            result.put("program", program.getName());
+            return Response.ok(result);
         } catch (Exception e) {
-            return "{\"error\": \"Analysis failed: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Analysis failed: " + e.getMessage());
         }
     }
 
-    public String analyzeDataRegion(String startAddressStr, int maxScanBytes,
+    public Response analyzeDataRegion(String startAddressStr, int maxScanBytes,
                                     boolean includeXrefMap, boolean includeAssemblyPatterns,
                                     boolean includeBoundaryDetection) {
-        return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection, null);
-    }
-
-    public String analyzeDataRegion(String startAddressStr, int maxScanBytes,
-                                    boolean includeXrefMap, boolean includeAssemblyPatterns,
-                                    boolean includeBoundaryDetection, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) return Response.err("No program loaded");
 
         try {
             Address startAddr = program.getAddressFactory().getAddress(startAddressStr);
             if (startAddr == null) {
-                return "{\"error\": \"Invalid address: " + startAddressStr + "\"}";
+                return Response.err("Invalid address: " + startAddressStr);
             }
 
             ReferenceManager refMgr = program.getReferenceManager();
@@ -421,30 +397,24 @@ public class AnalysisService {
 
             result.append("}");
 
-            return result.toString();
+            return Response.text(result.toString());
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * 3. DETECT_ARRAY_BOUNDS - Array/table size detection
      */
-    public String detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
+    public Response detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
                                     boolean analyzeIndexing, int maxScanRange) {
-        return detectArrayBounds(addressStr, analyzeLoopBounds, analyzeIndexing, maxScanRange, null);
-    }
-
-    public String detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
-                                    boolean analyzeIndexing, int maxScanRange, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) return Response.err("No program loaded");
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             if (addr == null) {
-                return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+                return Response.err("Invalid address: " + addressStr);
             }
 
             ReferenceManager refMgr = program.getReferenceManager();
@@ -472,53 +442,46 @@ public class AnalysisService {
                 scanAddr = scanAddr.add(1);
             }
 
-            StringBuilder result = new StringBuilder();
-            result.append("{");
-            result.append("\"address\": \"").append(addr.toString()).append("\",");
-            result.append("\"estimated_size\": ").append(estimatedSize).append(",");
-            result.append("\"stride\": 1,");
-            result.append("\"element_count\": ").append(estimatedSize).append(",");
-            result.append("\"confidence\": \"medium\",");
-            result.append("\"detection_method\": \"xref_analysis\"");
-            result.append("}");
-
-            return result.toString();
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("address", addr.toString());
+            result.put("estimated_size", estimatedSize);
+            result.put("stride", 1);
+            result.put("element_count", estimatedSize);
+            result.put("confidence", "medium");
+            result.put("detection_method", "xref_analysis");
+            return Response.ok(result);
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * GET_FIELD_ACCESS_CONTEXT - Get assembly/decompilation context for specific field offsets
      */
-    public String getFieldAccessContext(String structAddressStr, int fieldOffset, int numExamples) {
-        return getFieldAccessContext(structAddressStr, fieldOffset, numExamples, null);
-    }
-
-    public String getFieldAccessContext(String structAddressStr, int fieldOffset, int numExamples, String programName) {
+    public Response getFieldAccessContext(String structAddressStr, int fieldOffset, int numExamples) {
         // MAJOR FIX #7: Validate input parameters
         if (fieldOffset < 0 || fieldOffset > MAX_FIELD_OFFSET) {
-            return "{\"error\": \"Field offset must be between 0 and " + MAX_FIELD_OFFSET + "\"}";
+            return Response.err("Field offset must be between 0 and " + MAX_FIELD_OFFSET);
         }
         if (numExamples < 1 || numExamples > MAX_FIELD_EXAMPLES) {
-            return "{\"error\": \"numExamples must be between 1 and " + MAX_FIELD_EXAMPLES + "\"}";
+            return Response.err("numExamples must be between 1 and " + MAX_FIELD_EXAMPLES);
         }
 
-        Object[] programResult = getProgramOrError(programName);
-        Program resolvedProgram = (Program) programResult[0];
-        if (resolvedProgram == null) return (String) programResult[1];
-
-        final AtomicReference<String> result = new AtomicReference<>();
+        final AtomicReference<Response> result = new AtomicReference<>();
 
         // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Program program = resolvedProgram;
+                    Program program = programProvider.getCurrentProgram();
+                    if (program == null) {
+                        result.set(Response.err("No program loaded"));
+                        return;
+                    }
 
                     Address structAddr = program.getAddressFactory().getAddress(structAddressStr);
                     if (structAddr == null) {
-                        result.set("{\"error\": \"Invalid address: " + structAddressStr + "\"}");
+                        result.set(Response.err("Invalid address: " + structAddressStr));
                         return;
                     }
 
@@ -527,7 +490,7 @@ public class AnalysisService {
                     try {
                         fieldAddr = structAddr.add(fieldOffset);
                     } catch (Exception e) {
-                        result.set("{\"error\": \"Field offset overflow: " + fieldOffset + "\"}");
+                        result.set(Response.err("Field offset overflow: " + fieldOffset));
                         return;
                     }
 
@@ -585,16 +548,16 @@ public class AnalysisService {
                     json.append("}");
 
                     Msg.info(this, "Found " + exampleCount + " field access examples");
-                    result.set(json.toString());
+                    result.set(Response.text(json.toString()));
 
                 } catch (Exception e) {
                     Msg.error(this, "Error in getFieldAccessContext", e);
-                    result.set("{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}");
+                    result.set(Response.err(e.getMessage()));
                 }
             });
         } catch (InvocationTargetException | InterruptedException e) {
             Msg.error(this, "Thread synchronization error in getFieldAccessContext", e);
-            return "{\"error\": \"Thread synchronization error: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Thread synchronization error: " + e.getMessage());
         }
 
         return result.get();
@@ -603,19 +566,14 @@ public class AnalysisService {
     /**
      * 7. INSPECT_MEMORY_CONTENT - Memory content inspection with string detection
      */
-    public String inspectMemoryContent(String addressStr, int length, boolean detectStrings) {
-        return inspectMemoryContent(addressStr, length, detectStrings, null);
-    }
-
-    public String inspectMemoryContent(String addressStr, int length, boolean detectStrings, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response inspectMemoryContent(String addressStr, int length, boolean detectStrings) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) return Response.err("No program loaded");
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             if (addr == null) {
-                return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+                return Response.err("Invalid address: " + addressStr);
             }
 
             Memory memory = program.getMemory();
@@ -724,23 +682,20 @@ public class AnalysisService {
 
             result.append("}");
 
-            return result.toString();
+            return Response.text(result.toString());
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Detect cryptographic constants in the binary (AES S-boxes, SHA constants, etc.)
      */
-    public String detectCryptoConstants() {
-        return detectCryptoConstants(null);
-    }
-
-    public String detectCryptoConstants(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response detectCryptoConstants() {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         try {
             final StringBuilder result = new StringBuilder();
@@ -756,26 +711,211 @@ public class AnalysisService {
             result.append("\"note\": \"This endpoint requires advanced pattern matching against known crypto constants\"}\n");
             result.append("]");
 
-            return result.toString();
+            return Response.text(result.toString());
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return Response.err(e.getMessage());
         }
+    }
+
+    /**
+     * Composite endpoint for RE documentation workflow.
+     * Returns decompiled code + classification + callees + variables with pre-analysis + compact completeness
+     * in a single response, using only one decompilation.
+     */
+    public Response analyzeForDocumentation(String functionAddress, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) {
+            return Response.err((String) programResult[1]);
+        }
+
+        final Program finalProgram = program;
+        final StringBuilder result = new StringBuilder();
+        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
+
+        try {
+            threadingStrategy.executeRead(() -> {
+                try {
+                    Address addr = finalProgram.getAddressFactory().getAddress(functionAddress);
+                    if (addr == null) {
+                        errorMsg.set("Invalid address: " + functionAddress);
+                        return null;
+                    }
+                    Function func = finalProgram.getFunctionManager().getFunctionAt(addr);
+                    if (func == null) {
+                        func = finalProgram.getFunctionManager().getFunctionContaining(addr);
+                    }
+                    if (func == null) {
+                        errorMsg.set("No function at address: " + functionAddress);
+                        return null;
+                    }
+
+                    result.append("{");
+                    result.append("\"name\": \"").append(ServiceUtils.escapeJson(func.getName())).append("\", ");
+                    result.append("\"address\": \"").append(func.getEntryPoint().toString()).append("\", ");
+                    result.append("\"signature\": \"").append(ServiceUtils.escapeJson(func.getSignature().toString())).append("\", ");
+
+                    String classification = classifyFunction(func, finalProgram);
+                    result.append("\"classification\": \"").append(classification).append("\", ");
+
+                    String retTypeName = func.getReturnType().getName();
+                    result.append("\"return_type\": \"").append(ServiceUtils.escapeJson(retTypeName)).append("\", ");
+                    result.append("\"return_type_resolved\": ").append(!retTypeName.startsWith("undefined")).append(", ");
+
+                    DecompileResults decompResults = functionService.decompileFunction(func, finalProgram);
+                    if (decompResults != null && decompResults.decompileCompleted() && decompResults.getDecompiledFunction() != null) {
+                        String decompiledCode = decompResults.getDecompiledFunction().getC();
+                        if (decompiledCode != null) {
+                            result.append("\"decompiled_code\": \"").append(ServiceUtils.escapeJson(decompiledCode)).append("\", ");
+                        }
+                    }
+
+                    result.append("\"callees\": [");
+                    Set<Function> calledFuncs = func.getCalledFunctions(null);
+                    int calleeIdx = 0;
+                    int ordinalCalleeCount = 0;
+                    for (Function called : calledFuncs) {
+                        if (calleeIdx > 0) result.append(", ");
+                        String calleeName = called.getName();
+                        boolean isUndocumented = calleeName.startsWith("FUN_") || calleeName.startsWith("thunk_FUN_");
+                        boolean isOrdinal = calleeName.startsWith("Ordinal_") || calleeName.startsWith("thunk_Ordinal_");
+                        if (isOrdinal) ordinalCalleeCount++;
+                        result.append("{\"name\": \"").append(ServiceUtils.escapeJson(calleeName)).append("\"");
+                        if (isUndocumented) result.append(", \"undocumented\": true");
+                        if (isOrdinal) result.append(", \"is_ordinal\": true");
+                        if (called.isThunk()) result.append(", \"is_thunk\": true");
+                        result.append("}");
+                        calleeIdx++;
+                    }
+                    result.append("], ");
+                    result.append("\"callee_count\": ").append(calleeIdx).append(", ");
+                    result.append("\"ordinal_callee_count\": ").append(ordinalCalleeCount).append(", ");
+
+                    if (calleeIdx == 1 && retTypeName.startsWith("undefined")) {
+                        Function callee = calledFuncs.iterator().next();
+                        String calleeRetType = callee.getReturnType().getName();
+                        if (!calleeRetType.equals("void") && !calleeRetType.startsWith("undefined")) {
+                            result.append("\"wrapper_hint\": \"Callee '").append(ServiceUtils.escapeJson(callee.getName()))
+                                  .append("' returns ").append(ServiceUtils.escapeJson(calleeRetType)).append("\", ");
+                        }
+                    }
+
+                    result.append("\"parameters\": [");
+                    Parameter[] params = func.getParameters();
+                    for (int i = 0; i < params.length; i++) {
+                        if (i > 0) result.append(", ");
+                        String pName = params[i].getName();
+                        String pType = params[i].getDataType().getName();
+                        String pStorage = params[i].getVariableStorage().toString();
+                        boolean needsType = pType.startsWith("undefined");
+                        boolean needsRename = pName.matches("param_\\d+");
+                        result.append("{\"name\": \"").append(ServiceUtils.escapeJson(pName)).append("\", ");
+                        result.append("\"type\": \"").append(ServiceUtils.escapeJson(pType)).append("\", ");
+                        result.append("\"storage\": \"").append(ServiceUtils.escapeJson(pStorage)).append("\", ");
+                        result.append("\"needs_type\": ").append(needsType).append(", ");
+                        result.append("\"needs_rename\": ").append(needsRename);
+                        if (needsType) {
+                            result.append(", \"suggested_type\": \"").append(FunctionService.suggestType(pType)).append("\"");
+                            result.append(", \"suggested_prefix\": \"").append(FunctionService.suggestHungarianPrefix(FunctionService.suggestType(pType))).append("\"");
+                        } else {
+                            result.append(", \"suggested_prefix\": \"").append(FunctionService.suggestHungarianPrefix(pType)).append("\"");
+                        }
+                        result.append("}");
+                    }
+                    result.append("], ");
+
+                    result.append("\"locals\": [");
+                    boolean firstLocal = true;
+                    if (decompResults != null && decompResults.decompileCompleted()) {
+                        HighFunction highFunc = decompResults.getHighFunction();
+                        if (highFunc != null) {
+                            Iterator<HighSymbol> symbols = highFunc.getLocalSymbolMap().getSymbols();
+                            while (symbols.hasNext()) {
+                                HighSymbol sym = symbols.next();
+                                if (!firstLocal) result.append(", ");
+                                firstLocal = false;
+                                String symName = sym.getName();
+                                String symType = sym.getDataType().getName();
+                                boolean isPhantom = symName.startsWith("extraout_") || symName.startsWith("in_");
+                                String storageStr = "";
+                                HighVariable highVar = sym.getHighVariable();
+                                if (highVar != null && highVar.getRepresentative() != null) {
+                                    Varnode rep = highVar.getRepresentative();
+                                    if (rep.getAddress() != null) {
+                                        storageStr = rep.getAddress().toString() + ":" + rep.getSize();
+                                    }
+                                }
+                                boolean needsType = !isPhantom && symType.startsWith("undefined");
+                                boolean needsRename = !isPhantom && symName.matches("local_[0-9a-fA-F]+|[a-zA-Z]Var\\d+");
+                                result.append("{\"name\": \"").append(ServiceUtils.escapeJson(symName)).append("\", ");
+                                result.append("\"type\": \"").append(ServiceUtils.escapeJson(symType)).append("\", ");
+                                result.append("\"storage\": \"").append(ServiceUtils.escapeJson(storageStr)).append("\", ");
+                                result.append("\"is_phantom\": ").append(isPhantom);
+                                if (needsType) {
+                                    result.append(", \"needs_type\": true");
+                                    result.append(", \"suggested_type\": \"").append(FunctionService.suggestType(symType)).append("\"");
+                                }
+                                if (needsRename) {
+                                    result.append(", \"needs_rename\": true");
+                                    String prefix = needsType ? FunctionService.suggestHungarianPrefix(FunctionService.suggestType(symType))
+                                                             : FunctionService.suggestHungarianPrefix(symType);
+                                    result.append(", \"suggested_prefix\": \"").append(prefix).append("\"");
+                                }
+                                result.append("}");
+                            }
+                        }
+                    }
+                    result.append("], ");
+
+                    int datGlobalCount = 0;
+                    ReferenceIterator refIter = finalProgram.getReferenceManager().getReferenceIterator(func.getBody().getMinAddress());
+                    while (refIter.hasNext()) {
+                        Reference ref = refIter.next();
+                        if (!func.getBody().contains(ref.getFromAddress())) continue;
+                        Address toAddr = ref.getToAddress();
+                        Symbol sym = finalProgram.getSymbolTable().getPrimarySymbol(toAddr);
+                        if (sym != null && sym.getName().startsWith("DAT_")) {
+                            datGlobalCount++;
+                        }
+                    }
+                    result.append("\"dat_global_count\": ").append(datGlobalCount).append(", ");
+                } catch (Exception e) {
+                    errorMsg.set(e.getMessage());
+                }
+                return null;
+            });
+
+            if (errorMsg.get() != null) {
+                return Response.err(errorMsg.get());
+            }
+
+            Response comp = analyzeFunctionCompleteness(functionAddress);
+            if (comp instanceof Response.Err e) {
+                return Response.err(e.message());
+            }
+            String completenessJson = ((Response.Text) comp).content();
+            if (completenessJson.startsWith("{") && completenessJson.endsWith("}")) {
+                result.append("\"completeness\": ").append(completenessJson);
+            }
+            result.append("}");
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+
+        return Response.text(result.toString());
     }
 
     /**
      * Search for byte patterns with optional wildcards
      */
-    public String searchBytePatterns(String pattern, String mask) {
-        return searchBytePatterns(pattern, mask, null);
-    }
-
-    public String searchBytePatterns(String pattern, String mask, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response searchBytePatterns(String pattern, String mask) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         if (pattern == null || pattern.trim().isEmpty()) {
-            return "Error: Pattern is required";
+            return Response.err("Pattern is required");
         }
 
         try {
@@ -857,9 +997,9 @@ public class AnalysisService {
             }
 
             result.append("\n]");
-            return result.toString();
+            return Response.text(result.toString());
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return Response.err(e.getMessage());
         }
     }
 
@@ -867,17 +1007,14 @@ public class AnalysisService {
      * Find functions structurally similar to the target function
      * Uses basic block count, instruction count, call count, and cyclomatic complexity
      */
-    public String findSimilarFunctions(String targetFunction, double threshold) {
-        return findSimilarFunctions(targetFunction, threshold, null);
-    }
-
-    public String findSimilarFunctions(String targetFunction, double threshold, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response findSimilarFunctions(String targetFunction, double threshold) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         if (targetFunction == null || targetFunction.trim().isEmpty()) {
-            return "Error: Target function name is required";
+            return Response.err("Target function name is required");
         }
 
         try {
@@ -893,7 +1030,7 @@ public class AnalysisService {
             }
 
             if (targetFunc == null) {
-                return "{\"error\": \"Function not found: " + ServiceUtils.escapeJson(targetFunction) + "\"}";
+                return Response.err("Function not found: " + targetFunction);
             }
 
             // Calculate metrics for target function
@@ -963,9 +1100,9 @@ public class AnalysisService {
             result.append("  ]\n");
             result.append("}");
 
-            return result.toString();
+            return Response.text(result.toString());
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
@@ -973,17 +1110,14 @@ public class AnalysisService {
      * Analyze function control flow complexity
      * Calculates cyclomatic complexity, basic blocks, edges, and detailed metrics
      */
-    public String analyzeControlFlow(String functionName) {
-        return analyzeControlFlow(functionName, null);
-    }
-
-    public String analyzeControlFlow(String functionName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response analyzeControlFlow(String functionName) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         if (functionName == null || functionName.trim().isEmpty()) {
-            return "{\"error\": \"Function name is required\"}";
+            return Response.err("Function name is required");
         }
 
         try {
@@ -999,7 +1133,7 @@ public class AnalysisService {
             }
 
             if (func == null) {
-                return "{\"error\": \"Function not found: " + ServiceUtils.escapeJson(functionName) + "\"}";
+                return Response.err("Function not found: " + functionName);
             }
 
             BasicBlockModel blockModel = new BasicBlockModel(program);
@@ -1151,26 +1285,23 @@ public class AnalysisService {
             result.append("  ]\n");
             result.append("}");
 
-            return result.toString();
+            return Response.text(result.toString());
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Find potentially unreachable code blocks
      */
-    public String findDeadCode(String functionName) {
-        return findDeadCode(functionName, null);
-    }
-
-    public String findDeadCode(String functionName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response findDeadCode(String functionName) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         if (functionName == null || functionName.trim().isEmpty()) {
-            return "Error: Function name is required";
+            return Response.err("Function name is required");
         }
 
         try {
@@ -1185,32 +1316,20 @@ public class AnalysisService {
             result.append("\"note\": \"This endpoint requires reachability analysis via control flow graph\"}\n");
             result.append("]");
 
-            return result.toString();
+            return Response.text(result.toString());
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Analyze function documentation completeness
      */
-    public String analyzeFunctionCompleteness(String functionAddress) {
-        return analyzeFunctionCompleteness(functionAddress, false, null);
-    }
-
-    public String analyzeFunctionCompleteness(String functionAddress, boolean compact) {
-        return analyzeFunctionCompleteness(functionAddress, compact, null);
-    }
-
-    /**
-     * Analyze function documentation completeness.
-     * @param compact When true, returns only scores and issue counts (no arrays, no recommendations).
-     *                Reduces response from ~20KB to ~300 bytes.
-     */
-    public String analyzeFunctionCompleteness(String functionAddress, boolean compact, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response analyzeFunctionCompleteness(String functionAddress) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         final StringBuilder result = new StringBuilder();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
@@ -1230,13 +1349,22 @@ public class AnalysisService {
                         return;
                     }
 
-                    // Classify function using shared utility
-                    String classification = classifyFunction(func, program);
-                    boolean isThunk = "thunk".equals(classification);
+                    // Detect thunk functions (single JMP instruction, no real body)
+                    // Covers: Ghidra-tagged thunks, single-JMP stubs, and IAT thunks (JMP dword ptr [IAT])
+                    boolean isThunk = func.isThunk();
+                    if (!isThunk) {
+                        ghidra.program.model.listing.InstructionIterator instrIter =
+                            program.getListing().getInstructions(func.getBody(), true);
+                        if (instrIter.hasNext()) {
+                            ghidra.program.model.listing.Instruction firstInstr = instrIter.next();
+                            if (!instrIter.hasNext() && firstInstr.getMnemonicString().equals("JMP")) {
+                                isThunk = true;
+                            }
+                        }
+                    }
 
                     result.append("{");
                     result.append("\"function_name\": \"").append(func.getName()).append("\", ");
-                    result.append("\"classification\": \"").append(classification).append("\", ");
                     result.append("\"is_thunk\": ").append(isThunk).append(", ");
                     result.append("\"has_custom_name\": ").append(!ServiceUtils.isAutoGeneratedName(func.getName())).append(", ");
                     result.append("\"has_prototype\": ").append(func.getSignature() != null).append(", ");
@@ -1259,16 +1387,12 @@ public class AnalysisService {
                         validatePlateCommentStructure(plateComment, plateCommentIssues, isThunk);
                     }
 
-                    if (compact) {
-                        result.append("\"plate_issues\": ").append(plateCommentIssues.size()).append(", ");
-                    } else {
-                        result.append("\"plate_comment_issues\": [");
-                        for (int i = 0; i < plateCommentIssues.size(); i++) {
-                            if (i > 0) result.append(", ");
-                            result.append("\"").append(ServiceUtils.escapeJson(plateCommentIssues.get(i))).append("\"");
-                        }
-                        result.append("], ");
+                    result.append("\"plate_comment_issues\": [");
+                    for (int i = 0; i < plateCommentIssues.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(ServiceUtils.escapeJson(plateCommentIssues.get(i))).append("\"");
                     }
+                    result.append("], ");
 
                     // Check for undefined variables (both names and types)
                     // PRIORITY 1 FIX: Use decompilation-based variable detection to avoid phantom variables
@@ -1426,25 +1550,20 @@ public class AnalysisService {
 
                     result.append("\"decompilation_available\": ").append(decompilationAvailable).append(", ");
 
-                    if (compact) {
-                        result.append("\"undefined_count\": ").append(undefinedVars.size()).append(", ");
-                        result.append("\"phantom_count\": ").append(phantomVars.size()).append(", ");
-                    } else {
-                        result.append("\"undefined_variables\": [");
-                        for (int i = 0; i < undefinedVars.size(); i++) {
-                            if (i > 0) result.append(", ");
-                            result.append("\"").append(undefinedVars.get(i)).append("\"");
-                        }
-                        result.append("], ");
-
-                        // v3.0.1: Report phantom variables separately (not counted in scoring)
-                        result.append("\"phantom_variables\": [");
-                        for (int i = 0; i < phantomVars.size(); i++) {
-                            if (i > 0) result.append(", ");
-                            result.append("\"").append(ServiceUtils.escapeJson(phantomVars.get(i))).append("\"");
-                        }
-                        result.append("], ");
+                    result.append("\"undefined_variables\": [");
+                    for (int i = 0; i < undefinedVars.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(undefinedVars.get(i)).append("\"");
                     }
+                    result.append("], ");
+
+                    // v3.0.1: Report phantom variables separately (not counted in scoring)
+                    result.append("\"phantom_variables\": [");
+                    for (int i = 0; i < phantomVars.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(ServiceUtils.escapeJson(phantomVars.get(i))).append("\"");
+                    }
+                    result.append("], ");
 
                     // Check Hungarian notation compliance
                     // PRIORITY 1 FIX: Use same decompilation-based detection for consistency
@@ -1475,28 +1594,23 @@ public class AnalysisService {
                         }
                     }
 
+                    result.append("\"hungarian_notation_violations\": [");
+                    for (int i = 0; i < hungarianViolations.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(ServiceUtils.escapeJson(hungarianViolations.get(i))).append("\"");
+                    }
+                    result.append("], ");
+
                     // Enhanced validation: Check parameter type quality
                     List<String> typeQualityIssues = new ArrayList<>();
                     validateParameterTypeQuality(func, typeQualityIssues);
 
-                    if (compact) {
-                        result.append("\"hungarian_violations\": ").append(hungarianViolations.size()).append(", ");
-                        result.append("\"type_quality_issues\": ").append(typeQualityIssues.size()).append(", ");
-                    } else {
-                        result.append("\"hungarian_notation_violations\": [");
-                        for (int i = 0; i < hungarianViolations.size(); i++) {
-                            if (i > 0) result.append(", ");
-                            result.append("\"").append(ServiceUtils.escapeJson(hungarianViolations.get(i))).append("\"");
-                        }
-                        result.append("], ");
-
-                        result.append("\"type_quality_issues\": [");
-                        for (int i = 0; i < typeQualityIssues.size(); i++) {
-                            if (i > 0) result.append(", ");
-                            result.append("\"").append(ServiceUtils.escapeJson(typeQualityIssues.get(i))).append("\"");
-                        }
-                        result.append("], ");
+                    result.append("\"type_quality_issues\": [");
+                    for (int i = 0; i < typeQualityIssues.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(ServiceUtils.escapeJson(typeQualityIssues.get(i))).append("\"");
                     }
+                    result.append("], ");
 
                     // NEW: Check for unrenamed DAT_* globals and undocumented Ordinal calls in decompiled code
                     List<String> unrenamedGlobals = new ArrayList<>();
@@ -1629,24 +1743,19 @@ public class AnalysisService {
                     // Include disassembly comments in total for density calculation
                     int totalCommentCount = inlineCommentCount + disasmCommentCount;
 
-                    if (compact) {
-                        result.append("\"globals_unrenamed\": ").append(unrenamedGlobals.size()).append(", ");
-                        result.append("\"ordinals_undocumented\": ").append(undocumentedOrdinals.size()).append(", ");
-                    } else {
-                        result.append("\"unrenamed_globals\": [");
-                        for (int i = 0; i < unrenamedGlobals.size(); i++) {
-                            if (i > 0) result.append(", ");
-                            result.append("\"").append(ServiceUtils.escapeJson(unrenamedGlobals.get(i))).append("\"");
-                        }
-                        result.append("], ");
-
-                        result.append("\"undocumented_ordinals\": [");
-                        for (int i = 0; i < undocumentedOrdinals.size(); i++) {
-                            if (i > 0) result.append(", ");
-                            result.append("\"").append(ServiceUtils.escapeJson(undocumentedOrdinals.get(i))).append("\"");
-                        }
-                        result.append("], ");
+                    result.append("\"unrenamed_globals\": [");
+                    for (int i = 0; i < unrenamedGlobals.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(ServiceUtils.escapeJson(unrenamedGlobals.get(i))).append("\"");
                     }
+                    result.append("], ");
+
+                    result.append("\"undocumented_ordinals\": [");
+                    for (int i = 0; i < undocumentedOrdinals.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(ServiceUtils.escapeJson(undocumentedOrdinals.get(i))).append("\"");
+                    }
+                    result.append("], ");
 
                     result.append("\"inline_comment_count\": ").append(inlineCommentCount).append(", ");
                     result.append("\"disasm_comment_count\": ").append(disasmCommentCount).append(", ");
@@ -1662,27 +1771,20 @@ public class AnalysisService {
                     result.append("\"all_deductions_unfixable\": ").append(scoreResult.score < 100.0 && scoreResult.effectiveScore >= 100.0).append(", ");
 
                     // PROP-0002: Report whether function has renameable variables (not register-only SSA)
-                    if (compact) {
-                        // In compact mode, this is the last field — no trailing comma
-                        result.append("\"has_renameable_variables\": ").append(!localVarNames.isEmpty());
-                    } else {
-                        result.append("\"has_renameable_variables\": ").append(!localVarNames.isEmpty()).append(", ");
-                    }
+                    result.append("\"has_renameable_variables\": ").append(!localVarNames.isEmpty()).append(", ");
 
-                    if (!compact) {
-                        // Generate workflow-aligned recommendations (skipped in compact mode — AI has these in its prompt)
-                        List<String> recommendations = generateWorkflowRecommendations(
-                            func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues,
-                            unrenamedGlobals, undocumentedOrdinals, commentDensity, scoreResult, codeLineCount, isThunk
-                        );
+                    // Generate workflow-aligned recommendations
+                    List<String> recommendations = generateWorkflowRecommendations(
+                        func, undefinedVars, plateCommentIssues, hungarianViolations, typeQualityIssues,
+                        unrenamedGlobals, undocumentedOrdinals, commentDensity, scoreResult, codeLineCount, isThunk
+                    );
 
-                        result.append("\"recommendations\": [");
-                        for (int i = 0; i < recommendations.size(); i++) {
-                            if (i > 0) result.append(", ");
-                            result.append("\"").append(ServiceUtils.escapeJson(recommendations.get(i))).append("\"");
-                        }
-                        result.append("]");
+                    result.append("\"recommendations\": [");
+                    for (int i = 0; i < recommendations.size(); i++) {
+                        if (i > 0) result.append(", ");
+                        result.append("\"").append(ServiceUtils.escapeJson(recommendations.get(i))).append("\"");
                     }
+                    result.append("]");
 
                     result.append("}");
                 } catch (Exception e) {
@@ -1691,25 +1793,25 @@ public class AnalysisService {
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Exception e) {
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
 
-        return result.toString();
+        return Response.text(result.toString());
     }
 
     /**
      * v1.5.0: Find next undefined function needing analysis
      */
     @SuppressWarnings("deprecation")
-    public String findNextUndefinedFunction(String startAddress, String criteria,
+    public Response findNextUndefinedFunction(String startAddress, String criteria,
                                             String pattern, String direction, String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+            return Response.err((String) programResult[1]);
         }
 
         final Program finalProgram = program;
@@ -1759,17 +1861,17 @@ public class AnalysisService {
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Exception e) {
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
 
-        return result.toString();
+        return Response.text(result.toString());
     }
 
     // Backward compatibility overload
-    public String findNextUndefinedFunction(String startAddress, String criteria,
+    public Response findNextUndefinedFunction(String startAddress, String criteria,
                                             String pattern, String direction) {
         return findNextUndefinedFunction(startAddress, criteria, pattern, direction, null);
     }
@@ -1777,13 +1879,13 @@ public class AnalysisService {
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
      */
-    public String analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
+    public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
                                           boolean includeCallers, boolean includeDisasm, boolean includeVariables,
                                           String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+            return Response.err((String) programResult[1]);
         }
 
         final Program finalProgram = program;
@@ -1813,7 +1915,6 @@ public class AnalysisService {
                     result.append("{");
                     result.append("\"name\": \"").append(func.getName()).append("\", ");
                     result.append("\"address\": \"").append(func.getEntryPoint().toString()).append("\", ");
-                    result.append("\"classification\": \"").append(classifyFunction(func, finalProgram)).append("\", ");
                     result.append("\"signature\": \"").append(func.getSignature().toString().replace("\"", "\\\"")).append("\"");
 
                     // v3.0.1: Flag undefined return type
@@ -1978,17 +2079,17 @@ public class AnalysisService {
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Exception e) {
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
 
-        return result.toString();
+        return Response.text(result.toString());
     }
 
     // Backward compatibility overload
-    public String analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
+    public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
                                           boolean includeCallers, boolean includeDisasm, boolean includeVariables) {
         return analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, null);
     }
@@ -1996,13 +2097,13 @@ public class AnalysisService {
     /**
      * NEW v1.6.0: Enhanced function search with filtering and sorting
      */
-    public String searchFunctionsEnhanced(String namePattern, Integer minXrefs, Integer maxXrefs,
+    public Response searchFunctionsEnhanced(String namePattern, Integer minXrefs, Integer maxXrefs,
                                           String callingConvention, Boolean hasCustomName, boolean regex,
                                           String sortBy, int offset, int limit, String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+            return Response.err((String) programResult[1]);
         }
 
         final StringBuilder result = new StringBuilder();
@@ -2103,13 +2204,13 @@ public class AnalysisService {
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Exception e) {
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
 
-        return result.toString();
+        return Response.text(result.toString());
     }
 
     // ========================================================================
@@ -2221,13 +2322,10 @@ public class AnalysisService {
             score -= 5;
         }
 
-        // Calculate unfixable penalty: void* on ordinal exports (params arrive as int, void*
-        // is the best we can do without caller-side analysis), phantom vars,
+        // Calculate unfixable penalty: void* on genuinely generic functions, phantom vars,
         // register-only SSA variables, and thunk-owned callee variables
-        boolean isExternalEntry = func.getProgram().getSymbolTable()
-                .isExternalEntryPoint(func.getEntryPoint());
         for (String issue : typeQualityIssues) {
-            if (issue.contains("Generic void*") && (isExternalEntry || isThunk)) {
+            if (issue.contains("Generic void*")) {
                 unfixablePenalty += 15;
             }
         }
@@ -2269,7 +2367,7 @@ public class AnalysisService {
 
         // If all deductions are unfixable, report that and skip the full workflow
         if (scoreResult.effectiveScore >= 100.0) {
-            recommendations.add("All remaining deductions are unfixable (void* on exported functions, phantom variables). No further action needed.");
+            recommendations.add("All remaining deductions are unfixable (void* on generic functions, phantom variables). No further action needed.");
             return recommendations;
         }
 
@@ -2630,203 +2728,5 @@ public class AnalysisService {
         if (!hasReturns) {
             issues.add("Missing Returns section");
         }
-    }
-
-    /**
-     * Composite endpoint for RE documentation workflow.
-     * Returns decompiled code + classification + callees + variables with pre-analysis + compact completeness
-     * in a single response, using only one decompilation.
-     */
-    public String analyzeForDocumentation(String functionAddress, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
-        }
-
-        final Program finalProgram = program;
-        final StringBuilder result = new StringBuilder();
-        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
-
-        try {
-            SwingUtilities.invokeAndWait(() -> {
-                try {
-                    // Resolve function by address
-                    Address addr = finalProgram.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        result.append("{\"error\": \"Invalid address: ").append(functionAddress).append("\"}");
-                        return;
-                    }
-                    Function func = finalProgram.getFunctionManager().getFunctionAt(addr);
-                    if (func == null) {
-                        func = finalProgram.getFunctionManager().getFunctionContaining(addr);
-                    }
-                    if (func == null) {
-                        result.append("{\"error\": \"No function at address: ").append(functionAddress).append("\"}");
-                        return;
-                    }
-
-                    result.append("{");
-
-                    // Basic info
-                    result.append("\"name\": \"").append(ServiceUtils.escapeJson(func.getName())).append("\", ");
-                    result.append("\"address\": \"").append(func.getEntryPoint().toString()).append("\", ");
-                    result.append("\"signature\": \"").append(ServiceUtils.escapeJson(func.getSignature().toString())).append("\", ");
-
-                    // Classification
-                    String classification = classifyFunction(func, finalProgram);
-                    result.append("\"classification\": \"").append(classification).append("\", ");
-
-                    // Return type analysis
-                    String retTypeName = func.getReturnType().getName();
-                    result.append("\"return_type\": \"").append(ServiceUtils.escapeJson(retTypeName)).append("\", ");
-                    result.append("\"return_type_resolved\": ").append(!retTypeName.startsWith("undefined")).append(", ");
-
-                    // Decompile (single decompilation reused for code + variables)
-                    DecompileResults decompResults = functionService.decompileFunction(func, finalProgram);
-                    if (decompResults != null && decompResults.decompileCompleted() &&
-                        decompResults.getDecompiledFunction() != null) {
-                        String decompiledCode = decompResults.getDecompiledFunction().getC();
-                        if (decompiledCode != null) {
-                            result.append("\"decompiled_code\": \"").append(ServiceUtils.escapeJson(decompiledCode)).append("\", ");
-                        }
-                    }
-
-                    // Callees with ordinal and documentation status
-                    result.append("\"callees\": [");
-                    Set<Function> calledFuncs = func.getCalledFunctions(null);
-                    int calleeIdx = 0;
-                    int ordinalCalleeCount = 0;
-                    for (Function called : calledFuncs) {
-                        if (calleeIdx > 0) result.append(", ");
-                        String calleeName = called.getName();
-                        boolean isUndocumented = calleeName.startsWith("FUN_") || calleeName.startsWith("thunk_FUN_");
-                        boolean isOrdinal = calleeName.startsWith("Ordinal_") || calleeName.startsWith("thunk_Ordinal_");
-                        if (isOrdinal) ordinalCalleeCount++;
-                        result.append("{\"name\": \"").append(ServiceUtils.escapeJson(calleeName)).append("\"");
-                        if (isUndocumented) result.append(", \"undocumented\": true");
-                        if (isOrdinal) result.append(", \"is_ordinal\": true");
-                        if (called.isThunk()) result.append(", \"is_thunk\": true");
-                        result.append("}");
-                        calleeIdx++;
-                    }
-                    result.append("], ");
-                    result.append("\"callee_count\": ").append(calleeIdx).append(", ");
-                    result.append("\"ordinal_callee_count\": ").append(ordinalCalleeCount).append(", ");
-
-                    // Wrapper hint
-                    if (calleeIdx == 1 && retTypeName.startsWith("undefined")) {
-                        Function callee = calledFuncs.iterator().next();
-                        String calleeRetType = callee.getReturnType().getName();
-                        if (!calleeRetType.equals("void") && !calleeRetType.startsWith("undefined")) {
-                            result.append("\"wrapper_hint\": \"Callee '").append(ServiceUtils.escapeJson(callee.getName()))
-                                  .append("' returns ").append(ServiceUtils.escapeJson(calleeRetType)).append("\", ");
-                        }
-                    }
-
-                    // Parameters with pre-analysis
-                    result.append("\"parameters\": [");
-                    Parameter[] params = func.getParameters();
-                    for (int i = 0; i < params.length; i++) {
-                        if (i > 0) result.append(", ");
-                        String pName = params[i].getName();
-                        String pType = params[i].getDataType().getName();
-                        String pStorage = params[i].getVariableStorage().toString();
-                        boolean needsType = pType.startsWith("undefined");
-                        boolean needsRename = pName.matches("param_\\d+");
-                        result.append("{\"name\": \"").append(ServiceUtils.escapeJson(pName)).append("\", ");
-                        result.append("\"type\": \"").append(ServiceUtils.escapeJson(pType)).append("\", ");
-                        result.append("\"storage\": \"").append(ServiceUtils.escapeJson(pStorage)).append("\", ");
-                        result.append("\"needs_type\": ").append(needsType).append(", ");
-                        result.append("\"needs_rename\": ").append(needsRename);
-                        if (needsType) {
-                            result.append(", \"suggested_type\": \"").append(FunctionService.suggestType(pType)).append("\"");
-                            result.append(", \"suggested_prefix\": \"").append(FunctionService.suggestHungarianPrefix(FunctionService.suggestType(pType))).append("\"");
-                        } else {
-                            result.append(", \"suggested_prefix\": \"").append(FunctionService.suggestHungarianPrefix(pType)).append("\"");
-                        }
-                        result.append("}");
-                    }
-                    result.append("], ");
-
-                    // Local variables with pre-analysis (from HighFunction)
-                    result.append("\"locals\": [");
-                    boolean firstLocal = true;
-                    if (decompResults != null && decompResults.decompileCompleted()) {
-                        HighFunction highFunc = decompResults.getHighFunction();
-                        if (highFunc != null) {
-                            Iterator<HighSymbol> symbols = highFunc.getLocalSymbolMap().getSymbols();
-                            while (symbols.hasNext()) {
-                                HighSymbol sym = symbols.next();
-                                if (!firstLocal) result.append(", ");
-                                firstLocal = false;
-                                String symName = sym.getName();
-                                String symType = sym.getDataType().getName();
-                                boolean isPhantom = symName.startsWith("extraout_") || symName.startsWith("in_");
-                                String storageStr = "";
-                                HighVariable highVar = sym.getHighVariable();
-                                if (highVar != null && highVar.getRepresentative() != null) {
-                                    Varnode rep = highVar.getRepresentative();
-                                    if (rep.getAddress() != null) {
-                                        storageStr = rep.getAddress().toString() + ":" + rep.getSize();
-                                    }
-                                }
-                                boolean needsType = !isPhantom && symType.startsWith("undefined");
-                                boolean needsRename = !isPhantom && symName.matches("local_[0-9a-fA-F]+|[a-zA-Z]Var\\d+");
-                                result.append("{\"name\": \"").append(ServiceUtils.escapeJson(symName)).append("\", ");
-                                result.append("\"type\": \"").append(ServiceUtils.escapeJson(symType)).append("\", ");
-                                result.append("\"storage\": \"").append(ServiceUtils.escapeJson(storageStr)).append("\", ");
-                                result.append("\"is_phantom\": ").append(isPhantom);
-                                if (needsType) {
-                                    result.append(", \"needs_type\": true");
-                                    result.append(", \"suggested_type\": \"").append(FunctionService.suggestType(symType)).append("\"");
-                                }
-                                if (needsRename) {
-                                    result.append(", \"needs_rename\": true");
-                                    String prefix = needsType ? FunctionService.suggestHungarianPrefix(FunctionService.suggestType(symType))
-                                                             : FunctionService.suggestHungarianPrefix(symType);
-                                    result.append(", \"suggested_prefix\": \"").append(prefix).append("\"");
-                                }
-                                result.append("}");
-                            }
-                        }
-                    }
-                    result.append("], ");
-
-                    // DAT global count (unrenamed globals referenced)
-                    int datGlobalCount = 0;
-                    ReferenceIterator refIter = finalProgram.getReferenceManager().getReferenceIterator(func.getBody().getMinAddress());
-                    while (refIter.hasNext()) {
-                        Reference ref = refIter.next();
-                        if (!func.getBody().contains(ref.getFromAddress())) continue;
-                        Address toAddr = ref.getToAddress();
-                        Symbol sym = finalProgram.getSymbolTable().getPrimarySymbol(toAddr);
-                        if (sym != null && sym.getName().startsWith("DAT_")) {
-                            datGlobalCount++;
-                        }
-                    }
-                    result.append("\"dat_global_count\": ").append(datGlobalCount).append(", ");
-
-                    // Compact completeness score
-                    String completenessJson = analyzeFunctionCompleteness(func.getEntryPoint().toString(), true);
-                    // Strip outer braces and embed inline
-                    if (completenessJson.startsWith("{") && completenessJson.endsWith("}")) {
-                        result.append("\"completeness\": ").append(completenessJson);
-                    }
-
-                    result.append("}");
-                } catch (Exception e) {
-                    errorMsg.set(e.getMessage());
-                }
-            });
-
-            if (errorMsg.get() != null) {
-                return "{\"error\": \"" + ServiceUtils.escapeJson(errorMsg.get()) + "\"}";
-            }
-        } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
-        }
-
-        return result.toString();
     }
 }

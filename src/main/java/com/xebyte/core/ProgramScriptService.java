@@ -80,14 +80,11 @@ public class ProgramScriptService {
      * Get metadata about the current program including name, architecture,
      * memory layout, function count, and symbol count.
      */
-    public String getMetadata() {
-        return getMetadata(null);
-    }
-
-    public String getMetadata(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response getMetadata() {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         StringBuilder metadata = new StringBuilder();
         metadata.append("Program Name: ").append(program.getName()).append("\n");
@@ -117,7 +114,7 @@ public class ProgramScriptService {
         int symbolCount = program.getSymbolTable().getNumSymbols();
         metadata.append("Symbol Count: ").append(symbolCount).append("\n");
 
-        return metadata.toString();
+        return Response.text(metadata.toString());
     }
 
     // ========================================================================
@@ -127,14 +124,11 @@ public class ProgramScriptService {
     /**
      * Save the currently active program to its domain file.
      */
-    public String saveCurrentProgram() {
-        return saveCurrentProgram(null);
-    }
-
-    public String saveCurrentProgram(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response saveCurrentProgram() {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         final StringBuilder result = new StringBuilder();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
@@ -161,26 +155,26 @@ public class ProgramScriptService {
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}";
+            return Response.err(msg);
         }
 
-        return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
+        return result.length() > 0 ? Response.text(result.toString()) : Response.err("Unknown failure");
     }
 
     /**
      * List all currently open programs in Ghidra.
      */
-    public String listOpenPrograms() {
+    public Response listOpenPrograms() {
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
-            return "{\"programs\": [], \"count\": 0, \"current_program\": \"\"}";
+            return Response.text("{\"programs\": [], \"count\": 0, \"current_program\": \"\"}");
         }
 
-        Program currentProgram = programProvider.resolveProgram(null);
+        Program currentProgram = programProvider.getCurrentProgram();
 
         StringBuilder result = new StringBuilder();
         result.append("{\"programs\": [");
@@ -207,20 +201,17 @@ public class ProgramScriptService {
         result.append(", \"current_program\": \"").append(currentProgram != null ? ServiceUtils.escapeJson(currentProgram.getName()) : "").append("\"");
         result.append("}");
 
-        return result.toString();
+        return Response.text(result.toString());
     }
 
     /**
      * Get detailed information about the currently active program.
      */
-    public String getCurrentProgramInfo() {
-        return getCurrentProgramInfo(null);
-    }
-
-    public String getCurrentProgramInfo(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response getCurrentProgramInfo() {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program currently loaded");
+        }
 
         StringBuilder result = new StringBuilder();
         result.append("{");
@@ -246,20 +237,20 @@ public class ProgramScriptService {
         result.append("\"memory_block_count\": ").append(program.getMemory().getBlocks().length);
 
         result.append("}");
-        return result.toString();
+        return Response.text(result.toString());
     }
 
     /**
      * Switch MCP context to a different open program by name.
      */
-    public String switchProgram(String programName) {
+    public Response switchProgram(String programName) {
         if (programName == null || programName.trim().isEmpty()) {
-            return "{\"error\": \"Program name is required\"}";
+            return Response.err("Program name is required");
         }
 
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
-            return "{\"error\": \"No programs are currently open\"}";
+            return Response.err("No programs are currently open");
         }
 
         Program targetProgram = null;
@@ -288,29 +279,28 @@ public class ProgramScriptService {
                 if (i > 0) availablePrograms.append(", ");
                 availablePrograms.append(programs[i].getName());
             }
-            return "{\"error\": \"Program not found: " + ServiceUtils.escapeJson(programName) + "\", \"available_programs\": [" +
-                   (programs.length > 0 ? "\"" + availablePrograms.toString().replace(", ", "\", \"") + "\"" : "") + "]}";
+            return Response.err("Program not found: " + programName + ". Available: " + availablePrograms);
         }
 
         // Switch to the target program
         programProvider.setCurrentProgram(targetProgram);
 
-        return "{\"success\": true, \"switched_to\": \"" + ServiceUtils.escapeJson(targetProgram.getName()) +
-               "\", \"path\": \"" + ServiceUtils.escapeJson(targetProgram.getDomainFile().getPathname()) + "\"}";
+        return Response.text("{\"success\": true, \"switched_to\": \"" + ServiceUtils.escapeJson(targetProgram.getName()) +
+               "\", \"path\": \"" + ServiceUtils.escapeJson(targetProgram.getDomainFile().getPathname()) + "\"}");
     }
 
     /**
      * List all files in the current Ghidra project.
      */
-    public String listProjectFiles(String folderPath) {
+    public Response listProjectFiles(String folderPath) {
         PluginTool tool = getToolFromProvider();
         if (tool == null) {
-            return "{\"error\": \"Project listing requires GUI mode (PluginTool not available)\"}";
+            return Response.err("Project listing requires GUI mode (PluginTool not available)");
         }
 
         ghidra.framework.model.Project project = tool.getProject();
         if (project == null) {
-            return "{\"error\": \"No project is currently open\"}";
+            return Response.err("No project is currently open");
         }
 
         ghidra.framework.model.ProjectData projectData = project.getProjectData();
@@ -326,7 +316,7 @@ public class ProgramScriptService {
                 if (part.isEmpty()) continue;
                 ghidra.framework.model.DomainFolder nextFolder = targetFolder.getFolder(part);
                 if (nextFolder == null) {
-                    return "{\"error\": \"Folder not found: " + ServiceUtils.escapeJson(folderPath) + "\"}";
+                    return Response.err("Folder not found: " + folderPath);
                 }
                 targetFolder = nextFolder;
             }
@@ -366,36 +356,36 @@ public class ProgramScriptService {
         result.append("]");
 
         result.append("}");
-        return result.toString();
+        return Response.text(result.toString());
     }
 
     /**
      * Open a program from the current project by path.
      */
-    public String openProgramFromProject(String path) {
+    public Response openProgramFromProject(String path) {
         return openProgramFromProject(path, false);
     }
 
-    public String openProgramFromProject(String path, boolean autoAnalyze) {
+    public Response openProgramFromProject(String path, boolean autoAnalyze) {
         if (path == null || path.trim().isEmpty()) {
-            return "{\"error\": \"Program path is required\"}";
+            return Response.err("Program path is required");
         }
 
         PluginTool tool = getToolFromProvider();
         if (tool == null) {
-            return "{\"error\": \"Opening programs requires GUI mode (PluginTool not available)\"}";
+            return Response.err("Opening programs requires GUI mode (PluginTool not available)");
         }
 
         ghidra.framework.model.Project project = tool.getProject();
         if (project == null) {
-            return "{\"error\": \"No project is currently open\"}";
+            return Response.err("No project is currently open");
         }
 
         ghidra.framework.model.ProjectData projectData = project.getProjectData();
         ghidra.framework.model.DomainFile domainFile = projectData.getFile(path);
 
         if (domainFile == null) {
-            return "{\"error\": \"File not found in project: " + ServiceUtils.escapeJson(path) + "\"}";
+            return Response.err("File not found in project: " + path);
         }
 
         // Check if already open
@@ -404,9 +394,9 @@ public class ProgramScriptService {
             if (prog.getDomainFile().getPathname().equals(path)) {
                 // Already open, just switch to it
                 programProvider.setCurrentProgram(prog);
-                return "{\"success\": true, \"message\": \"Program already open, switched to it\", " +
+                return Response.text("{\"success\": true, \"message\": \"Program already open, switched to it\", " +
                        "\"name\": \"" + ServiceUtils.escapeJson(prog.getName()) + "\", " +
-                       "\"path\": \"" + ServiceUtils.escapeJson(path) + "\"}";
+                       "\"path\": \"" + ServiceUtils.escapeJson(path) + "\"}");
             }
         }
 
@@ -414,12 +404,12 @@ public class ProgramScriptService {
         try {
             ProgramManager pm = tool.getService(ProgramManager.class);
             if (pm == null) {
-                return "{\"error\": \"ProgramManager service not available\"}";
+                return Response.err("ProgramManager service not available");
             }
 
             Program program = (Program) domainFile.getDomainObject(tool, false, false, ghidra.util.task.TaskMonitor.DUMMY);
             if (program == null) {
-                return "{\"error\": \"Failed to open program: " + ServiceUtils.escapeJson(path) + "\"}";
+                return Response.err("Failed to open program: " + path);
             }
 
             // Add to tool and set as current
@@ -439,13 +429,13 @@ public class ProgramScriptService {
                 }
             }
 
-            return "{\"success\": true, \"message\": \"Program opened successfully\", " +
+            return Response.text("{\"success\": true, \"message\": \"Program opened successfully\", " +
                    "\"name\": \"" + ServiceUtils.escapeJson(program.getName()) + "\", " +
                    "\"path\": \"" + ServiceUtils.escapeJson(path) + "\", " +
                    "\"auto_analyzed\": " + analyzed + ", " +
-                   "\"function_count\": " + program.getFunctionManager().getFunctionCount() + "}";
+                   "\"function_count\": " + program.getFunctionManager().getFunctionCount() + "}");
         } catch (Exception e) {
-            return "{\"error\": \"Failed to open program: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to open program: " + e.getMessage());
         }
     }
 
@@ -460,14 +450,11 @@ public class ProgramScriptService {
      * @param scriptArgs Optional space-separated arguments for the script
      * @return Script output or error message
      */
-    public String runGhidraScript(String scriptPath, String scriptArgs) {
-        return runGhidraScript(scriptPath, scriptArgs, (String) null);
-    }
-
-    public String runGhidraScript(String scriptPath, String scriptArgs, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response runGhidraScript(String scriptPath, String scriptArgs) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
@@ -640,7 +627,7 @@ public class ProgramScriptService {
             Msg.error(this, "Failed to execute on Swing thread", e);
         }
 
-        return resultMsg.toString();
+        return Response.text(resultMsg.toString());
     }
 
     /**
@@ -649,7 +636,7 @@ public class ProgramScriptService {
      * @param filter Optional filter string to match script names
      * @return JSON list of available scripts
      */
-    public String listGhidraScripts(String filter) {
+    public Response listGhidraScripts(String filter) {
         final StringBuilder resultMsg = new StringBuilder();
 
         try {
@@ -675,10 +662,10 @@ public class ProgramScriptService {
                 }
             });
         } catch (InterruptedException | InvocationTargetException e) {
-            return "Error: Failed to execute on Swing thread: " + e.getMessage();
+            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
         }
 
-        return resultMsg.toString();
+        return Response.text(resultMsg.toString());
     }
 
     // ========================================================================
@@ -688,17 +675,17 @@ public class ProgramScriptService {
     /**
      * Read memory at a specific address.
      */
-    public String readMemory(String addressStr, int length, String programName) {
+    public Response readMemory(String addressStr, int length, String programName) {
         try {
             Object[] programResult = getProgramOrError(programName);
             Program program = (Program) programResult[0];
             if (program == null) {
-                return "{\"error\":\"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+                return Response.err((String) programResult[1]);
             }
 
             Address address = program.getAddressFactory().getAddress(addressStr);
             if (address == null) {
-                return "{\"error\":\"Invalid address: " + addressStr + "\"}";
+                return Response.err("Invalid address: " + addressStr);
             }
 
             Memory memory = program.getMemory();
@@ -725,36 +712,31 @@ public class ProgramScriptService {
             json.append("\"");
             json.append("}");
 
-            return json.toString();
+            return Response.text(json.toString());
 
         } catch (Exception e) {
-            return "{\"error\":\"Failed to read memory: " + e.getMessage() + "\"}";
+            return Response.err("Failed to read memory: " + e.getMessage());
         }
     }
 
     /**
      * Create an uninitialized memory block (e.g., for MMIO/peripheral regions).
      */
-    public String createMemoryBlock(String name, String addressStr, long size,
+    public Response createMemoryBlock(String name, String addressStr, long size,
                                      boolean read, boolean write, boolean execute,
                                      boolean isVolatile, String comment) {
-        return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, null);
-    }
-
-    public String createMemoryBlock(String name, String addressStr, long size,
-                                     boolean read, boolean write, boolean execute,
-                                     boolean isVolatile, String comment, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
         if (name == null || name.isEmpty()) {
-            return "{\"error\": \"name parameter required\"}";
+            return Response.err("name parameter required");
         }
         if (addressStr == null || addressStr.isEmpty()) {
-            return "{\"error\": \"address parameter required\"}";
+            return Response.err("address parameter required");
         }
         if (size <= 0) {
-            return "{\"error\": \"size must be positive\"}";
+            return Response.err("size must be positive");
         }
 
         final StringBuilder result = new StringBuilder();
@@ -819,14 +801,14 @@ public class ProgramScriptService {
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return "{\"error\": \"Failed to execute on Swing thread: " + msg.replace("\"", "\\\"") + "\"}";
+            return Response.err("Failed to execute on Swing thread: " + msg);
         }
 
-        return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
+        return result.length() > 0 ? Response.text(result.toString()) : Response.err("Unknown failure");
     }
 
     // ========================================================================
@@ -837,16 +819,13 @@ public class ProgramScriptService {
      * Set a bookmark at an address with category and comment.
      * Creates or updates the bookmark if one already exists at the address with the same category.
      */
-    public String setBookmark(String addressStr, String category, String comment) {
-        return setBookmark(addressStr, category, comment, null);
-    }
-
-    public String setBookmark(String addressStr, String category, String comment, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response setBookmark(String addressStr, String category, String comment) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
         if (addressStr == null || addressStr.isEmpty()) {
-            return "{\"success\": false, \"error\": \"Address is required\"}";
+            return Response.err("Address is required");
         }
         if (category == null || category.isEmpty()) {
             category = "Note";  // Default category
@@ -858,7 +837,7 @@ public class ProgramScriptService {
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             if (addr == null) {
-                return "{\"success\": false, \"error\": \"Invalid address: " + escapeJsonString(addressStr) + "\"}";
+                return Response.err("Invalid address: " + addressStr);
             }
 
             BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -878,9 +857,9 @@ public class ProgramScriptService {
                 bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
                 program.endTransaction(transactionId, true);
 
-                return "{\"success\": true, \"address\": \"" + escapeJsonString(addr.toString()) +
+                return Response.text("{\"success\": true, \"address\": \"" + escapeJsonString(addr.toString()) +
                        "\", \"category\": \"" + escapeJsonString(finalCategory) +
-                       "\", \"comment\": \"" + escapeJsonString(finalComment) + "\"}";
+                       "\", \"comment\": \"" + escapeJsonString(finalComment) + "\"}");
 
             } catch (Exception e) {
                 program.endTransaction(transactionId, false);
@@ -888,21 +867,18 @@ public class ProgramScriptService {
             }
 
         } catch (Exception e) {
-            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * List bookmarks, optionally filtered by category and/or address.
      */
-    public String listBookmarks(String category, String addressStr) {
-        return listBookmarks(category, addressStr, null);
-    }
-
-    public String listBookmarks(String category, String addressStr, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listBookmarks(String category, String addressStr) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         try {
             BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -912,7 +888,7 @@ public class ProgramScriptService {
             if (addressStr != null && !addressStr.isEmpty()) {
                 Address addr = program.getAddressFactory().getAddress(addressStr);
                 if (addr == null) {
-                    return "{\"success\": false, \"error\": \"Invalid address: " + escapeJsonString(addressStr) + "\"}";
+                    return Response.err("Invalid address: " + addressStr);
                 }
 
                 Bookmark[] bms = bookmarkManager.getBookmarks(addr);
@@ -960,32 +936,29 @@ public class ProgramScriptService {
             }
             response.append("], \"count\": ").append(bookmarks.size()).append("}");
 
-            return response.toString();
+            return Response.text(response.toString());
 
         } catch (Exception e) {
-            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Delete a bookmark at an address with optional category filter.
      */
-    public String deleteBookmark(String addressStr, String category) {
-        return deleteBookmark(addressStr, category, null);
-    }
-
-    public String deleteBookmark(String addressStr, String category, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response deleteBookmark(String addressStr, String category) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
         if (addressStr == null || addressStr.isEmpty()) {
-            return "{\"success\": false, \"error\": \"Address is required\"}";
+            return Response.err("Address is required");
         }
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             if (addr == null) {
-                return "{\"success\": false, \"error\": \"Invalid address: " + escapeJsonString(addressStr) + "\"}";
+                return Response.err("Invalid address: " + addressStr);
             }
 
             BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -1003,7 +976,7 @@ public class ProgramScriptService {
                 }
 
                 program.endTransaction(transactionId, true);
-                return "{\"success\": true, \"deleted\": " + deleted + ", \"address\": \"" + escapeJsonString(addr.toString()) + "\"}";
+                return Response.text("{\"success\": true, \"deleted\": " + deleted + ", \"address\": \"" + escapeJsonString(addr.toString()) + "\"}");
 
             } catch (Exception e) {
                 program.endTransaction(transactionId, false);
@@ -1011,7 +984,7 @@ public class ProgramScriptService {
             }
 
         } catch (Exception e) {
-            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
@@ -1019,18 +992,15 @@ public class ProgramScriptService {
      * Run a Ghidra script with enhanced output capture and JSON response.
      * Locates the script in standard directories, executes it, and returns structured results.
      */
-    public String runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput) {
-        return runGhidraScriptWithCapture(scriptName, scriptArgs, timeoutSeconds, captureOutput, null);
-    }
-
-    public String runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput, String programName) {
+    public Response runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput) {
         if (scriptName == null || scriptName.isEmpty()) {
-            return "{\"success\": false, \"error\": \"Script name is required\"}";
+            return Response.err("Script name is required");
         }
 
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
 
         try {
             // Locate the script file - search Ghidra's standard script directories
@@ -1071,14 +1041,21 @@ public class ProgramScriptService {
                 for (String dir : searchDirs) {
                     if (dir != null) searched.append(dir).append(", ");
                 }
-                return "{\"success\": false, \"error\": \"Script '" + escapeJsonString(filename) +
-                       "' not found. Searched: " + escapeJsonString(searched.toString()) + "\"}";
+                return Response.err("Script '" + scriptName + "' not found. Searched: " + searched);
             }
 
             // Execute the script via the existing execution method
             long startTime = System.currentTimeMillis();
-            String output = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs);
+            Response scriptResponse = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs);
             double executionTime = (System.currentTimeMillis() - startTime) / 1000.0;
+
+            // Extract the text content from the Response
+            String output = "";
+            if (scriptResponse instanceof Response.Text t) {
+                output = t.content();
+            } else if (scriptResponse instanceof Response.Err e) {
+                output = e.message();
+            }
 
             boolean succeeded = output.contains("SCRIPT COMPLETED SUCCESSFULLY");
 
@@ -1092,10 +1069,10 @@ public class ProgramScriptService {
             response.append("\"console_output\": \"").append(escapeJsonString(output)).append("\"");
             response.append("}");
 
-            return response.toString();
+            return Response.text(response.toString());
 
         } catch (Exception e) {
-            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
@@ -1179,25 +1156,25 @@ public class ProgramScriptService {
      * Generate script content based on workflow type and parameters.
      * Dispatches to specific script generators based on workflowType.
      */
-    public String generateScriptContent(String purpose, String workflowType, Map<String, Object> parameters) {
+    public Response generateScriptContent(String purpose, String workflowType, Map<String, Object> parameters) {
         if (parameters == null) {
             parameters = new HashMap<>();
         }
 
         switch (workflowType) {
             case "document_functions":
-                return generateDocumentFunctionsScript(purpose, parameters);
+                return Response.text(generateDocumentFunctionsScript(purpose, parameters));
             case "fix_ordinals":
-                return generateFixOrdinalsScript(purpose, parameters);
+                return Response.text(generateFixOrdinalsScript(purpose, parameters));
             case "bulk_rename":
-                return generateBulkRenameScript(purpose, parameters);
+                return Response.text(generateBulkRenameScript(purpose, parameters));
             case "analyze_structures":
-                return generateAnalyzeStructuresScript(purpose, parameters);
+                return Response.text(generateAnalyzeStructuresScript(purpose, parameters));
             case "find_patterns":
-                return generateFindPatternsScript(purpose, parameters);
+                return Response.text(generateFindPatternsScript(purpose, parameters));
             case "custom":
             default:
-                return generateCustomScript(purpose, parameters);
+                return Response.text(generateCustomScript(purpose, parameters));
         }
     }
 
