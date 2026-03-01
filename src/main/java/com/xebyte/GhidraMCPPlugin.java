@@ -97,7 +97,7 @@ class VersionInfo {
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 171;
+    private static final int ENDPOINT_COUNT = 172;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -2307,6 +2307,12 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             sendResponse(exchange, gotoAddress(address));
         }));
 
+        // BATCH_APPLY_DOCUMENTATION - Apply all documentation to a function in one call
+        server.createContext("/batch_apply_documentation", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            sendResponse(exchange, batchApplyDocumentation(params));
+        }));
+
         // SERVER_AUTHENTICATE - Register credentials for programmatic server authentication
         server.createContext("/server/authenticate", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
@@ -4381,6 +4387,223 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     private String analyzeFunctionCompleteness(String functionAddress) {
         return analysisService.analyzeFunctionCompleteness(functionAddress);
+    }
+
+    /**
+     * v4.0.0: Apply all documentation to a function in a single call.
+     * Orchestrates: goto -> rename -> prototype -> variable types -> variable renames -> comments -> score.
+     * Ordering matters: prototype MUST come before comments (set_function_prototype wipes plate comments).
+     * Each step is optional — only fields present in params are applied.
+     * Each step is independent — failures in one step don't prevent subsequent steps.
+     */
+    @SuppressWarnings("unchecked")
+    private String batchApplyDocumentation(Map<String, Object> params) {
+        String address = params.get("address") != null ? params.get("address").toString() : null;
+        if (address == null || address.trim().isEmpty()) {
+            return "{\"error\": \"address parameter is required\"}";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"address\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(address)).append("\", \"steps\": {");
+        java.util.List<String> errors = new java.util.ArrayList<>();
+        boolean firstStep = true;
+
+        // Step 1: Goto (optional) — navigate CodeBrowser to this function
+        Object gotoParam = params.get("goto");
+        boolean doGoto = gotoParam instanceof Boolean ? (Boolean) gotoParam : false;
+        if (doGoto) {
+            if (!firstStep) sb.append(", ");
+            firstStep = false;
+            try {
+                String gotoResult = gotoAddress(address);
+                boolean gotoOk = gotoResult != null && !gotoResult.contains("\"error\"");
+                sb.append("\"goto\": {\"success\": ").append(gotoOk).append("}");
+            } catch (Exception e) {
+                sb.append("\"goto\": {\"success\": false, \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
+                errors.add("goto: " + e.getMessage());
+            }
+        }
+
+        // Step 2: Rename function (optional)
+        String name = params.get("name") != null ? params.get("name").toString() : null;
+        if (name != null && !name.isEmpty()) {
+            if (!firstStep) sb.append(", ");
+            firstStep = false;
+            try {
+                String renameResult = renameFunctionByAddress(address, name);
+                boolean renameOk = renameResult != null && (renameResult.contains("Success") || renameResult.contains("Renamed"));
+                sb.append("\"rename\": {\"success\": ").append(renameOk);
+                if (!renameOk) {
+                    sb.append(", \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(renameResult)).append("\"");
+                    errors.add("rename: " + renameResult);
+                }
+                sb.append("}");
+            } catch (Exception e) {
+                sb.append("\"rename\": {\"success\": false, \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
+                errors.add("rename: " + e.getMessage());
+            }
+        }
+
+        // Step 3: Set prototype (optional) — MUST come BEFORE comments (wipes plate comment)
+        String prototype = params.get("prototype") != null ? params.get("prototype").toString() : null;
+        if (prototype != null && !prototype.isEmpty()) {
+            if (!firstStep) sb.append(", ");
+            firstStep = false;
+            try {
+                String callingConvention = params.get("calling_convention") != null ? params.get("calling_convention").toString() : null;
+                com.xebyte.core.FunctionService.PrototypeResult protoResult = setFunctionPrototype(address, prototype, callingConvention);
+                sb.append("\"prototype\": {\"success\": ").append(protoResult.isSuccess());
+                if (!protoResult.isSuccess()) {
+                    sb.append(", \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(protoResult.getErrorMessage())).append("\"");
+                    errors.add("prototype: " + protoResult.getErrorMessage());
+                }
+                sb.append("}");
+            } catch (Exception e) {
+                sb.append("\"prototype\": {\"success\": false, \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
+                errors.add("prototype: " + e.getMessage());
+            }
+        }
+
+        // Step 4: Set variable types (optional)
+        Object varTypesObj = params.get("variable_types");
+        if (varTypesObj instanceof Map) {
+            if (!firstStep) sb.append(", ");
+            firstStep = false;
+            Map<String, Object> varTypes = (Map<String, Object>) varTypesObj;
+            int setCount = 0, failCount = 0;
+            java.util.List<String> typeErrors = new java.util.ArrayList<>();
+            for (Map.Entry<String, Object> entry : varTypes.entrySet()) {
+                try {
+                    String typeResult = setLocalVariableType(address, entry.getKey(), entry.getValue().toString());
+                    if (typeResult != null && (typeResult.contains("Success") || typeResult.contains("success") || typeResult.contains("Changed"))) {
+                        setCount++;
+                    } else {
+                        failCount++;
+                        typeErrors.add(entry.getKey() + ": " + (typeResult != null ? typeResult.substring(0, Math.min(typeResult.length(), 100)) : "null"));
+                    }
+                } catch (Exception e) {
+                    failCount++;
+                    typeErrors.add(entry.getKey() + ": " + e.getMessage());
+                }
+            }
+            sb.append("\"variable_types\": {\"success\": ").append(failCount == 0);
+            sb.append(", \"set\": ").append(setCount).append(", \"failed\": ").append(failCount);
+            if (!typeErrors.isEmpty()) {
+                sb.append(", \"errors\": [");
+                for (int i = 0; i < typeErrors.size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append("\"").append(com.xebyte.core.ServiceUtils.escapeJson(typeErrors.get(i))).append("\"");
+                }
+                sb.append("]");
+                errors.addAll(typeErrors);
+            }
+            sb.append("}");
+        }
+
+        // Step 5: Rename variables (optional)
+        Object varRenamesObj = params.get("variable_renames");
+        if (varRenamesObj instanceof Map) {
+            if (!firstStep) sb.append(", ");
+            firstStep = false;
+            Map<String, String> varRenames = new java.util.LinkedHashMap<>();
+            for (Map.Entry<String, Object> entry : ((Map<String, Object>) varRenamesObj).entrySet()) {
+                varRenames.put(entry.getKey(), entry.getValue().toString());
+            }
+            try {
+                String renameResult = batchRenameVariables(address, varRenames, true);
+                // batchRenameVariables returns JSON — pass through key fields
+                boolean renameOk = renameResult != null && renameResult.contains("\"success\": true");
+                sb.append("\"variable_renames\": {\"success\": ").append(renameOk);
+                // Extract counts from JSON response
+                try {
+                    int renamedIdx = renameResult.indexOf("\"variables_renamed\":");
+                    int failedIdx = renameResult.indexOf("\"variables_failed\":");
+                    if (renamedIdx >= 0) {
+                        String countStr = renameResult.substring(renamedIdx + 20).trim();
+                        int end = countStr.indexOf(',');
+                        if (end < 0) end = countStr.indexOf('}');
+                        sb.append(", \"renamed\": ").append(countStr.substring(0, end).trim());
+                    }
+                    if (failedIdx >= 0) {
+                        String countStr = renameResult.substring(failedIdx + 19).trim();
+                        int end = countStr.indexOf(',');
+                        if (end < 0) end = countStr.indexOf('}');
+                        sb.append(", \"failed\": ").append(countStr.substring(0, end).trim());
+                    }
+                } catch (Exception ignored) { }
+                if (!renameOk) errors.add("variable_renames: " + renameResult);
+                sb.append("}");
+            } catch (Exception e) {
+                sb.append("\"variable_renames\": {\"success\": false, \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
+                errors.add("variable_renames: " + e.getMessage());
+            }
+        }
+
+        // Step 6: Set comments (optional) — AFTER prototype to avoid wipe
+        String plateComment = params.get("plate_comment") != null ? params.get("plate_comment").toString() : null;
+        java.util.List<Map<String, String>> decompComments = convertToMapList(params.get("decompiler_comments"));
+        java.util.List<Map<String, String>> disasmComments = convertToMapList(params.get("disassembly_comments"));
+        boolean hasComments = plateComment != null ||
+                              (decompComments != null && !decompComments.isEmpty()) ||
+                              (disasmComments != null && !disasmComments.isEmpty());
+        if (hasComments) {
+            if (!firstStep) sb.append(", ");
+            firstStep = false;
+            try {
+                String commentResult = batchSetComments(address, decompComments, disasmComments, plateComment);
+                boolean commentOk = commentResult != null && commentResult.contains("\"success\": true");
+                sb.append("\"comments\": {\"success\": ").append(commentOk);
+                // Extract plate_comment_set from response
+                if (commentResult != null && commentResult.contains("\"plate_comment_set\": true")) {
+                    sb.append(", \"plate\": true");
+                }
+                try {
+                    int decompIdx = commentResult.indexOf("\"decompiler_comments_set\":");
+                    int disasmIdx = commentResult.indexOf("\"disassembly_comments_set\":");
+                    if (decompIdx >= 0) {
+                        String countStr = commentResult.substring(decompIdx + 26).trim();
+                        int end = countStr.indexOf(',');
+                        if (end < 0) end = countStr.indexOf('}');
+                        sb.append(", \"decompiler\": ").append(countStr.substring(0, end).trim());
+                    }
+                    if (disasmIdx >= 0) {
+                        String countStr = commentResult.substring(disasmIdx + 27).trim();
+                        int end = countStr.indexOf(',');
+                        if (end < 0) end = countStr.indexOf('}');
+                        sb.append(", \"disassembly\": ").append(countStr.substring(0, end).trim());
+                    }
+                } catch (Exception ignored) { }
+                if (!commentOk) errors.add("comments: " + commentResult);
+                sb.append("}");
+            } catch (Exception e) {
+                sb.append("\"comments\": {\"success\": false, \"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
+                errors.add("comments: " + e.getMessage());
+            }
+        }
+
+        sb.append("}"); // close "steps"
+
+        // Step 7: Completeness score (optional, default true)
+        Object scoreParam = params.get("score");
+        boolean doScore = scoreParam instanceof Boolean ? (Boolean) scoreParam : true;
+        if (doScore) {
+            try {
+                String scoreResult = analyzeFunctionCompleteness(address);
+                sb.append(", \"completeness\": ").append(scoreResult);
+            } catch (Exception e) {
+                sb.append(", \"completeness\": {\"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
+            }
+        }
+
+        // Errors summary
+        sb.append(", \"errors\": [");
+        for (int i = 0; i < errors.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append("\"").append(com.xebyte.core.ServiceUtils.escapeJson(errors.get(i))).append("\"");
+        }
+        sb.append("]}");
+
+        return sb.toString();
     }
 
     /**

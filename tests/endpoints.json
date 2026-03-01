@@ -1,7 +1,7 @@
 {
   "version": "4.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 187,
+  "total_endpoints": 188,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -90,6 +90,7 @@
     {"path": "/get_plate_comment", "method": "GET", "category": "comment", "params": ["address"], "description": "Get plate comment"},
     {"path": "/set_plate_comment", "method": "POST", "category": "comment", "params": ["function_address", "comment"], "description": "Set plate comment"},
     {"path": "/batch_set_comments", "method": "POST", "category": "comment", "params": ["function_address", "decompiler_comments", "disassembly_comments", "plate_comment"], "description": "Set multiple comments"},
+    {"path": "/batch_apply_documentation", "method": "POST", "category": "analysis", "params": ["address", "name", "prototype", "calling_convention", "variable_types", "variable_renames", "plate_comment", "decompiler_comments", "disassembly_comments", "goto", "score"], "description": "Apply all documentation to a function in one call"},
     {"path": "/clear_function_comments", "method": "POST", "category": "comment", "params": ["function_address", "clear_plate", "clear_pre", "clear_eol"], "description": "Clear all comments for a function"},
     {"path": "/set_bookmark", "method": "POST", "category": "comment", "params": ["address", "category", "comment"], "description": "Set bookmark"},
     {"path": "/delete_bookmark", "method": "POST", "category": "comment", "params": ["address", "category"], "description": "Delete bookmark"},

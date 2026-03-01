@@ -4425,6 +4425,85 @@ def analyze_function_completeness(function_address: str) -> str:
 
 
 @mcp.tool()
+def batch_apply_documentation(
+    address: str,
+    name: str = None,
+    prototype: str = None,
+    calling_convention: str = None,
+    variable_types: dict = None,
+    variable_renames: dict = None,
+    plate_comment: str = None,
+    decompiler_comments: list = None,
+    disassembly_comments: list = None,
+    goto: bool = False,
+    score: bool = True,
+) -> str:
+    """
+    Apply all documentation to a function in a single call (v4.0.0).
+    Replaces 5-6 separate tool calls (rename + prototype + types + renames + comments + score)
+    with one atomic operation.
+
+    Steps execute in dependency order: rename -> prototype -> variable_types ->
+    variable_renames -> comments -> score. All fields except address are optional.
+    Each step is independent — failures in one step don't prevent subsequent steps.
+
+    IMPORTANT: Prototype is applied BEFORE comments because set_function_prototype
+    wipes the plate comment. Comments are always set last.
+
+    Args:
+        address: Function address in hex format (e.g., "0x6FDB2C70"). Required.
+        name: New function name (PascalCase, verb-first). Omit to skip rename.
+        prototype: Full function signature (e.g., "void* __stdcall GetItemDataRecord(int nItemCode)").
+        calling_convention: Override calling convention (e.g., "__stdcall", "__fastcall").
+        variable_types: Dict of {variable_name: new_type} to set storage types.
+            Example: {"param_1": "int", "local_8": "void*"}
+        variable_renames: Dict of {old_name: new_name} for Hungarian-notation renames.
+            Example: {"param_1": "nItemCode", "local_8": "pRecord"}
+        plate_comment: Function header comment with summary, algorithm, parameters, returns.
+        decompiler_comments: List of {"address": "0x...", "comment": "..."} for PRE_COMMENTs.
+        disassembly_comments: List of {"address": "0x...", "comment": "..."} for EOL_COMMENTs.
+        goto: If true, navigate CodeBrowser to this function before applying changes.
+        score: If true (default), run completeness analysis after all changes and include the score.
+
+    Returns:
+        JSON with per-step results and optional completeness score:
+        {
+          "address": "0x6FDB2C70",
+          "steps": {
+            "rename": {"success": true},
+            "prototype": {"success": true},
+            "variable_types": {"success": true, "set": 2, "failed": 0},
+            "variable_renames": {"success": true, "renamed": 3, "failed": 0},
+            "comments": {"success": true, "plate": true, "decompiler": 2, "disassembly": 1}
+          },
+          "completeness": { ... full completeness analysis ... },
+          "errors": []
+        }
+    """
+    validate_hex_address(address)
+
+    payload = {"address": address, "goto": goto, "score": score}
+    if name is not None:
+        payload["name"] = name
+    if prototype is not None:
+        payload["prototype"] = prototype
+    if calling_convention is not None:
+        payload["calling_convention"] = calling_convention
+    if variable_types is not None:
+        payload["variable_types"] = variable_types
+    if variable_renames is not None:
+        payload["variable_renames"] = variable_renames
+    if plate_comment is not None:
+        payload["plate_comment"] = plate_comment
+    if decompiler_comments is not None:
+        payload["decompiler_comments"] = decompiler_comments
+    if disassembly_comments is not None:
+        payload["disassembly_comments"] = disassembly_comments
+
+    return safe_post_json("batch_apply_documentation", payload)
+
+
+@mcp.tool()
 def batch_analyze_completeness(addresses: list[str]) -> str:
     """
     Analyze completeness for multiple functions in a single call.
@@ -7486,20 +7565,43 @@ def delete_file(file_path: str) -> str:
 
 
 @mcp.tool()
-def checkout_file(repo: str, path: str) -> str:
+def checkout_file(repo: str, path: str, exclusive: bool = True) -> str:
     """
     Check out a file from a Ghidra shared server repository for exclusive editing.
 
-    Requires an active server connection (use connect_server first).
+    Checks the file's current checkout status first. If already checked out,
+    returns the existing checkout info instead of failing.
 
     Args:
         repo: Repository name (e.g., "MyProject").
         path: File path within the repository (e.g., "/Game.exe").
+        exclusive: If True (default), check out exclusively for editing.
 
     Returns:
         JSON with checkout status.
     """
-    return safe_post_json("server/version_control/checkout", {"repo": repo, "path": path})
+    # Check current status first to avoid errors on already-checked-out files
+    folder = path.rsplit("/", 1)[0] if "/" in path else "/"
+    if not folder:
+        folder = "/"
+    status = safe_get_json("server/checkouts", {"path": folder})
+    try:
+        status_data = json.loads(status) if isinstance(status, str) else status
+        checkouts = status_data.get("checkouts", [])
+        for co in checkouts:
+            if co.get("path") == path and co.get("is_checked_out"):
+                return json.dumps({
+                    "status": "already_checked_out",
+                    "path": path,
+                    "exclusive": co.get("is_checked_out_exclusive", False),
+                    "user": co.get("checkout_user", "unknown")
+                })
+    except (json.JSONDecodeError, AttributeError):
+        pass  # Fall through to attempt checkout
+
+    return safe_post_json("server/version_control/checkout", {
+        "path": path, "exclusive": str(exclusive).lower()
+    })
 
 
 @mcp.tool()
@@ -7517,7 +7619,7 @@ def checkin_file(repo: str, path: str, comment: str, keep_checked_out: bool = Fa
         JSON with check-in status.
     """
     return safe_post_json("server/version_control/checkin", {
-        "repo": repo, "path": path, "comment": comment,
+        "path": path, "comment": comment,
         "keepCheckedOut": str(keep_checked_out).lower()
     })
 
@@ -7534,7 +7636,7 @@ def undo_checkout(repo: str, path: str) -> str:
     Returns:
         JSON with undo status.
     """
-    return safe_post_json("server/version_control/undo_checkout", {"repo": repo, "path": path})
+    return safe_post_json("server/version_control/undo_checkout", {"path": path})
 
 
 @mcp.tool()
