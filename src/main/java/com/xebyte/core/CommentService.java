@@ -46,16 +46,37 @@ public class CommentService {
     }
 
     @SuppressWarnings("deprecation")
-    public Response setDecompilerComment(String addressStr, String comment) {
+    @McpTool(value = "/set_decompiler_comment", description = "Set a comment for a given address in the function pseudocode", method = McpTool.Method.POST)
+
+    public Response setDecompilerComment(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "comment") String comment) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment");
     }
 
     @SuppressWarnings("deprecation")
-    public Response setDisassemblyComment(String addressStr, String comment) {
+    @McpTool(value = "/set_disassembly_comment", description = "Set a comment for a given address in the function disassembly", method = McpTool.Method.POST)
+
+    public Response setDisassemblyComment(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "comment") String comment) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment");
     }
 
-    public Response getPlateComment(String address, String programName) {
+    @McpTool(value = "/get_plate_comment", description = "Get function plate (header) comment")
+
+
+    public Response getPlateComment(
+
+
+            @Param(value = "address") String address,
+
+
+            @Param(value = "program", required = false) String programName) {
         Program program = programProvider.resolveProgram(programName);
         if (program == null) return Response.err("No program loaded");
         if (address == null || address.isEmpty()) return Response.err("address parameter is required");
@@ -76,7 +97,13 @@ public class CommentService {
     }
 
     @SuppressWarnings("deprecation")
-    public Response setPlateComment(String functionAddress, String comment) {
+    @McpTool(value = "/set_plate_comment", description = "Set function plate (header) comment (v1.5.0)", method = McpTool.Method.POST)
+
+    public Response setPlateComment(
+
+            @Param(value = "function_address") String functionAddress,
+
+            @Param(value = "comment") String comment) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (functionAddress == null || functionAddress.isEmpty()) return Response.err("Function address is required");
@@ -102,8 +129,17 @@ public class CommentService {
     }
 
     @SuppressWarnings("deprecation")
-    public Response batchSetComments(String functionAddress, List<Map<String, String>> decompilerComments,
-                                     List<Map<String, String>> disassemblyComments, String plateComment) {
+    @McpTool(value = "/batch_set_comments", description = "Set multiple comments in a single operation (v1.5.0)", method = McpTool.Method.POST)
+
+    public Response batchSetComments(
+
+            @Param(value = "function_address") String functionAddress,
+
+            @Param(value = "decompilerComments", type = "object") List<Map<String, String>> decompilerComments,
+
+            @Param(value = "disassemblyComments", type = "object") List<Map<String, String>> disassemblyComments,
+
+            @Param(value = "plateComment") String plateComment) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
 
@@ -179,7 +215,17 @@ public class CommentService {
     }
 
     @SuppressWarnings("deprecation")
-    public Response clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol) {
+    @McpTool(value = "/clear_function_comments", description = "Clear all comments (plate, PRE, EOL) within a function's address range (v3.0.1)", method = McpTool.Method.POST)
+
+    public Response clearFunctionComments(
+
+            @Param(value = "function_address") String functionAddress,
+
+            @Param(value = "clearPlate", type = "boolean") boolean clearPlate,
+
+            @Param(value = "clearPre", type = "boolean") boolean clearPre,
+
+            @Param(value = "clearEol", type = "boolean") boolean clearEol) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (functionAddress == null || functionAddress.isEmpty()) return Response.err("function_address parameter is required");

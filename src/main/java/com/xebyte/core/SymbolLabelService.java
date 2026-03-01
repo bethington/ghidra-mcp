@@ -38,7 +38,15 @@ public class SymbolLabelService {
     /**
      * List all labels within a function's address range.
      */
-    public Response getFunctionLabels(String functionName, int offset, int limit) {
+    @McpTool(value = "/get_function_labels", description = "Get all labels within the specified function by name")
+
+    public Response getFunctionLabels(
+
+            @Param(value = "name") String functionName,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -98,7 +106,15 @@ public class SymbolLabelService {
     /**
      * Rename a label at the specified address.
      */
-    public Response renameLabel(String addressStr, String oldName, String newName) {
+    @McpTool(value = "/rename_label", description = "Rename an existing label at the specified address", method = McpTool.Method.POST)
+
+    public Response renameLabel(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "old_name") String oldName,
+
+            @Param(value = "new_name") String newName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -152,7 +168,13 @@ public class SymbolLabelService {
     /**
      * Create a new label at the specified address.
      */
-    public Response createLabel(String addressStr, String labelName) {
+    @McpTool(value = "/create_label", description = "Create a new label at the specified address", method = McpTool.Method.POST)
+
+    public Response createLabel(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "name") String labelName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -215,7 +237,11 @@ public class SymbolLabelService {
     /**
      * Batch create multiple labels in a single transaction.
      */
-    public Response batchCreateLabels(List<Map<String, String>> labels) {
+    @McpTool(value = "/batch_create_labels", description = "Create multiple labels in a single atomic operation (v1.5.1)", method = McpTool.Method.POST)
+
+    public Response batchCreateLabels(
+
+            @Param(value = "labels", type = "object") List<Map<String, String>> labels) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -317,7 +343,13 @@ public class SymbolLabelService {
     /**
      * Intelligently rename data or create label based on whether data is defined.
      */
-    public Response renameOrLabel(String addressStr, String newName) {
+    @McpTool(value = "/rename_or_label", description = "Intelligently rename data or create label at an address (server-side detection)", method = McpTool.Method.POST)
+
+    public Response renameOrLabel(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "name") String newName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -356,7 +388,13 @@ public class SymbolLabelService {
     /**
      * Delete a label at the specified address.
      */
-    public Response deleteLabel(String addressStr, String labelName) {
+    @McpTool(value = "/delete_label", description = "Delete a label at the specified address", method = McpTool.Method.POST)
+
+    public Response deleteLabel(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "name") String labelName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -435,7 +473,11 @@ public class SymbolLabelService {
     /**
      * Batch delete multiple labels in a single transaction.
      */
-    public Response batchDeleteLabels(List<Map<String, String>> labels) {
+    @McpTool(value = "/batch_delete_labels", description = "Delete multiple labels in a single atomic operation", method = McpTool.Method.POST)
+
+    public Response batchDeleteLabels(
+
+            @Param(value = "labels", type = "object") List<Map<String, String>> labels) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -534,7 +576,13 @@ public class SymbolLabelService {
     /**
      * Rename defined data symbols at an address.
      */
-    public Response renameDataAtAddress(String addressStr, String newName) {
+    @McpTool(value = "/rename_data", description = "Rename a data label at the specified address", method = McpTool.Method.POST)
+
+    public Response renameDataAtAddress(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "newName") String newName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -597,7 +645,13 @@ public class SymbolLabelService {
     /**
      * Rename a global variable/symbol.
      */
-    public Response renameGlobalVariable(String oldName, String newName) {
+    @McpTool(value = "/rename_global_variable", description = "Rename a global variable", method = McpTool.Method.POST)
+
+    public Response renameGlobalVariable(
+
+            @Param(value = "old_name") String oldName,
+
+            @Param(value = "new_name") String newName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -660,7 +714,13 @@ public class SymbolLabelService {
      * Rename an external location (e.g., change Ordinal_123 to a real function name).
      * Uses SwingUtilities.invokeAndWait + transaction for thread safety.
      */
-    public Response renameExternalLocation(String address, String newName) {
+    @McpTool(value = "/rename_external_location", description = "Rename an external location (e.g., change Ordinal_123 to a real function name)", method = McpTool.Method.POST)
+
+    public Response renameExternalLocation(
+
+            @Param(value = "address") String address,
+
+            @Param(value = "new_name") String newName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
 
@@ -732,7 +792,11 @@ public class SymbolLabelService {
      * Determine if address has data/code and suggest the appropriate rename operation.
      * Read-only detection using SwingUtilities.invokeAndWait for thread safety.
      */
-    public Response canRenameAtAddress(String addressStr) {
+    @McpTool(value = "/can_rename_at_address", description = "Check what can be renamed at a given address")
+
+    public Response canRenameAtAddress(
+
+            @Param(value = "address") String addressStr) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");

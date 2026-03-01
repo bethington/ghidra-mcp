@@ -149,7 +149,13 @@ public class AnalysisService {
     // Public endpoint methods
     // ========================================================================
 
-    public Response listAnalyzers(String programName) {
+    @McpTool(value = "/list_analyzers", description = "List all available analyzers for the current program")
+
+
+    public Response listAnalyzers(
+
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return Response.err((String) programResult[1]);
@@ -181,7 +187,11 @@ public class AnalysisService {
     /**
      * Trigger auto-analysis on the current or named program.
      */
-    public Response runAnalysis(String programName) {
+    @McpTool(value = "/run_analysis", description = "Run auto-analysis on the current program", method = McpTool.Method.POST)
+
+    public Response runAnalysis(
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return Response.err((String) programResult[1]);
@@ -216,9 +226,25 @@ public class AnalysisService {
         }
     }
 
-    public Response analyzeDataRegion(String startAddressStr, int maxScanBytes,
-                                    boolean includeXrefMap, boolean includeAssemblyPatterns,
-                                    boolean includeBoundaryDetection) {
+    @McpTool(value = "/analyze_data_region", description = "Comprehensive single-call analysis of a data region", method = McpTool.Method.POST)
+
+
+    public Response analyzeDataRegion(
+
+
+            @Param(value = "address") String startAddressStr,
+
+
+            @Param(value = "maxScanBytes", type = "integer") int maxScanBytes,
+
+
+            @Param(value = "includeXrefMap", type = "boolean") boolean includeXrefMap,
+
+
+            @Param(value = "includeAssemblyPatterns", type = "boolean") boolean includeAssemblyPatterns,
+
+
+            @Param(value = "includeBoundaryDetection", type = "boolean") boolean includeBoundaryDetection) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
 
@@ -406,8 +432,17 @@ public class AnalysisService {
     /**
      * 3. DETECT_ARRAY_BOUNDS - Array/table size detection
      */
-    public Response detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
-                                    boolean analyzeIndexing, int maxScanRange) {
+    @McpTool(value = "/detect_array_bounds", description = "Automatically detect array/table size and element boundaries", method = McpTool.Method.POST)
+
+    public Response detectArrayBounds(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "analyzeLoopBounds", type = "boolean") boolean analyzeLoopBounds,
+
+            @Param(value = "analyzeIndexing", type = "boolean") boolean analyzeIndexing,
+
+            @Param(value = "maxScanRange", type = "integer") int maxScanRange) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
 
@@ -458,7 +493,15 @@ public class AnalysisService {
     /**
      * GET_FIELD_ACCESS_CONTEXT - Get assembly/decompilation context for specific field offsets
      */
-    public Response getFieldAccessContext(String structAddressStr, int fieldOffset, int numExamples) {
+    @McpTool(value = "/get_field_access_context", description = "Get assembly/decompilation context for specific field offsets", method = McpTool.Method.POST)
+
+    public Response getFieldAccessContext(
+
+            @Param(value = "struct_address") String structAddressStr,
+
+            @Param(value = "fieldOffset", type = "integer") int fieldOffset,
+
+            @Param(value = "numExamples", type = "integer") int numExamples) {
         // MAJOR FIX #7: Validate input parameters
         if (fieldOffset < 0 || fieldOffset > MAX_FIELD_OFFSET) {
             return Response.err("Field offset must be between 0 and " + MAX_FIELD_OFFSET);
@@ -566,7 +609,15 @@ public class AnalysisService {
     /**
      * 7. INSPECT_MEMORY_CONTENT - Memory content inspection with string detection
      */
-    public Response inspectMemoryContent(String addressStr, int length, boolean detectStrings) {
+    @McpTool(value = "/inspect_memory_content", description = "Read raw memory bytes and provide hex/ASCII representation with string detection hints")
+
+    public Response inspectMemoryContent(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "length", type = "integer") int length,
+
+            @Param(value = "detectStrings", type = "boolean") boolean detectStrings) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
 
@@ -722,7 +773,10 @@ public class AnalysisService {
      * Returns decompiled code + classification + callees + variables with pre-analysis + compact completeness
      * in a single response, using only one decompilation.
      */
-    public Response analyzeForDocumentation(String functionAddress, String programName) {
+    @McpTool(value = "/analyze_for_documentation", description = "Composite RE documentation analysis (decompile + classify + variables + completeness)")
+    public Response analyzeForDocumentation(
+            @Param(value = "function_address", description = "Function address (hex)") String functionAddress,
+            @Param(value = "program", required = false, description = "Program name") String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
@@ -879,6 +933,7 @@ public class AnalysisService {
                         }
                     }
                     result.append("\"dat_global_count\": ").append(datGlobalCount).append(", ");
+                    // completeness is appended after executeRead to avoid deadlock (analyzeFunctionCompleteness uses invokeAndWait)
                 } catch (Exception e) {
                     errorMsg.set(e.getMessage());
                 }
@@ -908,7 +963,13 @@ public class AnalysisService {
     /**
      * Search for byte patterns with optional wildcards
      */
-    public Response searchBytePatterns(String pattern, String mask) {
+    @McpTool(value = "/search_byte_patterns", description = "Search for byte patterns with optional wildcards (e.g., 'E8 ?? ?? ?? ??')")
+
+    public Response searchBytePatterns(
+
+            @Param(value = "pattern", required = false) String pattern,
+
+            @Param(value = "mask", required = false) String mask) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1007,7 +1068,13 @@ public class AnalysisService {
      * Find functions structurally similar to the target function
      * Uses basic block count, instruction count, call count, and cyclomatic complexity
      */
-    public Response findSimilarFunctions(String targetFunction, double threshold) {
+    @McpTool(value = "/find_similar_functions", description = "Find similar functions")
+
+    public Response findSimilarFunctions(
+
+            @Param(value = "target_function") String targetFunction,
+
+            @Param(value = "threshold", type = "number") double threshold) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1110,7 +1177,11 @@ public class AnalysisService {
      * Analyze function control flow complexity
      * Calculates cyclomatic complexity, basic blocks, edges, and detailed metrics
      */
-    public Response analyzeControlFlow(String functionName) {
+    @McpTool(value = "/analyze_control_flow", description = "Analyze the control flow structure of a function")
+
+    public Response analyzeControlFlow(
+
+            @Param(value = "function_name") String functionName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1294,7 +1365,11 @@ public class AnalysisService {
     /**
      * Find potentially unreachable code blocks
      */
-    public Response findDeadCode(String functionName) {
+    @McpTool(value = "/find_dead_code", description = "Find unreachable/dead code blocks in a function or entire program")
+
+    public Response findDeadCode(
+
+            @Param(value = "function_name") String functionName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1325,7 +1400,11 @@ public class AnalysisService {
     /**
      * Analyze function documentation completeness
      */
-    public Response analyzeFunctionCompleteness(String functionAddress) {
+    @McpTool(value = "/analyze_function_completeness", description = "Analyze how completely a function has been documented (v1.5.0+)")
+
+    public Response analyzeFunctionCompleteness(
+
+            @Param(value = "function_address") String functionAddress) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1806,8 +1885,19 @@ public class AnalysisService {
      * v1.5.0: Find next undefined function needing analysis
      */
     @SuppressWarnings("deprecation")
-    public Response findNextUndefinedFunction(String startAddress, String criteria,
-                                            String pattern, String direction, String programName) {
+    @McpTool(value = "/find_next_undefined_function", description = "Find the next function needing analysis (v1.5.0)")
+
+    public Response findNextUndefinedFunction(
+
+            @Param(value = "start_address") String startAddress,
+
+            @Param(value = "criteria", required = false) String criteria,
+
+            @Param(value = "pattern", required = false) String pattern,
+
+            @Param(value = "direction", required = false) String direction,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
@@ -1879,9 +1969,23 @@ public class AnalysisService {
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
      */
-    public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
-                                          boolean includeCallers, boolean includeDisasm, boolean includeVariables,
-                                          String programName) {
+    @McpTool(value = "/analyze_function_complete", description = "Comprehensive function analysis in a single call (v1.6.0)")
+
+    public Response analyzeFunctionComplete(
+
+            @Param(value = "name") String name,
+
+            @Param(value = "includeXrefs", type = "boolean") boolean includeXrefs,
+
+            @Param(value = "includeCallees", type = "boolean") boolean includeCallees,
+
+            @Param(value = "includeCallers", type = "boolean") boolean includeCallers,
+
+            @Param(value = "includeDisasm", type = "boolean") boolean includeDisasm,
+
+            @Param(value = "includeVariables", type = "boolean") boolean includeVariables,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
@@ -2097,9 +2201,29 @@ public class AnalysisService {
     /**
      * NEW v1.6.0: Enhanced function search with filtering and sorting
      */
-    public Response searchFunctionsEnhanced(String namePattern, Integer minXrefs, Integer maxXrefs,
-                                          String callingConvention, Boolean hasCustomName, boolean regex,
-                                          String sortBy, int offset, int limit, String programName) {
+    @McpTool(value = "/search_functions_enhanced", description = "Enhanced function search with filtering and sorting (v1.6.0)")
+
+    public Response searchFunctionsEnhanced(
+
+            @Param(value = "name_pattern") String namePattern,
+
+            @Param(value = "minXrefs", type = "integer") Integer minXrefs,
+
+            @Param(value = "maxXrefs", type = "integer") Integer maxXrefs,
+
+            @Param(value = "callingConvention") String callingConvention,
+
+            @Param(value = "hasCustomName", type = "boolean") Boolean hasCustomName,
+
+            @Param(value = "regex", type = "boolean") boolean regex,
+
+            @Param(value = "sortBy") String sortBy,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {

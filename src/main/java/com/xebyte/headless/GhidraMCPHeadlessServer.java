@@ -263,17 +263,26 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         DocumentationHashService documentationHashService = new DocumentationHashService(programProvider, threadingStrategy, new BinaryComparisonService());
         documentationHashService.setFunctionService(functionService);
         AnalysisService analysisService = new AnalysisService(programProvider, threadingStrategy, functionService);
+        documentationHashService.setCommentService(commentService);
+        documentationHashService.setAnalysisService(analysisService);
         MalwareSecurityService malwareSecurityService = new MalwareSecurityService(programProvider, threadingStrategy);
         ProgramScriptService programScriptService = new ProgramScriptService(programProvider, threadingStrategy);
 
-        // Register shared endpoints via EndpointRegistrar
+        // Register all annotated endpoints via AnnotationScanner
         EndpointRegistrar.ContextRegistrar registrar = (path, handler) ->
             server.createContext(path, sunExchange -> handler.accept(new SunHttpExchangeAdapter(sunExchange)));
 
-        EndpointRegistrar.registerAll(registrar, EndpointRegistrar.sharedEndpoints(
-            listingService, commentService, symbolLabelService, functionService,
-            xrefCallGraphService, dataTypeService, documentationHashService,
-            analysisService, malwareSecurityService, programScriptService));
+        List<AnnotationScanner.ToolDef> toolDefs = AnnotationScanner.scan(
+                listingService, commentService, symbolLabelService, functionService,
+                xrefCallGraphService, dataTypeService, documentationHashService,
+                analysisService, malwareSecurityService, programScriptService);
+        AnnotationScanner.registerHttp(registrar, toolDefs);
+
+        // Serve MCP tool schema
+        String schemaJson = AnnotationScanner.toSchemaJson(toolDefs);
+        registrar.createContext("/mcp/schema", EndpointRegistrar.safeHandler(exchange -> {
+            EndpointRegistrar.sendResponse(exchange, Response.text(schemaJson));
+        }));
 
         // Register headless-specific endpoints
         registerHeadlessEndpoints();

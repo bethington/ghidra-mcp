@@ -162,7 +162,15 @@ public class FunctionService {
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
-    public Response decompileFunctionByAddress(String addressStr, String programName, int timeoutSeconds) {
+    @McpTool(value = "/decompile_function", description = "Decompile a function by name or address and return the decompiled C code")
+
+    public Response decompileFunctionByAddress(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "program", required = false) String programName,
+
+            @Param(value = "timeoutSeconds", type = "integer") int timeoutSeconds) {
         Object[] result = getProgramOrError(programName);
         Program program = (Program) result[0];
         if (program == null) return (Response) result[1];
@@ -285,7 +293,11 @@ public class FunctionService {
     /**
      * Batch decompile multiple functions by name.
      */
-    public Response batchDecompileFunctions(String functionsParam) {
+    @McpTool(value = "/batch_decompile", description = "Decompile multiple functions at once for bulk analysis")
+
+    public Response batchDecompileFunctions(
+
+            @Param(value = "functions") String functionsParam) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -357,7 +369,11 @@ public class FunctionService {
     /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
-    public Response forceDecompile(String functionAddrStr) {
+    @McpTool(value = "/force_decompile", description = "Force fresh decompilation of a function, bypassing the cache")
+
+    public Response forceDecompile(
+
+            @Param(value = "address") String functionAddrStr) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -457,7 +473,13 @@ public class FunctionService {
      * If programName is provided, uses that program instead of the current one.
      */
     @SuppressWarnings("deprecation")
-    public Response disassembleFunction(String addressStr, String programName) {
+    @McpTool(value = "/disassemble_function", description = "Get assembly code (address: instruction; comment) for a function")
+
+    public Response disassembleFunction(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] result = getProgramOrError(programName);
         Program program = (Program) result[0];
         if (program == null) return (Response) result[1];
@@ -506,7 +528,13 @@ public class FunctionService {
     /**
      * Get function by address.
      */
-    public Response getFunctionByAddress(String addressStr, String programName) {
+    @McpTool(value = "/get_function_by_address", description = "Get a function by its address")
+
+    public Response getFunctionByAddress(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -547,7 +575,13 @@ public class FunctionService {
     /**
      * Rename a function by its name.
      */
-    public Response renameFunction(String oldName, String newName) {
+    @McpTool(value = "/rename_function", description = "Rename a function by its current name to a new user-defined name", method = McpTool.Method.POST)
+
+    public Response renameFunction(
+
+            @Param(value = "oldName") String oldName,
+
+            @Param(value = "newName") String newName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -608,7 +642,15 @@ public class FunctionService {
     /**
      * Rename a variable in a function.
      */
-    public Response renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
+    @McpTool(value = "/rename_variable", description = "Rename variable", method = McpTool.Method.POST)
+
+    public Response renameVariableInFunction(
+
+            @Param(value = "functionName") String functionName,
+
+            @Param(value = "oldName") String oldVarName,
+
+            @Param(value = "newName") String newVarName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
 
@@ -729,7 +771,13 @@ public class FunctionService {
     /**
      * Rename a function by its address.
      */
-    public Response renameFunctionByAddress(String functionAddrStr, String newName) {
+    @McpTool(value = "/rename_function_by_address", description = "Rename a function by its address", method = McpTool.Method.POST)
+
+    public Response renameFunctionByAddress(
+
+            @Param(value = "function_address") String functionAddrStr,
+
+            @Param(value = "new_name") String newName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -782,6 +830,17 @@ public class FunctionService {
     // ========================================================================
     // Prototype / Signature methods
     // ========================================================================
+
+    /** MCP endpoint wrapper — converts PrototypeResult to Response. */
+    @McpTool(value = "/set_function_prototype", description = "Set a function's prototype and optionally its calling convention", method = McpTool.Method.POST)
+    public Response setFunctionPrototypeEndpoint(
+            @Param(value = "function_address", description = "Function address in hex") String functionAddrStr,
+            @Param(value = "prototype", description = "C-style function prototype") String prototype,
+            @Param(value = "calling_convention", required = false, description = "Calling convention name") String callingConvention) {
+        PrototypeResult result = setFunctionPrototype(functionAddrStr, prototype, callingConvention);
+        if (result.isSuccess()) return Response.text("Success");
+        return Response.err(result.getErrorMessage());
+    }
 
     /**
      * Set a function's prototype with proper error handling using ApplyFunctionSignatureCmd.
@@ -1030,7 +1089,15 @@ public class FunctionService {
     /**
      * Set a local variable's type using HighFunctionDBUtil.updateDBVariable.
      */
-    public Response setLocalVariableType(String functionAddrStr, String variableName, String newType) {
+    @McpTool(value = "/set_local_variable_type", description = "Set a local variable's type", method = McpTool.Method.POST)
+
+    public Response setLocalVariableType(
+
+            @Param(value = "function_address") String functionAddrStr,
+
+            @Param(value = "variable_name") String variableName,
+
+            @Param(value = "new_type") String newType) {
         // Input validation
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
@@ -1300,7 +1367,13 @@ public class FunctionService {
      * @param noReturn true to mark as non-returning, false to mark as returning
      * @return Success or error Response
      */
-    public Response setFunctionNoReturn(String functionAddrStr, boolean noReturn) {
+    @McpTool(value = "/set_function_no_return", description = "Set a function's \"No Return\" attribute to control flow analysis", method = McpTool.Method.POST)
+
+    public Response setFunctionNoReturn(
+
+            @Param(value = "function_address") String functionAddrStr,
+
+            @Param(value = "no_return", type = "boolean", defaultValue = "true") boolean noReturn) {
         // Input validation
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
@@ -1374,7 +1447,11 @@ public class FunctionService {
      * @param instructionAddrStr The instruction address in hex format (e.g., "0x6fb5c8b9")
      * @return Success or error Response
      */
-    public Response clearInstructionFlowOverride(String instructionAddrStr) {
+    @McpTool(value = "/clear_instruction_flow_override", description = "Clear a flow override on an instruction at the given address", method = McpTool.Method.POST)
+
+    public Response clearInstructionFlowOverride(
+
+            @Param(value = "address") String instructionAddrStr) {
         // Input validation
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
@@ -1444,7 +1521,15 @@ public class FunctionService {
      * @param storageSpec Storage specification (e.g., "Stack[-0x10]:4", "EBP:4", "EAX:4")
      * @return Success or error Response
      */
-    public Response setVariableStorage(String functionAddrStr, String variableName, String storageSpec) {
+    @McpTool(value = "/set_variable_storage", description = "Set custom storage for a local variable or parameter (v1.7.0)", method = McpTool.Method.POST)
+
+    public Response setVariableStorage(
+
+            @Param(value = "function_address") String functionAddrStr,
+
+            @Param(value = "variable_name") String variableName,
+
+            @Param(value = "storage") String storageSpec) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1535,7 +1620,13 @@ public class FunctionService {
     /**
      * Get detailed information about a function's variables (parameters and locals).
      */
-    public Response getFunctionVariables(String functionName, String programName) {
+    @McpTool(value = "/get_function_variables", description = "List all variables in a function including parameters and locals (v1.5.0)")
+
+    public Response getFunctionVariables(
+
+            @Param(value = "function_name") String functionName,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
@@ -1663,10 +1754,19 @@ public class FunctionService {
      * v1.5.0: Batch rename function and all its components atomically.
      */
     @SuppressWarnings("deprecation")
-    public Response batchRenameFunctionComponents(String functionAddress, String functionName,
-                                                Map<String, String> parameterRenames,
-                                                Map<String, String> localRenames,
-                                                String returnType) {
+    @McpTool(value = "/batch_rename_function_components", description = "Rename function and all its components atomically (v1.5.0)", method = McpTool.Method.POST)
+
+    public Response batchRenameFunctionComponents(
+
+            @Param(value = "function_address") String functionAddress,
+
+            @Param(value = "function_name") String functionName,
+
+            @Param(value = "parameter_renames", type = "object") Map<String, String> parameterRenames,
+
+            @Param(value = "local_renames", type = "object") Map<String, String> localRenames,
+
+            @Param(value = "returnType") String returnType) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1755,7 +1855,11 @@ public class FunctionService {
     /**
      * Delete a function at the given address.
      */
-    public Response deleteFunctionAtAddress(String addressStr) {
+    @McpTool(value = "/delete_function", description = "Delete a function at the specified address", method = McpTool.Method.POST)
+
+    public Response deleteFunctionAtAddress(
+
+            @Param(value = "address") String addressStr) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1810,7 +1914,15 @@ public class FunctionService {
     /**
      * Create a function at the given address.
      */
-    public Response createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
+    @McpTool(value = "/create_function", description = "Create a function at the specified address (v1.9.4)", method = McpTool.Method.POST)
+
+    public Response createFunctionAtAddress(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "name") String name,
+
+            @Param(value = "disassembleFirst", type = "boolean") boolean disassembleFirst) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1907,8 +2019,17 @@ public class FunctionService {
      * @param restrictToExecuteMemory If true, restricts disassembly to executable memory (default: true)
      * @return JSON result with disassembly status
      */
-    public Response disassembleBytes(String startAddress, String endAddress, Integer length,
-                                   boolean restrictToExecuteMemory) {
+    @McpTool(value = "/disassemble_bytes", description = "Disassemble a range of undefined bytes at a specific address (v1.7.1)", method = McpTool.Method.POST)
+
+    public Response disassembleBytes(
+
+            @Param(value = "start_address") String startAddress,
+
+            @Param(value = "end_address") String endAddress,
+
+            @Param(value = "length", type = "integer") Integer length,
+
+            @Param(value = "restrictToExecuteMemory", type = "boolean") boolean restrictToExecuteMemory) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -2070,7 +2191,15 @@ public class FunctionService {
      * @param forceIndividual If true, skip batch mode and use individual renames
      * @return JSON result with rename status
      */
-    public Response batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual) {
+    @McpTool(value = "/batch_rename_variables", description = "Batch rename variables", method = McpTool.Method.POST)
+
+    public Response batchRenameVariables(
+
+            @Param(value = "function_address") String functionAddress,
+
+            @Param(value = "force_individual", type = "object", defaultValue = "false") Map<String, String> variableRenames,
+
+            @Param(value = "variable_renames", type = "boolean") boolean forceIndividual) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");

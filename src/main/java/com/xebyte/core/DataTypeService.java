@@ -139,7 +139,17 @@ public class DataTypeService {
     /**
      * List all data types available in the program with optional category filtering
      */
-    public Response listDataTypes(String category, int offset, int limit, String programName) {
+    @McpTool(value = "/list_data_types", description = "List all data types available in the program with optional category filtering")
+
+    public Response listDataTypes(
+
+            @Param(value = "category") String category,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
@@ -236,7 +246,15 @@ public class DataTypeService {
     /**
      * Search for data types by pattern
      */
-    public Response searchDataTypes(String pattern, int offset, int limit) {
+    @McpTool(value = "/search_data_types", description = "Search for data types by pattern matching against type names")
+
+    public Response searchDataTypes(
+
+            @Param(value = "pattern", required = false) String pattern,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (pattern == null || pattern.isEmpty()) return Response.err("Search pattern is required");
@@ -264,7 +282,11 @@ public class DataTypeService {
     /**
      * Get the size of a data type
      */
-    public Response getTypeSize(String typeName) {
+    @McpTool(value = "/get_type_size", description = "Get type size")
+
+    public Response getTypeSize(
+
+            @Param(value = "type_name") String typeName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
@@ -287,7 +309,11 @@ public class DataTypeService {
     /**
      * Get the layout of a structure
      */
-    public Response getStructLayout(String structName) {
+    @McpTool(value = "/get_struct_layout", description = "Get the detailed field layout of a structure data type")
+
+    public Response getStructLayout(
+
+            @Param(value = "struct_name") String structName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (structName == null || structName.isEmpty()) return Response.err("Struct name is required");
@@ -327,7 +353,11 @@ public class DataTypeService {
     /**
      * Get all values in an enumeration
      */
-    public Response getEnumValues(String enumName) {
+    @McpTool(value = "/get_enum_values", description = "Get all values and names in an enumeration")
+
+    public Response getEnumValues(
+
+            @Param(value = "enum_name") String enumName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (enumName == null || enumName.isEmpty()) return Response.err("Enum name is required");
@@ -364,7 +394,11 @@ public class DataTypeService {
     /**
      * v1.5.0: Get valid Ghidra data type strings
      */
-    public Response getValidDataTypes(String category) {
+    @McpTool(value = "/get_valid_data_types", description = "Get list of valid Ghidra data type strings (v1.5.0)")
+
+    public Response getValidDataTypes(
+
+            @Param(value = "category") String category) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -413,7 +447,11 @@ public class DataTypeService {
     /**
      * NEW v1.6.0: Check if data type exists in type manager
      */
-    public Response validateDataTypeExists(String typeName) {
+    @McpTool(value = "/validate_data_type_exists", description = "Check if a data type exists in Ghidra before attempting type operations")
+
+    public Response validateDataTypeExists(
+
+            @Param(value = "type_name") String typeName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -456,7 +494,13 @@ public class DataTypeService {
      * Create a new structure data type with specified fields
      */
     @SuppressWarnings("deprecation")
-    public Response createStruct(String name, String fieldsJson) {
+    @McpTool(value = "/create_struct", description = "Create a new structure data type with specified fields", method = McpTool.Method.POST)
+
+    public Response createStruct(
+
+            @Param(value = "name") String name,
+
+            @Param(value = "fields") String fieldsJson) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -581,7 +625,15 @@ public class DataTypeService {
     /**
      * Create a new enumeration data type with name-value pairs
      */
-    public Response createEnum(String name, String valuesJson, int size) {
+    @McpTool(value = "/create_enum", description = "Create a new enumeration data type with name-value pairs", method = McpTool.Method.POST)
+
+    public Response createEnum(
+
+            @Param(value = "name") String name,
+
+            @Param(value = "values") String valuesJson,
+
+            @Param(value = "size", type = "integer") int size) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -724,7 +776,13 @@ public class DataTypeService {
     /**
      * Create a union data type (legacy method)
      */
-    public Response createUnion(String name, String fieldsJson) {
+    @McpTool(value = "/create_union", description = "Create a union data type with specified fields", method = McpTool.Method.POST)
+
+    public Response createUnion(
+
+            @Param(value = "name") String name,
+
+            @Param(value = "fields") String fieldsJson) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (name == null || name.isEmpty()) return Response.err("Union name is required");
@@ -782,7 +840,13 @@ public class DataTypeService {
     /**
      * Create a typedef (type alias)
      */
-    public Response createTypedef(String name, String baseType) {
+    @McpTool(value = "/create_typedef", description = "Create a typedef (type alias) data type", method = McpTool.Method.POST)
+
+    public Response createTypedef(
+
+            @Param(value = "name") String name,
+
+            @Param(value = "base_type") String baseType) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (name == null || name.isEmpty()) return Response.err("Typedef name is required");
@@ -843,7 +907,13 @@ public class DataTypeService {
     /**
      * Clone/copy a data type with a new name
      */
-    public Response cloneDataType(String sourceType, String newName) {
+    @McpTool(value = "/clone_data_type", description = "Clone an existing data type with a new name", method = McpTool.Method.POST)
+
+    public Response cloneDataType(
+
+            @Param(value = "source_type") String sourceType,
+
+            @Param(value = "new_name") String newName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (sourceType == null || sourceType.isEmpty()) return Response.err("Source type is required");
@@ -890,7 +960,15 @@ public class DataTypeService {
     /**
      * Create an array data type
      */
-    public Response createArrayType(String baseType, int length, String name) {
+    @McpTool(value = "/create_array_type", description = "Create an array data type", method = McpTool.Method.POST)
+
+    public Response createArrayType(
+
+            @Param(value = "base_type") String baseType,
+
+            @Param(value = "length", type = "integer", defaultValue = "1") int length,
+
+            @Param(value = "name") String name) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
@@ -943,7 +1021,13 @@ public class DataTypeService {
     /**
      * Create a pointer data type
      */
-    public Response createPointerType(String baseType, String name) {
+    @McpTool(value = "/create_pointer_type", description = "Create a pointer data type wrapping a base type", method = McpTool.Method.POST)
+
+    public Response createPointerType(
+
+            @Param(value = "base_type") String baseType,
+
+            @Param(value = "name") String name) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (baseType == null || baseType.isEmpty()) return Response.err("Base type is required");
@@ -1004,7 +1088,15 @@ public class DataTypeService {
     /**
      * Create a function signature data type
      */
-    public Response createFunctionSignature(String name, String returnType, String parametersJson) {
+    @McpTool(value = "/create_function_signature", description = "Create function signature", method = McpTool.Method.POST)
+
+    public Response createFunctionSignature(
+
+            @Param(value = "name") String name,
+
+            @Param(value = "return_type") String returnType,
+
+            @Param(value = "parametersJson") String parametersJson) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (name == null || name.isEmpty()) return Response.err("Function name is required");
@@ -1087,7 +1179,15 @@ public class DataTypeService {
     /**
      * Apply a specific data type at the given memory address
      */
-    public Response applyDataType(String addressStr, String typeName, boolean clearExisting) {
+    @McpTool(value = "/apply_data_type", description = "Apply a specific data type at the given memory address", method = McpTool.Method.POST)
+
+    public Response applyDataType(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "type_name") String typeName,
+
+            @Param(value = "clearExisting", type = "boolean") boolean clearExisting) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1172,7 +1272,11 @@ public class DataTypeService {
     /**
      * Delete a data type from the program
      */
-    public Response deleteDataType(String typeName) {
+    @McpTool(value = "/delete_data_type", description = "Delete a data type from the program", method = McpTool.Method.POST)
+
+    public Response deleteDataType(
+
+            @Param(value = "type_name") String typeName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
@@ -1223,7 +1327,17 @@ public class DataTypeService {
     /**
      * Modify a field in an existing structure
      */
-    public Response modifyStructField(String structName, String fieldName, String newType, String newName) {
+    @McpTool(value = "/modify_struct_field", description = "Modify a field in an existing structure", method = McpTool.Method.POST)
+
+    public Response modifyStructField(
+
+            @Param(value = "struct_name") String structName,
+
+            @Param(value = "field_name") String fieldName,
+
+            @Param(value = "new_type") String newType,
+
+            @Param(value = "new_name") String newName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
@@ -1305,7 +1419,17 @@ public class DataTypeService {
     /**
      * Add a new field to an existing structure
      */
-    public Response addStructField(String structName, String fieldName, String fieldType, int offset) {
+    @McpTool(value = "/add_struct_field", description = "Add a new field to an existing structure", method = McpTool.Method.POST)
+
+    public Response addStructField(
+
+            @Param(value = "struct_name") String structName,
+
+            @Param(value = "field_name") String fieldName,
+
+            @Param(value = "fieldType") String fieldType,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
@@ -1370,7 +1494,13 @@ public class DataTypeService {
     /**
      * Remove a field from an existing structure
      */
-    public Response removeStructField(String structName, String fieldName) {
+    @McpTool(value = "/remove_struct_field", description = "Remove a field from an existing structure", method = McpTool.Method.POST)
+
+    public Response removeStructField(
+
+            @Param(value = "struct_name") String structName,
+
+            @Param(value = "field_name") String fieldName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (structName == null || structName.isEmpty()) return Response.err("Structure name is required");
@@ -1437,7 +1567,13 @@ public class DataTypeService {
     /**
      * Move a data type to a different category
      */
-    public Response moveDataTypeToCategory(String typeName, String categoryPath) {
+    @McpTool(value = "/move_data_type_to_category", description = "Move an existing data type to a different category", method = McpTool.Method.POST)
+
+    public Response moveDataTypeToCategory(
+
+            @Param(value = "type_name") String typeName,
+
+            @Param(value = "category_path") String categoryPath) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (typeName == null || typeName.isEmpty()) return Response.err("Type name is required");
@@ -1492,7 +1628,13 @@ public class DataTypeService {
     /**
      * Validate if a data type fits at a given address
      */
-    public Response validateDataType(String addressStr, String typeName) {
+    @McpTool(value = "/validate_data_type", description = "Validate whether a data type can be applied at a specific memory address")
+
+    public Response validateDataType(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "type_name") String typeName) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
@@ -1549,7 +1691,15 @@ public class DataTypeService {
     /**
      * NEW v1.6.0: Validate function prototype before applying
      */
-    public Response validateFunctionPrototype(String functionAddress, String prototype, String callingConvention) {
+    @McpTool(value = "/validate_function_prototype", description = "Validate a function prototype before applying it")
+
+    public Response validateFunctionPrototype(
+
+            @Param(value = "function_address") String functionAddress,
+
+            @Param(value = "prototype") String prototype,
+
+            @Param(value = "calling_convention") String callingConvention) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -1629,7 +1779,13 @@ public class DataTypeService {
     /**
      * Import data types (placeholder)
      */
-    public Response importDataTypes(String source, String format) {
+    @McpTool(value = "/import_data_types", description = "Import data types from an external source file", method = McpTool.Method.POST)
+
+    public Response importDataTypes(
+
+            @Param(value = "source") String source,
+
+            @Param(value = "format", required = false) String format) {
         // This is a placeholder for import functionality
         // In a real implementation, you would parse the source based on format
         return Response.text("Import functionality not yet implemented. Source: " + source + ", Format: " + format);
@@ -1642,7 +1798,11 @@ public class DataTypeService {
     /**
      * Create a new data type category
      */
-    public Response createDataTypeCategory(String categoryPath) {
+    @McpTool(value = "/create_data_type_category", description = "Create a new category (folder) in the data type manager", method = McpTool.Method.POST)
+
+    public Response createDataTypeCategory(
+
+            @Param(value = "category_path") String categoryPath) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
         if (categoryPath == null || categoryPath.isEmpty()) return Response.err("Category path is required");
@@ -1661,7 +1821,13 @@ public class DataTypeService {
     /**
      * List all data type categories
      */
-    public Response listDataTypeCategories(int offset, int limit) {
+    @McpTool(value = "/list_data_type_categories", description = "List all data type categories (folders) in the program")
+
+    public Response listDataTypeCategories(
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
 
@@ -1707,7 +1873,15 @@ public class DataTypeService {
      * @return Response with field usage analysis
      */
     @SuppressWarnings("deprecation")
-    public Response analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze) {
+    @McpTool(value = "/analyze_struct_field_usage", description = "Analyze how structure fields are accessed in decompiled code", method = McpTool.Method.POST)
+
+    public Response analyzeStructFieldUsage(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "struct_name") String structName,
+
+            @Param(value = "maxFunctionsToAnalyze", type = "integer") int maxFunctionsToAnalyze) {
         // CRITICAL FIX #3: Validate input parameters
         if (maxFunctionsToAnalyze < MIN_FUNCTIONS_TO_ANALYZE || maxFunctionsToAnalyze > MAX_FUNCTIONS_TO_ANALYZE) {
             return Response.err("maxFunctionsToAnalyze must be between " + MIN_FUNCTIONS_TO_ANALYZE +
@@ -1947,7 +2121,13 @@ public class DataTypeService {
      * @return Response with field name suggestions
      */
     @SuppressWarnings("deprecation")
-    public Response suggestFieldNames(String structAddressStr, int structSize) {
+    @McpTool(value = "/suggest_field_names", description = "Get AI-assisted field name suggestions for a structure at an address", method = McpTool.Method.POST)
+
+    public Response suggestFieldNames(
+
+            @Param(value = "struct_address") String structAddressStr,
+
+            @Param(value = "structSize", type = "integer") int structSize) {
         // Validate input parameters
         if (structSize < 0 || structSize > MAX_FIELD_OFFSET) {
             return Response.err("structSize must be between 0 and " + MAX_FIELD_OFFSET);
@@ -2083,9 +2263,19 @@ public class DataTypeService {
      * 6. APPLY_DATA_CLASSIFICATION - Atomic type application
      */
     @SuppressWarnings("unchecked")
-    public Response applyDataClassification(String addressStr, String classification,
-                                           String name, String comment,
-                                           Object typeDefinitionObj) {
+    @McpTool(value = "/apply_data_classification", description = "Apply data type classification at an address with naming and comments in one atomic call", method = McpTool.Method.POST)
+
+    public Response applyDataClassification(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "classification") String classification,
+
+            @Param(value = "name") String name,
+
+            @Param(value = "comment") String comment,
+
+            @Param(value = "typeDefinitionObj", type = "object") Object typeDefinitionObj) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
 

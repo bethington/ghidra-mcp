@@ -55,7 +55,17 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific address (xref to)
      */
-    public Response getXrefsTo(String addressStr, int offset, int limit, String programName) {
+    @McpTool(value = "/get_xrefs_to", description = "Get all references to the specified address (xref to)")
+
+    public Response getXrefsTo(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -93,7 +103,17 @@ public class XrefCallGraphService {
     /**
      * Get all references from a specific address (xref from)
      */
-    public Response getXrefsFrom(String addressStr, int offset, int limit, String programName) {
+    @McpTool(value = "/get_xrefs_from", description = "Get all references from the specified address (xref from)")
+
+    public Response getXrefsFrom(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -138,7 +158,17 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific function by name
      */
-    public Response getFunctionXrefs(String functionName, int offset, int limit, String programName) {
+    @McpTool(value = "/get_function_xrefs", description = "Get all references to the specified function by name")
+
+    public Response getFunctionXrefs(
+
+            @Param(value = "name") String functionName,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -182,7 +212,15 @@ public class XrefCallGraphService {
     /**
      * Get all jump target addresses from a function's disassembly
      */
-    public Response getFunctionJumpTargets(String functionName, int offset, int limit) {
+    @McpTool(value = "/get_function_jump_targets", description = "Get all jump target addresses from a function's disassembly")
+
+    public Response getFunctionJumpTargets(
+
+            @Param(value = "name") String functionName,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -285,7 +323,17 @@ public class XrefCallGraphService {
     /**
      * Get all functions called by the specified function (callees)
      */
-    public Response getFunctionCallees(String functionName, int offset, int limit, String programName) {
+    @McpTool(value = "/get_function_callees", description = "Get all functions called by the specified function (callees)")
+
+    public Response getFunctionCallees(
+
+            @Param(value = "name") String functionName,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -365,7 +413,17 @@ public class XrefCallGraphService {
     /**
      * Get all functions that call the specified function (callers)
      */
-    public Response getFunctionCallers(String functionName, int offset, int limit, String programName) {
+    @McpTool(value = "/get_function_callers", description = "Get all functions that call the specified function (callers)")
+
+    public Response getFunctionCallers(
+
+            @Param(value = "name") String functionName,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -439,7 +497,17 @@ public class XrefCallGraphService {
     /**
      * Get a call graph subgraph centered on the specified function
      */
-    public Response getFunctionCallGraph(String functionName, int depth, String direction, String programName) {
+    @McpTool(value = "/get_function_call_graph", description = "Get a call graph subgraph centered on the specified function")
+
+    public Response getFunctionCallGraph(
+
+            @Param(value = "name") String functionName,
+
+            @Param(value = "depth", type = "integer") int depth,
+
+            @Param(value = "direction", required = false) String direction,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -567,7 +635,15 @@ public class XrefCallGraphService {
     /**
      * Get the complete call graph for the entire program
      */
-    public Response getFullCallGraph(String format, int limit, String programName) {
+    @McpTool(value = "/get_full_call_graph", description = "Get the complete call graph for the entire program")
+
+    public Response getFullCallGraph(
+
+            @Param(value = "format", required = false) String format,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -676,7 +752,17 @@ public class XrefCallGraphService {
      * Enhanced call graph analysis with cycle detection and path finding
      * Provides advanced graph algorithms for understanding function relationships
      */
-    public Response analyzeCallGraph(String startFunction, String endFunction, String analysisType, String programName) {
+    @McpTool(value = "/analyze_call_graph", description = "Analyze call graph relationships with advanced graph algorithms")
+
+    public Response analyzeCallGraph(
+
+            @Param(value = "start_function") String startFunction,
+
+            @Param(value = "end_function") String endFunction,
+
+            @Param(value = "analysisType") String analysisType,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -1077,7 +1163,11 @@ public class XrefCallGraphService {
     /**
      * Retrieve xrefs for multiple addresses in one call
      */
-    public Response getBulkXrefs(Object addressesObj) {
+    @McpTool(value = "/get_bulk_xrefs", description = "Get cross-references for multiple addresses in a single batch request", method = McpTool.Method.POST)
+
+    public Response getBulkXrefs(
+
+            @Param(value = "addresses", type = "object") Object addressesObj) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
 
@@ -1145,8 +1235,15 @@ public class XrefCallGraphService {
     /**
      * Assembly pattern analysis - get assembly context around xref source addresses
      */
-    public Response getAssemblyContext(Object xrefSourcesObj, int contextInstructions,
-                                      Object includePatternsObj) {
+    @McpTool(value = "/get_assembly_context", description = "Get assembly instructions with context for multiple xref source addresses", method = McpTool.Method.POST)
+
+    public Response getAssemblyContext(
+
+            @Param(value = "xref_sources", type = "object") Object xrefSourcesObj,
+
+            @Param(value = "contextInstructions", type = "integer") int contextInstructions,
+
+            @Param(value = "includePatternsObj", type = "object") Object includePatternsObj) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
 
