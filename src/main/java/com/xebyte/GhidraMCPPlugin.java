@@ -25,6 +25,7 @@ import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.plugin.PluginCategoryNames;
 import ghidra.app.services.CodeViewerService;
+import ghidra.app.services.GoToService;
 
 import ghidra.app.script.GhidraScriptUtil;
 import ghidra.app.script.GhidraScript;
@@ -96,7 +97,7 @@ class VersionInfo {
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 169;
+    private static final int ENDPOINT_COUNT = 170;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -2291,6 +2292,13 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             Map<String, Object> params = parseJsonParams(exchange);
             String filePath = params.get("path") != null ? params.get("path").toString() : null;
             sendResponse(exchange, launchCodeBrowser(filePath));
+        }));
+
+        // TOOL_GOTO_ADDRESS - Navigate CodeBrowser listing/decompiler to a specific address
+        server.createContext("/tool/goto_address", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String address = params.get("address") != null ? params.get("address").toString() : null;
+            sendResponse(exchange, gotoAddress(address));
         }));
 
         // SERVER_AUTHENTICATE - Register credentials for programmatic server authentication
@@ -5210,6 +5218,81 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             }
         } catch (Exception e) {
             return "{\"error\": \"Failed to launch CodeBrowser: " + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * Navigate the CodeBrowser listing/decompiler to a specific address.
+     * Finds the running CodeBrowser via ToolManager and uses GoToService.
+     */
+    private String gotoAddress(String addressStr) {
+        if (addressStr == null || addressStr.trim().isEmpty()) {
+            return "{\"error\": \"address parameter is required\"}";
+        }
+
+        try {
+            Project project = tool.getProject();
+            if (project == null) {
+                return "{\"error\": \"No project open\"}";
+            }
+
+            // Find a running CodeBrowser
+            ghidra.framework.model.ToolManager tm = project.getToolManager();
+            if (tm == null) {
+                return "{\"error\": \"ToolManager not available\"}";
+            }
+
+            PluginTool codeBrowser = null;
+            for (PluginTool runningTool : tm.getRunningTools()) {
+                if (runningTool.getService(ghidra.app.services.ProgramManager.class) != null) {
+                    codeBrowser = runningTool;
+                    break;
+                }
+            }
+
+            if (codeBrowser == null) {
+                return "{\"error\": \"No CodeBrowser running\"}";
+            }
+
+            // Get GoToService from the CodeBrowser
+            GoToService goToService = codeBrowser.getService(GoToService.class);
+            if (goToService == null) {
+                return "{\"error\": \"GoToService not available in CodeBrowser\"}";
+            }
+
+            // Get the current program from the CodeBrowser
+            ghidra.app.services.ProgramManager pm = codeBrowser.getService(ghidra.app.services.ProgramManager.class);
+            Program program = pm.getCurrentProgram();
+            if (program == null) {
+                return "{\"error\": \"No program open in CodeBrowser\"}";
+            }
+
+            // Parse the address
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr == null) {
+                return "{\"error\": \"Invalid address: " + escapeJson(addressStr) + "\"}";
+            }
+
+            // Navigate on the EDT
+            final GoToService gts = goToService;
+            final Address targetAddr = addr;
+            final AtomicBoolean success = new AtomicBoolean(false);
+            SwingUtilities.invokeAndWait(() -> {
+                success.set(gts.goTo(targetAddr));
+            });
+
+            if (success.get()) {
+                // Check if the address is in a function
+                Function func = program.getFunctionManager().getFunctionContaining(addr);
+                String funcInfo = func != null
+                    ? ", \"function\": \"" + escapeJson(func.getName()) + "\""
+                    : "";
+                return "{\"success\": true, \"address\": \"" + addr.toString() + "\"" + funcInfo + "}";
+            } else {
+                return "{\"error\": \"GoToService could not navigate to " + escapeJson(addressStr) + "\"}";
+            }
+        } catch (Exception e) {
+            return "{\"error\": \"Failed to navigate: " + escapeJson(e.getMessage()) + "\"}";
         }
     }
 

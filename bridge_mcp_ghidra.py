@@ -7373,6 +7373,23 @@ def launch_codebrowser(path: str = None) -> str:
 
 
 @mcp.tool()
+def goto_address(address: str) -> str:
+    """
+    Navigate the CodeBrowser listing and decompiler to a specific address.
+
+    Finds the running CodeBrowser and uses GoToService to move the cursor
+    to the specified address, updating both the listing and decompiler views.
+
+    Args:
+        address: Memory address in hex format (e.g., "0x6FD81234")
+
+    Returns:
+        JSON with success status, navigated address, and containing function (if any).
+    """
+    return safe_post_json("tool/goto_address", {"address": address})
+
+
+@mcp.tool()
 def authenticate_server(username: str = None, password: str = "") -> str:
     """
     Register credentials for Ghidra server authentication.
