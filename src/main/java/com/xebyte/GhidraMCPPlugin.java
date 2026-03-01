@@ -236,20 +236,12 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         Msg.info(this, "Endpoints: " + VersionInfo.getEndpointCount());
         Msg.info(this, "============================================");
 
-        // Auto-register server authenticator if credentials are available via env vars.
-        // This intercepts Ghidra's server auth dialog before the project connects.
-        String serverUser = System.getenv("GHIDRA_SERVER_USER");
-        String serverPass = System.getenv("GHIDRA_SERVER_PASSWORD");
-        if (serverUser == null || serverUser.isEmpty()) {
-            serverUser = ghidra.framework.preferences.Preferences.getProperty("PasswordPrompt.Name");
-        }
-        if (serverUser == null || serverUser.isEmpty()) {
-            serverUser = System.getProperty("user.name");
-        }
-        if (serverPass != null && !serverPass.isEmpty()) {
-            this.authenticator = new com.xebyte.core.GhidraMCPAuthenticator(serverUser, serverPass.toCharArray());
-            ghidra.framework.client.ClientUtil.setClientAuthenticator(this.authenticator);
-            Msg.info(this, "GhidraMCP: Registered server authenticator for user: " + serverUser);
+        // Server authenticator: GhidraMCPAuthInitializer (ModuleInitializer) handles
+        // early registration from GHIDRA_SERVER_PASSWORD env var — runs before project opens.
+        // The /server/authenticate endpoint handles runtime credential updates.
+        if (com.xebyte.core.GhidraMCPAuthInitializer.isRegistered()) {
+            this.authenticator = com.xebyte.core.GhidraMCPAuthInitializer.getAuthenticator();
+            Msg.info(this, "GhidraMCP: Server authenticator was registered at startup");
         }
 
         // Register the configuration option

@@ -870,90 +870,82 @@ try {
     exit 1
 }
 
-# Also copy JAR to user's local Extensions directory for development/debugging
-$jarSourcePath = "$PSScriptRoot\target\GhidraMCP.jar"
-if (-not (Test-Path $jarSourcePath)) {
-    $versionedJarPath = "$PSScriptRoot\target\GhidraMCP-$version.jar"
-    if (Test-Path $versionedJarPath) {
-        $jarSourcePath = $versionedJarPath
+# Extract extension ZIP to user's local Extensions directory.
+# Ghidra considers an extension "installed" when its directory (with extension.properties)
+# exists under the user Extensions dir. Without this, users must manually activate via
+# File > Install Extensions after every deploy.
+$ghidraVersionDir = $null
+$ghidraUserBase = "$env:USERPROFILE\AppData\Roaming\ghidra"
+
+if (Test-Path $ghidraUserBase) {
+    # Extract version from GhidraPath (e.g., "F:\ghidra_12.0.3_PUBLIC" -> "12.0.3")
+    $targetVersion = $null
+    if ($GhidraPath -match "ghidra_([0-9.]+)") {
+        $targetVersion = $Matches[1]
     }
-}
-if (Test-Path $jarSourcePath) {
-    # Detect Ghidra user config directory matching the target installation
-    $ghidraVersionDir = $null
-    $ghidraUserBase = "$env:USERPROFILE\AppData\Roaming\ghidra"
 
-    if (Test-Path $ghidraUserBase) {
-        # Extract version from GhidraPath (e.g., "F:\ghidra_12.0.3_PUBLIC" -> "12.0.3")
-        $targetVersion = $null
-        if ($GhidraPath -match "ghidra_([0-9.]+)") {
-            $targetVersion = $Matches[1]
-        }
-
-        if ($targetVersion) {
-            # Find user config dir matching the target Ghidra version (e.g., ghidra_12.0.3_PUBLIC)
-            $matchingDirs = Get-ChildItem -Path $ghidraUserBase -Directory -Filter "ghidra_${targetVersion}*"
-            if ($matchingDirs) {
-                # Prefer PUBLIC over DEV if multiple matches
-                $publicDir = $matchingDirs | Where-Object { $_.Name -match "PUBLIC" } | Select-Object -First 1
-                $ghidraVersionDir = if ($publicDir) { $publicDir.Name } else { $matchingDirs[0].Name }
-                Write-LogInfo "Detected Ghidra user config version: $ghidraVersionDir (matching $targetVersion)"
-            }
-        }
-
-        if (-not $ghidraVersionDir) {
-            # Fallback: use highest version directory
-            $ghidraVersionDirs = Get-ChildItem -Path $ghidraUserBase -Directory -Filter "ghidra_*" |
-                ForEach-Object {
-                    if ($_.Name -match "ghidra_([0-9]+)\.([0-9]+)(?:\.([0-9]+))?") {
-                        [PSCustomObject]@{
-                            Name = $_.Name
-                            Major = [int]$Matches[1]
-                            Minor = [int]$Matches[2]
-                            Patch = if ($Matches[3]) { [int]$Matches[3] } else { 0 }
-                        }
-                    }
-                } |
-                Sort-Object Major, Minor, Patch -Descending
-
-            if ($ghidraVersionDirs) {
-                $ghidraVersionDir = $ghidraVersionDirs[0].Name
-                Write-LogInfo "Using highest Ghidra user config version: $ghidraVersionDir"
-            }
+    if ($targetVersion) {
+        $matchingDirs = Get-ChildItem -Path $ghidraUserBase -Directory -Filter "ghidra_${targetVersion}*"
+        if ($matchingDirs) {
+            $publicDir = $matchingDirs | Where-Object { $_.Name -match "PUBLIC" } | Select-Object -First 1
+            $ghidraVersionDir = if ($publicDir) { $publicDir.Name } else { $matchingDirs[0].Name }
+            Write-LogInfo "Detected Ghidra user config version: $ghidraVersionDir (matching $targetVersion)"
         }
     }
 
     if (-not $ghidraVersionDir) {
-        # Last resort: construct from GhidraPath
-        if ($GhidraPath -match "ghidra_([0-9.]+)") {
-            $ghidraVersionDir = "ghidra_$($Matches[1])_PUBLIC"
-        } else {
-            $ghidraVersionDir = "ghidra_12.0.3_PUBLIC"
-        }
-        Write-LogInfo "Using Ghidra version dir: $ghidraVersionDir"
-    }
+        $ghidraVersionDirs = Get-ChildItem -Path $ghidraUserBase -Directory -Filter "ghidra_*" |
+            ForEach-Object {
+                if ($_.Name -match "ghidra_([0-9]+)\.([0-9]+)(?:\.([0-9]+))?") {
+                    [PSCustomObject]@{
+                        Name = $_.Name
+                        Major = [int]$Matches[1]
+                        Minor = [int]$Matches[2]
+                        Patch = if ($Matches[3]) { [int]$Matches[3] } else { 0 }
+                    }
+                }
+            } |
+            Sort-Object Major, Minor, Patch -Descending
 
-    $userExtensionsDir = "$ghidraUserBase\$ghidraVersionDir\Extensions\GhidraMCP\lib"
-
-    if (-not (Test-Path $userExtensionsDir)) {
-        Write-LogInfo "Creating user Extensions directory: $userExtensionsDir"
-        if ($PSCmdlet.ShouldProcess($userExtensionsDir, "Create user extension library directory")) {
-            New-Item -ItemType Directory -Path $userExtensionsDir -Force | Out-Null
+        if ($ghidraVersionDirs) {
+            $ghidraVersionDir = $ghidraVersionDirs[0].Name
+            Write-LogInfo "Using highest Ghidra user config version: $ghidraVersionDir"
         }
     }
+}
 
-    try {
-        $jarDestinationPath = Join-Path $userExtensionsDir "GhidraMCP.jar"
-        if ($PSCmdlet.ShouldProcess($jarDestinationPath, "Copy plugin JAR to user extension directory")) {
-            Copy-Item $jarSourcePath $jarDestinationPath -Force
-            Write-LogSuccess "Installed: GhidraMCP.jar → $userExtensionsDir"
-        }
-    } catch {
-        Write-LogWarning "Failed to copy JAR to user Extensions: $($_.Exception.Message)"
-        Write-LogInfo "JAR copy is optional - plugin will work without it"
+if (-not $ghidraVersionDir) {
+    if ($GhidraPath -match "ghidra_([0-9.]+)") {
+        $ghidraVersionDir = "ghidra_$($Matches[1])_PUBLIC"
+    } else {
+        $ghidraVersionDir = "ghidra_12.0.3_PUBLIC"
     }
-} else {
-    Write-LogWarning "JAR file not found: $jarSourcePath"
+    Write-LogInfo "Using Ghidra version dir: $ghidraVersionDir"
+}
+
+$userExtensionsBase = "$ghidraUserBase\$ghidraVersionDir\Extensions"
+$userExtensionsDir = "$userExtensionsBase\GhidraMCP"
+
+try {
+    if ($PSCmdlet.ShouldProcess($userExtensionsDir, "Extract extension ZIP to user Extensions directory")) {
+        # Extract ZIP contents to user Extensions dir (GhidraMCP/ subfolder is inside the ZIP)
+        Expand-Archive -Path $artifactPath -DestinationPath $userExtensionsBase -Force
+        Write-LogSuccess "Installed: extension extracted to $userExtensionsDir"
+    }
+} catch {
+    Write-LogWarning "Failed to extract extension to user Extensions: $($_.Exception.Message)"
+    Write-LogInfo "Falling back to JAR-only copy..."
+    # Fallback: at minimum copy the JAR so the plugin classes are available
+    $jarSourcePath = "$PSScriptRoot\target\GhidraMCP.jar"
+    if (-not (Test-Path $jarSourcePath)) {
+        $versionedJarPath = "$PSScriptRoot\target\GhidraMCP-$version.jar"
+        if (Test-Path $versionedJarPath) { $jarSourcePath = $versionedJarPath }
+    }
+    if (Test-Path $jarSourcePath) {
+        $libDir = "$userExtensionsDir\lib"
+        New-Item -ItemType Directory -Path $libDir -Force | Out-Null
+        Copy-Item $jarSourcePath "$libDir\GhidraMCP.jar" -Force
+    }
 }
 
 # Copy Python MCP bridge to Ghidra root
@@ -1093,9 +1085,9 @@ Write-Host ""
 Write-LogSuccess "GhidraMCP v$version Successfully Deployed!"
 Write-Host ""
 Write-LogInfo "Installation Locations:"
-Write-Host "   Plugin: $destinationPath"
+Write-Host "   Plugin ZIP: $destinationPath"
 if ($userExtensionsDir) {
-    Write-Host "   JAR: $jarDestinationPath"
+    Write-Host "   User Extension: $userExtensionsDir"
 }
 Write-Host "   Python Bridge: $GhidraPath\bridge_mcp_ghidra.py"
 Write-Host "   Requirements: $GhidraPath\requirements.txt"
