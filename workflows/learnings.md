@@ -1,7 +1,7 @@
 # RE Loop Learnings
 
 > Maintained by /re-loop. Manual edits welcome.
-> Last updated: iteration 20
+> Last updated: iteration 33
 
 ## Binary Context
 - [D2Common.dll@1.00] x86 32-bit PE, __stdcall ordinal exports. 3,654 functions, 332 data types, image base 0x10000000. All undocumented ordinals are single-JMP thunks.
@@ -57,6 +57,29 @@
 - Offset +0x0C: dwField3 (uint)
 - Indexed by (nAnimIndex >> 8), stride = 0x10 bytes
 - Used by InitializeUnitAnimation, GetUnitAnimFrameEvent, InitializeMonsterItemData
+
+### Missiles Table (sgptDataTables+0xB64, stride 0x1A4 = 420 bytes)
+- Base: sgptDataTables+0xB64, count: sgptDataTables+0xB6C
+- Offset +0xEC: base value (int)
+- Offset +0x104: level breakpoints (passed to CalculateStatByLevelBreakpoints)
+- Offset +0x118: calc expression index (uint, -1 = none)
+- Offset +0x196: fixed-point shift (byte)
+- Used by CalcMissileParam (10821)
+
+### Path Data (unit+0x2C sub-structure)
+- Offset +0x10: current position
+- Offset +0x18: target position
+- Offset +0x24: velocity (int, subtracted per step)
+- Offset +0x30: sub-struct pointer (validated for mode 2 transitions)
+- Offset +0x34: mode flags (uint, bits 8-18 = mode-specific flags, bit 4 = at destination)
+- Offset +0x3C: current mode (int: 2=normal, 4=special, 0xB/8=invalid backup, 0xD=alternate, 0xF=retry)
+- Offset +0x40: backup mode (int, saved from +0x3C on flag 0x2000 transitions)
+- Offset +0x7C: secondary field (backed up to +0x80 on flag bit 15 transitions)
+- Offset +0x80: backup of +0x7C
+- Offset +0x91: byte value (validated < 0x4E for mode 4)
+- Offset +0x94: distance accumulator (byte, [0-255])
+- Offset +0x98: mode data (from g_adwData_6fde02d8[mode + 0x0E])
+- Used by AdvanceUnitPathStep (10251), SetPathMode (10325), CopyUnitPathBlock (10881)
 
 ### ItemStatsDataEntry (partial, from iteration 3)
 - Offset +0x68: dwGroupId (uint) — stat group identifier, used for group membership comparison
@@ -132,6 +155,71 @@
 - [D2Common.dll@1.13d] Ordinal 10058: FindBestEquippedWeapon — inventory weapon selection. Reads unit[0x18] (inventory), switch on item sub-type at +0x168. Type 0x2D = weapon class. Slots 5/6 = left/right hand.
 - [D2Common.dll@1.13d] Ordinal 10977: TransferStatListOwnership — transfers stat list between owners. Special case: items with Ordinal_10689 result 0x0B/0x0C get removed. Bit 0x40000000 at sub_struct+0x10 = modifier state.
 - [D2Common.dll@1.13d] Ordinal 10964: GetLevelPresetData — reads 24 bytes from preset table. DWORD_6fdf4cac (base), stride 0xF0 (240 bytes), compound index = levelId + presetIndex*16.
+- [D2Common.dll@1.13d] Ordinal 10444: ClearCollisionMask — multi-mode collision clearing. Mode 1=point, 2=cross, 3=3x3. Mirror of CheckCollisionMask (10953).
+- [D2Common.dll@1.13d] Ordinal 10152: GetCollisionMaskFlags — multi-mode collision flag reader. Mode 0/1=point, 2=cross, 3=3x3 bounds. Returns ushort flags, 0xFFFF on invalid mode.
+- [D2Common.dll@1.13d] Ordinal 10976: GetItemStatValueCapped — item-only (type 4). Base from Ordinal_11033(classId) + stat bonus from ItemStatCost entry 254 (offset 0x14178). Clamped to 0x1FF (511).
+- [D2Common.dll@1.13d] Ordinal 10223: ClearUnitCollisionArea — removes unit collision footprint. Type dispatch: Player/Monster=ClearMapCellFlagRadius, Object=Ordinal_11104, Missile/Item=ClearCollisionMask. Uses GetUnitCollisionFlags + GetUnitSizeModifier.
+- [D2Common.dll@1.13d] Ordinal 10222: SetUnitCollisionArea — applies unit collision footprint. Type dispatch: Player/Monster=ApplyTileAttributePattern, Object=Ordinal_10144, Missile/Item=Ordinal_10446. Mirror of ClearUnitCollisionArea.
+- [D2Common.dll@1.13d] Ordinal 10881: CopyUnitPathBlock — copies 32 bytes from path block +0x4C to output, zero-fills on null
+- [D2Common.dll@1.13d] Ordinal 10446: SetCollisionMask — multi-mode collision OR. Mode 1=point, 2=cross, 3=3x3. Mirror of ClearCollisionMask
+- [D2Common.dll@1.13d] Ordinal 10627: FindEquippedWeaponByClassId — weapon slot scan by header 0x1020304 + type 0x2D
+- [D2Common.dll@1.13d] Ordinal 10518: GetUnitStatCostValue — ItemStatCost lookup by stat ID, stride 0x144
+- [D2Common.dll@1.13d] Ordinal 10435: AssignSkillToUnit — skill allocation/level-up via ApplySkillItemStats, from Skills.cpp
+- [D2Common.dll@1.13d] Ordinal 10171: IsUnitDualWieldClass — Player class 4 (Barbarian) or 6 (Assassin), Monster 416-418 (hirelings)
+- [D2Common.dll@1.13d] Ordinal 10721: FindWeaponInEquipSlots — searches equipment slots 4/5 for valid unrestricted weapon, outputs slot + primary match
+- [D2Common.dll@1.13d] Ordinal 10286: GetEquippedItemByBodyLoc — loops 11 equipment slots, matches by body location via GetItemEquipBodyType/Ordinal_10993
+- [D2Common.dll@1.13d] Ordinal 10987: GetItemEquipBodyType — item data +0xC0 lookup with pair table mapping. Returns compound type (high=category, low=mapped sub-type)
+- [D2Common.dll@1.13d] Ordinal 10360: SetItemProperty — writes item_data+0x28. Mirror of GetItemProperty (10075). 100% score.
+- [D2Common.dll@1.13d] Ordinal 10717: GetItemQuantity — reads item_data+0x2C, clamped to minimum 1. Stackable item count.
+- [D2Common.dll@1.13d] Ordinal 10219: AllocateStatList — 60-byte stat list from pool. Source: StatsEx.cpp:1386. Fields: owner, flags, modifier, stateId, expireFrames.
+- [D2Common.dll@1.13d] Ordinal 10736: GenerateDrlgLevel — type dispatcher: 1=Maze, 2=Preset, 3=Outdoors. All paths call UpdateInventoryItemFlags + CalculateDrlgRoomSpawnPositions.
+- [D2Common.dll@1.13d] Ordinal 11012: ResolveItemEquipSlotType — scans item type table (sgptDataTables+0x17C), checks bitmask, resolves equip slot. Type record stride 0x3C at +0xBC.
+- [D2Common.dll@1.13d] Ordinal 10992: RemoveUnitFromClassList — unlinks from class_data+0x74 list, clears bit 0x2000 at unit+0xC4. Counterpart of AddUnitToClassQueue (10229).
+- [D2Common.dll@1.13d] Ordinal 10884: GetItemRecordGfxField — reads byte at item_data_record+0x138. Stride 0x1a8, bounds-checked. Used as gfx variant cap.
+- [D2Common.dll@1.13d] Ordinal 10185: GetItemStackGfxTier — computes visual tier for stackable items. Quantity thresholds: <26 (low), 26-40 (mid), 41+ (high). ItemTypes+0x1A/+0x1B/+0x1C = tier bytes.
+- [D2Common.dll@1.13d] Ordinal 10292: GetInventorySlotItem — reads item from inventory slot [0-12]. Magic header 0x1020304. Uses ExpandOrInitInventoryPage.
+- [D2Common.dll@1.13d] Ordinal 10458: TestItemFlags — bitmask AND on item_data+0x18 flags. Same field as GetItemFlags (10709).
+- [D2Common.dll@1.13d] Ordinal 10695: GetItemQuality — returns item_data+0x00 (quality enum). Default 2=Normal. Values: 1=Low, 2=Normal, 3=Superior, 4=Magic, 5=Set, 6=Rare, 7=Unique, 8=Crafted.
+- [D2Common.dll@1.13d] Ordinal 10484: GetUnitOverlayComponent — unit type+mode → component index. Player modes 1-4 → indices 6-12. Monster=5. Object 0x152/0x153 → 10/11. Player mode 4 dual-wield flag.
+- [D2Common.dll@1.13d] Ordinal 10209: GetItemRecordByte11C — strict byte reader at item record +0x11C (284). Crashes on failure (unlike GfxField which returns 0).
+- [D2Common.dll@1.13d] Ordinal 10143: GetItemDimensions — reads invWidth (+0x10F) and invHeight (+0x110) from item data record via output pointers.
+- [D2Common.dll@1.13d] Ordinal 10880: IsItemEthereal — tests bit 0x400000 (bit 22) in item_data+0x18. Ethereal flag.
+- [D2Common.dll@1.13d] Ordinal 10526: ResolveWeaponAnimToken — complex 175-line animation resolver. 4-byte ASCII codes: "hth "=hand-to-hand, "1ss "=single swing, "1js "=jab swing, "1jt "=jab thrust, "1st "=stab, "ht2 "=assassin. Skills table: sgptDataTables+0xBC4, stride 0xC4.
+- [D2Common.dll@1.13d] Ordinal 11021: GetSkillRangeValue — skills table short at +0x174. Default 0x7FFFFFFF (range/distance). Skills: base +0xB98, count +0xBA0, stride 0x23C.
+- [D2Common.dll@1.13d] Ordinal 10984: FindSkillListNode — __fastcall linked list search at pSkillData+0xA8. Matches skillId (short at +0) AND param (at +0x34). Node stride: +0 id, +4 next, +0x34 param.
+- [D2Common.dll@1.13d] Ordinal 11013: GetUnitBlockingSize — per-type collision size. Player=2, Monster=table+9, Object=record+0xD4, Missile=table+0x18A, Item=1. NULL aborts.
+- [D2Common.dll@1.13d] Ordinal 10993: GetItemRecordBodyLoc — byte at item record +0x115. Equipment body location slot. Strict validation (aborts on NULL/non-item/no record).
+- [D2Common.dll@1.13d] Ordinal 10715: GetItemRecordByte132 — byte at item record +0x132. **Stackability flag** (0=not stackable). Used by AreItemsIdentical (10613) to gate deep comparison. Lenient (returns 0 for NULL/non-item).
+- [D2Common.dll@1.13d] Ordinal 11168: ApplyCollisionPatternAtCoords — delegates to Ordinal_10144 with unit size/flags. NULL aborts.
+- [D2Common.dll@1.13d] Ordinal 10254: ApplyUnitSizedCollision — extracts position from path data, delegates to Ordinal_11104 with collision properties.
+- [D2Common.dll@1.13d] Ordinal 10335: UpdateUnitSkillLevel — find/create skill node, set level, reapply stats. Skill node: +0x28=level.
+- [D2Common.dll@1.13d] Ordinal 10613: AreItemsIdentical — deep item comparison for stacking: classId, quality, property, +0x132 flag, ethereal, 6 stats (0x15-0x18, 0x9F, 0xA0), Ordinal_10275 check. Returns 1 if all match.
+- [D2Common.dll@1.13d] Ordinal 10236: CheckUnitCollisionOverlap — bounding box overlap test between units. Only checks against Object type. Uses path data position (type-dependent 16/32-bit coords).
+- [D2Common.dll@1.13d] Ordinal 10604: GetItemRecordCode — dword at item data record +0x80. Used by item encode/decode serialization.
+- [D2Common.dll@1.13d] Ordinal 10701: GetItemDataShortByIndex — ushort at item_data+0x3E + nIndex*2. Lenient (returns 0 on failure).
+- [D2Common.dll@1.13d] Ordinal 10348: IsClassRestrictedItem — checks item record +0x13D for Barbarian (class 4) owners. Likely "2-handed" flag. Used by weapon swap validation.
+- [D2Common.dll@1.13d] Ordinal 10246: ComputeUnitDistance — approximate distance between units using size-adjusted positions. Lookup table for near (<8 tiles), weighted sum for far. Used by collision system.
+- [D2Common.dll@1.13d] Ordinal 10443: GetWeaponSlotRestriction — weapon slot compatibility checker. Returns -1 (no issue), 1 (class restricted), 2 (special property). Calls IsClassRestrictedItem and HasItemRecordFlag11C.
+- [D2Common.dll@1.13d] Ordinal 10004: GetItemRecordByte137 — byte at item record +0x137 by classId. Lenient (0 on out-of-bounds).
+- [D2Common.dll@1.13d] Ordinal 10672: HasItemRecordFlag11C — unit-validated wrapper around GetItemRecordByte11C. Returns 0 for non-items.
+- [D2Common.dll@1.13d] Ordinal 10869: GetItemTypeEquiv2 — ItemTypes table short at +0xE (second equivalence type).
+- [D2Common.dll@1.13d] Ordinal 10215: GetItemTypeEquiv1 — ItemTypes table short at +0xC (first equivalence type).
+- [D2Common.dll@1.13d] Ordinal 10149: IsItemDurabilityDepleted — multi-condition: has durability (+0x112), not indestructible (+0x113), Ordinal_10314 check, stat 0x98 < 1.
+- [D2Common.dll@1.13d] Ordinal 10314: GetMaxDurabilityStat — checks ItemStatCost[73] (maxdurability), reads unit+0x5C stat list. Gate for durability depletion.
+- [D2Common.dll@1.13d] Ordinal 10821: CalcMissileParam — missiles table calc (base+0xB64, stride 0x1A4). Fields: +0xEC base, +0x104 breakpoints, +0x118 calc, +0x196 shift. Requires type 3 (Missile).
+- [D2Common.dll@1.13d] Ordinal 10728: CalcSkillElemMin — skill elemental min damage. Skills table +0x1E0 (base), +0x1E8 (breakpoints), +0x1A4 (shift), +0x210 (calc), +0x1DC (bonus type).
+- [D2Common.dll@1.13d] Ordinal 10662: CalcSkillElemMax — skill elemental max damage. Skills table +0x1E4 (base), +0x1FC (breakpoints). Paired with CalcSkillElemMin.
+- [D2Common.dll@1.13d] Ordinal 10251: AdvanceUnitPathStep — path stepping with mode transitions (2/0xD/0xF). Distance accumulator byte at path+0x94, velocity at path+0x24.
+- [D2Common.dll@1.13d] Ordinal 10275: GetItemStatCostEntryC2 — reads ItemStatCost[194] (0xC2) value. Used by AreItemsIdentical for identity comparison.
+- [D2Common.dll@1.13d] Ordinal 10536: EvaluateMissileCalcExpression — missile bytecode evaluator. Table: sgptDataTables+0x60/+0x64. Called by CalcMissileParam (10821).
+- [D2Common.dll@1.13d] Ordinal 10001: GetItemDataShort30 — reads short at item_data+0x30. Type 4 only. CONCAT22 artifact.
+- [D2Common.dll@1.13d] Ordinal 10739: SetUnitPathField10 — writes pathData+0x10 for Object/Item/Tile (types 2/4/5). Paired with 10892.
+- [D2Common.dll@1.13d] Ordinal 10892: SetUnitPathField0C — writes pathData+0x0C for Object/Item/Tile (types 2/4/5). Paired with 10739. Likely X/Y coordinate pair at +0x0C/+0x10.
+- [D2Common.dll@1.13d] Ordinal 10864: GetMaxGoldBank — gold stash tier by level thresholds (g_dwPad_6fde3418[1..5]). Community: D2GetMaxGoldBank.
+- [D2Common.dll@1.13d] Ordinal 10796: CheckItemTypeByClassId — bitmask type check by class ID with parent inheritance at +0x120. Similar to CheckItemType (10731) but raw class ID input.
+- [D2Common.dll@1.13d] Ordinal 11035: GetUnitModifierStatValue — stat from modifier 0x69 (105) via Ordinal_10429. Player/Monster only, default 2 for other types.
+- [D2Common.dll@1.13d] Ordinal 10395: GetPositionPair — reads struct[0] and struct[9] (offsets +0x00, +0x24) into output pointers. Adjacent to CopyUnitPathBlock.
+- [D2Common.dll@1.13d] Ordinal 10325: SetPathMode — path mode setter with flag backup, mode table g_adwData_6fde02d8. Updates +0x3C mode, +0x34 flags, +0x98 mode data.
 - [Fog.dll@1.13d] Ordinal 10019: InitializeSystem — __fastcall, OS detection + crit sections + memory pool + exception handler. Absent in 1.06b.
 - [Fog.dll@1.13d] Ordinal 10027: HandleDeadlockShutdown — __cdecl, WSACleanup + LogErrorAndInitiateShutdown + ShutdownResourcesAndExit
 - [Fog.dll@1.13d] Ordinal 10115: GetSavePath — __fastcall(lpszBuffer, dwBufferSize), registry "Save Path" + fallback to InstallPath\Save\
@@ -176,33 +264,20 @@
 - [Storm.dll] **Networking**: SNetCreateLadderGame (138) — ladder game session creation
 - [Storm.dll] **Image Export**: SBmpSaveImageEx (326) — multi-format image writer (BMP, PCX, TGA, GIF)
 - [Storm.dll] **Audio**: SFileDdaBeginEx (255) — WAV/DDA audio stream initialization
-- [D2Common.dll@1.13d] **Item Data**: GetItemDataRecord (10600) — array lookup by item code, stride 0x1a8
-- [D2Common.dll@1.13d] **Item Types**: CheckItemType (10731) — bitmask type check with parent inheritance, 111 xrefs (most-called undocumented)
-- [D2Common.dll@1.13d] **Stat System**: GetUnitBaseStat (10550), SetStatInList (10463) — stat value read/write via sorted lists with binary search
-- [D2Common.dll@1.13d] **Data Tables**: CompileTextDataTable (10037) — generic DATA\GLOBAL\EXCEL .txt→binary compiler, 94 xrefs
-- [D2Common.dll@1.13d] **Stat System Extended**: SetUnitStat (10590) wraps SetStatInList (10463), AddStatToList (11158) accumulates. Three-layer architecture: unit wrapper → sorted list op → delta propagation
-- [D2Common.dll@1.13d] **Collision**: CheckCollisionMask (10953) — multi-mode point/edge/area collision. Subfamily: GetMaskFlagAtCoordinate, CheckMaskFlagsWithEdgeWrap, CheckMaskFlagsRecursive
-- [D2Common.dll@1.13d] **Unit Data Access**: GetUnitClassData (10846) — class data pointer getter. GetItemType (10121) → GetItemTypeFromClassId (10850)
-- [D2Common.dll@1.13d] **Unit Properties**: GetUnitSizeModifier (10780) — per-type property switch. GetItemProperty (10075) — item data field at +0x28
-- [D2Common.dll@1.13d] **DRLG (Level Generation)**: AllocateDrlgLevel (10283) — level struct allocator from Drlg.cpp. Level types: 1=Maze (FindLevelWarpEntryById), 2=Preset (AllocatePresetWithRandomSubEntry), 3=Outdoors (Outdoors.cpp). LevelsDef table: sgptDataTables+0xC5C (count), base DWORD_6fdf64b8, stride 0x9C
-- [D2Common.dll@1.13d] **Unit Queue Management**: AddUnitToClassQueue (10229) — linked list insertion at class_data+0x1C, membership flag bit 0x2000 at unit+0xC4
-- [D2Common.dll@1.13d] **Item Flags**: GetItemFlags (10709) — item_data+0x18 dword. IsItemNotRestricted (10955) checks bits 0x100 and 0x4000 of this. Related to item restrictions.
-- [D2Common.dll@1.13d] **Item Type Table**: GetItemTypeProperty (11090) — ItemTypes.txt lookup. Table: sgptDataTables+0xBF8 (base), +0xBFC (count), stride 0xE4 (228 bytes). Property at +0x10.
-- [D2Common.dll@1.13d] **Global Record Accessors**: GetGlobalRecordById (10174) — stride 0x90 table at DWORD_6fdf4cd8, 1-based indexing. First 100% score function in 1.13d.
-- [D2Common.dll@1.13d] **Stat List Operations**: InsertAndApplyStatList (10808) — dual chain insertion: primary at +0x3C, secondary at +0x40 with modifier application. Complex 66-line function with 12 register-only SSA vars.
-- [D2Common.dll@1.13d] **Item Data Search**: FindItemDataRecord (10000) — binary search by 4-byte item code in sorted table (sgptDataTables+0xB7C base, +0xB80 count, stride 0x1a8). Returns pointer or NULL. 95% score.
-- [D2Common.dll@1.13d] **Skill Item Stats**: ApplySkillItemStats (10374) — applies up to 5 stat entries from skill data (+0x98 stat IDs, +0xA4 params, stride 4). Skills table: +0xB98/+0xBA0, stride 0x23C. Tracking stats: 0x15E=skillId, 0x15F=target. 4 undocumented callees: Ordinal_10706 (check skill target), Ordinal_10007 (create item link), Ordinal_11081 (calc stat value), Ordinal_11152 (finalize effect).
-- [D2Common.dll@1.13d] **Item Type Lookup**: GetItemTypeFromClassId (10850) — reads uint at item_data+0x50, bounds-checks against ItemTypes count. Called by GetItemType (10121).
-- [D2Common.dll@1.13d] **Global Pair Table**: LookupGlobalPairTable (10886) — 13-element key-value table at DWORD_6fdf4cd8, scans key array then returns value at matching offset. 0-based indexing, returns 0 on miss.
-- [D2Common.dll@1.13d] **Automap**: IsUnitAutoMapRevealed (10706) — unit type filter (Player/Monster/Missile only) → IsAutoMapCellRevealed delegate
-- [D2Common.dll@1.13d] **Item Type Bitmask**: SetUnitItemTypeBitFlag (11152) — bit manipulation on bitmask array at unit[0x17]+0x58. Uses gdwBitMasks_exref/gdwInvBitMasks_exref globals. Marks unit dirty via AddUnitToClassQueue. ApplyUnitItemTypeStatList (10399) creates stat lists with flag 0x80, writes stat 0xB2.
-- [D2Common.dll@1.13d] **Skill Calculations**: EvaluateSkillCalcExpression (11081) — bytecode evaluator. Calc table: sgptDataTables+0x40 (base), +0x44 (size). Callback: GetSkillCalcParameter. Related: ApplySkillItemStats (10374) calls this per stat entry.
-- [D2Common.dll@1.13d] **Item Level**: GetEffectiveItemLevel (10007) — base from item_data+0x28 + optional CalculateTotalSkillDamageBonus, clamped to g_pdwMaxItemLevel. Same base field as GetItemProperty (10075).
-- [D2Common.dll@1.13d] **Level Scaling**: CalcLevelScaledValue (11146) — diminishing returns curve: level*110/(level+6). At level 99: ~103.7% of range. Used for stat/damage/defense scaling across 13 callers.
-- [D2Common.dll@1.13d] **Unit Collision**: GetUnitCollisionFlags (10157) — __fastcall flag bitmask. Object sub-struct offsets: +0x13A (blocking), +0x13B (solid), +0x167 bit 4 (special), +0x1B6 (dynamic). Default reads from pPath+0x4C.
-- [D2Common.dll@1.13d] **Weapon Selection**: FindBestEquippedWeapon (10058) — inventory scan by unit[0x18]. Equipment slots via Ordinal_10286. Type 0x2D = weapon check. Flag 0x2000 = dual-wield pref. Sub-type switch at +0x168.
-- [D2Common.dll@1.13d] **Stat List Transfer**: TransferStatListOwnership (10977) — handles ownership migration with item special cases. Bit 0x40000000 = modifier applied state. Ordinal_10333 = unapply, Ordinal_10431 = reapply.
-- [D2Common.dll@1.13d] **Level Presets**: GetLevelPresetData (10964) — table at DWORD_6fdf4cac, stride 0xF0, compound 2D index (16 levels per preset). Copies 6 DWORDs from +0x10 to +0x24.
+- [D2Common.dll@1.13d] **Item System**: GetItemDataRecord (10600, stride 0x1a8), FindItemDataRecord (10000, binary search), CheckItemType (10731, 111 xrefs). GetItemType (10121) → GetItemTypeFromClassId (10850, item_data+0x50). GetItemTypeProperty (11090, ItemTypes +0xBF8, stride 0xE4). GetItemTypeEquiv1 (10215, +0xC)/GetItemTypeEquiv2 (10869, +0xE) — type equivalence hierarchy.
+- [D2Common.dll@1.13d] **Item Record Fields**: +0x80=itemCode (10604), +0x10F=invWidth, +0x110=invHeight (10143), +0x112=hasDurability, +0x113=indestructible (10149), +0x115=bodyLoc (10993), +0x11C=unknown (10209/10672), +0x132=stackability (10715), +0x137=unknown (10004), +0x138=gfxVariants (10884), +0x13D=2-handed/classRestrict (10348). All stride 0x1a8.
+- [D2Common.dll@1.13d] **Item Properties**: GetItemProperty (10075)/SetItemProperty (10360) at item_data+0x28. GetItemQuality (10695) at +0x00. GetItemFlags (10709)/TestItemFlags (10458)/IsItemNotRestricted (10955)/IsItemEthereal (10880) at +0x18. GetItemQuantity (10717) at +0x2C. GetEffectiveItemLevel (10007) base+bonus. GetItemStackGfxTier (10185) quantity→tier. GetItemStatValueCapped (10976) capped to 511. GetItemDataShortByIndex (10701, item_data+0x3E array). GetItemRecordCode (10604, record+0x80 dword).
+- [D2Common.dll@1.13d] **Stat System**: SetStatInList (10463) binary search insert, SetUnitStat (10590) wrapper, AddStatToList (11158) accumulator, GetUnitBaseStat (10550) reader. GetStatCostTableValue (10190)/GetStatCostValueChecked (10216) from ItemStatCost (+0xBCC, stride 0x144). InsertAndApplyStatList (10808) dual-chain. TransferStatListOwnership (10977). AllocateStatList (10219) 60-byte from pool.
+- [D2Common.dll@1.13d] **Collision System**: Low: ClearCollisionMask (10444), GetCollisionMaskFlags (10152), CheckCollisionMask (10953), SetCollisionMask (10446). Mid: ClearUnitCollisionArea (10223), SetUnitCollisionArea (10222), ApplyUnitSizedCollision (10254), ApplyCollisionPatternAtCoords (11168). High: GetUnitCollisionFlags (10157, __fastcall), GetUnitSizeModifier (10780), GetUnitBlockingSize (11013), CheckUnitCollisionOverlap (10236), ComputeUnitDistance (10246, size-adjusted distance calc). CopyUnitPathBlock (10881). Object paths via Ordinal_11104/10144.
+- [D2Common.dll@1.13d] **Skill System**: GetSkillRangeValue (11021, +0x174), FindSkillListNode (10984, __fastcall linked list), AssignSkillToUnit (10435), UpdateUnitSkillLevel (10335, level set+reapply), ApplySkillItemStats (10374, 5 stat entries), EvaluateSkillCalcExpression (11081, bytecode), CalcSkillElemMin (10728, +0x1E0/+0x1E8), CalcSkillElemMax (10662, +0x1E4/+0x1FC) — paired elem damage calc. Skills table: +0xB98/+0xBA0, stride 0x23C. Skill ElemMin: +0x1E0 base, +0x1E8 breakpoints. ElemMax: +0x1E4 base, +0x1FC breakpoints. Shared: +0x1A4 shift, +0x210 calc, +0x1DC bonus type.
+- [D2Common.dll@1.13d] **Missile System**: CalcMissileParam (10821, Missiles table +0xB64, stride 0x1A4). EvaluateMissileCalcExpression (10536, bytecode at +0x60/+0x64). Fields: +0xEC base, +0x104 breakpoints, +0x118 calc, +0x196 shift. Requires unit type 3 (Missile).
+- [D2Common.dll@1.13d] **Path/Movement**: AdvanceUnitPathStep (10251) — path step with mode transitions. SetPathMode (10325) — mode setter with flag backup and mode table. SetUnitPathField0C (10892)/SetUnitPathField10 (10739) — coordinate pair setters. GetPositionPair (10395) — dual-field getter from struct. Path data at unit+0x2C. Modes: 2=normal, 4=special, 0xD=alt, 0xF=retry.
+- [D2Common.dll@1.13d] **Item Identity**: AreItemsIdentical (10613) — deep comparison for stacking. Checks classId, quality, property (+0x28), stackability flag (+0x132), ethereal, 6 stats (0x15-0x18, 0x9F, 0xA0).
+- [D2Common.dll@1.13d] **Equipment System**: IsUnitDualWieldClass (10171), FindEquippedWeaponByClassId (10627), FindWeaponInEquipSlots (10721), GetEquippedItemByBodyLoc (10286), GetItemEquipBodyType (10987), FindBestEquippedWeapon (10058), ResolveItemEquipSlotType (11012), IsClassRestrictedItem (10348, Barbarian 2-handed check), GetWeaponSlotRestriction (10443, slot compatibility). 11 slots.
+- [D2Common.dll@1.13d] **DRLG**: AllocateDrlgLevel (10283, types 1=Maze/2=Preset/3=Outdoors), GenerateDrlgLevel (10736), GetLevelPresetData (10964, stride 0xF0). LevelsDef: +0xC5C, stride 0x9C.
+- [D2Common.dll@1.13d] **Data Tables**: CompileTextDataTable (10037, 94 xrefs). GetGlobalRecordById (10174, stride 0x90). LookupGlobalPairTable (10886, 13 elements). GetDataTableValue (11093, stride 135).
+- [D2Common.dll@1.13d] **Unit Access**: GetUnitClassData (10846, 31 xrefs). AddUnitToClassQueue (10229)/RemoveUnitFromClassList (10992). SetUnitItemTypeBitFlag (11152)/ApplyUnitItemTypeStatList (10399). IsUnitAutoMapRevealed (10706).
+- [D2Common.dll@1.13d] **Animation**: ResolveWeaponAnimToken (10526, 4-byte ASCII codes). GetUnitOverlayComponent (10484, type+mode→index). CalcLevelScaledValue (11146, diminishing returns).
 
 ## String Anchors
 - [D2Common.dll@1.13d] `..\\Source\\D2Common\\DATATBLS\\DataTbls.cpp` — CompileTextDataTable and related data table functions
@@ -213,13 +288,15 @@
 - Thunk functions (single JMP) have no body variables of their own; skip type audit and variable renaming on the thunk. Document the body instead.
 - Register-only SSA variables (bVar*, iVar*, piVar*, uVar*) in worker bodies cannot be renamed or retyped. Document in plate comment Special Cases.
 - Decompiler fails to recover jumptables for some error logging functions (0x10077d16, 0x10077d22).
+- [D2Common.dll@1.13d] Ordinals 10005/10009/10022/10056 at 0x6fd5afba-afd2: jumptable dispatchers, decompiler can't recover ("Too many branches"). 6-12 xrefs each but undocumentable.
 - CONCAT22 phantom variables (extraout_var*) appear when 16-bit path position functions return ushort but caller uses uint. Cannot fix.
 - DAT_* globals renamed via create_label/rename_or_label may not reflect in decompiler output until cache refresh. Deduction persists at 97% — accept as near-unfixable.
 - [FrontEnd] propagate_documentation fails: "FunctionService is null". Must propagate manually via switch_program + rename + set_prototype per version.
 
 ## Strategy Performance
 - [D2Common.dll@1.00] callee_first: 25 functions, avg 94.4% — all ordinal exports are thunks with no callees, degrades to sequential.
-- [D2Common.dll@1.13d] callee_first (exploration): 5 functions, avg 77.4% raw / 100% effective. All callees pre-named (1900+ functions already named). Strategy degenerates to sequential in this binary since undocumented Ordinal_* functions mostly call already-named functions.
+- [D2Common.dll@1.13d] callee_first (exploration x3): 15 functions, avg 77.2% raw. Degenerates — all callees pre-named. Complex functions (skill/missile calc) drop raw scores due to SSA/undefined storage.
+- [D2Common.dll@1.13d] high_xref: 65 functions, avg 75.6% raw. Primary strategy. Consistent results across item/skill/collision/equipment/path domains.
 - [Fog.dll@1.13d] callee_first: 7 functions across 2 iterations, avg 84.6% raw / 98.6% effective. Binary COMPLETE (0 undocumented). Register-only SSA is primary deduction source. Propagation: 11 total (7 to 1.10, 4 to 1.06b).
 - [D2Common.dll] All 269 remaining undocumented are Ordinal_* thunks. Worker-body thunks still yield rich analysis.
 - [D2Common.dll] Best batch: iteration 7 (3 thunks, all 100%). Worst: iteration 9 (85% raw, void* deductions).
