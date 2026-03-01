@@ -19,8 +19,6 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Service for function hashing, documentation export/import, and cross-version matching.
@@ -32,6 +30,8 @@ public class DocumentationHashService {
     private final ThreadingStrategy threadingStrategy;
     private final BinaryComparisonService binaryComparisonService;
     private FunctionService functionService;
+    private CommentService commentService;
+    private AnalysisService analysisService;
 
     public DocumentationHashService(ProgramProvider programProvider, ThreadingStrategy threadingStrategy,
                                      BinaryComparisonService binaryComparisonService) {
@@ -45,6 +45,16 @@ public class DocumentationHashService {
      */
     public void setFunctionService(FunctionService functionService) {
         this.functionService = functionService;
+    }
+
+    /** Set CommentService (needed for batch_apply_documentation). */
+    public void setCommentService(CommentService commentService) {
+        this.commentService = commentService;
+    }
+
+    /** Set AnalysisService (needed for batch_apply_documentation completeness step). */
+    public void setAnalysisService(AnalysisService analysisService) {
+        this.analysisService = analysisService;
     }
 
     private Object[] getProgramOrError(String programName) {
@@ -86,22 +96,22 @@ public class DocumentationHashService {
      *
      * This allows matching identical functions that are located at different addresses.
      */
-    public String getFunctionHash(String functionAddress, String programName) {
+    public Response getFunctionHash(String functionAddress, String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+            return Response.err((String) programResult[1]);
         }
 
         try {
             Address addr = program.getAddressFactory().getAddress(functionAddress);
             if (addr == null) {
-                return "{\"error\": \"Invalid address: " + functionAddress + "\"}";
+                return Response.err("Invalid address: " + functionAddress);
             }
 
             Function func = program.getFunctionManager().getFunctionAt(addr);
             if (func == null) {
-                return "{\"error\": \"No function at address: " + functionAddress + "\"}";
+                return Response.err("No function at address: " + functionAddress);
             }
 
             String hash = computeNormalizedFunctionHash(program, func);
@@ -119,14 +129,14 @@ public class DocumentationHashService {
             json.append("\"program\": \"").append(ServiceUtils.escapeJson(program.getName())).append("\"");
             json.append("}");
 
-            return json.toString();
+            return Response.text(json.toString());
         } catch (Exception e) {
-            return "{\"error\": \"Failed to compute hash: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to compute hash: " + e.getMessage());
         }
     }
 
     // Backward compatibility overload
-    public String getFunctionHash(String functionAddress) {
+    public Response getFunctionHash(String functionAddress) {
         return getFunctionHash(functionAddress, null);
     }
 
@@ -253,11 +263,11 @@ public class DocumentationHashService {
     /**
      * Get hashes for multiple functions efficiently
      */
-    public String getBulkFunctionHashes(int offset, int limit, String filter, String programName) {
+    public Response getBulkFunctionHashes(int offset, int limit, String filter, String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+            return Response.err((String) programResult[1]);
         }
 
         try {
@@ -309,14 +319,14 @@ public class DocumentationHashService {
             json.append("\"returned\": ").append(added).append(", ");
             json.append("\"total_matching\": ").append(total).append("}");
 
-            return json.toString();
+            return Response.text(json.toString());
         } catch (Exception e) {
-            return "{\"error\": \"Failed to get bulk hashes: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to get bulk hashes: " + e.getMessage());
         }
     }
 
     // Backward compatibility overload
-    public String getBulkFunctionHashes(int offset, int limit, String filter) {
+    public Response getBulkFunctionHashes(int offset, int limit, String filter) {
         return getBulkFunctionHashes(offset, limit, filter, null);
     }
 
@@ -327,26 +337,21 @@ public class DocumentationHashService {
     /**
      * Export all documentation for a function (for use in cross-binary propagation)
      */
-    public String getFunctionDocumentation(String functionAddress) {
-        return getFunctionDocumentation(functionAddress, null);
-    }
-
-    public String getFunctionDocumentation(String functionAddress, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response getFunctionDocumentation(String functionAddress) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+            return Response.err("No program loaded");
         }
 
         try {
             Address addr = program.getAddressFactory().getAddress(functionAddress);
             if (addr == null) {
-                return "{\"error\": \"Invalid address: " + functionAddress + "\"}";
+                return Response.err("Invalid address: " + functionAddress);
             }
 
             Function func = program.getFunctionManager().getFunctionAt(addr);
             if (func == null) {
-                return "{\"error\": \"No function at address: " + functionAddress + "\"}";
+                return Response.err("No function at address: " + functionAddress);
             }
 
             // Compute hash for matching
@@ -475,10 +480,10 @@ public class DocumentationHashService {
             json.append("\"completeness_score\": ").append(completenessScore);
 
             json.append("}");
-            return json.toString();
+            return Response.text(json.toString());
 
         } catch (Exception e) {
-            return "{\"error\": \"Failed to export documentation: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to export documentation: " + e.getMessage());
         }
     }
 
@@ -510,38 +515,32 @@ public class DocumentationHashService {
      * Expects JSON body with: target_address, source_documentation (from getFunctionDocumentation)
      */
     @SuppressWarnings("deprecation")
-    public String applyFunctionDocumentation(String jsonBody) {
-        return applyFunctionDocumentation(jsonBody, null);
-    }
-
-    @SuppressWarnings("deprecation")
-    public String applyFunctionDocumentation(String jsonBody, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
+    public Response applyFunctionDocumentation(String jsonBody) {
+        Program program = programProvider.getCurrentProgram();
         if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+            return Response.err("No program loaded");
         }
 
         try {
-            // Parse JSON manually (simple parsing for this format)
-            String targetAddress = ServiceUtils.extractJsonString(jsonBody, "target_address");
-            String functionName = ServiceUtils.extractJsonString(jsonBody, "function_name");
-            String returnType = ServiceUtils.extractJsonString(jsonBody, "return_type");
-            String callingConvention = ServiceUtils.extractJsonString(jsonBody, "calling_convention");
-            String plateComment = ServiceUtils.extractJsonString(jsonBody, "plate_comment");
+            Map<String, Object> body = JsonHelper.parseMap(jsonBody);
+            String targetAddress = JsonHelper.getString(body, "target_address");
+            String functionName = JsonHelper.getString(body, "function_name");
+            String returnType = JsonHelper.getString(body, "return_type");
+            String callingConvention = JsonHelper.getString(body, "calling_convention");
+            String plateComment = JsonHelper.getString(body, "plate_comment");
 
-            if (targetAddress == null) {
-                return "{\"error\": \"target_address is required\"}";
+            if (targetAddress == null || targetAddress.isEmpty()) {
+                return Response.err("target_address is required");
             }
 
             Address addr = program.getAddressFactory().getAddress(targetAddress);
             if (addr == null) {
-                return "{\"error\": \"Invalid target address: " + targetAddress + "\"}";
+                return Response.err("Invalid target address: " + targetAddress);
             }
 
             Function func = program.getFunctionManager().getFunctionAt(addr);
             if (func == null) {
-                return "{\"error\": \"No function at target address: " + targetAddress + "\"}";
+                return Response.err("No function at target address: " + targetAddress);
             }
 
             final AtomicBoolean success = new AtomicBoolean(false);
@@ -592,21 +591,21 @@ public class DocumentationHashService {
                         }
 
                         // Apply parameter names and types from JSON array
-                        String paramsJson = ServiceUtils.extractJsonArray(jsonBody, "parameters");
-                        if (paramsJson != null) {
-                            applyParameterDocumentation(func, program, paramsJson, changesApplied);
+                        Object paramsObj = body.get("parameters");
+                        if (paramsObj instanceof List<?> paramsList) {
+                            applyParameterDocumentation(func, program, paramsList, changesApplied);
                         }
 
                         // Apply comments from JSON array
-                        String commentsJson = ServiceUtils.extractJsonArray(jsonBody, "comments");
-                        if (commentsJson != null) {
-                            applyCommentsDocumentation(func, program, commentsJson, changesApplied);
+                        Object commentsObj = body.get("comments");
+                        if (commentsObj instanceof List<?> commentsList) {
+                            applyCommentsDocumentation(func, program, commentsList, changesApplied);
                         }
 
                         // Apply labels from JSON array
-                        String labelsJson = ServiceUtils.extractJsonArray(jsonBody, "labels");
-                        if (labelsJson != null) {
-                            applyLabelsDocumentation(func, program, labelsJson, changesApplied);
+                        Object labelsObj = body.get("labels");
+                        if (labelsObj instanceof List<?> labelsList) {
+                            applyLabelsDocumentation(func, program, labelsList, changesApplied);
                         }
 
                         success.set(true);
@@ -617,61 +616,59 @@ public class DocumentationHashService {
                     }
                 });
             } catch (Exception e) {
-                return "{\"error\": \"Failed to apply documentation: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+                return Response.err("Failed to apply documentation: " + e.getMessage());
             }
 
             if (success.get()) {
-                return "{\"success\": true, \"changes_applied\": " + changesApplied.get() +
-                       ", \"function\": \"" + ServiceUtils.escapeJson(func.getName()) + "\", " +
-                       "\"address\": \"" + addr.toString() + "\"}";
+                Map<String, Object> out = new java.util.LinkedHashMap<>();
+                out.put("success", true);
+                out.put("changes_applied", changesApplied.get());
+                out.put("function", func.getName());
+                out.put("address", addr.toString());
+                return Response.text(JsonHelper.toJson(out));
             } else {
-                return "{\"error\": \"" + (errorMsg.get() != null ? ServiceUtils.escapeJson(errorMsg.get()) : "Unknown error") + "\"}";
+                return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown error");
             }
 
         } catch (Exception e) {
-            return "{\"error\": \"Failed to parse documentation JSON: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to parse documentation JSON: " + e.getMessage());
         }
     }
 
     /**
-     * Apply parameter documentation from JSON
+     * Apply parameter documentation from parsed JSON array (list of maps with ordinal, name, type).
      */
-    private void applyParameterDocumentation(Function func, Program program, String paramsJson, AtomicInteger changesApplied) {
-        // Parse simple array format: [{"ordinal": 0, "name": "...", "type": "..."}, ...]
-        Pattern p = Pattern.compile(
-            "\\{\\s*\"ordinal\"\\s*:\\s*(\\d+).*?\"name\"\\s*:\\s*\"([^\"]*)\".*?\"type\"\\s*:\\s*\"([^\"]*)\"");
-        Matcher m = p.matcher(paramsJson);
-
+    @SuppressWarnings("unchecked")
+    private void applyParameterDocumentation(Function func, Program program, List<?> paramsList, AtomicInteger changesApplied) {
+        if (paramsList == null) return;
         Parameter[] params = func.getParameters();
-        while (m.find()) {
+        for (Object item : paramsList) {
+            if (!(item instanceof Map)) continue;
+            Map<String, Object> entry = (Map<String, Object>) item;
             try {
-                int ordinal = Integer.parseInt(m.group(1));
-                String name = m.group(2);
-                String typeName = m.group(3);
+                Object ordObj = entry.get("ordinal");
+                int ordinal = ordObj instanceof Number n ? n.intValue() : -1;
+                String name = JsonHelper.getString(entry, "name");
+                String typeName = JsonHelper.getString(entry, "type");
+                if (ordinal < 0 || name == null || typeName == null || ordinal >= params.length) continue;
 
-                if (ordinal < params.length) {
-                    Parameter param = params[ordinal];
-
-                    // Set name if different and not generic
-                    if (!name.startsWith("param_") && !name.equals(param.getName())) {
+                Parameter param = params[ordinal];
+                if (!name.startsWith("param_") && !name.equals(param.getName())) {
+                    try {
+                        param.setName(name, SourceType.USER_DEFINED);
+                        changesApplied.incrementAndGet();
+                    } catch (Exception e) {
+                        Msg.warn(this, "Could not set parameter name: " + e.getMessage());
+                    }
+                }
+                if (!typeName.startsWith("undefined") && !typeName.equals(param.getDataType().getName())) {
+                    DataType dt = ServiceUtils.findDataTypeByNameInAllCategories(program.getDataTypeManager(), typeName);
+                    if (dt != null) {
                         try {
-                            param.setName(name, SourceType.USER_DEFINED);
+                            param.setDataType(dt, SourceType.USER_DEFINED);
                             changesApplied.incrementAndGet();
                         } catch (Exception e) {
-                            Msg.warn(this, "Could not set parameter name: " + e.getMessage());
-                        }
-                    }
-
-                    // Set type if different
-                    if (!typeName.startsWith("undefined") && !typeName.equals(param.getDataType().getName())) {
-                        DataType dt = ServiceUtils.findDataTypeByNameInAllCategories(program.getDataTypeManager(), typeName);
-                        if (dt != null) {
-                            try {
-                                param.setDataType(dt, SourceType.USER_DEFINED);
-                                changesApplied.incrementAndGet();
-                            } catch (Exception e) {
-                                Msg.warn(this, "Could not set parameter type: " + e.getMessage());
-                            }
+                            Msg.warn(this, "Could not set parameter type: " + e.getMessage());
                         }
                     }
                 }
@@ -682,31 +679,24 @@ public class DocumentationHashService {
     }
 
     /**
-     * Apply inline comments from JSON
+     * Apply inline comments from parsed JSON array (list of maps with relative_offset, eol_comment, pre_comment).
      */
-    private void applyCommentsDocumentation(Function func, Program program, String commentsJson, AtomicInteger changesApplied) {
-        // Parse: [{"relative_offset": 0, "eol_comment": "...", "pre_comment": "..."}, ...]
-        Pattern p = Pattern.compile(
-            "\\{\\s*\"relative_offset\"\\s*:\\s*(\\d+)");
-        Matcher m = p.matcher(commentsJson);
-
+    @SuppressWarnings("unchecked")
+    private void applyCommentsDocumentation(Function func, Program program, List<?> commentsList, AtomicInteger changesApplied) {
+        if (commentsList == null) return;
         Address funcStart = func.getEntryPoint();
         Listing listing = program.getListing();
-
-        while (m.find()) {
+        for (Object item : commentsList) {
+            if (!(item instanceof Map)) continue;
+            Map<String, Object> entry = (Map<String, Object>) item;
             try {
-                long relOffset = Long.parseLong(m.group(1));
+                Object offsetObj = entry.get("relative_offset");
+                long relOffset = offsetObj instanceof Number n ? n.longValue() : -1;
+                if (relOffset < 0) continue;
+                String eolComment = JsonHelper.getString(entry, "eol_comment");
+                String preComment = JsonHelper.getString(entry, "pre_comment");
+
                 Address commentAddr = funcStart.add(relOffset);
-
-                // Extract comments for this entry
-                int entryStart = m.start();
-                int entryEnd = commentsJson.indexOf('}', entryStart);
-                if (entryEnd < 0) continue;
-                String entry = commentsJson.substring(entryStart, entryEnd + 1);
-
-                String eolComment = ServiceUtils.extractJsonString(entry, "eol_comment");
-                String preComment = ServiceUtils.extractJsonString(entry, "pre_comment");
-
                 CodeUnit cu = listing.getCodeUnitAt(commentAddr);
                 if (cu != null) {
                     if (eolComment != null && !eolComment.isEmpty()) {
@@ -725,25 +715,23 @@ public class DocumentationHashService {
     }
 
     /**
-     * Apply labels from JSON
+     * Apply labels from parsed JSON array (list of maps with relative_offset, name).
      */
-    private void applyLabelsDocumentation(Function func, Program program, String labelsJson, AtomicInteger changesApplied) {
-        // Parse: [{"relative_offset": 0, "name": "..."}, ...]
-        Pattern p = Pattern.compile(
-            "\\{\\s*\"relative_offset\"\\s*:\\s*(\\d+).*?\"name\"\\s*:\\s*\"([^\"]*)\"");
-        Matcher m = p.matcher(labelsJson);
-
+    @SuppressWarnings("unchecked")
+    private void applyLabelsDocumentation(Function func, Program program, List<?> labelsList, AtomicInteger changesApplied) {
+        if (labelsList == null) return;
         Address funcStart = func.getEntryPoint();
         SymbolTable symTable = program.getSymbolTable();
-
-        while (m.find()) {
+        for (Object item : labelsList) {
+            if (!(item instanceof Map)) continue;
+            Map<String, Object> entry = (Map<String, Object>) item;
             try {
-                long relOffset = Long.parseLong(m.group(1));
-                String labelName = m.group(2);
+                Object offsetObj = entry.get("relative_offset");
+                long relOffset = offsetObj instanceof Number n ? n.longValue() : -1;
+                String labelName = JsonHelper.getString(entry, "name");
+                if (relOffset < 0 || labelName == null || labelName.isEmpty()) continue;
 
                 Address labelAddr = funcStart.add(relOffset);
-
-                // Check if label already exists
                 Symbol existing = symTable.getPrimarySymbol(labelAddr);
                 if (existing == null || existing.getSymbolType() != SymbolType.LABEL ||
                     !existing.getName().equals(labelName)) {
@@ -760,6 +748,134 @@ public class DocumentationHashService {
         }
     }
 
+    /**
+     * Apply all documentation to a function in a single call.
+     * Orchestrates: rename -> prototype -> variable types -> variable renames -> comments -> completeness score.
+     */
+    @SuppressWarnings("unchecked")
+    public Response batchApplyDocumentation(String jsonBody) {
+        if (jsonBody == null || jsonBody.isBlank()) {
+            return Response.err("JSON body is required");
+        }
+        Map<String, Object> params = JsonHelper.parseMap(jsonBody);
+        String address = JsonHelper.getString(params, "address");
+        if (address != null) address = address.trim();
+        if (address == null || address.isEmpty()) {
+            return Response.err("address parameter is required");
+        }
+
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
+
+        Map<String, Object> steps = new java.util.LinkedHashMap<>();
+        java.util.List<String> errors = new java.util.ArrayList<>();
+
+        // Step 1: Rename function (optional)
+        String name = JsonHelper.getString(params, "name");
+        if (name != null && !name.isEmpty() && functionService != null) {
+            Response renameResp = functionService.renameFunctionByAddress(address, name);
+            boolean renameOk = !(renameResp instanceof Response.Err);
+            Map<String, Object> step = new java.util.LinkedHashMap<>();
+            step.put("success", renameOk);
+            if (renameResp instanceof Response.Err e) {
+                step.put("error", e.message());
+                errors.add("rename: " + e.message());
+            }
+            steps.put("rename", step);
+        }
+
+        // Step 2: Set prototype (optional)
+        String prototype = JsonHelper.getString(params, "prototype");
+        if (prototype != null && !prototype.isEmpty() && functionService != null) {
+            String callingConvention = JsonHelper.getString(params, "calling_convention");
+            FunctionService.PrototypeResult protoResult = functionService.setFunctionPrototype(address, prototype, callingConvention);
+            Map<String, Object> step = new java.util.LinkedHashMap<>();
+            step.put("success", protoResult.isSuccess());
+            if (!protoResult.isSuccess()) {
+                step.put("error", protoResult.getErrorMessage());
+                errors.add("prototype: " + protoResult.getErrorMessage());
+            }
+            steps.put("prototype", step);
+        }
+
+        // Step 3: Set variable types (optional)
+        Object varTypesObj = params.get("variable_types");
+        if (varTypesObj instanceof Map && functionService != null) {
+            Map<String, Object> varTypes = (Map<String, Object>) varTypesObj;
+            int setCount = 0, failCount = 0;
+            java.util.List<String> typeErrors = new java.util.ArrayList<>();
+            for (Map.Entry<String, Object> entry : varTypes.entrySet()) {
+                Response typeResp = functionService.setLocalVariableType(address, entry.getKey(), entry.getValue().toString());
+                boolean ok = !(typeResp instanceof Response.Err);
+                if (ok) setCount++; else {
+                    failCount++;
+                    typeErrors.add(entry.getKey() + ": " + (typeResp instanceof Response.Err e ? e.message() : "failed"));
+                }
+            }
+            Map<String, Object> step = new java.util.LinkedHashMap<>();
+            step.put("success", failCount == 0);
+            step.put("set", setCount);
+            step.put("failed", failCount);
+            if (!typeErrors.isEmpty()) {
+                step.put("errors", new java.util.ArrayList<>(typeErrors));
+                errors.addAll(typeErrors);
+            }
+            steps.put("variable_types", step);
+        }
+
+        // Step 4: Rename variables (optional)
+        Object varRenamesObj = params.get("variable_renames");
+        if (varRenamesObj instanceof Map && functionService != null) {
+            Map<String, String> varRenames = new java.util.LinkedHashMap<>();
+            for (Map.Entry<String, Object> e : ((Map<String, Object>) varRenamesObj).entrySet()) {
+                varRenames.put(e.getKey(), e.getValue().toString());
+            }
+            Response renameVarsResp = functionService.batchRenameVariables(address, varRenames, true);
+            boolean renameOk = renameVarsResp instanceof Response.Text t && t.content().contains("\"success\": true");
+            steps.put("variable_renames", Map.of("success", renameOk));
+            if (!renameOk && renameVarsResp instanceof Response.Err err) {
+                errors.add("variable_renames: " + err.message());
+            }
+        }
+
+        // Step 5: Set comments (optional)
+        String plateComment = JsonHelper.getString(params, "plate_comment");
+        java.util.List<Map<String, String>> decompComments = ServiceUtils.convertToMapList(params.get("decompiler_comments"));
+        java.util.List<Map<String, String>> disasmComments = ServiceUtils.convertToMapList(params.get("disassembly_comments"));
+        boolean hasComments = (plateComment != null && !plateComment.isEmpty()) ||
+            (decompComments != null && !decompComments.isEmpty()) ||
+            (disasmComments != null && !disasmComments.isEmpty());
+        if (hasComments && commentService != null) {
+            Response commentResp = commentService.batchSetComments(address, decompComments, disasmComments, plateComment);
+            boolean commentOk = commentResp instanceof Response.Text t && t.content().contains("\"success\": true");
+            steps.put("comments", Map.of("success", commentOk));
+            if (!commentOk && commentResp instanceof Response.Err err) {
+                errors.add("comments: " + err.message());
+            }
+        }
+
+        // Step 6: Completeness score (optional)
+        Object scoreParam = params.get("score");
+        boolean doScore = !(scoreParam instanceof Boolean) || (Boolean) scoreParam;
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("address", address);
+        result.put("steps", steps);
+        result.put("errors", errors);
+        if (doScore && analysisService != null) {
+            Response scoreResp = analysisService.analyzeFunctionCompleteness(address);
+            if (scoreResp instanceof Response.Text t) {
+                String scoreStr = t.content();
+                if (scoreStr != null && !scoreStr.isBlank() && scoreStr.startsWith("{")) {
+                    result.put("completeness", JsonHelper.parseMap(scoreStr));
+                }
+            }
+        }
+
+        return Response.text(JsonHelper.toJson(result));
+    }
+
     // -----------------------------------------------------------------------
     // Cross-Version Matching Tools
     // -----------------------------------------------------------------------
@@ -768,21 +884,16 @@ public class DocumentationHashService {
      * Compare documentation status across all open programs.
      * Returns documented/undocumented function counts for each program.
      */
-    public String compareProgramsDocumentation() {
-        return compareProgramsDocumentation(null);
-    }
-
-    public String compareProgramsDocumentation(String programName) {
+    public Response compareProgramsDocumentation() {
         StringBuilder result = new StringBuilder();
         result.append("{\"programs\": [");
 
         try {
             Program[] allPrograms = programProvider.getAllOpenPrograms();
-            Object[] programResult = getProgramOrError(programName);
-            Program currentProgram = (Program) programResult[0];
+            Program currentProgram = programProvider.getCurrentProgram();
 
             if (allPrograms == null || allPrograms.length == 0) {
-                return "{\"error\": \"No programs are open\"}";
+                return Response.err("No programs are open");
             }
 
             boolean first = true;
@@ -820,25 +931,25 @@ public class DocumentationHashService {
             result.append("], \"count\": ").append(allPrograms.length).append("}");
 
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
 
-        return result.toString();
+        return Response.text(result.toString());
     }
 
     /**
      * Find undocumented (FUN_*) functions that reference a given string address.
      * This filters get_xrefs_to results to only return FUN_* functions.
      */
-    public String findUndocumentedByString(String stringAddress, String programName) {
+    public Response findUndocumentedByString(String stringAddress, String programName) {
         if (stringAddress == null || stringAddress.isEmpty()) {
-            return "{\"error\": \"String address is required\"}";
+            return Response.err("String address is required");
         }
 
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+            return Response.err((String) programResult[1]);
         }
 
         StringBuilder result = new StringBuilder();
@@ -848,7 +959,7 @@ public class DocumentationHashService {
         try {
             Address addr = program.getAddressFactory().getAddress(stringAddress);
             if (addr == null) {
-                return "{\"error\": \"Invalid address format: " + stringAddress + "\"}";
+                return Response.err("Invalid address format: " + stringAddress);
             }
 
             ReferenceManager refMgr = program.getReferenceManager();
@@ -900,21 +1011,21 @@ public class DocumentationHashService {
             result.append("}");
 
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
 
-        return result.toString();
+        return Response.text(result.toString());
     }
 
     /**
      * Generate a report of all strings matching a pattern (e.g., ".cpp") and their referencing FUN_* functions.
      * This helps identify undocumented functions that can be matched using string anchors.
      */
-    public String batchStringAnchorReport(String pattern, String programName) {
+    public Response batchStringAnchorReport(String pattern, String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+            return Response.err((String) programResult[1]);
         }
 
         StringBuilder result = new StringBuilder();
@@ -1011,10 +1122,10 @@ public class DocumentationHashService {
             result.append("}");
 
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
 
-        return result.toString();
+        return Response.text(result.toString());
     }
 
     // -----------------------------------------------------------------------
@@ -1024,93 +1135,93 @@ public class DocumentationHashService {
     /**
      * Get the function signature (feature vector) for a function at the given address.
      */
-    public String handleGetFunctionSignature(String addressStr, String programName) {
+    public Response handleGetFunctionSignature(String addressStr, String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+        if (program == null) return Response.err((String) programResult[1]);
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
-            if (addr == null) return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+            if (addr == null) return Response.err("Invalid address: " + addressStr);
 
             Function func = program.getFunctionManager().getFunctionAt(addr);
-            if (func == null) return "{\"error\": \"No function at address: " + addressStr + "\"}";
+            if (func == null) return Response.err("No function at address: " + addressStr);
 
             BinaryComparisonService.FunctionSignature sig =
                 BinaryComparisonService.computeFunctionSignature(program, func, new ConsoleTaskMonitor());
-            return sig.toJson();
+            return Response.text(sig.toJson());
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Find functions in target program similar to the source function.
      */
-    public String handleFindSimilarFunctionsFuzzy(String addressStr, String sourceProgramName,
+    public Response handleFindSimilarFunctionsFuzzy(String addressStr, String sourceProgramName,
             String targetProgramName, double threshold, int limit) {
         // Source program: use sourceProgramName if given, otherwise current program
         Object[] srcResult = getProgramOrError(sourceProgramName);
         Program srcProgram = (Program) srcResult[0];
-        if (srcProgram == null) return (String) srcResult[1];
+        if (srcProgram == null) return Response.err((String) srcResult[1]);
 
         // Target program is required
         if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
-            return "{\"error\": \"target_program parameter is required\"}";
+            return Response.err("target_program parameter is required");
         }
         Object[] tgtResult = getProgramOrError(targetProgramName);
         Program tgtProgram = (Program) tgtResult[0];
-        if (tgtProgram == null) return (String) tgtResult[1];
+        if (tgtProgram == null) return Response.err((String) tgtResult[1]);
 
         try {
             Address addr = srcProgram.getAddressFactory().getAddress(addressStr);
-            if (addr == null) return "{\"error\": \"Invalid address: " + addressStr + "\"}";
+            if (addr == null) return Response.err("Invalid address: " + addressStr);
 
             Function srcFunc = srcProgram.getFunctionManager().getFunctionAt(addr);
-            if (srcFunc == null) return "{\"error\": \"No function at address: " + addressStr + "\"}";
+            if (srcFunc == null) return Response.err("No function at address: " + addressStr);
 
-            return BinaryComparisonService.findSimilarFunctionsJson(
-                srcProgram, srcFunc, tgtProgram, threshold, limit, new ConsoleTaskMonitor());
+            return Response.text(BinaryComparisonService.findSimilarFunctionsJson(
+                srcProgram, srcFunc, tgtProgram, threshold, limit, new ConsoleTaskMonitor()));
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Bulk fuzzy match: find best match for each source function in target program.
      */
-    public String handleBulkFuzzyMatch(String sourceProgramName, String targetProgramName,
+    public Response handleBulkFuzzyMatch(String sourceProgramName, String targetProgramName,
             double threshold, int offset, int limit, String filter) {
         if (sourceProgramName == null || sourceProgramName.trim().isEmpty()) {
-            return "{\"error\": \"source_program parameter is required\"}";
+            return Response.err("source_program parameter is required");
         }
         Object[] srcResult = getProgramOrError(sourceProgramName);
         Program srcProgram = (Program) srcResult[0];
-        if (srcProgram == null) return (String) srcResult[1];
+        if (srcProgram == null) return Response.err((String) srcResult[1]);
 
         if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
-            return "{\"error\": \"target_program parameter is required\"}";
+            return Response.err("target_program parameter is required");
         }
         Object[] tgtResult = getProgramOrError(targetProgramName);
         Program tgtProgram = (Program) tgtResult[0];
-        if (tgtProgram == null) return (String) tgtResult[1];
+        if (tgtProgram == null) return Response.err((String) tgtResult[1]);
 
         try {
-            return BinaryComparisonService.bulkFuzzyMatchJson(
-                srcProgram, tgtProgram, threshold, offset, limit, filter, new ConsoleTaskMonitor());
+            return Response.text(BinaryComparisonService.bulkFuzzyMatchJson(
+                srcProgram, tgtProgram, threshold, offset, limit, filter, new ConsoleTaskMonitor()));
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Compute a structured diff between two functions.
      */
-    public String handleDiffFunctions(String addressA, String addressB, String programAName, String programBName) {
+    public Response handleDiffFunctions(String addressA, String addressB, String programAName, String programBName) {
         // Program A
         Object[] resultA = getProgramOrError(programAName);
         Program progA = (Program) resultA[0];
-        if (progA == null) return (String) resultA[1];
+        if (progA == null) return Response.err((String) resultA[1]);
 
         // Program B defaults to Program A if not specified
         Program progB;
@@ -1119,25 +1230,25 @@ public class DocumentationHashService {
         } else {
             Object[] resultB = getProgramOrError(programBName);
             progB = (Program) resultB[0];
-            if (progB == null) return (String) resultB[1];
+            if (progB == null) return Response.err((String) resultB[1]);
         }
 
         try {
             Address addrA = progA.getAddressFactory().getAddress(addressA);
-            if (addrA == null) return "{\"error\": \"Invalid address_a: " + addressA + "\"}";
+            if (addrA == null) return Response.err("Invalid address_a: " + addressA);
 
             Address addrB = progB.getAddressFactory().getAddress(addressB);
-            if (addrB == null) return "{\"error\": \"Invalid address_b: " + addressB + "\"}";
+            if (addrB == null) return Response.err("Invalid address_b: " + addressB);
 
             Function funcA = progA.getFunctionManager().getFunctionAt(addrA);
-            if (funcA == null) return "{\"error\": \"No function at address_a: " + addressA + "\"}";
+            if (funcA == null) return Response.err("No function at address_a: " + addressA);
 
             Function funcB = progB.getFunctionManager().getFunctionAt(addrB);
-            if (funcB == null) return "{\"error\": \"No function at address_b: " + addressB + "\"}";
+            if (funcB == null) return Response.err("No function at address_b: " + addressB);
 
-            return BinaryComparisonService.diffFunctionsJson(progA, funcA, progB, funcB, new ConsoleTaskMonitor());
+            return Response.text(BinaryComparisonService.diffFunctionsJson(progA, funcA, progB, funcB, new ConsoleTaskMonitor()));
         } catch (Exception e) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 }

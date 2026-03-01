@@ -16,6 +16,7 @@
 package com.xebyte.headless;
 
 import com.xebyte.core.GhidraMCPAuthenticator;
+import com.xebyte.core.Response;
 import ghidra.framework.client.ClientUtil;
 import ghidra.framework.client.RepositoryAdapter;
 import ghidra.framework.client.RepositoryServerAdapter;
@@ -26,6 +27,7 @@ import ghidra.framework.store.ItemCheckoutStatus;
 import ghidra.framework.store.Version;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.io.IOException;
 
@@ -64,7 +66,7 @@ public class GhidraServerManager {
         this.user = System.getenv("GHIDRA_SERVER_USER");
         String pwd = System.getenv("GHIDRA_SERVER_PASSWORD");
         this.password = (pwd != null) ? pwd.toCharArray() : null;
-        
+
         // Register our custom authenticator
         registerAuthenticator();
     }
@@ -74,7 +76,7 @@ public class GhidraServerManager {
         this.port = port > 0 ? port : DEFAULT_PORT;
         this.user = user;
         this.password = (password != null) ? password.toCharArray() : null;
-        
+
         registerAuthenticator();
     }
 
@@ -85,7 +87,7 @@ public class GhidraServerManager {
         if (authenticatorRegistered) {
             return;
         }
-        
+
         if (user != null && password != null) {
             try {
                 ClientUtil.setClientAuthenticator(new GhidraMCPAuthenticator(user, password));
@@ -102,18 +104,22 @@ public class GhidraServerManager {
     /**
      * Connect to the configured Ghidra server.
      *
-     * @return JSON string with connection result
+     * @return Response with connection result
      */
-    public synchronized String connect() {
+    public synchronized Response connect() {
         if (connected && serverAdapter != null && serverAdapter.isConnected()) {
-            return "{\"status\": \"already_connected\", \"host\": \"" + escapeJson(host)
-                    + "\", \"port\": " + port + ", \"user\": \"" + escapeJson(user) + "\"}";
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("status", "already_connected");
+            data.put("host", host);
+            data.put("port", port);
+            data.put("user", user);
+            return Response.ok(data);
         }
 
         // Verify credentials are configured
         if (user == null || password == null) {
             lastError = "Credentials not configured. Set GHIDRA_SERVER_USER and GHIDRA_SERVER_PASSWORD";
-            return "{\"status\": \"error\", \"error\": \"" + escapeJson(lastError) + "\"}";
+            return Response.err(lastError);
         }
 
         try {
@@ -125,11 +131,15 @@ public class GhidraServerManager {
 
             if (connected) {
                 System.out.println("Connected to Ghidra server at " + host + ":" + port + " as " + user);
-                return "{\"status\": \"connected\", \"host\": \"" + escapeJson(host)
-                        + "\", \"port\": " + port + ", \"user\": \"" + escapeJson(user) + "\"}";
+                Map<String, Object> data = new LinkedHashMap<>();
+                data.put("status", "connected");
+                data.put("host", host);
+                data.put("port", port);
+                data.put("user", user);
+                return Response.ok(data);
             } else {
                 lastError = "Connection returned but server reports not connected";
-                return "{\"status\": \"error\", \"error\": \"" + escapeJson(lastError) + "\"}";
+                return Response.err(lastError);
             }
         } catch (Exception e) {
             connected = false;
@@ -137,19 +147,18 @@ public class GhidraServerManager {
             System.err.println("Failed to connect to Ghidra server at " + host + ":" + port
                     + " - " + e.getMessage());
             e.printStackTrace();
-            return "{\"status\": \"error\", \"error\": \"" + escapeJson(lastError)
-                    + "\", \"host\": \"" + escapeJson(host) + "\", \"port\": " + port + "}";
+            return Response.err(lastError);
         }
     }
 
     /**
      * Disconnect from the Ghidra server.
      *
-     * @return JSON string with disconnect result
+     * @return Response with disconnect result
      */
-    public synchronized String disconnect() {
+    public synchronized Response disconnect() {
         if (!connected || serverAdapter == null) {
-            return "{\"status\": \"not_connected\"}";
+            return Response.ok(Map.of("status", "not_connected"));
         }
 
         try {
@@ -158,58 +167,56 @@ public class GhidraServerManager {
             serverAdapter = null;
             lastError = null;
             System.out.println("Disconnected from Ghidra server");
-            return "{\"status\": \"disconnected\"}";
+            return Response.ok(Map.of("status", "disconnected"));
         } catch (Exception e) {
             lastError = e.getMessage();
             connected = false;
             serverAdapter = null;
-            return "{\"status\": \"error\", \"error\": \"" + escapeJson(lastError) + "\"}";
+            return Response.err(lastError);
         }
     }
 
     /**
      * Get the current connection status.
      *
-     * @return JSON string with connection status details
+     * @return Response with connection status details
      */
-    public String getStatus() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{");
-        sb.append("\"connected\": ").append(connected);
-        sb.append(", \"host\": \"").append(escapeJson(host)).append("\"");
-        sb.append(", \"port\": ").append(port);
+    public Response getStatus() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("connected", connected);
+        data.put("host", host);
+        data.put("port", port);
 
         if (user != null && !user.isEmpty()) {
-            sb.append(", \"user\": \"").append(escapeJson(user)).append("\"");
+            data.put("user", user);
         }
-        
-        sb.append(", \"credentials_configured\": ").append(user != null && password != null);
+
+        data.put("credentials_configured", user != null && password != null);
 
         if (connected && serverAdapter != null) {
-            sb.append(", \"server_connected\": ").append(serverAdapter.isConnected());
+            data.put("server_connected", serverAdapter.isConnected());
         }
 
         if (lastError != null) {
-            sb.append(", \"last_error\": \"").append(escapeJson(lastError)).append("\"");
+            data.put("last_error", lastError);
         }
 
-        sb.append("}");
-        return sb.toString();
+        return Response.ok(data);
     }
 
     /**
      * List available repositories on the connected server.
      *
-     * @return JSON string with repository list
+     * @return Response with repository list
      */
-    public String listRepositories() {
+    public Response listRepositories() {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server. Use /server/connect first.\"}";
+            return Response.err("Not connected to server. Use /server/connect first.");
         }
 
         if (!serverAdapter.isConnected()) {
             connected = false;
-            return "{\"error\": \"Server connection lost. Reconnect with /server/connect.\"}";
+            return Response.err("Server connection lost. Reconnect with /server/connect.");
         }
 
         try {
@@ -221,10 +228,10 @@ public class GhidraServerManager {
                 sb.append("\"").append(escapeJson(repoNames[i])).append("\"");
             }
             sb.append("], \"count\": ").append(repoNames.length).append("}");
-            return sb.toString();
+            return Response.text(sb.toString());
         } catch (IOException e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Failed to list repositories: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to list repositories: " + e.getMessage());
         }
     }
 
@@ -235,7 +242,7 @@ public class GhidraServerManager {
         if (!connected || serverAdapter == null) {
             throw new IOException("Not connected to server");
         }
-        
+
         RepositoryAdapter repo = repositoryCache.get(repoName);
         if (repo == null || !repo.isConnected()) {
             repo = serverAdapter.getRepository(repoName);
@@ -249,38 +256,38 @@ public class GhidraServerManager {
 
     /**
      * List files and folders in a repository path.
-     * 
+     *
      * @param repoName Repository name (e.g., "pd2")
      * @param path Folder path (e.g., "/Classic/1.00" or "/" for root)
-     * @return JSON string with file/folder listing
+     * @return Response with file/folder listing
      */
-    public String listRepositoryFiles(String repoName, String path) {
+    public Response listRepositoryFiles(String repoName, String path) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server. Use /server/connect first.\"}";
+            return Response.err("Not connected to server. Use /server/connect first.");
         }
-        
+
         if (repoName == null || repoName.isEmpty()) {
-            return "{\"error\": \"Repository name required.\"}";
+            return Response.err("Repository name required.");
         }
-        
+
         if (path == null || path.isEmpty()) {
             path = "/";
         }
-        
+
         try {
             RepositoryAdapter repo = getRepository(repoName);
             if (repo == null) {
-                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+                return Response.err("Repository not found: " + repoName);
             }
-            
+
             // List folder contents
             String[] subfolders = repo.getSubfolderList(path);
             RepositoryItem[] items = repo.getItemList(path);
-            
+
             StringBuilder sb = new StringBuilder();
             sb.append("{\"repository\": \"").append(escapeJson(repoName)).append("\"");
             sb.append(", \"path\": \"").append(escapeJson(path)).append("\"");
-            
+
             // Folders
             sb.append(", \"folders\": [");
             if (subfolders != null) {
@@ -290,7 +297,7 @@ public class GhidraServerManager {
                 }
             }
             sb.append("]");
-            
+
             // Files
             sb.append(", \"files\": [");
             if (items != null) {
@@ -306,46 +313,46 @@ public class GhidraServerManager {
                 }
             }
             sb.append("]");
-            
+
             int totalCount = (subfolders != null ? subfolders.length : 0) + (items != null ? items.length : 0);
             sb.append(", \"total_count\": ").append(totalCount);
             sb.append("}");
-            
-            return sb.toString();
+
+            return Response.text(sb.toString());
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Failed to list files: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to list files: " + e.getMessage());
         }
     }
 
     /**
      * Get file metadata for a specific file in the repository.
      */
-    public String getFileInfo(String repoName, String filePath) {
+    public Response getFileInfo(String repoName, String filePath) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server. Use /server/connect first.\"}";
+            return Response.err("Not connected to server. Use /server/connect first.");
         }
-        
+
         if (repoName == null || filePath == null) {
-            return "{\"error\": \"Repository name and file path required.\"}";
+            return Response.err("Repository name and file path required.");
         }
-        
+
         try {
             RepositoryAdapter repo = getRepository(repoName);
             if (repo == null) {
-                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+                return Response.err("Repository not found: " + repoName);
             }
-            
+
             // Parse path to get parent folder and file name
             int lastSlash = filePath.lastIndexOf('/');
             String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
             String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
-            
+
             RepositoryItem item = repo.getItem(parentPath, fileName);
             if (item == null) {
-                return "{\"error\": \"File not found: " + escapeJson(filePath) + "\"}";
+                return Response.err("File not found: " + filePath);
             }
-            
+
             StringBuilder sb = new StringBuilder();
             sb.append("{");
             sb.append("\"name\": \"").append(escapeJson(item.getName())).append("\"");
@@ -353,10 +360,10 @@ public class GhidraServerManager {
             sb.append(", \"type\": \"").append(escapeJson(item.getContentType())).append("\"");
             sb.append(", \"version\": ").append(item.getVersion());
             sb.append("}");
-            return sb.toString();
+            return Response.text(sb.toString());
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Failed to get file info: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to get file info: " + e.getMessage());
         }
     }
 
@@ -364,27 +371,27 @@ public class GhidraServerManager {
      * Create a new repository on the connected server.
      *
      * @param name Repository name
-     * @return JSON string with result
+     * @return Response with result
      */
-    public synchronized String createRepository(String name) {
+    public synchronized Response createRepository(String name) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server. Use /server/connect first.\"}";
+            return Response.err("Not connected to server. Use /server/connect first.");
         }
         if (name == null || name.trim().isEmpty()) {
-            return "{\"error\": \"Repository name required.\"}";
+            return Response.err("Repository name required.");
         }
         try {
             RepositoryAdapter repo = serverAdapter.createRepository(name.trim());
             if (repo != null) {
                 repo.connect();
                 repositoryCache.put(name.trim(), repo);
-                return "{\"status\": \"created\", \"repository\": \"" + escapeJson(name.trim()) + "\"}";
+                return Response.ok(Map.of("status", "created", "repository", name.trim()));
             } else {
-                return "{\"error\": \"Failed to create repository: server returned null\"}";
+                return Response.err("Failed to create repository: server returned null");
             }
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Failed to create repository: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to create repository: " + e.getMessage());
         }
     }
 
@@ -393,26 +400,29 @@ public class GhidraServerManager {
      *
      * @param repoName Repository name
      * @param filePath File path within the repository
-     * @return JSON string with result
+     * @return Response with result
      */
-    public String checkoutFile(String repoName, String filePath) {
+    public Response checkoutFile(String repoName, String filePath) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server.\"}";
+            return Response.err("Not connected to server.");
         }
         try {
             RepositoryAdapter repo = getRepository(repoName);
             if (repo == null) {
-                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+                return Response.err("Repository not found: " + repoName);
             }
             int lastSlash = filePath.lastIndexOf('/');
             String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
             String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
             repo.checkout(parentPath, fileName, CheckoutType.EXCLUSIVE, null);
-            return "{\"status\": \"checked_out\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"path\": \"" + escapeJson(filePath) + "\"}";
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("status", "checked_out");
+            data.put("repository", repoName);
+            data.put("path", filePath);
+            return Response.ok(data);
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Checkout failed: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Checkout failed: " + e.getMessage());
         }
     }
 
@@ -423,33 +433,36 @@ public class GhidraServerManager {
      * @param filePath File path within the repository
      * @param comment Check-in comment
      * @param keepCheckedOut If true, file remains checked out after check-in
-     * @return JSON string with result
+     * @return Response with result
      */
-    public String checkinFile(String repoName, String filePath, String comment, boolean keepCheckedOut) {
+    public Response checkinFile(String repoName, String filePath, String comment, boolean keepCheckedOut) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server.\"}";
+            return Response.err("Not connected to server.");
         }
         try {
             RepositoryAdapter repo = getRepository(repoName);
             if (repo == null) {
-                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+                return Response.err("Repository not found: " + repoName);
             }
             int lastSlash = filePath.lastIndexOf('/');
             String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
             String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
             RepositoryItem item = repo.getItem(parentPath, fileName);
             if (item == null) {
-                return "{\"error\": \"File not found in repository: " + escapeJson(filePath) + "\"}";
+                return Response.err("File not found in repository: " + filePath);
             }
             // Note: actual checkin is performed via DomainFile.checkin() on the client side.
             // Repository adapter does not expose a direct checkin() method.
             // Return advisory message instead.
-            if (item == null) return "{\"error\": \"Item check was null\"}"; // suppress lint
-            return "{\"status\": \"checked_in\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"path\": \"" + escapeJson(filePath) + "\", \"keep_checked_out\": " + keepCheckedOut + "}";
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("status", "checked_in");
+            data.put("repository", repoName);
+            data.put("path", filePath);
+            data.put("keep_checked_out", keepCheckedOut);
+            return Response.ok(data);
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Checkin failed: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Checkin failed: " + e.getMessage());
         }
     }
 
@@ -458,28 +471,30 @@ public class GhidraServerManager {
      *
      * @param repoName Repository name
      * @param filePath File path within the repository
-     * @return JSON string with result
+     * @return Response with result
      */
-    public String undoCheckout(String repoName, String filePath) {
+    public Response undoCheckout(String repoName, String filePath) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server.\"}";
+            return Response.err("Not connected to server.");
         }
         try {
             RepositoryAdapter repo = getRepository(repoName);
             if (repo == null) {
-                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+                return Response.err("Repository not found: " + repoName);
             }
             int lastSlash = filePath.lastIndexOf('/');
             String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
             String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
             // undoCheckout is performed via DomainFile on the client side
             // Return advisory - the checkout record can be terminated via terminateCheckout
-            if (repo == null) return "{\"error\": \"Repo not found\"}"; // suppress lint
-            return "{\"status\": \"checkout_undone\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"path\": \"" + escapeJson(filePath) + "\"}";
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("status", "checkout_undone");
+            data.put("repository", repoName);
+            data.put("path", filePath);
+            return Response.ok(data);
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Undo checkout failed: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Undo checkout failed: " + e.getMessage());
         }
     }
 
@@ -489,25 +504,28 @@ public class GhidraServerManager {
      * @param repoName Repository name
      * @param filePath File path within the repository
      * @param comment Initial version comment
-     * @return JSON string with result
+     * @return Response with result
      */
-    public String addToVersionControl(String repoName, String filePath, String comment) {
+    public Response addToVersionControl(String repoName, String filePath, String comment) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server.\"}";
+            return Response.err("Not connected to server.");
         }
         try {
             RepositoryAdapter repo = getRepository(repoName);
             if (repo == null) {
-                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+                return Response.err("Repository not found: " + repoName);
             }
             // Adding to version control is done via DomainFile on the client side;
             // here we verify the repository is accessible
-            return "{\"status\": \"repository_verified\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"path\": \"" + escapeJson(filePath) +
-                   "\", \"note\": \"Use the project's DomainFile to complete add-to-version-control.\"}";
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("status", "repository_verified");
+            data.put("repository", repoName);
+            data.put("path", filePath);
+            data.put("note", "Use the project's DomainFile to complete add-to-version-control.");
+            return Response.ok(data);
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Add to version control failed: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Add to version control failed: " + e.getMessage());
         }
     }
 
@@ -516,16 +534,16 @@ public class GhidraServerManager {
      *
      * @param repoName Repository name
      * @param filePath File path within the repository
-     * @return JSON string with version history
+     * @return Response with version history
      */
-    public String getVersionHistory(String repoName, String filePath) {
+    public Response getVersionHistory(String repoName, String filePath) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server.\"}";
+            return Response.err("Not connected to server.");
         }
         try {
             RepositoryAdapter repo = getRepository(repoName);
             if (repo == null) {
-                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+                return Response.err("Repository not found: " + repoName);
             }
             int lastSlash = filePath.lastIndexOf('/');
             String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
@@ -547,10 +565,10 @@ public class GhidraServerManager {
                 }
             }
             sb.append("], \"count\": ").append(versions != null ? versions.length : 0).append("}");
-            return sb.toString();
+            return Response.text(sb.toString());
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Failed to get version history: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to get version history: " + e.getMessage());
         }
     }
 
@@ -559,16 +577,16 @@ public class GhidraServerManager {
      *
      * @param repoName Repository name
      * @param filePath File path within the repository
-     * @return JSON string with checkout list
+     * @return Response with checkout list
      */
-    public String getCheckouts(String repoName, String filePath) {
+    public Response getCheckouts(String repoName, String filePath) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server.\"}";
+            return Response.err("Not connected to server.");
         }
         try {
             RepositoryAdapter repo = getRepository(repoName);
             if (repo == null) {
-                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+                return Response.err("Repository not found: " + repoName);
             }
             int lastSlash = filePath.lastIndexOf('/');
             String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
@@ -590,10 +608,10 @@ public class GhidraServerManager {
                 }
             }
             sb.append("], \"count\": ").append(checkouts != null ? checkouts.length : 0).append("}");
-            return sb.toString();
+            return Response.text(sb.toString());
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Failed to get checkouts: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to get checkouts: " + e.getMessage());
         }
     }
 
@@ -603,37 +621,41 @@ public class GhidraServerManager {
      * @param repoName Repository name
      * @param filePath File path within the repository
      * @param checkoutId The checkout ID to terminate
-     * @return JSON string with result
+     * @return Response with result
      */
-    public String terminateCheckout(String repoName, String filePath, long checkoutId) {
+    public Response terminateCheckout(String repoName, String filePath, long checkoutId) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server.\"}";
+            return Response.err("Not connected to server.");
         }
         try {
             RepositoryAdapter repo = getRepository(repoName);
             if (repo == null) {
-                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+                return Response.err("Repository not found: " + repoName);
             }
             int lastSlash = filePath.lastIndexOf('/');
             String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
             String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
             repo.terminateCheckout(parentPath, fileName, checkoutId, false);
-            return "{\"status\": \"checkout_terminated\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"path\": \"" + escapeJson(filePath) + "\", \"checkout_id\": " + checkoutId + "}";
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("status", "checkout_terminated");
+            data.put("repository", repoName);
+            data.put("path", filePath);
+            data.put("checkout_id", checkoutId);
+            return Response.ok(data);
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Terminate checkout failed: " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Terminate checkout failed: " + e.getMessage());
         }
     }
 
     /**
      * Admin: list all users registered on the server.
      *
-     * @return JSON string with user list
+     * @return Response with user list
      */
-    public String listServerUsers() {
+    public Response listServerUsers() {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server.\"}";
+            return Response.err("Not connected to server.");
         }
         try {
             String[] userNames = serverAdapter.getAllUsers();
@@ -646,10 +668,10 @@ public class GhidraServerManager {
                 }
             }
             sb.append("], \"count\": ").append(userNames != null ? userNames.length : 0).append("}");
-            return sb.toString();
+            return Response.text(sb.toString());
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Failed to list users (admin access required): " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to list users (admin access required): " + e.getMessage());
         }
     }
 
@@ -659,26 +681,30 @@ public class GhidraServerManager {
      * @param repoName Repository name
      * @param userName User name
      * @param accessLevel Access level (0=no_access, 1=read_only, 2=read_write, 3=admin)
-     * @return JSON string with result
+     * @return Response with result
      */
-    public String setUserPermissions(String repoName, String userName, int accessLevel) {
+    public Response setUserPermissions(String repoName, String userName, int accessLevel) {
         if (!connected || serverAdapter == null) {
-            return "{\"error\": \"Not connected to server.\"}";
+            return Response.err("Not connected to server.");
         }
         try {
             RepositoryAdapter repo = getRepository(repoName);
             if (repo == null) {
-                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+                return Response.err("Repository not found: " + repoName);
             }
             // Find user and set access level - create/update user entry
             repo.setUserList(new User[]{
                 new User(userName, accessLevel)
             }, false);
-            return "{\"status\": \"permissions_set\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"user\": \"" + escapeJson(userName) + "\", \"access_level\": " + accessLevel + "}";
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("status", "permissions_set");
+            data.put("repository", repoName);
+            data.put("user", userName);
+            data.put("access_level", accessLevel);
+            return Response.ok(data);
         } catch (Exception e) {
             lastError = e.getMessage();
-            return "{\"error\": \"Failed to set permissions (admin access required): " + escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to set permissions (admin access required): " + e.getMessage());
         }
     }
 
