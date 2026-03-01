@@ -2796,4 +2796,94 @@ public class DataTypeService {
         if (str == null || str.isEmpty()) return str;
         return Character.toUpperCase(str.charAt(0)) + str.substring(1);
     }
+
+    // ==================================================================================
+    // Type consolidation
+    // ==================================================================================
+
+    private static final List<String> STATE_PREFIXES = List.of(
+        "Initialized", "Allocated", "Created", "Updated", "Processed",
+        "Deleted", "Modified", "Constructed", "Freed", "Destroyed",
+        "Copied", "Cloned", "Active", "Pending", "Ready"
+    );
+
+    @McpTool(value = "/consolidate_duplicate_types", description = "Find and consolidate duplicate state-based types into identity-based type", method = McpTool.Method.POST)
+    public Response consolidateDuplicateTypes(
+            @Param(value = "base_type_name", description = "Base identity-based type name (e.g. 'GameObject')") String baseTypeName,
+            @Param(value = "auto_delete", required = false, defaultValue = "false", description = "If true, delete state-based variants") boolean autoDelete) {
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) return Response.err("No program open");
+        if (baseTypeName == null || baseTypeName.isEmpty()) return Response.err("base_type_name is required");
+
+        DataTypeManager dtm = program.getDataTypeManager();
+
+        // Find base type
+        DataType baseType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, baseTypeName);
+
+        // Find state-based duplicates by searching all categories
+        List<String> duplicatesFound = new ArrayList<>();
+        List<DataType> duplicateTypes = new ArrayList<>();
+        dtm.getAllDataTypes().forEachRemaining(dt -> {
+            String name = dt.getName();
+            if (name.equals(baseTypeName)) return;
+            for (String prefix : STATE_PREFIXES) {
+                if (name.startsWith(prefix) && name.endsWith(baseTypeName)) {
+                    duplicatesFound.add(name);
+                    duplicateTypes.add(dt);
+                    break;
+                }
+            }
+        });
+
+        var result = new LinkedHashMap<String, Object>();
+        result.put("base_type", baseTypeName);
+        result.put("base_type_exists", baseType != null);
+        if (baseType != null) result.put("base_type_size", baseType.getLength());
+        result.put("duplicates_found", duplicatesFound);
+
+        List<String> deleted = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        List<String> recommendations = new ArrayList<>();
+
+        if (baseType == null) {
+            warnings.add("Base type '" + baseTypeName + "' does not exist - cannot consolidate");
+            result.put("action_required", true);
+        } else if (duplicatesFound.isEmpty()) {
+            recommendations.add("No state-based duplicates found for " + baseTypeName + " - type naming is correct");
+            result.put("action_required", false);
+        } else if (autoDelete) {
+            int txId = program.startTransaction("Consolidate duplicate types");
+            try {
+                for (DataType dt : duplicateTypes) {
+                    try {
+                        dtm.remove(dt, null);
+                        deleted.add(dt.getName());
+                    } catch (Exception e) {
+                        warnings.add(dt.getName() + " could not be deleted: " + e.getMessage());
+                    }
+                }
+                program.endTransaction(txId, true);
+            } catch (Exception e) {
+                program.endTransaction(txId, false);
+                return Response.err("Transaction failed: " + e.getMessage());
+            }
+            result.put("action_required", !warnings.isEmpty());
+        } else {
+            result.put("action_required", true);
+            recommendations.add("Run consolidate_duplicate_types with auto_delete=true after updating function prototypes");
+        }
+
+        if (!deleted.isEmpty()) result.put("duplicates_deleted", deleted);
+        if (!warnings.isEmpty()) result.put("warnings", warnings);
+
+        // Add per-duplicate recommendations
+        for (String dup : duplicatesFound) {
+            if (!deleted.contains(dup)) {
+                recommendations.add("Update prototypes: replace '" + dup + " *' with '" + baseTypeName + " *'");
+            }
+        }
+        if (!recommendations.isEmpty()) result.put("recommendations", recommendations);
+
+        return Response.ok(result);
+    }
 }

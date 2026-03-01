@@ -271,6 +271,8 @@ public final class AnnotationScanner {
         List<String> required = new ArrayList<>();
 
         for (ParamDef p : def.params()) {
+            // _body is an internal convention (raw JSON passthrough), not a user-facing param
+            if ("_body".equals(p.name())) continue;
             Map<String, Object> prop = new LinkedHashMap<>();
             prop.put("type", p.jsonType());
             if (!p.description().isEmpty()) {

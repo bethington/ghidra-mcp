@@ -1400,11 +1400,8 @@ public class AnalysisService {
     /**
      * Analyze function documentation completeness
      */
-    @McpTool(value = "/analyze_function_completeness", description = "Analyze how completely a function has been documented (v1.5.0+)")
-
-    public Response analyzeFunctionCompleteness(
-
-            @Param(value = "function_address") String functionAddress) {
+    // No @McpTool — GUI plugin registers this with decompiler cache refresh
+    public Response analyzeFunctionCompleteness(String functionAddress) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");

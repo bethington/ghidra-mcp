@@ -7,7 +7,6 @@ import ghidra.util.Msg;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,11 +32,14 @@ public class ServerManager {
 
     private ServerManager() {}
 
-    public synchronized void registerTool(PluginTool tool) throws IOException {
+    public synchronized void registerTool(PluginTool tool,
+            java.util.function.Consumer<EndpointRegistrar.ContextRegistrar> guiEndpoints) throws IOException {
         String toolId = String.valueOf(System.identityHashCode(tool));
         tools.put(toolId, tool);
         activeToolId.compareAndSet(null, toolId);
         Msg.info(this, "Registered tool " + toolId + " (total: " + tools.size() + ")");
+
+        cleanStaleFiles();
 
         if (server == null) {
             programProvider = new MultiToolProgramProvider(tools, activeToolId);
@@ -61,9 +63,8 @@ public class ServerManager {
                 listingService, commentService, symbolLabelService, functionService,
                 xrefCallGraphService, dataTypeService, documentationHashService,
                 analysisService, malwareSecurityService, programScriptService);
-            startServer(toolDefs);
+            startServer(toolDefs, guiEndpoints);
         }
-        writeMetadata();
     }
 
     public synchronized void deregisterTool(PluginTool tool) {
@@ -78,8 +79,6 @@ public class ServerManager {
         if (tools.isEmpty()) {
             stopServer();
             instance = null;
-        } else {
-            writeMetadata();
         }
     }
 
@@ -93,7 +92,8 @@ public class ServerManager {
         return server != null ? server.getSocketPath() : null;
     }
 
-    private void startServer(java.util.List<AnnotationScanner.ToolDef> toolDefs) throws IOException {
+    private void startServer(java.util.List<AnnotationScanner.ToolDef> toolDefs,
+            java.util.function.Consumer<EndpointRegistrar.ContextRegistrar> guiEndpoints) throws IOException {
         Path socketDir = getSocketDir();
         Files.createDirectories(socketDir);
         Path socketPath = socketDir.resolve(getSocketName());
@@ -109,21 +109,123 @@ public class ServerManager {
             EndpointRegistrar.sendResponse(exchange, Response.text(schemaJson));
         }));
 
+        // Live instance info — queried by bridge on demand
+        registrar.createContext("/mcp/instance_info", EndpointRegistrar.safeHandler(exchange -> {
+            EndpointRegistrar.sendResponse(exchange, Response.ok(buildInstanceInfo()));
+        }));
+
+        // Register GUI-specific endpoints
+        if (guiEndpoints != null) {
+            guiEndpoints.accept(registrar);
+        }
+
         server.start();
+    }
+
+    private Map<String, Object> buildInstanceInfo() {
+        long pid = ProcessHandle.current().pid();
+        String projectName = "unknown";
+        String projectPath = "";
+
+        PluginTool activeTool = getActiveTool();
+        if (activeTool != null) {
+            ghidra.framework.model.Project proj = activeTool.getProject();
+            if (proj != null) {
+                projectName = proj.getName();
+                projectPath = proj.getProjectLocator().toString();
+            }
+        }
+
+        // Collect open program names from all running tools (including CodeBrowser)
+        var openNames = new java.util.HashSet<String>();
+        if (activeTool != null) {
+            ghidra.framework.model.Project proj = activeTool.getProject();
+            if (proj != null) {
+                try {
+                    ghidra.framework.model.ToolManager tm = proj.getToolManager();
+                    if (tm != null) {
+                        for (PluginTool runningTool : tm.getRunningTools()) {
+                            ghidra.app.services.ProgramManager pm = runningTool.getService(ghidra.app.services.ProgramManager.class);
+                            if (pm != null) {
+                                for (Program p : pm.getAllOpenPrograms()) {
+                                    openNames.add(p.getName());
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    Msg.warn(this, "Failed to query running tools: " + e.getMessage());
+                }
+            }
+        }
+
+        // List all programs in the project with open flag
+        var programs = new java.util.ArrayList<Map<String, Object>>();
+        if (activeTool != null) {
+            ghidra.framework.model.Project proj = activeTool.getProject();
+            if (proj != null) {
+                collectPrograms(proj.getProjectData().getRootFolder(), openNames, programs);
+            }
+        }
+
+        var info = new LinkedHashMap<String, Object>();
+        info.put("pid", pid);
+        info.put("project", projectName);
+        info.put("project_path", projectPath);
+        info.put("programs", programs);
+        info.put("tools", tools.size());
+        return info;
     }
 
     private void stopServer() {
         if (server != null) {
             Msg.info(this, "Stopping GhidraMCP UDS server...");
             server.stop();
-            try {
-                Path metaPath = getSocketDir().resolve(getSocketName().replace(".sock", ".json"));
-                Files.deleteIfExists(metaPath);
-            } catch (IOException e) {
-                Msg.warn(this, "Could not delete metadata file: " + e.getMessage());
-            }
             server = null;
             Msg.info(this, "GhidraMCP UDS server stopped.");
+        }
+    }
+
+    private void collectPrograms(ghidra.framework.model.DomainFolder folder,
+            java.util.Set<String> openNames, java.util.List<Map<String, Object>> out) {
+        for (ghidra.framework.model.DomainFile df : folder.getFiles()) {
+            var entry = new LinkedHashMap<String, Object>();
+            entry.put("name", df.getName());
+            entry.put("path", df.getPathname());
+            entry.put("open", openNames.contains(df.getName()));
+            out.add(entry);
+        }
+        for (ghidra.framework.model.DomainFolder sub : folder.getFolders()) {
+            collectPrograms(sub, openNames, out);
+        }
+    }
+
+    /**
+     * Remove stale .sock files from dead Ghidra processes.
+     */
+    private void cleanStaleFiles() {
+        try {
+            Path dir = getSocketDir();
+            if (!Files.isDirectory(dir)) return;
+            for (Path p : (Iterable<Path>) Files.list(dir)::iterator) {
+                String name = p.getFileName().toString();
+                if (!name.endsWith(".sock")) continue;
+                // Extract PID from filename: <project>-<pid>.sock
+                int dashIdx = name.lastIndexOf('-');
+                int dotIdx = name.lastIndexOf('.');
+                if (dashIdx < 0 || dotIdx < 0) continue;
+                try {
+                    long pid = Long.parseLong(name.substring(dashIdx + 1, dotIdx));
+                    if (!ProcessHandle.of(pid).isPresent()) {
+                        Files.deleteIfExists(p);
+                        Msg.info(this, "Cleaned stale socket: " + name);
+                    }
+                } catch (NumberFormatException e) {
+                    // not our file format
+                }
+            }
+        } catch (IOException e) {
+            Msg.warn(this, "Failed to clean stale files: " + e.getMessage());
         }
     }
 
@@ -137,48 +239,7 @@ public class ServerManager {
     }
 
     private String getSocketName() {
-        String project = "ghidra";
-        PluginTool activeTool = getActiveTool();
-        if (activeTool != null) {
-            ghidra.framework.model.Project proj = activeTool.getProject();
-            if (proj != null) {
-                project = proj.getName().replaceAll("[^a-zA-Z0-9_-]", "_");
-            }
-        }
         long pid = ProcessHandle.current().pid();
-        return project + "-" + pid + ".sock";
-    }
-
-    private void writeMetadata() {
-        try {
-            Path metaPath = getSocketDir().resolve(getSocketName().replace(".sock", ".json"));
-            long pid = ProcessHandle.current().pid();
-            String projectName = "unknown";
-            String projectPath = "";
-            PluginTool activeTool = getActiveTool();
-            if (activeTool != null) {
-                ghidra.framework.model.Project proj = activeTool.getProject();
-                if (proj != null) {
-                    projectName = proj.getName();
-                    projectPath = proj.getProjectLocator().toString();
-                }
-            }
-            var programNames = new java.util.ArrayList<String>();
-            if (programProvider != null) {
-                for (Program p : programProvider.getAllOpenPrograms()) {
-                    programNames.add(p.getName());
-                }
-            }
-            var meta = new LinkedHashMap<String, Object>();
-            meta.put("pid", pid);
-            meta.put("project", projectName);
-            meta.put("project_path", projectPath);
-            meta.put("programs", programNames);
-            meta.put("tools", tools.size());
-            meta.put("started", Instant.now().toString());
-            Files.writeString(metaPath, JsonHelper.toJson(meta));
-        } catch (IOException e) {
-            Msg.warn(this, "Could not write metadata: " + e.getMessage());
-        }
+        return "ghidra-" + pid + ".sock";
     }
 }

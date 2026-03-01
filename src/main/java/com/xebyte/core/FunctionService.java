@@ -369,11 +369,8 @@ public class FunctionService {
     /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
-    @McpTool(value = "/force_decompile", description = "Force fresh decompilation of a function, bypassing the cache")
-
-    public Response forceDecompile(
-
-            @Param(value = "address") String functionAddrStr) {
+    // No @McpTool — GUI plugin registers this with GET/POST fallback
+    public Response forceDecompile(String functionAddrStr) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -479,11 +476,22 @@ public class FunctionService {
 
             @Param(value = "address") String addressStr,
 
-            @Param(value = "program", required = false) String programName) {
+            @Param(value = "program", required = false) String programName,
+
+            @Param(value = "filter_mnemonics", required = false, description = "Comma-separated mnemonics to filter by (e.g. 'CALL,JMP')") String filterMnemonics) {
         Object[] result = getProgramOrError(programName);
         Program program = (Program) result[0];
         if (program == null) return (Response) result[1];
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+
+        // Parse mnemonic filter
+        Set<String> mnemonicFilter = null;
+        if (filterMnemonics != null && !filterMnemonics.isEmpty()) {
+            mnemonicFilter = new HashSet<>();
+            for (String m : filterMnemonics.split(",")) {
+                mnemonicFilter.add(m.trim().toUpperCase());
+            }
+        }
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
@@ -498,9 +506,13 @@ public class FunctionService {
             InstructionIterator instructions = listing.getInstructions(start, true);
             while (instructions.hasNext()) {
                 Instruction instr = instructions.next();
-                if (instr.getAddress().compareTo(end) > 0) {
-                    break; // Stop if we've gone past the end of the function
+                if (instr.getAddress().compareTo(end) > 0) break;
+
+                // Apply mnemonic filter if specified
+                if (mnemonicFilter != null && !mnemonicFilter.contains(instr.getMnemonicString().toUpperCase())) {
+                    continue;
                 }
+
                 String comment = listing.getComment(CodeUnit.EOL_COMMENT, instr.getAddress());
                 comment = (comment != null) ? "; " + comment : "";
 
@@ -518,7 +530,7 @@ public class FunctionService {
 
     // Backward compatible overload for internal callers
     public Response disassembleFunction(String addressStr) {
-        return disassembleFunction(addressStr, null);
+        return disassembleFunction(addressStr, null, null);
     }
 
     // ========================================================================
@@ -1620,13 +1632,8 @@ public class FunctionService {
     /**
      * Get detailed information about a function's variables (parameters and locals).
      */
-    @McpTool(value = "/get_function_variables", description = "List all variables in a function including parameters and locals (v1.5.0)")
-
-    public Response getFunctionVariables(
-
-            @Param(value = "function_name") String functionName,
-
-            @Param(value = "program", required = false) String programName) {
+    // No @McpTool — GUI plugin registers this with function_address→name resolution
+    public Response getFunctionVariables(String functionName, String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {

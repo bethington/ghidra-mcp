@@ -9,7 +9,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * ProgramProvider that searches across all registered PluginTools.
+ * ProgramProvider that searches across all registered PluginTools AND
+ * running CodeBrowser tools discovered via ToolManager.
  *
  * Used by ServerManager to aggregate programs from multiple CodeBrowser
  * windows within the same Ghidra JVM. Thread-safe.
@@ -25,24 +26,49 @@ public class MultiToolProgramProvider implements ProgramProvider {
         this.activeToolId = activeToolId;
     }
 
-    @Override
-    public Program getCurrentProgram() {
-        // Try active tool first
-        PluginTool active = getActiveTool();
-        if (active != null) {
-            ProgramManager pm = active.getService(ProgramManager.class);
-            if (pm != null) {
-                Program p = pm.getCurrentProgram();
-                if (p != null) return p;
+    /**
+     * Get all ProgramManagers from registered tools AND running CodeBrowser tools.
+     */
+    private List<ProgramManager> findAllProgramManagers() {
+        List<ProgramManager> managers = new ArrayList<>();
+        Set<PluginTool> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+
+        // Check registered tools first
+        for (PluginTool tool : tools.values()) {
+            seen.add(tool);
+            ProgramManager pm = tool.getService(ProgramManager.class);
+            if (pm != null) managers.add(pm);
+        }
+
+        // Also check running tools via ToolManager (discovers CodeBrowser instances)
+        PluginTool anyTool = getActiveTool();
+        if (anyTool != null) {
+            try {
+                ghidra.framework.model.Project proj = anyTool.getProject();
+                if (proj != null) {
+                    ghidra.framework.model.ToolManager tm = proj.getToolManager();
+                    if (tm != null) {
+                        for (PluginTool runningTool : tm.getRunningTools()) {
+                            if (seen.add(runningTool)) {
+                                ProgramManager pm = runningTool.getService(ProgramManager.class);
+                                if (pm != null) managers.add(pm);
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // ToolManager may not be available
             }
         }
-        // Fall back to any tool with an open program
-        for (PluginTool tool : tools.values()) {
-            ProgramManager pm = tool.getService(ProgramManager.class);
-            if (pm != null) {
-                Program p = pm.getCurrentProgram();
-                if (p != null) return p;
-            }
+
+        return managers;
+    }
+
+    @Override
+    public Program getCurrentProgram() {
+        for (ProgramManager pm : findAllProgramManagers()) {
+            Program p = pm.getCurrentProgram();
+            if (p != null) return p;
         }
         return null;
     }
@@ -54,10 +80,10 @@ public class MultiToolProgramProvider implements ProgramProvider {
         }
         String searchName = name.trim();
 
-        // Exact name match (case-insensitive) across all tools
-        for (PluginTool tool : tools.values()) {
-            ProgramManager pm = tool.getService(ProgramManager.class);
-            if (pm == null) continue;
+        List<ProgramManager> managers = findAllProgramManagers();
+
+        // Exact name match (case-insensitive)
+        for (ProgramManager pm : managers) {
             for (Program prog : pm.getAllOpenPrograms()) {
                 if (prog.getName().equalsIgnoreCase(searchName)) {
                     return prog;
@@ -66,9 +92,7 @@ public class MultiToolProgramProvider implements ProgramProvider {
         }
 
         // Partial match on path
-        for (PluginTool tool : tools.values()) {
-            ProgramManager pm = tool.getService(ProgramManager.class);
-            if (pm == null) continue;
+        for (ProgramManager pm : managers) {
             for (Program prog : pm.getAllOpenPrograms()) {
                 String path = prog.getDomainFile().getPathname();
                 if (path.toLowerCase().contains(searchName.toLowerCase())) {
@@ -78,9 +102,7 @@ public class MultiToolProgramProvider implements ProgramProvider {
         }
 
         // Match without extension
-        for (PluginTool tool : tools.values()) {
-            ProgramManager pm = tool.getService(ProgramManager.class);
-            if (pm == null) continue;
+        for (ProgramManager pm : managers) {
             for (Program prog : pm.getAllOpenPrograms()) {
                 String pname = prog.getName();
                 String nameNoExt = pname.contains(".") ?
@@ -96,23 +118,16 @@ public class MultiToolProgramProvider implements ProgramProvider {
 
     @Override
     public Program[] getAllOpenPrograms() {
-        // Use identity set to deduplicate programs shared between tools
         Set<Program> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (PluginTool tool : tools.values()) {
-            ProgramManager pm = tool.getService(ProgramManager.class);
-            if (pm != null) {
-                Collections.addAll(seen, pm.getAllOpenPrograms());
-            }
+        for (ProgramManager pm : findAllProgramManagers()) {
+            Collections.addAll(seen, pm.getAllOpenPrograms());
         }
         return seen.toArray(new Program[0]);
     }
 
     @Override
     public void setCurrentProgram(Program program) {
-        // Find which tool owns this program and set it there
-        for (PluginTool tool : tools.values()) {
-            ProgramManager pm = tool.getService(ProgramManager.class);
-            if (pm == null) continue;
+        for (ProgramManager pm : findAllProgramManagers()) {
             for (Program prog : pm.getAllOpenPrograms()) {
                 if (prog == program) {
                     pm.setCurrentProgram(program);
@@ -123,24 +138,15 @@ public class MultiToolProgramProvider implements ProgramProvider {
     }
 
     /**
-     * Find a ProgramManager from any registered tool (active tool preferred).
-     * Returns null only if no tool has a ProgramManager (e.g., only FrontEndTool registered).
+     * Find a ProgramManager from any registered or running tool.
      */
     public ProgramManager findProgramManager() {
-        PluginTool active = getActiveTool();
-        if (active != null) {
-            ProgramManager pm = active.getService(ProgramManager.class);
-            if (pm != null) return pm;
-        }
-        for (PluginTool tool : tools.values()) {
-            ProgramManager pm = tool.getService(ProgramManager.class);
-            if (pm != null) return pm;
-        }
-        return null;
+        List<ProgramManager> managers = findAllProgramManagers();
+        return managers.isEmpty() ? null : managers.get(0);
     }
 
     /**
-     * Get the currently active PluginTool (the one whose window was last focused).
+     * Get the currently active PluginTool.
      */
     public PluginTool getActiveTool() {
         String id = activeToolId.get();
@@ -148,7 +154,6 @@ public class MultiToolProgramProvider implements ProgramProvider {
             PluginTool t = tools.get(id);
             if (t != null) return t;
         }
-        // Fall back to any registered tool
         var iter = tools.values().iterator();
         return iter.hasNext() ? iter.next() : null;
     }
