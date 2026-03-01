@@ -66,8 +66,11 @@ public class ProgramScriptService {
      * Returns null when running headless.
      */
     private PluginTool getToolFromProvider() {
-        if (programProvider instanceof GuiProgramProvider) {
-            return ((GuiProgramProvider) programProvider).getTool();
+        if (programProvider instanceof MultiToolProgramProvider mtp) {
+            return mtp.getActiveTool();
+        }
+        if (programProvider instanceof GuiProgramProvider gpp) {
+            return gpp.getTool();
         }
         return null;
     }
@@ -167,6 +170,27 @@ public class ProgramScriptService {
         }
 
         return result.length() > 0 ? Response.text(result.toString()) : Response.err("Unknown failure");
+    }
+
+    /**
+     * Save and exit Ghidra cleanly.
+     */
+    @McpTool(value = "/exit_ghidra", method = McpTool.Method.POST,
+             description = "Save the current program and exit Ghidra cleanly")
+    public Response exitGhidra() {
+        Response saveResult = saveCurrentProgram();
+        PluginTool tool = getToolFromProvider();
+        if (tool == null) {
+            return Response.err("Exit requires GUI mode (PluginTool not available)");
+        }
+        new Thread(() -> {
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+            SwingUtilities.invokeLater(tool::close);
+        }).start();
+        return Response.ok(Map.of(
+            "success", true,
+            "message", "Saving and exiting Ghidra",
+            "save", Response.r2s(saveResult)));
     }
 
     /**
@@ -378,7 +402,7 @@ public class ProgramScriptService {
     /**
      * Open a program from the current project by path.
      */
-    @McpTool(value = "/open_program", description = "Open a program from the current Ghidra project")
+    @McpTool(value = "/open_program", method = McpTool.Method.POST, description = "Open a program from the current Ghidra project")
 
     public Response openProgramFromProject(
 
@@ -422,19 +446,57 @@ public class ProgramScriptService {
 
         // Open the program
         try {
-            ProgramManager pm = tool.getService(ProgramManager.class);
-            if (pm == null) {
-                return Response.err("ProgramManager service not available");
+            // Find a ProgramManager from any running CodeBrowser
+            ProgramManager pm = null;
+            ghidra.framework.model.ToolManager tm = project.getToolManager();
+            if (tm != null) {
+                for (PluginTool runningTool : tm.getRunningTools()) {
+                    pm = runningTool.getService(ProgramManager.class);
+                    if (pm != null) break;
+                }
             }
 
-            Program program = (Program) domainFile.getDomainObject(tool, false, false, ghidra.util.task.TaskMonitor.DUMMY);
-            if (program == null) {
-                return Response.err("Failed to open program: " + path);
+            Program program;
+            if (pm != null) {
+                // CodeBrowser exists — open in it
+                program = (Program) domainFile.getDomainObject(tool, false, false, ghidra.util.task.TaskMonitor.DUMMY);
+                if (program == null) {
+                    return Response.err("Failed to open program: " + path);
+                }
+                pm.openProgram(program);
+                pm.setCurrentProgram(program);
+            } else {
+                // No CodeBrowser running — launch one from the active workspace
+                if (tm == null) {
+                    return Response.err("ToolManager not available");
+                }
+                ghidra.framework.model.Workspace ws = tm.getActiveWorkspace();
+                if (ws == null) {
+                    return Response.err("No active workspace");
+                }
+                // Find the CodeBrowser template
+                ghidra.framework.model.ToolChest chest = project.getLocalToolChest();
+                ghidra.framework.model.ToolTemplate template = chest != null ? chest.getToolTemplate("CodeBrowser") : null;
+                PluginTool launched;
+                if (template != null) {
+                    launched = ws.runTool(template);
+                } else {
+                    launched = ws.createTool();
+                }
+                if (launched == null) {
+                    return Response.err("Failed to launch CodeBrowser");
+                }
+                ProgramManager launchedPm = launched.getService(ProgramManager.class);
+                if (launchedPm == null) {
+                    return Response.err("Launched tool has no ProgramManager");
+                }
+                program = (Program) domainFile.getDomainObject(launched, false, false, ghidra.util.task.TaskMonitor.DUMMY);
+                if (program == null) {
+                    return Response.err("Failed to open program: " + path);
+                }
+                launchedPm.openProgram(program);
+                launchedPm.setCurrentProgram(program);
             }
-
-            // Add to tool and set as current
-            pm.openProgram(program);
-            pm.setCurrentProgram(program);
 
             // Optionally trigger auto-analysis
             boolean analyzed = false;
