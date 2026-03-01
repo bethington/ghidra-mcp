@@ -97,7 +97,7 @@ class VersionInfo {
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 170;
+    private static final int ENDPOINT_COUNT = 171;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -2262,6 +2262,12 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             Map<String, Object> params = parseJsonParams(exchange);
             String filePath = params.get("path") != null ? params.get("path").toString() : null;
             sendResponse(exchange, terminateFileCheckout(filePath));
+        }));
+
+        server.createContext("/server/admin/terminate_all_checkouts", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String folderPath = params.get("path") != null ? params.get("path").toString() : "/";
+            sendResponse(exchange, terminateAllCheckouts(folderPath));
         }));
 
         server.createContext("/server/admin/users", safeHandler(exchange -> {
@@ -4981,23 +4987,51 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }
         if (folder == null) return "{\"error\": \"Folder not found: " + escapeJson(folderPath) + "\"}";
 
+        RepositoryAdapter repo = getProjectRepository();
         StringBuilder sb = new StringBuilder();
         sb.append("{\"checkouts\": [");
-        int count = collectCheckouts(sb, folder, 0);
+        int count = collectCheckouts(sb, folder, 0, repo);
         sb.append("], \"count\": ").append(count).append("}");
         return sb.toString();
     }
 
-    private int collectCheckouts(StringBuilder sb, DomainFolder folder, int count) {
+    private int collectCheckouts(StringBuilder sb, DomainFolder folder, int count, RepositoryAdapter repo) {
         for (DomainFile f : folder.getFiles()) {
-            if (f.isCheckedOut()) {
+            boolean localCheckout = f.isCheckedOut();
+            ItemCheckoutStatus[] serverCheckouts = null;
+
+            // Check server-side checkouts via RepositoryAdapter
+            if (repo != null && f.isVersioned()) {
+                try {
+                    String path = f.getPathname();
+                    int lastSlash = path.lastIndexOf('/');
+                    String parentPath = lastSlash > 0 ? path.substring(0, lastSlash) : "/";
+                    String fileName = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+                    serverCheckouts = repo.getCheckouts(parentPath, fileName);
+                } catch (Exception e) { /* skip */ }
+            }
+            boolean serverCheckout = serverCheckouts != null && serverCheckouts.length > 0;
+
+            if (localCheckout || serverCheckout) {
                 if (count > 0) sb.append(", ");
                 appendFileJson(sb, f);
+                if (serverCheckout) {
+                    sb.setLength(sb.length() - 1); // remove closing }
+                    sb.append(", \"server_checkouts\": [");
+                    for (int i = 0; i < serverCheckouts.length; i++) {
+                        if (i > 0) sb.append(", ");
+                        sb.append("{\"checkout_id\": ").append(serverCheckouts[i].getCheckoutId());
+                        sb.append(", \"user\": \"").append(escapeJson(serverCheckouts[i].getUser())).append("\"");
+                        sb.append(", \"checkout_version\": ").append(serverCheckouts[i].getCheckoutVersion());
+                        sb.append("}");
+                    }
+                    sb.append("]}");
+                }
                 count++;
             }
         }
         for (DomainFolder sub : folder.getFolders()) {
-            count = collectCheckouts(sb, sub, count);
+            count = collectCheckouts(sb, sub, count, repo);
         }
         return count;
     }
@@ -5045,6 +5079,70 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 "\"terminated_count\": " + terminated + ", \"total_checkouts\": " + checkouts.length + "}";
         } catch (Exception e) {
             return "{\"error\": \"Terminate checkout failed: " + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    /**
+     * Terminate ALL server-side checkouts in a folder recursively.
+     * Returns a summary of all terminated checkouts.
+     */
+    private String terminateAllCheckouts(String folderPath) {
+        Project project = tool.getProject();
+        if (project == null) return "{\"error\": \"No project open\"}";
+        ProjectData data = project.getProjectData();
+        DomainFolder folder;
+        if (folderPath == null || folderPath.isEmpty() || folderPath.equals("/")) {
+            folder = data.getRootFolder();
+        } else {
+            folder = data.getFolder(folderPath);
+        }
+        if (folder == null) return "{\"error\": \"Folder not found: " + escapeJson(folderPath) + "\"}";
+
+        RepositoryAdapter repo = getProjectRepository();
+        if (repo == null) {
+            return "{\"error\": \"Cannot terminate checkouts: project has no repository connection\"}";
+        }
+
+        StringBuilder details = new StringBuilder();
+        details.append("[");
+        int[] counts = {0, 0}; // [files_with_checkouts, total_terminated]
+        terminateCheckoutsRecursive(folder, repo, details, counts);
+        details.append("]");
+
+        return "{\"status\": \"terminated\", \"folder\": \"" + escapeJson(folderPath != null ? folderPath : "/") + "\", " +
+            "\"files_with_checkouts\": " + counts[0] + ", " +
+            "\"checkouts_terminated\": " + counts[1] + ", " +
+            "\"details\": " + details.toString() + "}";
+    }
+
+    private void terminateCheckoutsRecursive(DomainFolder folder, RepositoryAdapter repo, StringBuilder details, int[] counts) {
+        for (DomainFile f : folder.getFiles()) {
+            if (!f.isVersioned()) continue;
+            try {
+                String path = f.getPathname();
+                int lastSlash = path.lastIndexOf('/');
+                String parentPath = lastSlash > 0 ? path.substring(0, lastSlash) : "/";
+                String fileName = lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+                ItemCheckoutStatus[] checkouts = repo.getCheckouts(parentPath, fileName);
+                if (checkouts != null && checkouts.length > 0) {
+                    int terminated = 0;
+                    for (ItemCheckoutStatus cs : checkouts) {
+                        try {
+                            repo.terminateCheckout(parentPath, fileName, cs.getCheckoutId(), false);
+                            terminated++;
+                        } catch (Exception e) { /* continue */ }
+                    }
+                    if (counts[0] > 0) details.append(", ");
+                    details.append("{\"path\": \"").append(escapeJson(path)).append("\"");
+                    details.append(", \"terminated\": ").append(terminated);
+                    details.append(", \"total\": ").append(checkouts.length).append("}");
+                    counts[0]++;
+                    counts[1] += terminated;
+                }
+            } catch (Exception e) { /* skip file */ }
+        }
+        for (DomainFolder sub : folder.getFolders()) {
+            terminateCheckoutsRecursive(sub, repo, details, counts);
         }
     }
 

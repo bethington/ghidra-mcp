@@ -7576,18 +7576,23 @@ def get_version_history(repo: str, path: str) -> str:
 
 
 @mcp.tool()
-def get_checkouts(repo: str, path: str) -> str:
+def get_checkouts(path: str = "/") -> str:
     """
-    Get current active checkouts for a file in a repository.
+    List all checked-out files in a project folder, including server-side checkouts.
+
+    Recursively scans the folder for both locally checked-out files and
+    server-side checkouts by other users. This is the recommended way to
+    see who has files locked on the shared server.
 
     Args:
-        repo: Repository name.
-        path: File path within the repository.
+        path: Folder path within the project (e.g., "/LoD/1.08").
+              Defaults to "/" (entire project).
 
     Returns:
-        JSON with list of active checkouts: user, project, checkout_id, version.
+        JSON with list of checked-out files. Each entry includes local checkout
+        status and server_checkouts array with checkout_id, user, and version.
     """
-    return safe_get_json("server/checkouts", {"repo": repo, "path": path})
+    return safe_get_json("server/checkouts", {"path": path})
 
 
 # ==========================================================================
@@ -7596,23 +7601,40 @@ def get_checkouts(repo: str, path: str) -> str:
 
 
 @mcp.tool()
-def terminate_checkout(repo: str, path: str, checkout_id: int) -> str:
+def terminate_checkout(path: str) -> str:
     """
-    Admin: forcibly terminate another user's checkout.
+    Forcibly terminate all checkouts on a single file.
 
-    Requires server admin privileges.
+    Terminates both local and server-side checkouts for the specified file.
+    Use get_checkouts first to see which files have active checkouts.
 
     Args:
-        repo: Repository name.
-        path: File path within the repository.
-        checkout_id: The checkout ID to terminate (from get_checkouts).
+        path: File path within the project (e.g., "/LoD/1.08/D2Common.dll").
 
     Returns:
-        JSON with termination status.
+        JSON with termination status and count of terminated checkouts.
     """
-    return safe_post_json("server/admin/terminate_checkout", {
-        "repo": repo, "path": path, "checkoutId": str(checkout_id)
-    })
+    return safe_post_json("server/admin/terminate_checkout", {"path": path})
+
+
+@mcp.tool()
+def terminate_all_checkouts(path: str = "/") -> str:
+    """
+    Forcibly terminate ALL checkouts in a folder recursively.
+
+    Scans all files in the folder (and subfolders) for server-side checkouts
+    and terminates them all in one call. Use this to bulk-clear checkout locks
+    on an entire version folder.
+
+    Args:
+        path: Folder path within the project (e.g., "/LoD/1.08").
+              Defaults to "/" (entire project).
+
+    Returns:
+        JSON with summary: files_with_checkouts, checkouts_terminated, and
+        per-file details.
+    """
+    return safe_post_json("server/admin/terminate_all_checkouts", {"path": path})
 
 
 @mcp.tool()

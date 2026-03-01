@@ -1,7 +1,7 @@
 {
   "version": "4.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 186,
+  "total_endpoints": 187,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -214,10 +214,11 @@
     {"path": "/server/version_control/undo_checkout", "method": "POST", "category": "server", "params": ["repo", "path"], "description": "Undo a file checkout"},
     {"path": "/server/version_control/add", "method": "POST", "category": "server", "params": ["repo", "path", "comment", "keepCheckedOut"], "description": "Add a file to version control"},
     {"path": "/server/version_history", "method": "GET", "category": "server", "params": ["repo", "path"], "description": "Get version history for a file"},
-    {"path": "/server/checkouts", "method": "GET", "category": "server", "params": ["repo", "path"], "description": "Get active checkouts for a repository path"},
+    {"path": "/server/checkouts", "method": "GET", "category": "server", "params": ["path"], "description": "List all checked-out files in a folder, including server-side checkouts"},
     {"path": "/server/admin/users", "method": "GET", "category": "server", "params": [], "description": "List all users on the server"},
     {"path": "/server/admin/set_permissions", "method": "POST", "category": "server", "params": ["repo", "user", "accessLevel"], "description": "Set user permissions on a repository"},
-    {"path": "/server/admin/terminate_checkout", "method": "POST", "category": "server", "params": ["repo", "path", "user", "checkoutId"], "description": "Terminate a user checkout"},
+    {"path": "/server/admin/terminate_checkout", "method": "POST", "category": "server", "params": ["path"], "description": "Terminate all checkouts on a single file"},
+    {"path": "/server/admin/terminate_all_checkouts", "method": "POST", "category": "server", "params": ["path"], "description": "Terminate all checkouts in a folder recursively"},
 
     {"path": "/server/repository/files", "method": "GET", "category": "server", "params": ["repo", "path"], "description": "List files in a server repository folder"},
     {"path": "/server/repository/file", "method": "GET", "category": "server", "params": ["repo", "path"], "description": "Get file info from a server repository"},
