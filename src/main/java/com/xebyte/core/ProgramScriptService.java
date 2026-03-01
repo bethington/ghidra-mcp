@@ -80,6 +80,8 @@ public class ProgramScriptService {
      * Get metadata about the current program including name, architecture,
      * memory layout, function count, and symbol count.
      */
+    @McpTool(value = "/get_metadata", description = "Get metadata about the current program/database")
+
     public Response getMetadata() {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
@@ -124,6 +126,8 @@ public class ProgramScriptService {
     /**
      * Save the currently active program to its domain file.
      */
+    @McpTool(value = "/save_program", description = "Save the current program in Ghidra")
+
     public Response saveCurrentProgram() {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
@@ -168,6 +172,8 @@ public class ProgramScriptService {
     /**
      * List all currently open programs in Ghidra.
      */
+    @McpTool(value = "/list_open_programs", description = "List all currently open programs in Ghidra")
+
     public Response listOpenPrograms() {
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
@@ -207,6 +213,8 @@ public class ProgramScriptService {
     /**
      * Get detailed information about the currently active program.
      */
+    @McpTool(value = "/get_current_program_info", description = "Get detailed information about the currently active program")
+
     public Response getCurrentProgramInfo() {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
@@ -243,7 +251,11 @@ public class ProgramScriptService {
     /**
      * Switch MCP context to a different open program by name.
      */
-    public Response switchProgram(String programName) {
+    @McpTool(value = "/switch_program", description = "Switch MCP context to a different open program")
+
+    public Response switchProgram(
+
+            @Param(value = "name") String programName) {
         if (programName == null || programName.trim().isEmpty()) {
             return Response.err("Program name is required");
         }
@@ -292,7 +304,11 @@ public class ProgramScriptService {
     /**
      * List all files in the current Ghidra project.
      */
-    public Response listProjectFiles(String folderPath) {
+    @McpTool(value = "/list_project_files", description = "List all files in the current Ghidra project")
+
+    public Response listProjectFiles(
+
+            @Param(value = "folder") String folderPath) {
         PluginTool tool = getToolFromProvider();
         if (tool == null) {
             return Response.err("Project listing requires GUI mode (PluginTool not available)");
@@ -362,7 +378,11 @@ public class ProgramScriptService {
     /**
      * Open a program from the current project by path.
      */
-    public Response openProgramFromProject(String path) {
+    @McpTool(value = "/open_program", description = "Open a program from the current Ghidra project")
+
+    public Response openProgramFromProject(
+
+            @Param(value = "path") String path) {
         return openProgramFromProject(path, false);
     }
 
@@ -450,7 +470,13 @@ public class ProgramScriptService {
      * @param scriptArgs Optional space-separated arguments for the script
      * @return Script output or error message
      */
-    public Response runGhidraScript(String scriptPath, String scriptArgs) {
+    @McpTool(value = "/run_script", description = "Run a Ghidra script programmatically (v1.7.0)", method = McpTool.Method.POST)
+
+    public Response runGhidraScript(
+
+            @Param(value = "script_path") String scriptPath,
+
+            @Param(value = "args") String scriptArgs) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -636,7 +662,11 @@ public class ProgramScriptService {
      * @param filter Optional filter string to match script names
      * @return JSON list of available scripts
      */
-    public Response listGhidraScripts(String filter) {
+    @McpTool(value = "/list_scripts", description = "List available Ghidra scripts (v1.7.0)")
+
+    public Response listGhidraScripts(
+
+            @Param(value = "filter", required = false) String filter) {
         final StringBuilder resultMsg = new StringBuilder();
 
         try {
@@ -675,7 +705,15 @@ public class ProgramScriptService {
     /**
      * Read memory at a specific address.
      */
-    public Response readMemory(String addressStr, int length, String programName) {
+    @McpTool(value = "/read_memory", description = "Read raw bytes from memory at the specified address")
+
+    public Response readMemory(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "length", type = "integer") int length,
+
+            @Param(value = "program", required = false) String programName) {
         try {
             Object[] programResult = getProgramOrError(programName);
             Program program = (Program) programResult[0];
@@ -722,9 +760,25 @@ public class ProgramScriptService {
     /**
      * Create an uninitialized memory block (e.g., for MMIO/peripheral regions).
      */
-    public Response createMemoryBlock(String name, String addressStr, long size,
-                                     boolean read, boolean write, boolean execute,
-                                     boolean isVolatile, String comment) {
+    @McpTool(value = "/create_memory_block", description = "Create an uninitialized memory block at the specified address", method = McpTool.Method.POST)
+
+    public Response createMemoryBlock(
+
+            @Param(value = "name") String name,
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "size") long size,
+
+            @Param(value = "read", type = "boolean") boolean read,
+
+            @Param(value = "write", type = "boolean") boolean write,
+
+            @Param(value = "execute", type = "boolean") boolean execute,
+
+            @Param(value = "isVolatile", type = "boolean") boolean isVolatile,
+
+            @Param(value = "comment") String comment) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -819,7 +873,15 @@ public class ProgramScriptService {
      * Set a bookmark at an address with category and comment.
      * Creates or updates the bookmark if one already exists at the address with the same category.
      */
-    public Response setBookmark(String addressStr, String category, String comment) {
+    @McpTool(value = "/set_bookmark", description = "Set a bookmark at the specified address", method = McpTool.Method.POST)
+
+    public Response setBookmark(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "category") String category,
+
+            @Param(value = "comment") String comment) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -874,7 +936,13 @@ public class ProgramScriptService {
     /**
      * List bookmarks, optionally filtered by category and/or address.
      */
-    public Response listBookmarks(String category, String addressStr) {
+    @McpTool(value = "/list_bookmarks", description = "List bookmarks in the program")
+
+    public Response listBookmarks(
+
+            @Param(value = "category") String category,
+
+            @Param(value = "address") String addressStr) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -946,7 +1014,13 @@ public class ProgramScriptService {
     /**
      * Delete a bookmark at an address with optional category filter.
      */
-    public Response deleteBookmark(String addressStr, String category) {
+    @McpTool(value = "/delete_bookmark", description = "Delete a bookmark at the specified address", method = McpTool.Method.POST)
+
+    public Response deleteBookmark(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "category") String category) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -992,7 +1066,17 @@ public class ProgramScriptService {
      * Run a Ghidra script with enhanced output capture and JSON response.
      * Locates the script in standard directories, executes it, and returns structured results.
      */
-    public Response runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput) {
+    @McpTool(value = "/run_ghidra_script", description = "Run a Ghidra script by name and capture all output including errors", method = McpTool.Method.POST)
+
+    public Response runGhidraScriptWithCapture(
+
+            @Param(value = "script_name") String scriptName,
+
+            @Param(value = "args") String scriptArgs,
+
+            @Param(value = "timeoutSeconds", type = "integer") int timeoutSeconds,
+
+            @Param(value = "captureOutput", type = "boolean") boolean captureOutput) {
         if (scriptName == null || scriptName.isEmpty()) {
             return Response.err("Script name is required");
         }

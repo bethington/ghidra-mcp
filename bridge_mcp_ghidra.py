@@ -11,7 +11,11 @@ import argparse
 import logging
 import time
 import re
-from urllib.parse import urljoin, urlparse
+import json
+import socket
+import http.client
+from pathlib import Path
+from urllib.parse import urljoin, urlparse, urlencode
 
 from mcp.server.fastmcp import FastMCP
 
@@ -133,6 +137,180 @@ mcp = FastMCP("ghidra-mcp")
 
 # Initialize ghidra_server_url: env var > .env file > default
 ghidra_server_url = os.getenv("GHIDRA_SERVER_URL", DEFAULT_GHIDRA_SERVER)
+
+
+# ==========================================================================
+# UNIX DOMAIN SOCKET (UDS) TRANSPORT
+# ==========================================================================
+
+
+class UnixHTTPConnection(http.client.HTTPConnection):
+    """HTTP connection over a Unix domain socket."""
+
+    def __init__(self, socket_path: str, timeout: int = 30):
+        super().__init__("localhost", timeout=timeout)
+        self.socket_path = socket_path
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(self.socket_path)
+
+
+# Cached active socket path (None = not discovered yet, "" = no UDS available)
+_active_socket: str | None = None
+
+
+def get_socket_dir() -> Path:
+    """Get the GhidraMCP socket runtime directory."""
+    xdg = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg:
+        return Path(xdg) / "ghidra-mcp"
+    user = os.getenv("USER", "unknown")
+    tmpdir = os.environ.get("TMPDIR")
+    if tmpdir:
+        return Path(tmpdir) / f"ghidra-mcp-{user}"
+    return Path(f"/tmp/ghidra-mcp-{user}")
+
+
+def is_pid_alive(pid: int) -> bool:
+    """Check if a process with the given PID is still running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # Process exists but we lack permission
+
+
+def discover_instances() -> list[dict]:
+    """Scan the socket directory for active GhidraMCP instances."""
+    socket_dir = get_socket_dir()
+    if not socket_dir.exists():
+        return []
+
+    instances = []
+    for sock_file in sorted(socket_dir.glob("*.sock")):
+        meta_file = sock_file.with_suffix(".json")
+        meta = {}
+        if meta_file.exists():
+            try:
+                meta = json.loads(meta_file.read_text())
+            except Exception:
+                pass
+
+        pid = meta.get("pid")
+        if pid and is_pid_alive(pid):
+            instances.append({"socket": str(sock_file), **meta})
+        else:
+            # Stale socket — clean up
+            logger.debug(f"Cleaning up stale socket: {sock_file}")
+            try:
+                sock_file.unlink(missing_ok=True)
+                meta_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    return instances
+
+
+def get_active_socket() -> str | None:
+    """
+    Get the UDS socket path to use for requests.
+
+    Discovery order:
+    1. GHIDRA_SOCKET env var (explicit override)
+    2. Cached socket from previous discovery
+    3. Auto-discover from socket directory
+
+    Returns None if no UDS is available (fall back to TCP).
+    """
+    global _active_socket
+
+    # Explicit socket override
+    explicit = os.environ.get("GHIDRA_SOCKET")
+    if explicit:
+        return explicit
+
+    # If GHIDRA_SERVER_URL is explicitly set, prefer TCP
+    if os.environ.get("GHIDRA_SERVER_URL"):
+        return None
+
+    # Return cached socket if still valid
+    if _active_socket:
+        if Path(_active_socket).exists():
+            return _active_socket
+        _active_socket = None  # Stale, re-discover
+
+    if _active_socket == "":
+        return None  # Previously discovered no sockets
+
+    # Auto-discover
+    instances = discover_instances()
+    if instances:
+        _active_socket = instances[0]["socket"]
+        logger.info(f"Auto-discovered GhidraMCP UDS at {_active_socket}")
+        return _active_socket
+
+    _active_socket = ""  # Mark as "no UDS available" to avoid repeated scans
+    return None
+
+
+def invalidate_socket_cache():
+    """Force re-discovery of UDS sockets on next request."""
+    global _active_socket
+    _active_socket = None
+
+
+def uds_request(
+    socket_path: str,
+    method: str,
+    endpoint: str,
+    params: dict | None = None,
+    form_data: dict | str | None = None,
+    json_data: dict | None = None,
+    timeout: int = 30,
+) -> tuple[str, int]:
+    """
+    Make an HTTP request over a Unix domain socket.
+
+    Returns (response_body, status_code).
+    """
+    conn = UnixHTTPConnection(socket_path, timeout=timeout)
+
+    # Build path with query params
+    path = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+    if params:
+        query = urlencode(params)
+        path = f"{path}?{query}"
+
+    headers = {}
+    body = None
+
+    if json_data is not None:
+        body = json.dumps(json_data).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    elif form_data is not None:
+        if isinstance(form_data, dict):
+            body = urlencode(form_data).encode("utf-8")
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        else:
+            body = form_data.encode("utf-8") if isinstance(form_data, str) else form_data
+
+    if body:
+        headers["Content-Length"] = str(len(body))
+
+    try:
+        conn.request(method, path, body=body, headers=headers)
+        response = conn.getresponse()
+        result = response.read().decode("utf-8")
+        status = response.status
+        conn.close()
+        return result, status
+    except Exception:
+        conn.close()
+        raise
 
 
 # Enhanced error classes
@@ -708,6 +886,7 @@ def cached_request(
 def safe_get_uncached(endpoint: str, params: dict = None, retries: int = 3) -> list:
     """
     Perform a GET request WITHOUT caching (for stateful queries like get_current_address).
+    Uses UDS transport when available, falls back to TCP.
 
     Args:
         endpoint: The API endpoint to call
@@ -720,16 +899,40 @@ def safe_get_uncached(endpoint: str, params: dict = None, retries: int = 3) -> l
     if params is None:
         params = {}
 
-    # Validate server URL for security
+    timeout = get_timeout_for_endpoint(endpoint)
+
+    # Try UDS transport first
+    sock = get_active_socket()
+    if sock:
+        for attempt in range(retries):
+            try:
+                start_time = time.time()
+                text, status = uds_request(sock, "GET", endpoint, params=params, timeout=timeout)
+                duration = time.time() - start_time
+                logger.info(f"UDS GET {endpoint} took {duration:.2f}s (attempt {attempt + 1})")
+                if status == 200:
+                    return text.splitlines()
+                elif status >= 500 and attempt < retries - 1:
+                    time.sleep(2**attempt)
+                    continue
+                else:
+                    return [f"Error {status}: {text.strip()}"]
+            except (OSError, ConnectionError) as e:
+                logger.warning(f"UDS request failed: {e}, invalidating cache")
+                invalidate_socket_cache()
+                break  # Fall through to TCP
+            except Exception as e:
+                logger.error(f"UDS error: {e}")
+                if attempt < retries - 1:
+                    continue
+                return [f"Error: {e}"]
+
+    # TCP fallback
     if not validate_server_url(ghidra_server_url):
         logger.error(f"Invalid or unsafe server URL: {ghidra_server_url}")
         return ["Error: Invalid server URL - only local addresses allowed"]
 
     url = urljoin(ghidra_server_url, endpoint)
-
-    # Get endpoint-specific timeout
-    timeout = get_timeout_for_endpoint(endpoint)
-    logger.debug(f"Using timeout of {timeout}s for endpoint {endpoint}")
 
     for attempt in range(retries):
         try:
@@ -737,44 +940,27 @@ def safe_get_uncached(endpoint: str, params: dict = None, retries: int = 3) -> l
             response = session.get(url, params=params, timeout=timeout)
             response.encoding = "utf-8"
             duration = time.time() - start_time
-
-            logger.info(
-                f"Request to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries})"
-            )
-
+            logger.info(f"TCP GET {endpoint} took {duration:.2f}s (attempt {attempt + 1})")
             if response.ok:
                 return response.text.splitlines()
             elif response.status_code == 404:
-                logger.warning(f"Endpoint not found: {endpoint}")
                 return [f"Endpoint not found: {endpoint}"]
             elif response.status_code >= 500:
-                # Server error - retry with exponential backoff
                 if attempt < retries - 1:
-                    wait_time = 2**attempt
-                    logger.warning(
-                        f"Server error {response.status_code}, retrying in {wait_time}s..."
-                    )
-                    time.sleep(wait_time)
+                    time.sleep(2**attempt)
                     continue
-                else:
-                    logger.error(
-                        f"Server error after {retries} attempts: {response.status_code}"
-                    )
-                    raise GhidraConnectionError(f"Server error: {response.status_code}")
+                raise GhidraConnectionError(f"Server error: {response.status_code}")
             else:
-                logger.error(f"HTTP {response.status_code}: {response.text.strip()}")
                 return [f"Error {response.status_code}: {response.text.strip()}"]
-
         except requests.exceptions.Timeout:
-            logger.warning(f"Request timeout on attempt {attempt + 1}/{retries}")
             if attempt < retries - 1:
                 continue
             return [f"Timeout connecting to Ghidra server after {retries} attempts"]
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {str(e)}")
             return [f"Request failed: {str(e)}"]
+        except GhidraConnectionError:
+            raise
         except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
             return [f"Unexpected error: {str(e)}"]
 
     return ["Unexpected error in safe_get_uncached"]
@@ -783,166 +969,88 @@ def safe_get_uncached(endpoint: str, params: dict = None, retries: int = 3) -> l
 @cached_request(cache_duration=180)  # 3-minute cache for GET requests
 def safe_get(endpoint: str, params: dict = None, retries: int = 3, program: str = None) -> list:
     """
-    Perform a GET request with enhanced error handling and retry logic.
-
-    Args:
-        endpoint: The API endpoint to call
-        params: Optional query parameters
-        retries: Number of retry attempts for server errors
-        program: Optional program name for multi-binary targeting
-
-    Returns:
-        List of strings representing the response
+    Perform a cached GET request. Uses UDS when available, falls back to TCP.
+    Delegates to safe_get_uncached (caching is handled by the decorator).
     """
-    if params is None:
-        params = {}
-    if program:
-        params["program"] = program
-
-    # Validate server URL for security
-    if not validate_server_url(ghidra_server_url):
-        logger.error(f"Invalid or unsafe server URL: {ghidra_server_url}")
-        return ["Error: Invalid server URL - only local addresses allowed"]
-
-    url = urljoin(ghidra_server_url, endpoint)
-
-    # Get endpoint-specific timeout
-    timeout = get_timeout_for_endpoint(endpoint)
-    logger.debug(f"Using timeout of {timeout}s for endpoint {endpoint}")
-
-    for attempt in range(retries):
-        try:
-            start_time = time.time()
-            response = session.get(url, params=params, timeout=timeout)
-            response.encoding = "utf-8"
-            duration = time.time() - start_time
-
-            logger.info(
-                f"Request to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries})"
-            )
-
-            if response.ok:
-                return response.text.splitlines()
-            elif response.status_code == 404:
-                logger.warning(f"Endpoint not found: {endpoint}")
-                return [f"Endpoint not found: {endpoint}"]
-            elif response.status_code >= 500:
-                # Server error - retry with exponential backoff
-                if attempt < retries - 1:
-                    wait_time = 2**attempt
-                    logger.warning(
-                        f"Server error {response.status_code}, retrying in {wait_time}s..."
-                    )
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    logger.error(
-                        f"Server error after {retries} attempts: {response.status_code}"
-                    )
-                    raise GhidraConnectionError(f"Server error: {response.status_code}")
-            else:
-                logger.error(f"HTTP {response.status_code}: {response.text.strip()}")
-                return [f"Error {response.status_code}: {response.text.strip()}"]
-
-        except requests.exceptions.Timeout:
-            logger.warning(f"Request timeout on attempt {attempt + 1}/{retries}")
-            if attempt < retries - 1:
-                continue
-            return [f"Timeout connecting to Ghidra server after {retries} attempts"]
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {str(e)}")
-            return [f"Request failed: {str(e)}"]
-        except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            return [f"Unexpected error: {str(e)}"]
-
-    return ["Unexpected error in safe_get"]
+    return safe_get_uncached(endpoint, params, retries)
 
 
 def safe_get_json(endpoint: str, params: dict = None, retries: int = 3, program: str = None) -> str:
     """
-    Perform a GET request for JSON endpoints with enhanced error handling and retry logic.
-
-    This function is specifically for endpoints that return JSON objects (not line-based text).
+    Perform a GET request for JSON endpoints. Uses UDS when available, falls back to TCP.
     Returns the raw response text as a single string instead of splitting into lines.
-
-    Args:
-        endpoint: The API endpoint to call
-        params: Optional query parameters
-        retries: Number of retry attempts for server errors
-        program: Optional program name for multi-binary targeting
-
-    Returns:
-        String containing JSON response from the server
+>>>>>>> 80327dc (feat: add UDS transport, multi-instance bridge, and upstream tools)
     """
     if params is None:
         params = {}
     if program:
         params["program"] = program
 
-    # Validate server URL for security
+    timeout = get_timeout_for_endpoint(endpoint)
+
+    # Try UDS transport first
+    sock = get_active_socket()
+    if sock:
+        for attempt in range(retries):
+            try:
+                start_time = time.time()
+                text, status = uds_request(sock, "GET", endpoint, params=params, timeout=timeout)
+                duration = time.time() - start_time
+                logger.info(f"UDS GET {endpoint} took {duration:.2f}s (attempt {attempt + 1})")
+                if status == 200:
+                    return text
+                elif status == 404:
+                    return f'{{"error": "Endpoint not found: {endpoint}"}}'
+                elif status >= 500 and attempt < retries - 1:
+                    time.sleep(2**attempt)
+                    continue
+                else:
+                    return f'{{"error": "HTTP {status}: {text.strip()}"}}'
+            except (OSError, ConnectionError) as e:
+                logger.warning(f"UDS request failed, falling back to TCP: {e}")
+                invalidate_socket_cache()
+                break
+            except Exception as e:
+                if attempt < retries - 1:
+                    continue
+                return f'{{"error": "{e}"}}'
+
+    # TCP fallback
     if not validate_server_url(ghidra_server_url):
         logger.error(f"Invalid or unsafe server URL: {ghidra_server_url}")
         return '{"error": "Invalid server URL - only local addresses allowed"}'
 
     url = urljoin(ghidra_server_url, endpoint)
 
-    # Get endpoint-specific timeout
-    timeout = get_timeout_for_endpoint(endpoint)
-    logger.debug(f"Using timeout of {timeout}s for endpoint {endpoint}")
-
     for attempt in range(retries):
         try:
             start_time = time.time()
             response = session.get(url, params=params, timeout=timeout)
             response.encoding = "utf-8"
             duration = time.time() - start_time
-
-            logger.info(
-                f"Request to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries})"
-            )
-
+            logger.info(f"TCP GET {endpoint} took {duration:.2f}s (attempt {attempt + 1})")
             if response.ok:
-                # Return raw JSON text, not splitlines
                 return response.text
             elif response.status_code == 404:
-                logger.warning(f"Endpoint not found: {endpoint}")
                 return f'{{"error": "Endpoint not found: {endpoint}"}}'
-            elif response.status_code >= 500:
-                # Server error - retry with exponential backoff
-                if attempt < retries - 1:
-                    wait_time = 2**attempt
-                    logger.warning(
-                        f"Server error {response.status_code}, retrying in {wait_time}s..."
-                    )
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    logger.error(
-                        f"Server error after {retries} attempts: {response.status_code}"
-                    )
-                    return f'{{"error": "Server error {response.status_code} after {retries} attempts"}}'
+            elif response.status_code >= 500 and attempt < retries - 1:
+                time.sleep(2**attempt)
+                continue
             else:
-                logger.error(f"HTTP {response.status_code}: {response.text.strip()}")
                 return f'{{"error": "HTTP {response.status_code}: {response.text.strip()}"}}'
-
         except requests.exceptions.Timeout:
-            logger.warning(f"Request timeout on attempt {attempt + 1}/{retries}")
             if attempt < retries - 1:
                 continue
             return f'{{"error": "Timeout connecting to Ghidra server after {retries} attempts"}}'
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {str(e)}")
             return f'{{"error": "Request failed: {str(e)}"}}'
-        except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            return f'{{"error": "Unexpected error: {str(e)}"}}'
 
     return '{"error": "Unexpected error in safe_get_json"}'
 
 
 def safe_post_json(endpoint: str, data: dict, retries: int = 3, program: str = None) -> str:
     """
+<<<<<<< HEAD
     Perform a JSON POST request with enhanced error handling and retry logic.
 
     Args:
@@ -953,71 +1061,76 @@ def safe_post_json(endpoint: str, data: dict, retries: int = 3, program: str = N
 
     Returns:
         String response from the server
+=======
+    Perform a JSON POST request. Uses UDS when available, falls back to TCP.
     """
-    # Validate server URL for security
+    timeout = calculate_dynamic_timeout(endpoint, data)
+
+    # Try UDS transport first
+    sock = get_active_socket()
+    if sock:
+        for attempt in range(retries):
+            try:
+                start_time = time.time()
+                text, status = uds_request(sock, "POST", endpoint, json_data=data, timeout=timeout)
+                duration = time.time() - start_time
+                logger.info(f"UDS POST {endpoint} took {duration:.2f}s (attempt {attempt + 1})")
+                if status == 200:
+                    return text.strip()
+                elif status == 404:
+                    return f"Error: Endpoint {endpoint} not found"
+                elif status >= 500 and attempt < retries - 1:
+                    time.sleep(1)
+                    continue
+                else:
+                    return f"Error: HTTP {status} - {text}"
+            except (OSError, ConnectionError) as e:
+                logger.warning(f"UDS request failed, falling back to TCP: {e}")
+                invalidate_socket_cache()
+                break
+            except Exception as e:
+                if attempt < retries - 1:
+                    time.sleep(1)
+                    continue
+                return f"Error: Request failed - {str(e)}"
+
+    # TCP fallback
     if not validate_server_url(ghidra_server_url):
         logger.error(f"Invalid or unsafe server URL: {ghidra_server_url}")
         return "Error: Invalid server URL - only local addresses allowed"
 
     url = urljoin(ghidra_server_url, endpoint)
-    if program:
-        url += f"?program={program}"
-
-    # Get dynamic timeout based on payload complexity
-    timeout = calculate_dynamic_timeout(endpoint, data)
-    logger.info(
-        f"Using dynamic timeout of {timeout}s for endpoint {endpoint} (payload items: {len(data)})"
-    )
-
-    # Disable Keep-Alive for long-running operations to prevent connection timeout
+>>>>>>> 80327dc (feat: add UDS transport, multi-instance bridge, and upstream tools)
     headers = {"Connection": "close"}
 
     for attempt in range(retries):
         try:
             start_time = time.time()
-
-            logger.info(f"Sending JSON POST to {url} with data: {data}")
             response = session.post(url, json=data, headers=headers, timeout=timeout)
-
             response.encoding = "utf-8"
             duration = time.time() - start_time
-
-            logger.info(
-                f"JSON POST to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries}), status: {response.status_code}"
-            )
-
+            logger.info(f"TCP POST {endpoint} took {duration:.2f}s (attempt {attempt + 1})")
             if response.ok:
                 return response.text.strip()
             elif response.status_code == 404:
                 return f"Error: Endpoint {endpoint} not found"
-            elif response.status_code >= 500:
-                if attempt < retries - 1:  # Only log retry attempts for server errors
-                    logger.warning(
-                        f"Server error {response.status_code} on attempt {attempt + 1}, retrying..."
-                    )
-                    time.sleep(1)  # Brief delay before retry
-                    continue
-                else:
-                    return f"Error: Server error {response.status_code} after {retries} attempts"
-            else:
-                return f"Error: HTTP {response.status_code} - {response.text}"
-
-        except requests.RequestException as e:
-            if attempt < retries - 1:
-                logger.warning(
-                    f"Request failed on attempt {attempt + 1}, retrying: {e}"
-                )
+            elif response.status_code >= 500 and attempt < retries - 1:
                 time.sleep(1)
                 continue
             else:
-                logger.error(f"Request failed after {retries} attempts: {e}")
-                return f"Error: Request failed - {str(e)}"
+                return f"Error: HTTP {response.status_code} - {response.text}"
+        except requests.RequestException as e:
+            if attempt < retries - 1:
+                time.sleep(1)
+                continue
+            return f"Error: Request failed - {str(e)}"
 
     return "Error: Maximum retries exceeded"
 
 
 def safe_post(endpoint: str, data: dict | str, retries: int = 3, program: str = None) -> str:
     """
+<<<<<<< HEAD
     Perform a POST request with enhanced error handling and retry logic.
 
     Args:
@@ -1028,8 +1141,39 @@ def safe_post(endpoint: str, data: dict | str, retries: int = 3, program: str = 
 
     Returns:
         String response from the server
+=======
+    Perform a POST request (form-encoded or raw). Uses UDS when available, falls back to TCP.
     """
-    # Validate server URL for security
+    timeout = get_timeout_for_endpoint(endpoint)
+
+    # Try UDS transport first
+    sock = get_active_socket()
+    if sock:
+        for attempt in range(retries):
+            try:
+                start_time = time.time()
+                text, status = uds_request(sock, "POST", endpoint, form_data=data, timeout=timeout)
+                duration = time.time() - start_time
+                logger.info(f"UDS POST {endpoint} took {duration:.2f}s (attempt {attempt + 1})")
+                if status == 200:
+                    return text.strip()
+                elif status == 404:
+                    return f"Endpoint not found: {endpoint}"
+                elif status >= 500 and attempt < retries - 1:
+                    time.sleep(2**attempt)
+                    continue
+                else:
+                    return f"Error {status}: {text.strip()}"
+            except (OSError, ConnectionError) as e:
+                logger.warning(f"UDS request failed, falling back to TCP: {e}")
+                invalidate_socket_cache()
+                break
+            except Exception as e:
+                if attempt < retries - 1:
+                    continue
+                return f"Unexpected error: {str(e)}"
+
+    # TCP fallback
     if not validate_server_url(ghidra_server_url):
         logger.error(f"Invalid or unsafe server URL: {ghidra_server_url}")
         return "Error: Invalid server URL - only local addresses allowed"
@@ -1038,62 +1182,31 @@ def safe_post(endpoint: str, data: dict | str, retries: int = 3, program: str = 
     if program:
         url += f"?program={program}"
 
-    # Get endpoint-specific timeout
-    timeout = get_timeout_for_endpoint(endpoint)
-    logger.debug(f"Using timeout of {timeout}s for endpoint {endpoint}")
-
     for attempt in range(retries):
         try:
             start_time = time.time()
-
             if isinstance(data, dict):
-                logger.info(f"Sending POST to {url} with form data: {data}")
                 response = session.post(url, data=data, timeout=timeout)
             else:
-                logger.info(f"Sending POST to {url} with raw data: {data}")
                 response = session.post(url, data=data.encode("utf-8"), timeout=timeout)
-
             response.encoding = "utf-8"
             duration = time.time() - start_time
-
-            logger.info(
-                f"POST to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries}), status: {response.status_code}"
-            )
-
+            logger.info(f"TCP POST {endpoint} took {duration:.2f}s (attempt {attempt + 1})")
             if response.ok:
                 return response.text.strip()
             elif response.status_code == 404:
-                logger.warning(f"Endpoint not found: {endpoint}")
                 return f"Endpoint not found: {endpoint}"
-            elif response.status_code >= 500:
-                # Server error - retry with exponential backoff
-                if attempt < retries - 1:
-                    wait_time = 2**attempt
-                    logger.warning(
-                        f"Server error {response.status_code}, retrying in {wait_time}s..."
-                    )
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    logger.error(
-                        f"Server error after {retries} attempts: {response.status_code}"
-                    )
-                    raise GhidraConnectionError(f"Server error: {response.status_code}")
+            elif response.status_code >= 500 and attempt < retries - 1:
+                time.sleep(2**attempt)
+                continue
             else:
-                logger.error(f"HTTP {response.status_code}: {response.text.strip()}")
                 return f"Error {response.status_code}: {response.text.strip()}"
-
         except requests.exceptions.Timeout:
-            logger.warning(f"POST timeout on attempt {attempt + 1}/{retries}")
             if attempt < retries - 1:
                 continue
             return f"Timeout connecting to Ghidra server after {retries} attempts"
         except requests.exceptions.RequestException as e:
-            logger.error(f"POST request failed: {str(e)}")
             return f"Request failed: {str(e)}"
-        except Exception as e:
-            logger.error(f"Unexpected error in POST: {str(e)}")
-            return f"Unexpected error: {str(e)}"
 
     return "Unexpected error in safe_post"
 
@@ -1107,10 +1220,7 @@ def make_request(
     program: str = None,
 ) -> str:
     """
-    Perform an HTTP request with enhanced error handling and retry logic.
-
-    This is a unified request function that supports both GET and POST methods,
-    used by program management and advanced documentation tools.
+    Perform an HTTP request. Uses UDS when available, falls back to TCP.
 
     Args:
         url: Full URL to request (not just endpoint)
@@ -1118,78 +1228,84 @@ def make_request(
         params: Query parameters for GET requests
         data: Raw data string for POST requests (already JSON-encoded)
         retries: Number of retry attempts for server errors
+<<<<<<< HEAD
         program: Optional program name for multi-binary targeting
 
     Returns:
         String response from the server (typically JSON)
+=======
+>>>>>>> 80327dc (feat: add UDS transport, multi-instance bridge, and upstream tools)
     """
     if params is None:
         params = {}
     if program:
         params["program"] = program
 
-    # Validate server URL for security
+    timeout = REQUEST_TIMEOUT
+
+    # Try UDS transport first — extract endpoint path from URL
+    sock = get_active_socket()
+    if sock:
+        endpoint = urlparse(url).path
+        for attempt in range(retries):
+            try:
+                start_time = time.time()
+                if method.upper() == "POST":
+                    # data is already JSON-encoded string
+                    text, status = uds_request(sock, "POST", endpoint, form_data=data, timeout=timeout)
+                else:
+                    text, status = uds_request(sock, "GET", endpoint, params=params, timeout=timeout)
+                duration = time.time() - start_time
+                logger.info(f"UDS {method} {endpoint} took {duration:.2f}s (attempt {attempt + 1})")
+                if status == 200:
+                    return text
+                elif status == 404:
+                    return f'{{"error": "Endpoint not found: {endpoint}"}}'
+                elif status >= 500 and attempt < retries - 1:
+                    time.sleep(2**attempt)
+                    continue
+                else:
+                    return f'{{"error": "HTTP {status}: {text.strip()}"}}'
+            except (OSError, ConnectionError) as e:
+                logger.warning(f"UDS request failed, falling back to TCP: {e}")
+                invalidate_socket_cache()
+                break
+            except Exception as e:
+                if attempt < retries - 1:
+                    continue
+                return f'{{"error": "{e}"}}'
+
+    # TCP fallback
     if not validate_server_url(url):
         logger.error(f"Invalid or unsafe server URL: {url}")
         return '{"error": "Invalid server URL - only local addresses allowed"}'
 
-    # Get endpoint-specific timeout
-    timeout = REQUEST_TIMEOUT
-    logger.debug(f"Using timeout of {timeout}s for {method} request to {url}")
-
     for attempt in range(retries):
         try:
             start_time = time.time()
-
             if method.upper() == "POST":
                 headers = {"Content-Type": "application/json"}
-                response = session.post(
-                    url, data=data, headers=headers, timeout=timeout
-                )
+                response = session.post(url, data=data, headers=headers, timeout=timeout)
             else:
                 response = session.get(url, params=params, timeout=timeout)
-
             response.encoding = "utf-8"
             duration = time.time() - start_time
-
-            logger.info(
-                f"{method} request to {url} took {duration:.2f}s (attempt {attempt + 1}/{retries})"
-            )
-
+            logger.info(f"TCP {method} {url} took {duration:.2f}s (attempt {attempt + 1})")
             if response.ok:
                 return response.text
             elif response.status_code == 404:
-                logger.warning(f"Endpoint not found: {url}")
                 return f'{{"error": "Endpoint not found: {url}"}}'
-            elif response.status_code >= 500:
-                # Server error - retry with exponential backoff
-                if attempt < retries - 1:
-                    wait_time = 2**attempt
-                    logger.warning(
-                        f"Server error {response.status_code}, retrying in {wait_time}s..."
-                    )
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    logger.error(
-                        f"Server error after {retries} attempts: {response.status_code}"
-                    )
-                    return f'{{"error": "Server error {response.status_code} after {retries} attempts"}}'
+            elif response.status_code >= 500 and attempt < retries - 1:
+                time.sleep(2**attempt)
+                continue
             else:
-                logger.error(f"HTTP {response.status_code}: {response.text.strip()}")
                 return f'{{"error": "HTTP {response.status_code}: {response.text.strip()}"}}'
-
         except requests.exceptions.Timeout:
-            logger.warning(f"Request timeout on attempt {attempt + 1}/{retries}")
             if attempt < retries - 1:
                 continue
             return f'{{"error": "Timeout connecting to Ghidra server after {retries} attempts"}}'
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {str(e)}")
             return f'{{"error": "Request failed: {str(e)}"}}'
-        except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
-            return f'{{"error": "Unexpected error: {str(e)}"}}'
 
     return '{"error": "Unexpected error in make_request"}'
 
@@ -4295,7 +4411,7 @@ def batch_analyze_completeness(addresses: list[str], program: str = None) -> str
 def find_next_undefined_function(
     start_address: str = None,
     criteria: str = "name_pattern",
-    pattern: str = None,
+    pattern: str = "FUN_",
     direction: str = "ascending",
     program: str = None,
 ) -> str:
@@ -4306,7 +4422,7 @@ def find_next_undefined_function(
     Args:
         start_address: Starting address for search (default: program min address)
         criteria: Search criteria (default: "name_pattern")
-        pattern: Name pattern to match (default: all auto-generated names: FUN_, Ordinal_, thunk_FUN_, thunk_Ordinal_). Provide a specific prefix like "FUN_" or "Ordinal_" to narrow the search.
+        pattern: Name pattern to match (default: "FUN_")
         direction: Search direction "ascending" or "descending" (default: "ascending")
         program: Optional program name to query (if not provided, uses current program)
 
@@ -4319,10 +4435,9 @@ def find_next_undefined_function(
     params = {
         "start_address": start_address,
         "criteria": criteria,
+        "pattern": pattern,
         "direction": direction,
     }
-    if pattern:
-        params["pattern"] = pattern
     if program:
         params["program"] = program
     return safe_get_json("find_next_undefined_function", params)
@@ -5989,7 +6104,7 @@ def find_similar_functions_fuzzy(
     }
     if source_program:
         params["source_program"] = source_program
-    return safe_get_json("find_similar_functions_fuzzy", params)
+    return safe_get("find_similar_functions_fuzzy", params)
 
 
 @mcp.tool()
@@ -6029,7 +6144,7 @@ def bulk_fuzzy_match(
     }
     if filter:
         params["filter"] = filter
-    return safe_get_json("bulk_fuzzy_match", params)
+    return safe_get("bulk_fuzzy_match", params)
 
 
 @mcp.tool()
@@ -7831,6 +7946,244 @@ def get_repository_file(repo: str, path: str) -> str:
     return safe_get_json(
         "server/repository/file", {"repo": repo, "path": path}
     )
+
+
+# ========== UDS INSTANCE MANAGEMENT ==========
+
+
+@mcp.tool()
+def list_instances() -> str:
+    """
+    List all running Ghidra instances discovered via Unix domain sockets.
+
+    Returns JSON with each instance's project name, PID, open programs, and socket path.
+    Also shows which instance is currently connected.
+    Useful for multi-instance setups where multiple Ghidra processes are running.
+    """
+    instances = discover_instances()
+    if not instances:
+        return json.dumps({"instances": [], "note": "No UDS instances found. Falling back to TCP."})
+    active = get_active_socket()
+    for inst in instances:
+        inst["connected"] = (inst["socket"] == active)
+    return json.dumps({"instances": instances}, indent=2)
+
+
+@mcp.tool()
+def connect_instance(project: str) -> str:
+    """
+    Switch the MCP bridge to a different Ghidra instance by project name.
+
+    Use list_instances() first to see available instances and their project names.
+    After connecting, all subsequent MCP tool calls will be routed to the selected instance.
+
+    Args:
+        project: Project name (or substring) to connect to (e.g., "test-project")
+
+    Returns:
+        JSON with connection result
+    """
+    global _active_socket
+    instances = discover_instances()
+    if not instances:
+        return json.dumps({"error": "No running Ghidra instances found"})
+
+    # Exact match first, then substring
+    match = None
+    for inst in instances:
+        if inst.get("project", "") == project:
+            match = inst
+            break
+    if not match:
+        for inst in instances:
+            if project.lower() in inst.get("project", "").lower():
+                match = inst
+                break
+    if not match:
+        available = [inst.get("project", "unknown") for inst in instances]
+        return json.dumps({"error": f"No instance matching '{project}'", "available": available})
+
+    _active_socket = match["socket"]
+    # Invalidate request cache since we switched instances
+    if hasattr(safe_get, "cache"):
+        safe_get.cache.clear()
+    return json.dumps({
+        "connected": True,
+        "project": match.get("project"),
+        "socket": match["socket"],
+        "pid": match.get("pid"),
+    })
+
+
+# ========== CONVENIENCE ALIASES ==========
+
+
+@mcp.tool()
+def get_decompiled_code(
+    function_address: str, refresh_cache: bool = False, timeout: int = None
+) -> str:
+    """
+    Get the decompiled C code for a function at the specified address.
+
+    **DEPRECATED**: Use decompile_function(address=...) instead. This tool is maintained
+    for backward compatibility but decompile_function() is the preferred unified tool.
+
+    Args:
+        function_address: Memory address of the function in hex format (e.g., "0x401000")
+        refresh_cache: If True, forces fresh decompilation (default: False)
+        timeout: Optional timeout in seconds for this operation
+
+    Returns:
+        str: Decompiled C pseudocode as a string
+
+    Note:
+        This is a convenience wrapper around decompile_function().
+        Prefer using: decompile_function(address="0x401000", force=True)
+    """
+    return decompile_function(
+        address=function_address, force=refresh_cache, timeout=timeout
+    )
+
+
+@mcp.tool()
+def get_disassembly(
+    function_address: str,
+    as_text: bool = False,
+    filter_mnemonics: str = None,
+    timeout: int = None,
+) -> list[str] | str:
+    """
+    Get the disassembled assembly code for a function at the specified address.
+
+    This is a simplified tool specifically designed for retrieving disassembly.
+    Use this when you need the assembly instructions of a function for low-level analysis.
+
+    Args:
+        function_address: Memory address of the function in hex format (e.g., "0x401000", "0x6fb6aef0")
+                         Accepts addresses with or without 0x prefix
+        as_text: If True, returns assembly as a single string with newlines; if False, returns list (default: False)
+        filter_mnemonics: Optional comma-separated instruction mnemonics to filter by
+                         (e.g., "CALL,JMP" shows only calls and jumps, "MOV" shows only moves)
+                         Case-insensitive
+        timeout: Optional timeout in seconds for this operation (overrides default)
+
+    Returns:
+        list[str] | str: List of assembly instructions (default) or single string with newlines if as_text=True
+                        Each line contains: address, instruction, and optional comment
+
+    Raises:
+        GhidraValidationError: If address format is invalid or no function found
+
+    Note:
+        This returns the same information as disassemble_function() but with a simpler name.
+        Use as_text=True for easier reading/display, or as_text=False (default) for programmatic parsing.
+    """
+    # Sanitize and validate address
+    function_address = sanitize_address(function_address)
+    if not validate_hex_address(function_address):
+        raise GhidraValidationError(
+            f"Invalid hexadecimal address format: {function_address}. "
+            f"Expected format: 0x followed by hex digits (e.g., '0x401000'). "
+            f"Use get_function_by_address() to verify the address."
+        )
+
+    # Verify function exists at this address
+    func_check = safe_get("get_function_by_address", {"address": function_address})
+    if not func_check or any(
+        "Error" in str(line) or "not found" in str(line).lower() for line in func_check
+    ):
+        raise GhidraValidationError(
+            f"No function found at address {function_address}. "
+            f"Verify the address using get_function_by_address() or "
+            f"use disassemble_bytes() to disassemble arbitrary memory regions."
+        )
+
+    # Apply custom timeout if specified
+    if timeout:
+        original_timeout = ENDPOINT_TIMEOUTS.get("disassemble_function", 30)
+        ENDPOINT_TIMEOUTS["disassemble_function"] = timeout
+
+    try:
+        result = safe_get("disassemble_function", {"address": function_address})
+
+        # Check for errors
+        if not result or (len(result) == 1 and "Error" in result[0]):
+            error_msg = result[0] if result else "Unknown error"
+            raise GhidraValidationError(
+                f"Failed to disassemble function at {function_address}: {error_msg}. "
+                f"Try using get_function_by_address() to verify the function exists."
+            )
+
+        # Apply mnemonic filter if specified
+        if filter_mnemonics:
+            mnemonics = [m.strip().upper() for m in filter_mnemonics.split(",")]
+            # Filter lines that contain any of the specified mnemonics
+            result = [
+                line
+                for line in result
+                if any(mnem in line.upper() for mnem in mnemonics)
+            ]
+
+            if not result:
+                logger.warning(
+                    f"No instructions matching '{filter_mnemonics}' found in function at {function_address}"
+                )
+
+        if as_text:
+            return "\n".join(result)
+        return result
+    finally:
+        # Restore original timeout
+        if timeout:
+            ENDPOINT_TIMEOUTS["disassemble_function"] = original_timeout
+
+
+@mcp.tool()
+def get_function_jump_target_addresses(
+    name: str, offset: int = 0, limit: int = 100
+) -> list:
+    """
+    Get all jump target addresses from a function's disassembly.
+
+    This tool analyzes the disassembly of a specified function and extracts all addresses
+    that are targets of conditional and unconditional jump instructions (JMP, JE, JNE, JZ, etc.).
+
+    Args:
+        name: Function name to analyze for jump targets
+        offset: Pagination offset (default: 0)
+        limit: Maximum number of jump targets to return (default: 100)
+
+    Returns:
+        List of jump target addresses found in the function's disassembly
+    """
+    return safe_get(
+        "get_function_jump_targets", {"name": name, "offset": offset, "limit": limit}
+    )
+
+
+@mcp.tool()
+def search_functions_by_name(
+    query: str, offset: int = 0, limit: int = 100, program: str = None
+) -> list:
+    """
+    Search for functions whose name contains the given substring.
+
+    Args:
+        query: Search string to match against function names
+        offset: Pagination offset for starting position (default: 0)
+        limit: Maximum number of results to return (default: 100)
+        program: Optional program name to query (e.g., "D2Client.dll").
+                 If not specified, uses the currently active program.
+
+    Returns:
+        List of matching functions with their names and addresses
+    """
+    if not query:
+        raise GhidraValidationError("query string is required")
+    params = {"query": query, "offset": offset, "limit": limit}
+    if program:
+        params["program"] = program
+    return safe_get("search_functions", params)
 
 
 # ========== MAIN ==========

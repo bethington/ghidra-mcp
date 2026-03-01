@@ -19,7 +19,6 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-
 /**
  * Service for function hashing, documentation export/import, and cross-version matching.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
@@ -96,7 +95,13 @@ public class DocumentationHashService {
      *
      * This allows matching identical functions that are located at different addresses.
      */
-    public Response getFunctionHash(String functionAddress, String programName) {
+    @McpTool(value = "/get_function_hash", description = "Compute a normalized opcode hash for a function")
+
+    public Response getFunctionHash(
+
+            @Param(value = "address") String functionAddress,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
@@ -263,7 +268,17 @@ public class DocumentationHashService {
     /**
      * Get hashes for multiple functions efficiently
      */
-    public Response getBulkFunctionHashes(int offset, int limit, String filter, String programName) {
+    @McpTool(value = "/get_bulk_function_hashes", description = "Get normalized opcode hashes for multiple functions efficiently")
+
+    public Response getBulkFunctionHashes(
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+
+            @Param(value = "filter", required = false) String filter,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
@@ -337,7 +352,11 @@ public class DocumentationHashService {
     /**
      * Export all documentation for a function (for use in cross-binary propagation)
      */
-    public Response getFunctionDocumentation(String functionAddress) {
+    @McpTool(value = "/get_function_documentation", description = "Export all documentation for a function (for cross-binary propagation)")
+
+    public Response getFunctionDocumentation(
+
+            @Param(value = "address") String functionAddress) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -515,7 +534,10 @@ public class DocumentationHashService {
      * Expects JSON body with: target_address, source_documentation (from getFunctionDocumentation)
      */
     @SuppressWarnings("deprecation")
-    public Response applyFunctionDocumentation(String jsonBody) {
+    @McpTool(value = "/apply_function_documentation", description = "Apply documentation to a target function from exported documentation", method = McpTool.Method.POST)
+
+    public Response applyFunctionDocumentation(
+            @Param(value = "_body", description = "Full JSON body as string") String jsonBody) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
@@ -636,6 +658,144 @@ public class DocumentationHashService {
     }
 
     /**
+     * v4.0.0: Apply all documentation to a function in a single call.
+     * Orchestrates: optional goto (no-op in service/GUI-only) -> rename -> prototype -> variable types -> variable renames -> comments -> optional completeness score.
+     */
+    @SuppressWarnings("unchecked")
+    @McpTool(value = "/batch_apply_documentation", description = "Apply documentation in one call (rename, prototype, variable types/renames, comments)", method = McpTool.Method.POST)
+    public Response batchApplyDocumentation(
+            @Param(value = "_body", description = "JSON body: address, name, prototype, calling_convention, variable_types, variable_renames, plate_comment, decompiler_comments, disassembly_comments, goto, score") String jsonBody) {
+        if (jsonBody == null || jsonBody.isBlank()) {
+            return Response.err("JSON body is required");
+        }
+        Map<String, Object> params = JsonHelper.parseMap(jsonBody);
+        String address = JsonHelper.getString(params, "address");
+        if (address != null) address = address.trim();
+        if (address == null || address.isEmpty()) {
+            return Response.err("address parameter is required");
+        }
+
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) {
+            return Response.err("No program loaded");
+        }
+
+        // Use address string directly; FunctionRef not yet available at this commit
+        Map<String, Object> steps = new java.util.LinkedHashMap<>();
+        java.util.List<String> errors = new java.util.ArrayList<>();
+
+        // Step 1: Goto (optional) — no-op in service; GUI can register a separate handler that does goto then calls this
+        Object gotoParam = params.get("goto");
+        boolean doGoto = gotoParam instanceof Boolean && (Boolean) gotoParam;
+        if (doGoto) {
+            steps.put("goto", Map.of("skipped", true, "note", "GUI-only; use plugin endpoint for navigation"));
+        }
+
+        // Step 2: Rename function (optional)
+        String name = JsonHelper.getString(params, "name");
+        if (name != null && !name.isEmpty() && functionService != null) {
+            Response renameResp = functionService.renameFunctionByAddress(address, name);
+            boolean renameOk = !(renameResp instanceof Response.Err);
+            Map<String, Object> step = new java.util.LinkedHashMap<>();
+            step.put("success", renameOk);
+            if (renameResp instanceof Response.Err e) {
+                step.put("error", e.message());
+                errors.add("rename: " + e.message());
+            }
+            steps.put("rename", step);
+        }
+
+        // Step 3: Set prototype (optional)
+        String prototype = JsonHelper.getString(params, "prototype");
+        if (prototype != null && !prototype.isEmpty() && functionService != null) {
+            String callingConvention = JsonHelper.getString(params, "calling_convention");
+            FunctionService.PrototypeResult protoResult = functionService.setFunctionPrototype(address, prototype, callingConvention);
+            Map<String, Object> step = new java.util.LinkedHashMap<>();
+            step.put("success", protoResult.isSuccess());
+            if (!protoResult.isSuccess()) {
+                step.put("error", protoResult.getErrorMessage());
+                errors.add("prototype: " + protoResult.getErrorMessage());
+            }
+            steps.put("prototype", step);
+        }
+
+        // Step 4: Set variable types (optional)
+        Object varTypesObj = params.get("variable_types");
+        if (varTypesObj instanceof Map && functionService != null) {
+            Map<String, Object> varTypes = (Map<String, Object>) varTypesObj;
+            int setCount = 0, failCount = 0;
+            java.util.List<String> typeErrors = new java.util.ArrayList<>();
+            for (Map.Entry<String, Object> entry : varTypes.entrySet()) {
+                Response typeResp = functionService.setLocalVariableType(address, entry.getKey(), entry.getValue().toString());
+                boolean ok = !(typeResp instanceof Response.Err);
+                if (ok) setCount++; else {
+                    failCount++;
+                    typeErrors.add(entry.getKey() + ": " + (typeResp instanceof Response.Err e ? e.message() : "failed"));
+                }
+            }
+            Map<String, Object> step = new java.util.LinkedHashMap<>();
+            step.put("success", failCount == 0);
+            step.put("set", setCount);
+            step.put("failed", failCount);
+            if (!typeErrors.isEmpty()) {
+                step.put("errors", new java.util.ArrayList<>(typeErrors));
+                errors.addAll(typeErrors);
+            }
+            steps.put("variable_types", step);
+        }
+
+        // Step 5: Rename variables (optional)
+        Object varRenamesObj = params.get("variable_renames");
+        if (varRenamesObj instanceof Map && functionService != null) {
+            Map<String, String> varRenames = new java.util.LinkedHashMap<>();
+            for (Map.Entry<String, Object> e : ((Map<String, Object>) varRenamesObj).entrySet()) {
+                varRenames.put(e.getKey(), e.getValue().toString());
+            }
+            Response renameVarsResp = functionService.batchRenameVariables(address, varRenames, true);
+            boolean renameOk = renameVarsResp instanceof Response.Text t && t.content().contains("\"success\": true");
+            steps.put("variable_renames", Map.of("success", renameOk));
+            if (!renameOk && renameVarsResp instanceof Response.Err err) {
+                errors.add("variable_renames: " + err.message());
+            }
+        }
+
+        // Step 6: Set comments (optional)
+        String plateComment = JsonHelper.getString(params, "plate_comment");
+        java.util.List<Map<String, String>> decompComments = ServiceUtils.convertToMapList(params.get("decompiler_comments"));
+        java.util.List<Map<String, String>> disasmComments = ServiceUtils.convertToMapList(params.get("disassembly_comments"));
+        boolean hasComments = (plateComment != null && !plateComment.isEmpty()) ||
+            (decompComments != null && !decompComments.isEmpty()) ||
+            (disasmComments != null && !disasmComments.isEmpty());
+        if (hasComments && commentService != null) {
+            Response commentResp = commentService.batchSetComments(address, decompComments, disasmComments, plateComment);
+            boolean commentOk = commentResp instanceof Response.Text t && t.content().contains("\"success\": true");
+            steps.put("comments", Map.of("success", commentOk));
+            if (!commentOk && commentResp instanceof Response.Err err) {
+                errors.add("comments: " + err.message());
+            }
+        }
+
+        // Step 7: Completeness score (optional)
+        Object scoreParam = params.get("score");
+        boolean doScore = !(scoreParam instanceof Boolean) || (Boolean) scoreParam;
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("address", address);
+        result.put("steps", steps);
+        result.put("errors", errors);
+        if (doScore && analysisService != null) {
+            Response scoreResp = analysisService.analyzeFunctionCompleteness(address);
+            if (scoreResp instanceof Response.Text t) {
+                String scoreStr = t.content();
+                if (scoreStr != null && !scoreStr.isBlank() && scoreStr.startsWith("{")) {
+                    result.put("completeness", JsonHelper.parseMap(scoreStr));
+                }
+            }
+        }
+
+        return Response.text(JsonHelper.toJson(result));
+    }
+
+    /**
      * Apply parameter documentation from parsed JSON array (list of maps with ordinal, name, type).
      */
     @SuppressWarnings("unchecked")
@@ -748,134 +908,6 @@ public class DocumentationHashService {
         }
     }
 
-    /**
-     * Apply all documentation to a function in a single call.
-     * Orchestrates: rename -> prototype -> variable types -> variable renames -> comments -> completeness score.
-     */
-    @SuppressWarnings("unchecked")
-    public Response batchApplyDocumentation(String jsonBody) {
-        if (jsonBody == null || jsonBody.isBlank()) {
-            return Response.err("JSON body is required");
-        }
-        Map<String, Object> params = JsonHelper.parseMap(jsonBody);
-        String address = JsonHelper.getString(params, "address");
-        if (address != null) address = address.trim();
-        if (address == null || address.isEmpty()) {
-            return Response.err("address parameter is required");
-        }
-
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) {
-            return Response.err("No program loaded");
-        }
-
-        Map<String, Object> steps = new java.util.LinkedHashMap<>();
-        java.util.List<String> errors = new java.util.ArrayList<>();
-
-        // Step 1: Rename function (optional)
-        String name = JsonHelper.getString(params, "name");
-        if (name != null && !name.isEmpty() && functionService != null) {
-            Response renameResp = functionService.renameFunctionByAddress(address, name);
-            boolean renameOk = !(renameResp instanceof Response.Err);
-            Map<String, Object> step = new java.util.LinkedHashMap<>();
-            step.put("success", renameOk);
-            if (renameResp instanceof Response.Err e) {
-                step.put("error", e.message());
-                errors.add("rename: " + e.message());
-            }
-            steps.put("rename", step);
-        }
-
-        // Step 2: Set prototype (optional)
-        String prototype = JsonHelper.getString(params, "prototype");
-        if (prototype != null && !prototype.isEmpty() && functionService != null) {
-            String callingConvention = JsonHelper.getString(params, "calling_convention");
-            FunctionService.PrototypeResult protoResult = functionService.setFunctionPrototype(address, prototype, callingConvention);
-            Map<String, Object> step = new java.util.LinkedHashMap<>();
-            step.put("success", protoResult.isSuccess());
-            if (!protoResult.isSuccess()) {
-                step.put("error", protoResult.getErrorMessage());
-                errors.add("prototype: " + protoResult.getErrorMessage());
-            }
-            steps.put("prototype", step);
-        }
-
-        // Step 3: Set variable types (optional)
-        Object varTypesObj = params.get("variable_types");
-        if (varTypesObj instanceof Map && functionService != null) {
-            Map<String, Object> varTypes = (Map<String, Object>) varTypesObj;
-            int setCount = 0, failCount = 0;
-            java.util.List<String> typeErrors = new java.util.ArrayList<>();
-            for (Map.Entry<String, Object> entry : varTypes.entrySet()) {
-                Response typeResp = functionService.setLocalVariableType(address, entry.getKey(), entry.getValue().toString());
-                boolean ok = !(typeResp instanceof Response.Err);
-                if (ok) setCount++; else {
-                    failCount++;
-                    typeErrors.add(entry.getKey() + ": " + (typeResp instanceof Response.Err e ? e.message() : "failed"));
-                }
-            }
-            Map<String, Object> step = new java.util.LinkedHashMap<>();
-            step.put("success", failCount == 0);
-            step.put("set", setCount);
-            step.put("failed", failCount);
-            if (!typeErrors.isEmpty()) {
-                step.put("errors", new java.util.ArrayList<>(typeErrors));
-                errors.addAll(typeErrors);
-            }
-            steps.put("variable_types", step);
-        }
-
-        // Step 4: Rename variables (optional)
-        Object varRenamesObj = params.get("variable_renames");
-        if (varRenamesObj instanceof Map && functionService != null) {
-            Map<String, String> varRenames = new java.util.LinkedHashMap<>();
-            for (Map.Entry<String, Object> e : ((Map<String, Object>) varRenamesObj).entrySet()) {
-                varRenames.put(e.getKey(), e.getValue().toString());
-            }
-            Response renameVarsResp = functionService.batchRenameVariables(address, varRenames, true);
-            boolean renameOk = renameVarsResp instanceof Response.Text t && t.content().contains("\"success\": true");
-            steps.put("variable_renames", Map.of("success", renameOk));
-            if (!renameOk && renameVarsResp instanceof Response.Err err) {
-                errors.add("variable_renames: " + err.message());
-            }
-        }
-
-        // Step 5: Set comments (optional)
-        String plateComment = JsonHelper.getString(params, "plate_comment");
-        java.util.List<Map<String, String>> decompComments = ServiceUtils.convertToMapList(params.get("decompiler_comments"));
-        java.util.List<Map<String, String>> disasmComments = ServiceUtils.convertToMapList(params.get("disassembly_comments"));
-        boolean hasComments = (plateComment != null && !plateComment.isEmpty()) ||
-            (decompComments != null && !decompComments.isEmpty()) ||
-            (disasmComments != null && !disasmComments.isEmpty());
-        if (hasComments && commentService != null) {
-            Response commentResp = commentService.batchSetComments(address, decompComments, disasmComments, plateComment);
-            boolean commentOk = commentResp instanceof Response.Text t && t.content().contains("\"success\": true");
-            steps.put("comments", Map.of("success", commentOk));
-            if (!commentOk && commentResp instanceof Response.Err err) {
-                errors.add("comments: " + err.message());
-            }
-        }
-
-        // Step 6: Completeness score (optional)
-        Object scoreParam = params.get("score");
-        boolean doScore = !(scoreParam instanceof Boolean) || (Boolean) scoreParam;
-        Map<String, Object> result = new java.util.LinkedHashMap<>();
-        result.put("address", address);
-        result.put("steps", steps);
-        result.put("errors", errors);
-        if (doScore && analysisService != null) {
-            Response scoreResp = analysisService.analyzeFunctionCompleteness(address);
-            if (scoreResp instanceof Response.Text t) {
-                String scoreStr = t.content();
-                if (scoreStr != null && !scoreStr.isBlank() && scoreStr.startsWith("{")) {
-                    result.put("completeness", JsonHelper.parseMap(scoreStr));
-                }
-            }
-        }
-
-        return Response.text(JsonHelper.toJson(result));
-    }
-
     // -----------------------------------------------------------------------
     // Cross-Version Matching Tools
     // -----------------------------------------------------------------------
@@ -884,6 +916,8 @@ public class DocumentationHashService {
      * Compare documentation status across all open programs.
      * Returns documented/undocumented function counts for each program.
      */
+    @McpTool(value = "/compare_programs_documentation", description = "Compare documentation status across all open programs")
+
     public Response compareProgramsDocumentation() {
         StringBuilder result = new StringBuilder();
         result.append("{\"programs\": [");
@@ -941,7 +975,13 @@ public class DocumentationHashService {
      * Find undocumented (FUN_*) functions that reference a given string address.
      * This filters get_xrefs_to results to only return FUN_* functions.
      */
-    public Response findUndocumentedByString(String stringAddress, String programName) {
+    @McpTool(value = "/find_undocumented_by_string", description = "Find undocumented (FUN_*) functions that reference a given string address")
+
+    public Response findUndocumentedByString(
+
+            @Param(value = "address") String stringAddress,
+
+            @Param(value = "program", required = false) String programName) {
         if (stringAddress == null || stringAddress.isEmpty()) {
             return Response.err("String address is required");
         }
@@ -1021,7 +1061,13 @@ public class DocumentationHashService {
      * Generate a report of all strings matching a pattern (e.g., ".cpp") and their referencing FUN_* functions.
      * This helps identify undocumented functions that can be matched using string anchors.
      */
-    public Response batchStringAnchorReport(String pattern, String programName) {
+    @McpTool(value = "/batch_string_anchor_report", description = "Generate a report of source file strings and their undocumented functions")
+
+    public Response batchStringAnchorReport(
+
+            @Param(value = "pattern", required = false) String pattern,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) {
@@ -1135,7 +1181,13 @@ public class DocumentationHashService {
     /**
      * Get the function signature (feature vector) for a function at the given address.
      */
-    public Response handleGetFunctionSignature(String addressStr, String programName) {
+    @McpTool(value = "/get_function_signature", description = "Get a function's feature signature for fuzzy matching")
+
+    public Response handleGetFunctionSignature(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return Response.err((String) programResult[1]);
@@ -1158,8 +1210,19 @@ public class DocumentationHashService {
     /**
      * Find functions in target program similar to the source function.
      */
-    public Response handleFindSimilarFunctionsFuzzy(String addressStr, String sourceProgramName,
-            String targetProgramName, double threshold, int limit) {
+    @McpTool(value = "/find_similar_functions_fuzzy", description = "Find functions in a target binary that are similar to a given source function")
+
+    public Response handleFindSimilarFunctionsFuzzy(
+
+            @Param(value = "address") String addressStr,
+
+            @Param(value = "source_program") String sourceProgramName,
+
+            @Param(value = "targetProgramName") String targetProgramName,
+
+            @Param(value = "threshold", type = "number") double threshold,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit) {
         // Source program: use sourceProgramName if given, otherwise current program
         Object[] srcResult = getProgramOrError(sourceProgramName);
         Program srcProgram = (Program) srcResult[0];
@@ -1190,8 +1253,21 @@ public class DocumentationHashService {
     /**
      * Bulk fuzzy match: find best match for each source function in target program.
      */
-    public Response handleBulkFuzzyMatch(String sourceProgramName, String targetProgramName,
-            double threshold, int offset, int limit, String filter) {
+    @McpTool(value = "/bulk_fuzzy_match", description = "Find the best fuzzy match for each source function in a target binary")
+
+    public Response handleBulkFuzzyMatch(
+
+            @Param(value = "source_program") String sourceProgramName,
+
+            @Param(value = "target_program") String targetProgramName,
+
+            @Param(value = "threshold", type = "number") double threshold,
+
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+
+            @Param(value = "filter", required = false) String filter) {
         if (sourceProgramName == null || sourceProgramName.trim().isEmpty()) {
             return Response.err("source_program parameter is required");
         }
@@ -1217,7 +1293,17 @@ public class DocumentationHashService {
     /**
      * Compute a structured diff between two functions.
      */
-    public Response handleDiffFunctions(String addressA, String addressB, String programAName, String programBName) {
+    @McpTool(value = "/diff_functions", description = "Compute a structured diff between two functions")
+
+    public Response handleDiffFunctions(
+
+            @Param(value = "address_a") String addressA,
+
+            @Param(value = "address_b") String addressB,
+
+            @Param(value = "program_a") String programAName,
+
+            @Param(value = "program_b") String programBName) {
         // Program A
         Object[] resultA = getProgramOrError(programAName);
         Program progA = (Program) resultA[0];

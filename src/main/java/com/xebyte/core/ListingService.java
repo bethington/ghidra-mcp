@@ -55,7 +55,11 @@ public class ListingService {
     // Listing endpoints
     // ========================================================================
 
-    public Response getAllFunctionNames(int offset, int limit, String programName) {
+    @McpTool(value = "/list_methods", description = "List all function names in the program with pagination")
+    public Response getAllFunctionNames(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0", description = "Pagination offset") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100", description = "Maximum results to return") int limit,
+            @Param(value = "program", required = false, description = "Program name (uses active program if omitted)") String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -67,7 +71,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(names, offset, limit));
     }
 
-    public Response getAllClassNames(int offset, int limit, String programName) {
+    @McpTool(value = "/list_classes", description = "List all namespace/class names in the program with pagination")
+    public Response getAllClassNames(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -84,7 +92,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(sorted, offset, limit));
     }
 
-    public Response listSegments(int offset, int limit, String programName) {
+    @McpTool(value = "/list_segments", description = "List all memory segments in the program with pagination")
+    public Response listSegments(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -96,7 +108,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public Response listImports(int offset, int limit, String programName) {
+    @McpTool(value = "/list_imports", description = "List imported symbols in the program with pagination")
+    public Response listImports(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -108,7 +124,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public Response listExports(int offset, int limit, String programName) {
+    @McpTool(value = "/list_exports", description = "List exported functions/symbols with pagination")
+    public Response listExports(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -126,7 +146,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public Response listNamespaces(int offset, int limit, String programName) {
+    @McpTool(value = "/list_namespaces", description = "List all non-global namespaces in the program with pagination")
+    public Response listNamespaces(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -143,7 +167,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(sorted, offset, limit));
     }
 
-    public Response listDefinedData(int offset, int limit, String programName) {
+    @McpTool(value = "/list_data_items", description = "List defined data labels and their values with pagination")
+    public Response listDefinedData(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -174,7 +202,12 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public Response listDataItemsByXrefs(int offset, int limit, String format, String programName) {
+    @McpTool(value = "/list_data_items_by_xrefs", description = "List defined data items sorted by cross-reference count")
+    public Response listDataItemsByXrefs(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "format", required = false, description = "Output format: text or json") String format,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -211,7 +244,12 @@ public class ListingService {
         }
     }
 
-    public Response searchFunctionsByName(String searchTerm, int offset, int limit, String programName) {
+    @McpTool(value = "/search_functions", description = "Search for functions whose name contains the given substring")
+    public Response searchFunctionsByName(
+            @Param(value = "query", description = "Search term to match against function names") String searchTerm,
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "program", required = false) String programName) {
         Object[] result = getProgramOrError(programName);
         Program program = (Program) result[0];
         if (program == null) return (Response) result[1];
@@ -233,7 +271,9 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(matches, offset, limit));
     }
 
-    public Response listFunctions(String programName) {
+    @McpTool(value = "/list_functions", description = "List all functions with their addresses")
+    public Response listFunctions(
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -248,7 +288,11 @@ public class ListingService {
         return Response.text(result.toString());
     }
 
-    public Response listFunctionsEnhanced(int offset, int limit, String programName) {
+    @McpTool(value = "/list_functions_enhanced", description = "List functions with enhanced metadata including thunk and external info")
+    public Response listFunctionsEnhanced(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "10000") int limit,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -288,7 +332,9 @@ public class ListingService {
         return Response.text(result.toString());
     }
 
-    public Response listCallingConventions(String programName) {
+    @McpTool(value = "/list_calling_conventions", description = "List all available calling conventions for the program")
+    public Response listCallingConventions(
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -310,7 +356,12 @@ public class ListingService {
         }
     }
 
-    public Response listDefinedStrings(int offset, int limit, String filter, String programName) {
+    @McpTool(value = "/list_strings", description = "List all defined strings in the program with optional filter")
+    public Response listDefinedStrings(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "filter", required = false, description = "Substring filter for string content") String filter,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -342,7 +393,9 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public Response getFunctionCount(String programName) {
+    @McpTool(value = "/get_function_count", description = "Return the total number of functions in the loaded program")
+    public Response getFunctionCount(
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -350,7 +403,14 @@ public class ListingService {
         return Response.ok(Map.of("function_count", count, "program", program.getName()));
     }
 
-    public Response searchStrings(String query, int minLength, String encoding, int offset, int limit, String programName) {
+    @McpTool(value = "/search_strings", description = "Search for string patterns in program memory using regex")
+    public Response searchStrings(
+            @Param(value = "query", description = "Regex pattern to search for") String query,
+            @Param(value = "min_length", type = "integer", required = false, defaultValue = "4", description = "Minimum string length") int minLength,
+            @Param(value = "encoding", required = false, description = "String encoding filter") String encoding,
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -392,7 +452,12 @@ public class ListingService {
         ));
     }
 
-    public Response listGlobals(int offset, int limit, String filter, String programName) {
+    @McpTool(value = "/list_globals", description = "List matching globals in the database (paginated, filtered)")
+    public Response listGlobals(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "filter", required = false, description = "Substring filter for global names") String filter,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -421,7 +486,9 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(globals, offset, limit));
     }
 
-    public Response getEntryPoints(String programName) {
+    @McpTool(value = "/get_entry_points", description = "Get all entry points in the program")
+    public Response getEntryPoints(
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -618,7 +685,11 @@ public class ListingService {
      * List all external locations (imports, ordinal imports, etc.)
      * Returns detailed information including library name and label.
      */
-    public Response listExternalLocations(int offset, int limit, String programName) {
+    @McpTool(value = "/list_external_locations", description = "List all external locations (imports, ordinal imports, external functions)")
+    public Response listExternalLocations(
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
@@ -657,7 +728,11 @@ public class ListingService {
     /**
      * Get details of a specific external location by address and optional DLL name.
      */
-    public Response getExternalLocationDetails(String address, String dllName, String programName) {
+    @McpTool(value = "/get_external_location", description = "Get details of a specific external location by address")
+    public Response getExternalLocationDetails(
+            @Param(value = "address", description = "Address of the external location") String address,
+            @Param(value = "dll_name", required = false, description = "DLL/library name to search in") String dllName,
+            @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];

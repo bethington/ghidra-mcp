@@ -151,6 +151,13 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         Msg.info(this, "Endpoints: " + VersionInfo.getEndpointCount());
         Msg.info(this, "============================================");
 
+        // Register with ServerManager for UDS transport (shared across all CodeBrowser windows)
+        try {
+            com.xebyte.core.ServerManager.getInstance().registerTool(tool);
+        } catch (IOException e) {
+            Msg.warn(this, "Failed to start UDS server: " + e.getMessage());
+        }
+
         if (GhidraMCPAuthInitializer.isRegistered()) {
             this.authenticator = GhidraMCPAuthInitializer.getAuthenticator();
             Msg.info(this, "GhidraMCP: Server authenticator was registered at startup");
@@ -314,16 +321,22 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }
 
         // ======================================================================
-        // Register all shared endpoints via EndpointRegistrar
+        // Register all annotated endpoints via AnnotationScanner
         // ======================================================================
         EndpointRegistrar.ContextRegistrar registrar = (path, handler) ->
             server.createContext(path, sunExchange -> handler.accept(new SunHttpExchangeAdapter(sunExchange)));
 
-        EndpointRegistrar.registerAll(registrar,
-            EndpointRegistrar.sharedEndpoints(
+        List<AnnotationScanner.ToolDef> toolDefs = AnnotationScanner.scan(
                 listingService, commentService, symbolLabelService, functionService,
                 xrefCallGraphService, dataTypeService, documentationHashService,
-                analysisService, malwareSecurityService, programScriptService));
+                analysisService, malwareSecurityService, programScriptService);
+        AnnotationScanner.registerHttp(registrar, toolDefs);
+
+        // Serve MCP tool schema
+        String schemaJson = AnnotationScanner.toSchemaJson(toolDefs);
+        registrar.createContext("/mcp/schema", EndpointRegistrar.safeHandler(exchange -> {
+            EndpointRegistrar.sendResponse(exchange, Response.text(schemaJson));
+        }));
 
         // ======================================================================
         // GUI-specific utility endpoints
@@ -1306,6 +1319,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
     @Override
     public void dispose() {
+        // Deregister from ServerManager (UDS transport)
+        com.xebyte.core.ServerManager.getInstance().deregisterTool(tool);
+
         instanceCount--;
         if (instanceCount <= 0) {
             stopServer();
