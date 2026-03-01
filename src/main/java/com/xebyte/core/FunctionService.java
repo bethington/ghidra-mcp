@@ -110,9 +110,10 @@ public class FunctionService {
     /**
      * Decompile a function by its name.
      */
-    public String decompileFunctionByName(String name) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String decompileFunctionByName(String name, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         DecompInterface decomp = new DecompInterface();
         decomp.openProgram(program);
         for (Function func : program.getFunctionManager().getFunctions(true)) {
@@ -127,6 +128,10 @@ public class FunctionService {
             }
         }
         return "Function not found";
+    }
+
+    public String decompileFunctionByName(String name) {
+        return decompileFunctionByName(name, null);
     }
 
     /**
@@ -256,10 +261,11 @@ public class FunctionService {
     /**
      * Batch decompile multiple functions by name.
      */
-    public String batchDecompileFunctions(String functionsParam) {
-        Program program = programProvider.getCurrentProgram();
+    public String batchDecompileFunctions(String functionsParam, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (functionsParam == null || functionsParam.trim().isEmpty()) {
@@ -325,13 +331,18 @@ public class FunctionService {
         }
     }
 
+    public String batchDecompileFunctions(String functionsParam) {
+        return batchDecompileFunctions(functionsParam, null);
+    }
+
     /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
-    public String forceDecompile(String functionAddrStr) {
-        Program program = programProvider.getCurrentProgram();
+    public String forceDecompile(String functionAddrStr, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
@@ -413,6 +424,10 @@ public class FunctionService {
         }
 
         return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+    }
+
+    public String forceDecompile(String functionAddrStr) {
+        return forceDecompile(functionAddrStr, null);
     }
 
     // ========================================================================
@@ -514,10 +529,11 @@ public class FunctionService {
     /**
      * Rename a function by its name.
      */
-    public String renameFunction(String oldName, String newName) {
-        Program program = programProvider.getCurrentProgram();
+    public String renameFunction(String oldName, String newName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (oldName == null || oldName.isEmpty()) {
@@ -568,12 +584,17 @@ public class FunctionService {
         return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
+    public String renameFunction(String oldName, String newName) {
+        return renameFunction(oldName, newName, null);
+    }
+
     /**
      * Rename a variable in a function.
      */
-    public String renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String renameVariableInFunction(String functionName, String oldVarName, String newVarName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         DecompInterface decomp = new DecompInterface();
         decomp.openProgram(program);
@@ -653,6 +674,10 @@ public class FunctionService {
         return successFlag.get() ? "Variable renamed" : "Failed to rename variable";
     }
 
+    public String renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
+        return renameVariableInFunction(functionName, oldVarName, newVarName, null);
+    }
+
     /**
      * Copied from AbstractDecompilerAction.checkFullCommit, it's protected.
      * Compare the given HighFunction's idea of the prototype with the Function's idea.
@@ -692,10 +717,11 @@ public class FunctionService {
     /**
      * Rename a function by its address.
      */
-    public String renameFunctionByAddress(String functionAddrStr, String newName) {
-        Program program = programProvider.getCurrentProgram();
+    public String renameFunctionByAddress(String functionAddrStr, String newName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
@@ -738,6 +764,10 @@ public class FunctionService {
         return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
+    public String renameFunctionByAddress(String functionAddrStr, String newName) {
+        return renameFunctionByAddress(functionAddrStr, newName, null);
+    }
+
     // ========================================================================
     // Prototype / Signature methods
     // ========================================================================
@@ -746,16 +776,24 @@ public class FunctionService {
      * Set a function's prototype with proper error handling using ApplyFunctionSignatureCmd.
      */
     public PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype) {
-        return setFunctionPrototype(functionAddrStr, prototype, null);
+        return setFunctionPrototype(functionAddrStr, prototype, null, null);
     }
 
     /**
-     * Set a function's prototype with calling convention support.
+     * Set a function's prototype with calling convention support (backward compatible).
      */
     public PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype, String callingConvention) {
+        return setFunctionPrototype(functionAddrStr, prototype, callingConvention, null);
+    }
+
+    /**
+     * Set a function's prototype with calling convention and program name support.
+     */
+    public PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype, String callingConvention, String programName) {
         // Input validation
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return new PrototypeResult(false, "No program loaded");
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return new PrototypeResult(false, (String) programResult[1]);
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
             return new PrototypeResult(false, "Function address is required");
         }
@@ -989,11 +1027,12 @@ public class FunctionService {
     /**
      * Set a local variable's type using HighFunctionDBUtil.updateDBVariable.
      */
-    public String setLocalVariableType(String functionAddrStr, String variableName, String newType) {
+    public String setLocalVariableType(String functionAddrStr, String variableName, String newType, String programName) {
         // Input validation
-        Program program = programProvider.getCurrentProgram();
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
@@ -1142,6 +1181,10 @@ public class FunctionService {
         return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
+    public String setLocalVariableType(String functionAddrStr, String variableName, String newType) {
+        return setLocalVariableType(functionAddrStr, variableName, newType, null);
+    }
+
     /**
      * Find a high symbol by name in the given high function.
      */
@@ -1255,11 +1298,12 @@ public class FunctionService {
      * @param noReturn true to mark as non-returning, false to mark as returning
      * @return Success or error message
      */
-    public String setFunctionNoReturn(String functionAddrStr, boolean noReturn) {
+    public String setFunctionNoReturn(String functionAddrStr, boolean noReturn, String programName) {
         // Input validation
-        Program program = programProvider.getCurrentProgram();
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
@@ -1307,6 +1351,10 @@ public class FunctionService {
         return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
+    public String setFunctionNoReturn(String functionAddrStr, boolean noReturn) {
+        return setFunctionNoReturn(functionAddrStr, noReturn, null);
+    }
+
     /**
      * Clear instruction-level flow override at a specific address.
      *
@@ -1325,11 +1373,12 @@ public class FunctionService {
      * @param instructionAddrStr The instruction address in hex format (e.g., "0x6fb5c8b9")
      * @return Success or error message
      */
-    public String clearInstructionFlowOverride(String instructionAddrStr) {
+    public String clearInstructionFlowOverride(String instructionAddrStr, String programName) {
         // Input validation
-        Program program = programProvider.getCurrentProgram();
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (instructionAddrStr == null || instructionAddrStr.isEmpty()) {
@@ -1380,6 +1429,10 @@ public class FunctionService {
         return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
+    public String clearInstructionFlowOverride(String instructionAddrStr) {
+        return clearInstructionFlowOverride(instructionAddrStr, null);
+    }
+
     /**
      * Set custom storage for a local variable or parameter (v1.7.0).
      *
@@ -1391,10 +1444,11 @@ public class FunctionService {
      * @param storageSpec Storage specification (e.g., "Stack[-0x10]:4", "EBP:4", "EAX:4")
      * @return Success or error message
      */
-    public String setVariableStorage(String functionAddrStr, String variableName, String storageSpec) {
-        Program program = programProvider.getCurrentProgram();
+    public String setVariableStorage(String functionAddrStr, String variableName, String storageSpec, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
@@ -1471,6 +1525,10 @@ public class FunctionService {
         return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
+    public String setVariableStorage(String functionAddrStr, String variableName, String storageSpec) {
+        return setVariableStorage(functionAddrStr, variableName, storageSpec, null);
+    }
+
     // ========================================================================
     // Function variables query
     // ========================================================================
@@ -1510,34 +1568,37 @@ public class FunctionService {
                         return null;
                     }
 
-                    // FIX: Force decompiler cache refresh to get current variable states after type changes
-                    // This ensures get_function_variables returns fresh data matching actual decompilation
-                    try {
-                        DecompInterface tempDecomp = new DecompInterface();
-                        tempDecomp.openProgram(finalProgram);
-                        tempDecomp.flushCache();
-                        tempDecomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                        tempDecomp.dispose();
-                    } catch (Exception e) {
-                        Msg.warn(this, "Failed to refresh decompiler cache for getFunctionVariables: " + e.getMessage());
-                        // Continue anyway - better to return potentially stale data than fail completely
-                    }
+                    // Use shared decompileFunction (uses existing cache, no forced flush)
+                    // The old forced cache flush + re-decompile added 5-30s latency per call.
+                    // Fresh data is ensured by decompileFunction's internal caching.
+                    DecompileResults decompResults = decompileFunction(func, finalProgram);
 
                     result.append("{");
                     result.append("\"function_name\": \"").append(func.getName()).append("\", ");
                     result.append("\"function_address\": \"").append(func.getEntryPoint().toString()).append("\", ");
 
-                    // Get parameters
+                    // Get parameters with pre-analysis hints
                     result.append("\"parameters\": [");
                     Parameter[] params = func.getParameters();
                     for (int i = 0; i < params.length; i++) {
                         if (i > 0) result.append(", ");
                         Parameter param = params[i];
+                        String pTypeName = param.getDataType().getName();
+                        boolean pNeedsType = pTypeName.startsWith("undefined");
+                        boolean pNeedsRename = param.getName().startsWith("param_");
                         result.append("{");
                         result.append("\"name\": \"").append(param.getName()).append("\", ");
-                        result.append("\"type\": \"").append(param.getDataType().getName()).append("\", ");
+                        result.append("\"type\": \"").append(pTypeName).append("\", ");
                         result.append("\"ordinal\": ").append(param.getOrdinal()).append(", ");
-                        result.append("\"storage\": \"").append(param.getVariableStorage().toString()).append("\"");
+                        result.append("\"storage\": \"").append(param.getVariableStorage().toString()).append("\", ");
+                        result.append("\"needs_type\": ").append(pNeedsType).append(", ");
+                        result.append("\"needs_rename\": ").append(pNeedsRename);
+                        if (pNeedsType) {
+                            result.append(", \"suggested_type\": \"").append(suggestType(pTypeName)).append("\"");
+                        }
+                        if (!pNeedsType) {
+                            result.append(", \"suggested_prefix\": \"").append(suggestHungarianPrefix(pTypeName)).append("\"");
+                        }
                         result.append("}");
                     }
                     result.append("], ");
@@ -1546,8 +1607,7 @@ public class FunctionService {
                     result.append("\"locals\": [");
                     Variable[] locals = func.getLocalVariables();
 
-                    // Decompile to get HighFunction for phantom detection
-                    DecompileResults decompResults = decompileFunction(func, finalProgram);
+                    // Use existing decompilation results for phantom detection (no second decompile)
                     java.util.Set<String> decompVarNames = new java.util.HashSet<>();
                     if (decompResults != null && decompResults.decompileCompleted()) {
                         ghidra.program.model.pcode.HighFunction highFunc = decompResults.getHighFunction();
@@ -1564,13 +1624,24 @@ public class FunctionService {
                         if (i > 0) result.append(", ");
                         Variable local = locals[i];
                         boolean isPhantom = !decompVarNames.contains(local.getName());
+                        String lTypeName = local.getDataType().getName();
+                        boolean lNeedsType = lTypeName.startsWith("undefined");
+                        boolean lNeedsRename = local.getName().startsWith("local_") ||
+                            local.getName().matches(".*Var\\d+");
 
                         result.append("{");
                         result.append("\"name\": \"").append(local.getName()).append("\", ");
-                        result.append("\"type\": \"").append(local.getDataType().getName()).append("\", ");
+                        result.append("\"type\": \"").append(lTypeName).append("\", ");
                         result.append("\"storage\": \"").append(local.getVariableStorage().toString()).append("\", ");
                         result.append("\"is_phantom\": ").append(isPhantom).append(", ");
-                        result.append("\"in_decompiled_code\": ").append(!isPhantom);
+                        result.append("\"needs_type\": ").append(lNeedsType && !isPhantom).append(", ");
+                        result.append("\"needs_rename\": ").append(lNeedsRename && !isPhantom);
+                        if (lNeedsType && !isPhantom) {
+                            result.append(", \"suggested_type\": \"").append(suggestType(lTypeName)).append("\"");
+                        }
+                        if (!lNeedsType && !isPhantom) {
+                            result.append(", \"suggested_prefix\": \"").append(suggestHungarianPrefix(lTypeName)).append("\"");
+                        }
                         result.append("}");
                     }
                     result.append("]");
@@ -1598,6 +1669,52 @@ public class FunctionService {
         return getFunctionVariables(functionName, null);
     }
 
+    /** Suggest a concrete type for an undefined Ghidra type based on size. */
+    static String suggestType(String typeName) {
+        if ("undefined1".equals(typeName)) return "byte";
+        if ("undefined2".equals(typeName)) return "ushort";
+        if ("undefined4".equals(typeName)) return "uint";
+        if ("undefined8".equals(typeName)) return "ulonglong";
+        return "uint"; // fallback for other undefined variants
+    }
+
+    /** Suggest a Hungarian notation prefix for a resolved type. */
+    static String suggestHungarianPrefix(String typeName) {
+        if (typeName == null) return "";
+        String base = typeName.replace("*", "").replace("[]", "").trim();
+        // Pointer types
+        if (typeName.contains("*")) {
+            if ("char".equals(base)) return "sz";
+            if ("wchar_t".equals(base)) return "wsz";
+            if ("void".equals(base)) return "p";
+            return "p"; // generic pointer
+        }
+        // Array types
+        if (typeName.contains("[")) {
+            if ("byte".equals(base) || "undefined1".equals(base)) return "ab";
+            if ("ushort".equals(base)) return "aw";
+            if ("uint".equals(base)) return "ad";
+            return "a";
+        }
+        // Scalar types
+        switch (base) {
+            case "byte": case "uchar": return "b";
+            case "char": return "c";
+            case "bool": case "BOOL": return "f";
+            case "short": case "int16_t": return "n";
+            case "ushort": case "uint16_t": case "WORD": case "wchar_t": return "w";
+            case "int": case "int32_t": case "long": return "n";
+            case "uint": case "uint32_t": case "ulong": case "DWORD": case "dword": return "dw";
+            case "longlong": case "int64_t": return "ll";
+            case "ulonglong": case "uint64_t": case "QWORD": return "qw";
+            case "float": return "fl";
+            case "double": return "d";
+            case "void": return "";
+            case "HANDLE": return "h";
+            default: return "";
+        }
+    }
+
     // ========================================================================
     // Batch operations
     // ========================================================================
@@ -1609,10 +1726,11 @@ public class FunctionService {
     public String batchRenameFunctionComponents(String functionAddress, String functionName,
                                                 Map<String, String> parameterRenames,
                                                 Map<String, String> localRenames,
-                                                String returnType) {
-        Program program = programProvider.getCurrentProgram();
+                                                String returnType, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         final StringBuilder result = new StringBuilder();
@@ -1691,6 +1809,13 @@ public class FunctionService {
         return result.toString();
     }
 
+    public String batchRenameFunctionComponents(String functionAddress, String functionName,
+                                                Map<String, String> parameterRenames,
+                                                Map<String, String> localRenames,
+                                                String returnType) {
+        return batchRenameFunctionComponents(functionAddress, functionName, parameterRenames, localRenames, returnType, null);
+    }
+
     // ========================================================================
     // Function creation / deletion
     // ========================================================================
@@ -1698,10 +1823,11 @@ public class FunctionService {
     /**
      * Delete a function at the given address.
      */
-    public String deleteFunctionAtAddress(String addressStr) {
-        Program program = programProvider.getCurrentProgram();
+    public String deleteFunctionAtAddress(String addressStr, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
         if (addressStr == null || addressStr.isEmpty()) {
             return "{\"error\": \"address parameter required\"}";
@@ -1750,13 +1876,18 @@ public class FunctionService {
         return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
     }
 
+    public String deleteFunctionAtAddress(String addressStr) {
+        return deleteFunctionAtAddress(addressStr, null);
+    }
+
     /**
      * Create a function at the given address.
      */
-    public String createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
-        Program program = programProvider.getCurrentProgram();
+    public String createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         if (addressStr == null || addressStr.isEmpty()) {
@@ -1836,6 +1967,10 @@ public class FunctionService {
         return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
     }
 
+    public String createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
+        return createFunctionAtAddress(addressStr, name, disassembleFirst, null);
+    }
+
     // ========================================================================
     // Disassembly
     // ========================================================================
@@ -1851,10 +1986,11 @@ public class FunctionService {
      * @return JSON result with disassembly status
      */
     public String disassembleBytes(String startAddress, String endAddress, Integer length,
-                                   boolean restrictToExecuteMemory) {
-        Program program = programProvider.getCurrentProgram();
+                                   boolean restrictToExecuteMemory, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         if (startAddress == null || startAddress.isEmpty()) {
@@ -2000,6 +2136,11 @@ public class FunctionService {
         return response;
     }
 
+    public String disassembleBytes(String startAddress, String endAddress, Integer length,
+                                   boolean restrictToExecuteMemory) {
+        return disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory, null);
+    }
+
     // ========================================================================
     // Batch Variable Rename
     // ========================================================================
@@ -2013,10 +2154,11 @@ public class FunctionService {
      * @param forceIndividual If true, skip batch mode and use individual renames
      * @return JSON result with rename status
      */
-    public String batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual) {
-        Program program = programProvider.getCurrentProgram();
+    public String batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         final StringBuilder result = new StringBuilder();
@@ -2210,14 +2352,19 @@ public class FunctionService {
         return result.toString();
     }
 
+    public String batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual) {
+        return batchRenameVariables(functionAddress, variableRenames, forceIndividual, null);
+    }
+
     /**
      * Individual variable renaming using HighFunctionDBUtil (fallback method).
      * This method uses decompilation but is more reliable for persistence.
      */
-    public String batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames) {
-        Program program = programProvider.getCurrentProgram();
+    public String batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "\"error\": \"No program loaded\"";
+            return (String) programResult[1];
         }
 
         final StringBuilder result = new StringBuilder();
@@ -2280,13 +2427,18 @@ public class FunctionService {
         return result.toString();
     }
 
+    public String batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames) {
+        return batchRenameVariablesIndividual(functionAddress, variableRenames, null);
+    }
+
     /**
      * Validate that batch operations actually persisted by checking current state.
      */
-    public String validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes) {
-        Program program = programProvider.getCurrentProgram();
+    public String validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         final StringBuilder result = new StringBuilder();
@@ -2392,5 +2544,9 @@ public class FunctionService {
 
         result.append("}");
         return result.toString();
+    }
+
+    public String validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes) {
+        return validateBatchOperationResults(functionAddress, expectedRenames, expectedTypes, null);
     }
 }

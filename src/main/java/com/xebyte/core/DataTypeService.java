@@ -236,9 +236,10 @@ public class DataTypeService {
     /**
      * Search for data types by pattern
      */
-    public String searchDataTypes(String pattern, int offset, int limit) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String searchDataTypes(String pattern, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (pattern == null || pattern.isEmpty()) return "Search pattern is required";
 
         List<String> matches = new ArrayList<>();
@@ -261,12 +262,18 @@ public class DataTypeService {
         return ServiceUtils.paginateList(matches, offset, limit);
     }
 
+    // Backward compatibility overload
+    public String searchDataTypes(String pattern, int offset, int limit) {
+        return searchDataTypes(pattern, offset, limit, null);
+    }
+
     /**
      * Get the size of a data type
      */
-    public String getTypeSize(String typeName) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String getTypeSize(String typeName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (typeName == null || typeName.isEmpty()) return "Type name is required";
 
         DataTypeManager dtm = program.getDataTypeManager();
@@ -284,12 +291,18 @@ public class DataTypeService {
                             dataType.getPathName());
     }
 
+    // Backward compatibility overload
+    public String getTypeSize(String typeName) {
+        return getTypeSize(typeName, null);
+    }
+
     /**
      * Get the layout of a structure
      */
-    public String getStructLayout(String structName) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String getStructLayout(String structName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (structName == null || structName.isEmpty()) return "Struct name is required";
 
         DataTypeManager dtm = program.getDataTypeManager();
@@ -324,12 +337,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String getStructLayout(String structName) {
+        return getStructLayout(structName, null);
+    }
+
     /**
      * Get all values in an enumeration
      */
-    public String getEnumValues(String enumName) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String getEnumValues(String enumName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (enumName == null || enumName.isEmpty()) return "Enum name is required";
 
         DataTypeManager dtm = program.getDataTypeManager();
@@ -361,13 +380,19 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String getEnumValues(String enumName) {
+        return getEnumValues(enumName, null);
+    }
+
     /**
      * v1.5.0: Get valid Ghidra data type strings
      */
-    public String getValidDataTypes(String category) {
-        Program program = programProvider.getCurrentProgram();
+    public String getValidDataTypes(String category, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         final StringBuilder result = new StringBuilder();
@@ -426,13 +451,19 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String getValidDataTypes(String category) {
+        return getValidDataTypes(category, null);
+    }
+
     /**
      * NEW v1.6.0: Check if data type exists in type manager
      */
-    public String validateDataTypeExists(String typeName) {
-        Program program = programProvider.getCurrentProgram();
+    public String validateDataTypeExists(String typeName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         final StringBuilder result = new StringBuilder();
@@ -465,6 +496,11 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String validateDataTypeExists(String typeName) {
+        return validateDataTypeExists(typeName, null);
+    }
+
     // -----------------------------------------------------------------------
     // Data Type Creation Methods
     // -----------------------------------------------------------------------
@@ -473,10 +509,11 @@ public class DataTypeService {
      * Create a new structure data type with specified fields
      */
     @SuppressWarnings("deprecation")
-    public String createStruct(String name, String fieldsJson) {
-        Program program = programProvider.getCurrentProgram();
+    public String createStruct(String name, String fieldsJson, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "No program loaded";
+            return (String) programResult[1];
         }
 
         if (name == null || name.isEmpty()) {
@@ -590,13 +627,19 @@ public class DataTypeService {
         return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
     }
 
+    // Backward compatibility overload
+    public String createStruct(String name, String fieldsJson) {
+        return createStruct(name, fieldsJson, null);
+    }
+
     /**
      * Create a new enumeration data type with name-value pairs
      */
-    public String createEnum(String name, String valuesJson, int size) {
-        Program program = programProvider.getCurrentProgram();
+    public String createEnum(String name, String valuesJson, int size, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "No program loaded";
+            return (String) programResult[1];
         }
 
         if (name == null || name.isEmpty()) {
@@ -655,6 +698,11 @@ public class DataTypeService {
         }
     }
 
+    // Backward compatibility overload
+    public String createEnum(String name, String valuesJson, int size) {
+        return createEnum(name, valuesJson, size, null);
+    }
+
     /**
      * Create a union data type with simplified approach for testing
      */
@@ -670,9 +718,10 @@ public class DataTypeService {
      * Create a union data type directly from fields object
      */
     @SuppressWarnings("unchecked")
-    public String createUnionDirect(String name, Object fieldsObj) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String createUnionDirect(String name, Object fieldsObj, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (name == null || name.isEmpty()) return "Union name is required";
         if (fieldsObj == null) return "Fields are required";
 
@@ -729,12 +778,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String createUnionDirect(String name, Object fieldsObj) {
+        return createUnionDirect(name, fieldsObj, null);
+    }
+
     /**
      * Create a union data type (legacy method)
      */
-    public String createUnion(String name, String fieldsJson) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String createUnion(String name, String fieldsJson, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (name == null || name.isEmpty()) return "Union name is required";
         if (fieldsJson == null || fieldsJson.isEmpty()) return "Fields JSON is required";
 
@@ -783,12 +838,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String createUnion(String name, String fieldsJson) {
+        return createUnion(name, fieldsJson, null);
+    }
+
     /**
      * Create a typedef (type alias)
      */
-    public String createTypedef(String name, String baseType) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String createTypedef(String name, String baseType, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (name == null || name.isEmpty()) return "Typedef name is required";
         if (baseType == null || baseType.isEmpty()) return "Base type is required";
 
@@ -840,12 +901,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String createTypedef(String name, String baseType) {
+        return createTypedef(name, baseType, null);
+    }
+
     /**
      * Clone/copy a data type with a new name
      */
-    public String cloneDataType(String sourceType, String newName) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String cloneDataType(String sourceType, String newName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (sourceType == null || sourceType.isEmpty()) return "Source type is required";
         if (newName == null || newName.isEmpty()) return "New name is required";
 
@@ -883,12 +950,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String cloneDataType(String sourceType, String newName) {
+        return cloneDataType(sourceType, newName, null);
+    }
+
     /**
      * Create an array data type
      */
-    public String createArrayType(String baseType, int length, String name) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String createArrayType(String baseType, int length, String name, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (baseType == null || baseType.isEmpty()) return "Base type is required";
         if (length <= 0) return "Array length must be positive";
 
@@ -932,12 +1005,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String createArrayType(String baseType, int length, String name) {
+        return createArrayType(baseType, length, name, null);
+    }
+
     /**
      * Create a pointer data type
      */
-    public String createPointerType(String baseType, String name) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String createPointerType(String baseType, String name, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (baseType == null || baseType.isEmpty()) return "Base type is required";
 
         AtomicBoolean success = new AtomicBoolean(false);
@@ -989,12 +1068,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String createPointerType(String baseType, String name) {
+        return createPointerType(baseType, name, null);
+    }
+
     /**
      * Create a function signature data type
      */
-    public String createFunctionSignature(String name, String returnType, String parametersJson) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String createFunctionSignature(String name, String returnType, String parametersJson, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (name == null || name.isEmpty()) return "Function name is required";
         if (returnType == null || returnType.isEmpty()) return "Return type is required";
 
@@ -1064,6 +1149,11 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String createFunctionSignature(String name, String returnType, String parametersJson) {
+        return createFunctionSignature(name, returnType, parametersJson, null);
+    }
+
     // -----------------------------------------------------------------------
     // Data Type Modification Methods
     // -----------------------------------------------------------------------
@@ -1071,10 +1161,11 @@ public class DataTypeService {
     /**
      * Apply a specific data type at the given memory address
      */
-    public String applyDataType(String addressStr, String typeName, boolean clearExisting) {
-        Program program = programProvider.getCurrentProgram();
+    public String applyDataType(String addressStr, String typeName, boolean clearExisting, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "No program loaded";
+            return (String) programResult[1];
         }
 
         if (addressStr == null || addressStr.isEmpty()) {
@@ -1152,12 +1243,18 @@ public class DataTypeService {
         }
     }
 
+    // Backward compatibility overload
+    public String applyDataType(String addressStr, String typeName, boolean clearExisting) {
+        return applyDataType(addressStr, typeName, clearExisting, null);
+    }
+
     /**
      * Delete a data type from the program
      */
-    public String deleteDataType(String typeName) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String deleteDataType(String typeName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (typeName == null || typeName.isEmpty()) return "Type name is required";
 
         AtomicBoolean success = new AtomicBoolean(false);
@@ -1199,12 +1296,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String deleteDataType(String typeName) {
+        return deleteDataType(typeName, null);
+    }
+
     /**
      * Modify a field in an existing structure
      */
-    public String modifyStructField(String structName, String fieldName, String newType, String newName) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String modifyStructField(String structName, String fieldName, String newType, String newName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (structName == null || structName.isEmpty()) return "Structure name is required";
         if (fieldName == null || fieldName.isEmpty()) return "Field name is required";
 
@@ -1277,12 +1380,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String modifyStructField(String structName, String fieldName, String newType, String newName) {
+        return modifyStructField(structName, fieldName, newType, newName, null);
+    }
+
     /**
      * Add a new field to an existing structure
      */
-    public String addStructField(String structName, String fieldName, String fieldType, int offset) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String addStructField(String structName, String fieldName, String fieldType, int offset, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (structName == null || structName.isEmpty()) return "Structure name is required";
         if (fieldName == null || fieldName.isEmpty()) return "Field name is required";
         if (fieldType == null || fieldType.isEmpty()) return "Field type is required";
@@ -1338,12 +1447,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String addStructField(String structName, String fieldName, String fieldType, int offset) {
+        return addStructField(structName, fieldName, fieldType, offset, null);
+    }
+
     /**
      * Remove a field from an existing structure
      */
-    public String removeStructField(String structName, String fieldName) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String removeStructField(String structName, String fieldName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (structName == null || structName.isEmpty()) return "Structure name is required";
         if (fieldName == null || fieldName.isEmpty()) return "Field name is required";
 
@@ -1401,12 +1516,18 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String removeStructField(String structName, String fieldName) {
+        return removeStructField(structName, fieldName, null);
+    }
+
     /**
      * Move a data type to a different category
      */
-    public String moveDataTypeToCategory(String typeName, String categoryPath) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String moveDataTypeToCategory(String typeName, String categoryPath, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (typeName == null || typeName.isEmpty()) return "Type name is required";
         if (categoryPath == null || categoryPath.isEmpty()) return "Category path is required";
 
@@ -1448,6 +1569,11 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String moveDataTypeToCategory(String typeName, String categoryPath) {
+        return moveDataTypeToCategory(typeName, categoryPath, null);
+    }
+
     // -----------------------------------------------------------------------
     // Data Type Validation Methods
     // -----------------------------------------------------------------------
@@ -1455,9 +1581,10 @@ public class DataTypeService {
     /**
      * Validate if a data type fits at a given address
      */
-    public String validateDataType(String addressStr, String typeName) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String validateDataType(String addressStr, String typeName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (addressStr == null || addressStr.isEmpty()) return "Address is required";
         if (typeName == null || typeName.isEmpty()) return "Type name is required";
 
@@ -1509,13 +1636,19 @@ public class DataTypeService {
         }
     }
 
+    // Backward compatibility overload
+    public String validateDataType(String addressStr, String typeName) {
+        return validateDataType(addressStr, typeName, null);
+    }
+
     /**
      * NEW v1.6.0: Validate function prototype before applying
      */
-    public String validateFunctionPrototype(String functionAddress, String prototype, String callingConvention) {
-        Program program = programProvider.getCurrentProgram();
+    public String validateFunctionPrototype(String functionAddress, String prototype, String callingConvention, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         final StringBuilder result = new StringBuilder();
@@ -1593,6 +1726,11 @@ public class DataTypeService {
         return result.toString();
     }
 
+    // Backward compatibility overload
+    public String validateFunctionPrototype(String functionAddress, String prototype, String callingConvention) {
+        return validateFunctionPrototype(functionAddress, prototype, callingConvention, null);
+    }
+
     /**
      * Import data types (placeholder)
      */
@@ -1609,9 +1747,10 @@ public class DataTypeService {
     /**
      * Create a new data type category
      */
-    public String createDataTypeCategory(String categoryPath) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String createDataTypeCategory(String categoryPath, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (categoryPath == null || categoryPath.isEmpty()) return "Category path is required";
 
         try {
@@ -1625,12 +1764,18 @@ public class DataTypeService {
         }
     }
 
+    // Backward compatibility overload
+    public String createDataTypeCategory(String categoryPath) {
+        return createDataTypeCategory(categoryPath, null);
+    }
+
     /**
      * List all data type categories
      */
-    public String listDataTypeCategories(int offset, int limit) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+    public String listDataTypeCategories(int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         try {
             DataTypeManager dtm = program.getDataTypeManager();
@@ -1643,6 +1788,11 @@ public class DataTypeService {
         } catch (Exception e) {
             return "Error listing categories: " + e.getMessage();
         }
+    }
+
+    // Backward compatibility overload
+    public String listDataTypeCategories(int offset, int limit) {
+        return listDataTypeCategories(offset, limit, null);
     }
 
     /**
@@ -1674,11 +1824,17 @@ public class DataTypeService {
      * @return JSON string with field usage analysis
      */
     @SuppressWarnings("deprecation")
-    public String analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze) {
+    public String analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze, String programName) {
         // CRITICAL FIX #3: Validate input parameters
         if (maxFunctionsToAnalyze < MIN_FUNCTIONS_TO_ANALYZE || maxFunctionsToAnalyze > MAX_FUNCTIONS_TO_ANALYZE) {
             return "{\"error\": \"maxFunctionsToAnalyze must be between " + MIN_FUNCTIONS_TO_ANALYZE +
                    " and " + MAX_FUNCTIONS_TO_ANALYZE + "\"}";
+        }
+
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) {
+            return (String) programResult[1];
         }
 
         final AtomicReference<String> result = new AtomicReference<>();
@@ -1687,11 +1843,6 @@ public class DataTypeService {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Program program = programProvider.getCurrentProgram();
-                    if (program == null) {
-                        result.set("{\"error\": \"No program loaded\"}");
-                        return;
-                    }
 
                     Address addr = program.getAddressFactory().getAddress(addressStr);
                     if (addr == null) {
@@ -1825,6 +1976,11 @@ public class DataTypeService {
         return result.get();
     }
 
+    // Backward compatibility overload
+    public String analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze) {
+        return analyzeStructFieldUsage(addressStr, structName, maxFunctionsToAnalyze, null);
+    }
+
     /**
      * Analyze decompiled code to extract field usage patterns
      * MAJOR FIX #4: Improved pattern matching with word boundaries and keyword filtering
@@ -1914,10 +2070,16 @@ public class DataTypeService {
      * @return JSON string with field name suggestions
      */
     @SuppressWarnings("deprecation")
-    public String suggestFieldNames(String structAddressStr, int structSize) {
+    public String suggestFieldNames(String structAddressStr, int structSize, String programName) {
         // Validate input parameters
         if (structSize < 0 || structSize > MAX_FIELD_OFFSET) {
             return "{\"error\": \"structSize must be between 0 and " + MAX_FIELD_OFFSET + "\"}";
+        }
+
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) {
+            return (String) programResult[1];
         }
 
         final AtomicReference<String> result = new AtomicReference<>();
@@ -1926,11 +2088,6 @@ public class DataTypeService {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Program program = programProvider.getCurrentProgram();
-                    if (program == null) {
-                        result.set("{\"error\": \"No program loaded\"}");
-                        return;
-                    }
 
                     Address addr = program.getAddressFactory().getAddress(structAddressStr);
                     if (addr == null) {
@@ -2015,6 +2172,11 @@ public class DataTypeService {
         return result.get();
     }
 
+    // Backward compatibility overload
+    public String suggestFieldNames(String structAddressStr, int structSize) {
+        return suggestFieldNames(structAddressStr, structSize, null);
+    }
+
     /**
      * Generate field name suggestions based on data type and patterns
      */
@@ -2052,9 +2214,10 @@ public class DataTypeService {
     @SuppressWarnings("unchecked")
     public String applyDataClassification(String addressStr, String classification,
                                            String name, String comment,
-                                           Object typeDefinitionObj) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "{\"error\": \"No program loaded\"}";
+                                           Object typeDefinitionObj, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         final StringBuilder resultJson = new StringBuilder();
         final AtomicReference<String> typeApplied = new AtomicReference<>("none");
@@ -2288,6 +2451,13 @@ public class DataTypeService {
         } catch (Exception e) {
             return "{\"error\": \"" + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
         }
+    }
+
+    // Backward compatibility overload
+    public String applyDataClassification(String addressStr, String classification,
+                                           String name, String comment,
+                                           Object typeDefinitionObj) {
+        return applyDataClassification(addressStr, classification, name, comment, typeDefinitionObj, null);
     }
 
     // -----------------------------------------------------------------------

@@ -62,6 +62,49 @@ RETRY_BACKOFF_FACTOR = 0.5
 CACHE_SIZE = 256
 ENABLE_CACHING = True
 
+# Tool profiles for reducing schema overhead in specialized workflows
+TOOL_PROFILES = {
+    "re": {
+        "check_connection", "get_current_program_info", "get_metadata",
+        "save_program", "exit_ghidra",
+        "list_open_programs", "switch_program", "open_program",
+        "search_functions_enhanced", "find_next_undefined_function",
+        "decompile_function", "analyze_function_complete", "analyze_for_documentation",
+        "get_function_variables", "get_function_callees", "get_function_callers",
+        "batch_apply_documentation", "analyze_function_completeness",
+        "batch_analyze_completeness", "batch_set_variable_types",
+        "set_bookmark", "get_function_xrefs",
+        "get_function_hash", "propagate_documentation", "build_function_hash_index",
+        "run_ghidra_script", "run_script_inline",
+        "rename_function_by_address", "set_function_prototype",
+        "rename_variables", "batch_set_comments", "set_plate_comment",
+        "set_local_variable_type", "rename_or_label",
+    },
+}
+
+
+def apply_tool_profile(mcp_instance, profile_name):
+    """Remove tools not in the specified profile from the MCP server."""
+    if profile_name not in TOOL_PROFILES:
+        raise ValueError(f"Unknown profile '{profile_name}'. Available: {list(TOOL_PROFILES.keys())}")
+    allowed = TOOL_PROFILES[profile_name]
+    tool_mgr = getattr(mcp_instance, '_tool_manager', None)
+    if tool_mgr is None:
+        logger.warning("Could not access tool manager for profile filtering")
+        return
+    tools_dict = getattr(tool_mgr, '_tools', None)
+    if tools_dict is None:
+        logger.warning("Could not access tools dict for profile filtering")
+        return
+    all_tools = list(tools_dict.keys())
+    removed = 0
+    for name in all_tools:
+        if name not in allowed:
+            del tools_dict[name]
+            removed += 1
+    logger.info(f"Profile '{profile_name}': kept {len(allowed)} tools, removed {removed}")
+
+
 # Connection pooling for better performance
 session = requests.Session()
 retry_strategy = Retry(
@@ -488,7 +531,7 @@ def validate_program_path(path: str) -> bool:
 
 
 @mcp.tool()
-def validate_data_type_exists(type_name: str) -> str:
+def validate_data_type_exists(type_name: str, program: str = None) -> str:
     """
     Check if a data type exists in Ghidra before attempting type operations.
 
@@ -497,6 +540,7 @@ def validate_data_type_exists(type_name: str) -> str:
 
     Args:
         type_name: The data type name to validate (e.g., "int", "double", "MyStruct", "byte *")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with validation results:
@@ -518,11 +562,11 @@ def validate_data_type_exists(type_name: str) -> str:
         validate_data_type_exists("UnitAny")
     """
     params = {"type_name": type_name}
-    return safe_get_json("validate_data_type_exists", params)
+    return safe_get_json("validate_data_type_exists", params, program=program)
 
 
 @mcp.tool()
-def get_data_type_size(type_name: str) -> str:
+def get_data_type_size(type_name: str, program: str = None) -> str:
     """
     Get the size in bytes of a data type.
 
@@ -530,6 +574,7 @@ def get_data_type_size(type_name: str) -> str:
 
     Args:
         type_name: The data type name (e.g., "int", "double", "MyStruct")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with size information:
@@ -544,7 +589,7 @@ def get_data_type_size(type_name: str) -> str:
         # Returns: {"type_name": "double", "size": 8, "category": "builtin"}
     """
     params = {"type_name": type_name}
-    return safe_get_json("get_data_type_size", params)
+    return safe_get_json("get_data_type_size", params, program=program)
 
 
 def _convert_escaped_newlines(text: str) -> str:
@@ -736,7 +781,7 @@ def safe_get_uncached(endpoint: str, params: dict = None, retries: int = 3) -> l
 
 
 @cached_request(cache_duration=180)  # 3-minute cache for GET requests
-def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
+def safe_get(endpoint: str, params: dict = None, retries: int = 3, program: str = None) -> list:
     """
     Perform a GET request with enhanced error handling and retry logic.
 
@@ -744,12 +789,15 @@ def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
         endpoint: The API endpoint to call
         params: Optional query parameters
         retries: Number of retry attempts for server errors
+        program: Optional program name for multi-binary targeting
 
     Returns:
         List of strings representing the response
     """
     if params is None:
         params = {}
+    if program:
+        params["program"] = program
 
     # Validate server URL for security
     if not validate_server_url(ghidra_server_url):
@@ -811,7 +859,7 @@ def safe_get(endpoint: str, params: dict = None, retries: int = 3) -> list:
     return ["Unexpected error in safe_get"]
 
 
-def safe_get_json(endpoint: str, params: dict = None, retries: int = 3) -> str:
+def safe_get_json(endpoint: str, params: dict = None, retries: int = 3, program: str = None) -> str:
     """
     Perform a GET request for JSON endpoints with enhanced error handling and retry logic.
 
@@ -822,12 +870,15 @@ def safe_get_json(endpoint: str, params: dict = None, retries: int = 3) -> str:
         endpoint: The API endpoint to call
         params: Optional query parameters
         retries: Number of retry attempts for server errors
+        program: Optional program name for multi-binary targeting
 
     Returns:
         String containing JSON response from the server
     """
     if params is None:
         params = {}
+    if program:
+        params["program"] = program
 
     # Validate server URL for security
     if not validate_server_url(ghidra_server_url):
@@ -890,7 +941,7 @@ def safe_get_json(endpoint: str, params: dict = None, retries: int = 3) -> str:
     return '{"error": "Unexpected error in safe_get_json"}'
 
 
-def safe_post_json(endpoint: str, data: dict, retries: int = 3) -> str:
+def safe_post_json(endpoint: str, data: dict, retries: int = 3, program: str = None) -> str:
     """
     Perform a JSON POST request with enhanced error handling and retry logic.
 
@@ -898,6 +949,7 @@ def safe_post_json(endpoint: str, data: dict, retries: int = 3) -> str:
         endpoint: The API endpoint to call
         data: Data to send as JSON
         retries: Number of retry attempts for server errors
+        program: Optional program name for multi-binary targeting
 
     Returns:
         String response from the server
@@ -908,6 +960,8 @@ def safe_post_json(endpoint: str, data: dict, retries: int = 3) -> str:
         return "Error: Invalid server URL - only local addresses allowed"
 
     url = urljoin(ghidra_server_url, endpoint)
+    if program:
+        url += f"?program={program}"
 
     # Get dynamic timeout based on payload complexity
     timeout = calculate_dynamic_timeout(endpoint, data)
@@ -962,7 +1016,7 @@ def safe_post_json(endpoint: str, data: dict, retries: int = 3) -> str:
     return "Error: Maximum retries exceeded"
 
 
-def safe_post(endpoint: str, data: dict | str, retries: int = 3) -> str:
+def safe_post(endpoint: str, data: dict | str, retries: int = 3, program: str = None) -> str:
     """
     Perform a POST request with enhanced error handling and retry logic.
 
@@ -970,6 +1024,7 @@ def safe_post(endpoint: str, data: dict | str, retries: int = 3) -> str:
         endpoint: The API endpoint to call
         data: Data to send (dict or string)
         retries: Number of retry attempts for server errors
+        program: Optional program name for multi-binary targeting
 
     Returns:
         String response from the server
@@ -980,6 +1035,8 @@ def safe_post(endpoint: str, data: dict | str, retries: int = 3) -> str:
         return "Error: Invalid server URL - only local addresses allowed"
 
     url = urljoin(ghidra_server_url, endpoint)
+    if program:
+        url += f"?program={program}"
 
     # Get endpoint-specific timeout
     timeout = get_timeout_for_endpoint(endpoint)
@@ -1047,6 +1104,7 @@ def make_request(
     params: dict = None,
     data: str = None,
     retries: int = 3,
+    program: str = None,
 ) -> str:
     """
     Perform an HTTP request with enhanced error handling and retry logic.
@@ -1060,12 +1118,15 @@ def make_request(
         params: Query parameters for GET requests
         data: Raw data string for POST requests (already JSON-encoded)
         retries: Number of retry attempts for server errors
+        program: Optional program name for multi-binary targeting
 
     Returns:
         String response from the server (typically JSON)
     """
     if params is None:
         params = {}
+    if program:
+        params["program"] = program
 
     # Validate server URL for security
     if not validate_server_url(url):
@@ -1190,65 +1251,17 @@ def decompile_function(
     """
     Decompile a function by name or address and return the decompiled C code.
 
-    This is the primary tool for retrieving decompiled pseudocode. It supports both
-    function names and addresses, with optional cache refresh for seeing recent changes.
-
-    **Pagination (for large functions):**
-    Use offset and limit to paginate through large decompiled functions that might
-    overwhelm LLM context windows. The response includes pagination metadata.
-
-    **When to Use Force Decompilation (force=True):**
-    - After changing function signatures or prototypes
-    - After modifying variable types or storage
-    - After updating data types used by the function
-    - After renaming globals referenced by the function
-    - When decompilation seems stale or incorrect
-
     Args:
         name: Function name to decompile (either name or address required)
-        address: Function address in hex format (e.g., "0x6fb6aef0") - alternative to name
-        force: Force fresh decompilation, clearing cache and re-analyzing (default: False)
-        timeout: Optional timeout in seconds (default: 45s, use higher for complex functions)
-        program: Optional program name to query (e.g., "D2Client.dll").
-                 If not specified, uses the currently active program.
-        offset: Line number to start from (0-indexed). Use for pagination. (default: 0)
-        limit: Maximum number of lines to return. If None, returns all lines.
-               Recommended: 100-200 lines per chunk to avoid context overflow.
+        address: Function address in hex format (e.g., "0x6fb6aef0")
+        force: Force fresh decompilation, clearing cache (default: False). Use after changing signatures, types, or storage.
+        timeout: Timeout in seconds (default: 45s)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
+        offset: Line number to start from for pagination (0-indexed, default: 0)
+        limit: Max lines to return. If None, returns all. Use 100-200 for large functions.
 
     Returns:
-        Decompiled C code as a string. When using pagination (offset/limit), includes
-        metadata header showing total lines, current range, and whether more data exists.
-
-    Raises:
-        GhidraValidationError: If neither name nor address provided, or address format invalid
-
-    Examples:
-        # Decompile by function name
-        code = decompile_function(name="main")
-
-        # Decompile by address
-        code = decompile_function(address="0x6fb6aef0")
-
-        # Force fresh decompilation after making changes
-        code = decompile_function(address="0x6fb6aef0", force=True)
-
-        # Use custom timeout for very large function
-        code = decompile_function(name="ComplexFunction", timeout=120)
-
-        # Decompile from a specific program (cross-binary query)
-        code = decompile_function(address="0x6fb00000", program="D2Common.dll")
-
-        # Paginate through a large function (first 100 lines)
-        code = decompile_function(address="0x6fb6aef0", offset=0, limit=100)
-
-        # Get next chunk (lines 100-199)
-        code = decompile_function(address="0x6fb6aef0", offset=100, limit=100)
-
-    Performance Notes:
-        - Cached calls: ~10-50ms
-        - Fresh decompilation: ~100-500ms (depends on function complexity)
-        - Use force=True only when necessary
-        - Use pagination for functions with 200+ lines to avoid context overflow
+        Decompiled C pseudocode. With pagination, includes metadata header with total lines and range.
     """
     if not name and not address:
         raise GhidraValidationError("Either 'name' or 'address' parameter is required")
@@ -1341,22 +1354,23 @@ def decompile_function(
 
 
 @mcp.tool()
-def rename_function(old_name: str, new_name: str) -> str:
+def rename_function(old_name: str, new_name: str, program: str = None) -> str:
     """
     Rename a function by its current name to a new user-defined name.
 
     Args:
         old_name: Current name of the function to rename
         new_name: New name for the function
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message indicating the result of the rename operation
     """
-    return safe_post("rename_function", {"oldName": old_name, "newName": new_name})
+    return safe_post("rename_function", {"oldName": old_name, "newName": new_name}, program=program)
 
 
 @mcp.tool()
-def rename_data(address: str, new_name: str) -> str:
+def rename_data(address: str, new_name: str, program: str = None) -> str:
     """
     Rename a data label at the specified address.
 
@@ -1376,6 +1390,7 @@ def rename_data(address: str, new_name: str) -> str:
         address: Memory address in hex format (e.g., "0x1400010a0")
                 Accepts addresses with or without 0x prefix
         new_name: New name for the data label (must be valid C identifier)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         str: Success or failure message indicating the result of the rename operation
@@ -1413,7 +1428,7 @@ def rename_data(address: str, new_name: str) -> str:
             f"Names can only contain letters, numbers, and underscores."
         )
 
-    response = safe_post("rename_data", {"address": address, "newName": new_name})
+    response = safe_post("rename_data", {"address": address, "newName": new_name}, program=program)
 
     # Provide actionable error messages
     if "no defined data" in response.lower():
@@ -1467,7 +1482,7 @@ def _check_if_data_defined(address: str) -> bool:
 
 
 @mcp.tool()
-def get_function_labels(name: str, offset: int = 0, limit: int = 20) -> list:
+def get_function_labels(name: str, offset: int = 0, limit: int = 20, program: str = None) -> list:
     """
     Get all labels within the specified function by name.
 
@@ -1475,17 +1490,18 @@ def get_function_labels(name: str, offset: int = 0, limit: int = 20) -> list:
         name: Function name to search for labels within
         offset: Pagination offset (default: 0)
         limit: Maximum number of labels to return (default: 20)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         List of labels found within the specified function
     """
     return safe_get(
-        "get_function_labels", {"name": name, "offset": offset, "limit": limit}
+        "get_function_labels", {"name": name, "offset": offset, "limit": limit}, program=program
     )
 
 
 @mcp.tool()
-def rename_label(address: str, old_name: str, new_name: str) -> str:
+def rename_label(address: str, old_name: str, new_name: str, program: str = None) -> str:
     """
     Rename an existing label at the specified address.
 
@@ -1493,6 +1509,7 @@ def rename_label(address: str, old_name: str, new_name: str) -> str:
         address: Target address in hex format (e.g., "0x1400010a0")
         old_name: Current label name to rename
         new_name: New name for the label
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message indicating the result of the rename operation
@@ -1501,7 +1518,7 @@ def rename_label(address: str, old_name: str, new_name: str) -> str:
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
 
     return safe_post(
-        "rename_label", {"address": address, "old_name": old_name, "new_name": new_name}
+        "rename_label", {"address": address, "old_name": old_name, "new_name": new_name}, program=program
     )
 
 
@@ -1611,7 +1628,7 @@ def get_external_location(
 
 
 @mcp.tool()
-def rename_external_location(address: str, new_name: str) -> str:
+def rename_external_location(address: str, new_name: str, program: str = None) -> str:
     """
     Rename an external location (e.g., change Ordinal_123 to a real function name).
 
@@ -1622,6 +1639,7 @@ def rename_external_location(address: str, new_name: str) -> str:
     Args:
         address: Memory address of the external location (e.g., "0x6fb7e218")
         new_name: New name for the external location (e.g., "sgptDataTables")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success message with old and new names, or error message
@@ -1634,7 +1652,7 @@ def rename_external_location(address: str, new_name: str) -> str:
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
     params = {"address": address, "new_name": new_name}
-    return safe_post("rename_external_location", params)
+    return safe_post("rename_external_location", params, program=program)
 
 
 @mcp.tool()
@@ -1680,43 +1698,16 @@ def list_data_items_by_xrefs(
     offset: int = 0, limit: int = 100, format: str = "json", program: str = None
 ) -> str:
     """
-    List defined data items sorted by cross-reference count (v1.7.4).
-    Returns data items with the most references first.
-
-    This tool is ideal for identifying the most heavily-used data structures
-    in a binary, helping prioritize which data items to analyze first.
+    List defined data items sorted by cross-reference count (most referenced first).
 
     Args:
-        offset: Pagination offset for starting position (default: 0)
-        limit: Maximum number of data items to return (default: 100)
-        format: Output format - "text" for human-readable or "json" for structured data (default: "json")
+        offset: Pagination offset (default: 0)
+        limit: Maximum items to return (default: 100)
+        format: "json" (default) or "text" for human-readable output
         program: Optional program name for multi-program support
 
     Returns:
-        Sorted list of data items with xref counts. Items with the most xrefs appear first.
-
-        JSON format returns:
-        [
-          {
-            "address": "0x6fb835b8",
-            "name": "DataTableName",
-            "type": "pointer",
-            "size": "4 bytes",
-            "xref_count": 25
-          },
-          ...
-        ]
-
-        Text format returns:
-        DataTableName @ 6fb835b8 [pointer] (4 bytes) - 25 xrefs
-        ...
-
-    Example:
-        # Get top 50 most referenced data items as JSON
-        list_data_items_by_xrefs(limit=50, format="json")
-
-        # Get all data items sorted by xrefs (text format)
-        list_data_items_by_xrefs(limit=10000, format="text")
+        Sorted list of data items with address, name, type, size, and xref count.
     """
     if format not in ["text", "json"]:
         raise GhidraValidationError("format must be 'text' or 'json'")
@@ -1732,59 +1723,19 @@ def list_data_items_by_xrefs(
 
 @mcp.tool()
 def rename_variables(
-    function_address: str, variable_renames: dict, backend: str = "auto"
+    function_address: str, variable_renames: dict, backend: str = "auto", program: str = None
 ) -> str:
     """
     Rename one or more variables in a function with automatic backend selection.
 
-    This unified tool replaces the deprecated rename_variable, batch_rename_variables,
-    and rename_variables_progressive tools. It automatically selects the optimal
-    backend based on the number of variables and handles timeouts gracefully.
-
-    Backend Selection Strategy:
-    - "auto" (default): Automatically chooses based on variable count
-      - 1 variable: Uses batch endpoint (most reliable)
-      - 2-10 variables: Uses batch endpoint with timeout monitoring
-      - 11+ variables: Uses progressive chunking with retry logic
-    - "batch": Always use batch endpoint (faster but may timeout on large functions)
-    - "progressive": Always use progressive chunking (slower but handles timeouts)
-
     Args:
         function_address: Function address in hex format (e.g., "0x401000")
-        variable_renames: Dict of {"old_name": "new_name"} pairs (can be single or multiple)
-        backend: Backend strategy - "auto" (default), "batch", or "progressive"
+        variable_renames: Dict of {"old_name": "new_name"} pairs
+        backend: "auto" (default, picks batch or progressive by count), "batch", or "progressive"
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON with detailed results:
-        {
-          "success": true,
-          "variables_renamed": 5,
-          "variables_failed": 0,
-          "backend_used": "batch",
-          "errors": []
-        }
-
-    Examples:
-        # Single variable (backend: auto → batch)
-        rename_variables("0x401000", {"local_8": "bufferSize"})
-
-        # Multiple variables (backend: auto → batch)
-        rename_variables("0x401000", {
-            "param_1": "pFile",
-            "local_4": "count",
-            "iVar1": "result"
-        })
-
-        # Large function with many variables (backend: auto → progressive)
-        rename_variables("0x401000", {
-            "local_8": "var1", "local_c": "var2", ... # 20+ variables
-        })
-
-        # Force batch mode
-        rename_variables("0x401000", {"local_8": "count"}, backend="batch")
-
-        # Force progressive mode for reliability
-        rename_variables("0x401000", renames_dict, backend="progressive")
+        JSON with success status, variables_renamed count, variables_failed count, backend_used, and errors.
     """
     import json
 
@@ -1827,7 +1778,7 @@ def rename_variables(
                 "function_address": function_address,
                 "variable_renames": variable_renames,
             }
-            result_json = safe_post_json("batch_rename_variables", payload)
+            result_json = safe_post_json("batch_rename_variables", payload, program=program)
             result = json.loads(result_json)
             result["backend_used"] = "batch"
             return json.dumps(result, indent=2)
@@ -1841,7 +1792,7 @@ def rename_variables(
                         f"Batch backend timed out, falling back to progressive"
                     )
                     return _rename_variables_progressive_internal(
-                        function_address, variable_renames
+                        function_address, variable_renames, program=program
                     )
 
             # Non-timeout error or explicit batch mode - return error
@@ -1858,7 +1809,7 @@ def rename_variables(
 
     else:  # progressive
         return _rename_variables_progressive_internal(
-            function_address, variable_renames
+            function_address, variable_renames, program=program
         )
 
 
@@ -1867,6 +1818,7 @@ def _rename_variables_progressive_internal(
     variable_renames: dict,
     chunk_size: int = 5,
     retry_attempts: int = 3,
+    program: str = None,
 ) -> str:
     """
     Internal progressive chunking implementation with retry logic.
@@ -1914,7 +1866,7 @@ def _rename_variables_progressive_internal(
                     "variable_renames": chunk,
                 }
 
-                result_json = safe_post_json("batch_rename_variables", payload)
+                result_json = safe_post_json("batch_rename_variables", payload, program=program)
                 result = json.loads(result_json)
 
                 if result.get("success"):
@@ -2032,38 +1984,15 @@ def disassemble_function(
     """
     Get assembly code (address: instruction; comment) for a function.
 
-    **Pagination (for large functions):**
-    Use offset and limit to paginate through large disassembled functions that might
-    overwhelm LLM context windows. Recommended chunk size: 100-200 instructions.
-
     Args:
-        address: Memory address in hex format (e.g., "0x1400010a0")
-        program: Optional program name to query (e.g., "D2Client.dll").
-                 If not specified, uses the currently active program.
-        offset: Instruction index to start from (0-indexed). Use for pagination. (default: 0)
-        limit: Maximum number of instructions to return. If None, returns all.
-               Recommended: 100-200 instructions per chunk to avoid context overflow.
-        filter_mnemonics: Optional comma-separated instruction mnemonics to filter by
-                         (e.g., "CALL,JMP" shows only calls and jumps, "MOV" shows only moves).
-                         Case-insensitive. Filtering is applied before pagination.
+        address: Function address in hex format (e.g., "0x1400010a0")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
+        offset: Instruction index to start from for pagination (0-indexed, default: 0)
+        limit: Max instructions to return. If None, returns all. Use 100-200 for large functions.
+        filter_mnemonics: Comma-separated mnemonics to filter (e.g., "CALL,JMP"). Applied before pagination.
 
     Returns:
-        List of assembly instructions with addresses and comments.
-        When using pagination, first element is a metadata string showing total count
-        and pagination info.
-
-    Examples:
-        # Get all assembly for a function
-        asm = disassemble_function(address="0x1400010a0")
-
-        # Get first 100 instructions only
-        asm = disassemble_function(address="0x1400010a0", offset=0, limit=100)
-
-        # Get next 100 instructions
-        asm = disassemble_function(address="0x1400010a0", offset=100, limit=100)
-
-        # Filter to show only CALL and JMP instructions
-        calls = disassemble_function(address="0x1400010a0", filter_mnemonics="CALL,JMP")
+        List of assembly instructions. With pagination, first element is metadata with total count.
     """
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
@@ -2103,13 +2032,14 @@ def disassemble_function(
 
 
 @mcp.tool()
-def set_decompiler_comment(address: str, comment: str) -> str:
+def set_decompiler_comment(address: str, comment: str, program: str = None) -> str:
     """
     Set a comment for a given address in the function pseudocode.
 
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
         comment: Comment text to add to the decompiled pseudocode
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message indicating the result of the comment operation
@@ -2117,17 +2047,18 @@ def set_decompiler_comment(address: str, comment: str) -> str:
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
 
-    return safe_post("set_decompiler_comment", {"address": address, "comment": comment})
+    return safe_post("set_decompiler_comment", {"address": address, "comment": comment}, program=program)
 
 
 @mcp.tool()
-def set_disassembly_comment(address: str, comment: str) -> str:
+def set_disassembly_comment(address: str, comment: str, program: str = None) -> str:
     """
     Set a comment for a given address in the function disassembly.
 
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
         comment: Comment text to add to the assembly disassembly
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message indicating the result of the comment operation
@@ -2136,12 +2067,12 @@ def set_disassembly_comment(address: str, comment: str) -> str:
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
 
     return safe_post(
-        "set_disassembly_comment", {"address": address, "comment": comment}
+        "set_disassembly_comment", {"address": address, "comment": comment}, program=program
     )
 
 
 @mcp.tool()
-def rename_function_by_address(function_address: str, new_name: str) -> str:
+def rename_function_by_address(function_address: str, new_name: str, program: str = None) -> str:
     """
     Rename a function by its address.
 
@@ -2149,6 +2080,7 @@ def rename_function_by_address(function_address: str, new_name: str) -> str:
         function_address: Memory address of the function in hex format (e.g., "0x1400010a0")
                          Accepts addresses with or without 0x prefix
         new_name: New name for the function (must be valid C identifier)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         str: Success or failure message indicating the result of the rename operation
@@ -2183,7 +2115,7 @@ def rename_function_by_address(function_address: str, new_name: str) -> str:
         )
 
     # Verify function exists at this address
-    func_check = safe_get("get_function_by_address", {"address": function_address})
+    func_check = safe_get("get_function_by_address", {"address": function_address}, program=program)
     if not func_check or any(
         "Error" in str(line) or "not found" in str(line).lower() for line in func_check
     ):
@@ -2196,6 +2128,7 @@ def rename_function_by_address(function_address: str, new_name: str) -> str:
     result = safe_post(
         "rename_function_by_address",
         {"function_address": function_address, "new_name": new_name},
+        program=program,
     )
 
     # Provide clear success/failure messages
@@ -2213,38 +2146,20 @@ def set_function_prototype(
     prototype: str,
     calling_convention: str = None,
     timeout: int = None,
+    program: str = None,
 ) -> str:
     """
     Set a function's prototype and optionally its calling convention.
 
     Args:
-        function_address: Memory address of the function in hex format (e.g., "0x1400010a0")
-                         Accepts addresses with or without 0x prefix
-        prototype: Function prototype string (e.g., "int main(int argc, char* argv[])")
-                  Must be valid C function declaration syntax
-        calling_convention: Optional calling convention (e.g., "__cdecl", "__stdcall", "__fastcall", "__thiscall")
-                           Use list_calling_conventions() to see available conventions
-        timeout: Optional timeout in seconds for this operation (default: 45s)
+        function_address: Function address in hex format (e.g., "0x1400010a0")
+        prototype: C function declaration (e.g., "int main(int argc, char* argv[])")
+        calling_convention: Optional convention (e.g., "__cdecl", "__stdcall", "__fastcall")
+        timeout: Optional timeout in seconds (default: 45s)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        str: Success or failure message indicating the result of the prototype update
-
-    Raises:
-        GhidraValidationError: If address format is invalid or function not found
-
-    Examples:
-        # Set basic function prototype
-        set_function_prototype("0x401000", "int calculate(int x, int y)")
-
-        # Set prototype with calling convention
-        set_function_prototype("0x401000", "void __stdcall ProcessData(void* buffer, int size)", "__stdcall")
-
-        # Set prototype with custom timeout
-        set_function_prototype("0x401000", "void ComplexFunction(void)", timeout=90)
-
-    Note:
-        After changing a prototype, use get_decompiled_code() with refresh_cache=True
-        to see the updated decompilation.
+        Success or failure message. Use force decompile afterward to see updated output.
     """
     # Sanitize and validate address
     function_address = sanitize_address(function_address)
@@ -2266,7 +2181,7 @@ def set_function_prototype(
         )
 
     # Verify function exists
-    func_check = safe_get("get_function_by_address", {"address": function_address})
+    func_check = safe_get("get_function_by_address", {"address": function_address}, program=program)
     if not func_check or any(
         "Error" in str(line) or "not found" in str(line).lower() for line in func_check
     ):
@@ -2285,7 +2200,7 @@ def set_function_prototype(
         if calling_convention:
             data["calling_convention"] = calling_convention.strip()
 
-        result = safe_post_json("set_function_prototype", data)
+        result = safe_post_json("set_function_prototype", data, program=program)
 
         # Provide actionable error messages
         if "success" in result.lower():
@@ -2323,12 +2238,15 @@ def set_function_prototype(
 
 
 @mcp.tool()
-def list_calling_conventions() -> str:
+def list_calling_conventions(program: str = None) -> str:
     """
     List all available calling conventions in the current Ghidra program.
 
     This tool is useful for debugging and verifying which calling conventions
     are loaded, especially after adding custom conventions to x86win.cspec.
+
+    Args:
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         List of available calling convention names
@@ -2345,12 +2263,12 @@ def list_calling_conventions() -> str:
         #         - __d2regcall
         #         - __d2mixcall
     """
-    return safe_get("list_calling_conventions")
+    return safe_get("list_calling_conventions", program=program)
 
 
 @mcp.tool()
 def set_local_variable_type(
-    function_address: str, variable_name: str, new_type: str
+    function_address: str, variable_name: str, new_type: str, program: str = None
 ) -> str:
     """
     Set a local variable's type.
@@ -2359,6 +2277,7 @@ def set_local_variable_type(
         function_address: Memory address of the function in hex format (e.g., "0x1400010a0")
         variable_name: Name of the local variable to modify
         new_type: New data type for the variable (e.g., "int", "char*", "MyStruct")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message indicating the result of the type change
@@ -2373,11 +2292,12 @@ def set_local_variable_type(
             "variable_name": variable_name,
             "new_type": new_type,
         },
+        program=program,
     )
 
 
 @mcp.tool()
-def set_function_no_return(function_address: str, no_return: bool) -> str:
+def set_function_no_return(function_address: str, no_return: bool, program: str = None) -> str:
     """
     Set a function's "No Return" attribute to control flow analysis.
 
@@ -2395,6 +2315,7 @@ def set_function_no_return(function_address: str, no_return: bool) -> str:
     Args:
         function_address: Memory address of the function in hex format (e.g., "0x6fabbf92")
         no_return: true to mark as non-returning, false to mark as returning
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message with the function's old and new state
@@ -2417,63 +2338,25 @@ def set_function_no_return(function_address: str, no_return: bool) -> str:
                 no_return
             ).lower(),  # Convert boolean to string for HTTP form data
         },
+        program=program,
     )
 
 
 @mcp.tool()
 def set_variable_storage(
-    function_address: str, variable_name: str, storage: str
+    function_address: str, variable_name: str, storage: str, program: str = None
 ) -> str:
     """
-    Set custom storage for a local variable or parameter (v1.7.0).
-
-    This allows overriding Ghidra's automatic variable storage detection, which is
-    crucial for fixing decompilation issues caused by compiler optimizations.
-
-    **Use Cases:**
-    - Fix register reuse issues (e.g., EBP used as local variable after PUSH EBP)
-    - Correct variables misidentified as "unaff_" (unaffected registers)
-    - Override incorrect automatic stack variable allocation
-    - Force specific register or stack storage for variables
-
-    **Common Register Reuse Pattern:**
-    When a compiler pushes a register like EBP, then reuses it as a local variable:
-    ```asm
-    PUSH EBP        ; Save EBP
-    CALL func       ; Returns value in EAX
-    MOV EBP,EAX     ; Reuse EBP as local variable!
-    TEST EBP,EBP    ; Use it
-    ```
-
-    Ghidra sees this as "unaff_EBP" and produces incorrect decompilation.
-    Use this tool to create a proper local variable for the reused register.
+    Set custom storage for a local variable or parameter, overriding Ghidra's automatic detection.
 
     Args:
         function_address: Function address in hex (e.g., "0x6fb6aef0")
         variable_name: Name of variable to modify (e.g., "unaff_EBP")
-        storage: Storage specification in one of these formats:
-            - "Stack[-0x10]:4" - Stack location at offset -0x10, 4 bytes
-            - "EBP:4" - EBP register, 4 bytes
-            - "register:EBP" - EBP register (auto-sized)
-            - "EAX:4" - EAX register, 4 bytes
+        storage: Storage spec: "Stack[-0x10]:4", "EBP:4", "register:EBP", or "EAX:4"
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        Success message with old and new storage details
-
-    Example:
-        # Fix EBP register reuse issue
-        set_variable_storage(
-            function_address="0x6fb6aef0",
-            variable_name="unaff_EBP",
-            storage="Stack[-0x4]:4"  # Move to stack to clarify it's a local var
-        )
-
-        # Then force re-decompilation to see the fix
-        force_decompile("0x6fb6aef0")
-
-    Note:
-        After changing variable storage, use force_decompile() to see the updated
-        decompilation with the new variable assignments.
+        Success message with old and new storage details. Use force decompile afterward to see changes.
     """
     if not validate_hex_address(function_address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {function_address}")
@@ -2491,11 +2374,12 @@ def set_variable_storage(
             "variable_name": variable_name,
             "storage": storage,
         },
+        program=program,
     )
 
 
 @mcp.tool()
-def run_script(script_path: str, args: str = "") -> str:
+def run_script(script_path: str, args: str = "", program: str = None) -> str:
     """
     Run a Ghidra script programmatically (v1.7.0).
 
@@ -2511,6 +2395,7 @@ def run_script(script_path: str, args: str = "") -> str:
     Args:
         script_path: Absolute path to the script file (.java or .py)
         args: Optional JSON string of arguments (not yet fully implemented)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Script execution result or error message
@@ -2530,11 +2415,11 @@ def run_script(script_path: str, args: str = "") -> str:
     if not script_path or not script_path.strip():
         raise GhidraValidationError("Script path cannot be empty")
 
-    return safe_post("run_script", {"script_path": script_path, "args": args})
+    return safe_post("run_script", {"script_path": script_path, "args": args}, program=program)
 
 
 @mcp.tool()
-def list_scripts(filter: str = "") -> str:
+def list_scripts(filter: str = "", program: str = None) -> str:
     """
     List available Ghidra scripts (v1.7.0).
 
@@ -2543,6 +2428,7 @@ def list_scripts(filter: str = "") -> str:
 
     Args:
         filter: Optional filter string to match script names (case-sensitive substring match)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON object with array of script information:
@@ -2571,7 +2457,7 @@ def list_scripts(filter: str = "") -> str:
     if filter:
         params["filter"] = filter
 
-    return safe_get_json("list_scripts", params)
+    return safe_get_json("list_scripts", params, program=program)
 
 
 @mcp.tool()
@@ -2675,7 +2561,7 @@ def list_strings(
 
 @mcp.tool()
 def get_function_jump_targets(
-    name: str, offset: int = 0, limit: int = 100
+    name: str, offset: int = 0, limit: int = 100, program: str = None
 ) -> list:
     """
     Get all jump target addresses from a function's disassembly.
@@ -2687,17 +2573,18 @@ def get_function_jump_targets(
         name: Function name to analyze for jump targets
         offset: Pagination offset (default: 0)
         limit: Maximum number of jump targets to return (default: 100)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         List of jump target addresses found in the function's disassembly
     """
     return safe_get(
-        "get_function_jump_targets", {"name": name, "offset": offset, "limit": limit}
+        "get_function_jump_targets", {"name": name, "offset": offset, "limit": limit}, program=program
     )
 
 
 @mcp.tool()
-def create_label(address: str, name: str) -> str:
+def create_label(address: str, name: str, program: str = None) -> str:
     """
     Create a new label at the specified address.
 
@@ -2708,6 +2595,7 @@ def create_label(address: str, name: str) -> str:
         address: Target address in hex format (e.g., "0x1400010a0")
                 Accepts addresses with or without 0x prefix
         name: Name for the new label (must be valid C identifier)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         str: Success or failure message indicating the result of the label creation
@@ -2752,7 +2640,7 @@ def create_label(address: str, name: str) -> str:
             f"Names can only contain letters, numbers, and underscores."
         )
 
-    result = safe_post("create_label", {"address": address, "name": name})
+    result = safe_post("create_label", {"address": address, "name": name}, program=program)
 
     # Provide actionable error messages
     if "success" in result.lower() or "created" in result.lower():
@@ -2771,7 +2659,7 @@ def create_label(address: str, name: str) -> str:
 
 
 @mcp.tool()
-def batch_create_labels(labels: list) -> str:
+def batch_create_labels(labels: list, program: str = None) -> str:
     """
     Create multiple labels in a single atomic operation (v1.5.1).
 
@@ -2788,6 +2676,7 @@ def batch_create_labels(labels: list) -> str:
         labels: List of label objects, each with "address" and "name" fields
                 Example: [{"address": "0x6faeb266", "name": "begin_slot_processing"},
                          {"address": "0x6faeb280", "name": "loop_check_slot_active"}]
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON string with success status, counts, and any errors:
@@ -2811,11 +2700,11 @@ def batch_create_labels(labels: list) -> str:
                 f"Invalid hexadecimal address at index {i}: {label['address']}"
             )
 
-    return safe_post_json("batch_create_labels", {"labels": labels})
+    return safe_post_json("batch_create_labels", {"labels": labels}, program=program)
 
 
 @mcp.tool()
-def rename_or_label(address: str, name: str) -> str:
+def rename_or_label(address: str, name: str, program: str = None) -> str:
     """
     Intelligently rename data or create label at an address (server-side detection).
 
@@ -2830,6 +2719,7 @@ def rename_or_label(address: str, name: str) -> str:
     Args:
         address: Memory address in hex format (e.g., "0x1400010a0")
         name: Name for the data/label
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message with details about the operation performed
@@ -2837,11 +2727,11 @@ def rename_or_label(address: str, name: str) -> str:
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
 
-    return safe_post("rename_or_label", {"address": address, "name": name})
+    return safe_post("rename_or_label", {"address": address, "name": name}, program=program)
 
 
 @mcp.tool()
-def delete_label(address: str, name: str = None) -> str:
+def delete_label(address: str, name: str = None, program: str = None) -> str:
     """
     Delete a label at the specified address.
 
@@ -2853,6 +2743,7 @@ def delete_label(address: str, name: str = None) -> str:
                  Accepts addresses with or without 0x prefix
         name: Optional specific label name to delete. If not provided,
               deletes all labels at the address.
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with deletion results:
@@ -2881,50 +2772,20 @@ def delete_label(address: str, name: str = None) -> str:
     if name:
         params["name"] = name
 
-    return safe_post("delete_label", params)
+    return safe_post("delete_label", params, program=program)
 
 
 @mcp.tool()
-def batch_delete_labels(labels: list) -> str:
+def batch_delete_labels(labels: list, program: str = None) -> str:
     """
     Delete multiple labels in a single atomic operation.
 
-    This tool deletes multiple labels in one transaction, dramatically reducing
-    API calls. Essential for cleaning up orphan labels after applying array
-    types to pointer tables.
-
     Args:
-        labels: List of label objects, each with:
-                - "address" (required): Address of label to delete
-                - "name" (optional): Specific label name to delete
-                Example: [{"address": "0x6ff86c64", "name": "g_pData_6ff86c64"},
-                         {"address": "0x6ff86c68"}]
+        labels: List of label dicts, each with "address" (required) and optional "name".
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON with deletion results:
-        {
-          "success": true,
-          "labels_deleted": 30,
-          "labels_skipped": 2,
-          "errors_count": 0
-        }
-
-    Examples:
-        # Delete orphan labels from pointer array
-        labels = [
-            {"address": "0x6ff86c64", "name": "g_pData_6ff86c64"},
-            {"address": "0x6ff86c68", "name": "g_pData_6ff86c68"},
-            {"address": "0x6ff86c6c", "name": "g_pData_6ff86c6c"}
-        ]
-        batch_delete_labels(labels)
-
-        # Delete all labels at addresses (no name filter)
-        labels = [{"address": hex(0x6ff86c60 + i*4)} for i in range(1, 44)]
-        batch_delete_labels(labels)
-
-    See Also:
-        - delete_label(): Delete single label
-        - batch_create_labels(): Create multiple labels
+        JSON with labels_deleted, labels_skipped, and errors_count.
     """
     if not isinstance(labels, list):
         raise GhidraValidationError("labels must be a list")
@@ -2944,7 +2805,7 @@ def batch_delete_labels(labels: list) -> str:
                 f"Invalid hexadecimal address at index {i}: {label['address']}"
             )
 
-    return safe_post_json("batch_delete_labels", {"labels": labels})
+    return safe_post_json("batch_delete_labels", {"labels": labels}, program=program)
 
 
 @mcp.tool()
@@ -3074,7 +2935,7 @@ def list_data_types(
 
 
 @mcp.tool()
-def search_data_types(pattern: str, offset: int = 0, limit: int = 100) -> list:
+def search_data_types(pattern: str, offset: int = 0, limit: int = 100, program: str = None) -> list:
     """
     Search for data types by pattern matching against type names.
 
@@ -3086,6 +2947,7 @@ def search_data_types(pattern: str, offset: int = 0, limit: int = 100) -> list:
         pattern: Search pattern (case-insensitive substring match)
         offset: Pagination offset (default: 0)
         limit: Maximum number of results to return (default: 100)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         List of matching data types with their names, categories, and sizes
@@ -3098,69 +2960,29 @@ def search_data_types(pattern: str, offset: int = 0, limit: int = 100) -> list:
         search_data_types(pattern="ptr", limit=10)
     """
     params = {"pattern": pattern, "offset": offset, "limit": limit}
-    return safe_get("search_data_types", params)
+    return safe_get("search_data_types", params, program=program)
 
 
 @mcp.tool()
-def create_struct(name: str, fields: list) -> str:
+def create_struct(name: str, fields: list, program: str = None) -> str:
     """
     Create a new structure data type with specified fields.
 
-    This tool creates a custom structure definition that can be applied to memory
-    locations. Fields should be specified as a list of dictionaries with 'name'
-    and 'type' keys (offset is optional).
-
-    IMPORTANT: The 'fields' parameter should be a Python list of dictionaries.
-    The tool will automatically convert it to proper JSON format for the Ghidra endpoint.
-
-    Supported field types:
-    - Integers: int, uint, long, dword, ushort, word, short, char, byte, uchar
-    - Floats: float, double
-    - Pointers: void* (e.g., "void*" for void pointers)
-    - Arrays: typename[count] (e.g., "char[16]" for 16-byte char array)
-    - Custom: Any previously defined struct or enum name
-
     Args:
         name: Name for the new structure (must be unique)
-        fields: List of field definitions as dictionaries with:
-                - name (required): Field name (must be valid C identifier)
-                - type (required): Field data type from supported list above
-                - offset (optional): Explicit byte offset (fields auto-calculated if omitted)
+        fields: List of field dicts, each with "name" (str), "type" (str), and optional "offset" (int).
+                Supported types: int, uint, long, dword, ushort, word, short, char, byte, uchar,
+                float, double, void*, typename[count] (arrays), or any custom struct/enum name.
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        Success message with structure details (name, field count, total size)
-        Error message if creation fails
-
-    Examples:
-        # Simple struct with basic types
-        fields = [
-            {"name": "id", "type": "uint"},
-            {"name": "flags", "type": "ushort"},
-            {"name": "reserved", "type": "ushort"}
-        ]
-        result = create_struct("MyStruct", fields)
-
-        # Struct with pointers and arrays
-        fields = [
-            {"name": "dwType", "type": "uint"},
-            {"name": "pData", "type": "void*"},
-            {"name": "wX", "type": "ushort"},
-            {"name": "wY", "type": "ushort"},
-            {"name": "szName", "type": "char[16]"}
-        ]
-        result = create_struct("UnitAny", fields)
-
-    Note:
-        - Structure size is calculated based on field types and sizes
-        - Fields are added sequentially unless explicit offsets are provided
-        - Structure names must be unique (not previously defined)
-        - Use apply_data_type tool to apply the struct to memory locations
+        Success message with structure name, field count, and total size.
     """
-    return safe_post_json("create_struct", {"name": name, "fields": fields})
+    return safe_post_json("create_struct", {"name": name, "fields": fields}, program=program)
 
 
 @mcp.tool()
-def create_enum(name: str, values: dict, size: int = 4) -> str:
+def create_enum(name: str, values: dict, size: int = 4, program: str = None) -> str:
     """
     Create a new enumeration data type with name-value pairs.
 
@@ -3171,6 +2993,7 @@ def create_enum(name: str, values: dict, size: int = 4) -> str:
         name: Name for the new enumeration
         values: Dictionary of name-value pairs (e.g., {"OPTION_A": 0, "OPTION_B": 1})
         size: Size of the enum in bytes (1, 2, 4, or 8, default: 4)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success/failure message with created enumeration details
@@ -3178,11 +3001,11 @@ def create_enum(name: str, values: dict, size: int = 4) -> str:
     Example:
         values = {"STATE_IDLE": 0, "STATE_RUNNING": 1, "STATE_STOPPED": 2}
     """
-    return safe_post_json("create_enum", {"name": name, "values": values, "size": size})
+    return safe_post_json("create_enum", {"name": name, "values": values, "size": size}, program=program)
 
 
 @mcp.tool()
-def apply_data_type(address: str, type_name: str, clear_existing: bool = True) -> str:
+def apply_data_type(address: str, type_name: str, clear_existing: bool = True, program: str = None) -> str:
     """
     Apply a specific data type at the given memory address.
 
@@ -3193,6 +3016,7 @@ def apply_data_type(address: str, type_name: str, clear_existing: bool = True) -
         address: Target address in hex format (e.g., "0x1400010a0")
         type_name: Name of the data type to apply (e.g., "int", "MyStruct", "DWORD")
         clear_existing: Whether to clear existing data/code at the address (default: True)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success/failure message with details about the applied data type
@@ -3209,7 +3033,7 @@ def apply_data_type(address: str, type_name: str, clear_existing: bool = True) -
         "clear_existing": clear_existing,
     }
     logger.info(f"Data being sent: {data}")
-    result = safe_post_json("apply_data_type", data)
+    result = safe_post_json("apply_data_type", data, program=program)
     logger.info(f"Result received: {result}")
     return result
 
@@ -3254,17 +3078,20 @@ def get_version() -> str:
 
 
 @mcp.tool()
-def get_metadata() -> str:
+def get_metadata(program: str = None) -> str:
     """
     Get metadata about the current program/database.
 
     Returns program information including name, architecture, base address,
     entry points, and other relevant metadata.
 
+    Args:
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
+
     Returns:
         JSON string with program metadata
     """
-    return "\n".join(safe_get("get_metadata"))
+    return "\n".join(safe_get("get_metadata", program=program))
 
 
 @mcp.tool()
@@ -3314,7 +3141,7 @@ def list_globals(
 
 
 @mcp.tool()
-def rename_global_variable(old_name: str, new_name: str) -> str:
+def rename_global_variable(old_name: str, new_name: str, program: str = None) -> str:
     """
     Rename a global variable.
 
@@ -3323,44 +3150,49 @@ def rename_global_variable(old_name: str, new_name: str) -> str:
     Args:
         old_name: Current name of the global variable
         new_name: New name for the global variable
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success/failure message
     """
     return safe_post(
-        "rename_global_variable", {"old_name": old_name, "new_name": new_name}
+        "rename_global_variable", {"old_name": old_name, "new_name": new_name}, program=program
     )
 
 
 @mcp.tool()
-def get_entry_points() -> list:
+def get_entry_points(program: str = None) -> list:
     """
     Get all entry points in the database.
 
     Returns all program entry points including the main entry point and any
     additional entry points defined in the program.
 
+    Args:
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
+
     Returns:
         List of entry points with their addresses and names
     """
-    return safe_get("get_entry_points")
+    return safe_get("get_entry_points", program=program)
 
 
 # Data Type Analysis and Management Tools
 
 
 @mcp.tool()
-def get_enum_values(enum_name: str) -> list:
+def get_enum_values(enum_name: str, program: str = None) -> list:
     """
     Get all values and names in an enumeration.
 
     Args:
         enum_name: Name of the enumeration to query
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         List of all enumeration values with their names and numeric values
     """
-    return safe_get("get_enum_values", {"enum_name": enum_name})
+    return safe_get("get_enum_values", {"enum_name": enum_name}, program=program)
 
 
 @mcp.tool()
@@ -3394,7 +3226,7 @@ def search_byte_patterns(pattern: str, mask: str = None, program: str = None) ->
 
 
 @mcp.tool()
-def delete_data_type(type_name: str) -> str:
+def delete_data_type(type_name: str, program: str = None) -> str:
     """
     Delete a data type from the program.
 
@@ -3403,6 +3235,7 @@ def delete_data_type(type_name: str) -> str:
 
     Args:
         type_name: Name of the data type to delete
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message with details
@@ -3410,61 +3243,21 @@ def delete_data_type(type_name: str) -> str:
     if not type_name or not isinstance(type_name, str):
         raise GhidraValidationError("Type name is required and must be a string")
 
-    return safe_post_json("delete_data_type", {"type_name": type_name})
+    return safe_post_json("delete_data_type", {"type_name": type_name}, program=program)
 
 
 @mcp.tool()
-def consolidate_duplicate_types(base_type_name: str, auto_delete: bool = False) -> str:
+def consolidate_duplicate_types(base_type_name: str, auto_delete: bool = False, program: str = None) -> str:
     """
-    Find and consolidate duplicate state-based types into identity-based type.
-
-    This tool helps enforce identity-based naming by finding state-based variants
-    of a type (e.g., "InitializedGameObject", "AllocatedGameObject") and optionally
-    deleting them to force use of the identity-based name (e.g., "GameObject").
-
-    **State-Based Prefixes Detected:**
-    - Initialized, Allocated, Created, Updated, Processed
-    - Deleted, Modified, Constructed, Freed, Destroyed
-    - Copied, Cloned, Active, Pending, Ready
+    Find and consolidate duplicate state-based types into an identity-based type.
 
     Args:
         base_type_name: Base identity-based type name (e.g., "GameObject")
-        auto_delete: If True, automatically delete state-based variants (default: False)
-                    If False, only report duplicates without deleting
+        auto_delete: If True, delete state-based variants. If False (default), only report duplicates.
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON with consolidation results:
-        {
-          "base_type": "GameObject",
-          "base_type_size": 96,
-          "duplicates_found": ["InitializedGameObject", "AllocatedGameObject"],
-          "duplicates_deleted": ["InitializedGameObject"],  # Only if auto_delete=True
-          "warnings": ["AllocatedGameObject is in use, cannot delete"],
-          "action_required": true,  # If manual cleanup needed
-          "recommendations": [
-            "Update function prototypes to use GameObject instead of InitializedGameObject",
-            "Use set_function_prototype() to change parameter types"
-          ]
-        }
-
-    Examples:
-        # Find duplicates without deleting (safe discovery)
-        consolidate_duplicate_types("GameObject")
-        # Returns: {"duplicates_found": ["InitializedGameObject"], "action_required": true}
-
-        # Find and auto-delete duplicates (requires base type exists)
-        consolidate_duplicate_types("GameObject", auto_delete=True)
-        # Returns: {"duplicates_deleted": ["InitializedGameObject"], "action_required": false}
-
-    Workflow:
-        1. Run with auto_delete=False to discover duplicates
-        2. Review which functions use the duplicate types
-        3. Update function prototypes to use base type
-        4. Re-run with auto_delete=True to clean up
-
-    Note:
-        This tool enforces FUNCTION_DOC_WORKFLOW_V5.md Phase 2 Type Audit requirements.
-        State-based types cause 15-point completeness score penalty per occurrence.
+        JSON with duplicates found, deleted (if auto_delete), warnings, and recommendations.
     """
     import json
     import re
@@ -3492,7 +3285,7 @@ def consolidate_duplicate_types(base_type_name: str, auto_delete: bool = False) 
     ]
 
     # Search for all types matching base name pattern
-    types_result = search_data_types(base_type_name)
+    types_result = search_data_types(base_type_name, program=program)
     types_data = (
         json.loads(types_result) if isinstance(types_result, str) else types_result
     )
@@ -3547,7 +3340,7 @@ def consolidate_duplicate_types(base_type_name: str, auto_delete: bool = False) 
     if auto_delete:
         for duplicate in duplicates_found:
             try:
-                delete_result = delete_data_type(duplicate)
+                delete_result = delete_data_type(duplicate, program=program)
                 if "error" not in delete_result.lower():
                     result["duplicates_deleted"].append(duplicate)
                 else:
@@ -3580,7 +3373,7 @@ def consolidate_duplicate_types(base_type_name: str, auto_delete: bool = False) 
 
 @mcp.tool()
 def modify_struct_field(
-    struct_name: str, field_name: str, new_type: str = None, new_name: str = None
+    struct_name: str, field_name: str, new_type: str = None, new_name: str = None, program: str = None
 ) -> str:
     """
     Modify a field in an existing structure.
@@ -3593,6 +3386,7 @@ def modify_struct_field(
         field_name: Name of the field to modify
         new_type: New data type for the field (optional)
         new_name: New name for the field (optional)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message with details
@@ -3612,12 +3406,12 @@ def modify_struct_field(
     if new_name:
         data["new_name"] = new_name
 
-    return safe_post_json("modify_struct_field", data)
+    return safe_post_json("modify_struct_field", data, program=program)
 
 
 @mcp.tool()
 def add_struct_field(
-    struct_name: str, field_name: str, field_type: str, offset: int = -1
+    struct_name: str, field_name: str, field_type: str, offset: int = -1, program: str = None
 ) -> str:
     """
     Add a new field to an existing structure.
@@ -3630,6 +3424,7 @@ def add_struct_field(
         field_name: Name of the new field
         field_type: Data type of the new field
         offset: Offset to insert the field at (-1 for end, default: -1)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message with details
@@ -3648,11 +3443,11 @@ def add_struct_field(
         "offset": offset,
     }
 
-    return safe_post_json("add_struct_field", data)
+    return safe_post_json("add_struct_field", data, program=program)
 
 
 @mcp.tool()
-def remove_struct_field(struct_name: str, field_name: str) -> str:
+def remove_struct_field(struct_name: str, field_name: str, program: str = None) -> str:
     """
     Remove a field from an existing structure.
 
@@ -3661,6 +3456,7 @@ def remove_struct_field(struct_name: str, field_name: str) -> str:
     Args:
         struct_name: Name of the structure to modify
         field_name: Name of the field to remove
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message with details
@@ -3671,12 +3467,12 @@ def remove_struct_field(struct_name: str, field_name: str) -> str:
         raise GhidraValidationError("Field name is required and must be a string")
 
     return safe_post_json(
-        "remove_struct_field", {"struct_name": struct_name, "field_name": field_name}
+        "remove_struct_field", {"struct_name": struct_name, "field_name": field_name}, program=program
     )
 
 
 @mcp.tool()
-def create_array_type(base_type: str, length: int, name: str = None) -> str:
+def create_array_type(base_type: str, length: int, name: str = None, program: str = None) -> str:
     """
     Create an array data type.
 
@@ -3687,6 +3483,7 @@ def create_array_type(base_type: str, length: int, name: str = None) -> str:
         base_type: Name of the base data type for the array
         length: Number of elements in the array
         name: Optional name for the array type
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message with created array type details
@@ -3700,7 +3497,7 @@ def create_array_type(base_type: str, length: int, name: str = None) -> str:
     if name:
         data["name"] = name
 
-    return safe_post_json("create_array_type", data)
+    return safe_post_json("create_array_type", data, program=program)
 
 
 @mcp.tool()
@@ -3710,37 +3507,21 @@ def analyze_data_region(
     include_xref_map: bool = True,
     include_assembly_patterns: bool = True,
     include_boundary_detection: bool = True,
+    program: str = None,
 ) -> str:
     """
-    Comprehensive single-call analysis of a data region.
-
-    This tool performs complete data region analysis including boundary detection,
-    byte-by-byte xref mapping, stride detection, and classification hints.
-    Replaces 20-30 individual tool calls with one efficient batch operation.
+    Comprehensive single-call analysis of a data region (boundaries, xrefs, stride, classification).
 
     Args:
         address: Starting address in hex format (e.g., "0x6fb835b8")
         max_scan_bytes: Maximum bytes to scan for boundary detection (default: 1024)
-        include_xref_map: Include detailed byte-by-byte xref mapping (default: True)
+        include_xref_map: Include byte-by-byte xref mapping (default: True)
         include_assembly_patterns: Include assembly pattern analysis (default: True)
         include_boundary_detection: Detect data region boundaries (default: True)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON string with comprehensive analysis:
-        {
-          "start_address": "0x6fb835b8",
-          "end_address": "0x6fb835d4",
-          "byte_span": 28,
-          "xref_map": {"0x6fb835b8": [{"from": "0x6fb6cae9", "type": "DATA"}], ...},
-          "unique_xref_addresses": ["0x6fb835b8", "0x6fb835bc", ...],
-          "unique_xref_count": 5,
-          "classification_hint": "STRUCTURE|ARRAY|PRIMITIVE",
-          "stride_detected": 4,
-          "next_boundary_address": "0x6fb835d4",
-          "next_boundary_reason": "different_xref_set|named_label|end_of_data",
-          "current_name": "DAT_6fb835b8",
-          "current_type": "undefined"
-        }
+        JSON with start/end address, xref map, classification hint, stride, and boundary info.
     """
     import json
 
@@ -3758,7 +3539,7 @@ def analyze_data_region(
         "include_boundary_detection": include_boundary_detection,
     }
 
-    result = safe_post_json("analyze_data_region", data)
+    result = safe_post_json("analyze_data_region", data, program=program)
 
     # Format the JSON response for readability
     try:
@@ -3831,7 +3612,7 @@ def inspect_memory_content(
 
 
 @mcp.tool()
-def get_bulk_xrefs(addresses: str) -> str:
+def get_bulk_xrefs(addresses: str, program: str = None) -> str:
     """
     Get cross-references for multiple addresses in a single batch request.
 
@@ -3841,6 +3622,7 @@ def get_bulk_xrefs(addresses: str) -> str:
     Args:
         addresses: Comma-separated list of hex addresses (e.g., "0x6fb835b8,0x6fb835b9,0x6fb835ba")
                   or JSON array string (e.g., '["0x6fb835b8", "0x6fb835b9"]')
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON string with xref mappings:
@@ -3869,7 +3651,7 @@ def get_bulk_xrefs(addresses: str) -> str:
             raise GhidraValidationError(f"Invalid hex address format: {addr}")
 
     data = {"addresses": addr_list}
-    result = safe_post_json("get_bulk_xrefs", data)
+    result = safe_post_json("get_bulk_xrefs", data, program=program)
 
     # Format the JSON response for readability
     try:
@@ -3885,6 +3667,7 @@ def detect_array_bounds(
     analyze_loop_bounds: bool = True,
     analyze_indexing: bool = True,
     max_scan_range: int = 2048,
+    program: str = None,
 ) -> str:
     """
     Automatically detect array/table size and element boundaries.
@@ -3897,6 +3680,7 @@ def detect_array_bounds(
         analyze_loop_bounds: Analyze loop CMP instructions for bounds (default: True)
         analyze_indexing: Analyze array indexing patterns for stride (default: True)
         max_scan_range: Maximum bytes to scan for table end (default: 2048)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON string with array analysis:
@@ -3929,7 +3713,7 @@ def detect_array_bounds(
         "max_scan_range": max_scan_range,
     }
 
-    result = safe_post_json("detect_array_bounds", data)
+    result = safe_post_json("detect_array_bounds", data, program=program)
 
     # Format the JSON response for readability
     try:
@@ -3944,6 +3728,7 @@ def get_assembly_context(
     xref_sources: str,
     context_instructions: int = 5,
     include_patterns: str = "LEA,MOV,CMP,IMUL,ADD,SUB",
+    program: str = None,
 ) -> str:
     """
     Get assembly instructions with context for multiple xref source addresses.
@@ -3956,6 +3741,7 @@ def get_assembly_context(
                      or JSON array string
         context_instructions: Number of instructions before/after to include (default: 5)
         include_patterns: Comma-separated instruction types to highlight (default: "LEA,MOV,CMP,IMUL,ADD,SUB")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON string with assembly context:
@@ -4001,7 +3787,7 @@ def get_assembly_context(
         "include_patterns": pattern_list,
     }
 
-    result = safe_post_json("get_assembly_context", data)
+    result = safe_post_json("get_assembly_context", data, program=program)
 
     # Format the JSON response for readability
     try:
@@ -4018,7 +3804,7 @@ def get_assembly_context(
 
 @mcp.tool()
 def analyze_struct_field_usage(
-    address: str, struct_name: str = None, max_functions: int = 10
+    address: str, struct_name: str = None, max_functions: int = 10, program: str = None
 ) -> str:
     """
     Analyze how structure fields are accessed in decompiled code.
@@ -4031,6 +3817,7 @@ def analyze_struct_field_usage(
         address: Address of the structure instance in hex format (e.g., "0x6fb835b8")
         struct_name: Name of the structure type (optional - can be inferred if null)
         max_functions: Maximum number of referencing functions to analyze (default: 10)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON string with field usage analysis:
@@ -4066,7 +3853,7 @@ def analyze_struct_field_usage(
     if struct_name:
         data["struct_name"] = struct_name
 
-    result = safe_post_json("analyze_struct_field_usage", data)
+    result = safe_post_json("analyze_struct_field_usage", data, program=program)
 
     # Format the JSON response for readability
     try:
@@ -4078,7 +3865,7 @@ def analyze_struct_field_usage(
 
 @mcp.tool()
 def get_field_access_context(
-    struct_address: str, field_offset: int, num_examples: int = 5
+    struct_address: str, field_offset: int, num_examples: int = 5, program: str = None
 ) -> str:
     """
     Get assembly/decompilation context for specific field offsets.
@@ -4091,6 +3878,7 @@ def get_field_access_context(
         struct_address: Address of the structure instance in hex format (e.g., "0x6fb835b8")
         field_offset: Offset of the field within the structure (e.g., 4 for second DWORD)
         num_examples: Number of usage examples to return (default: 5)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON string with field access contexts:
@@ -4128,7 +3916,7 @@ def get_field_access_context(
         "num_examples": num_examples,
     }
 
-    result = safe_post_json("get_field_access_context", data)
+    result = safe_post_json("get_field_access_context", data, program=program)
 
     # Format the JSON response for readability
     try:
@@ -4144,6 +3932,7 @@ def batch_set_comments(
     decompiler_comments: list = None,
     disassembly_comments: list = None,
     plate_comment: str = None,
+    program: str = None,
 ) -> str:
     """
     Set multiple comments in a single operation (v1.5.0).
@@ -4154,6 +3943,7 @@ def batch_set_comments(
         decompiler_comments: List of {"address": "0x...", "comment": "..."} for PRE_COMMENT
         disassembly_comments: List of {"address": "0x...", "comment": "..."} for EOL_COMMENT
         plate_comment: Function header summary comment
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with success status and counts of comments set
@@ -4171,7 +3961,7 @@ def batch_set_comments(
         "plate_comment": plate_comment,
     }
 
-    return safe_post_json("batch_set_comments", payload)
+    return safe_post_json("batch_set_comments", payload, program=program)
 
 
 @mcp.tool()
@@ -4180,6 +3970,7 @@ def clear_function_comments(
     clear_plate: bool = True,
     clear_pre: bool = True,
     clear_eol: bool = True,
+    program: str = None,
 ) -> str:
     """
     Clear all comments (plate, PRE, EOL) within a function's address range (v3.0.1).
@@ -4190,6 +3981,7 @@ def clear_function_comments(
         clear_plate: Clear the plate (header) comment (default: True)
         clear_pre: Clear all PRE_COMMENT (decompiler) comments (default: True)
         clear_eol: Clear all EOL_COMMENT (disassembly) comments (default: True)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with counts of comments cleared per type
@@ -4203,17 +3995,18 @@ def clear_function_comments(
         "clear_eol": clear_eol,
     }
 
-    return safe_post_json("clear_function_comments", payload)
+    return safe_post_json("clear_function_comments", payload, program=program)
 
 
 @mcp.tool()
-def get_plate_comment(address: str) -> str:
+def get_plate_comment(address: str, program: str = None) -> str:
     """
     Get function plate (header) comment.
     This retrieves the comment that appears above the function in both disassembly and decompiler views.
 
     Args:
         address: Function address in hex format (e.g., "0x401000")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with address and comment, or null if no comment exists
@@ -4221,11 +4014,11 @@ def get_plate_comment(address: str) -> str:
     validate_hex_address(address)
 
     params = {"address": address}
-    return safe_get_json("get_plate_comment", params)
+    return safe_get_json("get_plate_comment", params, program=program)
 
 
 @mcp.tool()
-def set_plate_comment(function_address: str, comment: str) -> str:
+def set_plate_comment(function_address: str, comment: str, program: str = None) -> str:
     """
     Set function plate (header) comment (v1.5.0).
     This comment appears above the function in both disassembly and decompiler views.
@@ -4233,6 +4026,7 @@ def set_plate_comment(function_address: str, comment: str) -> str:
     Args:
         function_address: Function address in hex format (e.g., "0x401000")
         comment: Function header summary comment
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message
@@ -4243,7 +4037,7 @@ def set_plate_comment(function_address: str, comment: str) -> str:
     comment = _convert_escaped_newlines(comment)
 
     params = {"function_address": function_address, "comment": comment}
-    result = safe_post("set_plate_comment", params)
+    result = safe_post("set_plate_comment", params, program=program)
 
     # Verify plate comment was applied by decompiling the function
     # This works around a Ghidra decompiler cache race condition where
@@ -4256,7 +4050,10 @@ def set_plate_comment(function_address: str, comment: str) -> str:
             time.sleep(0.3)
 
             # Decompile by address and check for plate comment
-            decompiled = safe_get("decompile_function", {"address": function_address})
+            decompile_params = {"address": function_address}
+            if program:
+                decompile_params["program"] = program
+            decompiled = safe_get("decompile_function", decompile_params)
             if isinstance(decompiled, list):
                 decompiled = "\n".join(decompiled)
 
@@ -4266,12 +4063,12 @@ def set_plate_comment(function_address: str, comment: str) -> str:
                     f"Plate comment cache miss detected at {function_address}, retrying..."
                 )
                 time.sleep(0.5)  # Longer wait before retry
-                result = safe_post("set_plate_comment", params)
+                result = safe_post("set_plate_comment", params, program=program)
 
                 # Verify retry succeeded
                 time.sleep(0.3)
                 decompiled = safe_get(
-                    "decompile_function", {"address": function_address}
+                    "decompile_function", decompile_params
                 )
                 if isinstance(decompiled, list):
                     decompiled = "\n".join(decompiled)
@@ -4319,6 +4116,7 @@ def batch_rename_function_components(
     parameter_renames: dict = None,
     local_renames: dict = None,
     return_type: str = None,
+    program: str = None,
 ) -> str:
     """
     Rename function and all its components atomically (v1.5.0).
@@ -4330,6 +4128,7 @@ def batch_rename_function_components(
         parameter_renames: Dict of {"old_name": "new_name"} for parameters
         local_renames: Dict of {"old_name": "new_name"} for local variables
         return_type: New return type (optional)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with success status and counts of renamed components
@@ -4344,84 +4143,70 @@ def batch_rename_function_components(
         "return_type": return_type,
     }
 
-    return safe_post_json("batch_rename_function_components", payload)
+    return safe_post_json("batch_rename_function_components", payload, program=program)
 
 
 @mcp.tool()
-def get_valid_data_types(category: str = None) -> str:
+def get_valid_data_types(category: str = None, program: str = None) -> str:
     """
     Get list of valid Ghidra data type strings (v1.5.0).
     Helps construct proper type definitions for create_struct and other type operations.
 
     Args:
         category: Optional category filter (not currently used)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with lists of builtin_types and windows_types
     """
     params = {"category": category} if category else {}
-    return safe_get("get_valid_data_types", params)
+    return safe_get("get_valid_data_types", params, program=program)
 
 
 @mcp.tool()
-def analyze_function_completeness(function_address: str) -> str:
+def analyze_function_completeness(function_address: str, compact: bool = True, program: str = None) -> str:
     """
-    Analyze how completely a function has been documented (v1.5.0+).
-    Checks for custom names, prototypes, comments, undefined variables,
-    plate comment structure, and Hungarian notation compliance.
-
-    **NEW**: Returns workflow-aligned recommendations based on FUNCTION_DOC_WORKFLOW_V5.md
-    to guide users on exactly what steps to take to achieve 100% completeness.
+    Analyze how completely a function has been documented.
+    Checks names, prototypes, comments, undefined variables, Hungarian notation, and type quality.
 
     Args:
-        function_address: Function address in hex format
+        function_address: Function address in hex format.
+        compact: If True (default), returns only scores and issue counts (~300 bytes).
+                 If False, returns full issue arrays and workflow recommendations (~20KB).
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON with completeness analysis including:
-        - has_custom_name, has_prototype, has_calling_convention
-        - has_plate_comment, plate_comment_issues (minimum lines, required sections)
-        - undefined_variables (generic names and undefined types)
-        - hungarian_notation_violations (type-to-prefix mismatches)
-        - type_quality_issues (void* parameters, state-based type names)
-        - completeness_score (0-100)
-        - recommendations (array of actionable steps aligned with FUNCTION_DOC_WORKFLOW_V5.md)
-
-    Recommendations provide specific guidance on:
-        - Type normalization (undefined1 -> byte, undefined4 -> uint/int/float)
-        - Mandatory undefined type audit (check disassembly for assembly-only types)
-        - Plate comment structure (Algorithm, Parameters, Returns sections)
-        - Hungarian notation rules and prefix mappings
-        - Complete workflow steps in order
-
-    Example response:
-        {
-          "function_name": "InitializeGameObjectFields",
-          "has_custom_name": true,
-          "has_prototype": true,
-          "has_calling_convention": true,
-          "has_plate_comment": true,
-          "plate_comment_issues": [],
-          "undefined_variables": [
-            "pPrevHandler (type: undefined4)",
-            "dwExceptionState (type: undefined4)"
-          ],
-          "hungarian_notation_violations": [],
-          "type_quality_issues": [],
-          "completeness_score": 85.0,
-          "recommendations": [
-            "UNDEFINED TYPES DETECTED - Follow FUNCTION_DOC_WORKFLOW_V5.md Phase 2 'Type Audit' section:",
-            "1. Type Resolution: Apply type normalization before renaming:",
-            "   - undefined4 -> uint/int/float/pointer (32-bit - check usage context)",
-            "2. Use set_local_variable_type() with lowercase builtin types (uint, ushort, byte)",
-            "3. CRITICAL: Check disassembly with get_disassembly() for assembly-only undefined types",
-            "4. After resolving ALL undefined types, rename variables with Hungarian notation"
-          ]
-        }
+        JSON with completeness_score (0-100), effective_score, all_deductions_unfixable,
+        has_renameable_variables, and issue counts (compact) or full issue arrays (verbose).
     """
     validate_hex_address(function_address)
 
     params = {"function_address": function_address}
-    return safe_get_json("analyze_function_completeness", params)
+    if compact:
+        params["compact"] = "true"
+    return safe_get_json("analyze_function_completeness", params, program=program)
+
+
+@mcp.tool()
+def analyze_for_documentation(function_address: str, program: str = None) -> str:
+    """
+    Composite endpoint for RE documentation workflow. Single call returns decompiled code,
+    classification, callees (with ordinal/thunk flags), parameters and locals with
+    pre-analysis (needs_type, needs_rename, suggested_type, suggested_prefix),
+    DAT global count, and compact completeness score.
+
+    Args:
+        function_address: Function address in hex format (e.g., "0x6FAB1234")
+        program: Optional program name for multi-program support
+
+    Returns:
+        JSON with all data needed to document one function in a single response.
+    """
+    validate_hex_address(function_address)
+    params = {"function_address": function_address}
+    if program:
+        params["program"] = program
+    return safe_get_json("analyze_for_documentation", params)
 
 
 @mcp.tool()
@@ -4437,48 +4222,29 @@ def batch_apply_documentation(
     disassembly_comments: list = None,
     goto: bool = False,
     score: bool = True,
+    program: str = None,
 ) -> str:
     """
-    Apply all documentation to a function in a single call (v4.0.0).
-    Replaces 5-6 separate tool calls (rename + prototype + types + renames + comments + score)
-    with one atomic operation.
-
-    Steps execute in dependency order: rename -> prototype -> variable_types ->
-    variable_renames -> comments -> score. All fields except address are optional.
-    Each step is independent — failures in one step don't prevent subsequent steps.
-
-    IMPORTANT: Prototype is applied BEFORE comments because set_function_prototype
-    wipes the plate comment. Comments are always set last.
+    Apply all documentation to a function in a single call.
+    Executes in order: rename -> prototype -> variable_types -> variable_renames -> comments -> score.
+    Each step is independent; failures in one step don't block subsequent steps.
 
     Args:
         address: Function address in hex format (e.g., "0x6FDB2C70"). Required.
-        name: New function name (PascalCase, verb-first). Omit to skip rename.
+        name: New function name. Omit to skip rename.
         prototype: Full function signature (e.g., "void* __stdcall GetItemDataRecord(int nItemCode)").
         calling_convention: Override calling convention (e.g., "__stdcall", "__fastcall").
-        variable_types: Dict of {variable_name: new_type} to set storage types.
-            Example: {"param_1": "int", "local_8": "void*"}
-        variable_renames: Dict of {old_name: new_name} for Hungarian-notation renames.
-            Example: {"param_1": "nItemCode", "local_8": "pRecord"}
-        plate_comment: Function header comment with summary, algorithm, parameters, returns.
+        variable_types: Dict of {variable_name: new_type} for storage types.
+        variable_renames: Dict of {old_name: new_name} for variable renames.
+        plate_comment: Function header comment.
         decompiler_comments: List of {"address": "0x...", "comment": "..."} for PRE_COMMENTs.
         disassembly_comments: List of {"address": "0x...", "comment": "..."} for EOL_COMMENTs.
-        goto: If true, navigate CodeBrowser to this function before applying changes.
-        score: If true (default), run completeness analysis after all changes and include the score.
+        goto: If true, navigate CodeBrowser to this function before applying.
+        score: If true (default), include completeness analysis after changes.
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON with per-step results and optional completeness score:
-        {
-          "address": "0x6FDB2C70",
-          "steps": {
-            "rename": {"success": true},
-            "prototype": {"success": true},
-            "variable_types": {"success": true, "set": 2, "failed": 0},
-            "variable_renames": {"success": true, "renamed": 3, "failed": 0},
-            "comments": {"success": true, "plate": true, "decompiler": 2, "disassembly": 1}
-          },
-          "completeness": { ... full completeness analysis ... },
-          "errors": []
-        }
+        JSON with per-step success/failure results and optional completeness score.
     """
     validate_hex_address(address)
 
@@ -4500,11 +4266,11 @@ def batch_apply_documentation(
     if disassembly_comments is not None:
         payload["disassembly_comments"] = disassembly_comments
 
-    return safe_post_json("batch_apply_documentation", payload)
+    return safe_post_json("batch_apply_documentation", payload, program=program)
 
 
 @mcp.tool()
-def batch_analyze_completeness(addresses: list[str]) -> str:
+def batch_analyze_completeness(addresses: list[str], program: str = None) -> str:
     """
     Analyze completeness for multiple functions in a single call.
     Returns all completeness scores, deductions, and recommendations at once,
@@ -4512,6 +4278,7 @@ def batch_analyze_completeness(addresses: list[str]) -> str:
 
     Args:
         addresses: List of hex addresses (e.g., ["0x10001000", "0x10002000"])
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with results array containing completeness data for each function
@@ -4521,7 +4288,7 @@ def batch_analyze_completeness(addresses: list[str]) -> str:
     for addr in addresses:
         validate_hex_address(addr)
 
-    return safe_post_json("batch_analyze_completeness", {"addresses": addresses})
+    return safe_post_json("batch_analyze_completeness", {"addresses": addresses}, program=program)
 
 
 @mcp.tool()
@@ -4562,13 +4329,14 @@ def find_next_undefined_function(
 
 
 @mcp.tool()
-def batch_set_variable_types(function_address: str, variable_types: dict) -> str:
+def batch_set_variable_types(function_address: str, variable_types: dict, program: str = None) -> str:
     """
     Set types for multiple variables in a single operation (v1.5.0).
 
     Args:
         function_address: Function address in hex format
         variable_types: Dict of {"variable_name": "type_name"}
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with success status and count of variables typed
@@ -4580,7 +4348,7 @@ def batch_set_variable_types(function_address: str, variable_types: dict) -> str
         "variable_types": variable_types or {},
     }
 
-    return safe_post_json("batch_set_variable_types", payload)
+    return safe_post_json("batch_set_variable_types", payload, program=program)
 
 
 # ========== HIGH PRIORITY: WORKFLOW ENHANCEMENTS (v1.6.0) ==========
@@ -4591,7 +4359,7 @@ def batch_set_variable_types(function_address: str, variable_types: dict) -> str
 
 @mcp.tool()
 def set_parameter_type(
-    function_address: str, parameter_name: str, new_type: str
+    function_address: str, parameter_name: str, new_type: str, program: str = None
 ) -> str:
     """
     Change a parameter's data type to improve decompilation quality.
@@ -4604,6 +4372,7 @@ def set_parameter_type(
         function_address: Function address in hex format
         parameter_name: Name of the parameter to modify
         new_type: New data type (e.g., "MyStruct *", "int *", "char *")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or failure message with details
@@ -4616,7 +4385,7 @@ def set_parameter_type(
         "new_type": new_type,
     }
 
-    return safe_post_json("set_parameter_type", payload)
+    return safe_post_json("set_parameter_type", payload, program=program)
 
 
 @mcp.tool()
@@ -4682,48 +4451,22 @@ def search_functions_enhanced(
     program: str = None,
 ) -> str:
     """
-    Enhanced function search with filtering and sorting (v1.6.0).
-
-    Provides powerful search capabilities to find functions matching
-    multiple criteria, with support for regex patterns and sorting.
+    Enhanced function search with filtering and sorting.
 
     Args:
         name_pattern: Function name pattern (substring or regex)
-        min_xrefs: Minimum number of cross-references
-        max_xrefs: Maximum number of cross-references
+        min_xrefs: Minimum cross-reference count
+        max_xrefs: Maximum cross-reference count
         calling_convention: Filter by calling convention
-        has_custom_name: True=user-named only, False=default names (FUN_) only
+        has_custom_name: True=user-named only, False=FUN_* only
         regex: Enable regex pattern matching
-        sort_by: Sort order: "address"|"name"|"xref_count" (default: "address")
+        sort_by: "address" (default), "name", or "xref_count"
         offset: Pagination offset
         limit: Maximum results to return
-        program: Optional program name to query (e.g., "D2Client.dll").
-                 If not specified, uses the currently active program.
+        program: Optional program name. Defaults to active program.
 
     Returns:
-        JSON with search results:
-        {
-          "total": 150,
-          "offset": 0,
-          "limit": 100,
-          "results": [
-            {
-              "name": "ProcessPlayerSkillCooldowns",
-              "address": "0x6fb385a0",
-              "xref_count": 5,
-              "calling_convention": "__cdecl"
-            }
-          ]
-        }
-
-    Example:
-        # Find all FUN_ functions with 2+ xrefs, sorted by xref count
-        search_functions_enhanced(
-            name_pattern="FUN_",
-            min_xrefs=2,
-            sort_by="xref_count",
-            limit=50
-        )
+        JSON with total count and results array (name, address, xref_count, calling_convention).
     """
     params = {
         "name_pattern": name_pattern,
@@ -4749,42 +4492,20 @@ def disassemble_bytes(
     end_address: str = None,
     length: int = None,
     restrict_to_execute_memory: bool = True,
+    program: str = None,
 ) -> str:
     """
-    Disassemble a range of undefined bytes at a specific address (v1.7.1).
-
-    This tool converts undefined bytes into disassembled instructions, which is
-    essential after clearing flow overrides that previously hid code.
+    Disassemble undefined bytes into instructions at a specific address range.
 
     Args:
         start_address: Starting address in hex format (e.g., "0x6fb4ca14")
-        end_address: Optional ending address in hex format (exclusive)
-        length: Optional length in bytes (alternative to end_address)
-        restrict_to_execute_memory: If true, restricts to executable memory (default: True)
+        end_address: Optional ending address in hex (exclusive)
+        length: Optional length in bytes (alternative to end_address). Auto-detects if neither given.
+        restrict_to_execute_memory: Restrict to executable memory (default: True)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON with disassembly result:
-        {
-          "success": true,
-          "start_address": "0x6fb4ca14",
-          "end_address": "0x6fb4ca28",
-          "bytes_disassembled": 21,
-          "message": "Successfully disassembled 21 byte(s)"
-        }
-
-    Example:
-        # Disassemble 21 bytes at 0x6fb4ca14
-        disassemble_bytes("0x6fb4ca14", length=21)
-
-        # Disassemble range from 0x6fb4ca14 to 0x6fb4ca29 (exclusive)
-        disassemble_bytes("0x6fb4ca14", end_address="0x6fb4ca29")
-
-        # Auto-detect length (scan until existing code/data found)
-        disassemble_bytes("0x6fb4ca14")
-
-    Note:
-        If neither end_address nor length is provided, the tool will automatically
-        detect the range by scanning until it hits existing instructions or defined data.
+        JSON with success status, address range, and bytes_disassembled count.
     """
     if not validate_hex_address(start_address):
         raise GhidraValidationError(f"Invalid start address format: {start_address}")
@@ -4802,21 +4523,24 @@ def disassemble_bytes(
     # Remove None values
     data = {k: v for k, v in data.items() if v is not None}
 
-    return safe_post_json("disassemble_bytes", data)
+    return safe_post_json("disassemble_bytes", data, program=program)
 
 
 @mcp.tool()
-def save_program() -> str:
+def save_program(program: str = None) -> str:
     """
     Save the current program in Ghidra.
 
     Saves all pending changes to the Ghidra project database.
     Call this before exiting Ghidra to ensure no work is lost.
 
+    Args:
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
+
     Returns:
         JSON with save status.
     """
-    return safe_post_json("save_program", {})
+    return safe_post_json("save_program", {}, program=program)
 
 
 @mcp.tool()
@@ -4834,7 +4558,7 @@ def exit_ghidra() -> str:
 
 
 @mcp.tool()
-def delete_function(address: str) -> str:
+def delete_function(address: str, program: str = None) -> str:
     """
     Delete a function at the specified address.
 
@@ -4844,6 +4568,7 @@ def delete_function(address: str) -> str:
 
     Args:
         address: Address of the function entry point in hex format (e.g., "0x08011d34")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with deletion result including the name of the deleted function.
@@ -4854,52 +4579,24 @@ def delete_function(address: str) -> str:
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid address format: {address}")
 
-    return safe_post_json("delete_function", {"address": address})
+    return safe_post_json("delete_function", {"address": address}, program=program)
 
 
 @mcp.tool()
 def create_function(
-    address: str, name: str = None, disassemble_first: bool = True
+    address: str, name: str = None, disassemble_first: bool = True, program: str = None
 ) -> str:
     """
-    Create a function at the specified address (v1.9.4).
-
-    This tool creates a new function at the given address. Useful for
-    defining functions that Ghidra didn't automatically detect, such as:
-    - Code after unconditional returns
-    - Functions referenced only from data pointers/tables
-    - Hidden code revealed after clearing flow overrides
-    - Orphaned code segments
+    Create a function at the specified address.
 
     Args:
-        address: Starting address for the function in hex format (e.g., "0x6ff56791")
-        name: Optional name for the function (if omitted, uses auto-generated FUN_ name)
+        address: Starting address in hex format (e.g., "0x6ff56791")
+        name: Optional function name (if omitted, auto-generates FUN_ name)
         disassemble_first: If true, disassemble bytes before creating function (default: True)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON with function creation result:
-        {
-          "success": true,
-          "address": "0x6ff56791",
-          "function_name": "FUN_6ff56791",
-          "entry_point": "0x6ff56791",
-          "auto_analysis_pending": true,
-          "message": "Function created successfully at 0x6ff56791"
-        }
-
-    Examples:
-        # Create function at orphan address with auto-generated name
-        create_function("0x6ff56791")
-
-        # Create function with custom name
-        create_function("0x6ff56791", name="ProcessOrphanedData")
-
-        # Create function without disassembling first (if already disassembled)
-        create_function("0x6ff56791", disassemble_first=False)
-
-    Note:
-        This will fail if a function already exists at the address.
-        Use disassemble_first=True (default) to ensure instructions exist before function creation.
+        JSON with success status, address, function name, and entry point.
     """
     if not validate_hex_address(address):
         raise GhidraValidationError(f"Invalid address format: {address}")
@@ -4909,7 +4606,7 @@ def create_function(
     # Remove None values
     data = {k: v for k, v in data.items() if v is not None}
 
-    return safe_post_json("create_function", data)
+    return safe_post_json("create_function", data, program=program)
 
 
 @mcp.tool()
@@ -4922,6 +4619,7 @@ def create_memory_block(
     execute: bool = False,
     volatile: bool = False,
     comment: str = None,
+    program: str = None,
 ) -> str:
     """
     Create an uninitialized memory block at the specified address.
@@ -4938,6 +4636,7 @@ def create_memory_block(
         execute: Allow execute access (default: False)
         volatile: Mark as volatile memory (default: False)
         comment: Optional description for the block
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with block creation result including name, address range,
@@ -4963,7 +4662,7 @@ def create_memory_block(
     if comment is not None:
         data["comment"] = comment
 
-    return safe_post_json("create_memory_block", data)
+    return safe_post_json("create_memory_block", data, program=program)
 
 
 # ========== SCRIPT GENERATION (v1.9.0) ==========
@@ -5211,41 +4910,20 @@ def run_ghidra_script(
     args: str = None,
     timeout_seconds: int = 300,
     capture_output: bool = True,
+    program: str = None,
 ) -> str:
     """
     Run a Ghidra script by name and capture all output including errors.
 
-    Searches for the script in ~/ghidra_scripts/, ./ghidra_scripts/, and
-    absolute paths. Scripts from other locations are automatically copied
-    to ~/ghidra_scripts/ for OSGi class loading compatibility.
-
     Args:
-        script_name: Script name (e.g., "MyScript" or "MyScript.java") or absolute path
-        args: Optional space-separated arguments passed to the script via
-              getScriptArgs(). This prevents scripts from falling through to
-              askString() which opens a blocking GUI dialog.
-        timeout_seconds: Max execution time (default: 5 minutes)
+        script_name: Script name (e.g., "MyScript.java") or absolute path
+        args: Optional space-separated arguments passed via getScriptArgs()
+        timeout_seconds: Max execution time in seconds (default: 300)
         capture_output: Capture console output (default: True)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON with execution results:
-        {
-            "success": true/false,
-            "script_name": "DocumentFunctions",
-            "script_path": "/home/user/ghidra_scripts/DocumentFunctions.java",
-            "execution_time_seconds": 45.2,
-            "console_output": "Processing...\\nCompleted!"
-        }
-
-    Example:
-        # Run a script with no arguments
-        run_ghidra_script("DocumentFunctions")
-
-        # Run a script with arguments (prevents askString() dialogs)
-        run_ghidra_script("ExportSymbols", args="/tmp/symbols.json")
-
-        # Run with multiple arguments
-        run_ghidra_script("RebaseScript", args="0x08000000 0x20000000")
+        JSON with success status, script path, execution time, and console output.
     """
     import json
 
@@ -5260,7 +4938,7 @@ def run_ghidra_script(
     if args:
         payload["args"] = args
 
-    result = safe_post_json("run_ghidra_script", payload)
+    result = safe_post_json("run_ghidra_script", payload, program=program)
 
     try:
         parsed = json.loads(result)
@@ -5270,7 +4948,7 @@ def run_ghidra_script(
 
 
 @mcp.tool()
-def run_script_inline(code: str, args: str = None) -> str:
+def run_script_inline(code: str, args: str = None, program: str = None) -> str:
     """
     Execute an inline Java snippet as a Ghidra script.
 
@@ -5281,6 +4959,7 @@ def run_script_inline(code: str, args: str = None) -> str:
     Args:
         code: Complete Java source code (must contain a class extending GhidraScript)
         args: Optional space-separated arguments passed to the script
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Script execution output including console output and any errors.
@@ -5303,7 +4982,7 @@ def run_script_inline(code: str, args: str = None) -> str:
     if args:
         data["args"] = args
 
-    return safe_post_json("run_script_inline", data)
+    return safe_post_json("run_script_inline", data, program=program)
 
 
 @mcp.tool()
@@ -5547,11 +5226,11 @@ def get_current_program_info() -> str:
 @mcp.tool()
 def switch_program(name: str) -> str:
     """
-    Switch MCP context to a different open program.
+    Switch the default program for tools that don't specify an explicit program.
 
-    After switching, all subsequent MCP tool calls will operate on
-    the newly selected program. The program must already be open
-    in Ghidra (use list_open_programs() to see available programs).
+    Sets which program is used when a tool call omits the `program` parameter.
+    For deterministic multi-binary workflows, prefer passing `program=` explicitly
+    to each tool call instead of relying on switch_program.
 
     Args:
         name: Name of the program to switch to. Can be:
@@ -5565,11 +5244,13 @@ def switch_program(name: str) -> str:
         GhidraValidationError: If program name not provided or not found
 
     Example:
-        # Switch to a different DLL
-        result = switch_program("D2Client.dll")
+        # For parallel multi-binary, pass program= explicitly:
+        funcs_a = list_functions(program="D2Client.dll")
+        funcs_b = list_functions(program="D2Common.dll")
 
-        # Now all tools operate on D2Client.dll
-        funcs = list_functions()  # Lists D2Client functions
+        # switch_program sets the fallback default (not needed with explicit program=):
+        switch_program("D2Client.dll")
+        funcs = list_functions()  # Uses D2Client.dll as default
     """
     if not name:
         raise GhidraValidationError("Program name is required")
@@ -5789,7 +5470,8 @@ def set_bookmark(
     address: str,
     category: str = "Analysis",
     comment: str = "",
-    bookmark_type: str = "Note"
+    bookmark_type: str = "Note",
+    program: str = None
 ) -> str:
     """
     Set a bookmark at the specified address.
@@ -5803,6 +5485,7 @@ def set_bookmark(
         category: Bookmark category for organization (default: "Analysis")
         comment: Descriptive comment for the bookmark
         bookmark_type: Type of bookmark - "Note", "Warning", "Error", "Info" (default: "Note")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON confirmation of bookmark creation
@@ -5818,6 +5501,8 @@ def set_bookmark(
         raise GhidraValidationError("Address is required")
 
     url = f"{ghidra_server_url}/set_bookmark"
+    if program:
+        url += f"?program={program}"
     params = {
         "address": address,
         "category": category,
@@ -5828,7 +5513,7 @@ def set_bookmark(
 
 
 @mcp.tool()
-def delete_bookmark(address: str, category: str = None) -> str:
+def delete_bookmark(address: str, category: str = None, program: str = None) -> str:
     """
     Delete a bookmark at the specified address.
 
@@ -5838,6 +5523,7 @@ def delete_bookmark(address: str, category: str = None) -> str:
     Args:
         address: Address of the bookmark to delete
         category: Optional category filter (deletes all if not specified)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON confirmation of deletion
@@ -5853,7 +5539,7 @@ def delete_bookmark(address: str, category: str = None) -> str:
     params = {"address": address}
     if category:
         params["category"] = category
-    return make_request(url, method="POST", data=json.dumps(params))
+    return make_request(url, method="POST", data=json.dumps(params), program=program)
 
 
 # ====================================================================================
@@ -5862,7 +5548,7 @@ def delete_bookmark(address: str, category: str = None) -> str:
 
 
 @mcp.tool()
-def analyze_control_flow(function_name: str) -> str:
+def analyze_control_flow(function_name: str, program: str = None) -> str:
     """
     Analyze the control flow structure of a function.
 
@@ -5875,6 +5561,7 @@ def analyze_control_flow(function_name: str) -> str:
 
     Args:
         function_name: Name of function to analyze
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with control flow graph data and complexity metrics
@@ -5895,11 +5582,13 @@ def analyze_control_flow(function_name: str) -> str:
 
     url = f"{ghidra_server_url}/analyze_control_flow"
     params = {"function_name": function_name}
+    if program:
+        params["program"] = program
     return make_request(url, method="GET", params=params)
 
 
 @mcp.tool()
-def find_dead_code(function_name: str = None) -> str:
+def find_dead_code(function_name: str = None, program: str = None) -> str:
     """
     Find unreachable/dead code blocks in a function or entire program.
 
@@ -5912,6 +5601,7 @@ def find_dead_code(function_name: str = None) -> str:
 
     Args:
         function_name: Optional function to analyze. If not provided, scans entire program.
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with list of unreachable code blocks and their addresses
@@ -5924,11 +5614,11 @@ def find_dead_code(function_name: str = None) -> str:
     params = {}
     if function_name:
         params["function_name"] = function_name
-    return make_request(url, method="GET", params=params)
+    return make_request(url, method="GET", params=params, program=program)
 
 
 @mcp.tool()
-def find_anti_analysis_techniques() -> str:
+def find_anti_analysis_techniques(program: str = None) -> str:
     """
     Detect anti-analysis and anti-debugging techniques in the binary.
 
@@ -5939,6 +5629,9 @@ def find_anti_analysis_techniques() -> str:
     - VM/sandbox detection
     - Self-modifying code indicators
     - API obfuscation
+
+    Args:
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with detected techniques, their locations, and severity
@@ -5954,11 +5647,11 @@ def find_anti_analysis_techniques() -> str:
         # }
     """
     url = f"{ghidra_server_url}/find_anti_analysis_techniques"
-    return make_request(url, method="GET")
+    return make_request(url, method="GET", program=program)
 
 
 @mcp.tool()
-def batch_decompile(functions: str) -> str:
+def batch_decompile(functions: str, program: str = None) -> str:
     """
     Decompile multiple functions at once for bulk analysis.
 
@@ -5969,6 +5662,7 @@ def batch_decompile(functions: str) -> str:
 
     Args:
         functions: Comma-separated list of function names or addresses
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with decompiled code for each function
@@ -5982,11 +5676,13 @@ def batch_decompile(functions: str) -> str:
 
     url = f"{ghidra_server_url}/batch_decompile"
     params = {"functions": functions}
+    if program:
+        params["program"] = program
     return make_request(url, method="GET", params=params)
 
 
 @mcp.tool()
-def get_function_metrics(function_name: str = None, address: str = None) -> str:
+def get_function_metrics(function_name: str = None, address: str = None, program: str = None) -> str:
     """
     Get complexity metrics for a function.
 
@@ -5998,6 +5694,7 @@ def get_function_metrics(function_name: str = None, address: str = None) -> str:
     Args:
         function_name: Name of function to analyze
         address: Or address of function (alternative to name)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with metrics:
@@ -6022,6 +5719,8 @@ def get_function_metrics(function_name: str = None, address: str = None) -> str:
         params["target_function"] = function_name
     elif address:
         params["target_function"] = address
+    if program:
+        params["program"] = program
     return make_request(url, method="GET", params=params)
 
 
@@ -6124,54 +5823,12 @@ def batch_string_anchor_report(pattern: str = ".cpp", program: str = None) -> st
     """
     Generate a report of source file strings and their undocumented functions.
 
-    Scans all strings matching a pattern (default: ".cpp" for source file paths)
-    and returns a prioritized list of string anchors with their FUN_* functions.
-    This enables efficient batch documentation of functions by source file.
-
     Args:
-        pattern: String pattern to match (default: ".cpp" for source files)
-                 Other useful patterns: ".h", "Error", "Assert"
+        pattern: String pattern to match (default: ".cpp"). Other useful patterns: ".h", "Error", "Assert"
         program: Optional program name for multi-program support
 
     Returns:
-        JSON with anchor report:
-        {
-          "pattern": ".cpp",
-          "anchors": [
-            {
-              "string": "..\\Source\\D2Client\\UI\\panel.cpp",
-              "address": "6fb86c18",
-              "undocumented": [
-                {"name": "FUN_6fadecd0", "address": "6fadecd0"}
-              ],
-              "documented": ["RenderGamePanels"],
-              "undocumented_count": 1,
-              "documented_count": 1
-            },
-            {
-              "string": "..\\Source\\D2Client\\UI\\automap.cpp",
-              "address": "6fb85e3c",
-              "undocumented": [
-                {"name": "FUN_6fb09460", "address": "6fb09460"},
-                {"name": "FUN_6fb09b60", "address": "6fb09b60"}
-              ],
-              "documented": ["AllocateAutomapSprite", "LoadAutomapDataFromStorage"],
-              "undocumented_count": 2,
-              "documented_count": 2
-            }
-          ],
-          "total_anchors": 17,
-          "total_undocumented_functions": 45
-        }
-
-    Example:
-        # Get prioritized list of source files with undocumented functions
-        report = batch_string_anchor_report(".cpp")
-
-        # Process each anchor's undocumented functions
-        for anchor in report["anchors"]:
-            if anchor["undocumented_count"] > 0:
-                print(f"{anchor['string']}: {anchor['undocumented_count']} to document")
+        JSON with anchors (string, address, undocumented/documented function lists), total counts.
     """
     url = f"{ghidra_server_url}/batch_string_anchor_report"
     params = {"pattern": pattern}
@@ -6188,42 +5845,14 @@ def batch_string_anchor_report(pattern: str = ".cpp", program: str = None) -> st
 @mcp.tool()
 def get_function_hash(address: str, program: str = None) -> str:
     """
-    Compute a normalized opcode hash for a function.
-
-    The hash normalizes absolute addresses (call targets, jump targets, data refs)
-    to allow matching identical functions located at different addresses across
-    different versions of a binary.
-
-    Hash normalization:
-    - Internal jump/call targets: Converted to relative offsets
-    - External call targets: Replaced with CALL_EXT
-    - External data references: Replaced with DATA_EXT
-    - Small immediates (<0x10000): Kept as-is (likely constants)
-    - Large immediates: Replaced with IMM_LARGE
-    - Registers: Preserved (part of function logic)
+    Compute a normalized opcode hash for a function (address-independent, for cross-binary matching).
 
     Args:
         address: Function address in hex format (e.g., "0x6FAB1234")
         program: Optional program name for multi-program support
 
     Returns:
-        JSON with function hash and metadata:
-        {
-            "function_name": "ProcessUnit",
-            "address": "0x6fab1234",
-            "hash": "a1b2c3d4...",
-            "instruction_count": 42,
-            "size_bytes": 156,
-            "has_custom_name": true,
-            "program": "D2Client.dll"
-        }
-
-    Example:
-        # Get hash for a documented function
-        hash_info = get_function_hash("0x6FAB1234")
-
-        # Use hash to find matches in other binaries
-        # (see build_function_hash_index for automation)
+        JSON with function name, address, hash, instruction count, size, and program.
     """
     if not address:
         raise GhidraValidationError("Function address is required")
@@ -6335,17 +5964,7 @@ def find_similar_functions_fuzzy(
     limit: int = 20,
 ) -> str:
     """
-    Find functions in a target binary that are similar to a given source function.
-
-    Uses compiler-agnostic similarity scoring based on call graph, string
-    references, constants, and structural features. Designed for matching
-    functions across binaries compiled by different compilers where exact
-    hash matching fails.
-
-    Similarity weights (optimized for cross-compiler matching):
-    - 60% set features: callee names (50%), strings (30%), immediates (20%)
-    - 25% numeric features: instruction count, blocks, calls, complexity
-    - 15% structural: basic block hash overlap
+    Find functions in a target binary that are similar to a given source function using fuzzy matching.
 
     Args:
         address: Source function address in hex format (e.g., "0x08011d34")
@@ -6355,23 +5974,7 @@ def find_similar_functions_fuzzy(
         limit: Maximum number of matches to return (default: 20)
 
     Returns:
-        JSON with ranked matches:
-        {
-            "source": {"name": "HAL_GPIO_Init", "address": "0x08011d34"},
-            "target_program": "firmware.bin",
-            "total_matches": 3,
-            "matches": [
-                {"name": "FUN_0800a234", "address": "0x0800a234", "score": 0.92},
-                ...
-            ]
-        }
-
-    Example:
-        # Find matches for a documented function in another binary
-        find_similar_functions_fuzzy("0x08011d34", "firmware.bin")
-
-        # Stricter matching
-        find_similar_functions_fuzzy("0x08011d34", "firmware.bin", threshold=0.85)
+        JSON with ranked matches including names, addresses, and similarity scores.
     """
     if not address:
         raise GhidraValidationError("Function address is required")
@@ -6399,46 +6002,18 @@ def bulk_fuzzy_match(
     filter: str = None,
 ) -> str:
     """
-    Find the best fuzzy match for each source function in a target binary.
-
-    Paginated bulk operation that compares every source function against all
-    target functions and returns the single best match per source function.
-    Pre-computes target signatures for efficiency.
+    Find the best fuzzy match for each source function in a target binary (paginated).
 
     Args:
         source_program: Name of the source program (required)
         target_program: Name of the target program (required)
         threshold: Minimum similarity score 0.0-1.0 (default: 0.7)
-        offset: Skip this many source functions (for pagination)
+        offset: Skip this many source functions for pagination (default: 0)
         limit: Process this many source functions per call (default: 50)
         filter: "named" (only documented), "unnamed" (only FUN_*), or None for all
 
     Returns:
-        JSON with best match per source function:
-        {
-            "source_program": "firmware_reconstructed.bin",
-            "target_program": "firmware.bin",
-            "total_source_functions": 234,
-            "offset": 0, "limit": 50,
-            "matches": [
-                {
-                    "source_name": "HAL_GPIO_Init",
-                    "source_address": "0x08011d34",
-                    "target_name": "FUN_0800a234",
-                    "target_address": "0x0800a234",
-                    "score": 0.92
-                },
-                ...
-            ]
-        }
-
-    Example:
-        # Match documented functions to find their counterparts
-        bulk_fuzzy_match("firmware_reconstructed.bin", "firmware.bin", filter="named")
-
-        # Page through all functions
-        bulk_fuzzy_match("src.bin", "tgt.bin", offset=0, limit=50)
-        bulk_fuzzy_match("src.bin", "tgt.bin", offset=50, limit=50)
+        JSON with best match per source function including names, addresses, and similarity scores.
     """
     if not source_program:
         raise GhidraValidationError("source_program is required")
@@ -6465,11 +6040,7 @@ def diff_functions(
     program_b: str = None,
 ) -> str:
     """
-    Compute a structured diff between two functions.
-
-    Produces an instruction-level diff using LCS alignment with normalized
-    instructions. For ARM binaries, prologue/epilogue changes are reported
-    separately from body logic changes.
+    Compute a structured instruction-level diff between two functions.
 
     Args:
         address_a: First function address in hex (e.g., "0x08011d34")
@@ -6478,34 +6049,7 @@ def diff_functions(
         program_b: Program name for function B (default: same as program_a)
 
     Returns:
-        JSON with structured diff:
-        {
-            "function_a": {"name": "HAL_GPIO_Init", "address": "...", "instruction_count": 87},
-            "function_b": {"name": "FUN_0800a234", "address": "...", "instruction_count": 91},
-            "summary": {
-                "similarity_score": 0.89,
-                "body_equal": 72, "body_added": 8, "body_removed": 4,
-                "prologue_changed": true, "epilogue_changed": false,
-                "calls_only_in_a": [], "calls_only_in_b": ["new_helper"],
-                "strings_only_in_a": [], "strings_only_in_b": []
-            },
-            "prologue_diff": [...],
-            "body_diff": [
-                {"type": "equal", "line": "MOV r0,r1"},
-                {"type": "removed", "line": "BL CALL_EXT"},
-                {"type": "added", "line": "BL CALL_EXT"},
-                ...
-            ],
-            "epilogue_diff": [...]
-        }
-
-    Example:
-        # Diff two versions of the same function across binaries
-        diff_functions("0x08011d34", "0x0800a234",
-                       program_a="firmware_v1.bin", program_b="firmware_v2.bin")
-
-        # Diff two functions in the same binary
-        diff_functions("0x08011d34", "0x08012000")
+        JSON with similarity score, prologue/body/epilogue diffs, and call/string differences.
     """
     if not address_a:
         raise GhidraValidationError("address_a is required")
@@ -6524,56 +6068,24 @@ def diff_functions(
 
 
 @mcp.tool()
-def get_function_documentation(address: str) -> str:
+def get_function_documentation(address: str, program: str = None) -> str:
     """
-    Export all documentation for a function (for cross-binary propagation).
-
-    Exports comprehensive documentation including:
-    - Function name, return type, calling convention
-    - Plate comment (function header documentation)
-    - Parameter names, types, and comments
-    - Local variable names and types (from decompilation)
-    - Inline comments (EOL and PRE) with relative offsets
-    - Labels within the function with relative offsets
-    - Completeness score
-    - Hash for matching in other binaries
-
-    The exported documentation uses relative offsets for comments and labels,
-    allowing it to be applied to matching functions at different addresses.
+    Export all documentation for a function (name, prototype, comments, labels, hash) for cross-binary propagation.
 
     Args:
         address: Function address in hex format (e.g., "0x6FAB1234")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON with complete function documentation:
-        {
-            "hash": "a1b2c3d4...",
-            "source_program": "D2Client.dll 1.13d",
-            "source_address": "0x6fab1234",
-            "function_name": "UNITS_GetUnitX",
-            "return_type": "int",
-            "calling_convention": "__fastcall",
-            "plate_comment": "Returns the X coordinate...",
-            "parameters": [...],
-            "local_variables": [...],
-            "comments": [{"relative_offset": 10, "eol_comment": "..."}],
-            "labels": [{"relative_offset": 20, "name": "loop_start"}],
-            "completeness_score": 95.0
-        }
-
-    Example:
-        # Export documentation from a well-documented function
-        docs = get_function_documentation("0x6FAB1234")
-
-        # Apply to matching function in another binary
-        apply_function_documentation(target_address="0x6FAB0000", **docs)
+        JSON with hash, function name, return type, calling convention, plate comment,
+        parameters, local variables, comments/labels with relative offsets, and completeness score.
     """
     if not address:
         raise GhidraValidationError("Function address is required")
 
     url = f"{ghidra_server_url}/get_function_documentation"
     params = {"address": address}
-    return make_request(url, method="GET", params=params)
+    return make_request(url, method="GET", params=params, program=program)
 
 
 @mcp.tool()
@@ -6586,13 +6098,10 @@ def apply_function_documentation(
     parameters: list = None,
     comments: list = None,
     labels: list = None,
+    program: str = None,
 ) -> str:
     """
-    Apply documentation to a target function from exported documentation.
-
-    This tool imports documentation exported by get_function_documentation()
-    to a matching function in the current program. Comments and labels are
-    mapped using relative offsets from the function start.
+    Apply exported documentation to a target function. Comments and labels use relative offsets.
 
     Args:
         target_address: Address of function to document (required)
@@ -6600,31 +6109,13 @@ def apply_function_documentation(
         return_type: Return type (e.g., "int", "void *")
         calling_convention: Calling convention (e.g., "__fastcall")
         plate_comment: Function header comment
-        parameters: List of parameter docs [{"ordinal": 0, "name": "...", "type": "..."}]
-        comments: List of comments [{"relative_offset": 10, "eol_comment": "..."}]
-        labels: List of labels [{"relative_offset": 20, "name": "loop_start"}]
+        parameters: List of parameter dicts [{"ordinal": 0, "name": "...", "type": "..."}]
+        comments: List of comment dicts [{"relative_offset": 10, "eol_comment": "..."}]
+        labels: List of label dicts [{"relative_offset": 20, "name": "loop_start"}]
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
-        JSON with success status:
-        {
-            "success": true,
-            "changes_applied": 12,
-            "function": "UNITS_GetUnitX",
-            "address": "0x6fab0000"
-        }
-
-    Example:
-        # Get documentation from source function
-        docs = json.loads(get_function_documentation("0x6FAB1234"))
-
-        # Apply to matching function in another binary
-        apply_function_documentation(
-            target_address="0x6FAB0000",
-            function_name=docs["function_name"],
-            plate_comment=docs["plate_comment"],
-            parameters=docs["parameters"],
-            comments=docs["comments"]
-        )
+        JSON with success status and changes_applied count.
     """
     if not target_address:
         raise GhidraValidationError("target_address is required")
@@ -6651,7 +6142,7 @@ def apply_function_documentation(
         body["labels"] = labels
 
     url = f"{ghidra_server_url}/apply_function_documentation"
-    return make_request(url, method="POST", data=json.dumps(body))
+    return make_request(url, method="POST", data=json.dumps(body), program=program)
 
 
 # ====================================================================================
@@ -6675,45 +6166,16 @@ def build_function_hash_index(
     merge: bool = True,
 ) -> str:
     """
-    Build or update a function hash index from one or more programs.
-
-    Scans functions in the specified programs (or current program if none specified),
-    computes normalized hashes, and builds an index for cross-binary documentation
-    propagation.
-
-    The index tracks:
-    - Hash -> canonical (best documented) function
-    - All instances of each hash across programs
-    - Completeness scores for ranking
+    Build or update a function hash index from one or more programs for cross-binary doc propagation.
 
     Args:
-        programs: List of program paths to scan (e.g., ["/D2Client.dll", "/D2Common.dll"])
-                  If None, scans the current program only
-        filter: "documented" (only functions with custom names),
-                "undocumented" (only FUN_* names), or "all"
+        programs: List of program paths to scan (e.g., ["/D2Client.dll"]). None = current program.
+        filter: "documented" (custom names only), "undocumented" (FUN_* only), or "all"
         index_file: Path to save index JSON (default: function_hash_index.json)
         merge: If True, merge with existing index; if False, replace
 
     Returns:
-        JSON summary:
-        {
-            "success": true,
-            "programs_scanned": 3,
-            "functions_indexed": 1234,
-            "unique_hashes": 987,
-            "duplicates_found": 247,
-            "index_file": "function_hash_index.json"
-        }
-
-    Example:
-        # Build index from current program
-        build_function_hash_index()
-
-        # Build index from multiple programs
-        build_function_hash_index(
-            programs=["/LoD/1.13d/D2Client.dll", "/LoD/1.12a/D2Client.dll"],
-            filter="documented"
-        )
+        JSON with programs scanned, functions indexed, unique hashes, and duplicates found.
     """
     index_path = index_file or FUNCTION_HASH_INDEX_FILE
 
@@ -6898,7 +6360,7 @@ def build_function_hash_index(
 
 @mcp.tool()
 def lookup_function_by_hash(
-    address: str = None, hash: str = None, index_file: str = None
+    address: str = None, hash: str = None, index_file: str = None, program: str = None
 ) -> str:
     """
     Look up a function in the hash index to find matches across binaries.
@@ -6910,6 +6372,7 @@ def lookup_function_by_hash(
         address: Function address to look up (computes hash automatically)
         hash: Direct hash value to look up (alternative to address)
         index_file: Path to index file (default: function_hash_index.json)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with lookup results:
@@ -6952,10 +6415,13 @@ def lookup_function_by_hash(
     # Get hash if address provided
     if address and not hash:
         try:
+            req_params = {"address": address}
+            if program:
+                req_params["program"] = program
             result = json.loads(
                 make_request(
                     f"{ghidra_server_url}/get_function_hash",
-                    params={"address": address},
+                    params=req_params,
                 )
             )
             if "error" in result:
@@ -6995,44 +6461,17 @@ def propagate_documentation(
     index_file: str = None,
 ) -> str:
     """
-    Propagate documentation from a source function to all matching functions.
-
-    Takes documentation from a well-documented function and applies it to all
-    matching functions (same hash) in the specified target programs or all
-    programs in the index.
+    Propagate documentation from a source function to all matching functions (same hash) across binaries.
 
     Args:
         source_address: Address of source function (will export its documentation)
-        source_hash: Hash to look up canonical source in index (alternative)
+        source_hash: Hash to look up canonical source in index (alternative to source_address)
         target_programs: List of program names to propagate to (None = all in index)
         dry_run: If True, only report what would be changed without applying
         index_file: Path to index file (default: function_hash_index.json)
 
     Returns:
-        JSON with propagation results:
-        {
-            "success": true,
-            "source": {"program": "...", "address": "...", "name": "..."},
-            "targets_updated": 4,
-            "targets_skipped": 1,
-            "details": [
-                {"program": "...", "address": "...", "status": "updated", "changes": 12},
-                {"program": "...", "address": "...", "status": "skipped", "reason": "same program"}
-            ]
-        }
-
-    Example:
-        # Propagate documentation from current function to all matching
-        propagate_documentation(source_address="0x6FAB1234")
-
-        # Dry run first to see what would change
-        propagate_documentation(source_address="0x6FAB1234", dry_run=True)
-
-        # Propagate to specific programs only
-        propagate_documentation(
-            source_address="0x6FAB1234",
-            target_programs=["D2Client.dll 1.12a", "D2Client.dll 1.11b"]
-        )
+        JSON with targets updated/skipped counts and per-target details.
     """
     if not source_address and not source_hash:
         raise GhidraValidationError(
@@ -7452,7 +6891,7 @@ def launch_codebrowser(path: str = None) -> str:
 
 
 @mcp.tool()
-def goto_address(address: str) -> str:
+def goto_address(address: str, program: str = None) -> str:
     """
     Navigate the CodeBrowser listing and decompiler to a specific address.
 
@@ -7461,11 +6900,12 @@ def goto_address(address: str) -> str:
 
     Args:
         address: Memory address in hex format (e.g., "0x6FD81234")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with success status, navigated address, and containing function (if any).
     """
-    return safe_post_json("tool/goto_address", {"address": address})
+    return safe_post_json("tool/goto_address", {"address": address}, program=program)
 
 
 @mcp.tool()
@@ -7884,22 +7324,23 @@ def list_functions_enhanced(
 
 
 @mcp.tool()
-def create_typedef(name: str, base_type: str) -> str:
+def create_typedef(name: str, base_type: str, program: str = None) -> str:
     """
     Create a typedef (type alias) data type.
 
     Args:
         name: Name for the new typedef (e.g., "pUnit")
         base_type: Base type to alias (e.g., "UnitAny *", "int", "DWORD")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success message with typedef details or error message
     """
-    return safe_post_json("create_typedef", {"name": name, "baseType": base_type})
+    return safe_post_json("create_typedef", {"name": name, "baseType": base_type}, program=program)
 
 
 @mcp.tool()
-def create_union(name: str, fields: list) -> str:
+def create_union(name: str, fields: list, program: str = None) -> str:
     """
     Create a union data type with specified fields.
 
@@ -7910,6 +7351,7 @@ def create_union(name: str, fields: list) -> str:
         fields: List of field definitions as dictionaries with:
                 - name (required): Field name
                 - type (required): Field data type (e.g., "int", "float", "char[16]")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success message with union details or error message
@@ -7922,17 +7364,18 @@ def create_union(name: str, fields: list) -> str:
         ]
         result = create_union("NumberVariant", fields)
     """
-    return safe_post_json("create_union", {"name": name, "fields": fields})
+    return safe_post_json("create_union", {"name": name, "fields": fields}, program=program)
 
 
 @mcp.tool()
-def create_pointer_type(base_type: str, name: str = None) -> str:
+def create_pointer_type(base_type: str, name: str = None, program: str = None) -> str:
     """
     Create a pointer data type wrapping a base type.
 
     Args:
         base_type: Base type to create pointer for (e.g., "int", "UnitAny", "void")
         name: Optional custom name for the pointer type
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success message with pointer type details or error message
@@ -7940,11 +7383,11 @@ def create_pointer_type(base_type: str, name: str = None) -> str:
     data = {"baseType": base_type}
     if name:
         data["name"] = name
-    return safe_post_json("create_pointer_type", data)
+    return safe_post_json("create_pointer_type", data, program=program)
 
 
 @mcp.tool()
-def clone_data_type(source_type: str, new_name: str) -> str:
+def clone_data_type(source_type: str, new_name: str, program: str = None) -> str:
     """
     Clone an existing data type with a new name.
 
@@ -7954,17 +7397,18 @@ def clone_data_type(source_type: str, new_name: str) -> str:
     Args:
         source_type: Name of the existing data type to clone
         new_name: Name for the cloned type (must be unique)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success message with cloned type details or error message
     """
     return safe_post_json(
-        "clone_data_type", {"sourceType": source_type, "newName": new_name}
+        "clone_data_type", {"sourceType": source_type, "newName": new_name}, program=program
     )
 
 
 @mcp.tool()
-def create_data_type_category(category_path: str) -> str:
+def create_data_type_category(category_path: str, program: str = None) -> str:
     """
     Create a new category (folder) in the data type manager.
 
@@ -7972,18 +7416,19 @@ def create_data_type_category(category_path: str) -> str:
 
     Args:
         category_path: Category path to create (e.g., "/MyTypes/Structures")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success message or error message
     """
     return safe_post_json(
-        "create_data_type_category", {"categoryPath": category_path}
+        "create_data_type_category", {"categoryPath": category_path}, program=program
     )
 
 
 @mcp.tool()
 def list_data_type_categories(
-    offset: int = 0, limit: int = 100
+    offset: int = 0, limit: int = 100, program: str = None
 ) -> list:
     """
     List all data type categories (folders) in the program.
@@ -7991,23 +7436,25 @@ def list_data_type_categories(
     Args:
         offset: Pagination offset (default: 0)
         limit: Maximum number of categories to return (default: 100)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         List of category paths in the data type manager
     """
     return safe_get(
-        "list_data_type_categories", {"offset": offset, "limit": limit}
+        "list_data_type_categories", {"offset": offset, "limit": limit}, program=program
     )
 
 
 @mcp.tool()
-def move_data_type_to_category(type_name: str, category_path: str) -> str:
+def move_data_type_to_category(type_name: str, category_path: str, program: str = None) -> str:
     """
     Move an existing data type to a different category.
 
     Args:
         type_name: Name of the data type to move
         category_path: Target category path (e.g., "/MyTypes/Structures")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success message or error message
@@ -8015,11 +7462,12 @@ def move_data_type_to_category(type_name: str, category_path: str) -> str:
     return safe_post_json(
         "move_data_type_to_category",
         {"typeName": type_name, "categoryPath": category_path},
+        program=program,
     )
 
 
 @mcp.tool()
-def get_struct_layout(struct_name: str) -> str:
+def get_struct_layout(struct_name: str, program: str = None) -> str:
     """
     Get the detailed field layout of a structure data type.
 
@@ -8028,27 +7476,29 @@ def get_struct_layout(struct_name: str) -> str:
 
     Args:
         struct_name: Name of the structure to inspect
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Formatted struct layout with offset, size, type, and name for each field
     """
-    return safe_get_json("get_struct_layout", {"structName": struct_name})
+    return safe_get_json("get_struct_layout", {"structName": struct_name}, program=program)
 
 
 @mcp.tool()
-def import_data_types(source: str, format: str = "gdt") -> str:
+def import_data_types(source: str, format: str = "gdt", program: str = None) -> str:
     """
     Import data types from an external source file.
 
     Args:
         source: Path to the data type source file (e.g., a .gdt file)
         format: Import format (default: "gdt")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Import results or error message
     """
     return safe_post_json(
-        "import_data_types", {"source": source, "format": format}
+        "import_data_types", {"source": source, "format": format}, program=program
     )
 
 
@@ -8056,7 +7506,7 @@ def import_data_types(source: str, format: str = "gdt") -> str:
 
 
 @mcp.tool()
-def validate_data_type(address: str, type_name: str) -> str:
+def validate_data_type(address: str, type_name: str, program: str = None) -> str:
     """
     Validate whether a data type can be applied at a specific memory address.
 
@@ -8066,18 +7516,19 @@ def validate_data_type(address: str, type_name: str) -> str:
     Args:
         address: Memory address to check (e.g., "0x401000")
         type_name: Data type name to validate (e.g., "MyStruct", "int")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with validation results including compatibility and any warnings
     """
     return safe_get_json(
-        "validate_data_type", {"address": address, "typeName": type_name}
+        "validate_data_type", {"address": address, "typeName": type_name}, program=program
     )
 
 
 @mcp.tool()
 def validate_function_prototype(
-    function_address: str, prototype: str, calling_convention: str = None
+    function_address: str, prototype: str, calling_convention: str = None, program: str = None
 ) -> str:
     """
     Validate a function prototype before applying it.
@@ -8089,6 +7540,7 @@ def validate_function_prototype(
         function_address: Address of the function to validate against
         prototype: Prototype string (e.g., "int __stdcall MyFunc(int a, char *b)")
         calling_convention: Optional calling convention to validate
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with validation results, any syntax errors, and warnings
@@ -8096,11 +7548,11 @@ def validate_function_prototype(
     params = {"functionAddress": function_address, "prototype": prototype}
     if calling_convention:
         params["callingConvention"] = calling_convention
-    return safe_get_json("validate_function_prototype", params)
+    return safe_get_json("validate_function_prototype", params, program=program)
 
 
 @mcp.tool()
-def can_rename_at_address(address: str) -> str:
+def can_rename_at_address(address: str, program: str = None) -> str:
     """
     Check what can be renamed at a given address.
 
@@ -8109,12 +7561,13 @@ def can_rename_at_address(address: str) -> str:
 
     Args:
         address: Memory address to check (e.g., "0x401000")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with rename type ("function", "defined_data", or "undefined"),
         current name, and suggested tool to use
     """
-    return safe_get_json("can_rename_at_address", {"address": address})
+    return safe_get_json("can_rename_at_address", {"address": address}, program=program)
 
 
 # ========== DECOMPILATION ==========
@@ -8142,7 +7595,7 @@ def force_decompile(address: str, program: str = None) -> str:
 
 
 @mcp.tool()
-def clear_instruction_flow_override(address: str) -> str:
+def clear_instruction_flow_override(address: str, program: str = None) -> str:
     """
     Clear a flow override on an instruction at the given address.
 
@@ -8151,12 +7604,13 @@ def clear_instruction_flow_override(address: str) -> str:
 
     Args:
         address: Address of the instruction with the flow override (e.g., "0x401000")
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success or error message
     """
     return safe_post_json(
-        "clear_instruction_flow_override", {"address": address}
+        "clear_instruction_flow_override", {"address": address}, program=program
     )
 
 
@@ -8165,7 +7619,7 @@ def clear_instruction_flow_override(address: str) -> str:
 
 @mcp.tool()
 def list_bookmarks(
-    category: str = None, address: str = None, offset: int = 0, limit: int = 100
+    category: str = None, address: str = None, offset: int = 0, limit: int = 100, program: str = None
 ) -> list:
     """
     List bookmarks in the program.
@@ -8178,6 +7632,7 @@ def list_bookmarks(
         address: Optional filter by specific address
         offset: Pagination offset (default: 0)
         limit: Maximum number of bookmarks to return (default: 100)
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         List of bookmarks with address, category, comment, and type
@@ -8187,7 +7642,7 @@ def list_bookmarks(
         params["category"] = category
     if address:
         params["address"] = address
-    return safe_get("list_bookmarks", params)
+    return safe_get("list_bookmarks", params, program=program)
 
 
 # ========== SECURITY ANALYSIS ==========
@@ -8260,7 +7715,7 @@ def extract_iocs_with_context(program: str = None) -> str:
 
 
 @mcp.tool()
-def suggest_field_names(address: str, size: int = None) -> str:
+def suggest_field_names(address: str, size: int = None, program: str = None) -> str:
     """
     Get AI-assisted field name suggestions for a structure at an address.
 
@@ -8270,6 +7725,7 @@ def suggest_field_names(address: str, size: int = None) -> str:
     Args:
         address: Address of the structure instance
         size: Optional structure size in bytes
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         JSON with field offset, type, current name, and suggested names
@@ -8277,12 +7733,12 @@ def suggest_field_names(address: str, size: int = None) -> str:
     params = {"address": address}
     if size:
         params["size"] = size
-    return safe_get_json("suggest_field_names", params)
+    return safe_get_json("suggest_field_names", params, program=program)
 
 
 @mcp.tool()
 def apply_data_classification(
-    address: str, classification: str, type_definition: dict = None
+    address: str, classification: str, type_definition: dict = None, program: str = None
 ) -> str:
     """
     Apply data type classification at an address with naming and comments in one atomic call.
@@ -8294,6 +7750,7 @@ def apply_data_classification(
         address: Memory address to classify (e.g., "0x401000")
         classification: Classification type (PRIMITIVE, STRUCTURE, ARRAY, ENUM)
         type_definition: Optional type definition dict with details for the classification
+        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
 
     Returns:
         Success message with applied classification details or error message
@@ -8301,7 +7758,7 @@ def apply_data_classification(
     data = {"address": address, "classification": classification}
     if type_definition:
         data["type_definition"] = type_definition
-    return safe_post_json("apply_data_classification", data)
+    return safe_post_json("apply_data_classification", data, program=program)
 
 
 @mcp.tool()
@@ -8405,12 +7862,21 @@ def main():
         choices=["stdio", "sse"],
         help="Transport protocol for MCP, default: stdio",
     )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        choices=list(TOOL_PROFILES.keys()),
+        help="Load only tools for a specific workflow (e.g., 're' for reverse engineering)",
+    )
     args = parser.parse_args()
 
     # Use the global variable to ensure it's properly updated
     global ghidra_server_url
     if args.ghidra_server:
         ghidra_server_url = args.ghidra_server
+
+    if args.profile:
+        apply_tool_profile(mcp, args.profile)
 
     if args.transport == "sse":
         try:

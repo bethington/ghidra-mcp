@@ -92,7 +92,7 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "4.0.0"; // Default fallback
+    private static String VERSION = "4.1.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
@@ -105,7 +105,7 @@ class VersionInfo {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "4.0.0");
+                VERSION = props.getProperty("app.version", "4.1.0");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
                 GHIDRA_VERSION = props.getProperty("ghidra.version", "unknown");
                 BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
@@ -229,6 +229,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         this.xrefCallGraphService = new com.xebyte.core.XrefCallGraphService(programProvider, threadingStrategy);
         this.dataTypeService = new com.xebyte.core.DataTypeService(programProvider, threadingStrategy);
         this.documentationHashService = new com.xebyte.core.DocumentationHashService(programProvider, threadingStrategy, new com.xebyte.core.BinaryComparisonService());
+        this.documentationHashService.setFunctionService(this.functionService);
         this.analysisService = new com.xebyte.core.AnalysisService(programProvider, threadingStrategy, this.functionService);
         this.malwareSecurityService = new com.xebyte.core.MalwareSecurityService(programProvider, threadingStrategy);
         this.programScriptService = new com.xebyte.core.ProgramScriptService(programProvider, threadingStrategy);
@@ -495,22 +496,25 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
         server.createContext("/rename_function", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
-            String result = renameFunction(params.get("oldName"), params.get("newName"));
+            String programName = parseQueryParams(exchange).get("program");
+            String result = renameFunction(params.get("oldName"), params.get("newName"), programName);
             sendResponse(exchange, result);
         }));
 
         server.createContext("/rename_data", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
-            String result = renameDataAtAddress(params.get("address"), params.get("newName"));
+            String programName = parseQueryParams(exchange).get("program");
+            String result = renameDataAtAddress(params.get("address"), params.get("newName"), programName);
             sendResponse(exchange, result);
         }));
 
         server.createContext("/rename_variable", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String functionName = params.get("functionName");
             String oldName = params.get("oldName");
             String newName = params.get("newName");
-            String result = renameVariableInFunction(functionName, oldName, newName);
+            String result = renameVariableInFunction(functionName, oldName, newName, programName);
             sendResponse(exchange, result);
         }));
 
@@ -576,30 +580,34 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
         server.createContext("/set_decompiler_comment", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String address = params.get("address");
             String comment = params.get("comment");
-            String result = setDecompilerComment(address, comment);
+            String result = setDecompilerComment(address, comment, programName);
             sendResponse(exchange, result);
         }));
 
         server.createContext("/set_disassembly_comment", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String address = params.get("address");
             String comment = params.get("comment");
-            String result = setDisassemblyComment(address, comment);
+            String result = setDisassemblyComment(address, comment, programName);
             sendResponse(exchange, result);
         }));
 
         server.createContext("/rename_function_by_address", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String functionAddress = params.get("function_address");
             String newName = params.get("new_name");
-            String result = renameFunctionByAddress(functionAddress, newName);
+            String result = renameFunctionByAddress(functionAddress, newName, programName);
             sendResponse(exchange, result);
         }));
 
         server.createContext("/set_function_prototype", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String functionAddress = (String) params.get("function_address");
             String prototype = (String) params.get("prototype");
             String callingConvention = (String) params.get("calling_convention");
@@ -607,7 +615,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             // v3.0.1: Capture old prototype before applying changes
             String oldPrototype = "";
             if (functionAddress != null && !functionAddress.isEmpty()) {
-                Program prog = getCurrentProgram();
+                Program prog = getProgram(programName);
                 if (prog != null) {
                     Address addr = prog.getAddressFactory().getAddress(functionAddress);
                     if (addr != null) {
@@ -620,7 +628,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             }
 
             // Call the set prototype function and get detailed result
-            com.xebyte.core.FunctionService.PrototypeResult result = setFunctionPrototype(functionAddress, prototype, callingConvention);
+            com.xebyte.core.FunctionService.PrototypeResult result = setFunctionPrototype(functionAddress, prototype, callingConvention, programName);
 
             if (result.isSuccess()) {
                 String successMsg = "Successfully set prototype for function at " + functionAddress;
@@ -640,19 +648,22 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }));
 
         server.createContext("/list_calling_conventions", safeHandler(exchange -> {
-            String result = listCallingConventions();
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String programName = qparams.get("program");
+            String result = listCallingConventions(programName);
             sendResponse(exchange, result);
         }));
 
         server.createContext("/set_local_variable_type", safeHandler(exchange -> {
             try {
                 Map<String, String> params = parsePostParams(exchange);
+                String programName = parseQueryParams(exchange).get("program");
                 String functionAddress = params.get("function_address");
                 String variableName = params.get("variable_name");
                 String newType = params.get("new_type");
 
                 // Try to set the type (with internal error handling)
-                String result = setLocalVariableType(functionAddress, variableName, newType);
+                String result = setLocalVariableType(functionAddress, variableName, newType, programName);
                 sendResponse(exchange, result);
             } catch (Exception e) {
                 // Catch any uncaught exceptions to prevent 500 errors
@@ -665,6 +676,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
         server.createContext("/set_function_no_return", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String functionAddress = params.get("function_address");
             String noReturnStr = params.get("no_return");
 
@@ -679,12 +691,13 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 noReturn = Boolean.parseBoolean(noReturnStr);
             }
 
-            String result = setFunctionNoReturn(functionAddress, noReturn);
+            String result = setFunctionNoReturn(functionAddress, noReturn, programName);
             sendResponse(exchange, result);
         }));
 
         server.createContext("/clear_instruction_flow_override", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String instructionAddress = params.get("address");
 
             if (instructionAddress == null || instructionAddress.isEmpty()) {
@@ -692,13 +705,14 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 return;
             }
 
-            String result = clearInstructionFlowOverride(instructionAddress);
+            String result = clearInstructionFlowOverride(instructionAddress, programName);
             sendResponse(exchange, result);
         }));
 
         // Variable storage control endpoint (v1.7.0)
         server.createContext("/set_variable_storage", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String functionAddress = params.get("function_address");
             String variableName = params.get("variable_name");
             String storageSpec = params.get("storage");
@@ -716,13 +730,14 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 return;
             }
 
-            String result = setVariableStorage(functionAddress, variableName, storageSpec);
+            String result = setVariableStorage(functionAddress, variableName, storageSpec, programName);
             sendResponse(exchange, result);
         }));
 
         // Ghidra script execution endpoint (v1.7.0)
         server.createContext("/run_script", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String scriptPath = params.get("script_path");
             String scriptArgs = params.get("args"); // Optional JSON arguments
 
@@ -731,7 +746,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 return;
             }
 
-            String result = runGhidraScript(scriptPath, scriptArgs);
+            String result = runGhidraScript(scriptPath, scriptArgs, programName);
             sendResponse(exchange, result);
         }));
 
@@ -862,7 +877,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             String name = qparams.get("name");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 20);
-            sendResponse(exchange, getFunctionLabels(name, offset, limit));
+            String programName = qparams.get("program");
+            sendResponse(exchange, getFunctionLabels(name, offset, limit, programName));
         }));
 
         server.createContext("/get_function_jump_targets", safeHandler(exchange -> {
@@ -870,15 +886,17 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             String name = qparams.get("name");
             int offset = parseIntOrDefault(qparams.get("offset"), 0);
             int limit = parseIntOrDefault(qparams.get("limit"), 100);
-            sendResponse(exchange, getFunctionJumpTargets(name, offset, limit));
+            String programName = qparams.get("program");
+            sendResponse(exchange, getFunctionJumpTargets(name, offset, limit, programName));
         }));
 
         server.createContext("/rename_label", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String address = params.get("address");
             String oldName = params.get("old_name");
             String newName = params.get("new_name");
-            String result = renameLabel(address, oldName, newName);
+            String result = renameLabel(address, oldName, newName, programName);
             sendResponse(exchange, result);
         }));
 
@@ -901,49 +919,55 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
         server.createContext("/rename_external_location", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String address = params.get("address");
             String newName = params.get("new_name");
-            sendResponse(exchange, renameExternalLocation(address, newName));
+            sendResponse(exchange, renameExternalLocation(address, newName, programName));
         }));
 
         server.createContext("/create_label", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String address = params.get("address");
             String name = params.get("name");
-            String result = createLabel(address, name);
+            String result = createLabel(address, name, programName);
             sendResponse(exchange, result);
         }));
 
         // BATCH_CREATE_LABELS - Create multiple labels in a single operation (v1.5.1)
         server.createContext("/batch_create_labels", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             List<Map<String, String>> labels = convertToMapList(params.get("labels"));
-            String result = batchCreateLabels(labels);
+            String result = batchCreateLabels(labels, programName);
             sendResponse(exchange, result);
         }));
 
         server.createContext("/rename_or_label", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String address = params.get("address");
             String name = params.get("name");
-            String result = renameOrLabel(address, name);
+            String result = renameOrLabel(address, name, programName);
             sendResponse(exchange, result);
         }));
 
         // DELETE_LABEL - Remove a label at an address
         server.createContext("/delete_label", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String address = params.get("address");
             String name = params.get("name");  // Optional: specific label name to delete
-            String result = deleteLabel(address, name);
+            String result = deleteLabel(address, name, programName);
             sendResponse(exchange, result);
         }));
 
         // BATCH_DELETE_LABELS - Delete multiple labels in a single operation
         server.createContext("/batch_delete_labels", safeHandler(exchange -> {
             Map<String, Object> params = parseJsonParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             List<Map<String, String>> labels = convertToMapList(params.get("labels"));
-            String result = batchDeleteLabels(labels);
+            String result = batchDeleteLabels(labels, programName);
             sendResponse(exchange, result);
         }));
 
@@ -1098,9 +1122,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
         server.createContext("/rename_global_variable", safeHandler(exchange -> {
             Map<String, String> params = parsePostParams(exchange);
+            String programName = parseQueryParams(exchange).get("program");
             String oldName = params.get("old_name");
             String newName = params.get("new_name");
-            String result = renameGlobalVariable(oldName, newName);
+            String result = renameGlobalVariable(oldName, newName, programName);
             sendResponse(exchange, result);
         }));
 
@@ -1665,6 +1690,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         server.createContext("/analyze_function_completeness", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionAddress = qparams.get("function_address");
+            boolean compact = "true".equalsIgnoreCase(qparams.get("compact"));
 
             // FIX #4: Force decompiler cache refresh before analysis to ensure fresh data
             Program program = getCurrentProgram();
@@ -1689,7 +1715,20 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 }
             }
 
-            String result = analyzeFunctionCompleteness(functionAddress);
+            String result = analyzeFunctionCompleteness(functionAddress, compact);
+            sendResponse(exchange, result);
+        }));
+
+        // ANALYZE_FOR_DOCUMENTATION - Composite endpoint for RE documentation workflow
+        server.createContext("/analyze_for_documentation", safeHandler(exchange -> {
+            Map<String, String> qparams = parseQueryParams(exchange);
+            String functionAddress = qparams.get("function_address");
+            String programName = qparams.get("program");
+            if (functionAddress == null || functionAddress.isEmpty()) {
+                sendResponse(exchange, "{\"error\": \"Missing required parameter: function_address\"}");
+                return;
+            }
+            String result = analysisService.analyzeForDocumentation(functionAddress, programName);
             sendResponse(exchange, result);
         }));
 
@@ -1830,8 +1869,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         server.createContext("/can_rename_at_address", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String address = qparams.get("address");
+            String programName = qparams.get("program");
 
-            String result = canRenameAtAddress(address);
+            String result = canRenameAtAddress(address, programName);
             sendResponse(exchange, result);
         }));
 
@@ -1943,7 +1983,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
         server.createContext("/save_program", safeHandler(exchange -> {
             try {
-                sendResponse(exchange, saveCurrentProgram());
+                String programName = parseQueryParams(exchange).get("program");
+                sendResponse(exchange, saveCurrentProgram(programName));
             } catch (Throwable e) {
                 String msg = e.getMessage() != null ? e.getMessage() : e.toString();
                 sendResponse(exchange, "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}");
@@ -1953,7 +1994,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         server.createContext("/exit_ghidra", safeHandler(exchange -> {
             try {
                 // Save first, then exit
-                String saveResult = saveCurrentProgram();
+                String saveResult = saveCurrentProgram(null);
                 sendResponse(exchange, "{\"success\": true, \"message\": \"Saving and exiting Ghidra\", \"save\": " + saveResult + "}");
                 // Schedule exit after response is sent
                 new Thread(() -> {
@@ -2034,14 +2075,16 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         server.createContext("/get_function_documentation", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
             String functionAddress = qparams.get("address");
-            String result = getFunctionDocumentation(functionAddress);
+            String programName = qparams.get("program");
+            String result = getFunctionDocumentation(functionAddress, programName);
             sendResponse(exchange, result);
         }));
 
         // APPLY_FUNCTION_DOCUMENTATION - Import documentation to a target function
         server.createContext("/apply_function_documentation", safeHandler(exchange -> {
+            String programName = parseQueryParams(exchange).get("program");
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            String result = applyFunctionDocumentation(body);
+            String result = applyFunctionDocumentation(body, programName);
             sendResponse(exchange, result);
         }));
 
@@ -2421,16 +2464,20 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return functionService.decompileFunctionByName(name);
     }
 
-    private String renameFunction(String oldName, String newName) {
-        return functionService.renameFunction(oldName, newName);
+    private String renameFunction(String oldName, String newName, String programName) {
+        return functionService.renameFunction(oldName, newName, programName);
+    }
+
+    private String renameDataAtAddress(String addressStr, String newName, String programName) {
+        return symbolLabelService.renameDataAtAddress(addressStr, newName, programName);
     }
 
     private String renameDataAtAddress(String addressStr, String newName) {
         return symbolLabelService.renameDataAtAddress(addressStr, newName);
     }
 
-    private String renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
-        return functionService.renameVariableInFunction(functionName, oldVarName, newVarName);
+    private String renameVariableInFunction(String functionName, String oldVarName, String newVarName, String programName) {
+        return functionService.renameVariableInFunction(functionName, oldVarName, newVarName, programName);
     }
 
     // ----------------------------------------------------------------------------------
@@ -2533,14 +2580,27 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return commentService.setCommentAtAddress(addressStr, comment, commentType, transactionName);
     }
 
+    private String setDecompilerComment(String addressStr, String comment, String programName) {
+        return commentService.setDecompilerComment(addressStr, comment, programName);
+    }
+
     private String setDecompilerComment(String addressStr, String comment) {
         return commentService.setDecompilerComment(addressStr, comment);
+    }
+
+    private String setDisassemblyComment(String addressStr, String comment, String programName) {
+        return commentService.setDisassemblyComment(addressStr, comment, programName);
     }
 
     private String setDisassemblyComment(String addressStr, String comment) {
         return commentService.setDisassemblyComment(addressStr, comment);
     }
 
+    private String renameFunctionByAddress(String functionAddrStr, String newName, String programName) {
+        return functionService.renameFunctionByAddress(functionAddrStr, newName, programName);
+    }
+
+    // Backward compatible overload (used by batchApplyDocumentation)
     private String renameFunctionByAddress(String functionAddrStr, String newName) {
         return functionService.renameFunctionByAddress(functionAddrStr, newName);
     }
@@ -2553,20 +2613,44 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return functionService.setFunctionPrototype(functionAddrStr, prototype, callingConvention);
     }
 
+    private com.xebyte.core.FunctionService.PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype, String callingConvention, String programName) {
+        return functionService.setFunctionPrototype(functionAddrStr, prototype, callingConvention, programName);
+    }
+
+    private String listCallingConventions(String programName) {
+        return listingService.listCallingConventions(programName);
+    }
+
     private String listCallingConventions() {
         return listingService.listCallingConventions(null);
+    }
+
+    private String setLocalVariableType(String functionAddrStr, String variableName, String newType, String programName) {
+        return functionService.setLocalVariableType(functionAddrStr, variableName, newType, programName);
     }
 
     private String setLocalVariableType(String functionAddrStr, String variableName, String newType) {
         return functionService.setLocalVariableType(functionAddrStr, variableName, newType);
     }
 
+    private String setFunctionNoReturn(String functionAddrStr, boolean noReturn, String programName) {
+        return functionService.setFunctionNoReturn(functionAddrStr, noReturn, programName);
+    }
+
     private String setFunctionNoReturn(String functionAddrStr, boolean noReturn) {
         return functionService.setFunctionNoReturn(functionAddrStr, noReturn);
     }
 
+    private String clearInstructionFlowOverride(String instructionAddrStr, String programName) {
+        return functionService.clearInstructionFlowOverride(instructionAddrStr, programName);
+    }
+
     private String clearInstructionFlowOverride(String instructionAddrStr) {
         return functionService.clearInstructionFlowOverride(instructionAddrStr);
+    }
+
+    private String setVariableStorage(String functionAddrStr, String variableName, String storageSpec, String programName) {
+        return functionService.setVariableStorage(functionAddrStr, variableName, storageSpec, programName);
     }
 
     private String setVariableStorage(String functionAddrStr, String variableName, String storageSpec) {
@@ -2583,6 +2667,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * @param scriptArgs Optional space-separated arguments for the script
      * @return Script output or error message
      */
+    private String runGhidraScript(String scriptPath, String scriptArgs, String programName) {
+        return programScriptService.runGhidraScript(scriptPath, scriptArgs, programName);
+    }
+
     private String runGhidraScript(String scriptPath, String scriptArgs) {
         return programScriptService.runGhidraScript(scriptPath, scriptArgs);
     }
@@ -3425,8 +3513,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     /**
      * List all currently open programs in Ghidra
      */
-    private String saveCurrentProgram() {
-        return programScriptService.saveCurrentProgram();
+    private String saveCurrentProgram(String programName) {
+        return programScriptService.saveCurrentProgram(programName);
     }
 
     private String listOpenPrograms() {
@@ -3499,12 +3587,12 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     /**
      * Export all documentation for a function (for use in cross-binary propagation)
      */
-    private String getFunctionDocumentation(String functionAddress) {
-        return documentationHashService.getFunctionDocumentation(functionAddress);
+    private String getFunctionDocumentation(String functionAddress, String programName) {
+        return documentationHashService.getFunctionDocumentation(functionAddress, programName);
     }
 
-    private String applyFunctionDocumentation(String jsonBody) {
-        return documentationHashService.applyFunctionDocumentation(jsonBody);
+    private String applyFunctionDocumentation(String jsonBody, String programName) {
+        return documentationHashService.applyFunctionDocumentation(jsonBody, programName);
     }
 
     /**
@@ -3551,8 +3639,16 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     /**
      * Get labels within a specific function by name
      */
+    public String getFunctionLabels(String functionName, int offset, int limit, String programName) {
+        return symbolLabelService.getFunctionLabels(functionName, offset, limit, programName);
+    }
+
     public String getFunctionLabels(String functionName, int offset, int limit) {
         return symbolLabelService.getFunctionLabels(functionName, offset, limit);
+    }
+
+    public String renameLabel(String addressStr, String oldName, String newName, String programName) {
+        return symbolLabelService.renameLabel(addressStr, oldName, newName, programName);
     }
 
     public String renameLabel(String addressStr, String oldName, String newName) {
@@ -3562,24 +3658,48 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     /**
      * Get all jump target addresses from a function's disassembly
      */
+    public String getFunctionJumpTargets(String functionName, int offset, int limit, String programName) {
+        return xrefCallGraphService.getFunctionJumpTargets(functionName, offset, limit, programName);
+    }
+
     public String getFunctionJumpTargets(String functionName, int offset, int limit) {
         return xrefCallGraphService.getFunctionJumpTargets(functionName, offset, limit);
+    }
+
+    public String createLabel(String addressStr, String labelName, String programName) {
+        return symbolLabelService.createLabel(addressStr, labelName, programName);
     }
 
     public String createLabel(String addressStr, String labelName) {
         return symbolLabelService.createLabel(addressStr, labelName);
     }
 
+    public String batchCreateLabels(List<Map<String, String>> labels, String programName) {
+        return symbolLabelService.batchCreateLabels(labels, programName);
+    }
+
     public String batchCreateLabels(List<Map<String, String>> labels) {
         return symbolLabelService.batchCreateLabels(labels);
+    }
+
+    public String renameOrLabel(String addressStr, String newName, String programName) {
+        return symbolLabelService.renameOrLabel(addressStr, newName, programName);
     }
 
     public String renameOrLabel(String addressStr, String newName) {
         return symbolLabelService.renameOrLabel(addressStr, newName);
     }
 
+    public String deleteLabel(String addressStr, String labelName, String programName) {
+        return symbolLabelService.deleteLabel(addressStr, labelName, programName);
+    }
+
     public String deleteLabel(String addressStr, String labelName) {
         return symbolLabelService.deleteLabel(addressStr, labelName);
+    }
+
+    public String batchDeleteLabels(List<Map<String, String>> labels, String programName) {
+        return symbolLabelService.batchDeleteLabels(labels, programName);
     }
 
     public String batchDeleteLabels(List<Map<String, String>> labels) {
@@ -3815,6 +3935,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return listingService.listGlobals(offset, limit, filter, programName);
     }
 
+    private String renameGlobalVariable(String oldName, String newName, String programName) {
+        return symbolLabelService.renameGlobalVariable(oldName, newName, programName);
+    }
+
     private String renameGlobalVariable(String oldName, String newName) {
         return symbolLabelService.renameGlobalVariable(oldName, newName);
     }
@@ -3909,7 +4033,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * Create a union data type (legacy method)
      */
     private String createUnion(String name, String fieldsJson) {
-        return dataTypeService.createUnion(name, fieldsJson);
+        return dataTypeService.createUnion(name, fieldsJson, null);
     }
 
     /**
@@ -4389,6 +4513,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return analysisService.analyzeFunctionCompleteness(functionAddress);
     }
 
+    private String analyzeFunctionCompleteness(String functionAddress, boolean compact) {
+        return analysisService.analyzeFunctionCompleteness(functionAddress, compact);
+    }
+
     /**
      * v4.0.0: Apply all documentation to a function in a single call.
      * Orchestrates: goto -> rename -> prototype -> variable types -> variable renames -> comments -> score.
@@ -4588,7 +4716,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         boolean doScore = scoreParam instanceof Boolean ? (Boolean) scoreParam : true;
         if (doScore) {
             try {
-                String scoreResult = analyzeFunctionCompleteness(address);
+                // Always use compact mode internally — AI already has workflow guidance in its prompt
+                String scoreResult = analyzeFunctionCompleteness(address, true);
                 sb.append(", \"completeness\": ").append(scoreResult);
             } catch (Exception e) {
                 sb.append(", \"completeness\": {\"error\": \"").append(com.xebyte.core.ServiceUtils.escapeJson(e.getMessage())).append("\"}");
@@ -4826,6 +4955,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     /**
      * NEW v1.6.0: Determine if address has data/code and suggest operation
      */
+    private String canRenameAtAddress(String addressStr, String programName) {
+        return symbolLabelService.canRenameAtAddress(addressStr, programName);
+    }
+
     private String canRenameAtAddress(String addressStr) {
         return symbolLabelService.canRenameAtAddress(addressStr);
     }
@@ -4954,6 +5087,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     /**
      * Rename an external location (e.g., change Ordinal_123 to a real function name)
      */
+    private String renameExternalLocation(String address, String newName, String programName) {
+        return symbolLabelService.renameExternalLocation(address, newName, programName);
+    }
+
     private String renameExternalLocation(String address, String newName) {
         return symbolLabelService.renameExternalLocation(address, newName);
     }

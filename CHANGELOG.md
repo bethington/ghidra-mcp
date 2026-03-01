@@ -4,6 +4,31 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v4.1.0 - 2026-03-01
+
+### Parallel Multi-Binary Support
+
+#### Universal `program` Parameter
+- **Every program-scoped MCP tool now accepts an optional `program` parameter** -- Pass `program="D2Client.dll"` to any tool to target a specific open program without calling `switch_program` first
+- **Eliminates race conditions** -- Parallel requests targeting different programs no longer contend on shared `currentProgram` state
+- **Backward compatible** -- Omitting `program` falls back to the current/default program, preserving existing workflows
+- **Full stack coverage**: Bridge helpers (5), 136 MCP tools, 130+ GUI endpoints, 130+ headless endpoints, and all 9 service classes updated
+
+#### Service Layer Changes
+- All service methods now accept `String programName` and resolve via `getProgramOrError(programName)`
+- Backward-compatible overloads (`method(args)` delegates to `method(args, null)`) preserve internal callers
+- Services updated: FunctionService, CommentService, DataTypeService, SymbolLabelService, XrefCallGraphService, DocumentationHashService, AnalysisService, MalwareSecurityService, ProgramScriptService
+
+#### Bridge Changes
+- `safe_get`, `safe_get_json`, `safe_post`, `safe_post_json`, `make_request` all accept `program=` kwarg
+- GET helpers inject `program` into query params; POST helpers append `?program=X` to URL
+- `switch_program` docstring updated: now documented as setting the default fallback, with explicit `program=` recommended for parallel workflows
+
+#### Counts
+- 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
+
+---
+
 ## v4.0.0 - 2026-02-28
 
 ### Major Release -- Service Layer Architecture Refactor

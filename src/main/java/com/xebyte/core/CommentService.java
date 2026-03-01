@@ -60,10 +60,11 @@ public class CommentService {
      * Set a comment using the specified comment type (PRE_COMMENT or EOL_COMMENT).
      */
     @SuppressWarnings("deprecation")
-    public String setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
-        Program program = programProvider.getCurrentProgram();
+    public String setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (addressStr == null || addressStr.isEmpty()) {
@@ -106,19 +107,43 @@ public class CommentService {
     }
 
     /**
+     * Backward-compatible overload without programName.
+     */
+    @SuppressWarnings("deprecation")
+    public String setCommentAtAddress(String addressStr, String comment, int commentType, String transactionName) {
+        return setCommentAtAddress(addressStr, comment, commentType, transactionName, null);
+    }
+
+    /**
      * Set a comment for a given address in the function pseudocode (PRE_COMMENT).
      */
     @SuppressWarnings("deprecation")
+    public String setDecompilerComment(String addressStr, String comment, String programName) {
+        return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment", programName);
+    }
+
+    /**
+     * Backward-compatible overload without programName.
+     */
+    @SuppressWarnings("deprecation")
     public String setDecompilerComment(String addressStr, String comment) {
-        return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment");
+        return setDecompilerComment(addressStr, comment, null);
     }
 
     /**
      * Set a comment for a given address in the function disassembly (EOL_COMMENT).
      */
     @SuppressWarnings("deprecation")
+    public String setDisassemblyComment(String addressStr, String comment, String programName) {
+        return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment", programName);
+    }
+
+    /**
+     * Backward-compatible overload without programName.
+     */
+    @SuppressWarnings("deprecation")
     public String setDisassemblyComment(String addressStr, String comment) {
-        return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment");
+        return setDisassemblyComment(addressStr, comment, null);
     }
 
     /**
@@ -159,10 +184,11 @@ public class CommentService {
      * Set function plate (header) comment.
      */
     @SuppressWarnings("deprecation")
-    public String setPlateComment(String functionAddress, String comment) {
-        Program program = programProvider.getCurrentProgram();
+    public String setPlateComment(String functionAddress, String comment, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (functionAddress == null || functionAddress.isEmpty()) {
@@ -220,14 +246,23 @@ public class CommentService {
     }
 
     /**
+     * Backward-compatible overload without programName.
+     */
+    @SuppressWarnings("deprecation")
+    public String setPlateComment(String functionAddress, String comment) {
+        return setPlateComment(functionAddress, comment, null);
+    }
+
+    /**
      * Batch set multiple comments (decompiler, disassembly, and plate) in a single operation.
      */
     @SuppressWarnings("deprecation")
     public String batchSetComments(String functionAddress, List<Map<String, String>> decompilerComments,
-                                   List<Map<String, String>> disassemblyComments, String plateComment) {
-        Program program = programProvider.getCurrentProgram();
+                                   List<Map<String, String>> disassemblyComments, String plateComment, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         final StringBuilder result = new StringBuilder();
@@ -339,13 +374,23 @@ public class CommentService {
     }
 
     /**
+     * Backward-compatible overload without programName.
+     */
+    @SuppressWarnings("deprecation")
+    public String batchSetComments(String functionAddress, List<Map<String, String>> decompilerComments,
+                                   List<Map<String, String>> disassemblyComments, String plateComment) {
+        return batchSetComments(functionAddress, decompilerComments, disassemblyComments, plateComment, null);
+    }
+
+    /**
      * Clear all comments (plate, PRE, EOL) within a function's address range.
      */
     @SuppressWarnings("deprecation")
-    public String clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol) {
-        Program program = programProvider.getCurrentProgram();
+    public String clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         if (functionAddress == null || functionAddress.isEmpty()) {
@@ -428,5 +473,12 @@ public class CommentService {
 
         result.append("}");
         return result.toString();
+    }
+
+    /**
+     * Backward-compatible overload without programName.
+     */
+    public String clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol) {
+        return clearFunctionComments(functionAddress, clearPlate, clearPre, clearEol, null);
     }
 }

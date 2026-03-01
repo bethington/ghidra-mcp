@@ -81,10 +81,13 @@ public class ProgramScriptService {
      * memory layout, function count, and symbol count.
      */
     public String getMetadata() {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) {
-            return "No program loaded";
-        }
+        return getMetadata(null);
+    }
+
+    public String getMetadata(String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         StringBuilder metadata = new StringBuilder();
         metadata.append("Program Name: ").append(program.getName()).append("\n");
@@ -125,10 +128,13 @@ public class ProgramScriptService {
      * Save the currently active program to its domain file.
      */
     public String saveCurrentProgram() {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
-        }
+        return saveCurrentProgram(null);
+    }
+
+    public String saveCurrentProgram(String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         final StringBuilder result = new StringBuilder();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
@@ -174,7 +180,7 @@ public class ProgramScriptService {
             return "{\"programs\": [], \"count\": 0, \"current_program\": \"\"}";
         }
 
-        Program currentProgram = programProvider.getCurrentProgram();
+        Program currentProgram = programProvider.resolveProgram(null);
 
         StringBuilder result = new StringBuilder();
         result.append("{\"programs\": [");
@@ -208,10 +214,13 @@ public class ProgramScriptService {
      * Get detailed information about the currently active program.
      */
     public String getCurrentProgramInfo() {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) {
-            return "{\"error\": \"No program currently loaded\"}";
-        }
+        return getCurrentProgramInfo(null);
+    }
+
+    public String getCurrentProgramInfo(String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         StringBuilder result = new StringBuilder();
         result.append("{");
@@ -452,10 +461,13 @@ public class ProgramScriptService {
      * @return Script output or error message
      */
     public String runGhidraScript(String scriptPath, String scriptArgs) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) {
-            return "Error: No program loaded";
-        }
+        return runGhidraScript(scriptPath, scriptArgs, (String) null);
+    }
+
+    public String runGhidraScript(String scriptPath, String scriptArgs, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
@@ -726,10 +738,15 @@ public class ProgramScriptService {
     public String createMemoryBlock(String name, String addressStr, long size,
                                      boolean read, boolean write, boolean execute,
                                      boolean isVolatile, String comment) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
-        }
+        return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, null);
+    }
+
+    public String createMemoryBlock(String name, String addressStr, long size,
+                                     boolean read, boolean write, boolean execute,
+                                     boolean isVolatile, String comment, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (name == null || name.isEmpty()) {
             return "{\"error\": \"name parameter required\"}";
         }
@@ -821,10 +838,13 @@ public class ProgramScriptService {
      * Creates or updates the bookmark if one already exists at the address with the same category.
      */
     public String setBookmark(String addressStr, String category, String comment) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) {
-            return "{\"success\": false, \"error\": \"No program loaded\"}";
-        }
+        return setBookmark(addressStr, category, comment, null);
+    }
+
+    public String setBookmark(String addressStr, String category, String comment, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (addressStr == null || addressStr.isEmpty()) {
             return "{\"success\": false, \"error\": \"Address is required\"}";
         }
@@ -876,10 +896,13 @@ public class ProgramScriptService {
      * List bookmarks, optionally filtered by category and/or address.
      */
     public String listBookmarks(String category, String addressStr) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) {
-            return "{\"success\": false, \"error\": \"No program loaded\"}";
-        }
+        return listBookmarks(category, addressStr, null);
+    }
+
+    public String listBookmarks(String category, String addressStr, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         try {
             BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -948,10 +971,13 @@ public class ProgramScriptService {
      * Delete a bookmark at an address with optional category filter.
      */
     public String deleteBookmark(String addressStr, String category) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) {
-            return "{\"success\": false, \"error\": \"No program loaded\"}";
-        }
+        return deleteBookmark(addressStr, category, null);
+    }
+
+    public String deleteBookmark(String addressStr, String category, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
         if (addressStr == null || addressStr.isEmpty()) {
             return "{\"success\": false, \"error\": \"Address is required\"}";
         }
@@ -994,14 +1020,17 @@ public class ProgramScriptService {
      * Locates the script in standard directories, executes it, and returns structured results.
      */
     public String runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput) {
+        return runGhidraScriptWithCapture(scriptName, scriptArgs, timeoutSeconds, captureOutput, null);
+    }
+
+    public String runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput, String programName) {
         if (scriptName == null || scriptName.isEmpty()) {
             return "{\"success\": false, \"error\": \"Script name is required\"}";
         }
 
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) {
-            return "{\"success\": false, \"error\": \"No program loaded\"}";
-        }
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         try {
             // Locate the script file - search Ghidra's standard script directories

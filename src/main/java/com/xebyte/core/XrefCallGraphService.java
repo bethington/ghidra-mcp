@@ -183,9 +183,14 @@ public class XrefCallGraphService {
      * Get all jump target addresses from a function's disassembly
      */
     public String getFunctionJumpTargets(String functionName, int offset, int limit) {
-        Program program = programProvider.getCurrentProgram();
+        return getFunctionJumpTargets(functionName, offset, limit, null);
+    }
+
+    public String getFunctionJumpTargets(String functionName, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "No program loaded";
+            return (String) programResult[1];
         }
 
         StringBuilder sb = new StringBuilder();
@@ -465,12 +470,12 @@ public class XrefCallGraphService {
 
         // Build call graph based on direction
         if ("callees".equals(direction) || "both".equals(direction)) {
-            buildCallGraphCallees(rootFunction, depth, visited, callGraph, functionManager);
+            buildCallGraphCallees(rootFunction, depth, visited, callGraph, functionManager, program);
         }
 
         if ("callers".equals(direction) || "both".equals(direction)) {
             visited.clear(); // Reset for callers traversal
-            buildCallGraphCallers(rootFunction, depth, visited, callGraph, functionManager);
+            buildCallGraphCallers(rootFunction, depth, visited, callGraph, functionManager, program);
         }
 
         // Format output as edges
@@ -495,7 +500,8 @@ public class XrefCallGraphService {
      * Helper method to build call graph for callees (what this function calls)
      */
     private void buildCallGraphCallees(Function function, int depth, Set<String> visited,
-                                     Map<String, Set<String>> callGraph, FunctionManager functionManager) {
+                                     Map<String, Set<String>> callGraph, FunctionManager functionManager,
+                                     Program program) {
         if (depth <= 0 || visited.contains(function.getName())) {
             return;
         }
@@ -505,7 +511,6 @@ public class XrefCallGraphService {
 
         // Find callees of this function
         AddressSetView functionBody = function.getBody();
-        Program program = programProvider.getCurrentProgram();
         Listing listing = program.getListing();
         ReferenceManager refManager = program.getReferenceManager();
 
@@ -522,7 +527,7 @@ public class XrefCallGraphService {
                         if (targetFunc != null) {
                             callees.add(targetFunc.getName());
                             // Recursively build graph for callees
-                            buildCallGraphCallees(targetFunc, depth - 1, visited, callGraph, functionManager);
+                            buildCallGraphCallees(targetFunc, depth - 1, visited, callGraph, functionManager, program);
                         }
                     }
                 }
@@ -538,13 +543,13 @@ public class XrefCallGraphService {
      * Helper method to build call graph for callers (what calls this function)
      */
     private void buildCallGraphCallers(Function function, int depth, Set<String> visited,
-                                     Map<String, Set<String>> callGraph, FunctionManager functionManager) {
+                                     Map<String, Set<String>> callGraph, FunctionManager functionManager,
+                                     Program program) {
         if (depth <= 0 || visited.contains(function.getName())) {
             return;
         }
 
         visited.add(function.getName());
-        Program program = programProvider.getCurrentProgram();
         ReferenceManager refManager = program.getReferenceManager();
 
         // Find callers of this function
@@ -558,7 +563,7 @@ public class XrefCallGraphService {
                     String callerName = callerFunc.getName();
                     callGraph.computeIfAbsent(callerName, k -> new HashSet<>()).add(function.getName());
                     // Recursively build graph for callers
-                    buildCallGraphCallers(callerFunc, depth - 1, visited, callGraph, functionManager);
+                    buildCallGraphCallers(callerFunc, depth - 1, visited, callGraph, functionManager, program);
                 }
             }
         }
@@ -1078,8 +1083,13 @@ public class XrefCallGraphService {
      * Retrieve xrefs for multiple addresses in one call
      */
     public String getBulkXrefs(Object addressesObj) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "{\"error\": \"No program loaded\"}";
+        return getBulkXrefs(addressesObj, null);
+    }
+
+    public String getBulkXrefs(Object addressesObj, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         StringBuilder json = new StringBuilder();
         json.append("{");
@@ -1147,8 +1157,14 @@ public class XrefCallGraphService {
      */
     public String getAssemblyContext(Object xrefSourcesObj, int contextInstructions,
                                       Object includePatternsObj) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "{\"error\": \"No program loaded\"}";
+        return getAssemblyContext(xrefSourcesObj, contextInstructions, includePatternsObj, null);
+    }
+
+    public String getAssemblyContext(Object xrefSourcesObj, int contextInstructions,
+                                      Object includePatternsObj, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) return (String) programResult[1];
 
         StringBuilder json = new StringBuilder();
         json.append("{");

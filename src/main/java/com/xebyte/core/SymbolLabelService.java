@@ -30,6 +30,36 @@ public class SymbolLabelService {
         this.threadingStrategy = threadingStrategy;
     }
 
+    // ========================================================================
+    // Program resolution helper
+    // ========================================================================
+
+    private Object[] getProgramOrError(String programName) {
+        Program program = null;
+        if (programName != null && !programName.isEmpty()) {
+            program = programProvider.resolveProgram(programName);
+        } else {
+            program = programProvider.getCurrentProgram();
+        }
+        if (program == null) {
+            String available = "";
+            Program[] all = programProvider.getAllOpenPrograms();
+            if (all != null && all.length > 0) {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < all.length; i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(all[i].getName());
+                }
+                available = " Available programs: " + sb;
+            }
+            String error = programName != null && !programName.isEmpty()
+                    ? ServiceUtils.programNotFoundError(programName) + available
+                    : "No program loaded." + available;
+            return new Object[]{null, error};
+        }
+        return new Object[]{program, null};
+    }
+
     // -----------------------------------------------------------------------
     // Label Methods
     // -----------------------------------------------------------------------
@@ -38,9 +68,14 @@ public class SymbolLabelService {
      * List all labels within a function's address range.
      */
     public String getFunctionLabels(String functionName, int offset, int limit) {
-        Program program = programProvider.getCurrentProgram();
+        return getFunctionLabels(functionName, offset, limit, null);
+    }
+
+    public String getFunctionLabels(String functionName, int offset, int limit, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "No program loaded";
+            return (String) programResult[1];
         }
 
         StringBuilder sb = new StringBuilder();
@@ -98,9 +133,14 @@ public class SymbolLabelService {
      * Rename a label at the specified address.
      */
     public String renameLabel(String addressStr, String oldName, String newName) {
-        Program program = programProvider.getCurrentProgram();
+        return renameLabel(addressStr, oldName, newName, null);
+    }
+
+    public String renameLabel(String addressStr, String oldName, String newName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "No program loaded";
+            return (String) programResult[1];
         }
 
         try {
@@ -152,9 +192,14 @@ public class SymbolLabelService {
      * Create a new label at the specified address.
      */
     public String createLabel(String addressStr, String labelName) {
-        Program program = programProvider.getCurrentProgram();
+        return createLabel(addressStr, labelName, null);
+    }
+
+    public String createLabel(String addressStr, String labelName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "No program loaded";
+            return (String) programResult[1];
         }
 
         if (addressStr == null || addressStr.isEmpty()) {
@@ -215,9 +260,14 @@ public class SymbolLabelService {
      * Batch create multiple labels in a single transaction.
      */
     public String batchCreateLabels(List<Map<String, String>> labels) {
-        Program program = programProvider.getCurrentProgram();
+        return batchCreateLabels(labels, null);
+    }
+
+    public String batchCreateLabels(List<Map<String, String>> labels, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         if (labels == null || labels.isEmpty()) {
@@ -326,9 +376,14 @@ public class SymbolLabelService {
      * Intelligently rename data or create label based on whether data is defined.
      */
     public String renameOrLabel(String addressStr, String newName) {
-        Program program = programProvider.getCurrentProgram();
+        return renameOrLabel(addressStr, newName, null);
+    }
+
+    public String renameOrLabel(String addressStr, String newName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (addressStr == null || addressStr.isEmpty()) {
@@ -350,10 +405,10 @@ public class SymbolLabelService {
 
             if (data != null) {
                 // Defined data exists - use rename_data logic
-                return renameDataAtAddress(addressStr, newName);
+                return renameDataAtAddress(addressStr, newName, programName);
             } else {
                 // No defined data - use create_label logic
-                return createLabel(addressStr, newName);
+                return createLabel(addressStr, newName, programName);
             }
 
         } catch (Exception e) {
@@ -365,9 +420,14 @@ public class SymbolLabelService {
      * Delete a label at the specified address.
      */
     public String deleteLabel(String addressStr, String labelName) {
-        Program program = programProvider.getCurrentProgram();
+        return deleteLabel(addressStr, labelName, null);
+    }
+
+    public String deleteLabel(String addressStr, String labelName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         if (addressStr == null || addressStr.isEmpty()) {
@@ -452,9 +512,14 @@ public class SymbolLabelService {
      * Batch delete multiple labels in a single transaction.
      */
     public String batchDeleteLabels(List<Map<String, String>> labels) {
-        Program program = programProvider.getCurrentProgram();
+        return batchDeleteLabels(labels, null);
+    }
+
+    public String batchDeleteLabels(List<Map<String, String>> labels, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         if (labels == null || labels.isEmpty()) {
@@ -557,9 +622,14 @@ public class SymbolLabelService {
      * Rename defined data symbols at an address.
      */
     public String renameDataAtAddress(String addressStr, String newName) {
-        Program program = programProvider.getCurrentProgram();
+        return renameDataAtAddress(addressStr, newName, null);
+    }
+
+    public String renameDataAtAddress(String addressStr, String newName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -620,9 +690,14 @@ public class SymbolLabelService {
      * Rename a global variable/symbol.
      */
     public String renameGlobalVariable(String oldName, String newName) {
-        Program program = programProvider.getCurrentProgram();
+        return renameGlobalVariable(oldName, newName, null);
+    }
+
+    public String renameGlobalVariable(String oldName, String newName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "Error: No program loaded";
+            return (String) programResult[1];
         }
 
         if (oldName == null || oldName.isEmpty()) {
@@ -683,8 +758,15 @@ public class SymbolLabelService {
      * Uses SwingUtilities.invokeAndWait + transaction for thread safety.
      */
     public String renameExternalLocation(String address, String newName) {
-        Program program = programProvider.getCurrentProgram();
-        if (program == null) return "No program loaded";
+        return renameExternalLocation(address, newName, null);
+    }
+
+    public String renameExternalLocation(String address, String newName, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
+        if (program == null) {
+            return (String) programResult[1];
+        }
 
         try {
             Address addr = program.getAddressFactory().getAddress(address);
@@ -752,9 +834,14 @@ public class SymbolLabelService {
      * Read-only detection using SwingUtilities.invokeAndWait for thread safety.
      */
     public String canRenameAtAddress(String addressStr) {
-        Program program = programProvider.getCurrentProgram();
+        return canRenameAtAddress(addressStr, null);
+    }
+
+    public String canRenameAtAddress(String addressStr, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return (String) programResult[1];
         }
 
         final StringBuilder result = new StringBuilder();

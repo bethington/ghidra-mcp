@@ -2,10 +2,10 @@
 
 ## Project Overview
 
-Ghidra MCP is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It provides **184 MCP tools** for binary analysis automation.
+Ghidra MCP is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It provides **188 MCP tools** for binary analysis automation.
 
 - **Package**: `com.xebyte`
-- **Version**: 4.0.0 (see `pom.xml`)
+- **Version**: 4.1.0 (see `pom.xml`)
 - **License**: Apache 2.0
 - **Java**: 21 LTS
 - **Ghidra**: 12.0.3
@@ -95,7 +95,7 @@ ghidra-mcp/
 
 ## Key Documentation
 
-- **API Reference**: See README.md for complete tool listing (184 MCP tools)
+- **API Reference**: See README.md for complete tool listing (188 MCP tools)
 - **Workflow Prompts**: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md` - Function documentation workflow (V5)
 - **Batch Processing**: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5_BATCH.md` - Multi-function parallel documentation
 - **Data Analysis**: `docs/prompts/DATA_TYPE_INVESTIGATION_WORKFLOW.md`
@@ -151,7 +151,8 @@ Located in `ghidra_scripts/`. Execute via:
 ## Version History
 
 See `CHANGELOG.md` for complete history. Key releases:
-- v4.0.0: Service layer architecture refactor (12 shared services), 69% plugin reduction, 184 MCP tools, 169 GUI endpoints, 173 headless endpoints
+- v4.1.0: Parallel multi-binary support via universal `program` parameter, 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
+- v4.0.0: Service layer architecture refactor (12 shared services), 69% plugin reduction, 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
 - v3.2.0: Completeness checker overhaul, batch_analyze_completeness endpoint, multi-window fix (#35), 180 MCP tools, 149 GUI endpoints
 - v3.1.0: Tools > GhidraMCP server control menu, deployment automation, completeness checker accuracy
 - v3.0.0: Headless parity, 8 new tool categories, 179 MCP tools, 147 GUI endpoints, 172 headless endpoints

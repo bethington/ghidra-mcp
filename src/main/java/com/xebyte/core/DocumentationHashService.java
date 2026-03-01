@@ -328,9 +328,14 @@ public class DocumentationHashService {
      * Export all documentation for a function (for use in cross-binary propagation)
      */
     public String getFunctionDocumentation(String functionAddress) {
-        Program program = programProvider.getCurrentProgram();
+        return getFunctionDocumentation(functionAddress, null);
+    }
+
+    public String getFunctionDocumentation(String functionAddress, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
         }
 
         try {
@@ -506,9 +511,15 @@ public class DocumentationHashService {
      */
     @SuppressWarnings("deprecation")
     public String applyFunctionDocumentation(String jsonBody) {
-        Program program = programProvider.getCurrentProgram();
+        return applyFunctionDocumentation(jsonBody, null);
+    }
+
+    @SuppressWarnings("deprecation")
+    public String applyFunctionDocumentation(String jsonBody, String programName) {
+        Object[] programResult = getProgramOrError(programName);
+        Program program = (Program) programResult[0];
         if (program == null) {
-            return "{\"error\": \"No program loaded\"}";
+            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
         }
 
         try {
@@ -758,12 +769,17 @@ public class DocumentationHashService {
      * Returns documented/undocumented function counts for each program.
      */
     public String compareProgramsDocumentation() {
+        return compareProgramsDocumentation(null);
+    }
+
+    public String compareProgramsDocumentation(String programName) {
         StringBuilder result = new StringBuilder();
         result.append("{\"programs\": [");
 
         try {
             Program[] allPrograms = programProvider.getAllOpenPrograms();
-            Program currentProgram = programProvider.getCurrentProgram();
+            Object[] programResult = getProgramOrError(programName);
+            Program currentProgram = (Program) programResult[0];
 
             if (allPrograms == null || allPrograms.length == 0) {
                 return "{\"error\": \"No programs are open\"}";
