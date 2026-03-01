@@ -1,28 +1,341 @@
 {
-  "version": 1,
-  "created": null,
-  "last_updated": null,
-  "iteration": 0,
-  "phase": "survey",
+  "version": 2,
+  "created": "2026-02-28T00:00:00Z",
+  "last_updated": "2026-02-28T05:00:00Z",
+  "iteration": 7,
+  "phase": "complete",
   "paused": false,
   "pause_reason": null,
+  "default_strategy": "callee_first",
+  "homogeneous_binary": true,
+  "scaling_notice_shown": false,
+  "skip_rules": [
+    {"id": "SKIP-001", "classification": "thunk", "step": "type_audit", "reason": "thunks have no body variables — all 7 thunks had zero type audit value", "created_iteration": 3},
+    {"id": "SKIP-002", "classification": "thunk", "step": "variable_rename", "reason": "thunk bodies have only register-only SSA variables that cannot be renamed", "created_iteration": 3}
+  ],
+  "improvements_applied": 4,
+  "improvements_proposed": 2,
   "session": {
-    "started": null,
-    "functions_documented": 0,
+    "started": "2026-02-28T00:00:00Z",
+    "functions_documented": 19,
     "functions_failed": 0,
-    "avg_score": 0,
-    "propagations": 0
+    "avg_score": 96.2,
+    "propagations": 0,
+    "total_tool_calls": 174,
+    "avg_calls_per_function": 9.2
   },
   "current_batch": [],
-  "completed": [],
+  "completed": [
+    {
+      "address": "0x10001064",
+      "old_name": "Ordinal_10352",
+      "new_name": "SetUnitUpdateFlag",
+      "score": 94,
+      "effective_score": 97,
+      "status": "complete",
+      "iteration": 1,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": ["fEnable hungarian false positive (f prefix for boolean-as-int)"],
+      "tool_calls": 7
+    },
+    {
+      "address": "0x100020bd",
+      "old_name": "Ordinal_10645",
+      "new_name": "GetAnimDataRecord",
+      "score": 94,
+      "effective_score": 97,
+      "status": "complete",
+      "iteration": 2,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": ["pAnimDataTable hungarian - int typed as pointer"],
+      "tool_calls": 7
+    },
+    {
+      "address": "0x10077d22",
+      "old_name": "Ordinal_10024",
+      "new_name": "LogArchiveError",
+      "score": 100,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 2,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": [],
+      "tool_calls": 7
+    },
+    {
+      "address": "0x10077d16",
+      "old_name": "Ordinal_10098",
+      "new_name": "LogSaveParseError",
+      "score": 100,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 2,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": [],
+      "tool_calls": 7
+    },
+    {
+      "address": "0x10002590",
+      "old_name": "Ordinal_10729",
+      "new_name": "AreItemsInSameStatGroup",
+      "score": 82,
+      "effective_score": 94,
+      "status": "complete",
+      "iteration": 3,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": ["pStatEntry1/2 hungarian - int typed as pointer", "bVar1/2 register-only SSA - cannot rename"],
+      "tool_calls": 10,
+      "friction_log": [
+        {"function": "0x10002590", "tool": "analyze_function_completeness", "issue": "pStatEntry params typed as int but used as pointers — Hungarian checker flags p prefix", "category": "tool_enhancement", "workaround": "Accepted effective_score instead of raw score"},
+        {"function": "0x10002590", "tool": "get_function_variables", "issue": "Body reports no locals - all variables are register-only SSA, cannot rename", "category": "workflow_inefficiency", "workaround": "Documented in plate comment Special Cases"}
+      ]
+    },
+    {
+      "address": "0x10001438",
+      "old_name": "Ordinal_10375",
+      "new_name": "GetUnitPosition",
+      "score": 94,
+      "effective_score": 97,
+      "status": "complete",
+      "iteration": 3,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": ["pUnit hungarian - int typed as pointer"],
+      "tool_calls": 8,
+      "friction_log": [
+        {"function": "0x10001438", "tool": "analyze_function_completeness", "issue": "pUnit typed as int but semantically a pointer — Hungarian checker flags p prefix", "category": "tool_enhancement", "workaround": "Accepted effective_score"}
+      ]
+    },
+    {
+      "address": "0x10001627",
+      "old_name": "Ordinal_10509",
+      "new_name": "ClearStatFromStatList",
+      "score": 100,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 3,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": [],
+      "tool_calls": 7,
+      "friction_log": []
+    },
+    {
+      "address": "0x10001870",
+      "old_name": "Ordinal_10382",
+      "new_name": "RemoveUnitFromChangedList",
+      "score": 94,
+      "effective_score": 97,
+      "status": "complete",
+      "iteration": 4,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "body_address": "0x1006d400",
+      "body_score": 69,
+      "body_effective": 97,
+      "deductions": ["pUnit hungarian - int typed as pointer", "body register-only SSA generics (pvVar*, iVar*)"],
+      "tool_calls": 12,
+      "friction_log": [
+        {"function": "0x10001870", "tool": "analyze_function_completeness", "issue": "pUnit typed as int — p-prefix on int param", "category": "tool_enhancement", "known_friction": true, "workaround": "PROP-0001 evidence incremented"},
+        {"function": "0x1006d400", "tool": "get_function_variables", "issue": "Body has register-only SSA variables only", "category": "workflow_inefficiency", "known_friction": true, "workaround": "PROP-0002 evidence incremented"}
+      ]
+    },
+    {
+      "address": "0x10001b4a",
+      "old_name": "Ordinal_10529",
+      "new_name": "IsUnitStateActive",
+      "score": 94,
+      "effective_score": 97,
+      "status": "complete",
+      "iteration": 4,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "body_address": "0x10067240",
+      "body_score": 94,
+      "deductions": ["pUnit hungarian - int typed as pointer"],
+      "tool_calls": 12,
+      "friction_log": [
+        {"function": "0x10001b4a", "tool": "analyze_function_completeness", "issue": "pUnit typed as int — p-prefix on int param", "category": "tool_enhancement", "known_friction": true, "workaround": "PROP-0001 evidence incremented"}
+      ]
+    },
+    {
+      "address": "0x10001c1c",
+      "old_name": "Ordinal_10207",
+      "new_name": "GetNodeDirection",
+      "score": 94,
+      "effective_score": 97,
+      "status": "complete",
+      "iteration": 4,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "body_address": "0x1005b2d0",
+      "body_score": 94,
+      "deductions": ["pNode hungarian - int typed as pointer"],
+      "tool_calls": 12,
+      "friction_log": [
+        {"function": "0x10001c1c", "tool": "analyze_function_completeness", "issue": "pNode typed as int — p-prefix on int param", "category": "tool_enhancement", "known_friction": true, "workaround": "PROP-0001 evidence incremented"}
+      ]
+    },
+    {
+      "address": "0x10001c44",
+      "old_name": "Ordinal_10853",
+      "new_name": "ExchangeUnitTypeField",
+      "score": 97,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 5,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "body_address": "0x10062800",
+      "deductions": ["pUnit hungarian - int typed as pointer"],
+      "tool_calls": 12,
+      "friction_log": [
+        {"function": "0x10001c44", "tool": "analyze_function_completeness", "issue": "pUnit typed as int — p-prefix on int param", "category": "tool_enhancement", "known_friction": true, "workaround": "PROP-0001 evidence incremented"}
+      ]
+    },
+    {
+      "address": "0x10001d84",
+      "old_name": "Ordinal_10899",
+      "new_name": "GetStatRecordEntry",
+      "score": 100,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 5,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "body_address": "0x10064d80",
+      "deductions": [],
+      "tool_calls": 12,
+      "friction_log": []
+    },
+    {
+      "address": "0x10001da2",
+      "old_name": "Ordinal_10535",
+      "new_name": "HasActiveEffectFlags",
+      "score": 97,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 5,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "body_address": "0x100678d0",
+      "deductions": ["pUnit hungarian - int typed as pointer"],
+      "tool_calls": 12,
+      "friction_log": [
+        {"function": "0x10001da2", "tool": "analyze_function_completeness", "issue": "pUnit typed as int — p-prefix on int param", "category": "tool_enhancement", "known_friction": true, "workaround": "PROP-0001 evidence incremented"}
+      ]
+    },
+    {
+      "address": "0x10001e42",
+      "old_name": "Ordinal_10944",
+      "new_name": "ComputeMonsterSkillParams",
+      "score": 91,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 6,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": ["extraout_var phantoms (4x)", "uStack Hungarian (3x) — register-only SSA"],
+      "tool_calls": 14,
+      "friction_log": []
+    },
+    {
+      "address": "0x10001e51",
+      "old_name": "Ordinal_11000",
+      "new_name": "GetMissileDataField",
+      "score": 100,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 6,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": [],
+      "tool_calls": 7,
+      "friction_log": []
+    },
+    {
+      "address": "0x10001e5b",
+      "old_name": "Ordinal_11012",
+      "new_name": "SetMissileDataField",
+      "score": 100,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 6,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": [],
+      "tool_calls": 7,
+      "friction_log": []
+    },
+    {
+      "address": "0x10001e9c",
+      "old_name": "Ordinal_10954",
+      "new_name": "FreeTrackedPoolArray",
+      "score": 100,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 7,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": [],
+      "tool_calls": 7,
+      "friction_log": []
+    },
+    {
+      "address": "0x10001ec4",
+      "old_name": "Ordinal_10533",
+      "new_name": "HasOverlayEffectFlag",
+      "score": 100,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 7,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": [],
+      "tool_calls": 7,
+      "friction_log": []
+    },
+    {
+      "address": "0x10001ed8",
+      "old_name": "Ordinal_10526",
+      "new_name": "HasAuraEffectFlag",
+      "score": 100,
+      "effective_score": 100,
+      "status": "complete",
+      "iteration": 7,
+      "strategy": "callee_first",
+      "classification": "thunk",
+      "deductions": [],
+      "tool_calls": 7,
+      "friction_log": []
+    }
+  ],
   "needs_work": [],
   "tool_errors": {},
   "strategy_stats": {
-    "callee_first": { "count": 0, "avg_score": 0 },
+    "callee_first": { "count": 19, "avg_score": 96.2 },
     "high_xref": { "count": 0, "avg_score": 0 },
     "neighborhood": { "count": 0, "avg_score": 0 },
     "worst_score": { "count": 0, "avg_score": 0 }
   },
   "programs_indexed": [],
-  "hash_index_built": false
+  "hash_index_built": false,
+  "score_history": [
+    {"iteration": 1, "count": 1, "avg_score": 94.0, "avg_effective": 97.0},
+    {"iteration": 2, "count": 4, "avg_score": 97.0, "avg_effective": 98.5},
+    {"iteration": 3, "count": 7, "avg_score": 95.3, "avg_effective": 97.9},
+    {"iteration": 4, "count": 10, "avg_score": 94.6, "avg_effective": 97.6},
+    {"iteration": 5, "count": 13, "avg_score": 95.4, "avg_effective": 98.2},
+    {"iteration": 6, "count": 16, "avg_score": 95.7, "avg_effective": 98.5},
+    {"iteration": 7, "count": 19, "avg_score": 96.2, "avg_effective": 98.7}
+  ],
+  "known_friction_patterns": [
+    {"tool": "analyze_function_completeness", "pattern": "p-prefix on int param", "proposal_id": "PROP-0001"},
+    {"tool": "get_function_variables", "pattern": "register-only SSA no locals", "proposal_id": "PROP-0002"}
+  ]
 }
