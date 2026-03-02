@@ -105,27 +105,26 @@ public class FunctionService {
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(value = "/decompile_function", description = "Decompile function at address")
+    @McpTool(value = "/decompile_function", description = "Decompile function by address or name")
     public Response decompileFunctionByAddress(
-            @Param("address") String addressStr,
+            @Param(value = "address", description = "Function address (hex) or name") FunctionRef ref,
             @Param(value = "program", required = false) String programName,
             @Param(value = "timeout", type = "integer", required = false, defaultValue = "60") int timeoutSeconds) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+        if (ref == null || ref.value() == null || ref.value().isEmpty()) return Response.err("Address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
-            Function func = ServiceUtils.getFunctionForAddress(program, addr);
-            if (func == null) return Response.err("No function found at or containing address " + addressStr);
+            Function func = ref.resolve(program);
+            if (func == null) return Response.err("No function found for '" + ref.value() + "'");
 
             DecompInterface decomp = new DecompInterface();
             decomp.openProgram(program);
             DecompileResults decompResult = decomp.decompileFunction(func, timeoutSeconds, new ConsoleTaskMonitor());
 
             if (decompResult == null) {
-                return Response.err("Decompiler returned null result for function at " + addressStr);
+                return Response.err("Decompiler returned null result for function at " + ref.value());
             }
 
             if (!decompResult.decompileCompleted()) {
@@ -147,11 +146,11 @@ public class FunctionService {
 
     // Backward compatible overloads for internal callers
     public Response decompileFunctionByAddress(String addressStr, String programName) {
-        return decompileFunctionByAddress(addressStr, programName, DECOMPILE_TIMEOUT_SECONDS);
+        return decompileFunctionByAddress(new FunctionRef(addressStr), programName, DECOMPILE_TIMEOUT_SECONDS);
     }
 
     public Response decompileFunctionByAddress(String addressStr) {
-        return decompileFunctionByAddress(addressStr, null, DECOMPILE_TIMEOUT_SECONDS);
+        return decompileFunctionByAddress(new FunctionRef(addressStr), null, DECOMPILE_TIMEOUT_SECONDS);
     }
 
     /**
@@ -457,22 +456,15 @@ public class FunctionService {
      * Get function by address.
      */
     @McpTool(value = "/get_function_by_address", description = "Get function info at address")
-    public Response getFunctionByAddress(@Param("address") String addressStr, @Param(value = "program", required = false) String programName) {
+    public Response getFunctionByAddress(@Param(value = "address", description = "Function address (hex) or name") FunctionRef ref, @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) return Response.text("Address is required");
+        if (ref == null || ref.value() == null || ref.value().isEmpty()) return Response.text("Address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
-            if (addr == null) return Response.err("Invalid address: " + addressStr);
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
-            if (func == null) {
-                func = program.getFunctionManager().getFunctionContaining(addr);
-            }
-
-            if (func == null) return Response.text("No function found at or containing address " + addressStr);
+            Function func = ref.resolve(program);
+            if (func == null) return Response.text("No function found for '" + ref.value() + "'");
 
             return Response.text(String.format("Function: %s at %s\nSignature: %s\nEntry: %s\nBody: %s - %s",
                 func.getName(),
@@ -488,7 +480,7 @@ public class FunctionService {
 
     // Backward compatibility overload
     public Response getFunctionByAddress(String addressStr) {
-        return getFunctionByAddress(addressStr, null);
+        return getFunctionByAddress(new FunctionRef(addressStr), null);
     }
 
     // ========================================================================
@@ -1566,33 +1558,27 @@ public class FunctionService {
      * Get detailed information about a function's variables (parameters and locals).
      */
     @McpTool(value = "/get_function_variables", description = "List all variables in a function")
-    public Response getFunctionVariables(@Param("function_name") String functionName, @Param(value = "program", required = false) String programName) {
+    public Response getFunctionVariables(@Param(value = "function_name", description = "Function name or address") FunctionRef ref, @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        if (functionName == null || functionName.isEmpty()) {
+        if (ref == null || ref.value() == null || ref.value().isEmpty()) {
             return Response.err("Function name is required");
         }
 
         final Program finalProgram = program;
+        final FunctionRef finalRef = ref;
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
             threadingStrategy.executeRead(() -> {
                 try {
-                    // Find function by name
-                    Function func = null;
-                    for (Function f : finalProgram.getFunctionManager().getFunctions(true)) {
-                        if (f.getName().equals(functionName)) {
-                            func = f;
-                            break;
-                        }
-                    }
+                    Function func = finalRef.resolve(finalProgram);
 
                     if (func == null) {
-                        errorMsg.set("Function not found: " + functionName);
+                        errorMsg.set("Function not found: " + finalRef.value());
                         return null;
                     }
 
@@ -1693,7 +1679,7 @@ public class FunctionService {
 
     // Backward compatibility overload
     public Response getFunctionVariables(String functionName) {
-        return getFunctionVariables(functionName, null);
+        return getFunctionVariables(new FunctionRef(functionName), null);
     }
 
     /** Suggest a concrete type for an undefined Ghidra type based on size. */

@@ -260,6 +260,10 @@ public final class AnnotationScanner {
             return raw.toString();
         }
 
+        if (type == FunctionRef.class) {
+            return new FunctionRef(raw.toString());
+        }
+
         if (type == int.class || type == Integer.class) {
             if (raw instanceof Number n) return n.intValue();
             try { return Integer.parseInt(raw.toString()); }

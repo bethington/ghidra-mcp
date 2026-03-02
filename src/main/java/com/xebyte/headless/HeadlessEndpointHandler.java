@@ -229,7 +229,7 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String getFunctionByAddress(String addressStr, String programName) {
-        return functionService.getFunctionByAddress(addressStr, programName).toJson();
+        return functionService.getFunctionByAddress(new com.xebyte.core.FunctionRef(addressStr), programName).toJson();
     }
 
     // ==========================================================================
@@ -573,7 +573,7 @@ public class HeadlessEndpointHandler {
      * Get all variables (parameters and locals) for a function.
      */
     public String getFunctionVariables(String functionName, String programName) {
-        return functionService.getFunctionVariables(functionName, programName).toJson();
+        return functionService.getFunctionVariables(new com.xebyte.core.FunctionRef(functionName), programName).toJson();
     }
 
     /**
@@ -1557,7 +1557,7 @@ public class HeadlessEndpointHandler {
      * Compute a normalized hash for a function
      */
     public String getFunctionHash(String addressStr, String programName) {
-        return documentationHashService.getFunctionHash(addressStr, programName).toJson();
+        return documentationHashService.getFunctionHash(new com.xebyte.core.FunctionRef(addressStr), programName).toJson();
     }
 
     /**
@@ -2121,7 +2121,7 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String getFunctionDocumentation(String functionAddress, String programName) {
-        return documentationHashService.getFunctionDocumentation(functionAddress, programName).toJson();
+        return documentationHashService.getFunctionDocumentation(new com.xebyte.core.FunctionRef(functionAddress), programName).toJson();
     }
 
     public String applyFunctionDocumentation(String jsonBody, String programName) {
