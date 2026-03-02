@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Service for symbol and label operations: create, rename, delete, batch operations.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
  */
+@McpToolGroup("symbol")
 public class SymbolLabelService {
 
     private final ProgramProvider programProvider;

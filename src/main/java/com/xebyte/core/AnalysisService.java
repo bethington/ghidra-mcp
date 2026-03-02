@@ -43,6 +43,7 @@ import java.util.regex.Pattern;
  * similarity detection, memory inspection, and enhanced search.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
  */
+@McpToolGroup("analysis")
 public class AnalysisService {
 
     private static final int MAX_FIELD_EXAMPLES = 50;
@@ -742,6 +743,7 @@ public class AnalysisService {
     /**
      * Detect cryptographic constants in the binary (AES S-boxes, SHA constants, etc.)
      */
+    @McpTool(value = "/detect_crypto_constants", description = "Detect cryptographic constants in the binary (AES S-boxes, SHA constants, etc.)")
     public Response detectCryptoConstants() {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {

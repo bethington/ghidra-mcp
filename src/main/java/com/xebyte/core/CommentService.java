@@ -12,6 +12,7 @@ import java.util.Map;
 /**
  * Service for comment operations: set/get/clear decompiler, disassembly, and plate comments.
  */
+@McpToolGroup("comment")
 public class CommentService {
 
     private final ProgramProvider programProvider;
