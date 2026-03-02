@@ -327,7 +327,10 @@ public class DocumentationHashService {
 
             // Local variables (from decompilation if available)
             List<Map<String, Object>> localVarsList = new ArrayList<>();
-            DecompileResults decompResults = functionService.decompileFunction(func, program);
+            if (functionService == null) {
+                Msg.warn(this, "FunctionService not available, skipping local variable extraction for " + func.getName());
+            }
+            DecompileResults decompResults = functionService != null ? functionService.decompileFunction(func, program) : null;
             if (decompResults != null && decompResults.decompileCompleted()) {
                 ghidra.program.model.pcode.HighFunction highFunc = decompResults.getHighFunction();
                 if (highFunc != null) {

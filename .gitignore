@@ -454,6 +454,14 @@ functions-progress-worker*.json
 # WORKFLOW LOCAL STATE FILES
 # =============================================================================
 
+# RE loop runtime state (project-specific, regenerated per session)
+workflows/loop_state.json
+workflows/learnings.md
+workflows/proposals.json
+workflows/community_names.json
+workflows/community/*.csv
+workflows/survey_*.json
+
 # Ghidra manager config (contains local paths)
 workflows/.ghidra_manager_config.json
 
