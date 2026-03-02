@@ -1,12 +1,12 @@
 {
   "version": 4,
   "created": "2026-02-28T00:00:00Z",
-  "last_updated": "2026-03-01T23:00:00Z",
+  "last_updated": "2026-03-02T12:00:00Z",
   "active_binary": "/Vanilla/1.13d/D2Common.dll",
   "mode": "multi_version",
   "global": {
-    "total_iterations": 33,
-    "total_functions_documented": 140,
+    "total_iterations": 171,
+    "total_functions_documented": 825,
     "known_friction_patterns": [
       {
         "tool": "analyze_function_completeness",
@@ -637,13 +637,14 @@
       }
     },
     "/Vanilla/1.13d/D2Common.dll": {
-      "iteration": 20,
+      "iteration": 159,
       "phase": "survey",
       "paused": false,
       "pause_reason": null,
       "default_strategy": "high_xref",
       "homogeneous_binary": false,
       "scaling_notice_shown": false,
+      "strategy_blacklist": ["neighborhood"],
       "skip_rules": [
         {
           "id": "SKIP-001",
@@ -662,883 +663,902 @@
       ],
       "session": {
         "started": "2026-03-01T17:00:00Z",
-        "functions_documented": 100,
+        "functions_documented": 788,
         "functions_failed": 0,
-        "avg_score": 76.4,
-        "avg_effective_score": 95.4,
+        "avg_score": 72.4,
+        "avg_effective_score": 81.0,
         "propagations": 0,
-        "total_tool_calls": 711,
-        "avg_calls_per_function": 7.1
+        "total_tool_calls": 2848,
+        "avg_calls_per_function": 3.6
       },
       "current_batch": [],
+      "completed_note": "trimmed to last 5, full history in bookmarks",
       "completed": [
         {
-          "address": "0x6fd76010",
-          "old_name": "Ordinal_10444",
-          "new_name": "ClearCollisionMask",
+          "address": "0x6fd652d0",
+          "old_name": "Ordinal_10040",
+          "new_name": "GetObjectFlags",
           "score": 80,
           "effective_score": 95,
           "status": "documented",
-          "iteration": 8,
+          "iteration": 159,
           "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["void* pClassData"],
-          "tool_calls": 7
+          "classification": "api_export",
+          "deductions": ["1 undefined (CONCAT31 SSA)", "1 type_quality"],
+          "tool_calls": 3,
+          "community_info": {"source": "PlugY/D2Funcs.h", "name_suggestion": "D2GetObjectFlags"}
         },
         {
-          "address": "0x6fd77000",
-          "old_name": "Ordinal_10152",
-          "new_name": "GetCollisionMaskFlags",
-          "score": 75,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 8,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA uVar1", "void* pClassData"],
-          "tool_calls": 7
-        },
-        {
-          "address": "0x6fd949b0",
-          "old_name": "Ordinal_10976",
-          "new_name": "GetItemStatValueCapped",
-          "score": 90,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 8,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1/iVar2"],
-          "tool_calls": 10
-        },
-        {
-          "address": "0x6fdc8140",
-          "old_name": "Ordinal_10223",
-          "new_name": "ClearUnitCollisionArea",
-          "score": 40,
-          "effective_score": 93,
-          "status": "documented",
-          "iteration": 8,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (10 vars)", "undefined4 uVar9", "Hungarian bVar8"],
-          "tool_calls": 9
-        },
-        {
-          "address": "0x6fdc8310",
-          "old_name": "Ordinal_10222",
-          "new_name": "SetUnitCollisionArea",
-          "score": 43,
-          "effective_score": 93,
-          "status": "documented",
-          "iteration": 8,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (10 vars)", "undefined4 uVar9"],
-          "tool_calls": 8
-        },
-        {
-          "address": "0x6fd73560",
-          "old_name": "Ordinal_10881",
-          "new_name": "CopyUnitPathBlock",
-          "score": 82,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 9,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["void* pClassData (Hungarian int-as-pointer)"],
-          "tool_calls": 7
-        },
-        {
-          "address": "0x6fd761c0",
-          "old_name": "Ordinal_10446",
-          "new_name": "SetCollisionMask",
-          "score": 70,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 9,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA", "generic local names fixed"],
-          "tool_calls": 11
-        },
-        {
-          "address": "0x6fd89b90",
-          "old_name": "Ordinal_10627",
-          "new_name": "FindEquippedWeaponByClassId",
-          "score": 80,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 9,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA"],
-          "tool_calls": 7
-        },
-        {
-          "address": "0x6fda8da0",
-          "old_name": "Ordinal_10518",
-          "new_name": "GetUnitStatCostValue",
-          "score": 87,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 9,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["pUnit Hungarian", "register-only SSA"],
-          "tool_calls": 7
-        },
-        {
-          "address": "0x6fdc5de0",
-          "old_name": "Ordinal_10435",
-          "new_name": "AssignSkillToUnit",
-          "score": 30,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 9,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (13 vars)"],
-          "tool_calls": 11
-        },
-        {
-          "address": "0x6fd66c50",
-          "old_name": "Ordinal_10171",
-          "new_name": "IsUnitDualWieldClass",
-          "score": 90,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 10,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (iVar1, iVar2)"],
-          "tool_calls": 7
-        },
-        {
-          "address": "0x6fd89f70",
-          "old_name": "Ordinal_10721",
-          "new_name": "FindWeaponInEquipSlots",
-          "score": 75,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 10,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (4 vars)"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fd8a0a0",
-          "old_name": "Ordinal_10286",
-          "new_name": "GetEquippedItemByBodyLoc",
-          "score": 60,
-          "effective_score": 98,
-          "status": "documented",
-          "iteration": 10,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (7 vars)", "Hungarian bVar7"],
-          "tool_calls": 9
-        },
-        {
-          "address": "0x6fd90cf0",
-          "old_name": "Ordinal_10987",
-          "new_name": "GetItemEquipBodyType",
-          "score": 87,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 10,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["pItem Hungarian int-as-pointer"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fd90eb0",
-          "old_name": "Ordinal_10360",
-          "new_name": "SetItemProperty",
+          "address": "0x6fd5ce00",
+          "old_name": "Ordinal_10127",
+          "new_name": "GetUnitNameString",
           "score": 100,
           "effective_score": 100,
           "status": "complete",
-          "iteration": 10,
+          "iteration": 158,
           "strategy": "high_xref",
           "classification": "worker",
           "deductions": [],
           "tool_calls": 5
         },
         {
-          "address": "0x6fd920d0",
-          "old_name": "Ordinal_10717",
-          "new_name": "GetItemQuantity",
-          "score": 95,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 11,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fda7a70",
-          "old_name": "Ordinal_10219",
-          "new_name": "AllocateStatList",
-          "score": 60,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 11,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["void* pOwner", "undefined4* type", "register-only SSA"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fdbddf0",
-          "old_name": "Ordinal_10736",
-          "new_name": "GenerateDrlgLevel",
+          "address": "0x6fd5df60",
+          "old_name": "Ordinal_10694",
+          "new_name": "GetDifficultyLevelsBIN",
           "score": 90,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 11,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["phantom extraout_ECX (6 vars)"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fdc3980",
-          "old_name": "Ordinal_11012",
-          "new_name": "ResolveItemEquipSlotType",
-          "score": 70,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 11,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (5 vars)", "nTypeIndex storage type"],
-          "tool_calls": 8
-        },
-        {
-          "address": "0x6fdd7110",
-          "old_name": "Ordinal_10992",
-          "new_name": "RemoveUnitFromClassList",
-          "score": 62,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 11,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (7 vars)", "Hungarian bVar1"],
-          "tool_calls": 8
-        },
-        {
-          "address": "0x6fd91190",
-          "old_name": "Ordinal_10884",
-          "new_name": "GetItemRecordGfxField",
-          "score": 95,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 12,
-          "strategy": "callee_first",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fd92ed0",
-          "old_name": "Ordinal_10185",
-          "new_name": "GetItemStackGfxTier",
-          "score": 72,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 12,
-          "strategy": "callee_first",
-          "classification": "worker",
-          "deductions": ["register-only SSA (5 vars)", "phantom in_EAX", "pUnit Hungarian"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fd87ee0",
-          "old_name": "Ordinal_10292",
-          "new_name": "GetInventorySlotItem",
-          "score": 92,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 12,
-          "strategy": "callee_first",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1", "pInventory Hungarian"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fd92200",
-          "old_name": "Ordinal_10458",
-          "new_name": "TestItemFlags",
-          "score": 97,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 12,
-          "strategy": "callee_first",
-          "classification": "leaf",
-          "deductions": ["pUnit Hungarian"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fd92400",
-          "old_name": "Ordinal_10695",
-          "new_name": "GetItemQuality",
-          "score": 97,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 12,
-          "strategy": "callee_first",
-          "classification": "leaf",
-          "deductions": ["pUnit Hungarian"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fd66280",
-          "old_name": "Ordinal_10484",
-          "new_name": "GetUnitOverlayComponent",
-          "score": 77,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 13,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (3 vars)", "pUnit Hungarian"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fd91730",
-          "old_name": "Ordinal_10209",
-          "new_name": "GetItemRecordByte11C",
-          "score": 95,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 13,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fd91a60",
-          "old_name": "Ordinal_10143",
-          "new_name": "GetItemDimensions",
-          "score": 92,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 13,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1", "pUnit Hungarian"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fd926c0",
-          "old_name": "Ordinal_10880",
-          "new_name": "IsItemEthereal",
-          "score": 97,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 13,
-          "strategy": "high_xref",
-          "classification": "leaf",
-          "deductions": ["pUnit Hungarian"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fda15b0",
-          "old_name": "Ordinal_10526",
-          "new_name": "ResolveWeaponAnimToken",
-          "score": 69,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 13,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (4 vars)", "phantom extraout_EDX (5)", "pUnit/pInventory Hungarian", "low comment density"],
-          "tool_calls": 10
-        },
-        {
-          "address": "0x6fdc2280",
-          "old_name": "Ordinal_11021",
-          "new_name": "GetSkillRangeValue",
-          "score": 95,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 14,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fdc2800",
-          "old_name": "Ordinal_10984",
-          "new_name": "FindSkillListNode",
-          "score": 82,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 14,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA puVar1", "pSkillData Hungarian"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fd67740",
-          "old_name": "Ordinal_11013",
-          "new_name": "GetUnitBlockingSize",
-          "score": 87,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 14,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1", "pUnit Hungarian", "low comment density"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fd91aa0",
-          "old_name": "Ordinal_10993",
-          "new_name": "GetItemRecordBodyLoc",
-          "score": 87,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 14,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1", "pUnit Hungarian"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fd916e0",
-          "old_name": "Ordinal_10715",
-          "new_name": "GetItemRecordByte132",
-          "score": 87,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 14,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1", "pUnit Hungarian"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fd67f60",
-          "old_name": "Ordinal_11168",
-          "new_name": "ApplyCollisionPatternAtCoords",
-          "score": 72,
-          "effective_score": 93,
-          "status": "documented",
-          "iteration": 15,
-          "strategy": "neighborhood",
-          "classification": "worker",
-          "deductions": ["register-only SSA (3 vars)", "pUnit Hungarian", "undocumented Ordinal_10144"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fd67fd0",
-          "old_name": "Ordinal_10254",
-          "new_name": "ApplyUnitSizedCollision",
-          "score": 60,
-          "effective_score": 93,
-          "status": "documented",
-          "iteration": 15,
-          "strategy": "neighborhood",
-          "classification": "worker",
-          "deductions": ["register-only SSA (6 vars)", "pUnit Hungarian", "undocumented Ordinal_11104"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fdc6340",
-          "old_name": "Ordinal_10335",
-          "new_name": "UpdateUnitSkillLevel",
-          "score": 76,
-          "effective_score": 92,
-          "status": "documented",
-          "iteration": 15,
-          "strategy": "neighborhood",
-          "classification": "worker",
-          "deductions": ["pSkillData/fRemoveAndReapply Hungarian", "low comment density"],
-          "tool_calls": 6
-        },
-        {
-          "address": "0x6fd951f0",
-          "old_name": "Ordinal_10613",
-          "new_name": "AreItemsIdentical",
-          "score": 62,
-          "effective_score": 93,
-          "status": "documented",
-          "iteration": 15,
-          "strategy": "neighborhood",
-          "classification": "worker",
-          "deductions": ["register-only SSA (5 vars)", "phantom extraout_var/ECX", "pItemA/B Hungarian", "undocumented Ordinal_10275"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fd67860",
-          "old_name": "Ordinal_10236",
-          "new_name": "CheckUnitCollisionOverlap",
-          "score": 26,
-          "effective_score": 83,
-          "status": "documented",
-          "iteration": 15,
-          "strategy": "neighborhood",
-          "classification": "worker",
-          "deductions": ["register-only SSA (9 vars)", "pUnitA/B Hungarian", "low comment density (124 lines)", "undocumented Ordinal_10246"],
-          "tool_calls": 7
-        },
-        {
-          "address": "0x6fd91b50",
-          "old_name": "Ordinal_10604",
-          "new_name": "GetItemRecordCode",
-          "score": 90,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 16,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["SSA iVar1 rename conflict"],
-          "tool_calls": 7
-        },
-        {
-          "address": "0x6fd92300",
-          "old_name": "Ordinal_10701",
-          "new_name": "GetItemDataShortByIndex",
-          "score": 100,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 16,
-          "strategy": "high_xref",
-          "classification": "leaf",
-          "deductions": [],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fd90bd0",
-          "old_name": "Ordinal_10348",
-          "new_name": "IsClassRestrictedItem",
-          "score": 87,
           "effective_score": 90,
           "status": "complete",
-          "iteration": 16,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["pItem p-prefix Hungarian (PROP-0001)", "nRecordPtr undefined4"],
-          "tool_calls": 7
-        },
-        {
-          "address": "0x6fd86310",
-          "old_name": "Ordinal_10246",
-          "new_name": "ComputeUnitDistance",
-          "score": 75,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 16,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (4 vars)", "low comment density (109 lines)"],
-          "tool_calls": 12
-        },
-        {
-          "address": "0x6fd893f0",
-          "old_name": "Ordinal_10443",
-          "new_name": "GetWeaponSlotRestriction",
-          "score": 65,
-          "effective_score": 93,
-          "status": "documented",
-          "iteration": 16,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA (5 vars)", "phantom extraout_var (4)", "BVar3 Hungarian", "undocumented Ordinal_10672"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fd911e0",
-          "old_name": "Ordinal_10004",
-          "new_name": "GetItemRecordByte137",
-          "score": 90,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 17,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fd934b0",
-          "old_name": "Ordinal_10672",
-          "new_name": "HasItemRecordFlag11C",
-          "score": 95,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 17,
+          "iteration": 158,
           "strategy": "high_xref",
           "classification": "leaf",
-          "deductions": [],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fd93720",
-          "old_name": "Ordinal_10869",
-          "new_name": "GetItemTypeEquiv2",
-          "score": 90,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 17,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fd93770",
-          "old_name": "Ordinal_10215",
-          "new_name": "GetItemTypeEquiv1",
-          "score": 90,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 17,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fd95600",
-          "old_name": "Ordinal_10149",
-          "new_name": "IsItemDurabilityDepleted",
-          "score": 88,
-          "effective_score": 93,
-          "status": "complete",
-          "iteration": 17,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1", "undocumented Ordinal_10314"],
-          "tool_calls": 5
-        },
-        {
-          "address": "0x6fda8960",
-          "old_name": "Ordinal_10314",
-          "new_name": "GetMaxDurabilityStat",
-          "score": 77,
-          "effective_score": 95,
-          "status": "documented",
-          "iteration": 18,
-          "strategy": "callee_first",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1-3", "pUnit Hungarian"],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fd9b5e0",
-          "old_name": "Ordinal_10821",
-          "new_name": "CalcMissileParam",
-          "score": 70,
-          "effective_score": 93,
-          "status": "documented",
-          "iteration": 18,
-          "strategy": "callee_first",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1-4/uVar2", "pUnit Hungarian", "undocumented Ordinal_10536"],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fdc3c00",
-          "old_name": "Ordinal_10728",
-          "new_name": "CalcSkillElemMin",
-          "score": 56,
-          "effective_score": 92,
-          "status": "documented",
-          "iteration": 18,
-          "strategy": "callee_first",
-          "classification": "worker",
-          "deductions": ["register-only SSA (5 vars)", "puVar1 undefined*", "pUnit/fIncludeBonus Hungarian", "undefined4 storage locals"],
-          "tool_calls": 8
-        },
-        {
-          "address": "0x6fdc3b00",
-          "old_name": "Ordinal_10662",
-          "new_name": "CalcSkillElemMax",
-          "score": 41,
-          "effective_score": 77,
-          "status": "documented",
-          "iteration": 18,
-          "strategy": "callee_first",
-          "classification": "worker",
-          "deductions": ["register-only SSA (5 vars)", "puVar1 undefined*", "pUnit/fIncludeBonus Hungarian", "undefined4 storage locals"],
-          "tool_calls": 8
-        },
-        {
-          "address": "0x6fdbea10",
-          "old_name": "Ordinal_10251",
-          "new_name": "AdvanceUnitPathStep",
-          "score": 74,
-          "effective_score": 90,
-          "status": "documented",
-          "iteration": 18,
-          "strategy": "callee_first",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1/iVar2", "pUnit/fUseAlternate Hungarian", "undocumented Ordinal_10474"],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fd94940",
-          "old_name": "Ordinal_10275",
-          "new_name": "GetItemStatCostEntryC2",
-          "score": 90,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 19,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fd9c380",
-          "old_name": "Ordinal_10536",
-          "new_name": "EvaluateMissileCalcExpression",
-          "score": 90,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 19,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA uVar1"],
-          "tool_calls": 8
-        },
-        {
-          "address": "0x6fd90a80",
-          "old_name": "Ordinal_10001",
-          "new_name": "GetItemDataShort30",
-          "score": 90,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 19,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fd65a70",
-          "old_name": "Ordinal_10739",
-          "new_name": "SetUnitPathField10",
-          "score": 90,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 19,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fd65ac0",
-          "old_name": "Ordinal_10892",
-          "new_name": "SetUnitPathField0C",
-          "score": 90,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 19,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1"],
-          "tool_calls": 4
-        },
-        {
-          "address": "0x6fdbcd90",
-          "old_name": "Ordinal_10864",
-          "new_name": "GetMaxGoldBank",
-          "score": 95,
-          "effective_score": 95,
-          "status": "complete",
-          "iteration": 20,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": [],
+          "deductions": ["register-only SSA (dwClampedIndex, dwClampedMax)"],
           "tool_calls": 8,
-          "community_info": {"source": "PlugY/D2Funcs.h", "name": "D2GetMaxGoldBank"}
+          "community_info": {"source": "PlugY/D2Funcs.h", "name_suggestion": "D2GetDifficultyLevelsBIN"}
         },
         {
-          "address": "0x6fd92dc0",
-          "old_name": "Ordinal_10796",
-          "new_name": "CheckItemTypeByClassId",
-          "score": 95,
-          "effective_score": 100,
-          "status": "complete",
-          "iteration": 20,
-          "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA iVar1 (generic name)"],
-          "tool_calls": 9
-        },
-        {
-          "address": "0x6fda8b60",
-          "old_name": "Ordinal_11035",
-          "new_name": "GetUnitModifierStatValue",
-          "score": 77,
-          "effective_score": 92,
+          "address": "0x6fd5e470",
+          "old_name": "Ordinal_11171",
+          "new_name": "GetItemQualityBracket",
+          "score": 75,
+          "effective_score": 75,
           "status": "documented",
-          "iteration": 20,
+          "iteration": 158,
           "strategy": "high_xref",
-          "classification": "worker",
-          "deductions": ["register-only SSA pStatList", "void* pUnit"],
+          "classification": "leaf",
+          "deductions": ["register-only SSA (4 vars)"],
           "tool_calls": 8
         },
         {
-          "address": "0x6fd73520",
-          "old_name": "Ordinal_10395",
-          "new_name": "GetPositionPair",
-          "score": 80,
-          "effective_score": 95,
+          "address": "0x6fd654c0",
+          "old_name": "Ordinal_10891",
+          "new_name": "SetMonsterDataField8",
+          "score": 84,
+          "effective_score": 87,
           "status": "documented",
-          "iteration": 20,
+          "iteration": 157,
           "strategy": "high_xref",
           "classification": "worker",
-          "deductions": ["void* pData"],
-          "tool_calls": 5
+          "deductions": ["1 undefined", "2 hungarian"],
+          "tool_calls": 2
         },
         {
-          "address": "0x6fdc7a70",
-          "old_name": "Ordinal_10325",
-          "new_name": "SetPathMode",
-          "score": 80,
-          "effective_score": 95,
+          "address": "0x6fd65510",
+          "old_name": "Ordinal_10328",
+          "new_name": "GetMonsterDataField8",
+          "score": 90,
+          "effective_score": 90,
           "status": "complete",
-          "iteration": 20,
+          "iteration": 157,
           "strategy": "high_xref",
           "classification": "worker",
-          "deductions": ["void* pPathData"],
-          "tool_calls": 9
+          "deductions": ["1 undefined"],
+          "tool_calls": 2
+        },
+        {
+          "address": "0x6fd65550",
+          "old_name": "Ordinal_10092",
+          "new_name": "GetMonsterDataField0",
+          "score": 90,
+          "effective_score": 90,
+          "status": "complete",
+          "iteration": 157,
+          "strategy": "high_xref",
+          "classification": "worker",
+          "deductions": ["1 undefined"],
+          "tool_calls": 2
+        },
+        {
+          "address": "0x6fd65b70",
+          "old_name": "Ordinal_10278",
+          "new_name": "AllocateUnitData",
+          "score": 55,
+          "effective_score": 70,
+          "status": "needs_work",
+          "iteration": 157,
+          "strategy": "high_xref",
+          "classification": "worker",
+          "deductions": ["5 undefined (SSA)", "1 type_quality"],
+          "tool_calls": 2
         }
       ],
-      "needs_work": [],
+      "needs_work": [
+        {
+          "address": "0x6fdc9070",
+          "score": 35,
+          "reason": "8 undefined SSA vars, collision/path function with many locals",
+          "iteration": 128
+        },
+        {
+          "address": "0x6fd69e50",
+          "score": 48,
+          "reason": "10 SSA undefined vars + 1 undocumented ordinal callee remaining. Re-scored iter 30.",
+          "iteration": 24
+        },
+        {
+          "address": "0x6fdc1f20",
+          "score": 35,
+          "reason": "8 undefined vars, SSA unfixable, bytecode interpreter intermediates",
+          "iteration": 26
+        },
+        {
+          "address": "0x6fdc2080",
+          "score": 45,
+          "reason": "7 undefined vars, SSA unfixable, skill calc chain",
+          "iteration": 26
+        },
+        {
+          "address": "0x6fd91590",
+          "score": 40,
+          "reason": "5 SSA undefined vars, item code group comparison logic",
+          "iteration": 29
+        },
+        {
+          "address": "0x6fd683a0",
+          "score": 34,
+          "reason": "5 SSA undefined, 2 hungarian, 2 type_quality — combat stat calc",
+          "iteration": 31
+        },
+        {
+          "address": "0x6fd8b3b0",
+          "score": 39,
+          "reason": "4 undefined, 2 phantom, 2 hungarian, 2 type_quality — inventory destructor",
+          "iteration": 31
+        },
+        {
+          "address": "0x6fd92850",
+          "score": 62,
+          "reason": "4 undefined, 3 hungarian, 2 ordinals_undoc — set bonus bitmask scanner",
+          "iteration": 32
+        },
+        {
+          "address": "0x6fd69550",
+          "score": 45,
+          "reason": "7 undefined (SSA), 5 hungarian — anim frame data mode dispatch, many intermediates",
+          "iteration": 33
+        },
+        {
+          "address": "0x6fdad890",
+          "score": 45,
+          "reason": "7 undefined, 3 phantom, 5 hungarian — property effect dispatcher with phantom stack params",
+          "iteration": 34
+        },
+        {
+          "address": "0x6fdc2dc0",
+          "score": 52,
+          "reason": "7 undefined (SSA), 2 hungarian, 1 ordinals_undoc — item type bonus calculator with stat layer lookup",
+          "iteration": 35
+        },
+        {
+          "address": "0x6fd85ce0",
+          "score": 0,
+          "reason": "18 undefined (SSA), 9 hungarian — 153-line proximity search with 9-case switch, massive SSA intermediate count",
+          "iteration": 38
+        },
+        {
+          "address": "0x6fd89940",
+          "score": 18,
+          "reason": "14 undefined (SSA), 2 phantom, 2 ordinals_undoc — belt slot finder with code group matching, 80 lines",
+          "iteration": 39
+        },
+        {
+          "address": "0x6fd91140",
+          "score": 69,
+          "reason": "1 undefined, return_type undefined1 — item record field 0x13E getter",
+          "iteration": 40
+        },
+        {
+          "address": "0x6fd671e0",
+          "score": 41,
+          "reason": "8 undefined (SSA), 3 hungarian — direction calc with type-branched position reading, 36 lines",
+          "iteration": 41
+        },
+        {
+          "address": "0x6fd92630",
+          "score": 69,
+          "reason": "2 undefined (SSA), 2 hungarian — set item record field getter",
+          "iteration": 41
+        },
+        {
+          "address": "0x6fda20a0",
+          "score": 58,
+          "reason": "5 undefined (SSA), 4 hungarian — weapon anim token check with equip resolve, 30 lines",
+          "iteration": 42
+        },
+        {
+          "address": "0x6fdaf020",
+          "score": 43,
+          "reason": "10 undefined (SSA), 1 ordinals_undoc — recursive room unit stat applicator with inventory traversal, 73 lines",
+          "iteration": 44
+        },
+        {
+          "address": "0x6fdc53e0",
+          "score": 69,
+          "reason": "4 undefined (SSA), 2 hungarian — skill max damage calc with weapon contribution, 41 lines",
+          "iteration": 46
+        },
+        {
+          "address": "0x6fdc54f0",
+          "score": 69,
+          "reason": "4 undefined (SSA), 2 hungarian — skill min damage calc with weapon contribution, 41 lines",
+          "iteration": 46
+        },
+        {
+          "address": "0x6fd643d0",
+          "score": 47,
+          "reason": "8 undefined (SSA), 4 phantom — master data table loader, 50+ Load/Parse calls, DataTbls.cpp",
+          "iteration": 48
+        },
+        {
+          "address": "0x6fd650c0",
+          "score": 45,
+          "reason": "7 undefined (SSA) — SEH constructor with arena alloc, Ignorelist.cpp",
+          "iteration": 48
+        },
+        {
+          "address": "0x6fd95460",
+          "score": 44,
+          "reason": "9 undefined (SSA), 2 hungarian — cube recipe table scan, 80 lines",
+          "iteration": 54
+        },
+        {
+          "address": "0x6fd95670",
+          "score": 9,
+          "reason": "13 undefined (SSA), 1 phantom, 2 hungarian, return_type — equip requirement checker, 117 lines",
+          "iteration": 54
+        },
+        {
+          "address": "0x6fd98c90",
+          "score": 53,
+          "reason": "5 undefined (SSA), 4 hungarian — item inventory display tier setter",
+          "iteration": 54
+        },
+        {
+          "address": "0x6fd9eb30",
+          "score": 69,
+          "reason": "1 undefined, 2 hungarian, return_type — sub-struct dimension getter",
+          "iteration": 54
+        },
+        {
+          "address": "0x6fda1f30",
+          "score": 54,
+          "reason": "4 undefined (SSA), 2 hungarian, return_type — weapon anim token resolver, 32 lines",
+          "iteration": 54
+        },
+        {
+          "address": "0x6fd6e7e0",
+          "score": 34,
+          "reason": "10 undefined (SSA), 3 phantom, 3 hungarian, 1 ordinals_undoc — type-dispatched unit filter callback, 164 lines",
+          "iteration": 56
+        },
+        {
+          "address": "0x6fd74620",
+          "score": 54,
+          "reason": "7 undefined (SSA), 2 hungarian — DRLG room linked list removal, 68 lines",
+          "iteration": 56
+        },
+        {
+          "address": "0x6fd77140",
+          "score": 37,
+          "reason": "10 undefined (SSA), 4 phantom, 1 hungarian, plate_issues — 6-mode collision flag reader, 35 lines",
+          "iteration": 56
+        },
+        {
+          "address": "0x6fda2bd0",
+          "score": 22,
+          "reason": "7 undefined, 1 hungarian, 1 type_quality, plate_issues — DRLG preset array copy with memory pool alloc",
+          "iteration": 59
+        },
+        {
+          "address": "0x6fda7d80",
+          "score": 29,
+          "reason": "8 undefined, 2 hungarian, plate_issues — stat list entry copier with pair iteration",
+          "iteration": 59
+        },
+        {
+          "address": "0x6fda7e60",
+          "score": 52,
+          "reason": "2 undefined, 1 hungarian, return_type, plate_issues — validated room unit search wrapper",
+          "iteration": 59
+        },
+        {
+          "address": "0x6fda8a60",
+          "score": 67,
+          "reason": "1 undefined, 1 hungarian, plate_issues — data table property stat getter",
+          "iteration": 59
+        },
+        {
+          "address": "0x6fda99a0",
+          "score": 31,
+          "reason": "4 undefined, 3 hungarian, return_type, plate_issues — stat modifier unapply with ownership transfer",
+          "iteration": 59
+        },
+        {
+          "address": "0x6fdbe4f0",
+          "score": 47,
+          "reason": "2 undefined, 1 hungarian, return_type, plate_issues — path target distance/position check",
+          "iteration": 60
+        },
+        {
+          "address": "0x6fdc06a0",
+          "score": 50,
+          "reason": "5 undefined, plate_issues — 2D level tile record copy, stride 0x108",
+          "iteration": 60
+        },
+        {
+          "address": "0x6fdc23d0",
+          "score": 49,
+          "reason": "4 undefined, 2 hungarian, plate_issues — monster skill level lookup in +0x170 array",
+          "iteration": 60
+        },
+        {
+          "address": "0x6fdd6f90",
+          "score": 44,
+          "reason": "9 undefined (SSA), 2 hungarian — bubble sort on room unit list, 75 lines, many intermediates",
+          "iteration": 61
+        },
+        {
+          "address": "0x6fd65130",
+          "score": 55,
+          "reason": "8 undefined — SEH ignore list init with arena alloc, Ignorelist.cpp",
+          "iteration": 62
+        },
+        {
+          "address": "0x6fd65f20",
+          "score": 67,
+          "reason": "5 undefined, 1 hungarian — player data field consume/reset, many SSA intermediates",
+          "iteration": 64
+        },
+        {
+          "address": "0x6fd66fa0",
+          "score": 49,
+          "reason": "5 undefined, 2 hungarian, 1 type_quality — quest/waypoint data free loop, SSA intermediates",
+          "iteration": 66
+        },
+        {
+          "address": "0x6fd67090",
+          "score": 47,
+          "reason": "9 undefined, 1 hungarian — quest/waypoint init with multiple pool allocs, many SSA intermediates",
+          "iteration": 66
+        },
+        {
+          "address": "0x6fd67b70",
+          "score": 20,
+          "reason": "12 undefined (SSA), return_type — path calc between two units, 81 lines, type-dispatched position reads",
+          "iteration": 67
+        },
+        {
+          "address": "0x6fd67e30",
+          "score": 30,
+          "reason": "10 undefined (SSA), return_type — path calc to coords, 43 lines, type-dispatched position reads",
+          "iteration": 67
+        },
+        {
+          "address": "0x6fd688a0",
+          "score": 64,
+          "reason": "5 undefined, 2 hungarian — block chance calc with skill desc/stat lookup, 65 lines",
+          "iteration": 68
+        },
+        {
+          "address": "0x6fd68b70",
+          "score": 65,
+          "reason": "3 undefined, return_type undefined1 — weapon range getter, type-dispatched",
+          "iteration": 68
+        },
+        {
+          "address": "0x6fd6a840",
+          "score": 62,
+          "reason": "3 undefined, 2 hungarian — skill list buffer copy, 8-entry linked list flattening",
+          "iteration": 69
+        },
+        {
+          "address": "0x6fd6a8d0",
+          "score": 62,
+          "reason": "2 undefined, 2 hungarian — linked list type 1 search, SSA intermediates",
+          "iteration": 69
+        },
+        {
+          "address": "0x6fd6a900",
+          "score": 62,
+          "reason": "2 undefined, 2 hungarian — linked list type 0 search, SSA intermediates",
+          "iteration": 69
+        },
+        {
+          "address": "0x6fd6a940",
+          "score": 62,
+          "reason": "2 undefined, 2 hungarian — linked list type 2 search, SSA intermediates, default 0xE8C",
+          "iteration": 69
+        },
+        {
+          "address": "0x6fd6e440",
+          "score": 43,
+          "reason": "5 undefined, 4 hungarian, 1 type_quality — room unit filter/collector, 32 lines, IsBadCodePtr callback validation",
+          "iteration": 70
+        },
+        {
+          "address": "0x6fd73610",
+          "score": 55,
+          "reason": "2 undefined, 1 type_quality, return_type — sub-struct paired field getter, SSA",
+          "iteration": 73
+        },
+        {
+          "address": "0x6fd73650",
+          "score": 60,
+          "reason": "2 undefined, 1 type_quality, return_type — lenient sub-struct paired field getter",
+          "iteration": 73
+        },
+        {
+          "address": "0x6fd73680",
+          "score": 65,
+          "reason": "3 undefined, 1 type_quality — broadcast value to linked list, SSA intermediates",
+          "iteration": 73
+        },
+        {
+          "address": "0x6fd736d0",
+          "score": 61,
+          "reason": "2 undefined, 3 hungarian, 1 type_quality — room connection propagation",
+          "iteration": 73
+        },
+        {
+          "address": "0x6fd73a50",
+          "score": 40,
+          "reason": "5 undefined (SSA), 1 type_quality, return_type — array entry flag validator, 32 lines",
+          "iteration": 74
+        },
+        {
+          "address": "0x6fd73e00",
+          "score": 40,
+          "reason": "2 undefined, 2 type_quality, return_type — linked list node search by byte key, 30 lines",
+          "iteration": 75
+        },
+        {
+          "address": "0x6fd73eb0",
+          "score": 65,
+          "reason": "3 undefined, 1 type_quality — lighting wrapper, SSA intermediates",
+          "iteration": 75
+        },
+        {
+          "address": "0x6fd73f70",
+          "score": 52,
+          "reason": "5 undefined, 1 hungarian, 1 type_quality — room array removal with swap-last + sort, 42 lines",
+          "iteration": 75
+        },
+        {
+          "address": "0x6fd74230",
+          "score": 65,
+          "reason": "2 type_quality — room draw visibility checker with validation",
+          "iteration": 76
+        },
+        {
+          "address": "0x6fd74280",
+          "score": 45,
+          "reason": "11 undefined — GetLevelColorBytes wrapper, params passed as undefined1*",
+          "iteration": 76
+        },
+        {
+          "address": "0x6fd74810",
+          "score": 0,
+          "reason": "15 undefined, 1 ordinals_undoc, return_type — DRLG room allocator, 29 lines, Dungeon.cpp:25",
+          "iteration": 77
+        },
+        {
+          "address": "0x6fd748e0",
+          "score": 50,
+          "reason": "3 undefined, 1 type_quality, return_type — room tile loader at path coords",
+          "iteration": 77
+        },
+        {
+          "address": "0x6fd74990",
+          "score": 65,
+          "reason": "2 type_quality — room ref count increment wrapper",
+          "iteration": 77
+        },
+        {
+          "address": "0x6fd76d90",
+          "score": 0,
+          "reason": "18 undefined (SSA), 2 type_quality, return_type — 95-line __fastcall spiral search, massive intermediates",
+          "iteration": 78
+        },
+        {
+          "address": "0x6fd779e0",
+          "score": 55,
+          "reason": "4 undefined, 1 type_quality — wrapper for SpiralSearchFreePosition with radius 50",
+          "iteration": 78
+        },
+        {
+          "address": "0x6fd7d7f0",
+          "score": 58,
+          "reason": "4 undefined (SSA), 4 hungarian — bitfield copy+reprocess, 31 lines",
+          "iteration": 79
+        },
+        {
+          "address": "0x6fd7f9d0",
+          "score": 61,
+          "reason": "4 undefined (SSA), 3 hungarian — zeros second bitfield in stat list",
+          "iteration": 83
+        },
+        {
+          "address": "0x6fd86210",
+          "score": 48,
+          "reason": "7 undefined, 4 hungarian — 79-line proximity distance with type-dispatched position reading, many SSA intermediates",
+          "iteration": 86
+        },
+        {
+          "address": "0x6fd86500",
+          "score": 59,
+          "reason": "6 undefined (SSA), 2 hungarian — 72-line 4-stage random attribute generator with difficulty modifiers",
+          "iteration": 86
+        },
+        {
+          "address": "0x6fd87d60",
+          "score": 67,
+          "reason": "2 undefined, 1 hungarian, plate_issues — inventory item type tracking with linked list append",
+          "iteration": 89
+        },
+        {
+          "address": "0x6fd87f80",
+          "score": 22,
+          "reason": "5 undefined, 1 hungarian, 1 type_quality, return_type — inventory constructor, 64-byte struct alloc",
+          "iteration": 89
+        },
+        {
+          "address": "0x6fd88a60",
+          "score": 19,
+          "reason": "8 undefined (SSA), 2 hungarian, return_type — inventory grid fit checker, 54 lines",
+          "iteration": 90
+        },
+        {
+          "address": "0x6fd894e0",
+          "score": 62,
+          "reason": "3 undefined, 1 phantom, 1 hungarian — weapon cursor update on item removal",
+          "iteration": 90
+        },
+        {
+          "address": "0x6fd895b0",
+          "score": 46,
+          "reason": "5 undefined (SSA), 3 hungarian — inventory item search by type, 65 lines",
+          "iteration": 90
+        },
+        {
+          "address": "0x6fd89680",
+          "score": 43,
+          "reason": "6 undefined (SSA), 4 hungarian — item search with overlay component, 62 lines",
+          "iteration": 90
+        },
+        {
+          "address": "0x6fd89760",
+          "score": 47,
+          "reason": "2 undefined, 1 hungarian, return_type — type 3 item check in inventory",
+          "iteration": 90
+        },
+        {
+          "address": "0x6fd8a920",
+          "score": 37,
+          "reason": "8 undefined (SSA), 1 hungarian — inventory identity search with stat comparison, 68 lines",
+          "iteration": 91
+        },
+        {
+          "address": "0x6fd8aa40",
+          "score": 32,
+          "reason": "4 undefined, 7 hungarian, 1 type_quality, 1 ordinal_undoc — equip slot availability checker, 45 lines",
+          "iteration": 91
+        },
+        {
+          "address": "0x6fd8ac90",
+          "score": 17,
+          "reason": "10 undefined (SSA), 1 phantom, 2 hungarian, 1 ordinal_undoc — COF visual component rebuild, 95 lines",
+          "iteration": 91
+        },
+        {
+          "address": "0x6fd8af80",
+          "score": 39,
+          "reason": "1 undefined, 1 phantom, 2 hungarian, 1 type_quality, return_type — clear inventory loop",
+          "iteration": 91
+        },
+        {
+          "address": "0x6fd8afd0",
+          "score": 49,
+          "reason": "1 undefined, 1 phantom, 2 hungarian, 1 type_quality — remove all items loop",
+          "iteration": 91
+        },
+        {
+          "address": "0x6fd8b680",
+          "score": 63,
+          "reason": "3 undefined (SSA), 4 hungarian — auto-place item in inventory slot",
+          "iteration": 92
+        },
+        {
+          "address": "0x6fd8b6f0",
+          "score": 64,
+          "reason": "3 undefined (SSA), 2 hungarian — auto-place item in belt",
+          "iteration": 92
+        },
+        {
+          "address": "0x6fd8b750",
+          "score": 61,
+          "reason": "4 undefined (SSA), 1 phantom, 3 hungarian — belt item placement with size check",
+          "iteration": 92
+        },
+        {
+          "address": "0x6fd8bc20",
+          "score": 64,
+          "reason": "3 undefined (SSA), 2 hungarian — monster Unicode name alloc, MONSTERS.CPP",
+          "iteration": 93
+        },
+        {
+          "address": "0x6fd90fc0",
+          "score": 66,
+          "reason": "2 undefined, 3 hungarian — item record flagByte +0xDC bit 2 accessor with abort",
+          "iteration": 95
+        },
+        {
+          "address": "0x6fd91020",
+          "score": 66,
+          "reason": "2 undefined, 3 hungarian — item record flagByte +0xDC bit 1 accessor with abort",
+          "iteration": 95
+        },
+        {
+          "address": "0x6fd91540",
+          "score": 69,
+          "reason": "2 undefined, 1 hungarian — item record byte +0x11D accessor with abort",
+          "iteration": 96
+        },
+        {
+          "address": "0x6fd91910",
+          "score": 69,
+          "reason": "2 undefined, 1 hungarian — item record byte +0xFD accessor with abort",
+          "iteration": 96
+        },
+        {
+          "address": "0x6fd93660",
+          "score": 63,
+          "reason": "3 undefined (SSA), 4 hungarian — ItemTypes sub-array pointer calc with clamped index",
+          "iteration": 101
+        },
+        {
+          "address": "0x6fd98ad0",
+          "score": 16,
+          "reason": "10 undefined (SSA), 1 phantom, 4 hungarian, 1 type_quality, 1 ordinal_undoc — inventory repair cost iterator",
+          "iteration": 102
+        },
+        {
+          "address": "0x6fd98d40",
+          "score": 48,
+          "reason": "7 undefined (SSA), 4 hungarian — item inventory graphic tier updater with quality switch",
+          "iteration": 102
+        },
+        {
+          "address": "0x6fd9acb0",
+          "score": 38,
+          "reason": "6 undefined (SSA), 4 hungarian, 1 type_quality — item bitstream parser with JM header",
+          "iteration": 102
+        },
+        {
+          "address": "0x6fd9dd10",
+          "score": 40,
+          "reason": "7 undefined (SSA), 1 hungarian, 1 type_quality, 1 ordinal_undoc — chat message allocator from Chat.cpp",
+          "iteration": 106
+        },
+        {
+          "address": "0x6fd9f0d0",
+          "score": 56,
+          "reason": "5 undefined (SSA), 1 phantom, 3 hungarian — env anim sub-frame cycler",
+          "iteration": 107
+        },
+        {
+          "address": "0x6fd9f1b0",
+          "score": 50,
+          "reason": "5 undefined (SSA), 1 phantom, 5 hungarian — env anim state setter with validation",
+          "iteration": 107
+        },
+        {
+          "address": "0x6fd9f2b0",
+          "score": 56,
+          "reason": "5 undefined (SSA), 1 phantom, 3 hungarian — env anim direction cycler",
+          "iteration": 107
+        },
+        {
+          "address": "0x6fd9f380",
+          "score": 61,
+          "reason": "5 undefined (SSA), 1 phantom, 3 hungarian — env anim update+check",
+          "iteration": 107
+        },
+        {
+          "address": "0x6fda7d30",
+          "score": 47,
+          "reason": "5 undefined (SSA), 1 hungarian, 1 type_quality — array entry copier with stride 8",
+          "iteration": 110
+        },
+        {
+          "address": "0x6fda81c0",
+          "score": 39,
+          "reason": "5 undefined (SSA), 2 hungarian, 1 type_quality — stat list iterator with callback",
+          "iteration": 110
+        },
+        {
+          "address": "0x6fda94d0",
+          "score": 26,
+          "reason": "8 undefined (SSA), 3 hungarian, 1 type_quality — derived stat recalculator with ItemStatCost dependency chains",
+          "iteration": 111
+        },
+        {
+          "address": "0x6fdaa4a0",
+          "score": 57,
+          "reason": "3 undefined (SSA), 2 hungarian — vital stats clamper (stamina/mana/life)",
+          "iteration": 112
+        },
+        {
+          "address": "0x6fdaa740",
+          "score": 49,
+          "reason": "5 undefined (SSA), 2 hungarian, 1 type_quality — stat list entry expiry by age",
+          "iteration": 112
+        },
+        {
+          "address": "0x6fdae670",
+          "score": 61,
+          "reason": "5 undefined (SSA), 3 hungarian — cube recipe applicator with stat list traversal",
+          "iteration": 114
+        },
+        {
+          "address": "0x6fdae820",
+          "score": 57,
+          "reason": "7 undefined (SSA), 1 hungarian — LCG random roller with quality table",
+          "iteration": 114
+        },
+        {
+          "address": "0x6fdb22c0",
+          "score": 50,
+          "reason": "6 undefined (SSA), 1 type_quality — dynamic table grower with realloc",
+          "iteration": 114
+        },
+        {
+          "address": "0x6fdbf4e0",
+          "score": 54,
+          "reason": "7 undefined (SSA), 2 hungarian — path stepper with complex flag logic",
+          "iteration": 116
+        },
+        {
+          "address": "0x6fdc1a80",
+          "score": 49,
+          "reason": "2 undefined (SSA), 2 hungarian — nested field exchange with SSA intermediates",
+          "iteration": 119
+        },
+        {
+          "address": "0x6fdc28e0",
+          "score": 29,
+          "reason": "8 undefined (SSA), 2 hungarian — collision tracer with many SSA coord intermediates (41 lines)",
+          "iteration": 120
+        },
+        {
+          "address": "0x6fdc50c0",
+          "score": 14,
+          "reason": "13 undefined (SSA), 2 phantom, 2 hungarian — ability position finder (126 lines)",
+          "iteration": 122
+        },
+        {
+          "address": "0x6fdc5300",
+          "score": 40,
+          "reason": "7 undefined (SSA) — skill bytecode interpreter wrapper",
+          "iteration": 122
+        },
+        {
+          "address": "0x6fdc56b0",
+          "score": 22,
+          "reason": "11 undefined (SSA), 1 hungarian — weapon damage calculator (87 lines)",
+          "iteration": 122
+        },
+        {
+          "address": "0x6fdd1ab0",
+          "score": 35,
+          "reason": "5 undefined (SSA), 2 hungarian — 146-line skill damage calculator with bitfield output selection",
+          "iteration": 130
+        },
+        {
+          "address": "0x6fd888b0",
+          "score": 50,
+          "reason": "6 undefined (SSA), 5 hungarian — inventory placement checker with complex grid iteration (63 lines)",
+          "iteration": 139
+        },
+        {
+          "address": "0x6fdc32b0",
+          "score": 52,
+          "reason": "8 undefined (SSA), 3 phantom — skill prerequisite validator (78 lines)",
+          "iteration": 143
+        },
+        {
+          "address": "0x6fdb52d0",
+          "score": 57,
+          "reason": "7 undefined (SSA), 1 phantom, 1 hungarian — item quality record search loop, 40 lines",
+          "iteration": 149
+        },
+        {
+          "address": "0x6fd938b0",
+          "score": 64,
+          "reason": "5 undefined (SSA), 2 hungarian — charged skill stat layer checker, 24 lines",
+          "iteration": 150
+        },
+        {
+          "address": "0x6fda23b0",
+          "score": 39,
+          "reason": "10 undefined (SSA), 2 hungarian — field table data initializer, FieldTbls.cpp, 49 lines",
+          "iteration": 150
+        },
+        {
+          "address": "0x6fdd7460",
+          "score": 54,
+          "reason": "4 undefined (SSA), 7 hungarian — monster component resolver with class override, 39 lines",
+          "iteration": 151
+        },
+        {
+          "address": "0x6fd67cf0",
+          "score": 43,
+          "reason": "8 undefined (SSA), 4 hungarian — unit path calculator with type-dispatched position reads, 70 lines",
+          "iteration": 152
+        },
+        {
+          "address": "0x6fd950b0",
+          "score": 54,
+          "reason": "7 undefined (SSA), 2 hungarian — weapon attack frame rate calc with anim COF path, 59 lines",
+          "iteration": 154
+        },
+        {
+          "address": "0x6fdbde70",
+          "score": 27,
+          "reason": "4 undefined (SSA), 16 hungarian — DRLG init, Drlg.cpp, 56 lines, many params as undefined4",
+          "iteration": 155
+        },
+        {
+          "address": "0x6fdc2980",
+          "score": 62,
+          "reason": "6 undefined (SSA), 1 hungarian — defense malus stat lookup, 64 lines",
+          "iteration": 156
+        },
+        {
+          "address": "0x6fd65b70",
+          "score": 55,
+          "reason": "5 undefined (SSA), 1 type_quality — unit data allocator, Units.cpp, 21 lines",
+          "iteration": 157
+        }
+      ],
       "tool_errors": {},
       "strategy_stats": {
         "callee_first": {
-          "count": 15,
-          "avg_score": 77.2,
+          "count": 20,
+          "avg_score": 77.0,
           "exploration": true
         },
         "high_xref": {
-          "count": 75,
-          "avg_score": 76.6
+          "count": 733,
+          "avg_score": 72.1
         },
         "neighborhood": {
-          "count": 10,
-          "avg_score": 59.3,
+          "count": 15,
+          "avg_score": 59.8,
           "exploration": true
         },
         "worst_score": {
-          "count": 0,
-          "avg_score": 0
+          "count": 5,
+          "avg_score": 74.0,
+          "exploration": true
         }
       },
       "score_history": [
@@ -1661,14 +1681,848 @@
           "count": 100,
           "avg_score": 85.4,
           "avg_effective": 95.4
+        },
+        {
+          "iteration": 21,
+          "count": 105,
+          "avg_score": 62.8,
+          "avg_effective": 92.6
+        },
+        {
+          "iteration": 22,
+          "count": 110,
+          "avg_score": 80.6,
+          "avg_effective": 94.0
+        },
+        {
+          "iteration": 23,
+          "count": 115,
+          "avg_score": 73.0,
+          "avg_effective": 88.2
+        },
+        {
+          "iteration": 24,
+          "count": 120,
+          "avg_score": 76.4,
+          "avg_effective": 79.4
+        },
+        {
+          "iteration": 25,
+          "count": 125,
+          "avg_score": 83.6,
+          "avg_effective": 83.6
+        },
+        {
+          "iteration": 26,
+          "count": 130,
+          "avg_score": 56.8,
+          "avg_effective": 62.4
+        },
+        {
+          "iteration": 27,
+          "count": 135,
+          "avg_score": 74.0,
+          "avg_effective": 86.0
+        },
+        {
+          "iteration": 28,
+          "count": 140,
+          "avg_score": 67.0,
+          "avg_effective": 82.0
+        },
+        {
+          "iteration": 29,
+          "count": 145,
+          "avg_score": 65.4,
+          "avg_effective": 83.4
+        },
+        {
+          "iteration": 30,
+          "count": 149,
+          "avg_score": 74.0,
+          "avg_effective": 80.0
+        },
+        {
+          "iteration": 31,
+          "count": 154,
+          "avg_score": 56.2,
+          "avg_effective": 73.0
+        },
+        {
+          "iteration": 32,
+          "count": 159,
+          "avg_score": 85.2,
+          "avg_effective": 91.6
+        },
+        {
+          "iteration": 33,
+          "count": 164,
+          "avg_score": 77.8,
+          "avg_effective": 79.6
+        },
+        {
+          "iteration": 34,
+          "count": 169,
+          "avg_score": 72.0,
+          "avg_effective": 75.0
+        },
+        {
+          "iteration": 35,
+          "count": 174,
+          "avg_score": 76.0,
+          "avg_effective": 77.8
+        },
+        {
+          "iteration": 36,
+          "count": 179,
+          "avg_score": 74.8,
+          "avg_effective": 78.0
+        },
+        {
+          "iteration": 37,
+          "count": 184,
+          "avg_score": 87.6,
+          "avg_effective": 90.4
+        },
+        {
+          "iteration": 38,
+          "count": 189,
+          "avg_score": 67.8,
+          "avg_effective": 72.6
+        },
+        {
+          "iteration": 39,
+          "count": 194,
+          "avg_score": 65.8,
+          "avg_effective": 66.4
+        },
+        {
+          "iteration": 40,
+          "count": 199,
+          "avg_score": 83.4,
+          "avg_effective": 85.2
+        },
+        {
+          "iteration": 41,
+          "count": 204,
+          "avg_score": 67.4,
+          "avg_effective": 67.4
+        },
+        {
+          "iteration": 42,
+          "count": 209,
+          "avg_score": 77.8,
+          "avg_effective": 79.0
+        },
+        {
+          "iteration": 43,
+          "count": 214,
+          "avg_score": 76.8,
+          "avg_effective": 84.4
+        },
+        {
+          "iteration": 44,
+          "count": 219,
+          "avg_score": 73.4,
+          "avg_effective": 74.0
+        },
+        {
+          "iteration": 45,
+          "count": 224,
+          "avg_score": 77.4,
+          "avg_effective": 81.0
+        },
+        {
+          "iteration": 46,
+          "count": 229,
+          "avg_score": 79.0,
+          "avg_effective": 81.4
+        },
+        {
+          "iteration": 47,
+          "count": 234,
+          "avg_score": 87.2,
+          "avg_effective": 88.4
+        },
+        {
+          "iteration": 48,
+          "count": 239,
+          "avg_score": 67.8,
+          "avg_effective": 73.0
+        },
+        {
+          "iteration": 49,
+          "count": 244,
+          "avg_score": 68.0,
+          "avg_effective": 83.0
+        },
+        {
+          "iteration": 50,
+          "count": 249,
+          "avg_score": 73.0,
+          "avg_effective": 91.0
+        },
+        {
+          "iteration": 51,
+          "count": 254,
+          "avg_score": 60.0,
+          "avg_effective": 82.0
+        },
+        {
+          "iteration": 52,
+          "count": 259,
+          "avg_score": 58.8,
+          "avg_effective": 80.4
+        },
+        {
+          "iteration": 53,
+          "count": 264,
+          "avg_score": 84.0,
+          "avg_effective": 85.0
+        },
+        {
+          "iteration": 54,
+          "count": 269,
+          "avg_score": 45.8,
+          "avg_effective": 60.0
+        },
+        {
+          "iteration": 55,
+          "count": 274,
+          "avg_score": 62.8,
+          "avg_effective": 71.4
+        },
+        {
+          "iteration": 56,
+          "count": 279,
+          "avg_score": 59.8,
+          "avg_effective": 86.2
+        },
+        {
+          "iteration": 57,
+          "count": 284,
+          "avg_score": 86.4,
+          "avg_effective": 96.4
+        },
+        {
+          "iteration": 58,
+          "count": 289,
+          "avg_score": 93.4,
+          "avg_effective": 98.4
+        },
+        {
+          "iteration": 59,
+          "count": 294,
+          "avg_score": 40.2,
+          "avg_effective": 48.2
+        },
+        {
+          "iteration": 60,
+          "count": 299,
+          "avg_score": 59.2,
+          "avg_effective": 61.2
+        },
+        {
+          "iteration": 61,
+          "count": 304,
+          "avg_score": 67.6,
+          "avg_effective": 79.6
+        },
+        {
+          "iteration": 62,
+          "count": 309,
+          "avg_score": 80.4,
+          "avg_effective": 84.0
+        },
+        {
+          "iteration": 63,
+          "count": 314,
+          "avg_score": 93.2,
+          "avg_effective": 97.0
+        },
+        {
+          "iteration": 64,
+          "count": 319,
+          "avg_score": 80.2,
+          "avg_effective": 84.8
+        },
+        {
+          "iteration": 65,
+          "count": 324,
+          "avg_score": 86.8,
+          "avg_effective": 86.8
+        },
+        {
+          "iteration": 66,
+          "count": 329,
+          "avg_score": 65.2,
+          "avg_effective": 69.4
+        },
+        {
+          "iteration": 67,
+          "count": 334,
+          "avg_score": 59.0,
+          "avg_effective": 62.0
+        },
+        {
+          "iteration": 68,
+          "count": 339,
+          "avg_score": 74.0,
+          "avg_effective": 75.2
+        },
+        {
+          "iteration": 69,
+          "count": 344,
+          "avg_score": 68.4,
+          "avg_effective": 72.4
+        },
+        {
+          "iteration": 70,
+          "count": 349,
+          "avg_score": 62.6,
+          "avg_effective": 87.8
+        },
+        {
+          "iteration": 71,
+          "count": 354,
+          "avg_score": 82.6,
+          "avg_effective": 86.8
+        },
+        {
+          "iteration": 72,
+          "count": 359,
+          "avg_score": 85.4,
+          "avg_effective": 88.4
+        },
+        {
+          "iteration": 73,
+          "count": 364,
+          "avg_score": 63.0,
+          "avg_effective": 87.4
+        },
+        {
+          "iteration": 74,
+          "count": 369,
+          "avg_score": 72.0,
+          "avg_effective": 93.0
+        },
+        {
+          "iteration": 75,
+          "count": 374,
+          "avg_score": 61.4,
+          "avg_effective": 89.0
+        },
+        {
+          "iteration": 76,
+          "count": 379,
+          "avg_score": 71.0,
+          "avg_effective": 88.0
+        },
+        {
+          "iteration": 77,
+          "count": 384,
+          "avg_score": 52.0,
+          "avg_effective": 86.0
+        },
+        {
+          "iteration": 78,
+          "count": 389,
+          "avg_score": 56.0,
+          "avg_effective": 82.0
+        },
+        {
+          "iteration": 79,
+          "count": 394,
+          "avg_score": 85.2,
+          "avg_effective": 87.0
+        },
+        {
+          "iteration": 80,
+          "count": 399,
+          "avg_score": 88.2,
+          "avg_effective": 90.4
+        },
+        {
+          "iteration": 81,
+          "count": 404,
+          "avg_score": 80.0,
+          "avg_effective": 80.0
+        },
+        {
+          "iteration": 82,
+          "count": 409,
+          "avg_score": 80.0,
+          "avg_effective": 80.0
+        },
+        {
+          "iteration": 83,
+          "count": 414,
+          "avg_score": 75.0,
+          "avg_effective": 78.0
+        },
+        {
+          "iteration": 84,
+          "count": 419,
+          "avg_score": 93.4,
+          "avg_effective": 95.2
+        },
+        {
+          "iteration": 85,
+          "count": 424,
+          "avg_score": 87.0,
+          "avg_effective": 90.0
+        },
+        {
+          "iteration": 86,
+          "count": 429,
+          "avg_score": 74.6,
+          "avg_effective": 77.8
+        },
+        {
+          "iteration": 87,
+          "count": 434,
+          "avg_score": 92.0,
+          "avg_effective": 92.0
+        },
+        {
+          "iteration": 88,
+          "count": 439,
+          "avg_score": 93.8,
+          "avg_effective": 94.4
+        },
+        {
+          "iteration": 89,
+          "count": 444,
+          "avg_score": 62.6,
+          "avg_effective": 66.2
+        },
+        {
+          "iteration": 90,
+          "count": 449,
+          "avg_score": 43.4,
+          "avg_effective": 56.2
+        },
+        {
+          "iteration": 91,
+          "count": 454,
+          "avg_score": 34.8,
+          "avg_effective": 61.0
+        },
+        {
+          "iteration": 92,
+          "count": 459,
+          "avg_score": 69.6,
+          "avg_effective": 79.6
+        },
+        {
+          "iteration": 93,
+          "count": 464,
+          "avg_score": 77.0,
+          "avg_effective": 80.6
+        },
+        {
+          "iteration": 94,
+          "count": 469,
+          "avg_score": 79.0,
+          "avg_effective": 81.2
+        },
+        {
+          "iteration": 95,
+          "count": 474,
+          "avg_score": 69.6,
+          "avg_effective": 72.0
+        },
+        {
+          "iteration": 96,
+          "count": 479,
+          "avg_score": 74.6,
+          "avg_effective": 77.0
+        },
+        {
+          "iteration": 97,
+          "count": 484,
+          "avg_score": 88.0,
+          "avg_effective": 88.0
+        },
+        {
+          "iteration": 98,
+          "count": 489,
+          "avg_score": 88.0,
+          "avg_effective": 88.0
+        },
+        {
+          "iteration": 99,
+          "count": 494,
+          "avg_score": 84.4,
+          "avg_effective": 84.4
+        },
+        {
+          "iteration": 100,
+          "count": 499,
+          "avg_score": 82.6,
+          "avg_effective": 85.6
+        },
+        {
+          "iteration": 101,
+          "count": 504,
+          "avg_score": 77.4,
+          "avg_effective": 82.2
+        },
+        {
+          "iteration": 102,
+          "count": 509,
+          "avg_score": 45.2,
+          "avg_effective": 65.2
+        },
+        {
+          "iteration": 103,
+          "count": 514,
+          "avg_score": 97.0,
+          "avg_effective": 97.0
+        },
+        {
+          "iteration": 104,
+          "count": 519,
+          "avg_score": 97.0,
+          "avg_effective": 97.0
+        },
+        {
+          "iteration": 105,
+          "count": 524,
+          "avg_score": 82.8,
+          "avg_effective": 83.4
+        },
+        {
+          "iteration": 106,
+          "count": 529,
+          "avg_score": 75.4,
+          "avg_effective": 82.4
+        },
+        {
+          "iteration": 107,
+          "count": 534,
+          "avg_score": 59.0,
+          "avg_effective": 65.0
+        },
+        {
+          "iteration": 108,
+          "count": 539,
+          "avg_score": 78.4,
+          "avg_effective": 85.6
+        },
+        {
+          "iteration": 109,
+          "count": 544,
+          "avg_score": 77.6,
+          "avg_effective": 80.6
+        },
+        {
+          "iteration": 110,
+          "count": 549,
+          "avg_score": 62.8,
+          "avg_effective": 74.8
+        },
+        {
+          "iteration": 111,
+          "count": 554,
+          "avg_score": 70.8,
+          "avg_effective": 77.6
+        },
+        {
+          "iteration": 112,
+          "count": 559,
+          "avg_score": 67.4,
+          "avg_effective": 72.8
+        },
+        {
+          "iteration": 113,
+          "count": 564,
+          "avg_score": 81.8,
+          "avg_effective": 86.0
+        },
+        {
+          "iteration": 114,
+          "count": 569,
+          "avg_score": 72.2,
+          "avg_effective": 77.8
+        },
+        {
+          "iteration": 115,
+          "count": 574,
+          "avg_score": 92.4,
+          "avg_effective": 92.4
+        },
+        {
+          "iteration": 116,
+          "count": 579,
+          "avg_score": 79.0,
+          "avg_effective": 86.2
+        },
+        {
+          "iteration": 117,
+          "count": 584,
+          "avg_score": 66.0,
+          "avg_effective": 72.0
+        },
+        {
+          "iteration": 118,
+          "count": 589,
+          "avg_score": 61.0,
+          "avg_effective": 74.8
+        },
+        {
+          "iteration": 119,
+          "count": 594,
+          "avg_score": 64.6,
+          "avg_effective": 79.4
+        },
+        {
+          "iteration": 120,
+          "count": 599,
+          "avg_score": 64.8,
+          "avg_effective": 72.8
+        },
+        {
+          "iteration": 121,
+          "count": 604,
+          "avg_score": 67.8,
+          "avg_effective": 75.4
+        },
+        {
+          "iteration": 122,
+          "count": 609,
+          "avg_score": 39.2,
+          "avg_effective": 66.0
+        },
+        {
+          "iteration": 123,
+          "count": 614,
+          "avg_score": 73.0,
+          "avg_effective": 78.4
+        },
+        {
+          "iteration": 124,
+          "count": 619,
+          "avg_score": 60.0,
+          "avg_effective": 65.0
+        },
+        {
+          "iteration": 125,
+          "count": 624,
+          "avg_score": 63.0,
+          "avg_effective": 67.0
+        },
+        {
+          "iteration": 126,
+          "count": 629,
+          "avg_score": 66.6,
+          "avg_effective": 71.0
+        },
+        {
+          "iteration": 127,
+          "count": 634,
+          "avg_score": 64.0,
+          "avg_effective": 74.4
+        },
+        {
+          "iteration": 128,
+          "count": 639,
+          "avg_score": 61.4,
+          "avg_effective": 67.0
+        },
+        {
+          "iteration": 129,
+          "count": 644,
+          "avg_score": 70.4,
+          "avg_effective": 78.0
+        },
+        {
+          "iteration": 130,
+          "count": 649,
+          "avg_score": 62.8,
+          "avg_effective": 73.0
+        },
+        {
+          "iteration": 131,
+          "count": 654,
+          "avg_score": 68.2,
+          "avg_effective": 70.0
+        },
+        {
+          "iteration": 132,
+          "count": 659,
+          "avg_score": 75.6,
+          "avg_effective": 78.6
+        },
+        {
+          "iteration": 133,
+          "count": 664,
+          "avg_score": 82.0,
+          "avg_effective": 84.2
+        },
+        {
+          "iteration": 134,
+          "count": 669,
+          "avg_score": 84.4,
+          "avg_effective": 87.2
+        },
+        {
+          "iteration": 135,
+          "count": 674,
+          "avg_score": 74.4,
+          "avg_effective": 76.8
+        },
+        {
+          "iteration": 136,
+          "count": 679,
+          "avg_score": 74.2,
+          "avg_effective": 81.8
+        },
+        {
+          "iteration": 137,
+          "count": 684,
+          "avg_score": 69.6,
+          "avg_effective": 75.0
+        },
+        {
+          "iteration": 138,
+          "count": 689,
+          "avg_score": 73.0,
+          "avg_effective": 81.0
+        },
+        {
+          "iteration": 139,
+          "count": 694,
+          "avg_score": 85.2,
+          "avg_effective": 88.2
+        },
+        {
+          "iteration": 140,
+          "count": 699,
+          "avg_score": 86.2,
+          "avg_effective": 88.0
+        },
+        {
+          "iteration": 141,
+          "count": 704,
+          "avg_score": 67.8,
+          "avg_effective": 70.0
+        },
+        {
+          "iteration": 142,
+          "count": 709,
+          "avg_score": 77.2,
+          "avg_effective": 78.4
+        },
+        {
+          "iteration": 143,
+          "count": 714,
+          "avg_score": 74.6,
+          "avg_effective": 76.4
+        },
+        {
+          "iteration": 144,
+          "count": 719,
+          "avg_score": 94.8,
+          "avg_effective": 96.0
+        },
+        {
+          "iteration": 145,
+          "count": 724,
+          "avg_score": 95.8,
+          "avg_effective": 97.0
+        },
+        {
+          "iteration": 146,
+          "count": 729,
+          "avg_score": 86.0,
+          "avg_effective": 89.0
+        },
+        {
+          "iteration": 147,
+          "count": 734,
+          "avg_score": 86.2,
+          "avg_effective": 89.0
+        },
+        {
+          "iteration": 148,
+          "count": 739,
+          "avg_score": 75.6,
+          "avg_effective": 82.0
+        },
+        {
+          "iteration": 149,
+          "count": 744,
+          "avg_score": 84.8,
+          "avg_effective": 85.4
+        },
+        {
+          "iteration": 150,
+          "count": 749,
+          "avg_score": 60.8,
+          "avg_effective": 81.8
+        },
+        {
+          "iteration": 151,
+          "count": 754,
+          "avg_score": 76.0,
+          "avg_effective": 79.4
+        },
+        {
+          "iteration": 152,
+          "count": 759,
+          "avg_score": 71.0,
+          "avg_effective": 80.8
+        },
+        {
+          "iteration": 153,
+          "count": 764,
+          "avg_score": 79.4,
+          "avg_effective": 91.6
+        },
+        {
+          "iteration": 154,
+          "count": 769,
+          "avg_score": 81.6,
+          "avg_effective": 85.8
+        },
+        {
+          "iteration": 155,
+          "count": 774,
+          "avg_score": 74.2,
+          "avg_effective": 83.6
+        },
+        {
+          "iteration": 156,
+          "count": 779,
+          "avg_score": 79.4,
+          "avg_effective": 80.6
+        },
+        {
+          "iteration": 157,
+          "count": 784,
+          "avg_score": 81.8,
+          "avg_effective": 85.4
+        },
+        {
+          "iteration": 158,
+          "count": 787,
+          "avg_score": 88.3,
+          "avg_effective": 88.3
+        },
+        {
+          "iteration": 159,
+          "count": 788,
+          "avg_score": 80.0,
+          "avg_effective": 95.0
         }
       ],
       "completion": {
         "is_complete": false,
-        "total_custom_named": 100,
+        "total_custom_named": 788,
         "total_functions": 2961,
-        "undocumented": 954,
-        "completion_percent": 9.6
+        "undocumented": 262,
+        "completion_percent": 62.3
       }
     }
   },
