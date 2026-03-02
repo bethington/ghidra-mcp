@@ -137,7 +137,8 @@ public class AnalysisService {
     // Public endpoint methods
     // ========================================================================
 
-    public Response listAnalyzers(String programName) {
+    @McpTool(value = "/list_analyzers", description = "List available analysis modules")
+    public Response listAnalyzers(@Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -163,7 +164,8 @@ public class AnalysisService {
     /**
      * Trigger auto-analysis on the current or named program.
      */
-    public Response runAnalysis(String programName) {
+    @McpTool(value = "/run_analysis", description = "Trigger Ghidra auto-analysis", method = McpTool.Method.POST)
+    public Response runAnalysis(@Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -204,9 +206,14 @@ public class AnalysisService {
         return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection, null);
     }
 
-    public Response analyzeDataRegion(String startAddressStr, int maxScanBytes,
-                                    boolean includeXrefMap, boolean includeAssemblyPatterns,
-                                    boolean includeBoundaryDetection, String programName) {
+    @McpTool(value = "/analyze_data_region", description = "Comprehensive data region analysis", method = McpTool.Method.POST)
+    public Response analyzeDataRegion(
+            @Param("address") String startAddressStr,
+            @Param(value = "max_scan_bytes", type = "integer", required = false, defaultValue = "1024") int maxScanBytes,
+            @Param(value = "include_xref_map", type = "boolean", required = false, defaultValue = "true") boolean includeXrefMap,
+            @Param(value = "include_assembly_patterns", type = "boolean", required = false, defaultValue = "true") boolean includeAssemblyPatterns,
+            @Param(value = "include_boundary_detection", type = "boolean", required = false, defaultValue = "true") boolean includeBoundaryDetection,
+            @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -367,8 +374,13 @@ public class AnalysisService {
         return detectArrayBounds(addressStr, analyzeLoopBounds, analyzeIndexing, maxScanRange, null);
     }
 
-    public Response detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
-                                    boolean analyzeIndexing, int maxScanRange, String programName) {
+    @McpTool(value = "/detect_array_bounds", description = "Detect array/table boundaries", method = McpTool.Method.POST)
+    public Response detectArrayBounds(
+            @Param("address") String addressStr,
+            @Param(value = "analyze_loop_bounds", type = "boolean", required = false, defaultValue = "true") boolean analyzeLoopBounds,
+            @Param(value = "analyze_indexing", type = "boolean", required = false, defaultValue = "true") boolean analyzeIndexing,
+            @Param(value = "max_scan_range", type = "integer", required = false, defaultValue = "2048") int maxScanRange,
+            @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -424,7 +436,12 @@ public class AnalysisService {
         return getFieldAccessContext(structAddressStr, fieldOffset, numExamples, null);
     }
 
-    public Response getFieldAccessContext(String structAddressStr, int fieldOffset, int numExamples, String programName) {
+    @McpTool(value = "/get_field_access_context", description = "Assembly/decompilation context for field offsets", method = McpTool.Method.POST)
+    public Response getFieldAccessContext(
+            @Param("struct_address") String structAddressStr,
+            @Param(value = "field_offset", type = "integer", required = false, defaultValue = "0") int fieldOffset,
+            @Param(value = "num_examples", type = "integer", required = false, defaultValue = "5") int numExamples,
+            @Param(value = "program", required = false) String programName) {
         // MAJOR FIX #7: Validate input parameters
         if (fieldOffset < 0 || fieldOffset > MAX_FIELD_OFFSET) {
             return Response.err("Field offset must be between 0 and " + MAX_FIELD_OFFSET);
@@ -519,7 +536,12 @@ public class AnalysisService {
         return inspectMemoryContent(addressStr, length, detectStrings, null);
     }
 
-    public Response inspectMemoryContent(String addressStr, int length, boolean detectStrings, String programName) {
+    @McpTool(value = "/inspect_memory_content", description = "Inspect memory content with string detection")
+    public Response inspectMemoryContent(
+            @Param("address") String addressStr,
+            @Param(value = "length", type = "integer", required = false, defaultValue = "64") int length,
+            @Param(value = "detect_strings", type = "boolean", required = false, defaultValue = "true") boolean detectStrings,
+            @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -635,7 +657,8 @@ public class AnalysisService {
         return detectCryptoConstants(null);
     }
 
-    public Response detectCryptoConstants(String programName) {
+    @McpTool(value = "/detect_crypto_constants", description = "Detect crypto algorithm constants in binary")
+    public Response detectCryptoConstants(@Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
 
@@ -660,7 +683,11 @@ public class AnalysisService {
         return searchBytePatterns(pattern, mask, null);
     }
 
-    public Response searchBytePatterns(String pattern, String mask, String programName) {
+    @McpTool(value = "/search_byte_patterns", description = "Search for byte patterns with masks")
+    public Response searchBytePatterns(
+            @Param("pattern") String pattern,
+            @Param(value = "mask", required = false) String mask,
+            @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -754,7 +781,11 @@ public class AnalysisService {
         return findSimilarFunctions(targetFunction, threshold, null);
     }
 
-    public Response findSimilarFunctions(String targetFunction, double threshold, String programName) {
+    @McpTool(value = "/find_similar_functions", description = "Find structurally similar functions")
+    public Response findSimilarFunctions(
+            @Param("target_function") String targetFunction,
+            @Param(value = "threshold", type = "number", required = false, defaultValue = "0.8") double threshold,
+            @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -839,7 +870,8 @@ public class AnalysisService {
         return analyzeControlFlow(functionName, null);
     }
 
-    public Response analyzeControlFlow(String functionName, String programName) {
+    @McpTool(value = "/analyze_control_flow", description = "Analyze function control flow complexity")
+    public Response analyzeControlFlow(@Param("function_name") String functionName, @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1004,7 +1036,8 @@ public class AnalysisService {
         return findDeadCode(functionName, null);
     }
 
-    public Response findDeadCode(String functionName, String programName) {
+    @McpTool(value = "/find_dead_code", description = "Identify unreachable code blocks")
+    public Response findDeadCode(@Param("function_name") String functionName, @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
 
@@ -1042,7 +1075,11 @@ public class AnalysisService {
      * @param compact When true, returns only scores and issue counts (no arrays, no recommendations).
      *                Reduces response from ~20KB to ~300 bytes.
      */
-    public Response analyzeFunctionCompleteness(String functionAddress, boolean compact, String programName) {
+    @McpTool(value = "/analyze_function_completeness", description = "Check function documentation completeness")
+    public Response analyzeFunctionCompleteness(
+            @Param("function_address") String functionAddress,
+            @Param(value = "compact", type = "boolean", required = false, defaultValue = "false") boolean compact,
+            @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1488,11 +1525,33 @@ public class AnalysisService {
         return Response.ok(resultData.get());
     }
 
+    @McpTool(value = "/batch_analyze_completeness", description = "Analyze completeness for multiple functions", method = McpTool.Method.POST)
+    public Response batchAnalyzeCompleteness(
+            @Param(value = "addresses", type = "array") List<String> addresses,
+            @Param(value = "program", required = false) String programName) {
+        if (addresses == null || addresses.isEmpty()) {
+            return Response.err("Missing required parameter: addresses (JSON array of hex addresses)");
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"results\": [");
+        for (int i = 0; i < addresses.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(analyzeFunctionCompleteness(addresses.get(i), false, programName).toJson());
+        }
+        sb.append("], \"count\": ").append(addresses.size()).append("}");
+        return Response.text(sb.toString());
+    }
+
     /**
      * v1.5.0: Find next undefined function needing analysis
      */
-    public Response findNextUndefinedFunction(String startAddress, String criteria,
-                                            String pattern, String direction, String programName) {
+    @McpTool(value = "/find_next_undefined_function", description = "Find next function needing analysis")
+    public Response findNextUndefinedFunction(
+            @Param(value = "start_address", required = false) String startAddress,
+            @Param(value = "criteria", required = false) String criteria,
+            @Param(value = "pattern", required = false) String pattern,
+            @Param(value = "direction", required = false) String direction,
+            @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1561,9 +1620,15 @@ public class AnalysisService {
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
      */
-    public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
-                                          boolean includeCallers, boolean includeDisasm, boolean includeVariables,
-                                          String programName) {
+    @McpTool(value = "/analyze_function_complete", description = "Comprehensive single-call function analysis")
+    public Response analyzeFunctionComplete(
+            @Param("name") String name,
+            @Param(value = "include_xrefs", type = "boolean", required = false, defaultValue = "true") boolean includeXrefs,
+            @Param(value = "include_callees", type = "boolean", required = false, defaultValue = "true") boolean includeCallees,
+            @Param(value = "include_callers", type = "boolean", required = false, defaultValue = "true") boolean includeCallers,
+            @Param(value = "include_disasm", type = "boolean", required = false, defaultValue = "true") boolean includeDisasm,
+            @Param(value = "include_variables", type = "boolean", required = false, defaultValue = "true") boolean includeVariables,
+            @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1774,9 +1839,18 @@ public class AnalysisService {
     /**
      * NEW v1.6.0: Enhanced function search with filtering and sorting
      */
-    public Response searchFunctionsEnhanced(String namePattern, Integer minXrefs, Integer maxXrefs,
-                                          String callingConvention, Boolean hasCustomName, boolean regex,
-                                          String sortBy, int offset, int limit, String programName) {
+    @McpTool(value = "/search_functions_enhanced", description = "Advanced function search with filtering")
+    public Response searchFunctionsEnhanced(
+            @Param(value = "name_pattern", required = false) String namePattern,
+            @Param(value = "min_xrefs", type = "integer", required = false) Integer minXrefs,
+            @Param(value = "max_xrefs", type = "integer", required = false) Integer maxXrefs,
+            @Param(value = "calling_convention", required = false) String callingConvention,
+            @Param(value = "has_custom_name", type = "boolean", required = false) Boolean hasCustomName,
+            @Param(value = "regex", type = "boolean", required = false, defaultValue = "false") boolean regex,
+            @Param(value = "sort_by", required = false, defaultValue = "address") String sortBy,
+            @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
+            @Param(value = "limit", type = "integer", required = false, defaultValue = "100") int limit,
+            @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2403,7 +2477,8 @@ public class AnalysisService {
      * Returns decompiled code + classification + callees + variables with pre-analysis + compact completeness
      * in a single response, using only one decompilation.
      */
-    public Response analyzeForDocumentation(String functionAddress, String programName) {
+    @McpTool(value = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow")
+    public Response analyzeForDocumentation(@Param("function_address") String functionAddress, @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

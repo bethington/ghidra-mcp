@@ -60,8 +60,7 @@ import ghidra.program.model.block.CodeBlockReference;
 import ghidra.program.model.block.CodeBlockReferenceIterator;
 
 import com.xebyte.core.BinaryComparisonService;
-import com.xebyte.core.EndpointDef;
-import com.xebyte.core.EndpointRegistry;
+import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.FrontEndProgramProvider;
 import com.xebyte.core.JsonHelper;
 
@@ -410,29 +409,24 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }
 
         // ==========================================================================
-        // SHARED ENDPOINTS — Declarative registration via EndpointRegistry
-        // Replaces ~1,950 lines of individual createContext() calls
+        // SHARED ENDPOINTS — Annotation-driven registration via AnnotationScanner
+        // Scans @McpTool annotations on service methods, replaces hand-wired registry
         // ==========================================================================
 
-        EndpointRegistry registry = new EndpointRegistry(
+        java.util.List<AnnotationScanner.ToolDef> toolDefs = AnnotationScanner.scan(
             listingService, functionService, commentService, symbolLabelService,
             xrefCallGraphService, dataTypeService, analysisService,
             documentationHashService, malwareSecurityService, programScriptService);
 
-        for (EndpointDef ep : registry.getEndpoints()) {
-            server.createContext(ep.path(), safeHandler(exchange -> {
-                Map<String, String> query = parseQueryParams(exchange);
-                Map<String, Object> body = "POST".equalsIgnoreCase(exchange.getRequestMethod())
-                    ? parseJsonParams(exchange) : Map.of();
-                try {
-                    sendResponse(exchange, ep.handler().handle(query, body).toJson());
-                } catch (IOException e) {
-                    throw e;
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            }));
-        }
+        AnnotationScanner.registerHttp(server, toolDefs);
+
+        // /mcp/schema — serves tool definitions for the dynamic MCP bridge
+        final String schemaJson = AnnotationScanner.toSchemaJson(toolDefs);
+        server.createContext("/mcp/schema", safeHandler(exchange -> {
+            sendResponse(exchange, schemaJson);
+        }));
+
+        Msg.info(this, "Registered " + toolDefs.size() + " annotated endpoints + /mcp/schema");
 
         // ==========================================================================
         // INFRASTRUCTURE ENDPOINTS (not in service layer)
