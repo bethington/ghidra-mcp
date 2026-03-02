@@ -11,7 +11,7 @@ This directory contains version-specific release documentation for the Ghidra MC
 - BSim Ghidra scripts for cross-version function similarity matching
 - Fixed enum value parsing (GitHub issue #44)
 - Dead code cleanup (~243KB of deprecated workflow modules removed)
-- 193 MCP tools, 169 GUI endpoints, 173 headless endpoints
+- 193 MCP tools, 175 GUI endpoints, 183 headless endpoints
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details
 
 ### v4.0.0

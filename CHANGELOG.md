@@ -38,7 +38,7 @@ Complete version history for the Ghidra MCP Server project.
 - **`scripts/migrate_learnings.py`** -- One-time migration from flat files (learnings.md, loop_state.json, community_names.json) to knowledge DB tables
 
 #### Counts
-- 193 MCP tools, 169 GUI endpoints, 173 headless endpoints
+- 193 MCP tools, 175 GUI endpoints, 183 headless endpoints
 
 ---
 

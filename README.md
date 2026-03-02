@@ -506,8 +506,8 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 ### Components
 
 - **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (193 tools)
-- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (169 GUI endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 173 endpoints, no GUI required
+- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (175 GUI endpoints)
+- **GhidraMCPHeadlessServer** — Standalone headless server — 183 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
@@ -570,11 +570,11 @@ Quick examples:
 ### Project Structure
 ```
 ghidra-mcp/
-├── bridge_mcp_ghidra.py     # MCP server (Python, 184 tools)
+├── bridge_mcp_ghidra.py     # MCP server (Python, 193 tools)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (169 endpoints)
-│       ├── headless/                    # Headless server (173 endpoints)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (175 endpoints)
+│       ├── headless/                    # Headless server (183 endpoints)
 │       └── core/                        # Shared service layer (12 services)
 ├── ghidra_scripts/          # Automation scripts
 ├── tests/                   # Python unit tests + endpoint catalog
@@ -754,8 +754,8 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 |--------|-------|
 | **Version** | 4.2.0 |
 | **MCP Tools** | 193 fully implemented |
-| **GUI Endpoints** | 169 (GhidraMCPPlugin) |
-| **Headless Endpoints** | 173 (GhidraMCPHeadlessServer) |
+| **GUI Endpoints** | 175 (GhidraMCPPlugin) |
+| **Headless Endpoints** | 183 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |
 | **Batch Efficiency** | 93% API call reduction |
 | **AI Workflows** | 7 proven documentation workflows |

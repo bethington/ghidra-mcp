@@ -192,11 +192,14 @@ jobs:
       run: |
         VERSION="${{ steps.version.outputs.VERSION }}"
         # Count MCP tools dynamically from bridge
-        MCP_TOOLS=$(grep -c '@mcp.tool()' bridge_mcp_ghidra.py 2>/dev/null || echo "179")
-        # Count GUI endpoints dynamically from plugin
-        GUI_EPS=$(grep -c 'createContext(' src/main/java/com/xebyte/GhidraMCPPlugin.java 2>/dev/null || echo "147")
-        # Count headless endpoints dynamically
-        HEADLESS_EPS=$(grep -c 'createContext(' src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java 2>/dev/null || echo "172")
+        MCP_TOOLS=$(grep -c '@mcp.tool()' bridge_mcp_ghidra.py 2>/dev/null || echo "193")
+        # Count GUI endpoints: direct createContext + shared EndpointRegistry entries
+        GUI_DIRECT=$(grep -cP '(?:server|httpServer)\.createContext\(' src/main/java/com/xebyte/GhidraMCPPlugin.java 2>/dev/null || echo "0")
+        REGISTRY=$(grep -cP '(?:get|post)\(\s*"/' src/main/java/com/xebyte/core/EndpointRegistry.java 2>/dev/null || echo "0")
+        GUI_EPS=$((GUI_DIRECT + REGISTRY))
+        # Count headless endpoints: direct createContext + shared EndpointRegistry entries
+        HEADLESS_DIRECT=$(grep -cP '(?:server|httpServer)\.createContext\(' src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java 2>/dev/null || echo "0")
+        HEADLESS_EPS=$((HEADLESS_DIRECT + REGISTRY))
 
         cat > release_notes.md << GENEOF
         # GhidraMCP Release ${VERSION}

@@ -151,7 +151,7 @@ Located in `ghidra_scripts/`. Execute via:
 ## Version History
 
 See `CHANGELOG.md` for complete history. Key releases:
-- v4.2.0: Knowledge database integration, BSim cross-version matching, enum fix (#44), 193 MCP tools, 169 GUI endpoints, 173 headless endpoints
+- v4.2.0: Knowledge database integration, BSim cross-version matching, enum fix (#44), 193 MCP tools, 175 GUI endpoints, 183 headless endpoints
 - v4.1.0: Parallel multi-binary support via universal `program` parameter, 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
 - v4.0.0: Service layer architecture refactor (12 shared services), 69% plugin reduction, 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
 - v3.2.0: Completeness checker overhaul, batch_analyze_completeness endpoint, multi-window fix (#35), 180 MCP tools, 149 GUI endpoints
