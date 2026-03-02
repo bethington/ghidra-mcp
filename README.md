@@ -3,17 +3,17 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-12.0.3-green.svg)](https://ghidra-sre.org/)
-[![Version](https://img.shields.io/badge/Version-4.0.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-4.2.0-brightgreen.svg)](CHANGELOG.md)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **184 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **193 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available.
 
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **184 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, and script execution.
+- **193 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, and script execution.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -24,7 +24,7 @@ Most Ghidra MCP implementations give you a handful of read-only tools and call i
 
 ### Core MCP Integration
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **184 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
+- **193 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
@@ -481,6 +481,13 @@ curl http://127.0.0.1:8089/get_version
 - `list_server_users` - List all users on the Ghidra Server
 - `set_user_permissions` - Set a user's repository access level
 
+### Knowledge Database (bridge-only, requires PostgreSQL)
+- `store_function_knowledge` - Store documented function data to knowledge DB
+- `query_knowledge_context` - Search documented functions by keyword (ILIKE + tsvector)
+- `store_ordinal_mapping` - Store ordinal-to-name mapping per binary version
+- `get_ordinal_mapping` - Look up known ordinal name by binary, version, ordinal
+- `export_system_knowledge` - Export documented functions as markdown by game system
+
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## 🏗️ Architecture
@@ -498,7 +505,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Components
 
-- **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (184 tools)
+- **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (193 tools)
 - **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (169 GUI endpoints)
 - **GhidraMCPHeadlessServer** — Standalone headless server — 173 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
@@ -679,7 +686,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v4.0.0
+# Connection OK - GhidraMCP Headless Server v4.2.0
 ```
 
 ### Headless API Workflow
@@ -745,8 +752,8 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 4.0.0 |
-| **MCP Tools** | 184 fully implemented |
+| **Version** | 4.2.0 |
+| **MCP Tools** | 193 fully implemented |
 | **GUI Endpoints** | 169 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 173 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |

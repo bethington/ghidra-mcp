@@ -12,7 +12,6 @@ import ghidra.util.task.ConsoleTaskMonitor;
 
 import javax.swing.SwingUtilities;
 import java.io.*;
-import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -29,36 +28,6 @@ public class ProgramScriptService {
     public ProgramScriptService(ProgramProvider programProvider, ThreadingStrategy threadingStrategy) {
         this.programProvider = programProvider;
         this.threadingStrategy = threadingStrategy;
-    }
-
-    // ========================================================================
-    // Program resolution helper
-    // ========================================================================
-
-    private Object[] getProgramOrError(String programName) {
-        Program program = null;
-        if (programName != null && !programName.isEmpty()) {
-            program = programProvider.resolveProgram(programName);
-        } else {
-            program = programProvider.getCurrentProgram();
-        }
-        if (program == null) {
-            String available = "";
-            Program[] all = programProvider.getAllOpenPrograms();
-            if (all != null && all.length > 0) {
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < all.length; i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append(all[i].getName());
-                }
-                available = " Available programs: " + sb;
-            }
-            String error = programName != null && !programName.isEmpty()
-                    ? ServiceUtils.programNotFoundError(programName) + available
-                    : "No program loaded." + available;
-            return new Object[]{null, error};
-        }
-        return new Object[]{program, null};
     }
 
     /**
@@ -80,14 +49,14 @@ public class ProgramScriptService {
      * Get metadata about the current program including name, architecture,
      * memory layout, function count, and symbol count.
      */
-    public String getMetadata() {
+    public Response getMetadata() {
         return getMetadata(null);
     }
 
-    public String getMetadata(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response getMetadata(String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         StringBuilder metadata = new StringBuilder();
         metadata.append("Program Name: ").append(program.getName()).append("\n");
@@ -117,7 +86,7 @@ public class ProgramScriptService {
         int symbolCount = program.getSymbolTable().getNumSymbols();
         metadata.append("Symbol Count: ").append(symbolCount).append("\n");
 
-        return metadata.toString();
+        return Response.text(metadata.toString());
     }
 
     // ========================================================================
@@ -127,16 +96,16 @@ public class ProgramScriptService {
     /**
      * Save the currently active program to its domain file.
      */
-    public String saveCurrentProgram() {
+    public Response saveCurrentProgram() {
         return saveCurrentProgram(null);
     }
 
-    public String saveCurrentProgram(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response saveCurrentProgram(String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
-        final StringBuilder result = new StringBuilder();
+        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
@@ -148,11 +117,11 @@ public class ProgramScriptService {
                         return;
                     }
                     df.save(new ConsoleTaskMonitor());
-                    result.append("{");
-                    result.append("\"success\": true, ");
-                    result.append("\"program\": \"").append(program.getName().replace("\"", "\\\"")).append("\", ");
-                    result.append("\"message\": \"Program saved successfully\"");
-                    result.append("}");
+                    resultData.set(JsonHelper.mapOf(
+                        "success", true,
+                        "program", program.getName(),
+                        "message", "Program saved successfully"
+                    ));
                 } catch (Throwable e) {
                     String msg = e.getMessage() != null ? e.getMessage() : e.toString();
                     errorMsg.set(msg);
@@ -161,105 +130,92 @@ public class ProgramScriptService {
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}";
+            return Response.err(msg);
         }
 
-        return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
+        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 
     /**
      * List all currently open programs in Ghidra.
      */
-    public String listOpenPrograms() {
+    public Response listOpenPrograms() {
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
-            return "{\"programs\": [], \"count\": 0, \"current_program\": \"\"}";
+            return Response.ok(JsonHelper.mapOf("programs", List.of(), "count", 0, "current_program", ""));
         }
 
         Program currentProgram = programProvider.resolveProgram(null);
 
-        StringBuilder result = new StringBuilder();
-        result.append("{\"programs\": [");
-
-        boolean first = true;
+        List<Map<String, Object>> programList = new ArrayList<>();
         for (Program prog : programs) {
-            if (!first) result.append(", ");
-            first = false;
-
-            result.append("{");
-            result.append("\"name\": \"").append(ServiceUtils.escapeJson(prog.getName())).append("\", ");
-            result.append("\"path\": \"").append(ServiceUtils.escapeJson(prog.getDomainFile().getPathname())).append("\", ");
-            result.append("\"is_current\": ").append(prog == currentProgram).append(", ");
-            result.append("\"executable_path\": \"").append(ServiceUtils.escapeJson(prog.getExecutablePath() != null ? prog.getExecutablePath() : "")).append("\", ");
-            result.append("\"language\": \"").append(ServiceUtils.escapeJson(prog.getLanguageID().getIdAsString())).append("\", ");
-            result.append("\"compiler\": \"").append(ServiceUtils.escapeJson(prog.getCompilerSpec().getCompilerSpecID().getIdAsString())).append("\", ");
-            result.append("\"image_base\": \"").append(prog.getImageBase().toString()).append("\", ");
-            result.append("\"memory_size\": ").append(prog.getMemory().getSize()).append(", ");
-            result.append("\"function_count\": ").append(prog.getFunctionManager().getFunctionCount());
-            result.append("}");
+            programList.add(JsonHelper.mapOf(
+                "name", prog.getName(),
+                "path", prog.getDomainFile().getPathname(),
+                "is_current", prog == currentProgram,
+                "executable_path", prog.getExecutablePath() != null ? prog.getExecutablePath() : "",
+                "language", prog.getLanguageID().getIdAsString(),
+                "compiler", prog.getCompilerSpec().getCompilerSpecID().getIdAsString(),
+                "image_base", prog.getImageBase().toString(),
+                "memory_size", prog.getMemory().getSize(),
+                "function_count", prog.getFunctionManager().getFunctionCount()
+            ));
         }
 
-        result.append("], \"count\": ").append(programs.length);
-        result.append(", \"current_program\": \"").append(currentProgram != null ? ServiceUtils.escapeJson(currentProgram.getName()) : "").append("\"");
-        result.append("}");
-
-        return result.toString();
+        return Response.ok(JsonHelper.mapOf(
+            "programs", programList,
+            "count", programs.length,
+            "current_program", currentProgram != null ? currentProgram.getName() : ""
+        ));
     }
 
     /**
      * Get detailed information about the currently active program.
      */
-    public String getCurrentProgramInfo() {
+    public Response getCurrentProgramInfo() {
         return getCurrentProgramInfo(null);
     }
 
-    public String getCurrentProgramInfo(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response getCurrentProgramInfo(String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
-        StringBuilder result = new StringBuilder();
-        result.append("{");
-        result.append("\"name\": \"").append(ServiceUtils.escapeJson(program.getName())).append("\", ");
-        result.append("\"path\": \"").append(ServiceUtils.escapeJson(program.getDomainFile().getPathname())).append("\", ");
-        result.append("\"executable_path\": \"").append(ServiceUtils.escapeJson(program.getExecutablePath() != null ? program.getExecutablePath() : "")).append("\", ");
-        result.append("\"executable_format\": \"").append(ServiceUtils.escapeJson(program.getExecutableFormat())).append("\", ");
-        result.append("\"language\": \"").append(ServiceUtils.escapeJson(program.getLanguageID().getIdAsString())).append("\", ");
-        result.append("\"compiler\": \"").append(ServiceUtils.escapeJson(program.getCompilerSpec().getCompilerSpecID().getIdAsString())).append("\", ");
-        result.append("\"address_size\": ").append(program.getAddressFactory().getDefaultAddressSpace().getSize()).append(", ");
-        result.append("\"image_base\": \"").append(program.getImageBase().toString()).append("\", ");
-        result.append("\"min_address\": \"").append(program.getMinAddress() != null ? program.getMinAddress().toString() : "null").append("\", ");
-        result.append("\"max_address\": \"").append(program.getMaxAddress() != null ? program.getMaxAddress().toString() : "null").append("\", ");
-        result.append("\"memory_size\": ").append(program.getMemory().getSize()).append(", ");
-        result.append("\"function_count\": ").append(program.getFunctionManager().getFunctionCount()).append(", ");
-        result.append("\"symbol_count\": ").append(program.getSymbolTable().getNumSymbols()).append(", ");
-        result.append("\"data_type_count\": ").append(program.getDataTypeManager().getDataTypeCount(true)).append(", ");
-
-        // Get creation and modification dates
-        result.append("\"creation_date\": \"").append(program.getCreationDate() != null ? program.getCreationDate().toString() : "unknown").append("\", ");
-
-        // Get memory block count
-        result.append("\"memory_block_count\": ").append(program.getMemory().getBlocks().length);
-
-        result.append("}");
-        return result.toString();
+        return Response.ok(JsonHelper.mapOf(
+            "name", program.getName(),
+            "path", program.getDomainFile().getPathname(),
+            "executable_path", program.getExecutablePath() != null ? program.getExecutablePath() : "",
+            "executable_format", program.getExecutableFormat(),
+            "language", program.getLanguageID().getIdAsString(),
+            "compiler", program.getCompilerSpec().getCompilerSpecID().getIdAsString(),
+            "address_size", program.getAddressFactory().getDefaultAddressSpace().getSize(),
+            "image_base", program.getImageBase().toString(),
+            "min_address", program.getMinAddress() != null ? program.getMinAddress().toString() : "null",
+            "max_address", program.getMaxAddress() != null ? program.getMaxAddress().toString() : "null",
+            "memory_size", program.getMemory().getSize(),
+            "function_count", program.getFunctionManager().getFunctionCount(),
+            "symbol_count", program.getSymbolTable().getNumSymbols(),
+            "data_type_count", program.getDataTypeManager().getDataTypeCount(true),
+            "creation_date", program.getCreationDate() != null ? program.getCreationDate().toString() : "unknown",
+            "memory_block_count", program.getMemory().getBlocks().length
+        ));
     }
 
     /**
      * Switch MCP context to a different open program by name.
      */
-    public String switchProgram(String programName) {
+    public Response switchProgram(String programName) {
         if (programName == null || programName.trim().isEmpty()) {
-            return "{\"error\": \"Program name is required\"}";
+            return Response.err("Program name is required");
         }
 
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
-            return "{\"error\": \"No programs are currently open\"}";
+            return Response.err("No programs are currently open");
         }
 
         Program targetProgram = null;
@@ -283,34 +239,38 @@ public class ProgramScriptService {
         }
 
         if (targetProgram == null) {
-            StringBuilder availablePrograms = new StringBuilder();
-            for (int i = 0; i < programs.length; i++) {
-                if (i > 0) availablePrograms.append(", ");
-                availablePrograms.append(programs[i].getName());
+            List<String> availablePrograms = new ArrayList<>();
+            for (Program prog : programs) {
+                availablePrograms.add(prog.getName());
             }
-            return "{\"error\": \"Program not found: " + ServiceUtils.escapeJson(programName) + "\", \"available_programs\": [" +
-                   (programs.length > 0 ? "\"" + availablePrograms.toString().replace(", ", "\", \"") + "\"" : "") + "]}";
+            return Response.ok(JsonHelper.mapOf(
+                "error", "Program not found: " + programName,
+                "available_programs", availablePrograms
+            ));
         }
 
         // Switch to the target program
         programProvider.setCurrentProgram(targetProgram);
 
-        return "{\"success\": true, \"switched_to\": \"" + ServiceUtils.escapeJson(targetProgram.getName()) +
-               "\", \"path\": \"" + ServiceUtils.escapeJson(targetProgram.getDomainFile().getPathname()) + "\"}";
+        return Response.ok(JsonHelper.mapOf(
+            "success", true,
+            "switched_to", targetProgram.getName(),
+            "path", targetProgram.getDomainFile().getPathname()
+        ));
     }
 
     /**
      * List all files in the current Ghidra project.
      */
-    public String listProjectFiles(String folderPath) {
+    public Response listProjectFiles(String folderPath) {
         PluginTool tool = getToolFromProvider();
         if (tool == null) {
-            return "{\"error\": \"Project listing requires GUI mode (PluginTool not available)\"}";
+            return Response.err("Project listing requires GUI mode (PluginTool not available)");
         }
 
         ghidra.framework.model.Project project = tool.getProject();
         if (project == null) {
-            return "{\"error\": \"No project is currently open\"}";
+            return Response.err("No project is currently open");
         }
 
         ghidra.framework.model.ProjectData projectData = project.getProjectData();
@@ -326,76 +286,68 @@ public class ProgramScriptService {
                 if (part.isEmpty()) continue;
                 ghidra.framework.model.DomainFolder nextFolder = targetFolder.getFolder(part);
                 if (nextFolder == null) {
-                    return "{\"error\": \"Folder not found: " + ServiceUtils.escapeJson(folderPath) + "\"}";
+                    return Response.err("Folder not found: " + folderPath);
                 }
                 targetFolder = nextFolder;
             }
         }
 
-        StringBuilder result = new StringBuilder();
-        result.append("{\"project_name\": \"").append(ServiceUtils.escapeJson(project.getName())).append("\", ");
-        result.append("\"current_folder\": \"").append(ServiceUtils.escapeJson(targetFolder.getPathname())).append("\", ");
-        result.append("\"folders\": [");
-
         // List subfolders
         ghidra.framework.model.DomainFolder[] subfolders = targetFolder.getFolders();
-        for (int i = 0; i < subfolders.length; i++) {
-            if (i > 0) result.append(", ");
-            result.append("\"").append(ServiceUtils.escapeJson(subfolders[i].getName())).append("\"");
+        List<String> folderNames = new ArrayList<>();
+        for (ghidra.framework.model.DomainFolder subfolder : subfolders) {
+            folderNames.add(subfolder.getName());
         }
-        result.append("], ");
-
-        result.append("\"files\": [");
 
         // List files in folder
         ghidra.framework.model.DomainFile[] files = targetFolder.getFiles();
-        boolean first = true;
+        List<Map<String, Object>> fileList = new ArrayList<>();
         for (ghidra.framework.model.DomainFile file : files) {
-            if (!first) result.append(", ");
-            first = false;
-
-            result.append("{");
-            result.append("\"name\": \"").append(ServiceUtils.escapeJson(file.getName())).append("\", ");
-            result.append("\"path\": \"").append(ServiceUtils.escapeJson(file.getPathname())).append("\", ");
-            result.append("\"content_type\": \"").append(ServiceUtils.escapeJson(file.getContentType())).append("\", ");
-            result.append("\"version\": ").append(file.getVersion()).append(", ");
-            result.append("\"is_read_only\": ").append(file.isReadOnly()).append(", ");
-            result.append("\"is_versioned\": ").append(file.isVersioned());
-            result.append("}");
+            fileList.add(JsonHelper.mapOf(
+                "name", file.getName(),
+                "path", file.getPathname(),
+                "content_type", file.getContentType(),
+                "version", file.getVersion(),
+                "is_read_only", file.isReadOnly(),
+                "is_versioned", file.isVersioned()
+            ));
         }
-        result.append("]");
 
-        result.append("}");
-        return result.toString();
+        return Response.ok(JsonHelper.mapOf(
+            "project_name", project.getName(),
+            "current_folder", targetFolder.getPathname(),
+            "folders", folderNames,
+            "files", fileList
+        ));
     }
 
     /**
      * Open a program from the current project by path.
      */
-    public String openProgramFromProject(String path) {
+    public Response openProgramFromProject(String path) {
         return openProgramFromProject(path, false);
     }
 
-    public String openProgramFromProject(String path, boolean autoAnalyze) {
+    public Response openProgramFromProject(String path, boolean autoAnalyze) {
         if (path == null || path.trim().isEmpty()) {
-            return "{\"error\": \"Program path is required\"}";
+            return Response.err("Program path is required");
         }
 
         PluginTool tool = getToolFromProvider();
         if (tool == null) {
-            return "{\"error\": \"Opening programs requires GUI mode (PluginTool not available)\"}";
+            return Response.err("Opening programs requires GUI mode (PluginTool not available)");
         }
 
         ghidra.framework.model.Project project = tool.getProject();
         if (project == null) {
-            return "{\"error\": \"No project is currently open\"}";
+            return Response.err("No project is currently open");
         }
 
         ghidra.framework.model.ProjectData projectData = project.getProjectData();
         ghidra.framework.model.DomainFile domainFile = projectData.getFile(path);
 
         if (domainFile == null) {
-            return "{\"error\": \"File not found in project: " + ServiceUtils.escapeJson(path) + "\"}";
+            return Response.err("File not found in project: " + path);
         }
 
         // Check if already open
@@ -404,9 +356,12 @@ public class ProgramScriptService {
             if (prog.getDomainFile().getPathname().equals(path)) {
                 // Already open, just switch to it
                 programProvider.setCurrentProgram(prog);
-                return "{\"success\": true, \"message\": \"Program already open, switched to it\", " +
-                       "\"name\": \"" + ServiceUtils.escapeJson(prog.getName()) + "\", " +
-                       "\"path\": \"" + ServiceUtils.escapeJson(path) + "\"}";
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "message", "Program already open, switched to it",
+                    "name", prog.getName(),
+                    "path", path
+                ));
             }
         }
 
@@ -414,12 +369,12 @@ public class ProgramScriptService {
         try {
             ProgramManager pm = tool.getService(ProgramManager.class);
             if (pm == null) {
-                return "{\"error\": \"ProgramManager service not available\"}";
+                return Response.err("ProgramManager service not available");
             }
 
             Program program = (Program) domainFile.getDomainObject(tool, false, false, ghidra.util.task.TaskMonitor.DUMMY);
             if (program == null) {
-                return "{\"error\": \"Failed to open program: " + ServiceUtils.escapeJson(path) + "\"}";
+                return Response.err("Failed to open program: " + path);
             }
 
             // Add to tool and set as current
@@ -439,13 +394,16 @@ public class ProgramScriptService {
                 }
             }
 
-            return "{\"success\": true, \"message\": \"Program opened successfully\", " +
-                   "\"name\": \"" + ServiceUtils.escapeJson(program.getName()) + "\", " +
-                   "\"path\": \"" + ServiceUtils.escapeJson(path) + "\", " +
-                   "\"auto_analyzed\": " + analyzed + ", " +
-                   "\"function_count\": " + program.getFunctionManager().getFunctionCount() + "}";
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "message", "Program opened successfully",
+                "name", program.getName(),
+                "path", path,
+                "auto_analyzed", analyzed,
+                "function_count", program.getFunctionManager().getFunctionCount()
+            ));
         } catch (Exception e) {
-            return "{\"error\": \"Failed to open program: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Failed to open program: " + e.getMessage());
         }
     }
 
@@ -460,14 +418,14 @@ public class ProgramScriptService {
      * @param scriptArgs Optional space-separated arguments for the script
      * @return Script output or error message
      */
-    public String runGhidraScript(String scriptPath, String scriptArgs) {
+    public Response runGhidraScript(String scriptPath, String scriptArgs) {
         return runGhidraScript(scriptPath, scriptArgs, (String) null);
     }
 
-    public String runGhidraScript(String scriptPath, String scriptArgs, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response runGhidraScript(String scriptPath, String scriptArgs, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
@@ -635,12 +593,12 @@ public class ProgramScriptService {
                     }
                 }
             });
-        } catch (InterruptedException | InvocationTargetException e) {
+        } catch (Exception e) {
             resultMsg.append("ERROR: Failed to execute on Swing thread: ").append(e.getMessage()).append("\n");
             Msg.error(this, "Failed to execute on Swing thread", e);
         }
 
-        return resultMsg.toString();
+        return Response.text(resultMsg.toString());
     }
 
     /**
@@ -649,36 +607,40 @@ public class ProgramScriptService {
      * @param filter Optional filter string to match script names
      * @return JSON list of available scripts
      */
-    public String listGhidraScripts(String filter) {
-        final StringBuilder resultMsg = new StringBuilder();
+    public Response listGhidraScripts(String filter) {
+        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
+        final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    resultMsg.append("{\n  \"note\": \"Script listing requires Ghidra GUI access\",\n");
-                    resultMsg.append("  \"filter\": \"").append(filter != null ? filter : "none").append("\",\n");
-                    resultMsg.append("  \"instructions\": [\n");
-                    resultMsg.append("    \"To view available scripts:\",\n");
-                    resultMsg.append("    \"1. Open Ghidra's Script Manager (Window → Script Manager)\",\n");
-                    resultMsg.append("    \"2. Browse scripts by category\",\n");
-                    resultMsg.append("    \"3. Use the search filter at the top\"\n");
-                    resultMsg.append("  ],\n");
-                    resultMsg.append("  \"common_script_locations\": [\n");
-                    resultMsg.append("    \"<ghidra_install>/Ghidra/Features/*/ghidra_scripts/\",\n");
-                    resultMsg.append("    \"<user_home>/ghidra_scripts/\"\n");
-                    resultMsg.append("  ]\n");
-                    resultMsg.append("}");
-
+                    resultData.set(JsonHelper.mapOf(
+                        "note", "Script listing requires Ghidra GUI access",
+                        "filter", filter != null ? filter : "none",
+                        "instructions", List.of(
+                            "To view available scripts:",
+                            "1. Open Ghidra's Script Manager (Window -> Script Manager)",
+                            "2. Browse scripts by category",
+                            "3. Use the search filter at the top"
+                        ),
+                        "common_script_locations", List.of(
+                            "<ghidra_install>/Ghidra/Features/*/ghidra_scripts/",
+                            "<user_home>/ghidra_scripts/"
+                        )
+                    ));
                 } catch (Exception e) {
-                    resultMsg.append("Error: ").append(e.getMessage());
+                    errorMsg.set(e.getMessage());
                     Msg.error(this, "Error in list scripts handler", e);
                 }
             });
-        } catch (InterruptedException | InvocationTargetException e) {
-            return "Error: Failed to execute on Swing thread: " + e.getMessage();
+        } catch (Exception e) {
+            return Response.err("Failed to execute on Swing thread: " + e.getMessage());
         }
 
-        return resultMsg.toString();
+        if (errorMsg.get() != null) {
+            return Response.err(errorMsg.get());
+        }
+        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 
     // ========================================================================
@@ -688,17 +650,15 @@ public class ProgramScriptService {
     /**
      * Read memory at a specific address.
      */
-    public String readMemory(String addressStr, int length, String programName) {
+    public Response readMemory(String addressStr, int length, String programName) {
         try {
-            Object[] programResult = getProgramOrError(programName);
-            Program program = (Program) programResult[0];
-            if (program == null) {
-                return "{\"error\":\"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
-            }
+            ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+            if (pe.hasError()) return pe.error();
+            Program program = pe.program();
 
             Address address = program.getAddressFactory().getAddress(addressStr);
             if (address == null) {
-                return "{\"error\":\"Invalid address: " + addressStr + "\"}";
+                return Response.err("Invalid address: " + addressStr);
             }
 
             Memory memory = program.getMemory();
@@ -706,58 +666,52 @@ public class ProgramScriptService {
 
             int bytesRead = memory.getBytes(address, bytes);
 
-            StringBuilder json = new StringBuilder();
-            json.append("{");
-            json.append("\"address\":\"").append(address.toString()).append("\",");
-            json.append("\"length\":").append(bytesRead).append(",");
-            json.append("\"data\":[");
-
+            List<Integer> dataList = new ArrayList<>();
+            StringBuilder hexStr = new StringBuilder();
             for (int i = 0; i < bytesRead; i++) {
-                if (i > 0) json.append(",");
-                json.append(bytes[i] & 0xFF);
+                dataList.add(bytes[i] & 0xFF);
+                hexStr.append(String.format("%02x", bytes[i] & 0xFF));
             }
 
-            json.append("],");
-            json.append("\"hex\":\"");
-            for (int i = 0; i < bytesRead; i++) {
-                json.append(String.format("%02x", bytes[i] & 0xFF));
-            }
-            json.append("\"");
-            json.append("}");
-
-            return json.toString();
+            return Response.ok(JsonHelper.mapOf(
+                "address", address.toString(),
+                "length", bytesRead,
+                "data", dataList,
+                "hex", hexStr.toString()
+            ));
 
         } catch (Exception e) {
-            return "{\"error\":\"Failed to read memory: " + e.getMessage() + "\"}";
+            return Response.err("Failed to read memory: " + e.getMessage());
         }
     }
 
     /**
      * Create an uninitialized memory block (e.g., for MMIO/peripheral regions).
      */
-    public String createMemoryBlock(String name, String addressStr, long size,
+    public Response createMemoryBlock(String name, String addressStr, long size,
                                      boolean read, boolean write, boolean execute,
                                      boolean isVolatile, String comment) {
         return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, null);
     }
 
-    public String createMemoryBlock(String name, String addressStr, long size,
+    public Response createMemoryBlock(String name, String addressStr, long size,
                                      boolean read, boolean write, boolean execute,
                                      boolean isVolatile, String comment, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
         if (name == null || name.isEmpty()) {
-            return "{\"error\": \"name parameter required\"}";
+            return Response.err("name parameter required");
         }
         if (addressStr == null || addressStr.isEmpty()) {
-            return "{\"error\": \"address parameter required\"}";
+            return Response.err("address parameter required");
         }
         if (size <= 0) {
-            return "{\"error\": \"size must be positive\"}";
+            return Response.err("size must be positive");
         }
 
-        final StringBuilder result = new StringBuilder();
+        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
@@ -794,21 +748,18 @@ public class ProgramScriptService {
                     }
 
                     txSuccess = true;
-                    result.append("{");
-                    result.append("\"success\": true, ");
-                    result.append("\"name\": \"").append(name.replace("\"", "\\\"")).append("\", ");
-                    result.append("\"start\": \"").append(block.getStart()).append("\", ");
-                    result.append("\"end\": \"").append(block.getEnd()).append("\", ");
-                    result.append("\"size\": ").append(block.getSize()).append(", ");
-                    result.append("\"permissions\": \"");
-                    result.append(read ? "r" : "-");
-                    result.append(write ? "w" : "-");
-                    result.append(execute ? "x" : "-");
-                    result.append("\", ");
-                    result.append("\"volatile\": ").append(isVolatile).append(", ");
-                    result.append("\"message\": \"Memory block '").append(name.replace("\"", "\\\""))
-                          .append("' created at ").append(addr).append("\"");
-                    result.append("}");
+
+                    String permissions = (read ? "r" : "-") + (write ? "w" : "-") + (execute ? "x" : "-");
+                    resultData.set(JsonHelper.mapOf(
+                        "success", true,
+                        "name", name,
+                        "start", block.getStart().toString(),
+                        "end", block.getEnd().toString(),
+                        "size", block.getSize(),
+                        "permissions", permissions,
+                        "volatile", isVolatile,
+                        "message", "Memory block '" + name + "' created at " + addr
+                    ));
                 } catch (Throwable e) {
                     String msg = e.getMessage() != null ? e.getMessage() : e.toString();
                     errorMsg.set(msg);
@@ -819,14 +770,14 @@ public class ProgramScriptService {
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return "{\"error\": \"Failed to execute on Swing thread: " + msg.replace("\"", "\\\"") + "\"}";
+            return Response.err("Failed to execute on Swing thread: " + msg);
         }
 
-        return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
+        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 
     // ========================================================================
@@ -837,16 +788,17 @@ public class ProgramScriptService {
      * Set a bookmark at an address with category and comment.
      * Creates or updates the bookmark if one already exists at the address with the same category.
      */
-    public String setBookmark(String addressStr, String category, String comment) {
+    public Response setBookmark(String addressStr, String category, String comment) {
         return setBookmark(addressStr, category, comment, null);
     }
 
-    public String setBookmark(String addressStr, String category, String comment, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response setBookmark(String addressStr, String category, String comment, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
         if (addressStr == null || addressStr.isEmpty()) {
-            return "{\"success\": false, \"error\": \"Address is required\"}";
+            return Response.err("Address is required");
         }
         if (category == null || category.isEmpty()) {
             category = "Note";  // Default category
@@ -858,7 +810,7 @@ public class ProgramScriptService {
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             if (addr == null) {
-                return "{\"success\": false, \"error\": \"Invalid address: " + escapeJsonString(addressStr) + "\"}";
+                return Response.err("Invalid address: " + addressStr);
             }
 
             BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -878,9 +830,12 @@ public class ProgramScriptService {
                 bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
                 program.endTransaction(transactionId, true);
 
-                return "{\"success\": true, \"address\": \"" + escapeJsonString(addr.toString()) +
-                       "\", \"category\": \"" + escapeJsonString(finalCategory) +
-                       "\", \"comment\": \"" + escapeJsonString(finalComment) + "\"}";
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "address", addr.toString(),
+                    "category", finalCategory,
+                    "comment", finalComment
+                ));
 
             } catch (Exception e) {
                 program.endTransaction(transactionId, false);
@@ -888,42 +843,42 @@ public class ProgramScriptService {
             }
 
         } catch (Exception e) {
-            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * List bookmarks, optionally filtered by category and/or address.
      */
-    public String listBookmarks(String category, String addressStr) {
+    public Response listBookmarks(String category, String addressStr) {
         return listBookmarks(category, addressStr, null);
     }
 
-    public String listBookmarks(String category, String addressStr, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listBookmarks(String category, String addressStr, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         try {
             BookmarkManager bookmarkManager = program.getBookmarkManager();
-            List<Map<String, String>> bookmarks = new ArrayList<>();
+            List<Map<String, Object>> bookmarks = new ArrayList<>();
 
             // If specific address provided, get bookmarks at that address
             if (addressStr != null && !addressStr.isEmpty()) {
                 Address addr = program.getAddressFactory().getAddress(addressStr);
                 if (addr == null) {
-                    return "{\"success\": false, \"error\": \"Invalid address: " + escapeJsonString(addressStr) + "\"}";
+                    return Response.err("Invalid address: " + addressStr);
                 }
 
                 Bookmark[] bms = bookmarkManager.getBookmarks(addr);
                 for (Bookmark bm : bms) {
                     if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
-                        Map<String, String> bmMap = new HashMap<>();
-                        bmMap.put("address", bm.getAddress().toString());
-                        bmMap.put("category", bm.getCategory());
-                        bmMap.put("comment", bm.getComment());
-                        bmMap.put("type", bm.getTypeString());
-                        bookmarks.add(bmMap);
+                        bookmarks.add(JsonHelper.mapOf(
+                            "address", bm.getAddress().toString(),
+                            "category", bm.getCategory(),
+                            "comment", bm.getComment(),
+                            "type", bm.getTypeString()
+                        ));
                     }
                 }
             } else {
@@ -934,58 +889,48 @@ public class ProgramScriptService {
                     while (iter.hasNext()) {
                         Bookmark bm = iter.next();
                         if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
-                            Map<String, String> bmMap = new HashMap<>();
-                            bmMap.put("address", bm.getAddress().toString());
-                            bmMap.put("category", bm.getCategory());
-                            bmMap.put("comment", bm.getComment());
-                            bmMap.put("type", bm.getTypeString());
-                            bookmarks.add(bmMap);
+                            bookmarks.add(JsonHelper.mapOf(
+                                "address", bm.getAddress().toString(),
+                                "category", bm.getCategory(),
+                                "comment", bm.getComment(),
+                                "type", bm.getTypeString()
+                            ));
                         }
                     }
                 }
             }
 
-            // Build JSON response
-            StringBuilder response = new StringBuilder();
-            response.append("{\"success\": true, \"bookmarks\": [");
-            for (int i = 0; i < bookmarks.size(); i++) {
-                if (i > 0) response.append(", ");
-                Map<String, String> bm = bookmarks.get(i);
-                response.append("{");
-                response.append("\"address\": \"").append(escapeJsonString(bm.get("address"))).append("\", ");
-                response.append("\"category\": \"").append(escapeJsonString(bm.get("category"))).append("\", ");
-                response.append("\"comment\": \"").append(escapeJsonString(bm.get("comment"))).append("\", ");
-                response.append("\"type\": \"").append(escapeJsonString(bm.get("type"))).append("\"");
-                response.append("}");
-            }
-            response.append("], \"count\": ").append(bookmarks.size()).append("}");
-
-            return response.toString();
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "bookmarks", bookmarks,
+                "count", bookmarks.size()
+            ));
 
         } catch (Exception e) {
-            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
     /**
      * Delete a bookmark at an address with optional category filter.
      */
-    public String deleteBookmark(String addressStr, String category) {
+    public Response deleteBookmark(String addressStr, String category) {
         return deleteBookmark(addressStr, category, null);
     }
 
-    public String deleteBookmark(String addressStr, String category, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response deleteBookmark(String addressStr, String category, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
         if (addressStr == null || addressStr.isEmpty()) {
-            return "{\"success\": false, \"error\": \"Address is required\"}";
+            return Response.err("Address is required");
         }
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             if (addr == null) {
-                return "{\"success\": false, \"error\": \"Invalid address: " + escapeJsonString(addressStr) + "\"}";
+                return Response.err("Invalid address: " + addressStr);
             }
 
             BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -1003,7 +948,11 @@ public class ProgramScriptService {
                 }
 
                 program.endTransaction(transactionId, true);
-                return "{\"success\": true, \"deleted\": " + deleted + ", \"address\": \"" + escapeJsonString(addr.toString()) + "\"}";
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "deleted", deleted,
+                    "address", addr.toString()
+                ));
 
             } catch (Exception e) {
                 program.endTransaction(transactionId, false);
@@ -1011,7 +960,7 @@ public class ProgramScriptService {
             }
 
         } catch (Exception e) {
-            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
@@ -1019,18 +968,18 @@ public class ProgramScriptService {
      * Run a Ghidra script with enhanced output capture and JSON response.
      * Locates the script in standard directories, executes it, and returns structured results.
      */
-    public String runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput) {
+    public Response runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput) {
         return runGhidraScriptWithCapture(scriptName, scriptArgs, timeoutSeconds, captureOutput, null);
     }
 
-    public String runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput, String programName) {
+    public Response runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput, String programName) {
         if (scriptName == null || scriptName.isEmpty()) {
-            return "{\"success\": false, \"error\": \"Script name is required\"}";
+            return Response.err("Script name is required");
         }
 
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         try {
             // Locate the script file - search Ghidra's standard script directories
@@ -1071,104 +1020,29 @@ public class ProgramScriptService {
                 for (String dir : searchDirs) {
                     if (dir != null) searched.append(dir).append(", ");
                 }
-                return "{\"success\": false, \"error\": \"Script '" + escapeJsonString(filename) +
-                       "' not found. Searched: " + escapeJsonString(searched.toString()) + "\"}";
+                return Response.err("Script '" + filename + "' not found. Searched: " + searched);
             }
 
             // Execute the script via the existing execution method
             long startTime = System.currentTimeMillis();
-            String output = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs);
+            Response scriptResponse = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs);
             double executionTime = (System.currentTimeMillis() - startTime) / 1000.0;
 
+            // Extract output text from the Response
+            String output = scriptResponse.toJson();
             boolean succeeded = output.contains("SCRIPT COMPLETED SUCCESSFULLY");
 
-            // Build JSON response
-            StringBuilder response = new StringBuilder();
-            response.append("{");
-            response.append("\"success\": ").append(succeeded).append(", ");
-            response.append("\"script_name\": \"").append(escapeJsonString(scriptName)).append("\", ");
-            response.append("\"script_path\": \"").append(escapeJsonString(scriptFile.getAbsolutePath())).append("\", ");
-            response.append("\"execution_time_seconds\": ").append(String.format("%.2f", executionTime)).append(", ");
-            response.append("\"console_output\": \"").append(escapeJsonString(output)).append("\"");
-            response.append("}");
-
-            return response.toString();
+            return Response.ok(JsonHelper.mapOf(
+                "success", succeeded,
+                "script_name", scriptName,
+                "script_path", scriptFile.getAbsolutePath(),
+                "execution_time_seconds", Double.parseDouble(String.format("%.2f", executionTime)),
+                "console_output", output
+            ));
 
         } catch (Exception e) {
-            return "{\"success\": false, \"error\": \"" + escapeJsonString(e.getMessage()) + "\"}";
+            return Response.err(e.getMessage());
         }
-    }
-
-    // ========================================================================
-    // JSON Helpers
-    // ========================================================================
-
-    /**
-     * Serialize a List of objects to proper JSON string.
-     * Handles Map objects within the list.
-     */
-    private String serializeListToJson(List<?> list) {
-        StringBuilder sb = new StringBuilder("[");
-        for (int i = 0; i < list.size(); i++) {
-            if (i > 0) sb.append(",");
-            Object item = list.get(i);
-            if (item instanceof String) {
-                sb.append("\"").append(escapeJsonString((String) item)).append("\"");
-            } else if (item instanceof Number) {
-                sb.append(item);
-            } else if (item instanceof Map) {
-                sb.append(serializeMapToJson((Map<?, ?>) item));
-            } else if (item instanceof List) {
-                sb.append(serializeListToJson((List<?>) item));
-            } else {
-                sb.append("\"").append(escapeJsonString(item.toString())).append("\"");
-            }
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    /**
-     * Serialize a Map to proper JSON object.
-     */
-    private String serializeMapToJson(Map<?, ?> map) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<?, ?> entry : map.entrySet()) {
-            if (!first) sb.append(",");
-            first = false;
-            sb.append("\"").append(escapeJsonString(entry.getKey().toString())).append("\":");
-            Object value = entry.getValue();
-            if (value instanceof String) {
-                sb.append("\"").append(escapeJsonString((String) value)).append("\"");
-            } else if (value instanceof Number) {
-                sb.append(value);
-            } else if (value instanceof Map) {
-                sb.append(serializeMapToJson((Map<?, ?>) value));
-            } else if (value instanceof List) {
-                sb.append(serializeListToJson((List<?>) value));
-            } else if (value instanceof Boolean) {
-                sb.append(value);
-            } else if (value == null) {
-                sb.append("null");
-            } else {
-                sb.append("\"").append(escapeJsonString(value.toString())).append("\"");
-            }
-        }
-        sb.append("}");
-        return sb.toString();
-    }
-
-    /**
-     * Escape special characters in JSON string values.
-     */
-    private String escapeJsonString(String str) {
-        if (str == null) return "";
-        return str.replace("\\", "\\\\")
-                  .replace("\"", "\\\"")
-                  .replace("\n", "\\n")
-                  .replace("\r", "\\r")
-                  .replace("\t", "\\t");
     }
 
     // ========================================================================
@@ -1179,25 +1053,25 @@ public class ProgramScriptService {
      * Generate script content based on workflow type and parameters.
      * Dispatches to specific script generators based on workflowType.
      */
-    public String generateScriptContent(String purpose, String workflowType, Map<String, Object> parameters) {
+    public Response generateScriptContent(String purpose, String workflowType, Map<String, Object> parameters) {
         if (parameters == null) {
             parameters = new HashMap<>();
         }
 
         switch (workflowType) {
             case "document_functions":
-                return generateDocumentFunctionsScript(purpose, parameters);
+                return Response.text(generateDocumentFunctionsScript(purpose, parameters));
             case "fix_ordinals":
-                return generateFixOrdinalsScript(purpose, parameters);
+                return Response.text(generateFixOrdinalsScript(purpose, parameters));
             case "bulk_rename":
-                return generateBulkRenameScript(purpose, parameters);
+                return Response.text(generateBulkRenameScript(purpose, parameters));
             case "analyze_structures":
-                return generateAnalyzeStructuresScript(purpose, parameters);
+                return Response.text(generateAnalyzeStructuresScript(purpose, parameters));
             case "find_patterns":
-                return generateFindPatternsScript(purpose, parameters);
+                return Response.text(generateFindPatternsScript(purpose, parameters));
             case "custom":
             default:
-                return generateCustomScript(purpose, parameters);
+                return Response.text(generateCustomScript(purpose, parameters));
         }
     }
 

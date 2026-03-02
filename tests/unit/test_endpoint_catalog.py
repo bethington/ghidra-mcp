@@ -23,6 +23,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 # Source file paths
 JAVA_PLUGIN_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "GhidraMCPPlugin.java"
 JAVA_HEADLESS_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "headless" / "GhidraMCPHeadlessServer.java"
+JAVA_REGISTRY_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "core" / "EndpointRegistry.java"
 PYTHON_BRIDGE_PATH = PROJECT_ROOT / "bridge_mcp_ghidra.py"
 ENDPOINTS_JSON_PATH = PROJECT_ROOT / "tests" / "endpoints.json"
 
@@ -32,15 +33,24 @@ ENDPOINTS_JSON_PATH = PROJECT_ROOT / "tests" / "endpoints.json"
 # =============================================================================
 
 def extract_java_endpoints() -> set[str]:
-    """Extract all endpoint paths from Java server.createContext() calls."""
+    """Extract all endpoint paths from Java source (createContext + EndpointRegistry)."""
     if not JAVA_PLUGIN_PATH.exists():
         pytest.skip(f"Java source not found: {JAVA_PLUGIN_PATH}")
 
-    content = JAVA_PLUGIN_PATH.read_text(encoding="utf-8")
-    # Match: server.createContext("/endpoint_name",
-    pattern = re.compile(r'server\.createContext\(\s*"(/[^"]+)"')
-    matches = pattern.findall(content)
-    return set(matches)
+    endpoints = set()
+
+    # 1. server.createContext("/path", ...) in plugin and headless server
+    context_pattern = re.compile(r'server\.createContext\(\s*"(/[^"]+)"')
+    for path in [JAVA_PLUGIN_PATH, JAVA_HEADLESS_PATH]:
+        if path.exists():
+            endpoints |= set(context_pattern.findall(path.read_text(encoding="utf-8")))
+
+    # 2. get("/path", ...) and post("/path", ...) in EndpointRegistry (declarative endpoints)
+    if JAVA_REGISTRY_PATH.exists():
+        registry_pattern = re.compile(r'(?:get|post)\(\s*"(/[^"]+)"')
+        endpoints |= set(registry_pattern.findall(JAVA_REGISTRY_PATH.read_text(encoding="utf-8")))
+
+    return endpoints
 
 
 def extract_python_http_endpoints() -> set[str]:
@@ -149,13 +159,8 @@ class TestJavaToEndpointsJson:
             )
 
     def test_endpoints_json_entries_exist_in_java(self):
-        """Every endpoints.json entry should have a Java createContext registration (plugin or headless)."""
-        # Combine GUI plugin and headless server endpoint registrations
+        """Every endpoints.json entry should have a Java registration (plugin, headless, or EndpointRegistry)."""
         java_endpoints = extract_java_endpoints()
-        if JAVA_HEADLESS_PATH.exists():
-            content = JAVA_HEADLESS_PATH.read_text(encoding="utf-8")
-            pattern = re.compile(r'server\.createContext\(\s*"(/[^"]+)"')
-            java_endpoints = java_endpoints | set(pattern.findall(content))
         json_paths = get_endpoints_json_paths()
 
         missing_from_java = json_paths - java_endpoints
@@ -198,14 +203,9 @@ class TestPythonToJava:
     """Verify Python bridge endpoints exist in Java."""
 
     def test_python_endpoints_exist_in_java(self):
-        """Every HTTP endpoint called by Python should exist in Java (plugin or headless server)."""
+        """Every HTTP endpoint called by Python should exist in Java (plugin, headless, or EndpointRegistry)."""
         python_endpoints = extract_python_http_endpoints()
-        # Combine GUI plugin and headless server endpoints
         java_endpoints = extract_java_endpoints()
-        if JAVA_HEADLESS_PATH.exists():
-            content = JAVA_HEADLESS_PATH.read_text(encoding="utf-8")
-            pattern = re.compile(r'server\.createContext\(\s*"(/[^"]+)"')
-            java_endpoints = java_endpoints | set(pattern.findall(content))
 
         # Known endpoints handled differently in Java
         known_exceptions = {
@@ -252,12 +252,7 @@ class TestEndpointCounts:
 
     def test_counts_roughly_consistent(self):
         """Endpoint counts across layers should be within a reasonable range."""
-        # Use combined Java count (GUI + headless) since endpoints.json covers both
         java_endpoints = extract_java_endpoints()
-        if JAVA_HEADLESS_PATH.exists():
-            content = JAVA_HEADLESS_PATH.read_text(encoding="utf-8")
-            pattern = re.compile(r'server\.createContext\(\s*"(/[^"]+)"')
-            java_endpoints = java_endpoints | set(pattern.findall(content))
         java_count = len(java_endpoints)
         json_count = len(get_endpoints_json_paths())
         python_count = extract_python_mcp_tool_count()

@@ -2,10 +2,10 @@
 
 ## Project Overview
 
-Ghidra MCP is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It provides **188 MCP tools** for binary analysis automation.
+Ghidra MCP is a production-ready Model Context Protocol (MCP) server that bridges Ghidra's reverse engineering capabilities with AI tools. It provides **193 MCP tools** for binary analysis automation.
 
 - **Package**: `com.xebyte`
-- **Version**: 4.1.0 (see `pom.xml`)
+- **Version**: 4.2.0 (see `pom.xml`)
 - **License**: Apache 2.0
 - **Java**: 21 LTS
 - **Ghidra**: 12.0.3
@@ -21,7 +21,7 @@ AI/Automation Tools <-> MCP Bridge (bridge_mcp_ghidra.py) <-> Ghidra Plugin (Ghi
 | Component | Location | Purpose |
 |-----------|----------|---------|
 | Ghidra Plugin | `src/main/java/com/xebyte/GhidraMCPPlugin.java` | HTTP server + endpoint wiring (~5,270 lines), delegates to services |
-| MCP Bridge | `bridge_mcp_ghidra.py` | Translates MCP protocol to HTTP calls (184 tools) |
+| MCP Bridge | `bridge_mcp_ghidra.py` | Translates MCP protocol to HTTP calls (193 tools) |
 | Headless Server | `src/main/java/com/xebyte/headless/` | Standalone server without Ghidra GUI (173 endpoints) |
 | Service Layer | `src/main/java/com/xebyte/core/` | 12 shared service classes with business logic (~15K lines) |
 
@@ -95,7 +95,7 @@ ghidra-mcp/
 
 ## Key Documentation
 
-- **API Reference**: See README.md for complete tool listing (188 MCP tools)
+- **API Reference**: See README.md for complete tool listing (193 MCP tools)
 - **Workflow Prompts**: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md` - Function documentation workflow (V5)
 - **Batch Processing**: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5_BATCH.md` - Multi-function parallel documentation
 - **Data Analysis**: `docs/prompts/DATA_TYPE_INVESTIGATION_WORKFLOW.md`
@@ -151,6 +151,7 @@ Located in `ghidra_scripts/`. Execute via:
 ## Version History
 
 See `CHANGELOG.md` for complete history. Key releases:
+- v4.2.0: Knowledge database integration, BSim cross-version matching, enum fix (#44), 193 MCP tools, 169 GUI endpoints, 173 headless endpoints
 - v4.1.0: Parallel multi-binary support via universal `program` parameter, 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
 - v4.0.0: Service layer architecture refactor (12 shared services), 69% plugin reduction, 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
 - v3.2.0: Completeness checker overhaul, batch_analyze_completeness endpoint, multi-window fix (#35), 180 MCP tools, 149 GUI endpoints

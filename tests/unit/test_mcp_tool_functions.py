@@ -136,21 +136,21 @@ class TestGetterTools:
         mock_get.return_value = '{"exists": true}'
         from bridge_mcp_ghidra import validate_data_type_exists
         validate_data_type_exists("int")
-        mock_get.assert_called_once_with("validate_data_type_exists", {"type_name": "int"})
+        mock_get.assert_called_once_with("validate_data_type_exists", {"type_name": "int"}, program=None)
 
     @patch("bridge_mcp_ghidra.safe_get_json")
     def test_get_data_type_size(self, mock_get):
         mock_get.return_value = '{"size": 4}'
         from bridge_mcp_ghidra import get_data_type_size
         get_data_type_size("int")
-        mock_get.assert_called_once_with("get_data_type_size", {"type_name": "int"})
+        mock_get.assert_called_once_with("get_data_type_size", {"type_name": "int"}, program=None)
 
     @patch("bridge_mcp_ghidra.safe_get")
     def test_get_function_labels(self, mock_get):
         mock_get.return_value = []
         from bridge_mcp_ghidra import get_function_labels
         get_function_labels("main", offset=5, limit=10)
-        mock_get.assert_called_once_with("get_function_labels", {"name": "main", "offset": 5, "limit": 10})
+        mock_get.assert_called_once_with("get_function_labels", {"name": "main", "offset": 5, "limit": 10}, program=None)
 
     @patch("bridge_mcp_ghidra.safe_get")
     def test_get_function_callees(self, mock_get):
@@ -196,14 +196,14 @@ class TestGetterTools:
         mock_get.return_value = []
         from bridge_mcp_ghidra import get_entry_points
         get_entry_points()
-        mock_get.assert_called_once_with("get_entry_points")
+        mock_get.assert_called_once_with("get_entry_points", program=None)
 
     @patch("bridge_mcp_ghidra.safe_get")
     def test_get_enum_values(self, mock_get):
         mock_get.return_value = []
         from bridge_mcp_ghidra import get_enum_values
         get_enum_values("MyEnum")
-        mock_get.assert_called_once_with("get_enum_values", {"enum_name": "MyEnum"})
+        mock_get.assert_called_once_with("get_enum_values", {"enum_name": "MyEnum"}, program=None)
 
     @patch("bridge_mcp_ghidra.safe_get")
     def test_get_function_jump_targets(self, mock_get):
@@ -259,7 +259,7 @@ class TestUtilityTools:
         mock_get.return_value = ['{"name": "test.exe"}']
         from bridge_mcp_ghidra import get_metadata
         result = get_metadata()
-        mock_get.assert_called_once_with("get_metadata")
+        mock_get.assert_called_once_with("get_metadata", program=None)
         assert "test.exe" in result
 
     @patch("bridge_mcp_ghidra.safe_get")
@@ -268,7 +268,7 @@ class TestUtilityTools:
         mock_get.return_value = ["__cdecl", "__stdcall"]
         from bridge_mcp_ghidra import list_calling_conventions
         list_calling_conventions()
-        mock_get.assert_called_once_with("list_calling_conventions")
+        mock_get.assert_called_once_with("list_calling_conventions", program=None)
 
 
 # =============================================================================
@@ -283,7 +283,7 @@ class TestRenameTools:
         mock_post.return_value = "Success"
         from bridge_mcp_ghidra import rename_function
         rename_function("old_func", "new_func")
-        mock_post.assert_called_once_with("rename_function", {"oldName": "old_func", "newName": "new_func"})
+        mock_post.assert_called_once_with("rename_function", {"oldName": "old_func", "newName": "new_func"}, program=None)
 
     @patch("bridge_mcp_ghidra.safe_post")
     def test_rename_label(self, mock_post):
@@ -293,6 +293,7 @@ class TestRenameTools:
         mock_post.assert_called_once_with(
             "rename_label",
             {"address": "0x401000", "old_name": "old_label", "new_name": "new_label"},
+            program=None,
         )
 
     @patch("bridge_mcp_ghidra.safe_post")
@@ -302,7 +303,7 @@ class TestRenameTools:
         from bridge_mcp_ghidra import rename_global_variable
         rename_global_variable("gOldName", "gNewName")
         mock_post.assert_called_once_with(
-            "rename_global_variable", {"old_name": "gOldName", "new_name": "gNewName"}
+            "rename_global_variable", {"old_name": "gOldName", "new_name": "gNewName"}, program=None
         )
 
     @patch("bridge_mcp_ghidra.safe_post")
@@ -312,7 +313,7 @@ class TestRenameTools:
         from bridge_mcp_ghidra import rename_external_location
         rename_external_location("0x401000", "NewName")
         mock_post.assert_called_once_with(
-            "rename_external_location", {"address": "0x401000", "new_name": "NewName"}
+            "rename_external_location", {"address": "0x401000", "new_name": "NewName"}, program=None
         )
 
     def test_rename_external_location_invalid_address(self):
@@ -327,7 +328,7 @@ class TestRenameTools:
         from bridge_mcp_ghidra import rename_or_label
         rename_or_label("0x401000", "myLabel")
         mock_post.assert_called_once_with(
-            "rename_or_label", {"address": "0x401000", "name": "myLabel"}
+            "rename_or_label", {"address": "0x401000", "name": "myLabel"}, program=None
         )
 
 
@@ -405,7 +406,7 @@ class TestCommentTools:
         from bridge_mcp_ghidra import set_decompiler_comment
         set_decompiler_comment("0x401000", "This is a comment")
         mock_post.assert_called_once_with(
-            "set_decompiler_comment", {"address": "0x401000", "comment": "This is a comment"}
+            "set_decompiler_comment", {"address": "0x401000", "comment": "This is a comment"}, program=None
         )
 
     @patch("bridge_mcp_ghidra.safe_post")
@@ -414,7 +415,7 @@ class TestCommentTools:
         from bridge_mcp_ghidra import set_disassembly_comment
         set_disassembly_comment("0x401000", "EOL comment")
         mock_post.assert_called_once_with(
-            "set_disassembly_comment", {"address": "0x401000", "comment": "EOL comment"}
+            "set_disassembly_comment", {"address": "0x401000", "comment": "EOL comment"}, program=None
         )
 
     @patch("bridge_mcp_ghidra.safe_get_json")
@@ -422,7 +423,7 @@ class TestCommentTools:
         mock_get.return_value = '{"comment": "plate"}'
         from bridge_mcp_ghidra import get_plate_comment
         get_plate_comment("0x401000")
-        mock_get.assert_called_once_with("get_plate_comment", {"address": "0x401000"})
+        mock_get.assert_called_once_with("get_plate_comment", {"address": "0x401000"}, program=None)
 
 
 # =============================================================================
@@ -438,7 +439,7 @@ class TestSearchTools:
         from bridge_mcp_ghidra import search_data_types
         search_data_types("struct_", offset=0, limit=20)
         mock_get.assert_called_once_with(
-            "search_data_types", {"pattern": "struct_", "offset": 0, "limit": 20}
+            "search_data_types", {"pattern": "struct_", "offset": 0, "limit": 20}, program=None
         )
 
     @patch("bridge_mcp_ghidra.safe_get")
@@ -554,7 +555,7 @@ class TestDataTypeTools:
         mock_post.return_value = '{"success": true}'
         from bridge_mcp_ghidra import delete_data_type
         delete_data_type("MyOldStruct")
-        mock_post.assert_called_once_with("delete_data_type", {"type_name": "MyOldStruct"})
+        mock_post.assert_called_once_with("delete_data_type", {"type_name": "MyOldStruct"}, program=None)
 
     @patch("bridge_mcp_ghidra.safe_post_json")
     def test_modify_struct_field(self, mock_post):
@@ -760,7 +761,7 @@ class TestProgramManagementTools:
         mock_post.return_value = '{"status": "saved"}'
         from bridge_mcp_ghidra import save_program
         save_program()
-        mock_post.assert_called_once_with("save_program", {})
+        mock_post.assert_called_once_with("save_program", {}, program=None)
 
     @patch("bridge_mcp_ghidra.safe_post_json")
     def test_exit_ghidra(self, mock_post):

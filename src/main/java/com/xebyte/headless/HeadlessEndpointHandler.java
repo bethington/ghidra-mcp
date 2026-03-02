@@ -78,6 +78,21 @@ public class HeadlessEndpointHandler {
     }
 
     // ==========================================================================
+    // SERVICE ACCESSORS (for EndpointRegistry)
+    // ==========================================================================
+
+    public com.xebyte.core.ListingService getListingService() { return listingService; }
+    public com.xebyte.core.FunctionService getFunctionService() { return functionService; }
+    public com.xebyte.core.CommentService getCommentService() { return commentService; }
+    public com.xebyte.core.SymbolLabelService getSymbolLabelService() { return symbolLabelService; }
+    public com.xebyte.core.XrefCallGraphService getXrefCallGraphService() { return xrefCallGraphService; }
+    public com.xebyte.core.DataTypeService getDataTypeService() { return dataTypeService; }
+    public com.xebyte.core.AnalysisService getAnalysisService() { return analysisService; }
+    public com.xebyte.core.DocumentationHashService getDocumentationHashService() { return documentationHashService; }
+    public com.xebyte.core.MalwareSecurityService getMalwareSecurityService() { return malwareSecurityService; }
+    public com.xebyte.core.ProgramScriptService getProgramScriptService() { return programScriptService; }
+
+    // ==========================================================================
     // UTILITY METHODS
     // ==========================================================================
 
@@ -170,43 +185,43 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String listMethods(int offset, int limit, String programName) {
-        return listingService.getAllFunctionNames(offset, limit, programName);
+        return listingService.getAllFunctionNames(offset, limit, programName).toJson();
     }
 
     public String listFunctions(String programName) {
-        return listingService.listFunctions(programName);
+        return listingService.listFunctions(programName).toJson();
     }
 
     public String listClasses(int offset, int limit, String programName) {
-        return listingService.getAllClassNames(offset, limit, programName);
+        return listingService.getAllClassNames(offset, limit, programName).toJson();
     }
 
     public String listSegments(int offset, int limit, String programName) {
-        return listingService.listSegments(offset, limit, programName);
+        return listingService.listSegments(offset, limit, programName).toJson();
     }
 
     public String listImports(int offset, int limit, String programName) {
-        return listingService.listImports(offset, limit, programName);
+        return listingService.listImports(offset, limit, programName).toJson();
     }
 
     public String listExports(int offset, int limit, String programName) {
-        return listingService.listExports(offset, limit, programName);
+        return listingService.listExports(offset, limit, programName).toJson();
     }
 
     public String listNamespaces(int offset, int limit, String programName) {
-        return listingService.listNamespaces(offset, limit, programName);
+        return listingService.listNamespaces(offset, limit, programName).toJson();
     }
 
     public String listDataItems(int offset, int limit, String programName) {
-        return listingService.listDefinedData(offset, limit, programName);
+        return listingService.listDefinedData(offset, limit, programName).toJson();
     }
 
     public String listStrings(int offset, int limit, String filter, String programName) {
-        return listingService.listDefinedStrings(offset, limit, filter, programName);
+        return listingService.listDefinedStrings(offset, limit, filter, programName).toJson();
     }
 
     public String listDataTypes(int offset, int limit, String category, String programName) {
-        return dataTypeService.listDataTypes(category, offset, limit, programName);
+        return dataTypeService.listDataTypes(category, offset, limit, programName).toJson();
     }
 
     // ==========================================================================
@@ -214,7 +229,7 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String getFunctionByAddress(String addressStr, String programName) {
-        return functionService.getFunctionByAddress(addressStr, programName);
+        return functionService.getFunctionByAddress(addressStr, programName).toJson();
     }
 
     // ==========================================================================
@@ -224,16 +239,16 @@ public class HeadlessEndpointHandler {
     public String decompileFunction(String addressStr, String name, String programName) {
         // Route to address-based or name-based decompilation
         if (addressStr != null && !addressStr.isEmpty()) {
-            return functionService.decompileFunctionByAddress(addressStr, programName);
+            return functionService.decompileFunctionByAddress(addressStr, programName).toJson();
         }
         if (name != null && !name.isEmpty()) {
-            return functionService.decompileFunctionByName(name, programName);
+            return functionService.decompileFunctionByName(name, programName).toJson();
         }
         return "Error: Function not found";
     }
 
     public String disassembleFunction(String addressStr, String programName) {
-        return functionService.disassembleFunction(addressStr, programName);
+        return functionService.disassembleFunction(addressStr, programName).toJson();
     }
 
     // ==========================================================================
@@ -241,15 +256,15 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String getXrefsTo(String addressStr, int offset, int limit, String programName) {
-        return xrefCallGraphService.getXrefsTo(addressStr, offset, limit, programName);
+        return xrefCallGraphService.getXrefsTo(addressStr, offset, limit, programName).toJson();
     }
 
     public String getXrefsFrom(String addressStr, int offset, int limit, String programName) {
-        return xrefCallGraphService.getXrefsFrom(addressStr, offset, limit, programName);
+        return xrefCallGraphService.getXrefsFrom(addressStr, offset, limit, programName).toJson();
     }
 
     public String getFunctionXrefs(String functionName, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionXrefs(functionName, offset, limit, programName);
+        return xrefCallGraphService.getFunctionXrefs(functionName, offset, limit, programName).toJson();
     }
 
     // ==========================================================================
@@ -257,7 +272,7 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String searchFunctions(String query, int offset, int limit, String programName) {
-        return listingService.searchFunctionsByName(query, offset, limit, programName);
+        return listingService.searchFunctionsByName(query, offset, limit, programName).toJson();
     }
 
     // ==========================================================================
@@ -265,37 +280,37 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String renameFunction(String oldName, String newName, String programName) {
-        return functionService.renameFunction(oldName, newName, programName);
+        return functionService.renameFunction(oldName, newName, programName).toJson();
     }
 
     public String renameFunctionByAddress(String addressStr, String newName, String programName) {
-        return functionService.renameFunctionByAddress(addressStr, newName, programName);
+        return functionService.renameFunctionByAddress(addressStr, newName, programName).toJson();
     }
 
     public String saveCurrentProgram(String programName) {
-        return programScriptService.saveCurrentProgram(programName);
+        return programScriptService.saveCurrentProgram(programName).toJson();
     }
 
     public String deleteFunctionAtAddress(String addressStr, String programName) {
-        return functionService.deleteFunctionAtAddress(addressStr, programName);
+        return functionService.deleteFunctionAtAddress(addressStr, programName).toJson();
     }
 
     public String createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst, String programName) {
-        return functionService.createFunctionAtAddress(addressStr, name, disassembleFirst, programName);
+        return functionService.createFunctionAtAddress(addressStr, name, disassembleFirst, programName).toJson();
     }
 
     public String createMemoryBlock(String name, String addressStr, long size,
                                     boolean read, boolean write, boolean execute,
                                     boolean isVolatile, String comment, String programName) {
-        return programScriptService.createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, programName);
+        return programScriptService.createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, programName).toJson();
     }
 
     public String renameData(String addressStr, String newName, String programName) {
-        return symbolLabelService.renameDataAtAddress(addressStr, newName, programName);
+        return symbolLabelService.renameDataAtAddress(addressStr, newName, programName).toJson();
     }
 
     public String renameVariable(String functionName, String oldName, String newName, String programName) {
-        return functionService.renameVariableInFunction(functionName, oldName, newName, programName);
+        return functionService.renameVariableInFunction(functionName, oldName, newName, programName).toJson();
     }
 
     // ==========================================================================
@@ -303,11 +318,11 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String setDecompilerComment(String addressStr, String comment, String programName) {
-        return commentService.setDecompilerComment(addressStr, comment, programName);
+        return commentService.setDecompilerComment(addressStr, comment, programName).toJson();
     }
 
     public String setDisassemblyComment(String addressStr, String comment, String programName) {
-        return commentService.setDisassemblyComment(addressStr, comment, programName);
+        return commentService.setDisassemblyComment(addressStr, comment, programName).toJson();
     }
 
     // ==========================================================================
@@ -315,15 +330,15 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String listOpenPrograms() {
-        return programScriptService.listOpenPrograms();
+        return programScriptService.listOpenPrograms().toJson();
     }
 
     public String getCurrentProgramInfo() {
-        return programScriptService.getCurrentProgramInfo();
+        return programScriptService.getCurrentProgramInfo().toJson();
     }
 
     public String switchProgram(String name) {
-        return programScriptService.switchProgram(name);
+        return programScriptService.switchProgram(name).toJson();
     }
 
     // ==========================================================================
@@ -544,21 +559,21 @@ public class HeadlessEndpointHandler {
      * Get all functions called by the specified function (callees).
      */
     public String getFunctionCallees(String functionName, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionCallees(functionName, offset, limit, programName);
+        return xrefCallGraphService.getFunctionCallees(functionName, offset, limit, programName).toJson();
     }
 
     /**
      * Get all functions that call the specified function (callers).
      */
     public String getFunctionCallers(String functionName, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionCallers(functionName, offset, limit, programName);
+        return xrefCallGraphService.getFunctionCallers(functionName, offset, limit, programName).toJson();
     }
 
     /**
      * Get all variables (parameters and locals) for a function.
      */
     public String getFunctionVariables(String functionName, String programName) {
-        return functionService.getFunctionVariables(functionName, programName);
+        return functionService.getFunctionVariables(functionName, programName).toJson();
     }
 
     /**
@@ -644,14 +659,14 @@ public class HeadlessEndpointHandler {
      * Set a local variable's type.
      */
     public String setLocalVariableType(String functionAddress, String variableName, String newType, String programName) {
-        return functionService.setLocalVariableType(functionAddress, variableName, newType, programName);
+        return functionService.setLocalVariableType(functionAddress, variableName, newType, programName).toJson();
     }
 
     /**
      * Create a structure data type.
      */
     public String createStruct(String name, String fieldsJson, String programName) {
-        return dataTypeService.createStruct(name, fieldsJson, programName);
+        return dataTypeService.createStruct(name, fieldsJson, programName).toJson();
     }
 
     /**
@@ -683,7 +698,7 @@ public class HeadlessEndpointHandler {
      * Apply a data type at an address.
      */
     public String applyDataType(String addressStr, String typeName, boolean clearExisting, String programName) {
-        return dataTypeService.applyDataType(addressStr, typeName, clearExisting, programName);
+        return dataTypeService.applyDataType(addressStr, typeName, clearExisting, programName).toJson();
     }
 
     /**
@@ -797,14 +812,14 @@ public class HeadlessEndpointHandler {
      * Get a function's plate (header) comment.
      */
     public String getPlateComment(String address, String programName) {
-        return commentService.getPlateComment(address, programName);
+        return commentService.getPlateComment(address, programName).toJson();
     }
 
     /**
      * Set a function's plate (header) comment.
      */
     public String setPlateComment(String functionAddress, String comment, String programName) {
-        return commentService.setPlateComment(functionAddress, comment, programName);
+        return commentService.setPlateComment(functionAddress, comment, programName).toJson();
     }
 
     // ==========================================================================
@@ -910,7 +925,7 @@ public class HeadlessEndpointHandler {
      * v3.0.1: Clear all comments (plate, PRE, EOL) within a function's address range.
      */
     public String clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol, String programName) {
-        return commentService.clearFunctionComments(functionAddress, clearPlate, clearPre, clearEol, programName);
+        return commentService.clearFunctionComments(functionAddress, clearPlate, clearPre, clearEol, programName).toJson();
     }
 
     /**
@@ -1165,7 +1180,7 @@ public class HeadlessEndpointHandler {
     public String searchFunctionsEnhanced(String namePattern, Integer minXrefs, Integer maxXrefs,
                                           Boolean hasCustomName, boolean regex, String sortBy,
                                           int offset, int limit, String programName) {
-        return analysisService.searchFunctionsEnhanced(namePattern, minXrefs, maxXrefs, null, hasCustomName, regex, sortBy, offset, limit, programName);
+        return analysisService.searchFunctionsEnhanced(namePattern, minXrefs, maxXrefs, null, hasCustomName, regex, sortBy, offset, limit, programName).toJson();
     }
 
     /**
@@ -1174,28 +1189,28 @@ public class HeadlessEndpointHandler {
     public String analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
                                           boolean includeCallers, boolean includeDisasm,
                                           boolean includeVariables, String programName) {
-        return analysisService.analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, programName);
+        return analysisService.analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, programName).toJson();
     }
 
     /**
      * Get cross-references for multiple addresses in bulk.
      */
     public String getBulkXrefs(String addressesJson, String programName) {
-        return xrefCallGraphService.getBulkXrefs(addressesJson, programName);
+        return xrefCallGraphService.getBulkXrefs(addressesJson, programName).toJson();
     }
 
     /**
      * List global variables with optional filtering.
      */
     public String listGlobals(int offset, int limit, String filter, String programName) {
-        return listingService.listGlobals(offset, limit, filter, programName);
+        return listingService.listGlobals(offset, limit, filter, programName).toJson();
     }
 
     /**
      * Rename a global variable.
      */
     public String renameGlobalVariable(String oldName, String newName, String programName) {
-        return symbolLabelService.renameGlobalVariable(oldName, newName, programName);
+        return symbolLabelService.renameGlobalVariable(oldName, newName, programName).toJson();
     }
 
     /**
@@ -1217,21 +1232,21 @@ public class HeadlessEndpointHandler {
         if (resolvedAddress == null || resolvedAddress.isEmpty()) {
             return "{\"error\": \"Function not found\"}";
         }
-        return functionService.forceDecompile(resolvedAddress, programName);
+        return functionService.forceDecompile(resolvedAddress, programName).toJson();
     }
 
     /**
      * Get program entry points.
      */
     public String getEntryPoints(String programName) {
-        return listingService.getEntryPoints(programName);
+        return listingService.getEntryPoints(programName).toJson();
     }
 
     /**
      * List available calling conventions.
      */
     public String listCallingConventions(String programName) {
-        return listingService.listCallingConventions(programName);
+        return listingService.listCallingConventions(programName).toJson();
     }
 
     /**
@@ -1239,7 +1254,7 @@ public class HeadlessEndpointHandler {
      */
     public String findNextUndefinedFunction(String startAddress, String criteria,
                                             String pattern, String direction, String programName) {
-        return analysisService.findNextUndefinedFunction(startAddress, criteria, pattern, direction, programName);
+        return analysisService.findNextUndefinedFunction(startAddress, criteria, pattern, direction, programName).toJson();
     }
 
     // ==========================================================================
@@ -1293,105 +1308,105 @@ public class HeadlessEndpointHandler {
      * Create an enumeration data type
      */
     public String createEnum(String name, String valuesJson, int size, String programName) {
-        return dataTypeService.createEnum(name, valuesJson, size, programName);
+        return dataTypeService.createEnum(name, valuesJson, size, programName).toJson();
     }
 
     /**
      * Create a union data type
      */
     public String createUnion(String name, String fieldsJson, String programName) {
-        return dataTypeService.createUnion(name, fieldsJson, programName);
+        return dataTypeService.createUnion(name, fieldsJson, programName).toJson();
     }
 
     /**
      * Create a typedef (type alias)
      */
     public String createTypedef(String name, String baseType, String programName) {
-        return dataTypeService.createTypedef(name, baseType, programName);
+        return dataTypeService.createTypedef(name, baseType, programName).toJson();
     }
 
     /**
      * Create an array data type
      */
     public String createArrayType(String baseType, int length, String name, String programName) {
-        return dataTypeService.createArrayType(baseType, length, name, programName);
+        return dataTypeService.createArrayType(baseType, length, name, programName).toJson();
     }
 
     /**
      * Create a pointer data type
      */
     public String createPointerType(String baseType, String name, String programName) {
-        return dataTypeService.createPointerType(baseType, name, programName);
+        return dataTypeService.createPointerType(baseType, name, programName).toJson();
     }
 
     /**
      * Add a field to an existing structure
      */
     public String addStructField(String structName, String fieldName, String fieldType, int offset, String programName) {
-        return dataTypeService.addStructField(structName, fieldName, fieldType, offset, programName);
+        return dataTypeService.addStructField(structName, fieldName, fieldType, offset, programName).toJson();
     }
 
     /**
      * Modify a field in an existing structure
      */
     public String modifyStructField(String structName, String fieldName, String newType, String newName, String programName) {
-        return dataTypeService.modifyStructField(structName, fieldName, newType, newName, programName);
+        return dataTypeService.modifyStructField(structName, fieldName, newType, newName, programName).toJson();
     }
 
     /**
      * Remove a field from an existing structure
      */
     public String removeStructField(String structName, String fieldName, String programName) {
-        return dataTypeService.removeStructField(structName, fieldName, programName);
+        return dataTypeService.removeStructField(structName, fieldName, programName).toJson();
     }
 
     /**
      * Delete a data type
      */
     public String deleteDataType(String typeName, String programName) {
-        return dataTypeService.deleteDataType(typeName, programName);
+        return dataTypeService.deleteDataType(typeName, programName).toJson();
     }
 
     /**
      * Search for data types by pattern
      */
     public String searchDataTypes(String pattern, int offset, int limit, String programName) {
-        return dataTypeService.searchDataTypes(pattern, offset, limit, programName);
+        return dataTypeService.searchDataTypes(pattern, offset, limit, programName).toJson();
     }
 
     /**
      * Validate if a data type exists
      */
     public String validateDataTypeExists(String typeName, String programName) {
-        return dataTypeService.validateDataTypeExists(typeName, programName);
+        return dataTypeService.validateDataTypeExists(typeName, programName).toJson();
     }
 
     /**
      * Get the size of a data type
      */
     public String getDataTypeSize(String typeName, String programName) {
-        return dataTypeService.getTypeSize(typeName, programName);
+        return dataTypeService.getTypeSize(typeName, programName).toJson();
     }
 
     /**
      * Get the layout of a structure
      */
     public String getStructLayout(String structName, String programName) {
-        return dataTypeService.getStructLayout(structName, programName);
+        return dataTypeService.getStructLayout(structName, programName).toJson();
     }
 
     /**
      * Get all values in an enumeration
      */
     public String getEnumValues(String enumName, String programName) {
-        return dataTypeService.getEnumValues(enumName, programName);
+        return dataTypeService.getEnumValues(enumName, programName).toJson();
     }
 
     /**
      * Clone/copy a data type with a new name
      */
     public String cloneDataType(String sourceType, String newName, String programName) {
-        return dataTypeService.cloneDataType(sourceType, newName, programName);
+        return dataTypeService.cloneDataType(sourceType, newName, programName).toJson();
     }
 
     // ==========================================================================
@@ -1535,21 +1550,21 @@ public class HeadlessEndpointHandler {
     public String analyzeDataRegion(String startAddressStr, int maxScanBytes,
                                     boolean includeXrefMap, boolean includeAssemblyPatterns,
                                     boolean includeBoundaryDetection, String programName) {
-        return analysisService.analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection, programName);
+        return analysisService.analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection, programName).toJson();
     }
 
     /**
      * Compute a normalized hash for a function
      */
     public String getFunctionHash(String addressStr, String programName) {
-        return documentationHashService.getFunctionHash(addressStr, programName);
+        return documentationHashService.getFunctionHash(addressStr, programName).toJson();
     }
 
     /**
      * Get hashes for multiple functions
      */
     public String getBulkFunctionHashes(int offset, int limit, String filter, String programName) {
-        return documentationHashService.getBulkFunctionHashes(offset, limit, filter, programName);
+        return documentationHashService.getBulkFunctionHashes(offset, limit, filter, programName).toJson();
     }
 
     /**
@@ -1557,28 +1572,28 @@ public class HeadlessEndpointHandler {
      */
     public String detectArrayBounds(String addressStr, boolean analyzeLoopBounds,
                                     boolean analyzeIndexing, int maxScanRange, String programName) {
-        return analysisService.detectArrayBounds(addressStr, analyzeLoopBounds, analyzeIndexing, maxScanRange, programName);
+        return analysisService.detectArrayBounds(addressStr, analyzeLoopBounds, analyzeIndexing, maxScanRange, programName).toJson();
     }
 
     /**
      * Get assembly context around xref sources
      */
     public String getAssemblyContext(String xrefSourcesStr, int contextInstructions, String includePatterns, String programName) {
-        return xrefCallGraphService.getAssemblyContext(xrefSourcesStr, contextInstructions, includePatterns, programName);
+        return xrefCallGraphService.getAssemblyContext(xrefSourcesStr, contextInstructions, includePatterns, programName).toJson();
     }
 
     /**
      * Analyze how structure fields are accessed
      */
     public String analyzeStructFieldUsage(String addressStr, String structName, int maxFunctions, String programName) {
-        return dataTypeService.analyzeStructFieldUsage(addressStr, structName, maxFunctions, programName);
+        return dataTypeService.analyzeStructFieldUsage(addressStr, structName, maxFunctions, programName).toJson();
     }
 
     /**
      * Get field access context for a structure field
      */
     public String getFieldAccessContext(String structAddressStr, int fieldOffset, int numExamples, String programName) {
-        return analysisService.getFieldAccessContext(structAddressStr, fieldOffset, numExamples, programName);
+        return analysisService.getFieldAccessContext(structAddressStr, fieldOffset, numExamples, programName).toJson();
     }
 
     /**
@@ -1613,7 +1628,7 @@ public class HeadlessEndpointHandler {
      * Check if rename is allowed at address
      */
     public String canRenameAtAddress(String addressStr, String programName) {
-        return symbolLabelService.canRenameAtAddress(addressStr, programName);
+        return symbolLabelService.canRenameAtAddress(addressStr, programName).toJson();
     }
 
     // ==========================================================================
@@ -1624,7 +1639,7 @@ public class HeadlessEndpointHandler {
      * Get function signature (feature vector) for fuzzy matching
      */
     public String getFunctionSignature(String addressStr, String programName) {
-        return documentationHashService.handleGetFunctionSignature(addressStr, programName);
+        return documentationHashService.handleGetFunctionSignature(addressStr, programName).toJson();
     }
 
     /**
@@ -1632,7 +1647,7 @@ public class HeadlessEndpointHandler {
      */
     public String findSimilarFunctionsFuzzy(String addressStr, String sourceProgramName,
             String targetProgramName, double threshold, int limit) {
-        return documentationHashService.handleFindSimilarFunctionsFuzzy(addressStr, sourceProgramName, targetProgramName, threshold, limit);
+        return documentationHashService.handleFindSimilarFunctionsFuzzy(addressStr, sourceProgramName, targetProgramName, threshold, limit).toJson();
     }
 
     /**
@@ -1640,7 +1655,7 @@ public class HeadlessEndpointHandler {
      */
     public String bulkFuzzyMatch(String sourceProgramName, String targetProgramName,
             double threshold, int offset, int limit, String filter) {
-        return documentationHashService.handleBulkFuzzyMatch(sourceProgramName, targetProgramName, threshold, offset, limit, filter);
+        return documentationHashService.handleBulkFuzzyMatch(sourceProgramName, targetProgramName, threshold, offset, limit, filter).toJson();
     }
 
     /**
@@ -1648,7 +1663,7 @@ public class HeadlessEndpointHandler {
      */
     public String diffFunctions(String addressA, String addressB,
             String programAName, String programBName) {
-        return documentationHashService.handleDiffFunctions(addressA, addressB, programAName, programBName);
+        return documentationHashService.handleDiffFunctions(addressA, addressB, programAName, programBName).toJson();
     }
 
     // ==========================================================================
@@ -1825,7 +1840,7 @@ public class HeadlessEndpointHandler {
     }
 
     public String readMemory(String addressStr, int length, String programName) {
-        return programScriptService.readMemory(addressStr, length, programName);
+        return programScriptService.readMemory(addressStr, length, programName).toJson();
     }
 
     // ==========================================================================
@@ -1833,15 +1848,15 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String listBookmarks(String category, String address, String programName) {
-        return programScriptService.listBookmarks(category, address, programName);
+        return programScriptService.listBookmarks(category, address, programName).toJson();
     }
 
     public String setBookmark(String addressStr, String category, String comment, String programName) {
-        return programScriptService.setBookmark(addressStr, category, comment, programName);
+        return programScriptService.setBookmark(addressStr, category, comment, programName).toJson();
     }
 
     public String deleteBookmark(String addressStr, String category, String programName) {
-        return programScriptService.deleteBookmark(addressStr, category, programName);
+        return programScriptService.deleteBookmark(addressStr, category, programName).toJson();
     }
 
     // ==========================================================================
@@ -1849,19 +1864,19 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String listDataItemsByXrefs(int offset, int limit, String format, String programName) {
-        return listingService.listDataItemsByXrefs(offset, limit, format, programName);
+        return listingService.listDataItemsByXrefs(offset, limit, format, programName).toJson();
     }
 
     public String listFunctionsEnhanced(int offset, int limit, String programName) {
-        return listingService.listFunctionsEnhanced(offset, limit, programName);
+        return listingService.listFunctionsEnhanced(offset, limit, programName).toJson();
     }
 
     public String getValidDataTypes(String category, String programName) {
-        return dataTypeService.getValidDataTypes(category, programName);
+        return dataTypeService.getValidDataTypes(category, programName).toJson();
     }
 
     public String getTypeSize(String typeName, String programName) {
-        return dataTypeService.getTypeSize(typeName, programName);
+        return dataTypeService.getTypeSize(typeName, programName).toJson();
     }
 
     public String listExternalLocations(int offset, int limit, String programName) {
@@ -1921,15 +1936,15 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String setFunctionNoReturn(String functionAddrStr, boolean noReturn, String programName) {
-        return functionService.setFunctionNoReturn(functionAddrStr, noReturn, programName);
+        return functionService.setFunctionNoReturn(functionAddrStr, noReturn, programName).toJson();
     }
 
     public String clearInstructionFlowOverride(String instructionAddrStr, String programName) {
-        return functionService.clearInstructionFlowOverride(instructionAddrStr, programName);
+        return functionService.clearInstructionFlowOverride(instructionAddrStr, programName).toJson();
     }
 
     public String setVariableStorage(String functionAddrStr, String variableName, String storageSpec, String programName) {
-        return functionService.setVariableStorage(functionAddrStr, variableName, storageSpec, programName);
+        return functionService.setVariableStorage(functionAddrStr, variableName, storageSpec, programName).toJson();
     }
 
     // ==========================================================================
@@ -1937,19 +1952,19 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String createDataTypeCategory(String categoryPath, String programName) {
-        return dataTypeService.createDataTypeCategory(categoryPath, programName);
+        return dataTypeService.createDataTypeCategory(categoryPath, programName).toJson();
     }
 
     public String moveDataTypeToCategory(String typeName, String targetCategory, String programName) {
-        return dataTypeService.moveDataTypeToCategory(typeName, targetCategory, programName);
+        return dataTypeService.moveDataTypeToCategory(typeName, targetCategory, programName).toJson();
     }
 
     public String listDataTypeCategories(int offset, int limit, String programName) {
-        return dataTypeService.listDataTypeCategories(offset, limit, programName);
+        return dataTypeService.listDataTypeCategories(offset, limit, programName).toJson();
     }
 
     public String importDataTypes(String source, String format, String programName) {
-        return dataTypeService.importDataTypes(source, format);
+        return dataTypeService.importDataTypes(source, format).toJson();
     }
 
     // ==========================================================================
@@ -1957,11 +1972,11 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String getFunctionCallGraph(String functionAddress, int depth, String direction, String programName) {
-        return xrefCallGraphService.getFunctionCallGraph(functionAddress, depth, direction, programName);
+        return xrefCallGraphService.getFunctionCallGraph(functionAddress, depth, direction, programName).toJson();
     }
 
     public String getFullCallGraph(int limit, String format, String programName) {
-        return xrefCallGraphService.getFullCallGraph(format, limit, programName);
+        return xrefCallGraphService.getFullCallGraph(format, limit, programName).toJson();
     }
 
     // ==========================================================================
@@ -1969,11 +1984,11 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String getFunctionJumpTargets(String functionAddress, int offset, int limit, String programName) {
-        return xrefCallGraphService.getFunctionJumpTargets(functionAddress, offset, limit, programName);
+        return xrefCallGraphService.getFunctionJumpTargets(functionAddress, offset, limit, programName).toJson();
     }
 
     public String getFunctionLabels(String functionAddress, int offset, int limit, String programName) {
-        return symbolLabelService.getFunctionLabels(functionAddress, offset, limit, programName);
+        return symbolLabelService.getFunctionLabels(functionAddress, offset, limit, programName).toJson();
     }
 
     // ==========================================================================
@@ -1981,7 +1996,7 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String analyzeControlFlow(String functionName, String programName) {
-        return analysisService.analyzeControlFlow(functionName, programName);
+        return analysisService.analyzeControlFlow(functionName, programName).toJson();
     }
 
     // ==========================================================================
@@ -1989,35 +2004,35 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String detectMalwareBehaviors(String programName) {
-        return malwareSecurityService.detectMalwareBehaviors(programName);
+        return malwareSecurityService.detectMalwareBehaviors(programName).toJson();
     }
 
     public String findAntiAnalysisTechniques(String programName) {
-        return malwareSecurityService.findAntiAnalysisTechniques(programName);
+        return malwareSecurityService.findAntiAnalysisTechniques(programName).toJson();
     }
 
     public String findDeadCode(String functionName, String programName) {
-        return analysisService.findDeadCode(functionName, programName);
+        return analysisService.findDeadCode(functionName, programName).toJson();
     }
 
     public String extractIOCsWithContext(String programName) {
-        return malwareSecurityService.extractIOCsWithContext(programName);
+        return malwareSecurityService.extractIOCsWithContext(programName).toJson();
     }
 
     public String analyzeApiCallChains(String programName) {
-        return malwareSecurityService.analyzeAPICallChains(programName);
+        return malwareSecurityService.analyzeAPICallChains(programName).toJson();
     }
 
     public String analyzeFunctionCompleteness(String functionAddress, String programName) {
-        return analysisService.analyzeFunctionCompleteness(functionAddress, false, programName);
+        return analysisService.analyzeFunctionCompleteness(functionAddress, false, programName).toJson();
     }
 
     public String analyzeFunctionCompleteness(String functionAddress, boolean compact, String programName) {
-        return analysisService.analyzeFunctionCompleteness(functionAddress, compact, programName);
+        return analysisService.analyzeFunctionCompleteness(functionAddress, compact, programName).toJson();
     }
 
     public String analyzeForDocumentation(String functionAddress, String programName) {
-        return analysisService.analyzeForDocumentation(functionAddress, programName);
+        return analysisService.analyzeForDocumentation(functionAddress, programName).toJson();
     }
 
     // ==========================================================================
@@ -2025,7 +2040,7 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String batchDecompileFunctions(String functionsParam, String programName) {
-        return functionService.batchDecompileFunctions(functionsParam, programName);
+        return functionService.batchDecompileFunctions(functionsParam, programName).toJson();
     }
 
     public String batchRenameFunctionComponents(String functionAddress, String functionName,
@@ -2081,7 +2096,7 @@ public class HeadlessEndpointHandler {
     }
 
     public String batchStringAnchorReport(String pattern, String programName) {
-        return documentationHashService.batchStringAnchorReport(pattern, programName);
+        return documentationHashService.batchStringAnchorReport(pattern, programName).toJson();
     }
 
     // ==========================================================================
@@ -2089,11 +2104,11 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String validateFunctionPrototype(String functionAddress, String prototype, String callingConvention, String programName) {
-        return dataTypeService.validateFunctionPrototype(functionAddress, prototype, callingConvention, programName);
+        return dataTypeService.validateFunctionPrototype(functionAddress, prototype, callingConvention, programName).toJson();
     }
 
     public String disassembleBytes(String startAddress, String endAddress, int length, String programName) {
-        return functionService.disassembleBytes(startAddress, endAddress, length > 0 ? length : null, false, programName);
+        return functionService.disassembleBytes(startAddress, endAddress, length > 0 ? length : null, false, programName).toJson();
     }
 
     public String runScriptInline(String scriptContent, String args) {
@@ -2106,56 +2121,56 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String getFunctionDocumentation(String functionAddress, String programName) {
-        return documentationHashService.getFunctionDocumentation(functionAddress, programName);
+        return documentationHashService.getFunctionDocumentation(functionAddress, programName).toJson();
     }
 
     public String applyFunctionDocumentation(String jsonBody, String programName) {
-        return documentationHashService.applyFunctionDocumentation(jsonBody, programName);
+        return documentationHashService.applyFunctionDocumentation(jsonBody, programName).toJson();
     }
 
     public String compareProgramsDocumentation(String programName) {
-        return documentationHashService.compareProgramsDocumentation(programName);
+        return documentationHashService.compareProgramsDocumentation(programName).toJson();
     }
 
     public String findUndocumentedByString(String stringAddress, String programName) {
-        return documentationHashService.findUndocumentedByString(stringAddress, programName);
+        return documentationHashService.findUndocumentedByString(stringAddress, programName).toJson();
     }
 
     public String detectCryptoConstants(String programName) {
-        return analysisService.detectCryptoConstants(programName);
+        return analysisService.detectCryptoConstants(programName).toJson();
     }
 
     // ========== PORTED FROM GUI PLUGIN ==========
 
     public String createLabel(String addressStr, String labelName, String programName) {
-        return symbolLabelService.createLabel(addressStr, labelName, programName);
+        return symbolLabelService.createLabel(addressStr, labelName, programName).toJson();
     }
 
     public String renameLabel(String addressStr, String oldName, String newName, String programName) {
-        return symbolLabelService.renameLabel(addressStr, oldName, newName, programName);
+        return symbolLabelService.renameLabel(addressStr, oldName, newName, programName).toJson();
     }
 
     public String renameExternalLocation(String addressStr, String newName, String programName) {
-        return symbolLabelService.renameExternalLocation(addressStr, newName, programName);
+        return symbolLabelService.renameExternalLocation(addressStr, newName, programName).toJson();
     }
 
     public String getFunctionCount(String programName) {
-        return listingService.getFunctionCount(programName);
+        return listingService.getFunctionCount(programName).toJson();
     }
 
     public String inspectMemoryContent(String addressStr, int length, boolean detectStrings, String programName) {
-        return analysisService.inspectMemoryContent(addressStr, length, detectStrings, programName);
+        return analysisService.inspectMemoryContent(addressStr, length, detectStrings, programName).toJson();
     }
 
     public String searchStrings(String query, int minLength, String encoding, int offset, int limit, String programName) {
-        return listingService.searchStrings(query, minLength, encoding, offset, limit, programName);
+        return listingService.searchStrings(query, minLength, encoding, offset, limit, programName).toJson();
     }
 
     public String findSimilarFunctions(String targetFunction, double threshold, String programName) {
-        return analysisService.findSimilarFunctions(targetFunction, threshold, programName);
+        return analysisService.findSimilarFunctions(targetFunction, threshold, programName).toJson();
     }
 
     public String validateDataType(String addressStr, String typeName, String programName) {
-        return dataTypeService.validateDataType(addressStr, typeName, programName);
+        return dataTypeService.validateDataType(addressStr, typeName, programName).toJson();
     }
 }

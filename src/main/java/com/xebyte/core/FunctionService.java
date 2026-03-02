@@ -46,39 +46,6 @@ public class FunctionService {
     }
 
     // ========================================================================
-    // Program resolution helper
-    // ========================================================================
-
-    /**
-     * Resolve a program by name, returning [program, errorJson].
-     * If program is null, errorJson contains a descriptive error message.
-     */
-    private Object[] getProgramOrError(String programName) {
-        Program program = programProvider.resolveProgram(programName);
-
-        if (program == null && programName != null && !programName.trim().isEmpty()) {
-            StringBuilder error = new StringBuilder();
-            error.append("{\"error\": \"Program not found: ").append(ServiceUtils.escapeJson(programName)).append("\", ");
-            error.append("\"available_programs\": [");
-
-            Program[] programs = programProvider.getAllOpenPrograms();
-            for (int i = 0; i < programs.length; i++) {
-                if (i > 0) error.append(", ");
-                error.append("\"").append(ServiceUtils.escapeJson(programs[i].getName())).append("\"");
-            }
-            error.append("]}");
-
-            return new Object[]{null, error.toString()};
-        }
-
-        if (program == null) {
-            return new Object[]{null, "{\"error\": \"No program currently loaded\"}"};
-        }
-
-        return new Object[]{program, null};
-    }
-
-    // ========================================================================
     // Inner classes
     // ========================================================================
 
@@ -110,10 +77,10 @@ public class FunctionService {
     /**
      * Decompile a function by its name.
      */
-    public String decompileFunctionByName(String name, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response decompileFunctionByName(String name, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
         DecompInterface decomp = new DecompInterface();
         decomp.openProgram(program);
         for (Function func : program.getFunctionManager().getFunctions(true)) {
@@ -121,16 +88,16 @@ public class FunctionService {
                 DecompileResults result =
                     decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
                 if (result != null && result.decompileCompleted()) {
-                    return result.getDecompiledFunction().getC();
+                    return Response.text(result.getDecompiledFunction().getC());
                 } else {
-                    return "Decompilation failed";
+                    return Response.text("Decompilation failed");
                 }
             }
         }
-        return "Function not found";
+        return Response.text("Function not found");
     }
 
-    public String decompileFunctionByName(String name) {
+    public Response decompileFunctionByName(String name) {
         return decompileFunctionByName(name, null);
     }
 
@@ -138,48 +105,48 @@ public class FunctionService {
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
-    public String decompileFunctionByAddress(String addressStr, String programName, int timeoutSeconds) {
-        Object[] result = getProgramOrError(programName);
-        Program program = (Program) result[0];
-        if (program == null) return (String) result[1];
-        if (addressStr == null || addressStr.isEmpty()) return "{\"error\": \"Address is required\"}";
+    public Response decompileFunctionByAddress(String addressStr, String programName, int timeoutSeconds) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             Function func = ServiceUtils.getFunctionForAddress(program, addr);
-            if (func == null) return "{\"error\": \"No function found at or containing address " + addressStr + "\"}";
+            if (func == null) return Response.err("No function found at or containing address " + addressStr);
 
             DecompInterface decomp = new DecompInterface();
             decomp.openProgram(program);
             DecompileResults decompResult = decomp.decompileFunction(func, timeoutSeconds, new ConsoleTaskMonitor());
 
             if (decompResult == null) {
-                return "{\"error\": \"Decompiler returned null result for function at " + addressStr + "\"}";
+                return Response.err("Decompiler returned null result for function at " + addressStr);
             }
 
             if (!decompResult.decompileCompleted()) {
                 String errorMsg = decompResult.getErrorMessage();
-                return "{\"error\": \"Decompilation did not complete. " +
-                       (errorMsg != null ? "Reason: " + ServiceUtils.escapeJson(errorMsg) : "Function may be too complex or have invalid code flow.") + "\"}";
+                return Response.err("Decompilation did not complete. " +
+                       (errorMsg != null ? "Reason: " + errorMsg : "Function may be too complex or have invalid code flow."));
             }
 
             if (decompResult.getDecompiledFunction() == null) {
-                return "{\"error\": \"Decompiler completed but returned null decompiled function.\"}";
+                return Response.err("Decompiler completed but returned null decompiled function.");
             }
 
-            return decompResult.getDecompiledFunction().getC();
+            return Response.text(decompResult.getDecompiledFunction().getC());
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return "{\"error\": \"Error decompiling function: " + ServiceUtils.escapeJson(msg) + "\"}";
+            return Response.err("Error decompiling function: " + msg);
         }
     }
 
     // Backward compatible overloads for internal callers
-    public String decompileFunctionByAddress(String addressStr, String programName) {
+    public Response decompileFunctionByAddress(String addressStr, String programName) {
         return decompileFunctionByAddress(addressStr, programName, DECOMPILE_TIMEOUT_SECONDS);
     }
 
-    public String decompileFunctionByAddress(String addressStr) {
+    public Response decompileFunctionByAddress(String addressStr) {
         return decompileFunctionByAddress(addressStr, null, DECOMPILE_TIMEOUT_SECONDS);
     }
 
@@ -261,21 +228,18 @@ public class FunctionService {
     /**
      * Batch decompile multiple functions by name.
      */
-    public String batchDecompileFunctions(String functionsParam, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response batchDecompileFunctions(String functionsParam, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (functionsParam == null || functionsParam.trim().isEmpty()) {
-            return "Error: Functions parameter is required";
+            return Response.err("Functions parameter is required");
         }
 
         try {
             String[] functionNames = functionsParam.split(",");
-            StringBuilder result = new StringBuilder();
-            result.append("{");
+            Map<String, Object> resultMap = new LinkedHashMap<>();
 
             FunctionManager funcManager = program.getFunctionManager();
             final int MAX_FUNCTIONS = 20; // Limit to prevent overload
@@ -283,9 +247,6 @@ public class FunctionService {
             for (int i = 0; i < functionNames.length && i < MAX_FUNCTIONS; i++) {
                 String funcName = functionNames[i].trim();
                 if (funcName.isEmpty()) continue;
-
-                if (i > 0) result.append(", ");
-                result.append("\"").append(ServiceUtils.escapeJson(funcName)).append("\": ");
 
                 // Find function by name
                 Function function = null;
@@ -301,7 +262,7 @@ public class FunctionService {
                 }
 
                 if (function == null) {
-                    result.append("\"Error: Function not found\"");
+                    resultMap.put(funcName, "Error: Function not found");
                     continue;
                 }
 
@@ -313,40 +274,37 @@ public class FunctionService {
 
                     if (decompResults != null && decompResults.decompileCompleted()) {
                         String decompCode = decompResults.getDecompiledFunction().getC();
-                        result.append("\"").append(ServiceUtils.escapeJson(decompCode)).append("\"");
+                        resultMap.put(funcName, decompCode);
                     } else {
-                        result.append("\"Error: Decompilation failed\"");
+                        resultMap.put(funcName, "Error: Decompilation failed");
                     }
 
                     decompiler.dispose();
                 } catch (Exception e) {
-                    result.append("\"Error: ").append(ServiceUtils.escapeJson(e.getMessage())).append("\"");
+                    resultMap.put(funcName, "Error: " + e.getMessage());
                 }
             }
 
-            result.append("}");
-            return result.toString();
+            return Response.ok(resultMap);
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return Response.err(e.getMessage());
         }
     }
 
-    public String batchDecompileFunctions(String functionsParam) {
+    public Response batchDecompileFunctions(String functionsParam) {
         return batchDecompileFunctions(functionsParam, null);
     }
 
     /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
-    public String forceDecompile(String functionAddrStr, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response forceDecompile(String functionAddrStr, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return "Error: Function address is required";
+            return Response.err("Function address is required");
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -423,10 +381,14 @@ public class FunctionService {
             Msg.error(this, "Failed to execute force decompile on Swing thread", e);
         }
 
-        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        if (text.startsWith("Error:")) {
+            return Response.err(text.substring(7).trim());
+        }
+        return Response.text(text);
     }
 
-    public String forceDecompile(String functionAddrStr) {
+    public Response forceDecompile(String functionAddrStr) {
         return forceDecompile(functionAddrStr, null);
     }
 
@@ -438,17 +400,16 @@ public class FunctionService {
      * Get assembly code for a function.
      * If programName is provided, uses that program instead of the current one.
      */
-    @SuppressWarnings("deprecation")
-    public String disassembleFunction(String addressStr, String programName) {
-        Object[] result = getProgramOrError(programName);
-        Program program = (Program) result[0];
-        if (program == null) return (String) result[1];
-        if (addressStr == null || addressStr.isEmpty()) return "{\"error\": \"Address is required\"}";
+    public Response disassembleFunction(String addressStr, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             Function func = ServiceUtils.getFunctionForAddress(program, addr);
-            if (func == null) return "{\"error\": \"No function found at or containing address " + addressStr + "\"}";
+            if (func == null) return Response.err("No function found at or containing address " + addressStr);
 
             StringBuilder sb = new StringBuilder();
             Listing listing = program.getListing();
@@ -470,14 +431,14 @@ public class FunctionService {
                     comment));
             }
 
-            return sb.toString();
+            return Response.text(sb.toString());
         } catch (Exception e) {
-            return "{\"error\": \"Error disassembling function: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Error disassembling function: " + e.getMessage());
         }
     }
 
     // Backward compatible overload for internal callers
-    public String disassembleFunction(String addressStr) {
+    public Response disassembleFunction(String addressStr) {
         return disassembleFunction(addressStr, null);
     }
 
@@ -488,37 +449,37 @@ public class FunctionService {
     /**
      * Get function by address.
      */
-    public String getFunctionByAddress(String addressStr, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
-        if (addressStr == null || addressStr.isEmpty()) return "Address is required";
+    public Response getFunctionByAddress(String addressStr, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (addressStr == null || addressStr.isEmpty()) return Response.text("Address is required");
 
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
-            if (addr == null) return "Error: Invalid address: " + addressStr;
+            if (addr == null) return Response.err("Invalid address: " + addressStr);
 
             Function func = program.getFunctionManager().getFunctionAt(addr);
             if (func == null) {
                 func = program.getFunctionManager().getFunctionContaining(addr);
             }
 
-            if (func == null) return "No function found at or containing address " + addressStr;
+            if (func == null) return Response.text("No function found at or containing address " + addressStr);
 
-            return String.format("Function: %s at %s\nSignature: %s\nEntry: %s\nBody: %s - %s",
+            return Response.text(String.format("Function: %s at %s\nSignature: %s\nEntry: %s\nBody: %s - %s",
                 func.getName(),
                 func.getEntryPoint(),
                 func.getSignature(),
                 func.getEntryPoint(),
                 func.getBody().getMinAddress(),
-                func.getBody().getMaxAddress());
+                func.getBody().getMaxAddress()));
         } catch (Exception e) {
-            return "Error getting function: " + e.getMessage();
+            return Response.text("Error getting function: " + e.getMessage());
         }
     }
 
     // Backward compatibility overload
-    public String getFunctionByAddress(String addressStr) {
+    public Response getFunctionByAddress(String addressStr) {
         return getFunctionByAddress(addressStr, null);
     }
 
@@ -529,19 +490,17 @@ public class FunctionService {
     /**
      * Rename a function by its name.
      */
-    public String renameFunction(String oldName, String newName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response renameFunction(String oldName, String newName, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (oldName == null || oldName.isEmpty()) {
-            return "Error: Old function name is required";
+            return Response.err("Old function name is required");
         }
 
         if (newName == null || newName.isEmpty()) {
-            return "Error: New function name is required";
+            return Response.err("New function name is required");
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -581,20 +540,24 @@ public class FunctionService {
             Msg.error(this, "Failed to execute rename on Swing thread", e);
         }
 
-        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        if (successFlag.get()) {
+            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+        }
+        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
-    public String renameFunction(String oldName, String newName) {
+    public Response renameFunction(String oldName, String newName) {
         return renameFunction(oldName, newName, null);
     }
 
     /**
      * Rename a variable in a function.
      */
-    public String renameVariableInFunction(String functionName, String oldVarName, String newVarName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response renameVariableInFunction(String functionName, String oldVarName, String newVarName, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         DecompInterface decomp = new DecompInterface();
         decomp.openProgram(program);
@@ -608,22 +571,22 @@ public class FunctionService {
         }
 
         if (func == null) {
-            return "Function not found";
+            return Response.text("Function not found");
         }
 
         DecompileResults result = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
         if (result == null || !result.decompileCompleted()) {
-            return "Decompilation failed";
+            return Response.text("Decompilation failed");
         }
 
         HighFunction highFunction = result.getHighFunction();
         if (highFunction == null) {
-            return "Decompilation failed (no high function)";
+            return Response.text("Decompilation failed (no high function)");
         }
 
         LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
         if (localSymbolMap == null) {
-            return "Decompilation failed (no local symbol map)";
+            return Response.text("Decompilation failed (no local symbol map)");
         }
 
         HighSymbol highSymbol = null;
@@ -636,12 +599,12 @@ public class FunctionService {
                 highSymbol = symbol;
             }
             if (symbolName.equals(newVarName)) {
-                return "Error: A variable with name '" + newVarName + "' already exists in this function";
+                return Response.err("A variable with name '" + newVarName + "' already exists in this function");
             }
         }
 
         if (highSymbol == null) {
-            return "Variable not found";
+            return Response.text("Variable not found");
         }
 
         boolean commitRequired = checkFullCommit(highSymbol, highFunction);
@@ -669,12 +632,12 @@ public class FunctionService {
         } catch (Exception e) {
             String errorMsg = "Failed to execute rename on Swing thread: " + e.getMessage();
             Msg.error(this, errorMsg, e);
-            return errorMsg;
+            return Response.text(errorMsg);
         }
-        return successFlag.get() ? "Variable renamed" : "Failed to rename variable";
+        return Response.text(successFlag.get() ? "Variable renamed" : "Failed to rename variable");
     }
 
-    public String renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
+    public Response renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
         return renameVariableInFunction(functionName, oldVarName, newVarName, null);
     }
 
@@ -717,19 +680,17 @@ public class FunctionService {
     /**
      * Rename a function by its address.
      */
-    public String renameFunctionByAddress(String functionAddrStr, String newName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response renameFunctionByAddress(String functionAddrStr, String newName, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return "Error: Function address is required";
+            return Response.err("Function address is required");
         }
 
         if (newName == null || newName.isEmpty()) {
-            return "Error: New function name is required";
+            return Response.err("New function name is required");
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -761,10 +722,14 @@ public class FunctionService {
             Msg.error(this, "Failed to execute rename function on Swing thread", e);
         }
 
-        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        if (success.get()) {
+            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+        }
+        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
-    public String renameFunctionByAddress(String functionAddrStr, String newName) {
+    public Response renameFunctionByAddress(String functionAddrStr, String newName) {
         return renameFunctionByAddress(functionAddrStr, newName, null);
     }
 
@@ -791,9 +756,9 @@ public class FunctionService {
      */
     public PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype, String callingConvention, String programName) {
         // Input validation
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return new PrototypeResult(false, (String) programResult[1]);
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return new PrototypeResult(false, pe.error().toJson());
+        Program program = pe.program();
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
             return new PrototypeResult(false, "Function address is required");
         }
@@ -996,7 +961,6 @@ public class FunctionService {
                 return true;  // Successfully applied
             } else {
                 String msg = "Unknown calling convention: " + callingConvention + ". ";
-
                 // List available calling conventions for debugging
                 StringBuilder availList = new StringBuilder("Available calling conventions: ");
                 for (ghidra.program.model.lang.PrototypeModel model : available) {
@@ -1027,24 +991,22 @@ public class FunctionService {
     /**
      * Set a local variable's type using HighFunctionDBUtil.updateDBVariable.
      */
-    public String setLocalVariableType(String functionAddrStr, String variableName, String newType, String programName) {
+    public Response setLocalVariableType(String functionAddrStr, String variableName, String newType, String programName) {
         // Input validation
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return "Error: Function address is required";
+            return Response.err("Function address is required");
         }
 
         if (variableName == null || variableName.isEmpty()) {
-            return "Error: Variable name is required";
+            return Response.err("Variable name is required");
         }
 
         if (newType == null || newType.isEmpty()) {
-            return "Error: New type is required";
+            return Response.err("New type is required");
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -1178,10 +1140,14 @@ public class FunctionService {
             Msg.error(this, "Failed to execute set variable type on Swing thread", e);
         }
 
-        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        if (success.get()) {
+            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+        }
+        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
-    public String setLocalVariableType(String functionAddrStr, String variableName, String newType) {
+    public Response setLocalVariableType(String functionAddrStr, String variableName, String newType) {
         return setLocalVariableType(functionAddrStr, variableName, newType, null);
     }
 
@@ -1298,16 +1264,14 @@ public class FunctionService {
      * @param noReturn true to mark as non-returning, false to mark as returning
      * @return Success or error message
      */
-    public String setFunctionNoReturn(String functionAddrStr, boolean noReturn, String programName) {
+    public Response setFunctionNoReturn(String functionAddrStr, boolean noReturn, String programName) {
         // Input validation
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return "Error: Function address is required";
+            return Response.err("Function address is required");
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -1348,10 +1312,14 @@ public class FunctionService {
             Msg.error(this, "Failed to execute set no-return on Swing thread", e);
         }
 
-        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        if (success.get()) {
+            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+        }
+        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
-    public String setFunctionNoReturn(String functionAddrStr, boolean noReturn) {
+    public Response setFunctionNoReturn(String functionAddrStr, boolean noReturn) {
         return setFunctionNoReturn(functionAddrStr, noReturn, null);
     }
 
@@ -1373,16 +1341,14 @@ public class FunctionService {
      * @param instructionAddrStr The instruction address in hex format (e.g., "0x6fb5c8b9")
      * @return Success or error message
      */
-    public String clearInstructionFlowOverride(String instructionAddrStr, String programName) {
+    public Response clearInstructionFlowOverride(String instructionAddrStr, String programName) {
         // Input validation
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (instructionAddrStr == null || instructionAddrStr.isEmpty()) {
-            return "Error: Instruction address is required";
+            return Response.err("Instruction address is required");
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -1426,10 +1392,14 @@ public class FunctionService {
             Msg.error(this, "Failed to execute clear flow override on Swing thread", e);
         }
 
-        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        if (success.get()) {
+            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+        }
+        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
-    public String clearInstructionFlowOverride(String instructionAddrStr) {
+    public Response clearInstructionFlowOverride(String instructionAddrStr) {
         return clearInstructionFlowOverride(instructionAddrStr, null);
     }
 
@@ -1444,21 +1414,19 @@ public class FunctionService {
      * @param storageSpec Storage specification (e.g., "Stack[-0x10]:4", "EBP:4", "EAX:4")
      * @return Success or error message
      */
-    public String setVariableStorage(String functionAddrStr, String variableName, String storageSpec, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response setVariableStorage(String functionAddrStr, String variableName, String storageSpec, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return "Error: Function address is required";
+            return Response.err("Function address is required");
         }
         if (variableName == null || variableName.isEmpty()) {
-            return "Error: Variable name is required";
+            return Response.err("Variable name is required");
         }
         if (storageSpec == null || storageSpec.isEmpty()) {
-            return "Error: Storage specification is required";
+            return Response.err("Storage specification is required");
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -1522,10 +1490,14 @@ public class FunctionService {
             Msg.error(this, "Failed to execute set variable storage on Swing thread", e);
         }
 
-        return resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
+        if (success.get()) {
+            return Response.text(text);
+        }
+        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
-    public String setVariableStorage(String functionAddrStr, String variableName, String storageSpec) {
+    public Response setVariableStorage(String functionAddrStr, String variableName, String storageSpec) {
         return setVariableStorage(functionAddrStr, variableName, storageSpec, null);
     }
 
@@ -1536,19 +1508,17 @@ public class FunctionService {
     /**
      * Get detailed information about a function's variables (parameters and locals).
      */
-    public String getFunctionVariables(String functionName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
-        }
+    public Response getFunctionVariables(String functionName, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (functionName == null || functionName.isEmpty()) {
-            return "{\"error\": \"Function name is required\"}";
+            return Response.err("Function name is required");
         }
 
         final Program finalProgram = program;
-        final StringBuilder result = new StringBuilder();
+        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
         try {
@@ -1573,38 +1543,36 @@ public class FunctionService {
                     // Fresh data is ensured by decompileFunction's internal caching.
                     DecompileResults decompResults = decompileFunction(func, finalProgram);
 
-                    result.append("{");
-                    result.append("\"function_name\": \"").append(func.getName()).append("\", ");
-                    result.append("\"function_address\": \"").append(func.getEntryPoint().toString()).append("\", ");
+                    Map<String, Object> data = new LinkedHashMap<>();
+                    data.put("function_name", func.getName());
+                    data.put("function_address", func.getEntryPoint().toString());
 
                     // Get parameters with pre-analysis hints
-                    result.append("\"parameters\": [");
+                    List<Map<String, Object>> paramsList = new ArrayList<>();
                     Parameter[] params = func.getParameters();
-                    for (int i = 0; i < params.length; i++) {
-                        if (i > 0) result.append(", ");
-                        Parameter param = params[i];
+                    for (Parameter param : params) {
+                        Map<String, Object> paramMap = new LinkedHashMap<>();
                         String pTypeName = param.getDataType().getName();
                         boolean pNeedsType = pTypeName.startsWith("undefined");
                         boolean pNeedsRename = param.getName().startsWith("param_");
-                        result.append("{");
-                        result.append("\"name\": \"").append(param.getName()).append("\", ");
-                        result.append("\"type\": \"").append(pTypeName).append("\", ");
-                        result.append("\"ordinal\": ").append(param.getOrdinal()).append(", ");
-                        result.append("\"storage\": \"").append(param.getVariableStorage().toString()).append("\", ");
-                        result.append("\"needs_type\": ").append(pNeedsType).append(", ");
-                        result.append("\"needs_rename\": ").append(pNeedsRename);
+                        paramMap.put("name", param.getName());
+                        paramMap.put("type", pTypeName);
+                        paramMap.put("ordinal", param.getOrdinal());
+                        paramMap.put("storage", param.getVariableStorage().toString());
+                        paramMap.put("needs_type", pNeedsType);
+                        paramMap.put("needs_rename", pNeedsRename);
                         if (pNeedsType) {
-                            result.append(", \"suggested_type\": \"").append(suggestType(pTypeName)).append("\"");
+                            paramMap.put("suggested_type", suggestType(pTypeName));
                         }
                         if (!pNeedsType) {
-                            result.append(", \"suggested_prefix\": \"").append(suggestHungarianPrefix(pTypeName)).append("\"");
+                            paramMap.put("suggested_prefix", suggestHungarianPrefix(pTypeName));
                         }
-                        result.append("}");
+                        paramsList.add(paramMap);
                     }
-                    result.append("], ");
+                    data.put("parameters", paramsList);
 
                     // Get local variables and detect phantom variables
-                    result.append("\"locals\": [");
+                    List<Map<String, Object>> localsList = new ArrayList<>();
                     Variable[] locals = func.getLocalVariables();
 
                     // Use existing decompilation results for phantom detection (no second decompile)
@@ -1620,32 +1588,31 @@ public class FunctionService {
                         }
                     }
 
-                    for (int i = 0; i < locals.length; i++) {
-                        if (i > 0) result.append(", ");
-                        Variable local = locals[i];
+                    for (Variable local : locals) {
+                        Map<String, Object> localMap = new LinkedHashMap<>();
                         boolean isPhantom = !decompVarNames.contains(local.getName());
                         String lTypeName = local.getDataType().getName();
                         boolean lNeedsType = lTypeName.startsWith("undefined");
                         boolean lNeedsRename = local.getName().startsWith("local_") ||
                             local.getName().matches(".*Var\\d+");
 
-                        result.append("{");
-                        result.append("\"name\": \"").append(local.getName()).append("\", ");
-                        result.append("\"type\": \"").append(lTypeName).append("\", ");
-                        result.append("\"storage\": \"").append(local.getVariableStorage().toString()).append("\", ");
-                        result.append("\"is_phantom\": ").append(isPhantom).append(", ");
-                        result.append("\"needs_type\": ").append(lNeedsType && !isPhantom).append(", ");
-                        result.append("\"needs_rename\": ").append(lNeedsRename && !isPhantom);
+                        localMap.put("name", local.getName());
+                        localMap.put("type", lTypeName);
+                        localMap.put("storage", local.getVariableStorage().toString());
+                        localMap.put("is_phantom", isPhantom);
+                        localMap.put("needs_type", lNeedsType && !isPhantom);
+                        localMap.put("needs_rename", lNeedsRename && !isPhantom);
                         if (lNeedsType && !isPhantom) {
-                            result.append(", \"suggested_type\": \"").append(suggestType(lTypeName)).append("\"");
+                            localMap.put("suggested_type", suggestType(lTypeName));
                         }
                         if (!lNeedsType && !isPhantom) {
-                            result.append(", \"suggested_prefix\": \"").append(suggestHungarianPrefix(lTypeName)).append("\"");
+                            localMap.put("suggested_prefix", suggestHungarianPrefix(lTypeName));
                         }
-                        result.append("}");
+                        localsList.add(localMap);
                     }
-                    result.append("]");
-                    result.append("}");
+                    data.put("locals", localsList);
+
+                    resultData.set(data);
                 } catch (Exception e) {
                     errorMsg.set(e.getMessage());
                     Msg.error(this, "Error getting function variables", e);
@@ -1654,18 +1621,20 @@ public class FunctionService {
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Exception e) {
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
 
-        return result.toString();
+        if (resultData.get() != null) {
+            return Response.ok(resultData.get());
+        }
+        return Response.err("Unknown error");
     }
 
     // Backward compatibility overload
-    @SuppressWarnings("deprecation")
-    public String getFunctionVariables(String functionName) {
+    public Response getFunctionVariables(String functionName) {
         return getFunctionVariables(functionName, null);
     }
 
@@ -1722,34 +1691,30 @@ public class FunctionService {
     /**
      * v1.5.0: Batch rename function and all its components atomically.
      */
-    @SuppressWarnings("deprecation")
-    public String batchRenameFunctionComponents(String functionAddress, String functionName,
+    public Response batchRenameFunctionComponents(String functionAddress, String functionName,
                                                 Map<String, String> parameterRenames,
                                                 Map<String, String> localRenames,
                                                 String returnType, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
-        final StringBuilder result = new StringBuilder();
-        result.append("{");
         final AtomicBoolean success = new AtomicBoolean(false);
-        final AtomicReference<Integer> paramsRenamed = new AtomicReference<>(0);
-        final AtomicReference<Integer> localsRenamed = new AtomicReference<>(0);
+        final AtomicInteger paramsRenamed = new AtomicInteger(0);
+        final AtomicInteger localsRenamed = new AtomicInteger(0);
+        final AtomicReference<String> errorRef = new AtomicReference<>(null);
 
         try {
             threadingStrategy.executeWrite(program, "Batch Rename Function Components", () -> {
                 Address addr = program.getAddressFactory().getAddress(functionAddress);
                 if (addr == null) {
-                    result.append("\"error\": \"Invalid address: ").append(functionAddress).append("\"");
+                    errorRef.set("Invalid address: " + functionAddress);
                     return null;
                 }
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
-                    result.append("\"error\": \"No function at address: ").append(functionAddress).append("\"");
+                    errorRef.set("No function at address: " + functionAddress);
                     return null;
                 }
 
@@ -1765,7 +1730,7 @@ public class FunctionService {
                         String newName = parameterRenames.get(param.getName());
                         if (newName != null && !newName.isEmpty()) {
                             param.setName(newName, SourceType.USER_DEFINED);
-                            paramsRenamed.getAndSet(paramsRenamed.get() + 1);
+                            paramsRenamed.incrementAndGet();
                         }
                     }
                 }
@@ -1777,7 +1742,7 @@ public class FunctionService {
                         String newName = localRenames.get(local.getName());
                         if (newName != null && !newName.isEmpty()) {
                             local.setName(newName, SourceType.USER_DEFINED);
-                            localsRenamed.getAndSet(localsRenamed.get() + 1);
+                            localsRenamed.incrementAndGet();
                         }
                     }
                 }
@@ -1795,21 +1760,26 @@ public class FunctionService {
                 return null;
             });
 
+            if (errorRef.get() != null) {
+                return Response.err(errorRef.get());
+            }
+
             if (success.get()) {
-                result.append("\"success\": true, ");
-                result.append("\"function_renamed\": ").append(functionName != null).append(", ");
-                result.append("\"parameters_renamed\": ").append(paramsRenamed.get()).append(", ");
-                result.append("\"locals_renamed\": ").append(localsRenamed.get());
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "function_renamed", functionName != null,
+                    "parameters_renamed", paramsRenamed.get(),
+                    "locals_renamed", localsRenamed.get()
+                ));
             }
         } catch (Exception e) {
-            result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+            return Response.err(e.getMessage());
         }
 
-        result.append("}");
-        return result.toString();
+        return Response.err("Unknown failure");
     }
 
-    public String batchRenameFunctionComponents(String functionAddress, String functionName,
+    public Response batchRenameFunctionComponents(String functionAddress, String functionName,
                                                 Map<String, String> parameterRenames,
                                                 Map<String, String> localRenames,
                                                 String returnType) {
@@ -1823,17 +1793,15 @@ public class FunctionService {
     /**
      * Delete a function at the given address.
      */
-    public String deleteFunctionAtAddress(String addressStr, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response deleteFunctionAtAddress(String addressStr, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
         if (addressStr == null || addressStr.isEmpty()) {
-            return "{\"error\": \"address parameter required\"}";
+            return Response.err("address parameter required");
         }
 
-        final StringBuilder result = new StringBuilder();
+        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
@@ -1854,47 +1822,47 @@ public class FunctionService {
                 long bodySize = func.getBody().getNumAddresses();
                 program.getFunctionManager().removeFunction(addr);
 
-                result.append("{");
-                result.append("\"success\": true, ");
-                result.append("\"address\": \"").append(addr).append("\", ");
-                result.append("\"deleted_function\": \"").append(funcName.replace("\"", "\\\"")).append("\", ");
-                result.append("\"body_size\": ").append(bodySize).append(", ");
-                result.append("\"message\": \"Function '").append(funcName.replace("\"", "\\\""))
-                      .append("' deleted at ").append(addr).append("\"");
-                result.append("}");
+                resultData.set(JsonHelper.mapOf(
+                    "success", true,
+                    "address", addr.toString(),
+                    "deleted_function", funcName,
+                    "body_size", bodySize,
+                    "message", "Function '" + funcName + "' deleted at " + addr
+                ));
                 return null;
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return "{\"error\": \"Failed to execute on Swing thread: " + msg.replace("\"", "\\\"") + "\"}";
+            return Response.err("Failed to execute on Swing thread: " + msg);
         }
 
-        return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
+        if (resultData.get() != null) {
+            return Response.ok(resultData.get());
+        }
+        return Response.err("Unknown failure");
     }
 
-    public String deleteFunctionAtAddress(String addressStr) {
+    public Response deleteFunctionAtAddress(String addressStr) {
         return deleteFunctionAtAddress(addressStr, null);
     }
 
     /**
      * Create a function at the given address.
      */
-    public String createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (addressStr == null || addressStr.isEmpty()) {
-            return "{\"error\": \"address parameter required\"}";
+            return Response.err("address parameter required");
         }
 
-        final StringBuilder result = new StringBuilder();
+        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
@@ -1944,30 +1912,32 @@ public class FunctionService {
                     func.setName(name, SourceType.USER_DEFINED);
                 }
 
-                String funcName = func.getName();
-                result.append("{");
-                result.append("\"success\": true, ");
-                result.append("\"address\": \"").append(addr).append("\", ");
-                result.append("\"function_name\": \"").append(funcName.replace("\"", "\\\"")).append("\", ");
-                result.append("\"entry_point\": \"").append(func.getEntryPoint()).append("\", ");
-                result.append("\"body_size\": ").append(func.getBody().getNumAddresses()).append(", ");
-                result.append("\"message\": \"Function created successfully at ").append(addr).append("\"");
-                result.append("}");
+                resultData.set(JsonHelper.mapOf(
+                    "success", true,
+                    "address", addr.toString(),
+                    "function_name", func.getName(),
+                    "entry_point", func.getEntryPoint().toString(),
+                    "body_size", func.getBody().getNumAddresses(),
+                    "message", "Function created successfully at " + addr
+                ));
                 return null;
             });
 
             if (errorMsg.get() != null) {
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-            return "{\"error\": \"Failed to execute on Swing thread: " + msg.replace("\"", "\\\"") + "\"}";
+            return Response.err("Failed to execute on Swing thread: " + msg);
         }
 
-        return result.length() > 0 ? result.toString() : "{\"error\": \"Unknown failure\"}";
+        if (resultData.get() != null) {
+            return Response.ok(resultData.get());
+        }
+        return Response.err("Unknown failure");
     }
 
-    public String createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
+    public Response createFunctionAtAddress(String addressStr, String name, boolean disassembleFirst) {
         return createFunctionAtAddress(addressStr, name, disassembleFirst, null);
     }
 
@@ -1985,19 +1955,17 @@ public class FunctionService {
      * @param restrictToExecuteMemory If true, restricts disassembly to executable memory (default: true)
      * @return JSON result with disassembly status
      */
-    public String disassembleBytes(String startAddress, String endAddress, Integer length,
+    public Response disassembleBytes(String startAddress, String endAddress, Integer length,
                                    boolean restrictToExecuteMemory, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         if (startAddress == null || startAddress.isEmpty()) {
-            return "{\"error\": \"start_address parameter required\"}";
+            return Response.err("start_address parameter required");
         }
 
-        final StringBuilder result = new StringBuilder();
+        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
@@ -2097,13 +2065,13 @@ public class FunctionService {
                     if (cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
                         // Success - build result
                         Msg.debug(this, "disassembleBytes: Successfully disassembled " + numBytes + " byte(s) from " + start + " to " + end);
-                        result.append("{");
-                        result.append("\"success\": true, ");
-                        result.append("\"start_address\": \"").append(start).append("\", ");
-                        result.append("\"end_address\": \"").append(end).append("\", ");
-                        result.append("\"bytes_disassembled\": ").append(numBytes).append(", ");
-                        result.append("\"message\": \"Successfully disassembled ").append(numBytes).append(" byte(s)\"");
-                        result.append("}");
+                        resultData.set(JsonHelper.mapOf(
+                            "success", true,
+                            "start_address", start.toString(),
+                            "end_address", end.toString(),
+                            "bytes_disassembled", numBytes,
+                            "message", "Successfully disassembled " + numBytes + " byte(s)"
+                        ));
                         success = true;
                     } else {
                         errorMsg.set("Disassembly failed: " + cmd.getStatusMsg());
@@ -2123,20 +2091,22 @@ public class FunctionService {
 
             if (errorMsg.get() != null) {
                 Msg.error(this, "disassembleBytes: Returning error response - " + errorMsg.get());
-                return "{\"error\": \"" + errorMsg.get().replace("\"", "\\\"") + "\"}";
+                return Response.err(errorMsg.get());
             }
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
             Msg.error(this, "disassembleBytes: Exception in outer try block", e);
-            return "{\"error\": \"" + msg.replace("\"", "\\\"") + "\"}";
+            return Response.err(msg);
         }
 
-        String response = result.toString();
-        Msg.debug(this, "disassembleBytes: Returning success response, length=" + response.length());
-        return response;
+        if (resultData.get() != null) {
+            Msg.debug(this, "disassembleBytes: Returning success response");
+            return Response.ok(resultData.get());
+        }
+        return Response.err("Unknown failure");
     }
 
-    public String disassembleBytes(String startAddress, String endAddress, Integer length,
+    public Response disassembleBytes(String startAddress, String endAddress, Integer length,
                                    boolean restrictToExecuteMemory) {
         return disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory, null);
     }
@@ -2154,20 +2124,18 @@ public class FunctionService {
      * @param forceIndividual If true, skip batch mode and use individual renames
      * @return JSON result with rename status
      */
-    public String batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
-        final StringBuilder result = new StringBuilder();
-        result.append("{");
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicInteger variablesRenamed = new AtomicInteger(0);
         final AtomicInteger variablesFailed = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
         final AtomicReference<Function> funcRef = new AtomicReference<>(null);
+        final AtomicReference<String> fallbackResult = new AtomicReference<>(null);
+        final AtomicReference<String> errorRef = new AtomicReference<>(null);
 
         try {
             SwingUtilities.invokeAndWait(() -> {
@@ -2179,14 +2147,14 @@ public class FunctionService {
                 try {
                     Address addr = program.getAddressFactory().getAddress(functionAddress);
                     if (addr == null) {
-                        result.append("\"error\": \"Invalid address: ").append(functionAddress).append("\"");
+                        errorRef.set("Invalid address: " + functionAddress);
                         return;
                     }
 
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     funcRef.set(func);
                     if (func == null) {
-                        result.append("\"error\": \"No function at address: ").append(functionAddress).append("\"");
+                        errorRef.set("No function at address: " + functionAddress);
                         return;
                     }
 
@@ -2298,16 +2266,15 @@ public class FunctionService {
                         program.endTransaction(tx, false);
 
                         // Try individual operations
-                        String individualResult = batchRenameVariablesIndividual(functionAddress, variableRenames);
-                        result.append("\"fallback_used\": true, ");
-                        result.append(individualResult);
+                        Response individualResult = batchRenameVariablesIndividual(functionAddress, variableRenames);
+                        fallbackResult.set(individualResult.toJson());
                         return;
                     } catch (Exception fallbackE) {
-                        result.append("\"error\": \"Batch operation failed and fallback also failed: ").append(e.getMessage()).append("\"");
+                        errorRef.set("Batch operation failed and fallback also failed: " + e.getMessage());
                         Msg.error(this, "Both batch and individual rename operations failed", e);
                     }
                 } finally {
-                    if (!result.toString().contains("\"fallback_used\"")) {
+                    if (fallbackResult.get() == null && errorRef.get() == null) {
                         // End event suppression transaction
                         program.endTransaction(eventTx, success.get());
                         program.flushEvents();
@@ -2330,29 +2297,34 @@ public class FunctionService {
                 }
             });
 
-            if (success.get() && !result.toString().contains("\"fallback_used\"")) {
-                result.append("\"success\": true, ");
-                result.append("\"method\": \"batch\", ");
-                result.append("\"variables_renamed\": ").append(variablesRenamed.get()).append(", ");
-                result.append("\"variables_failed\": ").append(variablesFailed.get());
+            // Return fallback result if used
+            if (fallbackResult.get() != null) {
+                return Response.text(fallbackResult.get());
+            }
+
+            if (errorRef.get() != null) {
+                return Response.err(errorRef.get());
+            }
+
+            if (success.get()) {
+                Map<String, Object> resultMap = new LinkedHashMap<>();
+                resultMap.put("success", true);
+                resultMap.put("method", "batch");
+                resultMap.put("variables_renamed", variablesRenamed.get());
+                resultMap.put("variables_failed", variablesFailed.get());
                 if (!errors.isEmpty()) {
-                    result.append(", \"errors\": [");
-                    for (int i = 0; i < errors.size(); i++) {
-                        if (i > 0) result.append(", ");
-                        result.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
-                    }
-                    result.append("]");
+                    resultMap.put("errors", errors);
                 }
+                return Response.ok(resultMap);
             }
         } catch (Exception e) {
-            result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+            return Response.err(e.getMessage());
         }
 
-        result.append("}");
-        return result.toString();
+        return Response.err("Unknown failure");
     }
 
-    public String batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual) {
+    public Response batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual) {
         return batchRenameVariables(functionAddress, variableRenames, forceIndividual, null);
     }
 
@@ -2360,14 +2332,11 @@ public class FunctionService {
      * Individual variable renaming using HighFunctionDBUtil (fallback method).
      * This method uses decompilation but is more reliable for persistence.
      */
-    public String batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
-        final StringBuilder result = new StringBuilder();
         final AtomicInteger variablesRenamed = new AtomicInteger(0);
         final AtomicInteger variablesFailed = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
@@ -2385,11 +2354,11 @@ public class FunctionService {
                 }
             });
         } catch (Exception e) {
-            return "\"error\": \"Failed to get function name: " + e.getMessage() + "\"";
+            return Response.err("Failed to get function name: " + e.getMessage());
         }
 
         if (functionName[0] == null) {
-            return "\"error\": \"Could not find function at address: " + functionAddress + "\"";
+            return Response.err("Could not find function at address: " + functionAddress);
         }
 
         // Process each variable individually using the reliable method
@@ -2398,12 +2367,13 @@ public class FunctionService {
             String newName = entry.getValue();
 
             try {
-                String renameResult = renameVariableInFunction(functionName[0], oldName, newName);
-                if (renameResult.equals("Variable renamed")) {
+                Response renameResult = renameVariableInFunction(functionName[0], oldName, newName);
+                String resultText = renameResult.toJson();
+                if (resultText.equals("Variable renamed")) {
                     variablesRenamed.incrementAndGet();
                 } else {
                     variablesFailed.incrementAndGet();
-                    errors.add("Failed to rename '" + oldName + "' to '" + newName + "': " + renameResult);
+                    errors.add("Failed to rename '" + oldName + "' to '" + newName + "': " + resultText);
                 }
             } catch (Exception e) {
                 variablesFailed.incrementAndGet();
@@ -2411,51 +2381,44 @@ public class FunctionService {
             }
         }
 
-        result.append("\"success\": true, ");
-        result.append("\"method\": \"individual\", ");
-        result.append("\"variables_renamed\": ").append(variablesRenamed.get()).append(", ");
-        result.append("\"variables_failed\": ").append(variablesFailed.get());
+        Map<String, Object> resultMap = new LinkedHashMap<>();
+        resultMap.put("success", true);
+        resultMap.put("method", "individual");
+        resultMap.put("variables_renamed", variablesRenamed.get());
+        resultMap.put("variables_failed", variablesFailed.get());
         if (!errors.isEmpty()) {
-            result.append(", \"errors\": [");
-            for (int i = 0; i < errors.size(); i++) {
-                if (i > 0) result.append(", ");
-                result.append("\"").append(errors.get(i).replace("\"", "\\\"")).append("\"");
-            }
-            result.append("]");
+            resultMap.put("errors", errors);
         }
-
-        return result.toString();
+        return Response.ok(resultMap);
     }
 
-    public String batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames) {
+    public Response batchRenameVariablesIndividual(String functionAddress, Map<String, String> variableRenames) {
         return batchRenameVariablesIndividual(functionAddress, variableRenames, null);
     }
 
     /**
      * Validate that batch operations actually persisted by checking current state.
      */
-    public String validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) {
-            return (String) programResult[1];
-        }
+    public Response validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
-        final StringBuilder result = new StringBuilder();
-        result.append("{");
+        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
+        final AtomicReference<String> errorRef = new AtomicReference<>(null);
 
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
                     Address addr = program.getAddressFactory().getAddress(functionAddress);
                     if (addr == null) {
-                        result.append("\"error\": \"Invalid address: ").append(functionAddress).append("\"");
+                        errorRef.set("Invalid address: " + functionAddress);
                         return;
                     }
 
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
-                        result.append("\"error\": \"No function at address: ").append(functionAddress).append("\"");
+                        errorRef.set("No function at address: " + functionAddress);
                         return;
                     }
 
@@ -2521,32 +2484,34 @@ public class FunctionService {
                         }
                     }
 
-                    result.append("\"success\": true, ");
-                    result.append("\"renames_validated\": ").append(renamesValidated).append(", ");
-                    result.append("\"types_validated\": ").append(typesValidated);
+                    Map<String, Object> data = new LinkedHashMap<>();
+                    data.put("success", true);
+                    data.put("renames_validated", renamesValidated);
+                    data.put("types_validated", typesValidated);
                     if (!validationErrors.isEmpty()) {
-                        result.append(", \"validation_errors\": [");
-                        for (int i = 0; i < validationErrors.size(); i++) {
-                            if (i > 0) result.append(", ");
-                            result.append("\"").append(validationErrors.get(i).replace("\"", "\\\"")).append("\"");
-                        }
-                        result.append("]");
+                        data.put("validation_errors", validationErrors);
                     }
+                    resultData.set(data);
 
                 } catch (Exception e) {
-                    result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+                    errorRef.set(e.getMessage());
                     Msg.error(this, "Error validating batch operations", e);
                 }
             });
         } catch (Exception e) {
-            result.append("\"error\": \"").append(e.getMessage().replace("\"", "\\\"")).append("\"");
+            return Response.err(e.getMessage());
         }
 
-        result.append("}");
-        return result.toString();
+        if (errorRef.get() != null) {
+            return Response.err(errorRef.get());
+        }
+        if (resultData.get() != null) {
+            return Response.ok(resultData.get());
+        }
+        return Response.err("Unknown failure");
     }
 
-    public String validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes) {
+    public Response validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes) {
         return validateBatchOperationResults(functionAddress, expectedRenames, expectedTypes, null);
     }
 }

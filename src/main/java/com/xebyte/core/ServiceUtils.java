@@ -26,7 +26,9 @@ public final class ServiceUtils {
     /**
      * Escape a string for safe inclusion in JSON values.
      * Handles quotes, backslashes, and control characters.
+     * @deprecated Use {@link JsonHelper#toJson(Object)} instead — Gson handles escaping automatically.
      */
+    @Deprecated
     public static String escapeJson(String str) {
         if (str == null) return "";
         return str.replace("\\", "\\\\")
@@ -79,7 +81,9 @@ public final class ServiceUtils {
 
     /**
      * Serialize a List of objects to a JSON array string.
+     * @deprecated Use {@link JsonHelper#toJson(Object)} instead.
      */
+    @Deprecated
     public static String serializeListToJson(List<?> list) {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < list.size(); i++) {
@@ -103,7 +107,9 @@ public final class ServiceUtils {
 
     /**
      * Serialize a Map to a JSON object string.
+     * @deprecated Use {@link JsonHelper#toJson(Object)} instead.
      */
+    @Deprecated
     public static String serializeMapToJson(Map<?, ?> map) {
         StringBuilder sb = new StringBuilder("{");
         boolean first = true;
@@ -435,12 +441,52 @@ public final class ServiceUtils {
 
     /**
      * Generate a JSON error response for when a program cannot be found.
+     * @deprecated Use {@link #getProgramOrError(ProgramProvider, String)} instead.
      */
+    @Deprecated
     public static String programNotFoundError(String programName) {
         if (programName == null || programName.isEmpty()) {
             return "{\"error\": \"No program is currently open\"}";
         }
         return "{\"error\": \"Program not found: " + escapeJson(programName) + "\"}";
+    }
+
+    /**
+     * Type-safe result from program resolution.
+     * Replaces the Object[] {Program, String} pattern used across all services.
+     */
+    public record ProgramOrError(Program program, Response error) {
+        public boolean hasError() { return program == null; }
+    }
+
+    /**
+     * Resolve the target program by name, or the current program if name is null/empty.
+     * Returns a ProgramOrError with either a valid Program or a Response.Err.
+     */
+    public static ProgramOrError getProgramOrError(ProgramProvider provider, String programName) {
+        Program program = null;
+        if (programName != null && !programName.isEmpty()) {
+            program = provider.resolveProgram(programName);
+        } else {
+            program = provider.getCurrentProgram();
+        }
+        if (program == null) {
+            String available = "";
+            Program[] all = provider.getAllOpenPrograms();
+            if (all != null && all.length > 0) {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < all.length; i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(all[i].getName());
+                }
+                available = " Available programs: " + sb;
+            }
+            String msg = programName != null && !programName.isEmpty()
+                    ? "Program not found: " + programName + available
+                    : "No program loaded." + available;
+            return new ProgramOrError(null, Response.err(msg));
+        }
+        return new ProgramOrError(program, null);
     }
 
     // ========================================================================

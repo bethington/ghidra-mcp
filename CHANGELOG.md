@@ -4,6 +4,44 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v4.2.0 - 2026-03-02
+
+### Knowledge Database Integration + BSim + Bug Fixes
+
+#### Knowledge Database (5 new MCP tools)
+- **`store_function_knowledge`** -- Store documented function data (name, prototype, comments, score) to PostgreSQL knowledge DB with fire-and-forget semantics
+- **`query_knowledge_context`** -- Keyword search across documented functions using PostgreSQL `ILIKE`/`tsvector` full-text search. Returns relevant prior documentation to inform new function analysis
+- **`store_ordinal_mapping`** -- Store ordinal-to-name mappings per binary version (e.g., D2Common.dll ordinal 10375 = GetUnitPosition)
+- **`get_ordinal_mapping`** -- Look up known ordinal names by binary, version, and ordinal number
+- **`export_system_knowledge`** -- Generate markdown export of documented functions grouped by game system, suitable for book chapters and content creation
+- **Graceful degradation**: All knowledge tools return `{"available": false}` when DB is unreachable. Circuit breaker disables DB after 3 consecutive failures for the session. RE loop proceeds without knowledge DB.
+- **Connection pool**: `psycopg2.ThreadedConnectionPool` with configurable DB host/port/credentials via `.env` file
+- **Schema**: 3 new tables (`ordinal_mappings`, `documented_functions`, `propagation_log`) with full-text search indexes and `updated_at` triggers
+
+#### BSim Cross-Version Matching (4 new Ghidra scripts)
+- **`BSimIngestProgram.java`** -- Ingest all functions from current program into BSim PostgreSQL DB. One-time per binary version.
+- **`BSimQueryAndPropagate.java`** -- Query BSim for cross-version matches of a specific function, returns JSON sorted by similarity score
+- **`BSimBulkQuery.java`** -- Bulk query all undocumented (FUN_*) functions against BSim DB for batch propagation
+- **`BSimTestConnection.java`** -- Verify BSim PostgreSQL connectivity and return DB metadata
+- **3-tier matching cascade** in RE loop: exact opcode hash (fastest) -> BSim LSH similarity (medium) -> fuzzy instruction pattern (slowest)
+
+#### Bug Fixes
+- **Fix #44**: Enum value parsing -- Gson parses JSON integers as `Double` (0 -> 0.0), causing `Long.parseLong("0.0")` to fail silently. Replaced hand-rolled parser with `JsonHelper.parseJson()` + `Number.longValue()`. Hex strings (`0x1F`) now also accepted.
+- **Improved error messages**: Enum creation with empty/invalid values now returns descriptive errors instead of silent failures
+
+#### Dead Code Cleanup
+- Removed ~243KB of deprecated workflow modules superseded by the RE loop skill
+- Deleted deprecated slash commands (`auto-document.md`, `improve-cycle.md`)
+
+#### Migration Scripts
+- **`scripts/apply_schema.py`** -- Apply knowledge DB schema to PostgreSQL (idempotent, handles "already exists" gracefully)
+- **`scripts/migrate_learnings.py`** -- One-time migration from flat files (learnings.md, loop_state.json, community_names.json) to knowledge DB tables
+
+#### Counts
+- 193 MCP tools, 169 GUI endpoints, 173 headless endpoints
+
+---
+
 ## v4.1.0 - 2026-03-01
 
 ### Parallel Multi-Binary Support

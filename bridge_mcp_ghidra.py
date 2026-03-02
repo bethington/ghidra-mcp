@@ -3,6 +3,7 @@
 # dependencies = [
 #     "requests>=2,<3",
 #     "mcp>=1.2.0,<2",
+#     "psycopg2-binary>=2.9,<3",
 # ]
 # ///
 
@@ -11,6 +12,8 @@ import argparse
 import logging
 import time
 import re
+import json
+import threading
 from urllib.parse import urljoin, urlparse
 
 from mcp.server.fastmcp import FastMCP
@@ -79,6 +82,10 @@ TOOL_PROFILES = {
         "rename_function_by_address", "set_function_prototype",
         "rename_variables", "batch_set_comments", "set_plate_comment",
         "set_local_variable_type", "rename_or_label",
+        # Knowledge DB tools
+        "store_function_knowledge", "query_knowledge_context",
+        "store_ordinal_mapping", "get_ordinal_mapping",
+        "export_system_knowledge",
     },
 }
 
@@ -116,10 +123,23 @@ adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=20, pool_maxs
 session.mount("http://", adapter)
 session.mount("https://", adapter)
 
+# Load .env file if present (for KNOWLEDGE_DB_*, GHIDRA_SERVER_URL, etc.)
+import os
+from pathlib import Path
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.split("#")[0].strip()  # strip inline comments
+            if key and key not in os.environ:  # env vars take precedence
+                os.environ[key] = value
+
 # Configure enhanced logging
 # Make log level configurable via environment variable (DEBUG, INFO, WARNING, ERROR, CRITICAL)
 # Default to INFO for production use
-import os
 
 LOG_LEVEL = os.getenv("GHIDRA_MCP_LOG_LEVEL", "INFO")
 
@@ -133,6 +153,147 @@ mcp = FastMCP("ghidra-mcp")
 
 # Initialize ghidra_server_url: env var > .env file > default
 ghidra_server_url = os.getenv("GHIDRA_SERVER_URL", DEFAULT_GHIDRA_SERVER)
+
+
+# ========== KNOWLEDGE DB (PostgreSQL at RE-Universe) ==========
+
+# Optional psycopg2 for knowledge database connectivity
+try:
+    import psycopg2
+    import psycopg2.pool
+    import psycopg2.extras
+    HAS_PSYCOPG2 = True
+except ImportError:
+    HAS_PSYCOPG2 = False
+    logger.warning("psycopg2 not installed — knowledge DB tools disabled")
+
+# Knowledge DB configuration (env vars with defaults for RE-Universe stack)
+KNOWLEDGE_DB_HOST = os.getenv("KNOWLEDGE_DB_HOST", "10.0.10.30")
+KNOWLEDGE_DB_PORT = int(os.getenv("KNOWLEDGE_DB_PORT", "5432"))
+KNOWLEDGE_DB_NAME = os.getenv("KNOWLEDGE_DB_NAME", "bsim")
+KNOWLEDGE_DB_USER = os.getenv("KNOWLEDGE_DB_USER", "ben")
+KNOWLEDGE_DB_PASSWORD = os.getenv("KNOWLEDGE_DB_PASSWORD", "")
+KNOWLEDGE_DB_TIMEOUT = float(os.getenv("KNOWLEDGE_DB_TIMEOUT", "2.0"))  # seconds
+KNOWLEDGE_DB_READ_TIMEOUT = float(os.getenv("KNOWLEDGE_DB_READ_TIMEOUT", "0.5"))  # seconds
+
+
+class KnowledgeDB:
+    """Connection pool + circuit breaker for the knowledge PostgreSQL database."""
+
+    def __init__(self):
+        self._pool = None
+        self._lock = threading.Lock()
+        self._consecutive_failures = 0
+        self._circuit_open = False
+        self._max_failures = 3
+
+    def _get_pool(self):
+        if self._pool is not None:
+            return self._pool
+        with self._lock:
+            if self._pool is not None:
+                return self._pool
+            if not HAS_PSYCOPG2:
+                return None
+            try:
+                self._pool = psycopg2.pool.ThreadedConnectionPool(
+                    minconn=1,
+                    maxconn=5,
+                    host=KNOWLEDGE_DB_HOST,
+                    port=KNOWLEDGE_DB_PORT,
+                    dbname=KNOWLEDGE_DB_NAME,
+                    user=KNOWLEDGE_DB_USER,
+                    password=KNOWLEDGE_DB_PASSWORD or None,
+                    connect_timeout=int(KNOWLEDGE_DB_TIMEOUT),
+                    options=f"-c statement_timeout={int(KNOWLEDGE_DB_READ_TIMEOUT * 1000)}",
+                )
+                logger.info(f"Knowledge DB pool created: {KNOWLEDGE_DB_HOST}:{KNOWLEDGE_DB_PORT}/{KNOWLEDGE_DB_NAME}")
+                self._consecutive_failures = 0
+                self._circuit_open = False
+                return self._pool
+            except Exception as e:
+                logger.warning(f"Knowledge DB connection failed: {e}")
+                return None
+
+    def _record_failure(self):
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._max_failures:
+            self._circuit_open = True
+            logger.warning("Knowledge DB circuit breaker OPEN — disabling for this session")
+
+    def _record_success(self):
+        self._consecutive_failures = 0
+
+    def execute_read(self, query, params=None):
+        """Execute a read query. Returns rows as list of dicts, or None on failure."""
+        if self._circuit_open or not HAS_PSYCOPG2:
+            return None
+        pool = self._get_pool()
+        if not pool:
+            return None
+        conn = None
+        try:
+            conn = pool.getconn()
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(query, params)
+                rows = cur.fetchall()
+            conn.rollback()  # read-only, release any locks
+            self._record_success()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.warning(f"Knowledge DB read failed: {e}")
+            self._record_failure()
+            if conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            return None
+        finally:
+            if conn and pool:
+                try:
+                    pool.putconn(conn)
+                except Exception:
+                    pass
+
+    def execute_write(self, query, params=None):
+        """Execute a write query. Returns True on success, False on failure. Fire-and-forget."""
+        if self._circuit_open or not HAS_PSYCOPG2:
+            return False
+        pool = self._get_pool()
+        if not pool:
+            return False
+        conn = None
+        try:
+            conn = pool.getconn()
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+            conn.commit()
+            self._record_success()
+            return True
+        except Exception as e:
+            logger.warning(f"Knowledge DB write failed: {e}")
+            self._record_failure()
+            if conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            return False
+        finally:
+            if conn and pool:
+                try:
+                    pool.putconn(conn)
+                except Exception:
+                    pass
+
+    @property
+    def available(self):
+        return HAS_PSYCOPG2 and not self._circuit_open
+
+
+# Global knowledge DB instance (lazy connection)
+knowledge_db = KnowledgeDB()
 
 
 # Enhanced error classes
@@ -7831,6 +7992,371 @@ def get_repository_file(repo: str, path: str) -> str:
     return safe_get_json(
         "server/repository/file", {"repo": repo, "path": path}
     )
+
+
+# ========== KNOWLEDGE DB TOOLS ==========
+
+
+@mcp.tool()
+def store_function_knowledge(
+    address: str,
+    binary_name: str,
+    version: str,
+    new_name: str,
+    old_name: str = None,
+    score: int = None,
+    status: str = "complete",
+    classification: str = None,
+    iteration: int = None,
+    strategy: str = None,
+    plate_comment: str = None,
+    prototype: str = None,
+    deductions: str = None,
+    game_system: str = None,
+) -> str:
+    """
+    Store a documented function in the knowledge database.
+
+    Called after documenting a function in the RE loop. Fire-and-forget —
+    failure is logged but does not block the RE loop.
+
+    Args:
+        address: Function address (e.g., "0x6fd81234")
+        binary_name: Binary name (e.g., "D2Common.dll")
+        version: Binary version (e.g., "1.00", "1.13d")
+        new_name: New function name
+        old_name: Original function name (e.g., "FUN_6fd81234")
+        score: Completeness score 0-100
+        status: Documentation status (complete, documented, needs_work, failed)
+        classification: Function classification (thunk, leaf, worker, api)
+        iteration: RE loop iteration number
+        strategy: Selection strategy used
+        plate_comment: Function plate comment / documentation
+        prototype: Function prototype / signature
+        deductions: JSON array of score deductions (as string)
+        game_system: Game system classification (e.g., "inventory", "combat")
+
+    Returns:
+        JSON with success status
+    """
+    if not knowledge_db.available:
+        return json.dumps({"available": False, "error": "Knowledge DB not available"})
+
+    deductions_json = deductions if deductions else "[]"
+    try:
+        json.loads(deductions_json)
+    except (json.JSONDecodeError, TypeError):
+        deductions_json = "[]"
+
+    success = knowledge_db.execute_write(
+        """INSERT INTO documented_functions
+           (address, binary_name, version, old_name, new_name, score, status,
+            classification, iteration, strategy, plate_comment, prototype,
+            deductions, game_system)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+           ON CONFLICT (address, binary_name, version)
+           DO UPDATE SET
+               new_name = EXCLUDED.new_name,
+               score = EXCLUDED.score,
+               status = EXCLUDED.status,
+               classification = EXCLUDED.classification,
+               iteration = EXCLUDED.iteration,
+               strategy = EXCLUDED.strategy,
+               plate_comment = EXCLUDED.plate_comment,
+               prototype = EXCLUDED.prototype,
+               deductions = EXCLUDED.deductions,
+               game_system = COALESCE(EXCLUDED.game_system, documented_functions.game_system)
+        """,
+        (address, binary_name, version, old_name, new_name, score, status,
+         classification, iteration, strategy, plate_comment, prototype,
+         deductions_json, game_system),
+    )
+
+    if success:
+        return json.dumps({"success": True, "stored": new_name})
+    return json.dumps({"success": False, "error": "Write failed (logged)"})
+
+
+@mcp.tool()
+def query_knowledge_context(
+    description: str = None,
+    binary_name: str = None,
+    version: str = None,
+    game_system: str = None,
+    limit: int = 10,
+) -> str:
+    """
+    Query the knowledge database for context about functions.
+
+    Uses PostgreSQL full-text search (tsvector) and ILIKE for keyword matching.
+    Call this during ANALYZE phase to get context from previously documented functions.
+
+    Args:
+        description: Search text (function name, keyword, or description fragment)
+        binary_name: Filter by binary name (e.g., "D2Common.dll")
+        version: Filter by version (e.g., "1.00")
+        game_system: Filter by game system (e.g., "inventory", "combat")
+        limit: Maximum results to return (default 10)
+
+    Returns:
+        JSON with matching documented functions and their knowledge
+    """
+    if not knowledge_db.available:
+        return json.dumps({"available": False, "error": "Knowledge DB not available"})
+
+    conditions = []
+    params = []
+
+    if description:
+        # Full-text search with fallback to ILIKE
+        conditions.append(
+            "(search_vector @@ plainto_tsquery('english', %s) OR "
+            "new_name ILIKE %s OR plate_comment ILIKE %s)"
+        )
+        like_pattern = f"%{description}%"
+        params.extend([description, like_pattern, like_pattern])
+
+    if binary_name:
+        conditions.append("binary_name = %s")
+        params.append(binary_name)
+
+    if version:
+        conditions.append("version = %s")
+        params.append(version)
+
+    if game_system:
+        conditions.append("game_system = %s")
+        params.append(game_system)
+
+    where_clause = " AND ".join(conditions) if conditions else "TRUE"
+    params.append(min(limit, 50))
+
+    query = f"""
+        SELECT address, binary_name, version, old_name, new_name, score,
+               status, classification, plate_comment, prototype, game_system
+        FROM documented_functions
+        WHERE {where_clause}
+        ORDER BY score DESC NULLS LAST, updated_at DESC
+        LIMIT %s
+    """
+
+    rows = knowledge_db.execute_read(query, params)
+    if rows is None:
+        return json.dumps({"available": False, "error": "Query failed"})
+
+    return json.dumps({"success": True, "count": len(rows), "functions": rows}, default=str)
+
+
+@mcp.tool()
+def store_ordinal_mapping(
+    ordinal: int,
+    binary_name: str,
+    version: str,
+    function_name: str,
+    calling_convention: str = None,
+    parameter_count: int = None,
+    source: str = "re_loop",
+    confidence: float = 1.0,
+    notes: str = None,
+) -> str:
+    """
+    Store an ordinal-to-function-name mapping in the knowledge database.
+
+    Called when a new ordinal export is identified during RE loop analysis.
+    Dual-write: also stored in community_names.json as offline fallback.
+
+    Args:
+        ordinal: Ordinal number (e.g., 10375)
+        binary_name: Binary name (e.g., "D2Common.dll")
+        version: Binary version (e.g., "1.00")
+        function_name: Resolved function name (e.g., "GetUnitPosition")
+        calling_convention: Calling convention (e.g., "__stdcall")
+        parameter_count: Number of parameters
+        source: Origin of mapping ("re_loop", "community", "ida_export")
+        confidence: Confidence 0.0-1.0 (default 1.0 for confirmed mappings)
+        notes: Additional notes
+
+    Returns:
+        JSON with success status
+    """
+    if not knowledge_db.available:
+        return json.dumps({"available": False, "error": "Knowledge DB not available"})
+
+    success = knowledge_db.execute_write(
+        """INSERT INTO ordinal_mappings
+           (ordinal, binary_name, version, function_name, calling_convention,
+            parameter_count, source, confidence, notes)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+           ON CONFLICT (ordinal, binary_name, version)
+           DO UPDATE SET
+               function_name = EXCLUDED.function_name,
+               calling_convention = COALESCE(EXCLUDED.calling_convention, ordinal_mappings.calling_convention),
+               parameter_count = COALESCE(EXCLUDED.parameter_count, ordinal_mappings.parameter_count),
+               confidence = GREATEST(EXCLUDED.confidence, ordinal_mappings.confidence),
+               notes = COALESCE(EXCLUDED.notes, ordinal_mappings.notes)
+        """,
+        (ordinal, binary_name, version, function_name, calling_convention,
+         parameter_count, source, confidence, notes),
+    )
+
+    if success:
+        return json.dumps({"success": True, "stored": f"Ordinal_{ordinal} -> {function_name}"})
+    return json.dumps({"success": False, "error": "Write failed (logged)"})
+
+
+@mcp.tool()
+def get_ordinal_mapping(
+    ordinal: int = None,
+    binary_name: str = None,
+    version: str = None,
+    function_name: str = None,
+) -> str:
+    """
+    Look up ordinal-to-function-name mappings from the knowledge database.
+
+    Query by ordinal number, function name, or both. Useful during ANALYZE phase
+    to resolve Ordinal_NNNNN exports using known mappings from other versions.
+
+    Args:
+        ordinal: Ordinal number to look up (e.g., 10375)
+        binary_name: Filter by binary (e.g., "D2Common.dll")
+        version: Filter by version (e.g., "1.00"). Omit to search all versions.
+        function_name: Search by function name (partial match)
+
+    Returns:
+        JSON with matching ordinal mappings across all known versions
+    """
+    if not knowledge_db.available:
+        return json.dumps({"available": False, "error": "Knowledge DB not available"})
+
+    conditions = []
+    params = []
+
+    if ordinal is not None:
+        conditions.append("ordinal = %s")
+        params.append(ordinal)
+
+    if binary_name:
+        conditions.append("binary_name = %s")
+        params.append(binary_name)
+
+    if version:
+        conditions.append("version = %s")
+        params.append(version)
+
+    if function_name:
+        conditions.append("function_name ILIKE %s")
+        params.append(f"%{function_name}%")
+
+    if not conditions:
+        return json.dumps({"success": False, "error": "At least one filter required"})
+
+    where_clause = " AND ".join(conditions)
+    query = f"""
+        SELECT ordinal, binary_name, version, function_name,
+               calling_convention, parameter_count, source, confidence, notes
+        FROM ordinal_mappings
+        WHERE {where_clause}
+        ORDER BY binary_name, version, ordinal
+        LIMIT 100
+    """
+
+    rows = knowledge_db.execute_read(query, params)
+    if rows is None:
+        return json.dumps({"available": False, "error": "Query failed"})
+
+    return json.dumps({"success": True, "count": len(rows), "mappings": rows}, default=str)
+
+
+@mcp.tool()
+def export_system_knowledge(
+    game_system: str = None,
+    binary_name: str = None,
+    version: str = None,
+    format: str = "markdown",
+) -> str:
+    """
+    Export documented knowledge for content creation (books, articles).
+
+    Generates structured output organized by game system, suitable for
+    writing technical documentation about Diablo 2 internals.
+
+    Args:
+        game_system: Filter by game system (e.g., "inventory", "combat", "all")
+        binary_name: Filter by binary (e.g., "D2Common.dll")
+        version: Filter by version (e.g., "1.00")
+        format: Output format ("markdown" or "json")
+
+    Returns:
+        Formatted knowledge export
+    """
+    if not knowledge_db.available:
+        return json.dumps({"available": False, "error": "Knowledge DB not available"})
+
+    conditions = []
+    params = []
+
+    if game_system and game_system != "all":
+        conditions.append("df.game_system = %s")
+        params.append(game_system)
+
+    if binary_name:
+        conditions.append("df.binary_name = %s")
+        params.append(binary_name)
+
+    if version:
+        conditions.append("df.version = %s")
+        params.append(version)
+
+    where_clause = " AND ".join(conditions) if conditions else "TRUE"
+
+    query = f"""
+        SELECT df.address, df.binary_name, df.version, df.new_name,
+               df.score, df.classification, df.plate_comment, df.prototype,
+               df.game_system,
+               om.ordinal, om.calling_convention
+        FROM documented_functions df
+        LEFT JOIN ordinal_mappings om
+            ON df.new_name = om.function_name
+            AND df.binary_name = om.binary_name
+            AND df.version = om.version
+        WHERE {where_clause}
+        ORDER BY df.game_system NULLS LAST, df.new_name
+    """
+
+    rows = knowledge_db.execute_read(query, params)
+    if rows is None:
+        return json.dumps({"available": False, "error": "Query failed"})
+
+    if format == "json":
+        return json.dumps({"success": True, "count": len(rows), "functions": rows}, default=str)
+
+    # Markdown format grouped by game system
+    systems = {}
+    for row in rows:
+        sys_name = row.get("game_system") or "Unclassified"
+        systems.setdefault(sys_name, []).append(row)
+
+    lines = ["# Diablo 2 Function Knowledge Export", ""]
+    binary_label = binary_name or "All binaries"
+    version_label = version or "all versions"
+    lines.append(f"**Binary:** {binary_label} | **Version:** {version_label} | **Functions:** {len(rows)}")
+    lines.append("")
+
+    for sys_name, funcs in sorted(systems.items()):
+        lines.append(f"## {sys_name.replace('_', ' ').title()}")
+        lines.append("")
+        for f in sorted(funcs, key=lambda x: x.get("new_name", "")):
+            ordinal_str = f" (Ordinal {f['ordinal']})" if f.get("ordinal") else ""
+            lines.append(f"### {f['new_name']}{ordinal_str}")
+            if f.get("prototype"):
+                lines.append(f"```c\n{f['prototype']}\n```")
+            if f.get("plate_comment"):
+                lines.append(f"{f['plate_comment']}")
+            lines.append(f"*Address: {f['address']} | Score: {f.get('score', 'N/A')} | Type: {f.get('classification', 'N/A')}*")
+            lines.append("")
+
+    return "\n".join(lines)
 
 
 # ========== MAIN ==========

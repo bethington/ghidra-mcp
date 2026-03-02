@@ -4,7 +4,17 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v4.0.0 (Latest)
+### v4.2.0 (Latest)
+
+- **Feature Release** - Knowledge database integration, BSim cross-version matching, enum fix
+- 5 new knowledge DB MCP tools (store/query function knowledge, ordinal mappings, export)
+- BSim Ghidra scripts for cross-version function similarity matching
+- Fixed enum value parsing (GitHub issue #44)
+- Dead code cleanup (~243KB of deprecated workflow modules removed)
+- 193 MCP tools, 169 GUI endpoints, 173 headless endpoints
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
+### v4.0.0
 
 - **Major Release** - Service layer architecture refactor
 - Extracted 12 shared service classes from monolith (`com.xebyte.core/`)

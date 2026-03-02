@@ -87,44 +87,24 @@ public class BinaryComparisonService {
         public boolean hasEpilogueStripped;
 
         public String toJson() {
-            StringBuilder sb = new StringBuilder();
-            sb.append("{");
-            sb.append("\"function_name\": \"").append(escapeJson(functionName)).append("\", ");
-            sb.append("\"address\": \"").append(escapeJson(address)).append("\", ");
-            sb.append("\"program\": \"").append(escapeJson(programName)).append("\", ");
-            sb.append("\"instruction_count\": ").append(instructionCount).append(", ");
-            sb.append("\"basic_block_count\": ").append(basicBlockCount).append(", ");
-            sb.append("\"edge_count\": ").append(edgeCount).append(", ");
-            sb.append("\"call_count\": ").append(callCount).append(", ");
-            sb.append("\"string_ref_count\": ").append(stringRefCount).append(", ");
-            sb.append("\"param_count\": ").append(paramCount).append(", ");
-            sb.append("\"cyclomatic_complexity\": ").append(cyclomaticComplexity).append(", ");
-            sb.append("\"prologue_stripped\": ").append(hasPrologueStripped).append(", ");
-            sb.append("\"epilogue_stripped\": ").append(hasEpilogueStripped).append(", ");
-
-            sb.append("\"callee_names\": [");
-            appendStringSet(sb, calleeNames);
-            sb.append("], ");
-
-            sb.append("\"string_constants\": [");
-            appendStringSet(sb, stringConstants);
-            sb.append("], ");
-
-            sb.append("\"immediate_values\": [");
-            boolean first = true;
-            for (Long v : immediateValues) {
-                if (!first) sb.append(", ");
-                sb.append(v);
-                first = false;
-            }
-            sb.append("], ");
-
-            sb.append("\"basic_block_hashes\": [");
-            appendStringList(sb, basicBlockHashes);
-            sb.append("]");
-
-            sb.append("}");
-            return sb.toString();
+            return JsonHelper.toJson(JsonHelper.mapOf(
+                "function_name", functionName,
+                "address", address,
+                "program", programName,
+                "instruction_count", instructionCount,
+                "basic_block_count", basicBlockCount,
+                "edge_count", edgeCount,
+                "call_count", callCount,
+                "string_ref_count", stringRefCount,
+                "param_count", paramCount,
+                "cyclomatic_complexity", cyclomaticComplexity,
+                "prologue_stripped", hasPrologueStripped,
+                "epilogue_stripped", hasEpilogueStripped,
+                "callee_names", calleeNames,
+                "string_constants", stringConstants,
+                "immediate_values", immediateValues,
+                "basic_block_hashes", basicBlockHashes
+            ));
         }
     }
 
@@ -297,7 +277,6 @@ public class BinaryComparisonService {
 
         // Extract features from body instructions
         AddressSetView funcBody = func.getBody();
-        Address funcStart = func.getEntryPoint();
 
         for (Instruction instr : body) {
             // Extract string refs and immediate values from operands
@@ -346,6 +325,7 @@ public class BinaryComparisonService {
             BasicBlockModel blockModel = new BasicBlockModel(program);
             CodeBlockIterator blockIter = blockModel.getCodeBlocksContaining(funcBody, monitor);
             Map<Address, List<String>> blockNormalized = new LinkedHashMap<>();
+            Address funcStart = func.getEntryPoint();
 
             while (blockIter.hasNext()) {
                 CodeBlock block = blockIter.next();
@@ -442,7 +422,7 @@ public class BinaryComparisonService {
     /**
      * Find functions in target program similar to the given source function.
      */
-    public static String findSimilarFunctionsJson(
+    public static Response findSimilarFunctionsJson(
             Program srcProgram, Function srcFunc,
             Program tgtProgram, double threshold, int limit,
             TaskMonitor monitor) {
@@ -482,37 +462,35 @@ public class BinaryComparisonService {
 
         int resultCount = Math.min(limit, indices.length);
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"source\": ");
-        sb.append("{\"name\": \"").append(escapeJson(srcFunc.getName())).append("\", ");
-        sb.append("\"address\": \"").append(srcFunc.getEntryPoint()).append("\", ");
-        sb.append("\"program\": \"").append(escapeJson(srcProgram.getName())).append("\"}, ");
-        sb.append("\"target_program\": \"").append(escapeJson(tgtProgram.getName())).append("\", ");
-        sb.append("\"threshold\": ").append(threshold).append(", ");
-        sb.append("\"total_matches\": ").append(indices.length).append(", ");
-        sb.append("\"matches\": [");
-
+        List<Map<String, Object>> matchList = new ArrayList<>();
         for (int i = 0; i < resultCount; i++) {
             int idx = indices[i];
             Function tgtFunc = matchFunctions.get(idx);
             double score = matches.get(idx)[0];
-
-            if (i > 0) sb.append(", ");
-            sb.append("{");
-            sb.append("\"name\": \"").append(escapeJson(tgtFunc.getName())).append("\", ");
-            sb.append("\"address\": \"").append(tgtFunc.getEntryPoint()).append("\", ");
-            sb.append("\"score\": ").append(String.format("%.4f", score));
-            sb.append("}");
+            matchList.add(JsonHelper.mapOf(
+                "name", tgtFunc.getName(),
+                "address", tgtFunc.getEntryPoint().toString(),
+                "score", Double.parseDouble(String.format("%.4f", score))
+            ));
         }
 
-        sb.append("]}");
-        return sb.toString();
+        return Response.ok(JsonHelper.mapOf(
+            "source", JsonHelper.mapOf(
+                "name", srcFunc.getName(),
+                "address", srcFunc.getEntryPoint().toString(),
+                "program", srcProgram.getName()
+            ),
+            "target_program", tgtProgram.getName(),
+            "threshold", threshold,
+            "total_matches", indices.length,
+            "matches", matchList
+        ));
     }
 
     /**
      * Bulk fuzzy match: find best match for each source function in target program.
      */
-    public static String bulkFuzzyMatchJson(
+    public static Response bulkFuzzyMatchJson(
             Program srcProgram, Program tgtProgram,
             double threshold, int offset, int limit,
             String filter, TaskMonitor monitor) {
@@ -535,11 +513,14 @@ public class BinaryComparisonService {
         int endIdx = Math.min(totalSrc, startIdx + limit);
 
         if (startIdx >= totalSrc) {
-            return "{\"source_program\": \"" + escapeJson(srcProgram.getName()) +
-                   "\", \"target_program\": \"" + escapeJson(tgtProgram.getName()) +
-                   "\", \"total_source_functions\": " + totalSrc +
-                   ", \"offset\": " + offset + ", \"limit\": " + limit +
-                   ", \"matches\": []}";
+            return Response.ok(JsonHelper.mapOf(
+                "source_program", srcProgram.getName(),
+                "target_program", tgtProgram.getName(),
+                "total_source_functions", totalSrc,
+                "offset", offset,
+                "limit", limit,
+                "matches", Collections.emptyList()
+            ));
         }
 
         // Pre-compute target signatures
@@ -554,15 +535,7 @@ public class BinaryComparisonService {
             tgtSigs.add(computeFunctionSignature(tgtProgram, f, monitor));
         }
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\"source_program\": \"").append(escapeJson(srcProgram.getName())).append("\", ");
-        sb.append("\"target_program\": \"").append(escapeJson(tgtProgram.getName())).append("\", ");
-        sb.append("\"total_source_functions\": ").append(totalSrc).append(", ");
-        sb.append("\"offset\": ").append(offset).append(", ");
-        sb.append("\"limit\": ").append(limit).append(", ");
-        sb.append("\"matches\": [");
-
-        boolean firstMatch = true;
+        List<Map<String, Object>> matchList = new ArrayList<>();
         for (int i = startIdx; i < endIdx; i++) {
             if (monitor.isCancelled()) break;
             Function srcFunc = srcFunctions.get(i);
@@ -589,20 +562,24 @@ public class BinaryComparisonService {
 
             if (bestScore >= threshold && bestIdx >= 0) {
                 Function bestFunc = tgtFunctions.get(bestIdx);
-                if (!firstMatch) sb.append(", ");
-                sb.append("{");
-                sb.append("\"source_name\": \"").append(escapeJson(srcFunc.getName())).append("\", ");
-                sb.append("\"source_address\": \"").append(srcFunc.getEntryPoint()).append("\", ");
-                sb.append("\"target_name\": \"").append(escapeJson(bestFunc.getName())).append("\", ");
-                sb.append("\"target_address\": \"").append(bestFunc.getEntryPoint()).append("\", ");
-                sb.append("\"score\": ").append(String.format("%.4f", bestScore));
-                sb.append("}");
-                firstMatch = false;
+                matchList.add(JsonHelper.mapOf(
+                    "source_name", srcFunc.getName(),
+                    "source_address", srcFunc.getEntryPoint().toString(),
+                    "target_name", bestFunc.getName(),
+                    "target_address", bestFunc.getEntryPoint().toString(),
+                    "score", Double.parseDouble(String.format("%.4f", bestScore))
+                ));
             }
         }
 
-        sb.append("]}");
-        return sb.toString();
+        return Response.ok(JsonHelper.mapOf(
+            "source_program", srcProgram.getName(),
+            "target_program", tgtProgram.getName(),
+            "total_source_functions", totalSrc,
+            "offset", offset,
+            "limit", limit,
+            "matches", matchList
+        ));
     }
 
     // ========================================================================
@@ -612,7 +589,7 @@ public class BinaryComparisonService {
     /**
      * Compute a structured diff between two functions.
      */
-    public static String diffFunctionsJson(
+    public static Response diffFunctionsJson(
             Program progA, Function funcA,
             Program progB, Function funcB,
             TaskMonitor monitor) {
@@ -700,66 +677,41 @@ public class BinaryComparisonService {
 
         double similarity = computeSimilarity(sigA, sigB);
 
-        // Build JSON
-        StringBuilder sb = new StringBuilder();
-        sb.append("{");
+        // Build diff entry lists for JSON
+        List<Map<String, Object>> prologueDiffList = diffEntriesToList(prologueDiff, prologueDiff.size());
+        List<Map<String, Object>> bodyDiffList = diffEntriesToList(bodyDiff, MAX_DIFF_ENTRIES);
+        List<Map<String, Object>> epilogueDiffList = diffEntriesToList(epilogueDiff, epilogueDiff.size());
 
-        // Function info
-        sb.append("\"function_a\": {");
-        sb.append("\"name\": \"").append(escapeJson(funcA.getName())).append("\", ");
-        sb.append("\"address\": \"").append(funcA.getEntryPoint()).append("\", ");
-        sb.append("\"program\": \"").append(escapeJson(progA.getName())).append("\", ");
-        sb.append("\"instruction_count\": ").append(partsA[0].size() + partsA[1].size() + partsA[2].size());
-        sb.append("}, ");
-
-        sb.append("\"function_b\": {");
-        sb.append("\"name\": \"").append(escapeJson(funcB.getName())).append("\", ");
-        sb.append("\"address\": \"").append(funcB.getEntryPoint()).append("\", ");
-        sb.append("\"program\": \"").append(escapeJson(progB.getName())).append("\", ");
-        sb.append("\"instruction_count\": ").append(partsB[0].size() + partsB[1].size() + partsB[2].size());
-        sb.append("}, ");
-
-        // Summary
-        sb.append("\"summary\": {");
-        sb.append("\"similarity_score\": ").append(String.format("%.4f", similarity)).append(", ");
-        sb.append("\"body_equal\": ").append(bodyEqual).append(", ");
-        sb.append("\"body_added\": ").append(bodyAdded).append(", ");
-        sb.append("\"body_removed\": ").append(bodyRemoved).append(", ");
-        sb.append("\"prologue_changed\": ").append(prologueChanged).append(", ");
-        sb.append("\"epilogue_changed\": ").append(epilogueChanged).append(", ");
-        sb.append("\"truncated\": ").append(truncated).append(", ");
-
-        sb.append("\"calls_only_in_a\": [");
-        appendStringSet(sb, callsOnlyA);
-        sb.append("], ");
-        sb.append("\"calls_only_in_b\": [");
-        appendStringSet(sb, callsOnlyB);
-        sb.append("], ");
-        sb.append("\"strings_only_in_a\": [");
-        appendStringSet(sb, stringsOnlyA);
-        sb.append("], ");
-        sb.append("\"strings_only_in_b\": [");
-        appendStringSet(sb, stringsOnlyB);
-        sb.append("]");
-        sb.append("}, ");
-
-        // Prologue diff
-        sb.append("\"prologue_diff\": [");
-        appendDiffEntries(sb, prologueDiff, prologueDiff.size());
-        sb.append("], ");
-
-        // Body diff (truncated)
-        sb.append("\"body_diff\": [");
-        appendDiffEntries(sb, bodyDiff, MAX_DIFF_ENTRIES);
-        sb.append("], ");
-
-        // Epilogue diff
-        sb.append("\"epilogue_diff\": [");
-        appendDiffEntries(sb, epilogueDiff, epilogueDiff.size());
-        sb.append("]");
-
-        sb.append("}");
-        return sb.toString();
+        return Response.ok(JsonHelper.mapOf(
+            "function_a", JsonHelper.mapOf(
+                "name", funcA.getName(),
+                "address", funcA.getEntryPoint().toString(),
+                "program", progA.getName(),
+                "instruction_count", partsA[0].size() + partsA[1].size() + partsA[2].size()
+            ),
+            "function_b", JsonHelper.mapOf(
+                "name", funcB.getName(),
+                "address", funcB.getEntryPoint().toString(),
+                "program", progB.getName(),
+                "instruction_count", partsB[0].size() + partsB[1].size() + partsB[2].size()
+            ),
+            "summary", JsonHelper.mapOf(
+                "similarity_score", Double.parseDouble(String.format("%.4f", similarity)),
+                "body_equal", bodyEqual,
+                "body_added", bodyAdded,
+                "body_removed", bodyRemoved,
+                "prologue_changed", prologueChanged,
+                "epilogue_changed", epilogueChanged,
+                "truncated", truncated,
+                "calls_only_in_a", callsOnlyA,
+                "calls_only_in_b", callsOnlyB,
+                "strings_only_in_a", stringsOnlyA,
+                "strings_only_in_b", stringsOnlyB
+            ),
+            "prologue_diff", prologueDiffList,
+            "body_diff", bodyDiffList,
+            "epilogue_diff", epilogueDiffList
+        ));
     }
 
     // ========================================================================
@@ -929,6 +881,19 @@ public class BinaryComparisonService {
     // UTILITY METHODS
     // ========================================================================
 
+    /**
+     * Convert a list of DiffEntry objects to a list of maps for JSON serialization.
+     */
+    private static List<Map<String, Object>> diffEntriesToList(List<DiffEntry> entries, int maxEntries) {
+        int count = Math.min(entries.size(), maxEntries);
+        List<Map<String, Object>> result = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            DiffEntry e = entries.get(i);
+            result.add(JsonHelper.mapOf("type", e.type, "line", e.line));
+        }
+        return result;
+    }
+
     private static double numericFieldSimilarity(int a, int b) {
         if (a == 0 && b == 0) return 1.0;
         return 1.0 - (double) Math.abs(a - b) / Math.max(a, b);
@@ -1007,40 +972,5 @@ public class BinaryComparisonService {
             sb.append(hex);
         }
         return sb.toString();
-    }
-
-    static String escapeJson(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
-    }
-
-    private static void appendStringSet(StringBuilder sb, Set<String> set) {
-        boolean first = true;
-        for (String s : set) {
-            if (!first) sb.append(", ");
-            sb.append("\"").append(escapeJson(s)).append("\"");
-            first = false;
-        }
-    }
-
-    private static void appendStringList(StringBuilder sb, List<String> list) {
-        for (int i = 0; i < list.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append("\"").append(escapeJson(list.get(i))).append("\"");
-        }
-    }
-
-    private static void appendDiffEntries(StringBuilder sb, List<DiffEntry> entries, int maxEntries) {
-        int count = Math.min(entries.size(), maxEntries);
-        for (int i = 0; i < count; i++) {
-            if (i > 0) sb.append(", ");
-            DiffEntry e = entries.get(i);
-            sb.append("{\"type\": \"").append(e.type).append("\", ");
-            sb.append("\"line\": \"").append(escapeJson(e.line)).append("\"}");
-        }
     }
 }

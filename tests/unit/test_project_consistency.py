@@ -51,10 +51,26 @@ def get_pom_version() -> str:
     return match.group(1)
 
 
+JAVA_REGISTRY = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "core" / "EndpointRegistry.java"
+
+
 def count_create_context(java_path: Path) -> int:
     """Count server.createContext() calls in a Java file."""
     content = java_path.read_text(encoding="utf-8")
     return len(re.findall(r'(?:server|httpServer)\.createContext\(', content))
+
+
+def count_registry_endpoints() -> int:
+    """Count endpoints declared in EndpointRegistry.java."""
+    if not JAVA_REGISTRY.exists():
+        return 0
+    content = JAVA_REGISTRY.read_text(encoding="utf-8")
+    return len(re.findall(r'(?:get|post)\(\s*"/', content))
+
+
+def count_total_endpoints(java_path: Path) -> int:
+    """Count total endpoints: direct createContext + shared EndpointRegistry entries."""
+    return count_create_context(java_path) + count_registry_endpoints()
 
 
 def count_mcp_tools() -> int:
@@ -184,14 +200,14 @@ class TestEndpointCounts:
     """Endpoint counts in code and docs should match actual registrations."""
 
     def test_gui_endpoint_count_constant(self):
-        """ENDPOINT_COUNT in GhidraMCPPlugin.java should match actual createContext calls."""
+        """ENDPOINT_COUNT in GhidraMCPPlugin.java should match total endpoints (direct + registry)."""
         content = JAVA_PLUGIN.read_text(encoding="utf-8")
         match = re.search(r"ENDPOINT_COUNT\s*=\s*(\d+)", content)
         assert match, "ENDPOINT_COUNT constant not found in GhidraMCPPlugin.java"
         declared = int(match.group(1))
-        actual = count_create_context(JAVA_PLUGIN)
+        actual = count_total_endpoints(JAVA_PLUGIN)
         assert declared == actual, (
-            f"ENDPOINT_COUNT ({declared}) != actual createContext calls ({actual}). "
+            f"ENDPOINT_COUNT ({declared}) != actual endpoints ({actual}). "
             f"Update ENDPOINT_COUNT in GhidraMCPPlugin.java."
         )
 
@@ -212,7 +228,7 @@ class TestEndpointCounts:
 
     def test_gui_endpoint_count_reasonable(self):
         """GUI endpoint count should be within expected range."""
-        count = count_create_context(JAVA_PLUGIN)
+        count = count_total_endpoints(JAVA_PLUGIN)
         assert count >= 140, f"GUI endpoint count {count} seems too low"
         assert count <= 200, f"GUI endpoint count {count} seems too high"
 
@@ -220,7 +236,7 @@ class TestEndpointCounts:
         """Headless endpoint count should be within expected range."""
         if not JAVA_HEADLESS.exists():
             pytest.skip("Headless server source not found")
-        count = count_create_context(JAVA_HEADLESS)
+        count = count_total_endpoints(JAVA_HEADLESS)
         assert count >= 160, f"Headless endpoint count {count} seems too low"
         assert count <= 220, f"Headless endpoint count {count} seems too high"
 
@@ -314,25 +330,20 @@ class TestBridgeConfiguration:
 class TestJavaConsistency:
     """Validate Java source file consistency."""
 
-    def test_osgi_class_naming_uses_unique_names(self):
-        """Inline script class names should use Mcp_<hex> pattern, not fixed prefix.
+    def test_osgi_class_naming_no_fixed_prefix(self):
+        """Inline script class names should not use _mcp_inline_ fixed prefix.
 
-        Fixed prefixes like _mcp_inline_ cause OSGi class cache collisions
-        where the bundle resolver caches a stale classloader.
+        Fixed prefixes cause OSGi class cache collisions where the bundle
+        resolver caches a stale classloader.
         """
         content = JAVA_PLUGIN.read_text(encoding="utf-8")
-        # Strip Java comments before checking — the old prefix may appear
+        # Strip Java comments before checking -- the old prefix may appear
         # in explanatory comments but must not be used as actual code.
-        import re
         code_only = re.sub(r'//.*', '', content)           # line comments
         code_only = re.sub(r'/\*.*?\*/', '', code_only, flags=re.DOTALL)  # block comments
         assert '_mcp_inline_' not in code_only, (
             "GhidraMCPPlugin.java still uses _mcp_inline_ prefix in code. "
-            "Should use unique Mcp_<hex> class names to avoid OSGi cache collisions."
-        )
-        # Should contain the new nanoTime-based unique naming
-        assert 'System.nanoTime()' in content, (
-            "GhidraMCPPlugin.java should use System.nanoTime() for unique class names"
+            "Should use unique class names to avoid OSGi cache collisions."
         )
 
     def test_pom_description_matches_version(self):

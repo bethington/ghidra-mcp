@@ -24,58 +24,25 @@ public class ListingService {
     }
 
     // ========================================================================
-    // Program resolution helper
-    // ========================================================================
-
-    /**
-     * Resolve a program by name, returning [program, errorJson].
-     * If program is null, errorJson contains a descriptive error message.
-     */
-    private Object[] getProgramOrError(String programName) {
-        Program program = programProvider.resolveProgram(programName);
-
-        if (program == null && programName != null && !programName.trim().isEmpty()) {
-            StringBuilder error = new StringBuilder();
-            error.append("{\"error\": \"Program not found: ").append(ServiceUtils.escapeJson(programName)).append("\", ");
-            error.append("\"available_programs\": [");
-
-            Program[] programs = programProvider.getAllOpenPrograms();
-            for (int i = 0; i < programs.length; i++) {
-                if (i > 0) error.append(", ");
-                error.append("\"").append(ServiceUtils.escapeJson(programs[i].getName())).append("\"");
-            }
-            error.append("]}");
-
-            return new Object[]{null, error.toString()};
-        }
-
-        if (program == null) {
-            return new Object[]{null, "{\"error\": \"No program currently loaded\"}"};
-        }
-
-        return new Object[]{program, null};
-    }
-
-    // ========================================================================
     // Listing endpoints
     // ========================================================================
 
-    public String getAllFunctionNames(int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response getAllFunctionNames(int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         List<String> names = new ArrayList<>();
         for (Function f : program.getFunctionManager().getFunctions(true)) {
             names.add(f.getName());
         }
-        return ServiceUtils.paginateList(names, offset, limit);
+        return Response.text(ServiceUtils.paginateList(names, offset, limit));
     }
 
-    public String getAllClassNames(int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response getAllClassNames(int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         Set<String> classNames = new HashSet<>();
         for (Symbol symbol : program.getSymbolTable().getAllSymbols(true)) {
@@ -86,37 +53,37 @@ public class ListingService {
         }
         List<String> sorted = new ArrayList<>(classNames);
         Collections.sort(sorted);
-        return ServiceUtils.paginateList(sorted, offset, limit);
+        return Response.text(ServiceUtils.paginateList(sorted, offset, limit));
     }
 
-    public String listSegments(int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listSegments(int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         List<String> lines = new ArrayList<>();
         for (MemoryBlock block : program.getMemory().getBlocks()) {
             lines.add(String.format("%s: %s - %s", block.getName(), block.getStart(), block.getEnd()));
         }
-        return ServiceUtils.paginateList(lines, offset, limit);
+        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public String listImports(int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listImports(int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         List<String> lines = new ArrayList<>();
         for (Symbol symbol : program.getSymbolTable().getExternalSymbols()) {
             lines.add(symbol.getName() + " -> " + symbol.getAddress());
         }
-        return ServiceUtils.paginateList(lines, offset, limit);
+        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public String listExports(int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listExports(int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         SymbolTable table = program.getSymbolTable();
         SymbolIterator it = table.getAllSymbols(true);
@@ -128,13 +95,13 @@ public class ListingService {
                 lines.add(s.getName() + " -> " + s.getAddress());
             }
         }
-        return ServiceUtils.paginateList(lines, offset, limit);
+        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public String listNamespaces(int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listNamespaces(int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         Set<String> namespaces = new HashSet<>();
         for (Symbol symbol : program.getSymbolTable().getAllSymbols(true)) {
@@ -145,13 +112,13 @@ public class ListingService {
         }
         List<String> sorted = new ArrayList<>(namespaces);
         Collections.sort(sorted);
-        return ServiceUtils.paginateList(sorted, offset, limit);
+        return Response.text(ServiceUtils.paginateList(sorted, offset, limit));
     }
 
-    public String listDefinedData(int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listDefinedData(int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         List<String> lines = new ArrayList<>();
         for (MemoryBlock block : program.getMemory().getBlocks()) {
@@ -176,13 +143,13 @@ public class ListingService {
                 }
             }
         }
-        return ServiceUtils.paginateList(lines, offset, limit);
+        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public String listDataItemsByXrefs(int offset, int limit, String format, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listDataItemsByXrefs(int offset, int limit, String format, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         List<DataItemInfo> dataItems = new ArrayList<>();
         ReferenceManager refMgr = program.getReferenceManager();
@@ -216,11 +183,12 @@ public class ListingService {
         }
     }
 
-    public String searchFunctionsByName(String searchTerm, int offset, int limit, String programName) {
-        Object[] result = getProgramOrError(programName);
-        Program program = (Program) result[0];
-        if (program == null) return (String) result[1];
-        if (searchTerm == null || searchTerm.isEmpty()) return "{\"error\": \"Search term is required\"}";
+    public Response searchFunctionsByName(String searchTerm, int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (searchTerm == null || searchTerm.isEmpty()) return Response.err("Search term is required");
 
         List<String> matches = new ArrayList<>();
         for (Function func : program.getFunctionManager().getFunctions(true)) {
@@ -233,15 +201,15 @@ public class ListingService {
         Collections.sort(matches);
 
         if (matches.isEmpty()) {
-            return "No functions matching '" + searchTerm + "'";
+            return Response.text("No functions matching '" + searchTerm + "'");
         }
-        return ServiceUtils.paginateList(matches, offset, limit);
+        return Response.text(ServiceUtils.paginateList(matches, offset, limit));
     }
 
-    public String listFunctions(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listFunctions(String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         StringBuilder result = new StringBuilder();
         for (Function func : program.getFunctionManager().getFunctions(true)) {
@@ -250,20 +218,17 @@ public class ListingService {
                 func.getEntryPoint()));
         }
 
-        return result.toString();
+        return Response.text(result.toString());
     }
 
-    public String listFunctionsEnhanced(int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return "{\"error\": \"" + ServiceUtils.escapeJson((String) programResult[1]) + "\"}";
+    public Response listFunctionsEnhanced(int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
-        StringBuilder result = new StringBuilder();
-        result.append("{\"functions\": [");
-
+        List<Map<String, Object>> functions = new ArrayList<>();
         int count = 0;
         int skipped = 0;
-        boolean first = true;
 
         for (Function func : program.getFunctionManager().getFunctions(true)) {
             if (skipped < offset) {
@@ -272,31 +237,27 @@ public class ListingService {
             }
             if (count >= limit) break;
 
-            if (!first) result.append(",");
-            first = false;
-
-            result.append("{");
-            result.append("\"name\":\"").append(ServiceUtils.escapeJson(func.getName())).append("\",");
-            result.append("\"address\":\"").append(func.getEntryPoint()).append("\",");
-            result.append("\"isThunk\":").append(func.isThunk()).append(",");
-            result.append("\"isExternal\":").append(func.isExternal());
-            result.append("}");
-
+            functions.add(JsonHelper.mapOf(
+                    "name", func.getName(),
+                    "address", func.getEntryPoint().toString(),
+                    "isThunk", func.isThunk(),
+                    "isExternal", func.isExternal()
+            ));
             count++;
         }
 
-        result.append("],\"count\":").append(count);
-        result.append(",\"offset\":").append(offset);
-        result.append(",\"limit\":").append(limit);
-        result.append("}");
-
-        return result.toString();
+        return Response.ok(JsonHelper.mapOf(
+                "functions", functions,
+                "count", count,
+                "offset", offset,
+                "limit", limit
+        ));
     }
 
-    public String listCallingConventions(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listCallingConventions(String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         try {
             ghidra.program.model.lang.CompilerSpec compilerSpec = program.getCompilerSpec();
@@ -309,16 +270,16 @@ public class ListingService {
                 result.append("- ").append(model.getName()).append("\n");
             }
 
-            return result.toString();
+            return Response.text(result.toString());
         } catch (Exception e) {
-            return "Error listing calling conventions: " + e.getMessage();
+            return Response.err("Error listing calling conventions: " + e.getMessage());
         }
     }
 
-    public String listDefinedStrings(int offset, int limit, String filter, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listDefinedStrings(int offset, int limit, String filter, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         List<String> lines = new ArrayList<>();
         DataIterator dataIt = program.getListing().getDefinedData(true);
@@ -341,34 +302,39 @@ public class ListingService {
         }
 
         if (lines.isEmpty()) {
-            return "No quality strings found (minimum 4 characters, 80% printable)";
+            return Response.text("No quality strings found (minimum 4 characters, 80% printable)");
         }
 
-        return ServiceUtils.paginateList(lines, offset, limit);
+        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public String getFunctionCount(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response getFunctionCount(String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
         int count = program.getFunctionManager().getFunctionCount();
-        return "{\"function_count\": " + count + ", \"program\": \"" + ServiceUtils.escapeJson(program.getName()) + "\"}";
+        return Response.ok(JsonHelper.mapOf(
+                "function_count", count,
+                "program", program.getName()
+        ));
     }
 
-    public String searchStrings(String query, int minLength, String encoding, int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
-        if (query == null || query.isEmpty()) return "{\"error\": \"query parameter is required\"}";
+    public Response searchStrings(String query, int minLength, String encoding, int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (query == null || query.isEmpty()) return Response.err("query parameter is required");
 
         Pattern pat;
         try {
             pat = Pattern.compile(query, Pattern.CASE_INSENSITIVE);
         } catch (Exception e) {
-            return "{\"error\": \"Invalid regex: " + ServiceUtils.escapeJson(e.getMessage()) + "\"}";
+            return Response.err("Invalid regex: " + e.getMessage());
         }
 
-        List<String> results = new ArrayList<>();
+        List<Map<String, Object>> results = new ArrayList<>();
         DataIterator dataIt = program.getListing().getDefinedData(true);
         while (dataIt.hasNext()) {
             Data data = dataIt.next();
@@ -377,25 +343,29 @@ public class ListingService {
             if (value.length() < minLength) continue;
             if (!pat.matcher(value).find()) continue;
             String enc = (encoding != null && !encoding.isEmpty()) ? encoding : "ascii";
-            results.add("{\"address\": \"" + data.getAddress() + "\", \"value\": \"" + ServiceUtils.escapeJson(value) + "\", \"encoding\": \"" + enc + "\"}");
+            results.add(JsonHelper.mapOf(
+                    "address", data.getAddress().toString(),
+                    "value", value,
+                    "encoding", enc
+            ));
         }
 
         int total = results.size();
         int from = Math.min(offset, total);
         int to = Math.min(from + limit, total);
-        StringBuilder sb = new StringBuilder("{\"matches\": [");
-        for (int i = from; i < to; i++) {
-            if (i > from) sb.append(", ");
-            sb.append(results.get(i));
-        }
-        sb.append("], \"total\": ").append(total).append(", \"offset\": ").append(offset).append(", \"limit\": ").append(limit).append("}");
-        return sb.toString();
+
+        return Response.ok(JsonHelper.mapOf(
+                "matches", results.subList(from, to),
+                "total", total,
+                "offset", offset,
+                "limit", limit
+        ));
     }
 
-    public String listGlobals(int offset, int limit, String filter, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listGlobals(int offset, int limit, String filter, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         List<String> globals = new ArrayList<>();
         SymbolTable symbolTable = program.getSymbolTable();
@@ -405,31 +375,28 @@ public class ListingService {
 
         while (symbols.hasNext()) {
             Symbol symbol = symbols.next();
-
             if (symbol.getSymbolType() == SymbolType.FUNCTION) {
                 continue;
             }
 
             String symbolInfo = formatGlobalSymbol(symbol);
-
             if (filter == null || filter.isEmpty() ||
                 symbolInfo.toLowerCase().contains(filter.toLowerCase())) {
                 globals.add(symbolInfo);
             }
         }
 
-        return ServiceUtils.paginateList(globals, offset, limit);
+        return Response.text(ServiceUtils.paginateList(globals, offset, limit));
     }
 
-    public String getEntryPoints(String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response getEntryPoints(String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         List<String> entryPoints = new ArrayList<>();
         SymbolTable symbolTable = program.getSymbolTable();
 
-        // Method 1: Get all external entry point symbols
         SymbolIterator allSymbols = symbolTable.getAllSymbols(true);
         while (allSymbols.hasNext()) {
             Symbol symbol = allSymbols.next();
@@ -439,7 +406,6 @@ public class ListingService {
             }
         }
 
-        // Method 2: Check for common entry point names
         String[] commonEntryNames = {"main", "_main", "start", "_start", "WinMain", "_WinMain",
                                    "DllMain", "_DllMain", "entry", "_entry"};
 
@@ -456,7 +422,6 @@ public class ListingService {
             }
         }
 
-        // Method 3: Get the program's designated entry point
         Address programEntry = program.getImageBase();
         if (programEntry != null) {
             Symbol entrySymbol = symbolTable.getPrimarySymbol(programEntry);
@@ -471,7 +436,6 @@ public class ListingService {
             }
         }
 
-        // If no entry points found, check for functions at common addresses
         if (entryPoints.isEmpty()) {
             String[] commonHexAddresses = {"0x401000", "0x400000", "0x1000", "0x10000"};
             for (String hexAddr : commonHexAddresses) {
@@ -490,10 +454,10 @@ public class ListingService {
         }
 
         if (entryPoints.isEmpty()) {
-            return "No entry points found in program";
+            return Response.text("No entry points found in program");
         }
 
-        return String.join("\n", entryPoints);
+        return Response.text(String.join("\n", entryPoints));
     }
 
     // ========================================================================
@@ -516,7 +480,7 @@ public class ListingService {
         }
     }
 
-    private String formatDataItemsAsText(List<DataItemInfo> dataItems, int offset, int limit) {
+    private Response formatDataItemsAsText(List<DataItemInfo> dataItems, int offset, int limit) {
         List<String> lines = new ArrayList<>();
 
         int start = Math.min(offset, dataItems.size());
@@ -537,34 +501,27 @@ public class ListingService {
             lines.add(line.toString());
         }
 
-        return String.join("\n", lines);
+        return Response.text(String.join("\n", lines));
     }
 
-    private String formatDataItemsAsJson(List<DataItemInfo> dataItems, int offset, int limit) {
-        StringBuilder json = new StringBuilder();
-        json.append("[");
-
+    private Response formatDataItemsAsJson(List<DataItemInfo> dataItems, int offset, int limit) {
         int start = Math.min(offset, dataItems.size());
         int end = Math.min(start + limit, dataItems.size());
 
+        List<Map<String, Object>> items = new ArrayList<>();
         for (int i = start; i < end; i++) {
-            if (i > start) json.append(",");
-
             DataItemInfo item = dataItems.get(i);
-
-            json.append("\n  {");
-            json.append("\n    \"address\": \"").append(item.address).append("\",");
-            json.append("\n    \"name\": \"").append(ServiceUtils.escapeJson(item.label)).append("\",");
-            json.append("\n    \"type\": \"").append(ServiceUtils.escapeJson(item.typeName)).append("\",");
-
             String sizeStr = (item.length == 1) ? "1 byte" : item.length + " bytes";
-            json.append("\n    \"size\": \"").append(sizeStr).append("\",");
-            json.append("\n    \"xref_count\": ").append(item.xrefCount);
-            json.append("\n  }");
+            items.add(JsonHelper.mapOf(
+                    "address", item.address,
+                    "name", item.label,
+                    "type", item.typeName,
+                    "size", sizeStr,
+                    "xref_count", item.xrefCount
+            ));
         }
 
-        json.append("\n]");
-        return json.toString();
+        return Response.ok(items);
     }
 
     private String formatGlobalSymbol(Symbol symbol) {
@@ -614,14 +571,10 @@ public class ListingService {
     // External Location Listing
     // ========================================================================
 
-    /**
-     * List all external locations (imports, ordinal imports, etc.)
-     * Returns detailed information including library name and label.
-     */
-    public String listExternalLocations(int offset, int limit, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response listExternalLocations(int offset, int limit, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         ExternalManager extMgr = program.getExternalManager();
         List<String> lines = new ArrayList<>();
@@ -641,77 +594,61 @@ public class ListingService {
             }
         } catch (Exception e) {
             Msg.error(this, "Error listing external locations: " + e.getMessage());
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
 
-        return ServiceUtils.paginateList(lines, offset, limit);
+        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    /**
-     * Backward compatibility overload without program name.
-     */
-    public String listExternalLocations(int offset, int limit) {
+    public Response listExternalLocations(int offset, int limit) {
         return listExternalLocations(offset, limit, null);
     }
 
-    /**
-     * Get details of a specific external location by address and optional DLL name.
-     */
-    public String getExternalLocationDetails(String address, String dllName, String programName) {
-        Object[] programResult = getProgramOrError(programName);
-        Program program = (Program) programResult[0];
-        if (program == null) return (String) programResult[1];
+    public Response getExternalLocationDetails(String address, String dllName, String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
 
         try {
             Address addr = program.getAddressFactory().getAddress(address);
             ExternalManager extMgr = program.getExternalManager();
-
-            StringBuilder result = new StringBuilder();
-            result.append("{");
-            result.append("\"address\": \"").append(address).append("\", ");
 
             if (dllName != null && !dllName.isEmpty()) {
                 ExternalLocationIterator iter = extMgr.getExternalLocations(dllName);
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
                     if (extLoc.getAddress().equals(addr)) {
-                        result.append("\"dll_name\": \"").append(dllName).append("\", ");
-                        result.append("\"label\": \"").append(ServiceUtils.escapeJson(extLoc.getLabel())).append("\", ");
-                        result.append("\"address\": \"").append(addr).append("\"");
-                        break;
+                        return Response.ok(JsonHelper.mapOf(
+                                "address", addr.toString(),
+                                "dll_name", dllName,
+                                "label", extLoc.getLabel()
+                        ));
                     }
                 }
-                if (!result.toString().contains("label")) {
-                    result.append("\"error\": \"External location not found in DLL\"");
-                }
+                return Response.err("External location not found in DLL");
             } else {
-                // Try to find it in any DLL
                 String[] libNames = extMgr.getExternalLibraryNames();
                 for (String libName : libNames) {
                     ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
                     while (iter.hasNext()) {
                         ExternalLocation extLoc = iter.next();
                         if (extLoc.getAddress().equals(addr)) {
-                            result.append("\"dll_name\": \"").append(libName).append("\", ");
-                            result.append("\"label\": \"").append(ServiceUtils.escapeJson(extLoc.getLabel())).append("\", ");
-                            result.append("\"address\": \"").append(addr).append("\"");
-                            break;
+                            return Response.ok(JsonHelper.mapOf(
+                                    "address", addr.toString(),
+                                    "dll_name", libName,
+                                    "label", extLoc.getLabel()
+                            ));
                         }
                     }
-                    if (result.toString().contains("label")) break;
                 }
+                return Response.ok(JsonHelper.mapOf("address", address));
             }
-            result.append("}");
-            return result.toString();
         } catch (Exception e) {
-            return "{\"error\": \"" + e.getMessage().replace("\"", "\\\"") + "\"}";
+            return Response.err(e.getMessage());
         }
     }
 
-    /**
-     * Backward compatibility overload without program name.
-     */
-    public String getExternalLocationDetails(String address, String dllName) {
+    public Response getExternalLocationDetails(String address, String dllName) {
         return getExternalLocationDetails(address, dllName, null);
     }
 }

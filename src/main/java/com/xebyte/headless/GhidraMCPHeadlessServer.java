@@ -17,6 +17,9 @@ package com.xebyte.headless;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.xebyte.core.EndpointDef;
+import com.xebyte.core.EndpointRegistry;
+import com.xebyte.core.JsonHelper;
 import com.xebyte.core.ProgramProvider;
 import com.xebyte.core.ThreadingStrategy;
 import ghidra.GhidraApplicationLayout;
@@ -270,529 +273,60 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     }
 
     private void registerEndpoints() {
-        // Legacy health check endpoint (plain text)
+        // ==========================================================================
+        // INFRASTRUCTURE ENDPOINTS (not in service layer)
+        // ==========================================================================
+
         server.createContext("/check_connection", exchange -> {
             sendResponse(exchange, "Connection OK - GhidraMCP Headless Server v" + VERSION);
         });
 
-        // Health check endpoint (JSON, for Docker/Kubernetes)
         server.createContext("/health", exchange -> {
             sendResponse(exchange, endpointHandler.getHealth());
         });
 
-        // Version endpoint
         server.createContext("/get_version", exchange -> {
             sendResponse(exchange, endpointHandler.getVersion());
         });
 
-        // Metadata endpoint
-        server.createContext("/get_metadata", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            sendResponse(exchange, endpointHandler.getMetadata(programName));
-        });
-
         // ==========================================================================
-        // LISTING ENDPOINTS
+        // SHARED ENDPOINTS — Declarative registration via EndpointRegistry
         // ==========================================================================
 
-        server.createContext("/list_methods", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listMethods(offset, limit, programName));
-        });
+        EndpointRegistry registry = new EndpointRegistry(
+            endpointHandler.getListingService(), endpointHandler.getFunctionService(),
+            endpointHandler.getCommentService(), endpointHandler.getSymbolLabelService(),
+            endpointHandler.getXrefCallGraphService(), endpointHandler.getDataTypeService(),
+            endpointHandler.getAnalysisService(), endpointHandler.getDocumentationHashService(),
+            endpointHandler.getMalwareSecurityService(), endpointHandler.getProgramScriptService());
 
-        server.createContext("/list_functions", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listFunctions(programName));
-        });
-
-        server.createContext("/list_classes", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listClasses(offset, limit, programName));
-        });
-
-        server.createContext("/list_segments", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listSegments(offset, limit, programName));
-        });
-
-        server.createContext("/list_imports", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listImports(offset, limit, programName));
-        });
-
-        server.createContext("/list_exports", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listExports(offset, limit, programName));
-        });
-
-        server.createContext("/list_namespaces", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listNamespaces(offset, limit, programName));
-        });
-
-        server.createContext("/list_data_items", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listDataItems(offset, limit, programName));
-        });
-
-        server.createContext("/list_strings", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String filter = params.get("filter");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listStrings(offset, limit, filter, programName));
-        });
-
-        server.createContext("/list_data_types", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String category = params.get("category");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listDataTypes(offset, limit, category, programName));
-        });
+        for (EndpointDef ep : registry.getEndpoints()) {
+            server.createContext(ep.path(), exchange -> {
+                try {
+                    Map<String, String> query = parseQueryParams(exchange);
+                    Map<String, Object> body = "POST".equalsIgnoreCase(exchange.getRequestMethod())
+                        ? JsonHelper.parseBody(exchange.getRequestBody()) : Map.of();
+                    sendResponse(exchange, ep.handler().handle(query, body).toJson());
+                } catch (Exception e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    sendResponse(exchange, "{\"error\": \"" + msg.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}");
+                }
+            });
+        }
 
         // ==========================================================================
-        // GETTER ENDPOINTS
+        // HEADLESS-ONLY ENDPOINTS (no GUI equivalent)
         // ==========================================================================
-
-        server.createContext("/get_function_by_address", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getFunctionByAddress(address, programName));
-        });
 
         server.createContext("/get_current_address", exchange -> {
-            // Headless mode has no cursor
             sendResponse(exchange, "{\"error\": \"Headless mode - use address parameter with specific endpoints\"}");
         });
 
         server.createContext("/get_current_function", exchange -> {
-            // Headless mode has no cursor
             sendResponse(exchange, "{\"error\": \"Headless mode - use get_function_by_address\"}");
         });
 
-        // ==========================================================================
-        // DECOMPILE/DISASSEMBLE ENDPOINTS
-        // ==========================================================================
-
-        server.createContext("/decompile_function", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            String name = params.get("name");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.decompileFunction(address, name, programName));
-        });
-
-        server.createContext("/disassemble_function", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.disassembleFunction(address, programName));
-        });
-
-        // ==========================================================================
-        // CROSS-REFERENCE ENDPOINTS
-        // ==========================================================================
-
-        server.createContext("/get_xrefs_to", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getXrefsTo(address, offset, limit, programName));
-        });
-
-        server.createContext("/get_xrefs_from", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getXrefsFrom(address, offset, limit, programName));
-        });
-
-        server.createContext("/get_function_xrefs", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String name = params.get("name");
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getFunctionXrefs(name, offset, limit, programName));
-        });
-
-        // ==========================================================================
-        // SEARCH ENDPOINTS
-        // ==========================================================================
-
-        server.createContext("/search_functions", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String query = params.get("query");
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.searchFunctions(query, offset, limit, programName));
-        });
-
-        // ==========================================================================
-        // PHASE 1: ESSENTIAL ANALYSIS ENDPOINTS
-        // ==========================================================================
-
-        server.createContext("/get_function_callees", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String name = params.get("name");
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getFunctionCallees(name, offset, limit, programName));
-        });
-
-        server.createContext("/get_function_callers", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String name = params.get("name");
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getFunctionCallers(name, offset, limit, programName));
-        });
-
-        server.createContext("/get_function_variables", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String functionName = params.get("function_name");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getFunctionVariables(functionName, programName));
-        });
-
-        server.createContext("/set_function_prototype", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String functionAddress = params.get("function_address");
-            String prototype = params.get("prototype");
-            String callingConvention = params.get("calling_convention");
-            sendResponse(exchange, endpointHandler.setFunctionPrototype(functionAddress, prototype, callingConvention, programName));
-        });
-
-        server.createContext("/set_local_variable_type", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String functionAddress = params.get("function_address");
-            String variableName = params.get("variable_name");
-            String newType = params.get("new_type");
-            sendResponse(exchange, endpointHandler.setLocalVariableType(functionAddress, variableName, newType, programName));
-        });
-
-        server.createContext("/create_struct", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String name = params.get("name");
-            String fields = params.get("fields");
-            sendResponse(exchange, endpointHandler.createStruct(name, fields, programName));
-        });
-
-        server.createContext("/apply_data_type", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String address = params.get("address");
-            String typeName = params.get("type_name");
-            boolean clearExisting = !"false".equalsIgnoreCase(params.get("clear_existing"));
-            sendResponse(exchange, endpointHandler.applyDataType(address, typeName, clearExisting, programName));
-        });
-
-        server.createContext("/batch_rename_variables", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String functionAddress = params.get("function_address");
-            String variableRenames = params.get("variable_renames");
-            sendResponse(exchange, endpointHandler.batchRenameVariables(functionAddress, variableRenames, programName));
-        });
-
-        server.createContext("/get_plate_comment", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getPlateComment(address, programName));
-        });
-
-        server.createContext("/set_plate_comment", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String functionAddress = params.get("function_address");
-            String comment = params.get("comment");
-            sendResponse(exchange, endpointHandler.setPlateComment(functionAddress, comment, programName));
-        });
-
-        // ==========================================================================
-        // PHASE 2: PRODUCTIVITY ENDPOINTS
-        // ==========================================================================
-
-        server.createContext("/batch_set_comments", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String functionAddress = params.get("function_address");
-            String decompilerComments = params.get("decompiler_comments");
-            String disassemblyComments = params.get("disassembly_comments");
-            String plateComment = params.get("plate_comment");
-            sendResponse(exchange, endpointHandler.batchSetComments(functionAddress, decompilerComments, disassemblyComments, plateComment, programName));
-        });
-
-        server.createContext("/clear_function_comments", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String functionAddress = params.get("function_address");
-            boolean clearPlate = !"false".equalsIgnoreCase(params.get("clear_plate"));
-            boolean clearPre = !"false".equalsIgnoreCase(params.get("clear_pre"));
-            boolean clearEol = !"false".equalsIgnoreCase(params.get("clear_eol"));
-            sendResponse(exchange, endpointHandler.clearFunctionComments(functionAddress, clearPlate, clearPre, clearEol, programName));
-        });
-
-        server.createContext("/batch_create_labels", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String labels = params.get("labels");
-            sendResponse(exchange, endpointHandler.batchCreateLabels(labels, programName));
-        });
-
-        server.createContext("/search_functions_enhanced", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String namePattern = params.get("name_pattern");
-            Integer minXrefs = params.get("min_xrefs") != null ? Integer.parseInt(params.get("min_xrefs")) : null;
-            Integer maxXrefs = params.get("max_xrefs") != null ? Integer.parseInt(params.get("max_xrefs")) : null;
-            Boolean hasCustomName = params.get("has_custom_name") != null ? Boolean.parseBoolean(params.get("has_custom_name")) : null;
-            boolean regex = "true".equalsIgnoreCase(params.get("regex"));
-            String sortBy = params.get("sort_by");
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.searchFunctionsEnhanced(namePattern, minXrefs, maxXrefs, hasCustomName, regex, sortBy, offset, limit, programName));
-        });
-
-        server.createContext("/analyze_function_complete", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String name = params.get("name");
-            boolean includeXrefs = !"false".equalsIgnoreCase(params.get("include_xrefs"));
-            boolean includeCallees = !"false".equalsIgnoreCase(params.get("include_callees"));
-            boolean includeCallers = !"false".equalsIgnoreCase(params.get("include_callers"));
-            boolean includeDisasm = !"false".equalsIgnoreCase(params.get("include_disasm"));
-            boolean includeVariables = !"false".equalsIgnoreCase(params.get("include_variables"));
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, programName));
-        });
-
-        server.createContext("/get_bulk_xrefs", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String addresses = params.get("addresses");
-            sendResponse(exchange, endpointHandler.getBulkXrefs(addresses, programName));
-        });
-
-        server.createContext("/list_globals", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String filter = params.get("filter");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listGlobals(offset, limit, filter, programName));
-        });
-
-        server.createContext("/rename_global_variable", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String oldName = params.get("old_name");
-            String newName = params.get("new_name");
-            sendResponse(exchange, endpointHandler.renameGlobalVariable(oldName, newName, programName));
-        });
-
-        server.createContext("/force_decompile", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            String name = params.get("name");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.forceDecompile(address, name, programName));
-        });
-
-        server.createContext("/get_entry_points", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getEntryPoints(programName));
-        });
-
-        server.createContext("/list_calling_conventions", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.listCallingConventions(programName));
-        });
-
-        server.createContext("/find_next_undefined_function", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String startAddress = params.get("start_address");
-            String criteria = params.get("criteria");
-            String pattern = params.get("pattern");
-            String direction = params.get("direction");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.findNextUndefinedFunction(startAddress, criteria, pattern, direction, programName));
-        });
-
-        // ==========================================================================
-        // RENAME ENDPOINTS (POST)
-        // ==========================================================================
-
-        server.createContext("/rename_function", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String oldName = params.get("oldName");
-            String newName = params.get("newName");
-            sendResponse(exchange, endpointHandler.renameFunction(oldName, newName, programName));
-        });
-
-        server.createContext("/rename_function_by_address", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String address = params.get("function_address");
-            String newName = params.get("new_name");
-            sendResponse(exchange, endpointHandler.renameFunctionByAddress(address, newName, programName));
-        });
-
-        server.createContext("/save_program", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            sendResponse(exchange, endpointHandler.saveCurrentProgram(programName));
-        });
-
-        server.createContext("/delete_function", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String address = params.get("address");
-            sendResponse(exchange, endpointHandler.deleteFunctionAtAddress(address, programName));
-        });
-
-        server.createContext("/create_function", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String address = params.get("address");
-            String name = params.get("name");
-            boolean disassembleFirst = !"false".equalsIgnoreCase(params.get("disassemble_first"));
-            sendResponse(exchange, endpointHandler.createFunctionAtAddress(address, name, disassembleFirst, programName));
-        });
-
-        server.createContext("/create_memory_block", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String mbName = params.get("name");
-            String mbAddress = params.get("address");
-            long mbSize = params.get("size") != null ? Long.parseLong(params.get("size")) : 0;
-            boolean mbRead = !"false".equalsIgnoreCase(params.get("read"));
-            boolean mbWrite = !"false".equalsIgnoreCase(params.get("write"));
-            boolean mbExecute = "true".equalsIgnoreCase(params.get("execute"));
-            boolean mbVolatile = "true".equalsIgnoreCase(params.get("volatile"));
-            String mbComment = params.get("comment");
-            sendResponse(exchange, endpointHandler.createMemoryBlock(
-                mbName, mbAddress, mbSize, mbRead, mbWrite, mbExecute, mbVolatile, mbComment, programName));
-        });
-
-        server.createContext("/rename_data", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String address = params.get("address");
-            String newName = params.get("newName");
-            sendResponse(exchange, endpointHandler.renameData(address, newName, programName));
-        });
-
-        server.createContext("/rename_variable", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String functionName = params.get("functionName");
-            String oldName = params.get("oldName");
-            String newName = params.get("newName");
-            sendResponse(exchange, endpointHandler.renameVariable(functionName, oldName, newName, programName));
-        });
-
-        // ==========================================================================
-        // COMMENT ENDPOINTS (POST)
-        // ==========================================================================
-
-        server.createContext("/set_decompiler_comment", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String address = params.get("address");
-            String comment = params.get("comment");
-            sendResponse(exchange, endpointHandler.setDecompilerComment(address, comment, programName));
-        });
-
-        server.createContext("/set_disassembly_comment", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String address = params.get("address");
-            String comment = params.get("comment");
-            sendResponse(exchange, endpointHandler.setDisassemblyComment(address, comment, programName));
-        });
-
-        // ==========================================================================
-        // PROGRAM MANAGEMENT ENDPOINTS
-        // ==========================================================================
-
-        server.createContext("/list_open_programs", exchange -> {
-            sendResponse(exchange, endpointHandler.listOpenPrograms());
-        });
-
-        server.createContext("/get_current_program_info", exchange -> {
-            sendResponse(exchange, endpointHandler.getCurrentProgramInfo());
-        });
-
-        server.createContext("/switch_program", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String name = params.get("name");
-            sendResponse(exchange, endpointHandler.switchProgram(name));
-        });
-
-        // ==========================================================================
-        // HEADLESS-SPECIFIC ENDPOINTS
-        // ==========================================================================
+        // --- Program Management ---
 
         server.createContext("/load_program", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -806,15 +340,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.closeProgram(name));
         });
 
-        server.createContext("/run_analysis", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.runAnalysis(programName));
-        });
-
-        // ==========================================================================
-        // PROJECT MANAGEMENT ENDPOINTS (Headless-specific)
-        // ==========================================================================
+        // --- Project Management (headless-specific) ---
 
         server.createContext("/open_project", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -824,10 +350,6 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         server.createContext("/close_project", exchange -> {
             sendResponse(exchange, endpointHandler.closeProject());
-        });
-
-        server.createContext("/list_project_files", exchange -> {
-            sendResponse(exchange, endpointHandler.listProjectFiles());
         });
 
         server.createContext("/load_program_from_project", exchange -> {
@@ -840,148 +362,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.getProjectInfo());
         });
 
-        // ==========================================================================
-        // SHARED SERVER ENDPOINTS
-        // ==========================================================================
-
-        server.createContext("/server/connect", exchange -> {
-            sendResponse(exchange, serverManager.connect());
-        });
-
-        server.createContext("/server/status", exchange -> {
-            sendResponse(exchange, serverManager.getStatus());
-        });
-
-        server.createContext("/server/repositories", exchange -> {
-            sendResponse(exchange, serverManager.listRepositories());
-        });
-
-        server.createContext("/server/disconnect", exchange -> {
-            sendResponse(exchange, serverManager.disconnect());
-        });
-
-        // Phase 2: Repository browsing endpoints
-        server.createContext("/server/repository/files", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String repo = params.get("repo");
-            String path = params.get("path");
-            if (path == null) path = "/";
-            sendResponse(exchange, serverManager.listRepositoryFiles(repo, path));
-        });
-
-        server.createContext("/server/repository/file", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String repo = params.get("repo");
-            String path = params.get("path");
-            sendResponse(exchange, serverManager.getFileInfo(repo, path));
-        });
-
-        // ==========================================================================
-        // PHASE 3: DATA TYPE SYSTEM ENDPOINTS
-        // ==========================================================================
-
-        server.createContext("/create_enum", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String name = params.get("name");
-            String values = params.get("values");
-            int size = parseIntOrDefault(params.get("size"), 4);
-            sendResponse(exchange, endpointHandler.createEnum(name, values, size, programName));
-        });
-
-        server.createContext("/create_union", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String name = params.get("name");
-            String fields = params.get("fields");
-            sendResponse(exchange, endpointHandler.createUnion(name, fields, programName));
-        });
-
-        server.createContext("/create_typedef", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String name = params.get("name");
-            String baseType = params.get("base_type");
-            sendResponse(exchange, endpointHandler.createTypedef(name, baseType, programName));
-        });
-
-        server.createContext("/create_array_type", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String baseType = params.get("base_type");
-            int length = parseIntOrDefault(params.get("length"), 1);
-            String name = params.get("name");
-            sendResponse(exchange, endpointHandler.createArrayType(baseType, length, name, programName));
-        });
-
-        server.createContext("/create_pointer_type", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String baseType = params.get("base_type");
-            String name = params.get("name");
-            sendResponse(exchange, endpointHandler.createPointerType(baseType, name, programName));
-        });
-
-        server.createContext("/add_struct_field", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String structName = params.get("struct_name");
-            String fieldName = params.get("field_name");
-            String fieldType = params.get("field_type");
-            int offset = parseIntOrDefault(params.get("offset"), -1);
-            sendResponse(exchange, endpointHandler.addStructField(structName, fieldName, fieldType, offset, programName));
-        });
-
-        server.createContext("/modify_struct_field", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String structName = params.get("struct_name");
-            String fieldName = params.get("field_name");
-            String newType = params.get("new_type");
-            String newName = params.get("new_name");
-            sendResponse(exchange, endpointHandler.modifyStructField(structName, fieldName, newType, newName, programName));
-        });
-
-        server.createContext("/remove_struct_field", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String structName = params.get("struct_name");
-            String fieldName = params.get("field_name");
-            sendResponse(exchange, endpointHandler.removeStructField(structName, fieldName, programName));
-        });
-
-        server.createContext("/delete_data_type", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String typeName = params.get("type_name");
-            sendResponse(exchange, endpointHandler.deleteDataType(typeName, programName));
-        });
-
-        server.createContext("/search_data_types", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String pattern = params.get("pattern");
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.searchDataTypes(pattern, offset, limit, programName));
-        });
-
-        server.createContext("/validate_data_type_exists", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String typeName = params.get("type_name");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.validateDataTypeExists(typeName, programName));
-        });
-
+        // GET_DATA_TYPE_SIZE - Not yet in service layer
         server.createContext("/get_data_type_size", exchange -> {
             Map<String, String> params = parseQueryParams(exchange);
             String typeName = params.get("type_name");
@@ -989,180 +370,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.getDataTypeSize(typeName, programName));
         });
 
-        server.createContext("/get_struct_layout", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String structName = params.get("struct_name");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getStructLayout(structName, programName));
-        });
-
-        server.createContext("/get_enum_values", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String enumName = params.get("enum_name");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getEnumValues(enumName, programName));
-        });
-
-        server.createContext("/clone_data_type", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String sourceType = params.get("source_type");
-            String newName = params.get("new_name");
-            sendResponse(exchange, endpointHandler.cloneDataType(sourceType, newName, programName));
-        });
-
-        // ==========================================================================
-        // PHASE 4: ADVANCED FEATURES ENDPOINTS
-        // ==========================================================================
-
-        server.createContext("/run_script", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String scriptPath = params.get("script_path");
-            String args = params.get("args");
-            sendResponse(exchange, endpointHandler.runScript(scriptPath, args, programName));
-        });
-
-        server.createContext("/list_scripts", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String filter = params.get("filter");
-            sendResponse(exchange, endpointHandler.listScripts(filter));
-        });
-
-        server.createContext("/search_byte_patterns", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String pattern = params.get("pattern");
-            String mask = params.get("mask");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.searchBytePatterns(pattern, mask, programName));
-        });
-
-        server.createContext("/analyze_data_region", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            int maxScanBytes = parseIntOrDefault(params.get("max_scan_bytes"), 1024);
-            boolean includeXrefMap = parseBooleanOrDefault(params.get("include_xref_map"), true);
-            boolean includeAssemblyPatterns = parseBooleanOrDefault(params.get("include_assembly_patterns"), true);
-            boolean includeBoundaryDetection = parseBooleanOrDefault(params.get("include_boundary_detection"), true);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.analyzeDataRegion(address, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection, programName));
-        });
-
-        server.createContext("/get_function_hash", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getFunctionHash(address, programName));
-        });
-
-        server.createContext("/get_bulk_function_hashes", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String filter = params.get("filter");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getBulkFunctionHashes(offset, limit, filter, programName));
-        });
-
-        server.createContext("/detect_array_bounds", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            boolean analyzeLoopBounds = parseBooleanOrDefault(params.get("analyze_loop_bounds"), true);
-            boolean analyzeIndexing = parseBooleanOrDefault(params.get("analyze_indexing"), true);
-            int maxScanRange = parseIntOrDefault(params.get("max_scan_range"), 2048);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.detectArrayBounds(address, analyzeLoopBounds, analyzeIndexing, maxScanRange, programName));
-        });
-
-        server.createContext("/get_assembly_context", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String xrefSources = params.get("xref_sources");
-            int contextInstructions = parseIntOrDefault(params.get("context_instructions"), 5);
-            String includePatterns = params.get("include_patterns");
-            if (includePatterns == null) includePatterns = "LEA,MOV,CMP,IMUL,ADD,SUB";
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getAssemblyContext(xrefSources, contextInstructions, includePatterns, programName));
-        });
-
-        server.createContext("/analyze_struct_field_usage", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            String structName = params.get("struct_name");
-            int maxFunctions = parseIntOrDefault(params.get("max_functions"), 10);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.analyzeStructFieldUsage(address, structName, maxFunctions, programName));
-        });
-
-        server.createContext("/get_field_access_context", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String structAddress = params.get("struct_address");
-            int fieldOffset = parseIntOrDefault(params.get("field_offset"), 0);
-            int numExamples = parseIntOrDefault(params.get("num_examples"), 5);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getFieldAccessContext(structAddress, fieldOffset, numExamples, programName));
-        });
-
-        server.createContext("/rename_or_label", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            String address = params.get("address");
-            String name = params.get("name");
-            sendResponse(exchange, endpointHandler.renameOrLabel(address, name, programName));
-        });
-
-        server.createContext("/can_rename_at_address", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.canRenameAtAddress(address, programName));
-        });
-
-        // FUZZY MATCHING & DIFF
-        server.createContext("/get_function_signature", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.getFunctionSignature(address, programName));
-        });
-
-        server.createContext("/find_similar_functions_fuzzy", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String address = params.get("address");
-            String sourceProgramName = params.get("source_program");
-            String targetProgramName = params.get("target_program");
-            double threshold = parseDoubleOrDefault(params.get("threshold"), 0.7);
-            int limit = parseIntOrDefault(params.get("limit"), 20);
-            sendResponse(exchange, endpointHandler.findSimilarFunctionsFuzzy(
-                address, sourceProgramName, targetProgramName, threshold, limit));
-        });
-
-        server.createContext("/bulk_fuzzy_match", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String sourceProgramName = params.get("source_program");
-            String targetProgramName = params.get("target_program");
-            double threshold = parseDoubleOrDefault(params.get("threshold"), 0.7);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 50);
-            String filter = params.get("filter");
-            sendResponse(exchange, endpointHandler.bulkFuzzyMatch(
-                sourceProgramName, targetProgramName, threshold, offset, limit, filter));
-        });
-
-        server.createContext("/diff_functions", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String addressA = params.get("address_a");
-            String addressB = params.get("address_b");
-            String programA = params.get("program_a");
-            String programB = params.get("program_b");
-            sendResponse(exchange, endpointHandler.diffFunctions(addressA, addressB, programA, programB));
-        });
-
-        // ==========================================================================
-        // PROJECT LIFECYCLE ENDPOINTS
-        // ==========================================================================
+        // --- Project Lifecycle ---
 
         server.createContext("/create_project", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -1181,9 +389,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.listProjects(params.get("searchDir")));
         });
 
-        // ==========================================================================
-        // PROJECT ORGANIZATION ENDPOINTS
-        // ==========================================================================
+        // --- Project Organization ---
 
         server.createContext("/create_folder", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -1205,14 +411,45 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.deleteFile(params.get("filePath")));
         });
 
-        // ==========================================================================
-        // SERVER VERSION CONTROL ENDPOINTS
-        // ==========================================================================
+        // --- Server Endpoints ---
+
+        server.createContext("/server/connect", exchange -> {
+            sendResponse(exchange, serverManager.connect());
+        });
+
+        server.createContext("/server/status", exchange -> {
+            sendResponse(exchange, serverManager.getStatus());
+        });
+
+        server.createContext("/server/repositories", exchange -> {
+            sendResponse(exchange, serverManager.listRepositories());
+        });
+
+        server.createContext("/server/disconnect", exchange -> {
+            sendResponse(exchange, serverManager.disconnect());
+        });
+
+        server.createContext("/server/repository/files", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String repo = params.get("repo");
+            String path = params.get("path");
+            if (path == null) path = "/";
+            sendResponse(exchange, serverManager.listRepositoryFiles(repo, path));
+        });
+
+        server.createContext("/server/repository/file", exchange -> {
+            Map<String, String> params = parseQueryParams(exchange);
+            String repo = params.get("repo");
+            String path = params.get("path");
+            sendResponse(exchange, serverManager.getFileInfo(repo, path));
+        });
 
         server.createContext("/server/repository/create", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             sendResponse(exchange, serverManager.createRepository(params.get("name")));
         });
+
+        // --- Version Control ---
 
         server.createContext("/server/version_control/checkout", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -1237,10 +474,6 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
                 params.get("repo"), params.get("path"), params.get("comment")));
         });
 
-        // ==========================================================================
-        // SERVER VERSION HISTORY ENDPOINTS
-        // ==========================================================================
-
         server.createContext("/server/version_history", exchange -> {
             Map<String, String> params = parseQueryParams(exchange);
             sendResponse(exchange, serverManager.getVersionHistory(params.get("repo"), params.get("path")));
@@ -1251,9 +484,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, serverManager.getCheckouts(params.get("repo"), params.get("path")));
         });
 
-        // ==========================================================================
-        // SERVER ADMIN ENDPOINTS
-        // ==========================================================================
+        // --- Admin ---
 
         server.createContext("/server/admin/terminate_checkout", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -1273,14 +504,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
                 params.get("repo"), params.get("user"), accessLevel));
         });
 
-        // ==========================================================================
-        // ANALYSIS CONTROL ENDPOINTS
-        // ==========================================================================
-
-        server.createContext("/list_analyzers", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.listAnalyzers(params.get("program")));
-        });
+        // --- Analysis Control ---
 
         server.createContext("/configure_analyzer", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -1290,197 +514,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
                 params.get("program"), params.get("name"), enabled));
         });
 
-        // ==========================================================================
-        // PORTED GUI ENDPOINTS (headless parity)
-        // ==========================================================================
-
-        server.createContext("/list_data_items_by_xrefs", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            String format = params.getOrDefault("format", "json");
-            sendResponse(exchange, endpointHandler.listDataItemsByXrefs(offset, limit, format, params.get("program")));
-        });
-
-        server.createContext("/list_functions_enhanced", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            sendResponse(exchange, endpointHandler.listFunctionsEnhanced(offset, limit, params.get("program")));
-        });
-
-        server.createContext("/set_function_no_return", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            boolean noReturn = parseBooleanOrDefault(params.get("noReturn"), true);
-            sendResponse(exchange, endpointHandler.setFunctionNoReturn(params.get("functionAddress"), noReturn, programName));
-        });
-
-        server.createContext("/clear_instruction_flow_override", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.clearInstructionFlowOverride(params.get("address"), programName));
-        });
-
-        server.createContext("/set_variable_storage", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.setVariableStorage(
-                params.get("functionAddress"), params.get("variableName"), params.get("storage"), programName));
-        });
-
-        server.createContext("/disassemble_bytes", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            int length = parseIntOrDefault(params.get("length"), 16);
-            sendResponse(exchange, endpointHandler.disassembleBytes(
-                params.get("startAddress"), params.get("endAddress"), length, programName));
-        });
-
-        server.createContext("/get_function_documentation", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.getFunctionDocumentation(
-                params.get("functionAddress"), params.get("program")));
-        });
-
-        server.createContext("/apply_function_documentation", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.applyFunctionDocumentation(params.get("json_body"), programName));
-        });
-
-        server.createContext("/compare_programs_documentation", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            String programName = params.get("program");
-            sendResponse(exchange, endpointHandler.compareProgramsDocumentation(programName));
-        });
-
-        server.createContext("/find_undocumented_by_string", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.findUndocumentedByString(
-                params.get("stringAddress"), params.get("program")));
-        });
-
-        server.createContext("/get_function_call_graph", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int depth = parseIntOrDefault(params.get("depth"), 3);
-            String direction = params.getOrDefault("direction", "callees");
-            sendResponse(exchange, endpointHandler.getFunctionCallGraph(
-                params.get("functionAddress"), depth, direction, params.get("program")));
-        });
-
-        server.createContext("/get_full_call_graph", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int limit = parseIntOrDefault(params.get("limit"), 10000);
-            String format = params.getOrDefault("format", "edges");
-            sendResponse(exchange, endpointHandler.getFullCallGraph(limit, format, params.get("program")));
-        });
-
-        server.createContext("/get_function_jump_targets", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            sendResponse(exchange, endpointHandler.getFunctionJumpTargets(
-                params.get("functionAddress"), offset, limit, params.get("program")));
-        });
-
-        server.createContext("/get_function_labels", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            sendResponse(exchange, endpointHandler.getFunctionLabels(
-                params.get("functionAddress"), offset, limit, params.get("program")));
-        });
-
-        server.createContext("/get_type_size", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.getTypeSize(params.get("typeName"), params.get("program")));
-        });
-
-        server.createContext("/get_valid_data_types", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.getValidDataTypes(params.get("category"), params.get("program")));
-        });
-
-        server.createContext("/list_external_locations", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            sendResponse(exchange, endpointHandler.listExternalLocations(offset, limit, params.get("program")));
-        });
-
-        server.createContext("/get_external_location", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.getExternalLocation(
-                params.get("address"), params.get("dllName"), params.get("program")));
-        });
-
-        server.createContext("/analyze_control_flow", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.analyzeControlFlow(
-                params.get("functionName"), params.get("program")));
-        });
-
-        server.createContext("/analyze_api_call_chains", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.analyzeApiCallChains(params.get("program")));
-        });
-
-        server.createContext("/analyze_function_completeness", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.analyzeFunctionCompleteness(
-                params.get("functionAddress"), params.get("program")));
-        });
-
-        server.createContext("/analyze_for_documentation", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.analyzeForDocumentation(
-                params.get("function_address"), params.get("program")));
-        });
-
-        server.createContext("/detect_malware_behaviors", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.detectMalwareBehaviors(params.get("program")));
-        });
-
-        server.createContext("/detect_crypto_constants", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.detectCryptoConstants(params.get("program")));
-        });
-
-        server.createContext("/find_anti_analysis_techniques", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.findAntiAnalysisTechniques(params.get("program")));
-        });
-
-        server.createContext("/find_dead_code", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.findDeadCode(
-                params.get("functionName"), params.get("program")));
-        });
-
-        server.createContext("/extract_iocs_with_context", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.extractIOCsWithContext(params.get("program")));
-        });
-
-        server.createContext("/batch_decompile", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.batchDecompileFunctions(
-                params.get("functions"), params.get("program")));
-        });
-
-        server.createContext("/batch_rename_function_components", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.batchRenameFunctionComponents(
-                params.get("functionAddress"), params.get("functionName"),
-                params.get("variables"), params.get("program")));
-        });
+        // --- Batch Variable Types (headless-specific parsing) ---
 
         server.createContext("/batch_set_variable_types", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -1489,151 +523,10 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
                 params.get("functionAddress"), params.get("variableTypes"), forceIndividual, params.get("program")));
         });
 
-        server.createContext("/batch_string_anchor_report", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.batchStringAnchorReport(
-                params.get("pattern"), params.get("program")));
-        });
-
-        server.createContext("/validate_function_prototype", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.validateFunctionPrototype(
-                params.get("functionAddress"), params.get("prototype"),
-                params.get("callingConvention"), params.get("program")));
-        });
-
-        server.createContext("/run_ghidra_script", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.runScript(params.get("script_path"), params.get("args"), programName));
-        });
-
-        server.createContext("/run_script_inline", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.runScriptInline(params.get("code"), params.get("args")));
-        });
-
-        server.createContext("/list_bookmarks", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.listBookmarks(
-                params.get("category"), params.get("address"), params.get("program")));
-        });
-
-        server.createContext("/set_bookmark", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.setBookmark(
-                params.get("address"), params.get("category"), params.get("comment"), params.get("program")));
-        });
-
-        server.createContext("/delete_bookmark", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.deleteBookmark(
-                params.get("address"), params.get("category"), params.get("program")));
-        });
+        // --- Exit ---
 
         server.createContext("/exit_ghidra", exchange -> {
             sendResponse(exchange, endpointHandler.exitServer());
-        });
-
-        server.createContext("/convert_number", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int size = parseIntOrDefault(params.get("size"), 64);
-            sendResponse(exchange, endpointHandler.convertNumber(params.get("text"), size));
-        });
-
-        server.createContext("/read_memory", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int length = parseIntOrDefault(params.get("length"), 64);
-            sendResponse(exchange, endpointHandler.readMemory(
-                params.get("address"), length, params.get("program")));
-        });
-
-        server.createContext("/create_data_type_category", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.createDataTypeCategory(params.get("categoryPath"), programName));
-        });
-
-        server.createContext("/move_data_type_to_category", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.moveDataTypeToCategory(
-                params.get("typeName"), params.get("categoryPath"), params.get("program")));
-        });
-
-        server.createContext("/list_data_type_categories", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            sendResponse(exchange, endpointHandler.listDataTypeCategories(offset, limit, params.get("program")));
-        });
-
-        server.createContext("/import_data_types", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.importDataTypes(
-                params.get("source"), params.get("format"), params.get("program")));
-        });
-
-        // === PORTED FROM GUI PLUGIN ===
-
-        server.createContext("/create_label", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.createLabel(params.get("address"), params.get("name"), programName));
-        });
-
-        server.createContext("/rename_label", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.renameLabel(
-                params.get("address"), params.get("old_name"), params.get("new_name"), programName));
-        });
-
-        server.createContext("/rename_external_location", exchange -> {
-            Map<String, String> qparams = parseQueryParams(exchange);
-            String programName = qparams.get("program");
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.renameExternalLocation(
-                params.get("address"), params.get("new_name"), programName));
-        });
-
-        server.createContext("/get_function_count", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.getFunctionCount(params.get("program")));
-        });
-
-        server.createContext("/inspect_memory_content", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int length = parseIntOrDefault(params.get("length"), 64);
-            boolean detectStrings = !"false".equalsIgnoreCase(params.get("detect_strings"));
-            sendResponse(exchange, endpointHandler.inspectMemoryContent(
-                params.get("address"), length, detectStrings, params.get("program")));
-        });
-
-        server.createContext("/search_strings", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            int offset = parseIntOrDefault(params.get("offset"), 0);
-            int limit = parseIntOrDefault(params.get("limit"), 100);
-            int minLength = parseIntOrDefault(params.get("min_length"), 4);
-            sendResponse(exchange, endpointHandler.searchStrings(
-                params.get("query"), minLength, params.get("encoding"), offset, limit, params.get("program")));
-        });
-
-        server.createContext("/find_similar_functions", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            double threshold = 0.8;
-            try { threshold = Double.parseDouble(params.get("threshold")); } catch (Exception ignored) {}
-            sendResponse(exchange, endpointHandler.findSimilarFunctions(
-                params.get("target_function"), threshold, params.get("program")));
-        });
-
-        server.createContext("/validate_data_type", exchange -> {
-            Map<String, String> params = parseQueryParams(exchange);
-            sendResponse(exchange, endpointHandler.validateDataType(
-                params.get("address"), params.get("typeName"), params.get("program")));
         });
 
         System.out.println("Registered " + countEndpoints() + " REST API endpoints");
