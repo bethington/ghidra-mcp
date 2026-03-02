@@ -62,6 +62,7 @@ import ghidra.program.model.block.CodeBlockReferenceIterator;
 import com.xebyte.core.BinaryComparisonService;
 import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.FrontEndProgramProvider;
+import com.xebyte.core.FunctionRef;
 import com.xebyte.core.JsonHelper;
 import com.xebyte.core.ServerManager;
 
@@ -839,7 +840,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * Get function by address
      */
     private String getFunctionByAddress(String addressStr, String programName) {
-        return functionService.getFunctionByAddress(addressStr, programName).toJson();
+        return functionService.getFunctionByAddress(new FunctionRef(addressStr), programName).toJson();
     }
 
     // Backward compatibility overload
@@ -904,7 +905,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     private String decompileFunctionByAddress(String addressStr, String programName, int timeoutSeconds) {
-        return functionService.decompileFunctionByAddress(addressStr, programName, timeoutSeconds).toJson();
+        return functionService.decompileFunctionByAddress(new FunctionRef(addressStr), programName, timeoutSeconds).toJson();
     }
 
     private String decompileFunctionByAddress(String addressStr, String programName) {
@@ -1586,7 +1587,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * This allows matching identical functions that are located at different addresses.
      */
     private String getFunctionHash(String functionAddress, String programName) {
-        return documentationHashService.getFunctionHash(functionAddress, programName).toJson();
+        return documentationHashService.getFunctionHash(new FunctionRef(functionAddress), programName).toJson();
     }
 
     // Backward compatibility overload
@@ -1607,7 +1608,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * Export all documentation for a function (for use in cross-binary propagation)
      */
     private String getFunctionDocumentation(String functionAddress, String programName) {
-        return documentationHashService.getFunctionDocumentation(functionAddress, programName).toJson();
+        return documentationHashService.getFunctionDocumentation(new FunctionRef(functionAddress), programName).toJson();
     }
 
     private String applyFunctionDocumentation(String jsonBody, String programName) {
@@ -2349,7 +2350,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     @SuppressWarnings("deprecation")
     private String getFunctionVariables(String functionName, String programName) {
-        return functionService.getFunctionVariables(functionName, programName).toJson();
+        return functionService.getFunctionVariables(new FunctionRef(functionName), programName).toJson();
     }
 
     // Backward compatibility overload

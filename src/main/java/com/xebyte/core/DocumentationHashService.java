@@ -61,21 +61,17 @@ public class DocumentationHashService {
      * This allows matching identical functions that are located at different addresses.
      */
     @McpTool(value = "/get_function_hash", description = "Compute normalized opcode hash for function")
-    public Response getFunctionHash(@Param("address") String functionAddress, @Param(value = "program", required = false) String programName) {
+    public Response getFunctionHash(@Param(value = "address", description = "Function address or name") FunctionRef ref, @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(functionAddress);
-            if (addr == null) {
-                return Response.err("Invalid address: " + functionAddress);
-            }
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
+            Function func = ref.resolve(program);
             if (func == null) {
-                return Response.err("No function at address: " + functionAddress);
+                return Response.err("No function found for '" + ref.value() + "'");
             }
+            Address addr = func.getEntryPoint();
 
             String hash = computeNormalizedFunctionHash(program, func);
             int instructionCount = countFunctionInstructions(program, func);
@@ -97,7 +93,7 @@ public class DocumentationHashService {
 
     // Backward compatibility overload
     public Response getFunctionHash(String functionAddress) {
-        return getFunctionHash(functionAddress, null);
+        return getFunctionHash(new FunctionRef(functionAddress), null);
     }
 
     /**
@@ -297,25 +293,21 @@ public class DocumentationHashService {
      * Export all documentation for a function (for use in cross-binary propagation)
      */
     public Response getFunctionDocumentation(String functionAddress) {
-        return getFunctionDocumentation(functionAddress, null);
+        return getFunctionDocumentation(new FunctionRef(functionAddress), null);
     }
 
     @McpTool(value = "/get_function_documentation", description = "Export all documentation for a function")
-    public Response getFunctionDocumentation(@Param("address") String functionAddress, @Param(value = "program", required = false) String programName) {
+    public Response getFunctionDocumentation(@Param(value = "address", description = "Function address or name") FunctionRef ref, @Param(value = "program", required = false) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(functionAddress);
-            if (addr == null) {
-                return Response.err("Invalid address: " + functionAddress);
-            }
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
+            Function func = ref.resolve(program);
             if (func == null) {
-                return Response.err("No function at address: " + functionAddress);
+                return Response.err("No function found for '" + ref.value() + "'");
             }
+            Address addr = func.getEntryPoint();
 
             // Compute hash for matching
             String hash = computeNormalizedFunctionHash(program, func);
