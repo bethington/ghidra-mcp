@@ -1695,7 +1695,7 @@ public class DataTypeService {
 
     public Response validateFunctionPrototype(
 
-            @Param(value = "function_address") String functionAddress,
+            @Param(value = "function_address") FunctionRef funcRef,
 
             @Param(value = "prototype") String prototype,
 
@@ -1704,6 +1704,7 @@ public class DataTypeService {
         if (program == null) {
             return Response.err("No program loaded");
         }
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         Map<String, Object> resultMap = new LinkedHashMap<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
@@ -1711,17 +1712,10 @@ public class DataTypeService {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        resultMap.put("valid", false);
-                        resultMap.put("error", "Invalid address: " + functionAddress);
-                        return;
-                    }
-
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    Function func = funcRef.resolve(program);
                     if (func == null) {
                         resultMap.put("valid", false);
-                        resultMap.put("error", "No function at address: " + functionAddress);
+                        resultMap.put("error", "No function found: " + funcRef.value());
                         return;
                     }
 

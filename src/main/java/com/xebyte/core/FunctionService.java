@@ -166,7 +166,7 @@ public class FunctionService {
 
     public Response decompileFunctionByAddress(
 
-            @Param(value = "address") String addressStr,
+            @Param(value = "address", description = "Function name or address (hex)") FunctionRef funcRef,
 
             @Param(value = "program", required = false) String programName,
 
@@ -174,19 +174,18 @@ public class FunctionService {
         Object[] result = getProgramOrError(programName);
         Program program = (Program) result[0];
         if (program == null) return (Response) result[1];
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
-            Function func = ServiceUtils.getFunctionForAddress(program, addr);
-            if (func == null) return Response.err("No function found at or containing address " + addressStr);
+            Function func = funcRef.resolve(program);
+            if (func == null) return Response.err("No function found: " + funcRef.value());
 
             DecompInterface decomp = new DecompInterface();
             decomp.openProgram(program);
             DecompileResults decompResult = decomp.decompileFunction(func, timeoutSeconds, new ConsoleTaskMonitor());
 
             if (decompResult == null) {
-                return Response.err("Decompiler returned null result for function at " + addressStr);
+                return Response.err("Decompiler returned null result for function: " + funcRef.value());
             }
 
             if (!decompResult.decompileCompleted()) {
@@ -208,11 +207,11 @@ public class FunctionService {
 
     // Backward compatible overloads for internal callers
     public Response decompileFunctionByAddress(String addressStr, String programName) {
-        return decompileFunctionByAddress(addressStr, programName, DECOMPILE_TIMEOUT_SECONDS);
+        return decompileFunctionByAddress(new FunctionRef(addressStr), programName, DECOMPILE_TIMEOUT_SECONDS);
     }
 
     public Response decompileFunctionByAddress(String addressStr) {
-        return decompileFunctionByAddress(addressStr, null, DECOMPILE_TIMEOUT_SECONDS);
+        return decompileFunctionByAddress(new FunctionRef(addressStr), null, DECOMPILE_TIMEOUT_SECONDS);
     }
 
     /**
@@ -386,15 +385,9 @@ public class FunctionService {
         try {
             threadingStrategy.executeRead(() -> {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-                    if (addr == null) {
-                        resultMsg.append("Error: Invalid function address: ").append(functionAddrStr);
-                        return null;
-                    }
-
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    Function func = new FunctionRef(functionAddrStr).resolve(program);
                     if (func == null) {
-                        resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                        resultMsg.append("Error: No function found: ").append(functionAddrStr);
                         return null;
                     }
 
@@ -474,7 +467,7 @@ public class FunctionService {
 
     public Response disassembleFunction(
 
-            @Param(value = "address") String addressStr,
+            @Param(value = "address") FunctionRef funcRef,
 
             @Param(value = "program", required = false) String programName,
 
@@ -482,7 +475,7 @@ public class FunctionService {
         Object[] result = getProgramOrError(programName);
         Program program = (Program) result[0];
         if (program == null) return (Response) result[1];
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         // Parse mnemonic filter
         Set<String> mnemonicFilter = null;
@@ -494,9 +487,8 @@ public class FunctionService {
         }
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
-            Function func = ServiceUtils.getFunctionForAddress(program, addr);
-            if (func == null) return Response.err("No function found at or containing address " + addressStr);
+            Function func = funcRef.resolve(program);
+            if (func == null) return Response.err("No function found: " + funcRef.value());
 
             StringBuilder sb = new StringBuilder();
             Listing listing = program.getListing();
@@ -530,7 +522,7 @@ public class FunctionService {
 
     // Backward compatible overload for internal callers
     public Response disassembleFunction(String addressStr) {
-        return disassembleFunction(addressStr, null, null);
+        return disassembleFunction(new FunctionRef(addressStr), null, null);
     }
 
     // ========================================================================
@@ -540,28 +532,21 @@ public class FunctionService {
     /**
      * Get function by address.
      */
-    @McpTool(value = "/get_function_by_address", description = "Get a function by its address")
+    @McpTool(value = "/get_function_by_address", description = "Get a function by name or address")
 
     public Response getFunctionByAddress(
 
-            @Param(value = "address") String addressStr,
+            @Param(value = "address", description = "Function name or address (hex)") FunctionRef funcRef,
 
             @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
-            if (addr == null) return Response.err("Invalid address: " + addressStr);
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
-            if (func == null) {
-                func = program.getFunctionManager().getFunctionContaining(addr);
-            }
-
-            if (func == null) return Response.err("No function found at or containing address " + addressStr);
+            Function func = funcRef.resolve(program);
+            if (func == null) return Response.err("No function found: " + funcRef.value());
 
             return Response.text(String.format("Function: %s at %s\nSignature: %s\nEntry: %s\nBody: %s - %s",
                 func.getName(),
@@ -577,7 +562,7 @@ public class FunctionService {
 
     // Backward compatibility overload
     public Response getFunctionByAddress(String addressStr) {
-        return getFunctionByAddress(addressStr, null);
+        return getFunctionByAddress(new FunctionRef(addressStr), null);
     }
 
     // ========================================================================
@@ -783,11 +768,11 @@ public class FunctionService {
     /**
      * Rename a function by its address.
      */
-    @McpTool(value = "/rename_function_by_address", description = "Rename a function by its address", method = McpTool.Method.POST)
+    @McpTool(value = "/rename_function_by_address", description = "Rename a function by its address or name", method = McpTool.Method.POST)
 
     public Response renameFunctionByAddress(
 
-            @Param(value = "function_address") String functionAddrStr,
+            @Param(value = "function_address") FunctionRef funcRef,
 
             @Param(value = "new_name") String newName) {
         Program program = programProvider.getCurrentProgram();
@@ -795,8 +780,8 @@ public class FunctionService {
             return Response.err("No program loaded");
         }
 
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return Response.err("Function address is required");
+        if (funcRef == null) {
+            return Response.err("Function name or address is required");
         }
 
         if (newName == null || newName.isEmpty()) {
@@ -808,23 +793,17 @@ public class FunctionService {
 
         try {
             threadingStrategy.executeWrite(program, "Rename function by address", () -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-                if (addr == null) {
-                    resultMsg.append("Error: Invalid address: ").append(functionAddrStr);
-                    return null;
-                }
-
-                Function func = ServiceUtils.getFunctionForAddress(program, addr);
+                Function func = funcRef.resolve(program);
                 if (func == null) {
-                    resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                    resultMsg.append("Error: No function found: ").append(funcRef.value());
                     return null;
                 }
 
                 String oldName = func.getName();
                 func.setName(newName, SourceType.USER_DEFINED);
                 success.set(true);
-                resultMsg.append("Success: Renamed function at ").append(functionAddrStr)
-                        .append(" from '").append(oldName).append("' to '").append(newName).append("'");
+                resultMsg.append("Success: Renamed function '").append(oldName)
+                        .append("' to '").append(newName).append("'");
                 return null;
             });
         } catch (Exception e) {
@@ -846,10 +825,15 @@ public class FunctionService {
     /** MCP endpoint wrapper — converts PrototypeResult to Response. */
     @McpTool(value = "/set_function_prototype", description = "Set a function's prototype and optionally its calling convention", method = McpTool.Method.POST)
     public Response setFunctionPrototypeEndpoint(
-            @Param(value = "function_address", description = "Function address in hex") String functionAddrStr,
+            @Param(value = "function_address", description = "Function name or address (hex)") FunctionRef funcRef,
             @Param(value = "prototype", description = "C-style function prototype") String prototype,
             @Param(value = "calling_convention", required = false, description = "Calling convention name") String callingConvention) {
-        PrototypeResult result = setFunctionPrototype(functionAddrStr, prototype, callingConvention);
+        if (funcRef == null) return Response.err("Function name or address is required");
+        Program program = programProvider.getCurrentProgram();
+        if (program == null) return Response.err("No program loaded");
+        Function func = funcRef.resolve(program);
+        if (func == null) return Response.err("No function found: " + funcRef.value());
+        PrototypeResult result = setFunctionPrototype(func.getEntryPoint().toString(), prototype, callingConvention);
         if (result.isSuccess()) return Response.text("Success");
         return Response.err(result.getErrorMessage());
     }
@@ -1105,7 +1089,7 @@ public class FunctionService {
 
     public Response setLocalVariableType(
 
-            @Param(value = "function_address") String functionAddrStr,
+            @Param(value = "function_address") FunctionRef funcRef,
 
             @Param(value = "variable_name") String variableName,
 
@@ -1116,8 +1100,8 @@ public class FunctionService {
             return Response.err("No program loaded");
         }
 
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return Response.err("Function address is required");
+        if (funcRef == null) {
+            return Response.err("Function name or address is required");
         }
 
         if (variableName == null || variableName.isEmpty()) {
@@ -1135,21 +1119,15 @@ public class FunctionService {
             threadingStrategy.executeRead(() -> {
                 try {
                     // Find the function
-                    Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-                    if (addr == null) {
-                        resultMsg.append("Error: Invalid address: ").append(functionAddrStr);
-                        return null;
-                    }
-
-                    Function func = ServiceUtils.getFunctionForAddress(program, addr);
+                    Function func = funcRef.resolve(program);
                     if (func == null) {
-                        resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                        resultMsg.append("Error: No function found: ").append(funcRef.value());
                         return null;
                     }
 
                     DecompileResults results = decompileFunction(func, program);
                     if (results == null || !results.decompileCompleted()) {
-                        resultMsg.append("Error: Decompilation failed for function at ").append(functionAddrStr);
+                        resultMsg.append("Error: Decompilation failed for function: ").append(funcRef.value());
                         return null;
                     }
 
@@ -1383,7 +1361,7 @@ public class FunctionService {
 
     public Response setFunctionNoReturn(
 
-            @Param(value = "function_address") String functionAddrStr,
+            @Param(value = "function_address") FunctionRef funcRef,
 
             @Param(value = "no_return", type = "boolean", defaultValue = "true") boolean noReturn) {
         // Input validation
@@ -1392,8 +1370,8 @@ public class FunctionService {
             return Response.err("No program loaded");
         }
 
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return Response.err("Function address is required");
+        if (funcRef == null) {
+            return Response.err("Function name or address is required");
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -1401,15 +1379,9 @@ public class FunctionService {
 
         try {
             threadingStrategy.executeWrite(program, "Set function no return", () -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-                if (addr == null) {
-                    resultMsg.append("Error: Invalid address: ").append(functionAddrStr);
-                    return null;
-                }
-
-                Function func = ServiceUtils.getFunctionForAddress(program, addr);
+                Function func = funcRef.resolve(program);
                 if (func == null) {
-                    resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                    resultMsg.append("Error: No function found: ").append(funcRef.value());
                     return null;
                 }
 
@@ -1422,11 +1394,10 @@ public class FunctionService {
                 success.set(true);
 
                 resultMsg.append("Success: Set function '").append(func.getName())
-                        .append("' at ").append(functionAddrStr)
-                        .append(" from ").append(oldState)
+                        .append("' from ").append(oldState)
                         .append(" to ").append(newState);
 
-                Msg.info(this, "Set no-return=" + noReturn + " for function " + func.getName() + " at " + functionAddrStr);
+                Msg.info(this, "Set no-return=" + noReturn + " for function " + func.getName());
                 return null;
             });
         } catch (Exception e) {
@@ -1537,7 +1508,7 @@ public class FunctionService {
 
     public Response setVariableStorage(
 
-            @Param(value = "function_address") String functionAddrStr,
+            @Param(value = "function_address") FunctionRef funcRef,
 
             @Param(value = "variable_name") String variableName,
 
@@ -1547,8 +1518,8 @@ public class FunctionService {
             return Response.err("No program loaded");
         }
 
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
-            return Response.err("Function address is required");
+        if (funcRef == null) {
+            return Response.err("Function name or address is required");
         }
         if (variableName == null || variableName.isEmpty()) {
             return Response.err("Variable name is required");
@@ -1562,15 +1533,9 @@ public class FunctionService {
 
         try {
             threadingStrategy.executeWrite(program, "Set variable storage", () -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-                if (addr == null) {
-                    resultMsg.append("Error: Invalid function address: ").append(functionAddrStr);
-                    return null;
-                }
-
-                Function func = program.getFunctionManager().getFunctionAt(addr);
+                Function func = funcRef.resolve(program);
                 if (func == null) {
-                    resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                    resultMsg.append("Error: No function found: ").append(funcRef.value());
                     return null;
                 }
 
@@ -1595,7 +1560,7 @@ public class FunctionService {
                 resultMsg.append("Note: Programmatic variable storage control is limited in Ghidra.\n\n");
                 resultMsg.append("Current variable information:\n");
                 resultMsg.append("  Variable: ").append(variableName).append("\n");
-                resultMsg.append("  Function: ").append(func.getName()).append(" @ ").append(functionAddrStr).append("\n");
+                resultMsg.append("  Function: ").append(func.getName()).append(" @ ").append(func.getEntryPoint()).append("\n");
                 resultMsg.append("  Current storage: ").append(oldStorage).append("\n");
                 resultMsg.append("  Requested storage: ").append(storageSpec).append("\n\n");
                 resultMsg.append("To change variable storage:\n");
@@ -1765,7 +1730,7 @@ public class FunctionService {
 
     public Response batchRenameFunctionComponents(
 
-            @Param(value = "function_address") String functionAddress,
+            @Param(value = "function_address") FunctionRef funcRef,
 
             @Param(value = "function_name") String functionName,
 
@@ -1787,15 +1752,9 @@ public class FunctionService {
 
         try {
             threadingStrategy.executeWrite(program, "Batch Rename Function Components", () -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddress);
-                if (addr == null) {
-                    result.append("\"error\": \"Invalid address: ").append(functionAddress).append("\"");
-                    return null;
-                }
-
-                Function func = program.getFunctionManager().getFunctionAt(addr);
+                Function func = funcRef != null ? funcRef.resolve(program) : null;
                 if (func == null) {
-                    result.append("\"error\": \"No function at address: ").append(functionAddress).append("\"");
+                    result.append("\"error\": \"No function found: ").append(funcRef != null ? funcRef.value() : "null").append("\"");
                     return null;
                 }
 
@@ -1862,36 +1821,31 @@ public class FunctionService {
     /**
      * Delete a function at the given address.
      */
-    @McpTool(value = "/delete_function", description = "Delete a function at the specified address", method = McpTool.Method.POST)
+    @McpTool(value = "/delete_function", description = "Delete a function at the specified address or by name", method = McpTool.Method.POST)
 
     public Response deleteFunctionAtAddress(
 
-            @Param(value = "address") String addressStr) {
+            @Param(value = "address") FunctionRef funcRef) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
         }
-        if (addressStr == null || addressStr.isEmpty()) {
-            return Response.err("address parameter required");
+        if (funcRef == null) {
+            return Response.err("Function name or address is required");
         }
 
         final StringBuilder result = new StringBuilder();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
-            threadingStrategy.executeWrite(program, "Delete function at address", () -> {
-                Address addr = program.getAddressFactory().getAddress(addressStr);
-                if (addr == null) {
-                    errorMsg.set("Invalid address: " + addressStr);
-                    return null;
-                }
-
-                Function func = program.getFunctionManager().getFunctionAt(addr);
+            threadingStrategy.executeWrite(program, "Delete function", () -> {
+                Function func = funcRef.resolve(program);
                 if (func == null) {
-                    errorMsg.set("No function found at address " + addressStr);
+                    errorMsg.set("No function found: " + funcRef.value());
                     return null;
                 }
 
+                Address addr = func.getEntryPoint();
                 String funcName = func.getName();
                 long bodySize = func.getBody().getNumAddresses();
                 program.getFunctionManager().removeFunction(addr);
@@ -2202,7 +2156,7 @@ public class FunctionService {
 
     public Response batchRenameVariables(
 
-            @Param(value = "function_address") String functionAddress,
+            @Param(value = "function_address") FunctionRef funcRef,
 
             @Param(value = "force_individual", type = "object", defaultValue = "false") Map<String, String> variableRenames,
 
@@ -2218,7 +2172,7 @@ public class FunctionService {
         final AtomicInteger variablesRenamed = new AtomicInteger(0);
         final AtomicInteger variablesFailed = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
-        final AtomicReference<Function> funcRef = new AtomicReference<>(null);
+        final AtomicReference<Function> resolvedFuncRef = new AtomicReference<>(null);
 
         try {
             SwingUtilities.invokeAndWait(() -> {
@@ -2228,16 +2182,10 @@ public class FunctionService {
                 program.flushEvents();
 
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        result.append("\"error\": \"Invalid address: ").append(functionAddress).append("\"");
-                        return;
-                    }
-
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    funcRef.set(func);
+                    Function func = funcRef != null ? funcRef.resolve(program) : null;
+                    resolvedFuncRef.set(func);
                     if (func == null) {
-                        result.append("\"error\": \"No function at address: ").append(functionAddress).append("\"");
+                        result.append("\"error\": \"No function found: ").append(funcRef != null ? funcRef.value() : "null").append("\"");
                         return;
                     }
 
@@ -2349,7 +2297,7 @@ public class FunctionService {
                         program.endTransaction(tx, false);
 
                         // Try individual operations
-                        Response individualResult = batchRenameVariablesIndividual(functionAddress, variableRenames);
+                        Response individualResult = batchRenameVariablesIndividual(funcRef != null ? funcRef.value() : null, variableRenames);
                         result.append("\"fallback_used\": true, ");
                         if (individualResult instanceof Response.Text t) {
                             result.append(t.content());
@@ -2369,12 +2317,12 @@ public class FunctionService {
                         program.endTransaction(tx, success.get());
 
                         // Invalidate decompiler cache after successful renames
-                        if (success.get() && variablesRenamed.get() > 0 && funcRef.get() != null) {
+                        if (success.get() && variablesRenamed.get() > 0 && resolvedFuncRef.get() != null) {
                             try {
                                 DecompInterface tempDecomp = new DecompInterface();
                                 tempDecomp.openProgram(program);
                                 tempDecomp.flushCache();
-                                tempDecomp.decompileFunction(funcRef.get(), DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                                tempDecomp.decompileFunction(resolvedFuncRef.get(), DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
                                 tempDecomp.dispose();
                                 Msg.info(this, "Invalidated decompiler cache after renaming " + variablesRenamed.get() + " variables");
                             } catch (Exception cacheEx) {

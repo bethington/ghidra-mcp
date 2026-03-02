@@ -73,20 +73,16 @@ public class CommentService {
     public Response getPlateComment(
 
 
-            @Param(value = "address") String address,
+            @Param(value = "address") FunctionRef funcRef,
 
 
             @Param(value = "program", required = false) String programName) {
         Program program = programProvider.resolveProgram(programName);
         if (program == null) return Response.err("No program loaded");
-        if (address == null || address.isEmpty()) return Response.err("address parameter is required");
+        if (funcRef == null) return Response.err("Function name or address is required");
 
-        Address addr = program.getAddressFactory().getAddress(address);
-        if (addr == null) return Response.err("Invalid address: " + address);
-
-        Function func = program.getFunctionManager().getFunctionAt(addr);
-        if (func == null) func = program.getFunctionManager().getFunctionContaining(addr);
-        if (func == null) return Response.err("No function at address: " + address);
+        Function func = funcRef.resolve(program);
+        if (func == null) return Response.err("No function found: " + funcRef.value());
 
         String plateComment = func.getComment();
         var result = new LinkedHashMap<String, Object>();
@@ -101,22 +97,20 @@ public class CommentService {
 
     public Response setPlateComment(
 
-            @Param(value = "function_address") String functionAddress,
+            @Param(value = "function_address") FunctionRef funcRef,
 
             @Param(value = "comment") String comment) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
-        if (functionAddress == null || functionAddress.isEmpty()) return Response.err("Function address is required");
+        if (funcRef == null) return Response.err("Function name or address is required");
         if (comment == null) return Response.err("Comment is required");
 
         try {
             Response result = threadingStrategy.executeWrite(program, "Set Plate Comment", () -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddress);
-                if (addr == null) return Response.err("Invalid address: " + functionAddress);
-                Function func = program.getFunctionManager().getFunctionAt(addr);
-                if (func == null) return Response.err("No function at address: " + functionAddress);
+                Function func = funcRef.resolve(program);
+                if (func == null) return Response.err("No function found: " + funcRef.value());
                 func.setComment(comment);
-                return Response.text("Success: Set plate comment for function at " + functionAddress);
+                return Response.text("Success: Set plate comment for function " + func.getName());
             });
             if (result instanceof Response.Text) {
                 program.flushEvents();
@@ -133,7 +127,7 @@ public class CommentService {
 
     public Response batchSetComments(
 
-            @Param(value = "function_address") String functionAddress,
+            @Param(value = "function_address") FunctionRef funcRef,
 
             @Param(value = "decompilerComments", type = "object") List<Map<String, String>> decompilerComments,
 
@@ -149,16 +143,13 @@ public class CommentService {
                 Listing listing = program.getListing();
 
                 // Set or clear plate comment
-                if (plateComment != null && !plateComment.equals("null") && functionAddress != null) {
-                    Address funcAddr = program.getAddressFactory().getAddress(functionAddress);
-                    if (funcAddr != null) {
-                        Function func = program.getFunctionManager().getFunctionAt(funcAddr);
-                        if (func != null) {
-                            String existingPlate = func.getComment();
-                            if (existingPlate != null && !existingPlate.isEmpty()) counts[3]++;
-                            func.setComment(plateComment.isEmpty() ? null : plateComment);
-                            counts[2] = 1;
-                        }
+                if (plateComment != null && !plateComment.equals("null") && funcRef != null) {
+                    Function func = funcRef.resolve(program);
+                    if (func != null) {
+                        String existingPlate = func.getComment();
+                        if (existingPlate != null && !existingPlate.isEmpty()) counts[3]++;
+                        func.setComment(plateComment.isEmpty() ? null : plateComment);
+                        counts[2] = 1;
                     }
                 }
 
@@ -219,7 +210,7 @@ public class CommentService {
 
     public Response clearFunctionComments(
 
-            @Param(value = "function_address") String functionAddress,
+            @Param(value = "function_address") FunctionRef funcRef,
 
             @Param(value = "clearPlate", type = "boolean") boolean clearPlate,
 
@@ -228,15 +219,13 @@ public class CommentService {
             @Param(value = "clearEol", type = "boolean") boolean clearEol) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) return Response.err("No program loaded");
-        if (functionAddress == null || functionAddress.isEmpty()) return Response.err("function_address parameter is required");
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         try {
             final int[] counts = new int[3]; // [preCleared, eolCleared, plateCleared]
             threadingStrategy.executeWrite(program, "Clear Function Comments", () -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddress);
-                if (addr == null) throw new IllegalArgumentException("Invalid address: " + functionAddress);
-                Function func = program.getFunctionManager().getFunctionAt(addr);
-                if (func == null) throw new IllegalArgumentException("No function at address: " + functionAddress);
+                Function func = funcRef.resolve(program);
+                if (func == null) throw new IllegalArgumentException("No function found: " + funcRef.value());
 
                 if (clearPlate && func.getComment() != null) {
                     func.setComment(null);

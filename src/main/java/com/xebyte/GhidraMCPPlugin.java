@@ -590,7 +590,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         for (Map.Entry<String, String> entry : variableTypes.entrySet()) {
             try {
                 Response result = functionService.setLocalVariableType(
-                    functionAddress, entry.getKey(), entry.getValue());
+                    new com.xebyte.core.FunctionRef(functionAddress), entry.getKey(), entry.getValue());
                 String resultStr = Response.r2s(result);
                 if (resultStr.toLowerCase().contains("success")) {
                     variablesTyped++;

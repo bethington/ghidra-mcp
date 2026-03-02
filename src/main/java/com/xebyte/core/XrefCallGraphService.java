@@ -158,11 +158,11 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific function by name
      */
-    @McpTool(value = "/get_function_xrefs", description = "Get all references to the specified function by name")
+    @McpTool(value = "/get_function_xrefs", description = "Get all references to the specified function")
 
     public Response getFunctionXrefs(
 
-            @Param(value = "name") String functionName,
+            @Param(value = "name") FunctionRef funcRef,
 
             @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
 
@@ -172,31 +172,30 @@ public class XrefCallGraphService {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
-        if (functionName == null || functionName.isEmpty()) return Response.err("Function name is required");
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         try {
+            Function function = funcRef.resolve(program);
+            if (function == null) return Response.err("No function found: " + funcRef.value());
+
             List<String> refs = new ArrayList<>();
             FunctionManager funcManager = program.getFunctionManager();
-            for (Function function : funcManager.getFunctions(true)) {
-                if (function.getName().equals(functionName)) {
-                    Address entryPoint = function.getEntryPoint();
-                    ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
+            Address entryPoint = function.getEntryPoint();
+            ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
 
-                    while (refIter.hasNext()) {
-                        Reference ref = refIter.next();
-                        Address fromAddr = ref.getFromAddress();
-                        RefType refType = ref.getReferenceType();
+            while (refIter.hasNext()) {
+                Reference ref = refIter.next();
+                Address fromAddr = ref.getFromAddress();
+                RefType refType = ref.getReferenceType();
 
-                        Function fromFunc = funcManager.getFunctionContaining(fromAddr);
-                        String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
+                Function fromFunc = funcManager.getFunctionContaining(fromAddr);
+                String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
 
-                        refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
-                    }
-                }
+                refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
             }
 
             if (refs.isEmpty()) {
-                return Response.text("No references found to function: " + functionName);
+                return Response.text("No references found to function: " + funcRef.value());
             }
 
             return Response.text(ServiceUtils.paginateList(refs, offset, limit));
@@ -216,7 +215,7 @@ public class XrefCallGraphService {
 
     public Response getFunctionJumpTargets(
 
-            @Param(value = "name") String functionName,
+            @Param(value = "name") FunctionRef funcRef,
 
             @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
 
@@ -225,21 +224,14 @@ public class XrefCallGraphService {
         if (program == null) {
             return Response.err("No program loaded");
         }
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
-        Function function = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                function = f;
-                break;
-            }
-        }
-
+        Function function = funcRef.resolve(program);
         if (function == null) {
-            return Response.err("Function not found: " + functionName);
+            return Response.err("No function found: " + funcRef.value());
         }
 
         AddressSetView functionBody = function.getBody();
@@ -310,7 +302,7 @@ public class XrefCallGraphService {
         }
 
         if (sb.length() == 0) {
-            return Response.text("No jump targets found in function: " + functionName);
+            return Response.text("No jump targets found in function: " + funcRef.value());
         }
 
         return Response.text(sb.toString());
@@ -327,7 +319,7 @@ public class XrefCallGraphService {
 
     public Response getFunctionCallees(
 
-            @Param(value = "name") String functionName,
+            @Param(value = "name") FunctionRef funcRef,
 
             @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
 
@@ -337,21 +329,14 @@ public class XrefCallGraphService {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
-        Function function = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                function = f;
-                break;
-            }
-        }
-
+        Function function = funcRef.resolve(program);
         if (function == null) {
-            return Response.err("Function not found: " + functionName);
+            return Response.err("No function found: " + funcRef.value());
         }
 
         Set<Function> callees = new HashSet<>();
@@ -404,7 +389,7 @@ public class XrefCallGraphService {
         }
 
         if (sb.length() == 0) {
-            return Response.text("No callees found for function: " + functionName);
+            return Response.text("No callees found for function: " + funcRef.value());
         }
 
         return Response.text(sb.toString());
@@ -417,7 +402,7 @@ public class XrefCallGraphService {
 
     public Response getFunctionCallers(
 
-            @Param(value = "name") String functionName,
+            @Param(value = "name") FunctionRef funcRef,
 
             @Param(value = "offset", type = "integer", required = false, defaultValue = "0") int offset,
 
@@ -427,21 +412,14 @@ public class XrefCallGraphService {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
-        Function targetFunction = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                targetFunction = f;
-                break;
-            }
-        }
-
+        Function targetFunction = funcRef.resolve(program);
         if (targetFunction == null) {
-            return Response.err("Function not found: " + functionName);
+            return Response.err("No function found: " + funcRef.value());
         }
 
         Set<Function> callers = new HashSet<>();
@@ -484,7 +462,7 @@ public class XrefCallGraphService {
         }
 
         if (sb.length() == 0) {
-            return Response.text("No callers found for function: " + functionName);
+            return Response.text("No callers found for function: " + funcRef.value());
         }
 
         return Response.text(sb.toString());
@@ -501,7 +479,7 @@ public class XrefCallGraphService {
 
     public Response getFunctionCallGraph(
 
-            @Param(value = "name") String functionName,
+            @Param(value = "name") FunctionRef funcRef,
 
             @Param(value = "depth", type = "integer") int depth,
 
@@ -511,21 +489,14 @@ public class XrefCallGraphService {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return (Response) programResult[1];
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
-        Function rootFunction = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                rootFunction = f;
-                break;
-            }
-        }
-
+        Function rootFunction = funcRef.resolve(program);
         if (rootFunction == null) {
-            return Response.err("Function not found: " + functionName);
+            return Response.err("No function found: " + funcRef.value());
         }
 
         Set<String> visited = new HashSet<>();
@@ -553,7 +524,7 @@ public class XrefCallGraphService {
         }
 
         if (sb.length() == 0) {
-            return Response.text("No call graph relationships found for function: " + functionName);
+            return Response.text("No call graph relationships found for function: " + funcRef.value());
         }
 
         return Response.text(sb.toString());

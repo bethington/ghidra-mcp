@@ -99,7 +99,7 @@ public class DocumentationHashService {
 
     public Response getFunctionHash(
 
-            @Param(value = "address") String functionAddress,
+            @Param(value = "address") FunctionRef funcRef,
 
             @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
@@ -107,17 +107,14 @@ public class DocumentationHashService {
         if (program == null) {
             return Response.err((String) programResult[1]);
         }
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(functionAddress);
-            if (addr == null) {
-                return Response.err("Invalid address: " + functionAddress);
-            }
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
+            Function func = funcRef.resolve(program);
             if (func == null) {
-                return Response.err("No function at address: " + functionAddress);
+                return Response.err("No function found: " + funcRef.value());
             }
+            Address addr = func.getEntryPoint();
 
             String hash = computeNormalizedFunctionHash(program, func);
             int instructionCount = countFunctionInstructions(program, func);
@@ -142,7 +139,7 @@ public class DocumentationHashService {
 
     // Backward compatibility overload
     public Response getFunctionHash(String functionAddress) {
-        return getFunctionHash(functionAddress, null);
+        return getFunctionHash(new FunctionRef(functionAddress), null);
     }
 
     /**
@@ -356,22 +353,19 @@ public class DocumentationHashService {
 
     public Response getFunctionDocumentation(
 
-            @Param(value = "address") String functionAddress) {
+            @Param(value = "address") FunctionRef funcRef) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
         }
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(functionAddress);
-            if (addr == null) {
-                return Response.err("Invalid address: " + functionAddress);
-            }
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
+            Function func = funcRef.resolve(program);
             if (func == null) {
-                return Response.err("No function at address: " + functionAddress);
+                return Response.err("No function found: " + funcRef.value());
             }
+            Address addr = func.getEntryPoint();
 
             // Compute hash for matching
             String hash = computeNormalizedFunctionHash(program, func);
@@ -694,7 +688,7 @@ public class DocumentationHashService {
         // Step 2: Rename function (optional)
         String name = JsonHelper.getString(params, "name");
         if (name != null && !name.isEmpty() && functionService != null) {
-            Response renameResp = functionService.renameFunctionByAddress(address, name);
+            Response renameResp = functionService.renameFunctionByAddress(new FunctionRef(address), name);
             boolean renameOk = !(renameResp instanceof Response.Err);
             Map<String, Object> step = new java.util.LinkedHashMap<>();
             step.put("success", renameOk);
@@ -726,7 +720,7 @@ public class DocumentationHashService {
             int setCount = 0, failCount = 0;
             java.util.List<String> typeErrors = new java.util.ArrayList<>();
             for (Map.Entry<String, Object> entry : varTypes.entrySet()) {
-                Response typeResp = functionService.setLocalVariableType(address, entry.getKey(), entry.getValue().toString());
+                Response typeResp = functionService.setLocalVariableType(new FunctionRef(address), entry.getKey(), entry.getValue().toString());
                 boolean ok = !(typeResp instanceof Response.Err);
                 if (ok) setCount++; else {
                     failCount++;
@@ -751,7 +745,7 @@ public class DocumentationHashService {
             for (Map.Entry<String, Object> e : ((Map<String, Object>) varRenamesObj).entrySet()) {
                 varRenames.put(e.getKey(), e.getValue().toString());
             }
-            Response renameVarsResp = functionService.batchRenameVariables(address, varRenames, true);
+            Response renameVarsResp = functionService.batchRenameVariables(new FunctionRef(address), varRenames, true);
             boolean renameOk = renameVarsResp instanceof Response.Text t && t.content().contains("\"success\": true");
             steps.put("variable_renames", Map.of("success", renameOk));
             if (!renameOk && renameVarsResp instanceof Response.Err err) {
@@ -767,7 +761,7 @@ public class DocumentationHashService {
             (decompComments != null && !decompComments.isEmpty()) ||
             (disasmComments != null && !disasmComments.isEmpty());
         if (hasComments && commentService != null) {
-            Response commentResp = commentService.batchSetComments(address, decompComments, disasmComments, plateComment);
+            Response commentResp = commentService.batchSetComments(new FunctionRef(address), decompComments, disasmComments, plateComment);
             boolean commentOk = commentResp instanceof Response.Text t && t.content().contains("\"success\": true");
             steps.put("comments", Map.of("success", commentOk));
             if (!commentOk && commentResp instanceof Response.Err err) {
@@ -1185,19 +1179,17 @@ public class DocumentationHashService {
 
     public Response handleGetFunctionSignature(
 
-            @Param(value = "address") String addressStr,
+            @Param(value = "address") FunctionRef funcRef,
 
             @Param(value = "program", required = false) String programName) {
         Object[] programResult = getProgramOrError(programName);
         Program program = (Program) programResult[0];
         if (program == null) return Response.err((String) programResult[1]);
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
-            if (addr == null) return Response.err("Invalid address: " + addressStr);
-
-            Function func = program.getFunctionManager().getFunctionAt(addr);
-            if (func == null) return Response.err("No function at address: " + addressStr);
+            Function func = funcRef.resolve(program);
+            if (func == null) return Response.err("No function found: " + funcRef.value());
 
             BinaryComparisonService.FunctionSignature sig =
                 BinaryComparisonService.computeFunctionSignature(program, func, new ConsoleTaskMonitor());
@@ -1214,7 +1206,7 @@ public class DocumentationHashService {
 
     public Response handleFindSimilarFunctionsFuzzy(
 
-            @Param(value = "address") String addressStr,
+            @Param(value = "address") FunctionRef funcRef,
 
             @Param(value = "source_program") String sourceProgramName,
 
@@ -1227,6 +1219,7 @@ public class DocumentationHashService {
         Object[] srcResult = getProgramOrError(sourceProgramName);
         Program srcProgram = (Program) srcResult[0];
         if (srcProgram == null) return Response.err((String) srcResult[1]);
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         // Target program is required
         if (targetProgramName == null || targetProgramName.trim().isEmpty()) {
@@ -1237,11 +1230,8 @@ public class DocumentationHashService {
         if (tgtProgram == null) return Response.err((String) tgtResult[1]);
 
         try {
-            Address addr = srcProgram.getAddressFactory().getAddress(addressStr);
-            if (addr == null) return Response.err("Invalid address: " + addressStr);
-
-            Function srcFunc = srcProgram.getFunctionManager().getFunctionAt(addr);
-            if (srcFunc == null) return Response.err("No function at address: " + addressStr);
+            Function srcFunc = funcRef.resolve(srcProgram);
+            if (srcFunc == null) return Response.err("No function found: " + funcRef.value());
 
             return Response.text(BinaryComparisonService.findSimilarFunctionsJson(
                 srcProgram, srcFunc, tgtProgram, threshold, limit, new ConsoleTaskMonitor()));
@@ -1297,9 +1287,9 @@ public class DocumentationHashService {
 
     public Response handleDiffFunctions(
 
-            @Param(value = "address_a") String addressA,
+            @Param(value = "address_a") FunctionRef funcRefA,
 
-            @Param(value = "address_b") String addressB,
+            @Param(value = "address_b") FunctionRef funcRefB,
 
             @Param(value = "program_a") String programAName,
 
@@ -1308,6 +1298,8 @@ public class DocumentationHashService {
         Object[] resultA = getProgramOrError(programAName);
         Program progA = (Program) resultA[0];
         if (progA == null) return Response.err((String) resultA[1]);
+        if (funcRefA == null) return Response.err("Function A name or address is required");
+        if (funcRefB == null) return Response.err("Function B name or address is required");
 
         // Program B defaults to Program A if not specified
         Program progB;
@@ -1320,17 +1312,11 @@ public class DocumentationHashService {
         }
 
         try {
-            Address addrA = progA.getAddressFactory().getAddress(addressA);
-            if (addrA == null) return Response.err("Invalid address_a: " + addressA);
+            Function funcA = funcRefA.resolve(progA);
+            if (funcA == null) return Response.err("No function found for A: " + funcRefA.value());
 
-            Address addrB = progB.getAddressFactory().getAddress(addressB);
-            if (addrB == null) return Response.err("Invalid address_b: " + addressB);
-
-            Function funcA = progA.getFunctionManager().getFunctionAt(addrA);
-            if (funcA == null) return Response.err("No function at address_a: " + addressA);
-
-            Function funcB = progB.getFunctionManager().getFunctionAt(addrB);
-            if (funcB == null) return Response.err("No function at address_b: " + addressB);
+            Function funcB = funcRefB.resolve(progB);
+            if (funcB == null) return Response.err("No function found for B: " + funcRefB.value());
 
             return Response.text(BinaryComparisonService.diffFunctionsJson(progA, funcA, progB, funcB, new ConsoleTaskMonitor()));
         } catch (Exception e) {
