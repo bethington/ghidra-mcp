@@ -26,7 +26,6 @@ import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.TaskMonitor;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -62,9 +61,8 @@ public class FrontEndProgramProvider implements ProgramProvider {
 
     @Override
     public Program getCurrentProgram() {
-        // First check if any running CodeBrowser has a current program
-        ProgramManager pm = findCodeBrowserProgramManager();
-        if (pm != null) {
+        // Check all running CodeBrowsers for a current program
+        for (ProgramManager pm : findAllCodeBrowserProgramManagers()) {
             Program cbProgram = pm.getCurrentProgram();
             if (cbProgram != null) {
                 return cbProgram;
@@ -82,20 +80,17 @@ public class FrontEndProgramProvider implements ProgramProvider {
 
         String searchName = name.trim();
 
-        // 1. Check if any running CodeBrowser has this program open
-        ProgramManager pm = findCodeBrowserProgramManager();
-        if (pm != null) {
-            Program[] cbPrograms = pm.getAllOpenPrograms();
-            for (Program prog : cbPrograms) {
-                if (prog.getName().equalsIgnoreCase(searchName)) {
-                    return prog;
-                }
+        // 1. Check all running CodeBrowsers for this program
+        List<Program> cbPrograms = collectCodeBrowserPrograms();
+        for (Program prog : cbPrograms) {
+            if (prog.getName().equalsIgnoreCase(searchName)) {
+                return prog;
             }
-            // Partial match on CodeBrowser programs
-            for (Program prog : cbPrograms) {
-                if (prog.getName().toLowerCase().contains(searchName.toLowerCase())) {
-                    return prog;
-                }
+        }
+        // Partial match on CodeBrowser programs
+        for (Program prog : cbPrograms) {
+            if (prog.getName().toLowerCase().contains(searchName.toLowerCase())) {
+                return prog;
             }
         }
 
@@ -117,16 +112,8 @@ public class FrontEndProgramProvider implements ProgramProvider {
 
     @Override
     public Program[] getAllOpenPrograms() {
-        List<Program> allPrograms = new ArrayList<>();
-
-        // Add CodeBrowser programs first (these are "live" in the GUI)
-        ProgramManager pm = findCodeBrowserProgramManager();
-        if (pm != null) {
-            Program[] cbPrograms = pm.getAllOpenPrograms();
-            for (Program prog : cbPrograms) {
-                allPrograms.add(prog);
-            }
-        }
+        // Collect programs from ALL CodeBrowser instances (deduped)
+        List<Program> allPrograms = collectCodeBrowserPrograms();
 
         // Add our cached programs that aren't already in the list
         for (Program prog : openPrograms.values()) {
@@ -149,11 +136,42 @@ public class FrontEndProgramProvider implements ProgramProvider {
     public void setCurrentProgram(Program program) {
         this.currentProgram = program;
 
-        // If CodeBrowser is open, also switch it
-        ProgramManager pm = findCodeBrowserProgramManager();
-        if (pm != null && program != null) {
-            pm.setCurrentProgram(program);
+        // Set current in the CodeBrowser that actually has this program open
+        if (program != null) {
+            for (ProgramManager pm : findAllCodeBrowserProgramManagers()) {
+                for (Program p : pm.getAllOpenPrograms()) {
+                    if (p == program || p.getName().equals(program.getName())) {
+                        pm.setCurrentProgram(program);
+                        return;
+                    }
+                }
+            }
         }
+    }
+
+    /**
+     * Collect programs from all running CodeBrowser instances, deduplicating
+     * by object identity and name.
+     *
+     * @return Mutable list of unique programs across all CodeBrowsers
+     */
+    private List<Program> collectCodeBrowserPrograms() {
+        List<Program> allPrograms = new ArrayList<>();
+        for (ProgramManager pm : findAllCodeBrowserProgramManagers()) {
+            for (Program prog : pm.getAllOpenPrograms()) {
+                boolean alreadyListed = false;
+                for (Program existing : allPrograms) {
+                    if (existing == prog || existing.getName().equals(prog.getName())) {
+                        alreadyListed = true;
+                        break;
+                    }
+                }
+                if (!alreadyListed) {
+                    allPrograms.add(prog);
+                }
+            }
+        }
+        return allPrograms;
     }
 
     /**
@@ -251,33 +269,37 @@ public class FrontEndProgramProvider implements ProgramProvider {
     }
 
     /**
-     * Find a ProgramManager from any running CodeBrowser tool.
+     * Find ProgramManagers from ALL running CodeBrowser tool instances.
+     * When multiple CodeBrowsers are open (e.g., user double-clicks multiple
+     * programs in FrontEnd), each has its own ProgramManager.
      *
-     * @return ProgramManager from a running CodeBrowser, or null if none found
+     * @return List of ProgramManagers from all running CodeBrowsers (may be empty)
      */
-    private ProgramManager findCodeBrowserProgramManager() {
+    private List<ProgramManager> findAllCodeBrowserProgramManagers() {
+        List<ProgramManager> managers = new ArrayList<>();
+
         Project project = tool.getProject();
         if (project == null) {
-            return null;
+            return managers;
         }
 
         try {
             ghidra.framework.model.ToolManager tm = project.getToolManager();
             if (tm == null) {
-                return null;
+                return managers;
             }
 
             for (PluginTool runningTool : tm.getRunningTools()) {
                 ProgramManager pm = runningTool.getService(ProgramManager.class);
                 if (pm != null) {
-                    return pm;
+                    managers.add(pm);
                 }
             }
         } catch (Exception e) {
             // ToolManager may not be available in all contexts
         }
 
-        return null;
+        return managers;
     }
 
     /**
