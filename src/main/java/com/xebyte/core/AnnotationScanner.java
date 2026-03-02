@@ -1,7 +1,6 @@
 package com.xebyte.core;
 
 import com.sun.net.httpserver.Headers;
-import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.ByteArrayInputStream;
@@ -96,10 +95,23 @@ public final class AnnotationScanner {
     // HTTP Registration
     // ==================================================================================
 
-    /** Register all scanned tools as HTTP endpoints on an HttpServer. */
+    /** Transport-agnostic endpoint registrar. */
+    @FunctionalInterface
+    public interface ContextRegistrar {
+        void createContext(String path, java.util.function.Consumer<HttpExchange> handler);
+    }
+
+    /** Register all scanned tools on a Sun HttpServer (wraps exchanges with adapter). */
     public static void registerHttp(HttpServer server, List<ToolDef> defs) {
+        registerHttp((path, handler) ->
+            server.createContext(path, exchange ->
+                handler.accept(new SunHttpExchangeAdapter(exchange))), defs);
+    }
+
+    /** Register all scanned tools using a transport-agnostic registrar. */
+    public static void registerHttp(ContextRegistrar registrar, List<ToolDef> defs) {
         for (ToolDef def : defs) {
-            server.createContext(def.path(), exchange -> {
+            registrar.createContext(def.path(), exchange -> {
                 try {
                     Object[] args = resolveArgs(def, exchange);
                     Object result = def.method().invoke(def.serviceInstance(), args);
@@ -119,7 +131,8 @@ public final class AnnotationScanner {
         }
     }
 
-    private static void sendResponse(HttpExchange exchange, String json) {
+    /** Send a JSON/text response. Public so ServerManager can use it for inline endpoints. */
+    public static void sendResponse(HttpExchange exchange, String json) {
         try {
             byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
             Headers headers = exchange.getResponseHeaders();
