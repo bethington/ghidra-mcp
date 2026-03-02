@@ -63,6 +63,7 @@ import com.xebyte.core.BinaryComparisonService;
 import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.FrontEndProgramProvider;
 import com.xebyte.core.JsonHelper;
+import com.xebyte.core.ServerManager;
 
 import ghidra.framework.main.ApplicationLevelPlugin;
 
@@ -275,6 +276,13 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                     "3. Checking if another Ghidra instance is running\n\n" +
                     "Error: " + e.getMessage());
             }
+        }
+
+        // Register with ServerManager for UDS transport (bridge discovery)
+        try {
+            ServerManager.getInstance().registerTool(tool, null);
+        } catch (IOException e) {
+            Msg.warn(this, "Failed to start UDS server: " + e.getMessage());
         }
 
         createMenuActions();
@@ -3554,6 +3562,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
     @Override
     public void dispose() {
+        // Deregister from UDS ServerManager
+        ServerManager.getInstance().deregisterTool(tool);
+
         instanceCount--;
         // Only stop the server when the last plugin instance is disposed
         if (instanceCount <= 0) {
