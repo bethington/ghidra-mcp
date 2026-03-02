@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * variable typing, and function creation/deletion.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
  */
+@McpToolGroup("function")
 public class FunctionService {
 
     private static final int DECOMPILE_TIMEOUT_SECONDS = 60;  // Increased from 30s to 60s for large functions

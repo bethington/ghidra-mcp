@@ -43,7 +43,9 @@ public final class AnnotationScanner {
     public static List<ToolDef> scan(Object... services) {
         List<ToolDef> defs = new ArrayList<>();
         for (Object svc : services) {
-            String category = svc.getClass().getSimpleName().toLowerCase().replaceAll("service$", "");
+            McpToolGroup groupAnn = svc.getClass().getAnnotation(McpToolGroup.class);
+            String category = groupAnn != null ? groupAnn.value()
+                : svc.getClass().getSimpleName().toLowerCase().replaceAll("service$", "");
             for (Method m : svc.getClass().getMethods()) {
                 McpTool ann = m.getAnnotation(McpTool.class);
                 if (ann == null) continue;

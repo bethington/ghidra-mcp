@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Service for comment operations: set/get/clear decompiler, disassembly, and plate comments.
  */
+@McpToolGroup("comment")
 public class CommentService {
 
     private final ProgramProvider programProvider;

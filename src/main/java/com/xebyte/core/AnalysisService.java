@@ -41,6 +41,7 @@ import java.util.regex.Pattern;
  * similarity detection, memory inspection, and enhanced search.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
  */
+@McpToolGroup("analysis")
 public class AnalysisService {
 
     private static final int MAX_FIELD_EXAMPLES = 50;

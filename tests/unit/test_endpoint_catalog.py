@@ -118,14 +118,14 @@ class TestEndpointsJson(unittest.TestCase):
 class TestBridgeIsDynamic(unittest.TestCase):
     """Verify the bridge uses dynamic registration, not hardcoded tools."""
 
-    def test_bridge_has_no_hardcoded_tools(self):
-        """Bridge should not have >5 @mcp.tool() decorators (only static tools)."""
+    def test_bridge_has_few_static_tools(self):
+        """Bridge should only have static tools (list_instances, connect_instance, tool group mgmt)."""
         bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
         content = bridge_path.read_text()
         tool_count = len(re.findall(r'@mcp\.tool\(\)', content))
-        self.assertLessEqual(tool_count, 5,
+        self.assertLessEqual(tool_count, 10,
             f"Bridge has {tool_count} @mcp.tool() decorators. "
-            "Expected <=5 (only static tools like list_instances, connect_instance)")
+            "Expected <=10 (only static tools)")
 
     def test_bridge_has_schema_registration(self):
         """Bridge should have register_tools_from_schema function."""
@@ -156,10 +156,29 @@ class TestAnnotationScannerExists(unittest.TestCase):
         path = CORE_SRC / "Param.java"
         self.assertTrue(path.exists())
 
+    def test_mcp_tool_group_annotation_exists(self):
+        path = CORE_SRC / "McpToolGroup.java"
+        self.assertTrue(path.exists())
+
     def test_scanner_has_schema_method(self):
         content = (CORE_SRC / "AnnotationScanner.java").read_text()
         self.assertIn("toSchemaJson", content)
         self.assertIn("registerHttp", content)
+
+    def test_all_services_have_tool_group(self):
+        """All service files should have @McpToolGroup annotation."""
+        expected = [
+            "ListingService", "FunctionService", "CommentService",
+            "SymbolLabelService", "XrefCallGraphService", "DataTypeService",
+            "AnalysisService", "DocumentationHashService",
+            "MalwareSecurityService", "ProgramScriptService",
+        ]
+        for name in expected:
+            path = CORE_SRC / f"{name}.java"
+            if path.exists():
+                content = path.read_text()
+                self.assertIn("@McpToolGroup", content,
+                    f"{name}.java missing @McpToolGroup annotation")
 
 
 if __name__ == "__main__":

@@ -342,6 +342,11 @@ def dispatch_post(endpoint: str, data: dict, retries: int = 3) -> str:
 # ==========================================================================
 
 _dynamic_tool_names: list[str] = []
+_full_schema: list[dict] = []  # Complete schema from /mcp/schema
+_loaded_groups: set[str] = set()  # Currently loaded tool groups
+
+# Core groups always loaded on connect (essential for basic RE workflow)
+CORE_GROUPS = {"listing", "function", "program"}
 
 
 def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
@@ -376,9 +381,33 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     return handler
 
 
-def register_tools_from_schema(schema: list[dict]) -> int:
-    """Register MCP tools from the /mcp/schema response. Returns count."""
-    global _dynamic_tool_names
+def _register_tool_def(tool_def: dict) -> bool:
+    """Register a single tool from a schema definition. Returns True if registered."""
+    name = tool_def["name"]
+    description = tool_def.get("description", "")
+    endpoint = tool_def["endpoint"]
+    http_method = tool_def.get("http_method", "GET")
+    input_schema = tool_def.get("input_schema", {"type": "object", "properties": {}})
+
+    handler = _build_tool_function(endpoint, http_method, input_schema)
+    handler.__name__ = name
+    handler.__doc__ = description
+
+    mcp.tool(name=name, description=description)(handler)
+    _dynamic_tool_names.append(name)
+    return True
+
+
+def register_tools_from_schema(schema: list[dict], groups: set[str] | None = None) -> int:
+    """Register MCP tools from the /mcp/schema response.
+
+    Args:
+        schema: List of tool definitions from /mcp/schema
+        groups: If provided, only register tools in these groups. None = register all.
+
+    Returns: count of registered tools.
+    """
+    global _dynamic_tool_names, _full_schema, _loaded_groups
 
     # Remove previously registered dynamic tools
     for name in _dynamic_tool_names:
@@ -387,33 +416,96 @@ def register_tools_from_schema(schema: list[dict]) -> int:
         except (KeyError, ValueError):
             pass
     _dynamic_tool_names.clear()
+    _loaded_groups.clear()
+
+    # Store full schema for lazy loading
+    _full_schema = schema
 
     count = 0
     for tool_def in schema:
-        name = tool_def["name"]
-        description = tool_def.get("description", "")
-        endpoint = tool_def["endpoint"]
-        http_method = tool_def.get("http_method", "GET")
-        input_schema = tool_def.get("input_schema", {"type": "object", "properties": {}})
-
-        handler = _build_tool_function(endpoint, http_method, input_schema)
-        handler.__name__ = name
-        handler.__doc__ = description
-
-        mcp.tool(name=name, description=description)(handler)
-        _dynamic_tool_names.append(name)
+        category = tool_def.get("category", "unknown")
+        if groups is not None and category not in groups:
+            continue
+        _register_tool_def(tool_def)
+        _loaded_groups.add(category)
         count += 1
 
     return count
 
 
-def _fetch_and_register_schema() -> int:
-    """Fetch /mcp/schema from connected instance and register tools. Returns tool count."""
+def _load_group(group_name: str) -> int:
+    """Load tools for a specific group from cached schema. Returns count."""
+    count = 0
+    for tool_def in _full_schema:
+        if tool_def.get("category") != group_name:
+            continue
+        name = tool_def["name"]
+        if name in _dynamic_tool_names:
+            continue  # Already loaded
+        _register_tool_def(tool_def)
+        count += 1
+    if count > 0:
+        _loaded_groups.add(group_name)
+    return count
+
+
+def _unload_group(group_name: str) -> int:
+    """Unload tools for a specific group. Returns count of removed tools."""
+    if group_name in CORE_GROUPS:
+        return 0  # Core groups can't be unloaded
+
+    to_remove = []
+    for tool_def in _full_schema:
+        if tool_def.get("category") == group_name:
+            name = tool_def["name"]
+            if name in _dynamic_tool_names:
+                to_remove.append(name)
+
+    for name in to_remove:
+        try:
+            mcp.remove_tool(name)
+            _dynamic_tool_names.remove(name)
+        except (KeyError, ValueError):
+            pass
+
+    if to_remove:
+        _loaded_groups.discard(group_name)
+    return len(to_remove)
+
+
+def _get_group_info() -> list[dict]:
+    """Get info about all tool groups from cached schema."""
+    groups: dict[str, list[str]] = {}
+    for tool_def in _full_schema:
+        cat = tool_def.get("category", "unknown")
+        groups.setdefault(cat, []).append(tool_def["name"])
+
+    result = []
+    for name, tools in sorted(groups.items()):
+        result.append({
+            "group": name,
+            "tool_count": len(tools),
+            "loaded": name in _loaded_groups,
+            "core": name in CORE_GROUPS,
+            "tools": sorted(tools),
+        })
+    return result
+
+
+def _fetch_and_register_schema(load_all: bool = False) -> int:
+    """Fetch /mcp/schema from connected instance and register tools.
+
+    Args:
+        load_all: If True, register all tools. If False, only core groups.
+
+    Returns: count of registered tools.
+    """
     text, status = do_request("GET", "/mcp/schema", timeout=10)
     if status != 200:
         raise RuntimeError(f"Failed to fetch schema: HTTP {status}")
     schema = json.loads(text)
-    return register_tools_from_schema(schema)
+    groups = None if load_all else CORE_GROUPS
+    return register_tools_from_schema(schema, groups=groups)
 
 
 # ==========================================================================
@@ -471,6 +563,7 @@ def connect_instance(project: str) -> str:
 
             try:
                 count = _fetch_and_register_schema()
+                total = len(_full_schema)
                 return json.dumps({
                     "connected": True,
                     "transport": "uds",
@@ -478,6 +571,9 @@ def connect_instance(project: str) -> str:
                     "socket": match["socket"],
                     "pid": match.get("pid"),
                     "tools_registered": count,
+                    "tools_total": total,
+                    "loaded_groups": sorted(_loaded_groups),
+                    "note": f"Loaded {count}/{total} tools (core groups). Use load_tool_group() for more.",
                 })
             except Exception as e:
                 return json.dumps({"error": f"Schema fetch failed: {e}", "socket": _active_socket})
@@ -489,11 +585,14 @@ def connect_instance(project: str) -> str:
         _active_socket = None
         _transport_mode = "tcp"
         count = _fetch_and_register_schema()
+        total = len(_full_schema)
         return json.dumps({
             "connected": True,
             "transport": "tcp",
             "url": tcp_url,
             "tools_registered": count,
+            "tools_total": total,
+            "loaded_groups": sorted(_loaded_groups),
         })
     except Exception as e:
         _transport_mode = "none"
@@ -503,6 +602,83 @@ def connect_instance(project: str) -> str:
             "error": f"No instance matching '{project}' (UDS: {len(instances)} found, TCP {tcp_url}: {e})",
             "available": available,
         })
+
+
+@mcp.tool()
+def list_tool_groups() -> str:
+    """
+    List all available tool groups with their tool counts and loaded status.
+
+    Returns each category with: tool count, loaded status, and tool names.
+    Use load_tool_group(group) to load a group's tools.
+    """
+    if not _full_schema:
+        return json.dumps({"error": "No instance connected. Use connect_instance() first."})
+    groups = _get_group_info()
+    return json.dumps({"groups": groups, "total_tools": len(_full_schema)}, indent=2)
+
+
+@mcp.tool()
+def load_tool_group(group: str) -> str:
+    """
+    Load all tools in a category. Accepts a category name or "all" to load everything.
+
+    Use list_tool_groups() to see available categories.
+
+    Args:
+        group: Category name (e.g. "function", "datatype") or "all"
+    """
+    if not _full_schema:
+        return json.dumps({"error": "No instance connected. Use connect_instance() first."})
+
+    if group == "all":
+        # Load all unloaded groups
+        all_groups = {td.get("category", "unknown") for td in _full_schema}
+        total = 0
+        for g in all_groups:
+            total += _load_group(g)
+        return json.dumps({
+            "loaded": "all",
+            "new_tools": total,
+            "total_loaded": len(_dynamic_tool_names),
+        })
+
+    count = _load_group(group)
+    if count == 0:
+        available = sorted({td.get("category", "unknown") for td in _full_schema})
+        if group in _loaded_groups:
+            return json.dumps({"message": f"Group '{group}' is already loaded.", "loaded_groups": sorted(_loaded_groups)})
+        return json.dumps({"error": f"No tools found for group '{group}'", "available": available})
+
+    return json.dumps({
+        "loaded": group,
+        "new_tools": count,
+        "total_loaded": len(_dynamic_tool_names),
+        "loaded_groups": sorted(_loaded_groups),
+    })
+
+
+@mcp.tool()
+def unload_tool_group(group: str) -> str:
+    """
+    Unload all tools in a category. Core tools are protected from unloading.
+
+    Args:
+        group: Category name to unload
+    """
+    if group in CORE_GROUPS:
+        return json.dumps({"error": f"Cannot unload core group '{group}'", "core_groups": sorted(CORE_GROUPS)})
+
+    count = _unload_group(group)
+    if count == 0:
+        return json.dumps({"message": f"Group '{group}' is not loaded or has no tools."})
+
+    return json.dumps({
+        "unloaded": group,
+        "removed_tools": count,
+        "total_loaded": len(_dynamic_tool_names),
+        "loaded_groups": sorted(_loaded_groups),
+    })
 
 
 # ==========================================================================
