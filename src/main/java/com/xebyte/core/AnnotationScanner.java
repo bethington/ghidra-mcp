@@ -73,6 +73,8 @@ public final class AnnotationScanner {
             return "boolean";
         if (type == double.class || type == Double.class || type == float.class || type == Float.class)
             return "number";
+        if (type == FunctionRef.class)
+            return "string";
         if (Map.class.isAssignableFrom(type))
             return "object";
         if (List.class.isAssignableFrom(type))
@@ -188,6 +190,11 @@ public final class AnnotationScanner {
             if (type == double.class) return 0.0;
             if (type == float.class) return 0.0f;
             return null;
+        }
+
+        // FunctionRef target (wraps string for type-safe function resolution)
+        if (type == FunctionRef.class) {
+            return (raw != null) ? new FunctionRef(raw.toString()) : null;
         }
 
         // String target

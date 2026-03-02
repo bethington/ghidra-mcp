@@ -1072,7 +1072,7 @@ public class AnalysisService {
 
     public Response findSimilarFunctions(
 
-            @Param(value = "target_function") String targetFunction,
+            @Param(value = "target_function") FunctionRef funcRef,
 
             @Param(value = "threshold", type = "number") double threshold) {
         Program program = programProvider.getCurrentProgram();
@@ -1080,24 +1080,16 @@ public class AnalysisService {
             return Response.err("No program loaded");
         }
 
-        if (targetFunction == null || targetFunction.trim().isEmpty()) {
-            return Response.err("Target function name is required");
+        if (funcRef == null) {
+            return Response.err("Function name or address is required");
         }
 
         try {
             FunctionManager functionManager = program.getFunctionManager();
-            Function targetFunc = null;
-
-            // Find the target function
-            for (Function f : functionManager.getFunctions(true)) {
-                if (f.getName().equals(targetFunction)) {
-                    targetFunc = f;
-                    break;
-                }
-            }
+            Function targetFunc = funcRef.resolve(program);
 
             if (targetFunc == null) {
-                return Response.err("Function not found: " + targetFunction);
+                return Response.err("No function found: " + funcRef.value());
             }
 
             // Calculate metrics for target function
@@ -1108,7 +1100,7 @@ public class AnalysisService {
             List<Map<String, Object>> similarFunctions = new ArrayList<>();
 
             for (Function func : functionManager.getFunctions(true)) {
-                if (func.getName().equals(targetFunction)) continue;
+                if (func.getEntryPoint().equals(targetFunc.getEntryPoint())) continue;
                 if (func.isThunk()) continue;
 
                 FunctionMetrics funcMetrics = calculateFunctionMetrics(func, blockModel, program);
@@ -1138,7 +1130,7 @@ public class AnalysisService {
             // Build JSON response
             StringBuilder result = new StringBuilder();
             result.append("{\n");
-            result.append("  \"target_function\": \"").append(ServiceUtils.escapeJson(targetFunction)).append("\",\n");
+            result.append("  \"target_function\": \"").append(ServiceUtils.escapeJson(targetFunc.getName())).append("\",\n");
             result.append("  \"target_metrics\": {\n");
             result.append("    \"basic_blocks\": ").append(targetMetrics.basicBlockCount).append(",\n");
             result.append("    \"instructions\": ").append(targetMetrics.instructionCount).append(",\n");
@@ -1181,30 +1173,21 @@ public class AnalysisService {
 
     public Response analyzeControlFlow(
 
-            @Param(value = "function_name") String functionName) {
+            @Param(value = "function_name") FunctionRef funcRef) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");
         }
 
-        if (functionName == null || functionName.trim().isEmpty()) {
-            return Response.err("Function name is required");
+        if (funcRef == null) {
+            return Response.err("Function name or address is required");
         }
 
         try {
-            FunctionManager functionManager = program.getFunctionManager();
-            Function func = null;
-
-            // Find the function by name
-            for (Function f : functionManager.getFunctions(true)) {
-                if (f.getName().equals(functionName)) {
-                    func = f;
-                    break;
-                }
-            }
+            Function func = funcRef.resolve(program);
 
             if (func == null) {
-                return Response.err("Function not found: " + functionName);
+                return Response.err("No function found: " + funcRef.value());
             }
 
             BasicBlockModel blockModel = new BasicBlockModel(program);
@@ -1319,7 +1302,7 @@ public class AnalysisService {
             // Build JSON response
             StringBuilder result = new StringBuilder();
             result.append("{\n");
-            result.append("  \"function_name\": \"").append(ServiceUtils.escapeJson(functionName)).append("\",\n");
+            result.append("  \"function_name\": \"").append(ServiceUtils.escapeJson(func.getName())).append("\",\n");
             result.append("  \"entry_point\": \"").append(func.getEntryPoint().toString()).append("\",\n");
             result.append("  \"size_bytes\": ").append(func.getBody().getNumAddresses()).append(",\n");
             result.append("  \"metrics\": {\n");
@@ -1970,7 +1953,7 @@ public class AnalysisService {
 
     public Response analyzeFunctionComplete(
 
-            @Param(value = "name") String name,
+            @Param(value = "name") FunctionRef funcRef,
 
             @Param(value = "includeXrefs", type = "boolean") boolean includeXrefs,
 
@@ -1988,6 +1971,7 @@ public class AnalysisService {
         if (program == null) {
             return Response.err((String) programResult[1]);
         }
+        if (funcRef == null) return Response.err("Function name or address is required");
 
         final Program finalProgram = program;
 
@@ -1997,19 +1981,10 @@ public class AnalysisService {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Function func = null;
-                    FunctionManager funcMgr = finalProgram.getFunctionManager();
-
-                    // Find function by name
-                    for (Function f : funcMgr.getFunctions(true)) {
-                        if (f.getName().equals(name)) {
-                            func = f;
-                            break;
-                        }
-                    }
+                    Function func = funcRef.resolve(finalProgram);
 
                     if (func == null) {
-                        result.append("{\"error\": \"Function not found: ").append(name).append("\"}");
+                        result.append("{\"error\": \"No function found: ").append(funcRef.value()).append("\"}");
                         return;
                     }
 
@@ -2192,7 +2167,7 @@ public class AnalysisService {
     // Backward compatibility overload
     public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
                                           boolean includeCallers, boolean includeDisasm, boolean includeVariables) {
-        return analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, null);
+        return analyzeFunctionComplete(new FunctionRef(name), includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, null);
     }
 
     /**
