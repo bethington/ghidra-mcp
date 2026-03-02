@@ -1,0 +1,64 @@
+# D2Lang.dll ordinal-to-function name mappings
+# source: CE_Database (ThePhrozenKeep/CE_Database) + D2MOO headers
+# version: 1.10f (ordinals stable across D2 versions)
+# format: ordinal
+# entries: 56
+#
+# Regular functions
+10000,LoadStringTables
+10001,FreeStringTables
+10002,CalculateHash
+10003,GetStringByReferenceString
+10004,GetStringFromTblIndex
+10005,CalculateCRC
+10006,GetLanguageString
+10007,GetLocaleId
+10013,GetTblIndex
+# Unicode class methods (demangled from C++ decorated names)
+10014,Unicode_Constructor
+10015,Unicode_AssignmentOperator
+10016,Unicode_CastToWChar
+10017,Unicode_DefaultConstructor
+10018,Unicode_Personalize
+10021,Unicode_compare
+10022,Unicode_compareStatic
+10023,Unicode_directionality
+10024,Unicode_isASCII
+10025,Unicode_isAlpha
+10026,Unicode_isLeftToRight
+10027,Unicode_isLineBreak
+10028,Unicode_isNewline
+10029,Unicode_isPipe
+10030,Unicode_isWhitespace
+10031,Unicode_isWordEnd
+10032,Unicode_loadSysMap
+10033,Unicode_sprintf
+10034,Unicode_strcat
+10035,Unicode_strchr
+10036,Unicode_strcmp
+10037,Unicode_strcoll
+10038,Unicode_strcpy
+10039,Unicode_stricmp
+10040,Unicode_strlen
+10041,Unicode_strncat
+10042,Unicode_strncmp
+10043,Unicode_strncoll
+10044,Unicode_strncpy
+10045,Unicode_strnicmp
+10046,Unicode_strstr
+10047,Unicode_strstri
+10048,Unicode_sys2Unicode
+10049,Unicode_sysWidth
+10050,Unicode_toLower
+10051,Unicode_toUnicode
+10052,Unicode_toUpper
+10053,Unicode_toUtf
+10054,Unicode_unicode2Sys
+10055,Unicode_unicode2Win
+10056,Unicode_unicodeWidth
+10057,Unicode_unicodenwidth
+10058,Unicode_unloadSysMap
+10059,Unicode_utf8ToUnicode
+10060,Unicode_utfnwidth
+10061,Unicode_utfwidth
+10062,Unicode_win2Unicode

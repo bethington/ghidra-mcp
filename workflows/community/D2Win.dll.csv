@@ -1,0 +1,26 @@
+# D2Win.dll ordinal-to-function name mappings
+# source: CE_Database + d2mods.info + mir-diablo-ii-tools Address Table
+# version: 1.10f (ordinals stable across D2 versions)
+# format: ordinal
+# entries: 19
+# note: D2Win.dll is sparsely documented across community sources
+#
+10017,CreateWindow
+10018,DestroyWindow
+10034,GetNearestPaletteIndex
+10035,LoadCelFile
+10037,UnloadCelFile
+10039,LoadCellFile
+10110,DrawUnicodeText
+10114,GetUnicodeTextDrawWidth
+10115,GetUnicodeTextNDrawWidth
+10117,DisplayText
+10120,SetUnicodeTextFont
+10121,GetWidthOfUnicodeString
+10122,SetPopUpUnicodeText
+10124,GetPopupUnicodeTextWidthAndHeight
+10127,SetFont
+10129,AddUniStringToDisplay
+10160,GetPlayerTitle
+10175,GetPL2Shift
+10177,LoadActPalette
