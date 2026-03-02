@@ -17,8 +17,7 @@ package com.xebyte.headless;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import com.xebyte.core.EndpointDef;
-import com.xebyte.core.EndpointRegistry;
+import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.JsonHelper;
 import com.xebyte.core.ProgramProvider;
 import com.xebyte.core.ThreadingStrategy;
@@ -290,29 +289,29 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         });
 
         // ==========================================================================
-        // SHARED ENDPOINTS — Declarative registration via EndpointRegistry
+        // SHARED ENDPOINTS — Annotation-driven registration via AnnotationScanner
         // ==========================================================================
 
-        EndpointRegistry registry = new EndpointRegistry(
+        java.util.List<AnnotationScanner.ToolDef> toolDefs = AnnotationScanner.scan(
             endpointHandler.getListingService(), endpointHandler.getFunctionService(),
             endpointHandler.getCommentService(), endpointHandler.getSymbolLabelService(),
             endpointHandler.getXrefCallGraphService(), endpointHandler.getDataTypeService(),
             endpointHandler.getAnalysisService(), endpointHandler.getDocumentationHashService(),
             endpointHandler.getMalwareSecurityService(), endpointHandler.getProgramScriptService());
 
-        for (EndpointDef ep : registry.getEndpoints()) {
-            server.createContext(ep.path(), exchange -> {
-                try {
-                    Map<String, String> query = parseQueryParams(exchange);
-                    Map<String, Object> body = "POST".equalsIgnoreCase(exchange.getRequestMethod())
-                        ? JsonHelper.parseBody(exchange.getRequestBody()) : Map.of();
-                    sendResponse(exchange, ep.handler().handle(query, body).toJson());
-                } catch (Exception e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
-                    sendResponse(exchange, "{\"error\": \"" + msg.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}");
-                }
-            });
-        }
+        AnnotationScanner.registerHttp(server, toolDefs);
+
+        // /mcp/schema — serves tool definitions for the dynamic MCP bridge
+        final String schemaJson = AnnotationScanner.toSchemaJson(toolDefs);
+        server.createContext("/mcp/schema", exchange -> {
+            try {
+                sendResponse(exchange, schemaJson);
+            } catch (Exception e) {
+                sendResponse(exchange, "{\"error\": \"" + e.getMessage() + "\"}");
+            }
+        });
+
+        System.out.println("[GhidraMCP] Registered " + toolDefs.size() + " annotated endpoints + /mcp/schema");
 
         // ==========================================================================
         // HEADLESS-ONLY ENDPOINTS (no GUI equivalent)
