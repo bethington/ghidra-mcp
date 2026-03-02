@@ -2,269 +2,237 @@
 Unit tests for GhidraMCP bridge utility functions.
 
 These tests run WITHOUT requiring a Ghidra server connection.
-They test input validation, address parsing, caching, and error handling.
+They test transport utilities, timeout logic, and discovery functions.
 """
 
-import pytest
-import sys
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 import json
+import os
+import inspect
+import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-
-class TestAddressValidation:
-    """Tests for hex address validation and sanitization."""
-
-    def test_validate_hex_address_valid(self):
-        """Valid hex addresses should pass validation."""
-        from bridge_mcp_ghidra import validate_hex_address
-
-        assert validate_hex_address("0x401000") is True
-        assert validate_hex_address("0x6FB6AEF0") is True
-        assert validate_hex_address("0xDEADBEEF") is True
-        assert validate_hex_address("0x0") is True
-
-    def test_validate_hex_address_invalid(self):
-        """Invalid addresses should fail validation."""
-        from bridge_mcp_ghidra import validate_hex_address
-
-        assert validate_hex_address("") is False
-        assert validate_hex_address(None) is False
-        assert validate_hex_address("401000") is False  # Missing 0x prefix
-        assert validate_hex_address("0xGHIJKL") is False  # Invalid hex chars
-        assert validate_hex_address("not_an_address") is False
-
-    def test_sanitize_address_adds_prefix(self):
-        """Sanitize should add 0x prefix when missing."""
-        from bridge_mcp_ghidra import sanitize_address
-
-        assert sanitize_address("401000") == "0x401000"
-        assert sanitize_address("deadbeef") == "0xdeadbeef"
-
-    def test_sanitize_address_normalizes_case(self):
-        """Sanitize should normalize to lowercase."""
-        from bridge_mcp_ghidra import sanitize_address
-
-        assert sanitize_address("0X401000") == "0x401000"
-        assert sanitize_address("0xDEADBEEF") == "0xdeadbeef"
-
-    def test_sanitize_address_strips_whitespace(self):
-        """Sanitize should handle whitespace."""
-        from bridge_mcp_ghidra import sanitize_address
-
-        assert sanitize_address("  0x401000  ") == "0x401000"
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
-class TestServerUrlValidation:
-    """Tests for server URL validation (security)."""
+class TestGetSocketDir(unittest.TestCase):
+    """Test socket directory resolution."""
 
-    def test_validate_localhost(self):
-        """Localhost URLs should be valid."""
-        from bridge_mcp_ghidra import validate_server_url
+    @patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1000"}, clear=False)
+    def test_xdg_runtime_dir(self):
+        from bridge_mcp_ghidra import get_socket_dir
+        result = get_socket_dir()
+        self.assertEqual(result, Path("/run/user/1000/ghidra-mcp"))
 
-        assert validate_server_url("http://localhost:8089/") is True
-        assert validate_server_url("http://127.0.0.1:8089/") is True
-        assert validate_server_url("http://localhost:8080") is True
-
-    def test_validate_private_networks(self):
-        """Private network URLs should be valid."""
-        from bridge_mcp_ghidra import validate_server_url
-
-        assert validate_server_url("http://192.168.1.100:8089/") is True
-        assert validate_server_url("http://10.0.0.1:8089/") is True
-        assert validate_server_url("http://172.16.0.1:8089/") is True
-
-    def test_reject_public_urls(self):
-        """Public URLs should be rejected for security."""
-        from bridge_mcp_ghidra import validate_server_url
-
-        assert validate_server_url("http://example.com:8089/") is False
-        assert validate_server_url("http://8.8.8.8:8089/") is False
-
-    def test_reject_invalid_protocols(self):
-        """Non-HTTP protocols should be rejected."""
-        from bridge_mcp_ghidra import validate_server_url
-
-        assert validate_server_url("ftp://localhost:21/") is False
-        assert validate_server_url("file:///etc/passwd") is False
+    @patch.dict(os.environ, {"TMPDIR": "/custom/tmp", "USER": "testuser"}, clear=False)
+    def test_tmpdir_fallback(self):
+        env = os.environ.copy()
+        env.pop("XDG_RUNTIME_DIR", None)
+        with patch.dict(os.environ, env, clear=True):
+            from bridge_mcp_ghidra import get_socket_dir
+            result = get_socket_dir()
+            self.assertEqual(result, Path("/custom/tmp/ghidra-mcp-testuser"))
 
 
-class TestTimeoutCalculation:
-    """Tests for dynamic timeout calculation."""
+class TestIsPidAlive(unittest.TestCase):
+    """Test PID liveness check."""
+
+    def test_current_pid_alive(self):
+        from bridge_mcp_ghidra import is_pid_alive
+        self.assertTrue(is_pid_alive(os.getpid()))
+
+    def test_nonexistent_pid(self):
+        from bridge_mcp_ghidra import is_pid_alive
+        self.assertFalse(is_pid_alive(4000000))
+
+
+class TestGetTimeout(unittest.TestCase):
+    """Test per-endpoint timeout calculation."""
 
     def test_default_timeout(self):
-        """Unknown endpoints should get default timeout."""
-        from bridge_mcp_ghidra import get_timeout_for_endpoint
+        from bridge_mcp_ghidra import get_timeout
+        self.assertEqual(get_timeout("/some_unknown_endpoint"), 30)
 
-        timeout = get_timeout_for_endpoint("unknown_endpoint")
-        assert timeout == 30  # Default
+    def test_decompile_timeout(self):
+        from bridge_mcp_ghidra import get_timeout
+        self.assertEqual(get_timeout("/decompile_function"), 45)
 
-    def test_batch_operations_timeout(self):
-        """Batch operations should have higher timeouts."""
-        from bridge_mcp_ghidra import get_timeout_for_endpoint
+    def test_script_timeout(self):
+        from bridge_mcp_ghidra import get_timeout
+        self.assertEqual(get_timeout("/run_ghidra_script"), 1800)
 
-        assert get_timeout_for_endpoint("batch_rename_variables") == 120
-        assert get_timeout_for_endpoint("batch_set_comments") == 120
+    def test_batch_rename_scaling(self):
+        from bridge_mcp_ghidra import get_timeout
+        payload = {"variable_renames": {f"var_{i}": f"new_{i}" for i in range(10)}}
+        timeout = get_timeout("/batch_rename_variables", payload)
+        self.assertGreater(timeout, 120)
 
-    def test_dynamic_timeout_scales_with_payload(self):
-        """Dynamic timeout should scale with batch size."""
-        from bridge_mcp_ghidra import calculate_dynamic_timeout
-
-        # Small batch
-        small_payload = {"variable_renames": {"a": "b", "c": "d"}}
-        small_timeout = calculate_dynamic_timeout(
-            "batch_rename_variables", small_payload
-        )
-
-        # Large batch
-        large_payload = {"variable_renames": {f"var{i}": f"new{i}" for i in range(20)}}
-        large_timeout = calculate_dynamic_timeout(
-            "batch_rename_variables", large_payload
-        )
-
-        assert large_timeout > small_timeout
-        assert large_timeout <= 600  # Cap at 10 minutes
+    def test_batch_comments_scaling(self):
+        from bridge_mcp_ghidra import get_timeout
+        payload = {
+            "decompiler_comments": [{"addr": "0x1000", "comment": "test"}] * 5,
+            "disassembly_comments": [],
+        }
+        timeout = get_timeout("/batch_set_comments", payload)
+        self.assertGreater(timeout, 120)
 
 
-class TestAddressListParsing:
-    """Tests for comma-separated address list parsing."""
+class TestBuildToolFunction(unittest.TestCase):
+    """Test dynamic tool function builder."""
 
-    def test_parse_comma_separated(self):
-        """Should parse comma-separated addresses."""
-        from bridge_mcp_ghidra import parse_address_list
+    def test_builds_callable(self):
+        from bridge_mcp_ghidra import _build_tool_function
+        schema = {
+            "properties": {
+                "address": {"type": "string"},
+                "offset": {"type": "integer", "default": 0},
+            },
+            "required": ["address"],
+        }
+        fn = _build_tool_function("/decompile_function", "GET", schema)
+        self.assertTrue(callable(fn))
 
-        result = parse_address_list("0x401000, 0x402000, 0x403000")
-        assert result == ["0x401000", "0x402000", "0x403000"]
+    def test_signature_has_correct_params(self):
+        from bridge_mcp_ghidra import _build_tool_function
+        schema = {
+            "properties": {
+                "address": {"type": "string"},
+                "limit": {"type": "integer", "default": 100},
+            },
+            "required": ["address"],
+        }
+        fn = _build_tool_function("/test", "GET", schema)
+        sig = inspect.signature(fn)
+        self.assertIn("address", sig.parameters)
+        self.assertIn("limit", sig.parameters)
+        self.assertEqual(sig.parameters["limit"].default, 100)
 
-    def test_parse_json_array(self):
-        """Should parse JSON array of addresses."""
-        from bridge_mcp_ghidra import parse_address_list
+    def test_required_params_no_default(self):
+        from bridge_mcp_ghidra import _build_tool_function
+        schema = {
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        }
+        fn = _build_tool_function("/test", "GET", schema)
+        sig = inspect.signature(fn)
+        self.assertEqual(sig.parameters["name"].default, inspect.Parameter.empty)
 
-        result = parse_address_list('["0x401000", "0x402000"]')
-        assert result == ["0x401000", "0x402000"]
+    def test_optional_params_default_none(self):
+        from bridge_mcp_ghidra import _build_tool_function
+        schema = {
+            "properties": {"name": {"type": "string"}},
+            "required": [],
+        }
+        fn = _build_tool_function("/test", "GET", schema)
+        sig = inspect.signature(fn)
+        self.assertIsNone(sig.parameters["name"].default)
 
-    def test_parse_invalid_address_raises(self):
-        """Should raise on invalid addresses."""
-        from bridge_mcp_ghidra import parse_address_list, GhidraValidationError
+    def test_type_annotations(self):
+        from bridge_mcp_ghidra import _build_tool_function
+        schema = {
+            "properties": {
+                "name": {"type": "string"},
+                "count": {"type": "integer"},
+                "enabled": {"type": "boolean"},
+                "ratio": {"type": "number"},
+            },
+            "required": ["name", "count", "enabled", "ratio"],
+        }
+        fn = _build_tool_function("/test", "GET", schema)
+        annotations = fn.__annotations__
+        self.assertEqual(annotations["name"], str)
+        self.assertEqual(annotations["count"], int)
+        self.assertEqual(annotations["enabled"], bool)
+        self.assertEqual(annotations["ratio"], float)
 
-        with pytest.raises(GhidraValidationError):
-            parse_address_list("0x401000, invalid_address")
-
-
-class TestCacheKeyGeneration:
-    """Tests for cache key generation."""
-
-    def test_same_args_same_key(self):
-        """Same arguments should produce same cache key."""
-        from bridge_mcp_ghidra import cache_key
-
-        key1 = cache_key("endpoint", params={"a": 1})
-        key2 = cache_key("endpoint", params={"a": 1})
-        assert key1 == key2
-
-    def test_different_args_different_key(self):
-        """Different arguments should produce different cache keys."""
-        from bridge_mcp_ghidra import cache_key
-
-        key1 = cache_key("endpoint1", params={"a": 1})
-        key2 = cache_key("endpoint2", params={"a": 1})
-        assert key1 != key2
-
-
-class TestEscapedNewlineConversion:
-    """Tests for newline escape handling."""
-
-    def test_convert_escaped_newlines(self):
-        """Should convert \\n to actual newlines."""
-        from bridge_mcp_ghidra import _convert_escaped_newlines
-
-        result = _convert_escaped_newlines("Line1\\nLine2\\nLine3")
-        assert result == "Line1\nLine2\nLine3"
-
-    def test_handle_empty_string(self):
-        """Should handle empty strings."""
-        from bridge_mcp_ghidra import _convert_escaped_newlines
-
-        assert _convert_escaped_newlines("") == ""
-        assert _convert_escaped_newlines(None) is None
-
-
-class TestMockedHTTPRequests:
-    """Tests using mocked HTTP responses."""
-
-    @patch("bridge_mcp_ghidra.session")
-    def test_safe_get_success(self, mock_session):
-        """Successful GET should return response lines."""
-        from bridge_mcp_ghidra import safe_get_uncached
-
-        mock_response = MagicMock()
-        mock_response.ok = True
-        mock_response.text = "line1\nline2\nline3"
-        mock_session.get.return_value = mock_response
-
-        result = safe_get_uncached("test_endpoint")
-
-        assert result == ["line1", "line2", "line3"]
-
-    @patch("bridge_mcp_ghidra.session")
-    def test_safe_get_404(self, mock_session):
-        """404 should return error message."""
-        from bridge_mcp_ghidra import safe_get_uncached
-
-        mock_response = MagicMock()
-        mock_response.ok = False
-        mock_response.status_code = 404
-        mock_session.get.return_value = mock_response
-
-        result = safe_get_uncached("nonexistent_endpoint")
-
-        assert "not found" in result[0].lower()
-
-    @patch("bridge_mcp_ghidra.session")
-    def test_safe_get_json_success(self, mock_session):
-        """Successful JSON GET should return full JSON string."""
-        from bridge_mcp_ghidra import safe_get_json
-
-        mock_response = MagicMock()
-        mock_response.ok = True
-        mock_response.text = '{"key": "value", "count": 42}'
-        mock_session.get.return_value = mock_response
-
-        result = safe_get_json("json_endpoint")
-
-        # Should be parseable JSON
-        parsed = json.loads(result)
-        assert parsed["key"] == "value"
-        assert parsed["count"] == 42
+    def test_empty_schema(self):
+        from bridge_mcp_ghidra import _build_tool_function
+        schema = {"type": "object", "properties": {}}
+        fn = _build_tool_function("/test", "GET", schema)
+        sig = inspect.signature(fn)
+        self.assertEqual(len(sig.parameters), 0)
 
 
-class TestErrorClasses:
-    """Tests for custom error classes."""
+class TestRegisterToolsFromSchema(unittest.TestCase):
+    """Test dynamic tool registration from schema."""
 
-    def test_ghidra_connection_error(self):
-        """GhidraConnectionError should be raiseable."""
-        from bridge_mcp_ghidra import GhidraConnectionError
+    def test_registers_tools(self):
+        from bridge_mcp_ghidra import register_tools_from_schema, _dynamic_tool_names
+        schema = [
+            {
+                "name": "test_tool_reg_1",
+                "description": "A test tool",
+                "endpoint": "/test1",
+                "http_method": "GET",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "test_tool_reg_2",
+                "description": "Another test tool",
+                "endpoint": "/test2",
+                "http_method": "POST",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"data": {"type": "string"}},
+                    "required": ["data"],
+                },
+            },
+        ]
+        count = register_tools_from_schema(schema)
+        self.assertEqual(count, 2)
+        self.assertIn("test_tool_reg_1", _dynamic_tool_names)
+        self.assertIn("test_tool_reg_2", _dynamic_tool_names)
 
-        with pytest.raises(GhidraConnectionError):
-            raise GhidraConnectionError("Connection failed")
+    def test_clears_previous_tools(self):
+        from bridge_mcp_ghidra import register_tools_from_schema, _dynamic_tool_names
+        schema1 = [{"name": "old_tool_clear", "description": "", "endpoint": "/old",
+                     "http_method": "GET", "input_schema": {"type": "object", "properties": {}}}]
+        schema2 = [{"name": "new_tool_clear", "description": "", "endpoint": "/new",
+                     "http_method": "GET", "input_schema": {"type": "object", "properties": {}}}]
+        register_tools_from_schema(schema1)
+        self.assertIn("old_tool_clear", _dynamic_tool_names)
+        register_tools_from_schema(schema2)
+        self.assertNotIn("old_tool_clear", _dynamic_tool_names)
+        self.assertIn("new_tool_clear", _dynamic_tool_names)
 
-    def test_ghidra_validation_error(self):
-        """GhidraValidationError should be raiseable."""
-        from bridge_mcp_ghidra import GhidraValidationError
 
-        with pytest.raises(GhidraValidationError):
-            raise GhidraValidationError("Invalid input")
+class TestDispatchErrors(unittest.TestCase):
+    """Test dispatch functions when no instance connected."""
 
-    def test_ghidra_analysis_error(self):
-        """GhidraAnalysisError should be raiseable."""
-        from bridge_mcp_ghidra import GhidraAnalysisError
+    def test_dispatch_get_no_connection(self):
+        import bridge_mcp_ghidra as bridge
+        old = bridge._transport_mode
+        bridge._transport_mode = "none"
+        try:
+            result = bridge.dispatch_get("/test")
+            data = json.loads(result)
+            self.assertIn("error", data)
+            self.assertIn("connect_instance", data["error"])
+        finally:
+            bridge._transport_mode = old
 
-        with pytest.raises(GhidraAnalysisError):
-            raise GhidraAnalysisError("Analysis failed")
+    def test_dispatch_post_no_connection(self):
+        import bridge_mcp_ghidra as bridge
+        old = bridge._transport_mode
+        bridge._transport_mode = "none"
+        try:
+            result = bridge.dispatch_post("/test", {"key": "value"})
+            data = json.loads(result)
+            self.assertIn("error", data)
+        finally:
+            bridge._transport_mode = old
+
+
+class TestUnixHTTPConnection(unittest.TestCase):
+    """Test UnixHTTPConnection class."""
+
+    def test_sets_socket_path(self):
+        from bridge_mcp_ghidra import UnixHTTPConnection
+        conn = UnixHTTPConnection("/tmp/test.sock", timeout=10)
+        self.assertEqual(conn.socket_path, "/tmp/test.sock")
+        self.assertEqual(conn.timeout, 10)
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    unittest.main()
