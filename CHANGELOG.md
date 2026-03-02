@@ -31,7 +31,7 @@ Complete version history for the Ghidra MCP Server project.
 
 #### Dead Code Cleanup
 - Removed ~243KB of deprecated workflow modules superseded by the RE loop skill
-- Deleted deprecated slash commands (`auto-document.md`, `improve-cycle.md`)
+- Deleted deprecated slash commands (`auto-document.md`, `improve-cycle.md`, `fix-issues.md`, `improve.md`)
 
 #### Migration Scripts
 - **`scripts/apply_schema.py`** -- Apply knowledge DB schema to PostgreSQL (idempotent, handles "already exists" gracefully)

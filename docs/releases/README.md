@@ -127,6 +127,6 @@ Each release directory should contain:
 
 ## Navigation
 
-- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v4.0.0)
+- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v4.2.0)
 - For specific versions: Browse the version directories above
 - For overall project changes: See [CHANGELOG.md](../CHANGELOG.md) in the project root
