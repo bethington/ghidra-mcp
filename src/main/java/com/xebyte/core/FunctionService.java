@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * variable typing, and function creation/deletion.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
  */
+@McpToolGroup("function")
 public class FunctionService {
 
     private static final int DECOMPILE_TIMEOUT_SECONDS = 60;  // Increased from 30s to 60s for large functions
@@ -2158,9 +2159,9 @@ public class FunctionService {
 
             @Param(value = "function_address") FunctionRef funcRef,
 
-            @Param(value = "force_individual", type = "object", defaultValue = "false") Map<String, String> variableRenames,
+            @Param(value = "variable_renames", type = "object", description = "Map of old variable name -> new name") Map<String, String> variableRenames,
 
-            @Param(value = "variable_renames", type = "boolean") boolean forceIndividual) {
+            @Param(value = "force_individual", type = "boolean", defaultValue = "false", description = "Use individual rename path") boolean forceIndividual) {
         Program program = programProvider.getCurrentProgram();
         if (program == null) {
             return Response.err("No program loaded");

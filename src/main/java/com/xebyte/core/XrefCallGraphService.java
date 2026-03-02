@@ -12,6 +12,7 @@ import java.util.*;
  * call graph traversal, cycle detection, path finding, and bulk xref analysis.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
  */
+@McpToolGroup("xref")
 public class XrefCallGraphService {
 
     private final ProgramProvider programProvider;

@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Service for function hashing, documentation export/import, and cross-version matching.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
  */
+@McpToolGroup("dochash")
 public class DocumentationHashService {
 
     private final ProgramProvider programProvider;

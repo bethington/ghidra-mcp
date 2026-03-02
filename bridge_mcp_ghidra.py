@@ -268,6 +268,15 @@ def dispatch_post(endpoint: str, data: dict, retries: int = 3) -> str:
 # ==========================================================================
 
 _dynamic_tool_names: list[str] = []
+_full_schema: list[dict] = []
+_loaded_groups: set[str] = set()
+
+CORE_TOOLS = {
+    "list_functions", "decompile_function", "rename_function",
+    "list_data_types", "get_function_xrefs", "get_metadata",
+    "search_functions", "list_open_programs",
+}
+LOAD_ALL_TOOLS = os.getenv("GHIDRA_MCP_LOAD_ALL", "").lower() in ("1", "true", "yes")
 
 
 def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
@@ -304,20 +313,13 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     return handler
 
 
-def register_tools_from_schema(schema: list[dict]) -> int:
-    """Register MCP tools from the /mcp/schema response. Returns count."""
-    global _dynamic_tool_names
-
-    for name in _dynamic_tool_names:
-        try:
-            mcp.remove_tool(name)
-        except (KeyError, ValueError):
-            pass
-    _dynamic_tool_names.clear()
-
+def _register_tool_list(tools: list[dict]) -> int:
+    """Register a list of tool defs, skipping already-registered ones. Returns count added."""
     count = 0
-    for tool_def in schema:
+    for tool_def in tools:
         name = tool_def["name"]
+        if name in _dynamic_tool_names:
+            continue
         description = tool_def.get("description", "")
         endpoint = tool_def["endpoint"]
         http_method = tool_def.get("http_method", "GET")
@@ -330,8 +332,67 @@ def register_tools_from_schema(schema: list[dict]) -> int:
         mcp.tool(name=name, description=description)(handler)
         _dynamic_tool_names.append(name)
         count += 1
-
     return count
+
+
+def _unregister_tools(names: list[str]):
+    """Remove tools by name."""
+    for name in names:
+        try:
+            mcp.remove_tool(name)
+        except (KeyError, ValueError):
+            pass
+        if name in _dynamic_tool_names:
+            _dynamic_tool_names.remove(name)
+
+
+def _get_group_tools(group: str) -> list[dict]:
+    """Get tool defs belonging to a category."""
+    return [t for t in _full_schema if t.get("category", "") == group]
+
+
+def _get_all_groups() -> dict[str, list[dict]]:
+    """Group all tools by category."""
+    groups: dict[str, list[dict]] = {}
+    for t in _full_schema:
+        cat = t.get("category", "uncategorized")
+        groups.setdefault(cat, []).append(t)
+    return groups
+
+
+def register_tools_from_schema(schema: list[dict]) -> dict:
+    """Store full schema, register core tools (or all if LOAD_ALL_TOOLS). Returns summary."""
+    global _dynamic_tool_names, _full_schema, _loaded_groups
+
+    # Unregister any previously registered tools
+    for name in list(_dynamic_tool_names):
+        try:
+            mcp.remove_tool(name)
+        except (KeyError, ValueError):
+            pass
+    _dynamic_tool_names.clear()
+    _loaded_groups.clear()
+    _full_schema = schema
+
+    groups = _get_all_groups()
+
+    if LOAD_ALL_TOOLS:
+        count = _register_tool_list(schema)
+        _loaded_groups.update(groups.keys())
+        return {"mode": "all", "tools_registered": count, "groups": list(groups.keys())}
+
+    # Register only core tools
+    core_defs = [t for t in schema if t["name"] in CORE_TOOLS]
+    count = _register_tool_list(core_defs)
+
+    group_summary = {name: len(tools) for name, tools in sorted(groups.items())}
+    return {
+        "mode": "grouped",
+        "core_tools_loaded": count,
+        "total_tools_available": len(schema),
+        "groups": group_summary,
+        "hint": "Use list_tool_groups() to see available groups, load_tool_group(group) to load one.",
+    }
 
 
 # ==========================================================================
@@ -394,17 +455,101 @@ def connect_instance(project: str) -> str:
         if status != 200:
             return json.dumps({"error": f"Failed to fetch schema: HTTP {status}"})
         schema = json.loads(text)
-        count = register_tools_from_schema(schema)
+        reg_result = register_tools_from_schema(schema)
 
         return json.dumps({
             "connected": True,
             "project": match.get("project"),
             "socket": match["socket"],
             "pid": match.get("pid"),
-            "tools_registered": count,
+            **reg_result,
         })
     except Exception as e:
         return json.dumps({"error": f"Schema fetch failed: {e}", "connected_socket": _active_socket})
+
+
+@mcp.tool()
+def list_tool_groups() -> str:
+    """
+    List all available tool groups with their tool counts and loaded status.
+
+    Returns each category with: tool count, loaded status, and tool names.
+    Use load_tool_group(group) to load a group's tools.
+    """
+    if not _full_schema:
+        return json.dumps({"error": "No Ghidra instance connected. Use connect_instance() first."})
+
+    groups = _get_all_groups()
+    result = {}
+    for name, tools in sorted(groups.items()):
+        tool_names = [t["name"] for t in tools]
+        loaded_names = [n for n in tool_names if n in _dynamic_tool_names]
+        result[name] = {
+            "total": len(tools),
+            "loaded": len(loaded_names),
+            "tools": tool_names,
+        }
+    return json.dumps({"groups": result, "loaded_groups": sorted(_loaded_groups)}, indent=2)
+
+
+@mcp.tool()
+def load_tool_group(group: str) -> str:
+    """
+    Load all tools in a category. Accepts a category name or "all" to load everything.
+
+    Use list_tool_groups() to see available categories.
+
+    Args:
+        group: Category name (e.g. "function", "datatype") or "all"
+    """
+    if not _full_schema:
+        return json.dumps({"error": "No Ghidra instance connected. Use connect_instance() first."})
+
+    if group == "all":
+        count = _register_tool_list(_full_schema)
+        _loaded_groups.update(_get_all_groups().keys())
+        return json.dumps({"loaded": "all", "tools_added": count, "total_registered": len(_dynamic_tool_names)})
+
+    tools = _get_group_tools(group)
+    if not tools:
+        available = sorted(_get_all_groups().keys())
+        return json.dumps({"error": f"Unknown group '{group}'", "available_groups": available})
+
+    count = _register_tool_list(tools)
+    _loaded_groups.add(group)
+    return json.dumps({
+        "group": group,
+        "tools_added": count,
+        "total_registered": len(_dynamic_tool_names),
+        "tools": [t["name"] for t in tools],
+    })
+
+
+@mcp.tool()
+def unload_tool_group(group: str) -> str:
+    """
+    Unload all tools in a category. Core tools are protected from unloading.
+
+    Args:
+        group: Category name to unload
+    """
+    if not _full_schema:
+        return json.dumps({"error": "No Ghidra instance connected. Use connect_instance() first."})
+
+    tools = _get_group_tools(group)
+    if not tools:
+        available = sorted(_get_all_groups().keys())
+        return json.dumps({"error": f"Unknown group '{group}'", "available_groups": available})
+
+    names_to_remove = [t["name"] for t in tools if t["name"] not in CORE_TOOLS]
+    protected = [t["name"] for t in tools if t["name"] in CORE_TOOLS]
+    _unregister_tools(names_to_remove)
+    _loaded_groups.discard(group)
+
+    result = {"group": group, "tools_removed": len(names_to_remove), "total_registered": len(_dynamic_tool_names)}
+    if protected:
+        result["protected_core_tools"] = protected
+    return json.dumps(result)
 
 
 # ==========================================================================
@@ -423,8 +568,8 @@ def _auto_connect():
             text, status = uds_request(_active_socket, "GET", "/mcp/schema", timeout=10)
             if status == 200:
                 schema = json.loads(text)
-                count = register_tools_from_schema(schema)
-                logger.info(f"Auto-registered {count} tools from {instances[0].get('project', 'unknown')}")
+                reg_result = register_tools_from_schema(schema)
+                logger.info(f"Auto-registered tools from {instances[0].get('project', 'unknown')}: {reg_result}")
         except Exception as e:
             logger.warning(f"Auto-connect schema fetch failed: {e}")
     elif len(instances) > 1:
