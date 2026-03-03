@@ -27,7 +27,8 @@ import inspect
 from pathlib import Path
 from urllib.parse import urlencode
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.lowlevel.server import NotificationOptions
 
 # ==========================================================================
 # Configuration
@@ -72,6 +73,14 @@ logger = logging.getLogger(__name__)
 
 # Global state
 mcp = FastMCP("ghidra-mcp")
+
+# Enable tools/list_changed notifications so clients re-fetch tools after dynamic registration
+_orig_init_options = mcp._mcp_server.create_initialization_options
+def _patched_init_options(**kwargs):
+    return _orig_init_options(
+        notification_options=NotificationOptions(tools_changed=True), **kwargs)
+mcp._mcp_server.create_initialization_options = _patched_init_options
+
 _active_socket: str | None = None  # UDS socket path
 _active_tcp: str | None = None  # TCP base URL (e.g. "http://127.0.0.1:8089")
 _transport_mode: str = "none"  # "uds", "tcp", or "none"
@@ -508,6 +517,12 @@ def _fetch_and_register_schema(load_all: bool = False) -> int:
     return register_tools_from_schema(schema, groups=groups)
 
 
+async def _notify_tools_changed(ctx: Context | None) -> None:
+    """Send tools/list_changed notification if context is available."""
+    if ctx is not None and ctx._request_context is not None:
+        await ctx.request_context.session.send_tool_list_changed()
+
+
 # ==========================================================================
 # Static MCP tools (always available)
 # ==========================================================================
@@ -530,7 +545,7 @@ def list_instances() -> str:
 
 
 @mcp.tool()
-def connect_instance(project: str) -> str:
+async def connect_instance(project: str, ctx: Context | None = None) -> str:
     """
     Switch the MCP bridge to a different Ghidra instance by project name.
 
@@ -564,6 +579,7 @@ def connect_instance(project: str) -> str:
             try:
                 count = _fetch_and_register_schema()
                 total = len(_full_schema)
+                await _notify_tools_changed(ctx)
                 return json.dumps({
                     "connected": True,
                     "transport": "uds",
@@ -586,6 +602,7 @@ def connect_instance(project: str) -> str:
         _transport_mode = "tcp"
         count = _fetch_and_register_schema()
         total = len(_full_schema)
+        await _notify_tools_changed(ctx)
         return json.dumps({
             "connected": True,
             "transport": "tcp",
@@ -619,7 +636,7 @@ def list_tool_groups() -> str:
 
 
 @mcp.tool()
-def load_tool_group(group: str) -> str:
+async def load_tool_group(group: str, ctx: Context | None = None) -> str:
     """
     Load all tools in a category. Accepts a category name or "all" to load everything.
 
@@ -637,6 +654,8 @@ def load_tool_group(group: str) -> str:
         total = 0
         for g in all_groups:
             total += _load_group(g)
+        if total > 0:
+            await _notify_tools_changed(ctx)
         return json.dumps({
             "loaded": "all",
             "new_tools": total,
@@ -650,6 +669,7 @@ def load_tool_group(group: str) -> str:
             return json.dumps({"message": f"Group '{group}' is already loaded.", "loaded_groups": sorted(_loaded_groups)})
         return json.dumps({"error": f"No tools found for group '{group}'", "available": available})
 
+    await _notify_tools_changed(ctx)
     return json.dumps({
         "loaded": group,
         "new_tools": count,
@@ -659,7 +679,7 @@ def load_tool_group(group: str) -> str:
 
 
 @mcp.tool()
-def unload_tool_group(group: str) -> str:
+async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
     """
     Unload all tools in a category. Core tools are protected from unloading.
 
@@ -673,6 +693,7 @@ def unload_tool_group(group: str) -> str:
     if count == 0:
         return json.dumps({"message": f"Group '{group}' is not loaded or has no tools."})
 
+    await _notify_tools_changed(ctx)
     return json.dumps({
         "unloaded": group,
         "removed_tools": count,

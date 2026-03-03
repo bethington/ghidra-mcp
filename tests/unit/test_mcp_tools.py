@@ -88,8 +88,9 @@ class TestToolGroupManagement(unittest.TestCase):
         self.assertIn("function", CORE_GROUPS)
 
     def test_unload_core_group_blocked(self):
+        import asyncio
         from bridge_mcp_ghidra import unload_tool_group
-        result = json.loads(unload_tool_group("function"))
+        result = json.loads(asyncio.run(unload_tool_group("function")))
         self.assertIn("error", result)
         self.assertIn("core", result["error"].lower())
 
