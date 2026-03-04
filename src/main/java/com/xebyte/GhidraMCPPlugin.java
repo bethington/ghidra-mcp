@@ -1024,7 +1024,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     private String runGhidraScript(String scriptPath, String scriptArgs) {
-        return programScriptService.runGhidraScript(scriptPath, scriptArgs).toJson();
+        return programScriptService.runGhidraScript(scriptPath, scriptArgs, (String) null).toJson();
     }
 
     /**

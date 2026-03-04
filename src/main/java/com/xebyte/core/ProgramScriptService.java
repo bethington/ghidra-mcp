@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Service for program management, script execution, memory, and bookmark operations.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
  */
-@McpToolGroup("program")
+@McpToolGroup(value = "program", description = "Program management, script execution, memory read, bookmarks, save")
 public class ProgramScriptService {
 
     private final ProgramProvider programProvider;
@@ -427,10 +427,22 @@ public class ProgramScriptService {
      * @return Script output or error message
      */
     @McpTool(value = "/run_script_inline", description = "Execute inline Ghidra script code", method = McpTool.Method.POST)
-    public Response runGhidraScript(
-            @Param("code") String scriptPath,
+    public Response runInlineScript(
+            @Param(value = "code", description = "The script source code to execute") String code,
             @Param(value = "args", required = false) String scriptArgs) {
-        return runGhidraScript(scriptPath, scriptArgs, (String) null);
+        // Write inline code to a temp file, execute it, then clean up
+        File tmpFile = null;
+        try {
+            tmpFile = File.createTempFile("ghidra_inline_", ".py");
+            try (FileWriter fw = new FileWriter(tmpFile)) {
+                fw.write(code);
+            }
+            return runGhidraScript(tmpFile.getAbsolutePath(), scriptArgs, (String) null);
+        } catch (Exception e) {
+            return Response.err("Failed to create temp script: " + e.getMessage());
+        } finally {
+            if (tmpFile != null) tmpFile.delete();
+        }
     }
 
     @McpTool(value = "/run_script", description = "Execute a Ghidra script file", method = McpTool.Method.POST)
@@ -1072,7 +1084,7 @@ public class ProgramScriptService {
 
             // Execute the script via the existing execution method
             long startTime = System.currentTimeMillis();
-            Response scriptResponse = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs);
+            Response scriptResponse = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs, (String) null);
             double executionTime = (System.currentTimeMillis() - startTime) / 1000.0;
 
             // Extract output text from the Response

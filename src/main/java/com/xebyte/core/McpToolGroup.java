@@ -19,4 +19,7 @@ import java.lang.annotation.Target;
 public @interface McpToolGroup {
     /** The group/category name (e.g. "function", "listing", "comment"). */
     String value();
+
+    /** Short description of what tools in this group do (shown to AI agents). */
+    String description() default "";
 }

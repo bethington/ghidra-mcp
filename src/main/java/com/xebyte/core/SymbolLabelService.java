@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Service for symbol and label operations: create, rename, delete, batch operations.
  */
-@McpToolGroup("symbol")
+@McpToolGroup(value = "symbol", description = "Create/rename/delete labels, rename data, globals, external locations")
 public class SymbolLabelService {
 
     private final ProgramProvider programProvider;

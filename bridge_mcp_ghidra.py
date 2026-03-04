@@ -485,19 +485,25 @@ def _unload_group(group_name: str) -> int:
 def _get_group_info() -> list[dict]:
     """Get info about all tool groups from cached schema."""
     groups: dict[str, list[str]] = {}
+    descriptions: dict[str, str] = {}
     for tool_def in _full_schema:
         cat = tool_def.get("category", "unknown")
         groups.setdefault(cat, []).append(tool_def["name"])
+        if cat not in descriptions and tool_def.get("category_description"):
+            descriptions[cat] = tool_def["category_description"]
 
     result = []
     for name, tools in sorted(groups.items()):
-        result.append({
+        info: dict = {
             "group": name,
             "tool_count": len(tools),
             "loaded": name in _loaded_groups,
             "core": name in CORE_GROUPS,
-            "tools": sorted(tools),
-        })
+        }
+        if name in descriptions:
+            info["description"] = descriptions[name]
+        info["tools"] = sorted(tools)
+        result.append(info)
     return result
 
 

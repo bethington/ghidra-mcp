@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
  * Service for function hashing, documentation export/import, and cross-version matching.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
  */
-@McpToolGroup("documentation")
+@McpToolGroup(value = "documentation", description = "Function hashing, cross-binary documentation, undocumented function discovery")
 public class DocumentationHashService {
 
     private final ProgramProvider programProvider;

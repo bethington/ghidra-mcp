@@ -31,8 +31,8 @@ public final class AnnotationScanner {
 
     public record ToolDef(
         String path, String httpMethod, String toolName,
-        String description, String category, Method method,
-        Object serviceInstance, List<ParamDef> params
+        String description, String category, String categoryDescription,
+        Method method, Object serviceInstance, List<ParamDef> params
     ) {}
 
     // ==================================================================================
@@ -46,6 +46,7 @@ public final class AnnotationScanner {
             McpToolGroup groupAnn = svc.getClass().getAnnotation(McpToolGroup.class);
             String category = groupAnn != null ? groupAnn.value()
                 : svc.getClass().getSimpleName().toLowerCase().replaceAll("service$", "");
+            String categoryDesc = groupAnn != null ? groupAnn.description() : "";
             for (Method m : svc.getClass().getMethods()) {
                 McpTool ann = m.getAnnotation(McpTool.class);
                 if (ann == null) continue;
@@ -53,7 +54,7 @@ public final class AnnotationScanner {
                 String toolName = pathToToolName(ann.value());
                 defs.add(new ToolDef(
                     ann.value(), ann.method().name(), toolName,
-                    ann.description(), category, m, svc, params));
+                    ann.description(), category, categoryDesc, m, svc, params));
             }
         }
         return defs;
@@ -333,6 +334,9 @@ public final class AnnotationScanner {
             tool.put("endpoint", def.path());
             tool.put("http_method", def.httpMethod());
             tool.put("category", def.category());
+            if (!def.categoryDescription().isEmpty()) {
+                tool.put("category_description", def.categoryDescription());
+            }
             tool.put("input_schema", buildInputSchema(def));
             tools.add(tool);
         }
