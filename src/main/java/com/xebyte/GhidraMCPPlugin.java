@@ -257,33 +257,35 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             "The network port number the embedded HTTP server will listen on. " +
             "Requires Ghidra restart or plugin reload to take effect after changing.");
 
-        // Only start server if not already running (fixes #35: multi-window port collision)
-        if (server != null && isServerRunning()) {
-            Msg.info(this, "GhidraMCP HTTP server already running — sharing with this tool window.");
-        } else {
-            try {
-                startServer();
-                ownsServer = true;
-                Msg.info(this, "GhidraMCPPlugin loaded successfully with HTTP server on port " +
-                    options.getInt(PORT_OPTION_NAME, DEFAULT_PORT));
-            }
-            catch (IOException e) {
-                Msg.error(this, "Failed to start HTTP server: " + e.getMessage(), e);
-                Msg.showError(this, null, "GhidraMCP Server Error",
-                    "Failed to start MCP server on port " + options.getInt(PORT_OPTION_NAME, DEFAULT_PORT) +
-                    ".\n\nThe port may already be in use. Try:\n" +
-                    "1. Restarting Ghidra\n" +
-                    "2. Changing the port in Edit > Tool Options > GhidraMCP\n" +
-                    "3. Checking if another Ghidra instance is running\n\n" +
-                    "Error: " + e.getMessage());
-            }
-        }
-
-        // Register with ServerManager for UDS transport (bridge discovery)
+        // UDS transport is the primary server for GUI mode — supports multi-instance
+        // via per-PID sockets. TCP is only started as fallback if UDS fails.
+        boolean udsOk = false;
         try {
             ServerManager.getInstance().registerTool(tool, null);
+            udsOk = true;
+            Msg.info(this, "GhidraMCP UDS server active at " + ServerManager.getInstance().getSocketPath());
         } catch (IOException e) {
-            Msg.warn(this, "Failed to start UDS server: " + e.getMessage());
+            Msg.warn(this, "Failed to start UDS server, falling back to TCP: " + e.getMessage());
+        }
+
+        if (!udsOk) {
+            // Fall back to TCP if UDS is unavailable (e.g., no XDG_RUNTIME_DIR)
+            if (server != null && isServerRunning()) {
+                Msg.info(this, "GhidraMCP HTTP server already running — sharing with this tool window.");
+            } else {
+                try {
+                    startServer();
+                    ownsServer = true;
+                    Msg.info(this, "GhidraMCPPlugin loaded with TCP server on port " +
+                        options.getInt(PORT_OPTION_NAME, DEFAULT_PORT));
+                } catch (IOException e) {
+                    Msg.error(this, "Failed to start HTTP server: " + e.getMessage(), e);
+                    Msg.showError(this, null, "GhidraMCP Server Error",
+                        "Failed to start MCP server.\n\n" +
+                        "Both UDS and TCP transports failed.\n\n" +
+                        "Error: " + e.getMessage());
+                }
+            }
         }
 
         createMenuActions();
