@@ -172,7 +172,7 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 
 #### In Ghidra
 1. Start Ghidra and open a **CodeBrowser** window
-2. In **CodeBrowser**, enable the plugin via **File > Configure > Configure All Plugins > GhidraMCP**
+2. In **CodeBrowser**, enable the plugin via **File > Configure > Configure All Plugins (top right corner) > GhidraMCP**
 3. Optional: configure custom port via **CodeBrowser > Edit > Tool Options > GhidraMCP HTTP Server**
 4. Start the server via **Tools > GhidraMCP > Start MCP Server**
 5. The server runs on `http://127.0.0.1:8089/` by default
@@ -195,7 +195,7 @@ curl http://127.0.0.1:8089/get_version
 
 **Solution:**
 1. Verify extension is installed: **File > Install Extensions** — GhidraMCP should be listed
-2. Enable the plugin: **File > Configure > Configure All Plugins > GhidraMCP** (check the box)
+2. Enable the plugin: **File > Configure > Configure All Plugins (top right corner) > GhidraMCP** (check the box)
 3. **Restart Ghidra** after installation/enabling
 
 ### Server not responding / Connection refused
