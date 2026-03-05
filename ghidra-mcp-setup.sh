@@ -213,7 +213,14 @@ test_write_access() {
 
 # Find Ghidra processes
 get_ghidra_pids() {
-    pgrep -f '[g]hidra' 2>/dev/null || true
+    # check own PID first to avoid self-termination
+    local self=$$ parent=$PPID
+    pgrep -f '[g]hidra' 2>/dev/null | while read -r pid; do
+        if [[ "$pid" != "$self" && "$pid" != "$parent" ]]; then
+            echo "$pid"
+        fi
+    done
+    return 0
 }
 
 # Close Ghidra processes
@@ -232,6 +239,7 @@ close_ghidra() {
         log_info "Sending SIGTERM to Ghidra process $pid..."
         kill "$pid" 2>/dev/null || true
     done
+    log_info "All terminated."
 
     # Wait up to 5 seconds for graceful shutdown
     local waited=0
