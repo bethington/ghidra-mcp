@@ -4,7 +4,7 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v4.2.0 (Latest)
+### v4.3.0 (Latest)
 
 - **Feature Release** - Knowledge database integration, BSim cross-version matching, enum fix
 - 5 new knowledge DB MCP tools (store/query function knowledge, ordinal mappings, export)
@@ -134,6 +134,6 @@ Each release directory should contain:
 
 ## Navigation
 
-- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v4.2.0)
+- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v4.3.0)
 - For specific versions: Browse the version directories above
 - For overall project changes: See [CHANGELOG.md](../CHANGELOG.md) in the project root

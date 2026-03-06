@@ -95,7 +95,7 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "4.2.0"; // Default fallback
+    private static String VERSION = "4.3.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
@@ -108,7 +108,7 @@ class VersionInfo {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "4.2.0");
+                VERSION = props.getProperty("app.version", "4.3.0");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
                 GHIDRA_VERSION = props.getProperty("ghidra.version", "unknown");
                 BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
