@@ -211,9 +211,9 @@ test_write_access() {
     return $?
 }
 
-# Find Ghidra processes
+# Find Ghidra processes (match the actual Ghidra JVM launcher, not scripts/paths containing "ghidra")
 get_ghidra_pids() {
-    pgrep -f '[g]hidra' 2>/dev/null || true
+    pgrep -f 'ghidra\.Ghidra(Run|Launcher)|ghidraRun|support/launch\.sh' 2>/dev/null || true
 }
 
 # Close Ghidra processes
