@@ -1942,7 +1942,7 @@ def rename_variables(
             result_json = safe_post_json("batch_rename_variables", payload, program=program)
             result = json.loads(result_json)
             result["backend_used"] = "batch"
-            return json.dumps(result, indent=2)
+            return json.dumps(result)
 
         except Exception as e:
             error_msg = str(e)
@@ -1964,8 +1964,7 @@ def rename_variables(
                     "variables_failed": num_variables,
                     "backend_used": "batch",
                     "errors": [{"error": error_msg}],
-                },
-                indent=2,
+                }
             )
 
     else:  # progressive
@@ -2073,7 +2072,7 @@ def _rename_variables_progressive_internal(
                 )
             results["variables_failed"] += len(chunk)
 
-    return json.dumps(results, indent=2)
+    return json.dumps(results)
 
 
 @mcp.tool()
@@ -3702,12 +3701,7 @@ def analyze_data_region(
 
     result = safe_post_json("analyze_data_region", data, program=program)
 
-    # Format the JSON response for readability
-    try:
-        parsed = json.loads(result)
-        return json.dumps(parsed, indent=2)
-    except:
-        return result
+    return result
 
 
 @mcp.tool()
@@ -3764,12 +3758,12 @@ def inspect_memory_content(
 
     result = "\n".join(safe_get("inspect_memory_content", params))
 
-    # Try to format as JSON for readability
+    # Validate JSON; return raw if parsing fails
     try:
-        parsed = json.loads(result)
-        return json.dumps(parsed, indent=2)
-    except:
-        return result
+        json.loads(result)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return result
 
 
 @mcp.tool()
@@ -3814,12 +3808,7 @@ def get_bulk_xrefs(addresses: str, program: str = None) -> str:
     data = {"addresses": addr_list}
     result = safe_post_json("get_bulk_xrefs", data, program=program)
 
-    # Format the JSON response for readability
-    try:
-        parsed = json.loads(result)
-        return json.dumps(parsed, indent=2)
-    except:
-        return result
+    return result
 
 
 @mcp.tool()
@@ -3876,12 +3865,7 @@ def detect_array_bounds(
 
     result = safe_post_json("detect_array_bounds", data, program=program)
 
-    # Format the JSON response for readability
-    try:
-        parsed = json.loads(result)
-        return json.dumps(parsed, indent=2)
-    except:
-        return result
+    return result
 
 
 @mcp.tool()
@@ -3950,12 +3934,7 @@ def get_assembly_context(
 
     result = safe_post_json("get_assembly_context", data, program=program)
 
-    # Format the JSON response for readability
-    try:
-        parsed = json.loads(result)
-        return json.dumps(parsed, indent=2)
-    except:
-        return result
+    return result
 
 
 # ============================================================================
@@ -4016,12 +3995,7 @@ def analyze_struct_field_usage(
 
     result = safe_post_json("analyze_struct_field_usage", data, program=program)
 
-    # Format the JSON response for readability
-    try:
-        parsed = json.loads(result)
-        return json.dumps(parsed, indent=2)
-    except:
-        return result
+    return result
 
 
 @mcp.tool()
@@ -4079,12 +4053,7 @@ def get_field_access_context(
 
     result = safe_post_json("get_field_access_context", data, program=program)
 
-    # Format the JSON response for readability
-    try:
-        parsed = json.loads(result)
-        return json.dumps(parsed, indent=2)
-    except:
-        return result
+    return result
 
 
 @mcp.tool()
@@ -4555,7 +4524,7 @@ def analyze_function_complete(
     include_xrefs: bool = True,
     include_callees: bool = True,
     include_callers: bool = True,
-    include_disasm: bool = True,
+    include_disasm: bool = False,
     include_variables: bool = True,
     program: Optional[str] = None,
 ) -> str:
@@ -4570,7 +4539,7 @@ def analyze_function_complete(
         include_xrefs: Include cross-references to function
         include_callees: Include functions this function calls
         include_callers: Include functions that call this function
-        include_disasm: Include disassembly listing
+        include_disasm: Include disassembly listing (default: False to reduce response size)
         include_variables: Include parameter and local variable info
         program: Optional program name for multi-program support
 
@@ -4935,7 +4904,7 @@ def save_ghidra_script(
     if backup_path:
         response["backup_path"] = backup_path
 
-    return json.dumps(response, indent=2)
+    return json.dumps(response)
 
 
 @mcp.tool()
@@ -5025,7 +4994,7 @@ def list_ghidra_scripts(
 
     response = {"total_scripts": len(scripts), "scripts": scripts}
 
-    return json.dumps(response, indent=2)
+    return json.dumps(response)
 
 
 @mcp.tool()
@@ -5101,11 +5070,7 @@ def run_ghidra_script(
 
     result = safe_post_json("run_ghidra_script", payload, program=program)
 
-    try:
-        parsed = json.loads(result)
-        return json.dumps(parsed, indent=2)
-    except:
-        return result
+    return result
 
 
 @mcp.tool()
@@ -5243,7 +5208,7 @@ def update_ghidra_script(
     if backup_path:
         response["previous_version_backup"] = backup_path
 
-    return json.dumps(response, indent=2)
+    return json.dumps(response)
 
 
 @mcp.tool()
@@ -5322,7 +5287,7 @@ def delete_ghidra_script(
     if archive_path:
         response["archive_location"] = archive_path
 
-    return json.dumps(response, indent=2)
+    return json.dumps(response)
 
 
 # ==================== PROGRAM MANAGEMENT TOOLS ====================
