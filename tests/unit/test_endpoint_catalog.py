@@ -2,7 +2,7 @@
 Endpoint Catalog Consistency Tests.
 
 Verifies that the three endpoint sources stay in sync:
-1. Java plugin (GhidraMCPPlugin.java) - server.createContext() registrations
+1. Java services (@McpTool annotations) + inline createContext registrations
 2. Python MCP bridge (bridge_mcp_ghidra.py) - safe_get/safe_post endpoint strings
 3. Endpoint specification (tests/endpoints.json) - documented endpoints
 
@@ -23,7 +23,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 # Source file paths
 JAVA_PLUGIN_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "GhidraMCPPlugin.java"
 JAVA_HEADLESS_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "headless" / "GhidraMCPHeadlessServer.java"
-JAVA_REGISTRY_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "core" / "EndpointRegistry.java"
+JAVA_CORE_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "core"
 PYTHON_BRIDGE_PATH = PROJECT_ROOT / "bridge_mcp_ghidra.py"
 ENDPOINTS_JSON_PATH = PROJECT_ROOT / "tests" / "endpoints.json"
 
@@ -33,22 +33,23 @@ ENDPOINTS_JSON_PATH = PROJECT_ROOT / "tests" / "endpoints.json"
 # =============================================================================
 
 def extract_java_endpoints() -> set[str]:
-    """Extract all endpoint paths from Java source (createContext + EndpointRegistry)."""
+    """Extract all endpoint paths from Java source (@McpTool annotations + inline createContext)."""
     if not JAVA_PLUGIN_PATH.exists():
         pytest.skip(f"Java source not found: {JAVA_PLUGIN_PATH}")
 
     endpoints = set()
 
-    # 1. server.createContext("/path", ...) in plugin and headless server
+    # 1. @McpTool annotations in service classes
+    mcptool_pattern = re.compile(r'@McpTool\(\s*(?:value\s*=\s*)?["\'](/[^"\']+)["\']')
+    if JAVA_CORE_PATH.exists():
+        for java_file in JAVA_CORE_PATH.glob("*Service.java"):
+            endpoints |= set(mcptool_pattern.findall(java_file.read_text(encoding="utf-8")))
+
+    # 2. server.createContext("/path", ...) for inline endpoints in plugin and headless
     context_pattern = re.compile(r'server\.createContext\(\s*"(/[^"]+)"')
     for path in [JAVA_PLUGIN_PATH, JAVA_HEADLESS_PATH]:
         if path.exists():
             endpoints |= set(context_pattern.findall(path.read_text(encoding="utf-8")))
-
-    # 2. get("/path", ...) and post("/path", ...) in EndpointRegistry (declarative endpoints)
-    if JAVA_REGISTRY_PATH.exists():
-        registry_pattern = re.compile(r'(?:get|post)\(\s*"(/[^"]+)"')
-        endpoints |= set(registry_pattern.findall(JAVA_REGISTRY_PATH.read_text(encoding="utf-8")))
 
     return endpoints
 
@@ -148,6 +149,7 @@ class TestJavaToEndpointsJson:
         known_internal = {
             "/force_decompile",  # Internal variant used by decompile_function(force=True)
             "/get_plate_comment",  # GET variant for plate comment retrieval
+            "/mcp/schema",  # Internal endpoint for bridge auto-discovery
         }
         unexpected_missing = missing_from_json - known_internal
 
@@ -159,7 +161,7 @@ class TestJavaToEndpointsJson:
             )
 
     def test_endpoints_json_entries_exist_in_java(self):
-        """Every endpoints.json entry should have a Java registration (plugin, headless, or EndpointRegistry)."""
+        """Every endpoints.json entry should have a Java registration (@McpTool, plugin, or headless)."""
         java_endpoints = extract_java_endpoints()
         json_paths = get_endpoints_json_paths()
 

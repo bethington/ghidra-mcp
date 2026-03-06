@@ -6,7 +6,7 @@ and workflow integrity across the project. All tests run without a server.
 
 These tests catch the class of bugs found in v3.2.0:
 - Stale version references across files
-- ENDPOINT_COUNT constant out of sync with actual createContext calls
+- ENDPOINT_COUNT constant out of sync with actual @McpTool + createContext calls
 - Workflow files missing Ghidra JAR dependencies
 - Bridge configuration issues (trailing slash, wrong HTTP method)
 """
@@ -51,7 +51,17 @@ def get_pom_version() -> str:
     return match.group(1)
 
 
-JAVA_REGISTRY = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "core" / "EndpointRegistry.java"
+JAVA_CORE = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "core"
+
+
+def count_mcptool_annotations() -> int:
+    """Count @McpTool annotations across all service files."""
+    count = 0
+    if JAVA_CORE.exists():
+        for java_file in JAVA_CORE.glob("*Service.java"):
+            content = java_file.read_text(encoding="utf-8")
+            count += len(re.findall(r'@McpTool\(', content))
+    return count
 
 
 def count_create_context(java_path: Path) -> int:
@@ -60,17 +70,9 @@ def count_create_context(java_path: Path) -> int:
     return len(re.findall(r'(?:server|httpServer)\.createContext\(', content))
 
 
-def count_registry_endpoints() -> int:
-    """Count endpoints declared in EndpointRegistry.java."""
-    if not JAVA_REGISTRY.exists():
-        return 0
-    content = JAVA_REGISTRY.read_text(encoding="utf-8")
-    return len(re.findall(r'(?:get|post)\(\s*"/', content))
-
-
 def count_total_endpoints(java_path: Path) -> int:
-    """Count total endpoints: direct createContext + shared EndpointRegistry entries."""
-    return count_create_context(java_path) + count_registry_endpoints()
+    """Count total endpoints: @McpTool annotations + inline createContext calls."""
+    return count_mcptool_annotations() + count_create_context(java_path)
 
 
 def count_mcp_tools() -> int:
@@ -200,7 +202,7 @@ class TestEndpointCounts:
     """Endpoint counts in code and docs should match actual registrations."""
 
     def test_gui_endpoint_count_constant(self):
-        """ENDPOINT_COUNT in GhidraMCPPlugin.java should match total endpoints (direct + registry)."""
+        """ENDPOINT_COUNT in GhidraMCPPlugin.java should match total endpoints (@McpTool + inline)."""
         content = JAVA_PLUGIN.read_text(encoding="utf-8")
         match = re.search(r"ENDPOINT_COUNT\s*=\s*(\d+)", content)
         assert match, "ENDPOINT_COUNT constant not found in GhidraMCPPlugin.java"
