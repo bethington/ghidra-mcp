@@ -100,7 +100,7 @@ class VersionInfo {
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 175;
+    private static final int ENDPOINT_COUNT = 176;
     
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -433,6 +433,15 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 }
             }));
         }
+
+        // ==========================================================================
+        // SCHEMA ENDPOINT — Serves machine-readable API metadata
+        // ==========================================================================
+
+        String schemaJson = registry.generateSchema();
+        server.createContext("/mcp/schema", safeHandler(exchange -> {
+            sendResponse(exchange, schemaJson);
+        }));
 
         // ==========================================================================
         // INFRASTRUCTURE ENDPOINTS (not in service layer)

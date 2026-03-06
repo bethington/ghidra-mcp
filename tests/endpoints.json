@@ -1,7 +1,7 @@
 {
   "version": "4.2.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 189,
+  "total_endpoints": 190,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -25,6 +25,13 @@
       "category": "utility",
       "params": [],
       "description": "Health check endpoint"
+    },
+    {
+      "path": "/mcp/schema",
+      "method": "GET",
+      "category": "utility",
+      "params": [],
+      "description": "Machine-readable API schema with endpoint metadata"
     },
     {
       "path": "/get_version",

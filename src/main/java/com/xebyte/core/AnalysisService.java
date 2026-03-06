@@ -765,19 +765,13 @@ public class AnalysisService {
 
         try {
             FunctionManager functionManager = program.getFunctionManager();
-            Function targetFunc = null;
 
-            // Find the target function
-            for (Function f : functionManager.getFunctions(true)) {
-                if (f.getName().equals(targetFunction)) {
-                    targetFunc = f;
-                    break;
-                }
-            }
-
-            if (targetFunc == null) {
+            // Find the target function by name or address
+            FunctionRef.Result resolved = FunctionRef.of(targetFunction).tryResolve(program);
+            if (!resolved.isSuccess()) {
                 return Response.err("Function not found: " + targetFunction);
             }
+            Function targetFunc = resolved.function();
 
             // Calculate metrics for target function
             BasicBlockModel blockModel = new BasicBlockModel(program);
@@ -850,19 +844,13 @@ public class AnalysisService {
 
         try {
             FunctionManager functionManager = program.getFunctionManager();
-            Function func = null;
 
-            // Find the function by name
-            for (Function f : functionManager.getFunctions(true)) {
-                if (f.getName().equals(functionName)) {
-                    func = f;
-                    break;
-                }
-            }
-
-            if (func == null) {
+            // Find the function by name or address
+            FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+            if (!resolved.isSuccess()) {
                 return Response.err("Function not found: " + functionName);
             }
+            Function func = resolved.function();
 
             BasicBlockModel blockModel = new BasicBlockModel(program);
             Listing listing = program.getListing();

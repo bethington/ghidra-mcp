@@ -64,8 +64,25 @@ public class EndpointRegistry {
     }
 
     /** Returns an unmodifiable view of all registered endpoints. */
+    /** Returns an unmodifiable view of all registered endpoints. */
     public List<EndpointDef> getEndpoints() {
         return Collections.unmodifiableList(endpoints);
+    }
+
+    /**
+     * Generate a JSON schema string describing all registered endpoints.
+     * Used by the {@code /mcp/schema} endpoint for dynamic tool discovery.
+     */
+    public String generateSchema() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"tools\": [");
+        boolean first = true;
+        for (EndpointDef ep : endpoints) {
+            if (first) first = false; else sb.append(", ");
+            sb.append(ep.schemaJson());
+        }
+        sb.append("], \"count\": ").append(endpoints.size()).append("}");
+        return sb.toString();
     }
 
     // ======================================================================
@@ -76,8 +93,129 @@ public class EndpointRegistry {
         endpoints.add(new EndpointDef(path, "GET", handler));
     }
 
+    private void get(String path, String desc, List<EndpointDef.ParamDef> params,
+                     EndpointDef.EndpointHandler handler) {
+        endpoints.add(new EndpointDef(path, "GET", handler, desc, params));
+    }
+
     private void post(String path, EndpointDef.EndpointHandler handler) {
         endpoints.add(new EndpointDef(path, "POST", handler));
+    }
+
+    private void post(String path, String desc, List<EndpointDef.ParamDef> params,
+                      EndpointDef.EndpointHandler handler) {
+        endpoints.add(new EndpointDef(path, "POST", handler, desc, params));
+    }
+
+    // --- Schema builder helpers ---
+
+    private static List<EndpointDef.ParamDef> params(EndpointDef.ParamDef... defs) {
+        return List.of(defs);
+    }
+
+    private static EndpointDef.ParamDef qStr(String name, String desc) {
+        return new EndpointDef.ParamDef(name, "string", "query", false, null, desc);
+    }
+
+    private static EndpointDef.ParamDef qStr(String name) {
+        return qStr(name, "");
+    }
+
+    private static EndpointDef.ParamDef qInt(String name, int def, String desc) {
+        return new EndpointDef.ParamDef(name, "integer", "query", false, String.valueOf(def), desc);
+    }
+
+    private static EndpointDef.ParamDef qInt(String name, int def) {
+        return qInt(name, def, "");
+    }
+
+    private static EndpointDef.ParamDef qBool(String name, boolean def, String desc) {
+        return new EndpointDef.ParamDef(name, "boolean", "query", false, String.valueOf(def), desc);
+    }
+
+    private static EndpointDef.ParamDef qBool(String name, boolean def) {
+        return qBool(name, def, "");
+    }
+
+    private static EndpointDef.ParamDef qDbl(String name, double def) {
+        return new EndpointDef.ParamDef(name, "number", "query", false, String.valueOf(def), "");
+    }
+
+    private static EndpointDef.ParamDef qDbl(String name, double def, String desc) {
+        return new EndpointDef.ParamDef(name, "number", "query", false, String.valueOf(def), desc);
+    }
+
+    private static EndpointDef.ParamDef qNullInt(String name) {
+        return new EndpointDef.ParamDef(name, "integer", "query", false, null, "");
+    }
+
+    private static EndpointDef.ParamDef qNullBool(String name) {
+        return new EndpointDef.ParamDef(name, "boolean", "query", false, null, "");
+    }
+
+    private static EndpointDef.ParamDef bStr(String name, String desc) {
+        return new EndpointDef.ParamDef(name, "string", "body", true, null, desc);
+    }
+
+    private static EndpointDef.ParamDef bStr(String name) {
+        return bStr(name, "");
+    }
+
+    private static EndpointDef.ParamDef bStrOpt(String name, String def) {
+        return new EndpointDef.ParamDef(name, "string", "body", false, def, "");
+    }
+
+    private static EndpointDef.ParamDef bStrOpt(String name) {
+        return new EndpointDef.ParamDef(name, "string", "body", false, null, "");
+    }
+
+    private static EndpointDef.ParamDef bInt(String name, int def) {
+        return new EndpointDef.ParamDef(name, "integer", "body", false, String.valueOf(def), "");
+    }
+
+    private static EndpointDef.ParamDef bLong(String name, long def) {
+        return new EndpointDef.ParamDef(name, "integer", "body", false, String.valueOf(def), "");
+    }
+
+    private static EndpointDef.ParamDef bBool(String name, boolean def) {
+        return new EndpointDef.ParamDef(name, "boolean", "body", false, String.valueOf(def), "");
+    }
+
+    private static EndpointDef.ParamDef bBool(String name) {
+        return new EndpointDef.ParamDef(name, "boolean", "body", false, null, "");
+    }
+
+    private static EndpointDef.ParamDef bBoolReq(String name) {
+        return new EndpointDef.ParamDef(name, "boolean", "body", true, null, "");
+    }
+
+    private static EndpointDef.ParamDef bJson(String name, String desc) {
+        return new EndpointDef.ParamDef(name, "json", "body", true, null, desc);
+    }
+
+    private static EndpointDef.ParamDef bJson(String name) {
+        return bJson(name, "");
+    }
+
+    private static EndpointDef.ParamDef bObj(String name, String desc) {
+        return new EndpointDef.ParamDef(name, "object", "body", false, null, desc);
+    }
+
+    private static EndpointDef.ParamDef bObj(String name) {
+        return new EndpointDef.ParamDef(name, "object", "body", false, null, "");
+    }
+
+    private static EndpointDef.ParamDef bArr(String name, String desc) {
+        return new EndpointDef.ParamDef(name, "array", "body", true, null, desc);
+    }
+
+    private static EndpointDef.ParamDef bArr(String name) {
+        return new EndpointDef.ParamDef(name, "array", "body", true, null, "");
+    }
+
+    // Program param is always from query, always optional
+    private static EndpointDef.ParamDef pProg() {
+        return new EndpointDef.ParamDef("program", "string", "query", false, null, "Target program name");
     }
 
     // ======================================================================
@@ -222,89 +360,89 @@ public class EndpointRegistry {
 
     private void registerListingEndpoints() {
 
-        // /list_methods — paginated function names
-        get("/list_methods", (q, b) ->
-            listingService.getAllFunctionNames(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
+        get("/list_methods", "List all function names with pagination",
+            params(qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.getAllFunctionNames(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        // /list_classes — paginated class/namespace names
-        get("/list_classes", (q, b) ->
-            listingService.getAllClassNames(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
+        get("/list_classes", "List class and namespace names with pagination",
+            params(qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.getAllClassNames(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        // /list_segments — memory block listing
-        get("/list_segments", (q, b) ->
-            listingService.listSegments(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
+        get("/list_segments", "List memory blocks/segments",
+            params(qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.listSegments(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        // /list_imports — external symbol listing
-        get("/list_imports", (q, b) ->
-            listingService.listImports(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
+        get("/list_imports", "List external/imported symbols",
+            params(qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.listImports(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        // /list_exports — entry point listing
-        get("/list_exports", (q, b) ->
-            listingService.listExports(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
+        get("/list_exports", "List exported entry points",
+            params(qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.listExports(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        // /list_namespaces — namespace listing
-        get("/list_namespaces", (q, b) ->
-            listingService.listNamespaces(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
+        get("/list_namespaces", "List namespace hierarchy",
+            params(qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.listNamespaces(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        // /list_data_items — defined data listing
-        get("/list_data_items", (q, b) ->
-            listingService.listDefinedData(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
+        get("/list_data_items", "List defined data items",
+            params(qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.listDefinedData(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        // /list_data_items_by_xrefs — data items sorted by reference count
-        get("/list_data_items_by_xrefs", (q, b) ->
-            listingService.listDataItemsByXrefs(num(q, "offset", 0), num(q, "limit", 100),
+        get("/list_data_items_by_xrefs", "List data items sorted by cross-reference count",
+            params(qInt("offset", 0), qInt("limit", 100), qStr("format", "Output format (text or json)"), pProg()),
+            (q, b) -> listingService.listDataItemsByXrefs(num(q, "offset", 0), num(q, "limit", 100),
                 str(q, "format", "text"), str(q, "program")));
 
-        // /list_functions — all functions (no pagination)
-        get("/list_functions", (q, b) ->
-            listingService.listFunctions(str(q, "program")));
+        get("/list_functions", "List all functions (no pagination)",
+            params(pProg()),
+            (q, b) -> listingService.listFunctions(str(q, "program")));
 
-        // /list_functions_enhanced — JSON with thunk/external flags
-        get("/list_functions_enhanced", (q, b) ->
-            listingService.listFunctionsEnhanced(num(q, "offset", 0), num(q, "limit", 10000), str(q, "program")));
+        get("/list_functions_enhanced", "List functions with thunk/external flags as JSON",
+            params(qInt("offset", 0), qInt("limit", 10000), pProg()),
+            (q, b) -> listingService.listFunctionsEnhanced(num(q, "offset", 0), num(q, "limit", 10000), str(q, "program")));
 
-        // /list_calling_conventions — available calling conventions
-        get("/list_calling_conventions", (q, b) ->
-            listingService.listCallingConventions(str(q, "program")));
+        get("/list_calling_conventions", "List available calling conventions",
+            params(pProg()),
+            (q, b) -> listingService.listCallingConventions(str(q, "program")));
 
-        // /list_strings — defined string listing
-        get("/list_strings", (q, b) ->
-            listingService.listDefinedStrings(num(q, "offset", 0), num(q, "limit", 100),
+        get("/list_strings", "List defined strings with optional filter",
+            params(qInt("offset", 0), qInt("limit", 100), qStr("filter", "Substring filter"), pProg()),
+            (q, b) -> listingService.listDefinedStrings(num(q, "offset", 0), num(q, "limit", 100),
                 str(q, "filter"), str(q, "program")));
 
-        // /list_globals — global symbols
-        get("/list_globals", (q, b) ->
-            listingService.listGlobals(num(q, "offset", 0), num(q, "limit", 100),
+        get("/list_globals", "List global symbols with optional filter",
+            params(qInt("offset", 0), qInt("limit", 100), qStr("filter", "Substring filter"), pProg()),
+            (q, b) -> listingService.listGlobals(num(q, "offset", 0), num(q, "limit", 100),
                 str(q, "filter"), str(q, "program")));
 
-        // /get_entry_points — program entry points
-        get("/get_entry_points", (q, b) ->
-            listingService.getEntryPoints(str(q, "program")));
+        get("/get_entry_points", "Get program entry points",
+            params(pProg()),
+            (q, b) -> listingService.getEntryPoints(str(q, "program")));
 
-        // /get_function_count — total function count
-        get("/get_function_count", (q, b) ->
-            listingService.getFunctionCount(str(q, "program")));
+        get("/get_function_count", "Get total function count",
+            params(pProg()),
+            (q, b) -> listingService.getFunctionCount(str(q, "program")));
 
-        // /search_strings — regex string search
-        get("/search_strings", (q, b) ->
-            listingService.searchStrings(str(q, "query"), num(q, "min_length", 4),
+        get("/search_strings", "Search strings by regex pattern",
+            params(qStr("query", "Regex search pattern"), qInt("min_length", 4), qStr("encoding", "String encoding"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.searchStrings(str(q, "query"), num(q, "min_length", 4),
                 str(q, "encoding"), num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        // /list_external_locations — external symbol locations
-        get("/list_external_locations", (q, b) ->
-            listingService.listExternalLocations(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
+        get("/list_external_locations", "List external symbol locations",
+            params(qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.listExternalLocations(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        // /get_external_location — external location details
-        get("/get_external_location", (q, b) ->
-            listingService.getExternalLocationDetails(str(q, "address"), str(q, "dll_name"), str(q, "program")));
+        get("/get_external_location", "Get external location details by address or DLL name",
+            params(qStr("address"), qStr("dll_name"), pProg()),
+            (q, b) -> listingService.getExternalLocationDetails(str(q, "address"), str(q, "dll_name"), str(q, "program")));
 
-        // /convert_number — number format conversion
-        get("/convert_number", (q, b) ->
-            Response.text(ServiceUtils.convertNumber(str(q, "text"), num(q, "size", 4))));
+        get("/convert_number", "Convert number between hex/decimal/binary formats",
+            params(qStr("text", "Number to convert"), qInt("size", 4, "Size in bytes")),
+            (q, b) -> Response.text(ServiceUtils.convertNumber(str(q, "text"), num(q, "size", 4))));
 
-        // /search_functions — search functions by name
-        get("/search_functions", (q, b) ->
-            listingService.searchFunctionsByName(str(q, "query"), num(q, "offset", 0),
+        get("/search_functions", "Search functions by name pattern",
+            params(qStr("query", "Search pattern"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.searchFunctionsByName(str(q, "query"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
     }
 
@@ -314,42 +452,43 @@ public class EndpointRegistry {
 
     private void registerFunctionEndpoints() {
 
-        // /get_function_by_address — get function info at address
-        get("/get_function_by_address", (q, b) ->
-            functionService.getFunctionByAddress(str(q, "address"), str(q, "program")));
+        get("/get_function_by_address", "Get function info at a specific address",
+            params(qStr("address", "Function address in hex"), pProg()),
+            (q, b) -> functionService.getFunctionByAddress(str(q, "address"), str(q, "program")));
 
-        // /decompile_function — decompile function at address
-        get("/decompile_function", (q, b) ->
-            functionService.decompileFunctionByAddress(str(q, "address"), str(q, "program"),
+        get("/decompile_function", "Decompile function at address to pseudocode",
+            params(qStr("address", "Function address in hex"), qInt("timeout", 60, "Decompile timeout in seconds"), pProg()),
+            (q, b) -> functionService.decompileFunctionByAddress(str(q, "address"), str(q, "program"),
                 num(q, "timeout", 60)));
 
-        // /disassemble_function — disassemble function at address
-        get("/disassemble_function", (q, b) ->
-            functionService.disassembleFunction(str(q, "address"), str(q, "program")));
+        get("/disassemble_function", "Get assembly listing of function",
+            params(qStr("address", "Function address in hex"), pProg()),
+            (q, b) -> functionService.disassembleFunction(str(q, "address"), str(q, "program")));
 
-        // /force_decompile — force decompiler cache refresh
-        get("/force_decompile", (q, b) ->
-            functionService.forceDecompile(str(q, "address"), str(q, "program")));
+        get("/force_decompile", "Force decompiler cache refresh for function",
+            params(qStr("address", "Function address in hex"), pProg()),
+            (q, b) -> functionService.forceDecompile(str(q, "address"), str(q, "program")));
 
-        // /batch_decompile — decompile multiple functions
-        get("/batch_decompile", (q, b) ->
-            functionService.batchDecompileFunctions(str(q, "functions"), str(q, "program")));
+        get("/batch_decompile", "Decompile multiple functions at once",
+            params(qStr("functions", "Comma-separated function names"), pProg()),
+            (q, b) -> functionService.batchDecompileFunctions(str(q, "functions"), str(q, "program")));
 
-        // /rename_function — rename function by old/new name (POST, form-encoded)
-        post("/rename_function", (q, b) ->
-            functionService.renameFunction(bodyStr(b, "oldName"), bodyStr(b, "newName"), str(q, "program")));
+        post("/rename_function", "Rename function by old and new name",
+            params(bStr("oldName"), bStr("newName"), pProg()),
+            (q, b) -> functionService.renameFunction(bodyStr(b, "oldName"), bodyStr(b, "newName"), str(q, "program")));
 
-        // /rename_function_by_address — rename function at address (POST, form-encoded)
-        post("/rename_function_by_address", (q, b) ->
-            functionService.renameFunctionByAddress(bodyStr(b, "function_address"), bodyStr(b, "new_name"), str(q, "program")));
+        post("/rename_function_by_address", "Rename function at specific address",
+            params(bStr("function_address"), bStr("new_name"), pProg()),
+            (q, b) -> functionService.renameFunctionByAddress(bodyStr(b, "function_address"), bodyStr(b, "new_name"), str(q, "program")));
 
-        // /rename_variable — rename a variable in a function (POST, form-encoded)
-        post("/rename_variable", (q, b) ->
-            functionService.renameVariableInFunction(bodyStr(b, "functionName"), bodyStr(b, "oldName"),
+        post("/rename_variable", "Rename a variable in a function",
+            params(bStr("functionName"), bStr("oldName"), bStr("newName"), pProg()),
+            (q, b) -> functionService.renameVariableInFunction(bodyStr(b, "functionName"), bodyStr(b, "oldName"),
                 bodyStr(b, "newName"), str(q, "program")));
 
-        // /set_function_prototype — set function prototype with calling convention (POST, JSON)
-        post("/set_function_prototype", (q, b) -> {
+        post("/set_function_prototype", "Set function prototype with calling convention",
+            params(bStr("function_address"), bStr("prototype"), bStrOpt("calling_convention"), pProg()),
+            (q, b) -> {
             String functionAddress = bodyStr(b, "function_address");
             String prototype = bodyStr(b, "prototype");
             String callingConvention = bodyStr(b, "calling_convention");
@@ -369,31 +508,33 @@ public class EndpointRegistry {
             }
         });
 
-        // /set_local_variable_type — set the type of a local variable (POST, form-encoded)
-        post("/set_local_variable_type", (q, b) ->
-            functionService.setLocalVariableType(bodyStr(b, "function_address"),
+        post("/set_local_variable_type", "Set the data type of a local variable",
+            params(bStr("function_address"), bStr("variable_name"), bStr("new_type"), pProg()),
+            (q, b) -> functionService.setLocalVariableType(bodyStr(b, "function_address"),
                 bodyStr(b, "variable_name"), bodyStr(b, "new_type"), str(q, "program")));
 
-        // /set_function_no_return — mark function as no-return (POST, form-encoded)
-        post("/set_function_no_return", (q, b) ->
-            functionService.setFunctionNoReturn(bodyStr(b, "function_address"),
+        post("/set_function_no_return", "Mark function as no-return",
+            params(bStr("function_address"), bBool("no_return"), pProg()),
+            (q, b) -> functionService.setFunctionNoReturn(bodyStr(b, "function_address"),
                 bodyBool(b, "no_return"), str(q, "program")));
 
-        // /clear_instruction_flow_override — clear flow override (POST, form-encoded)
-        post("/clear_instruction_flow_override", (q, b) ->
-            functionService.clearInstructionFlowOverride(bodyStr(b, "address"), str(q, "program")));
+        post("/clear_instruction_flow_override", "Clear flow override at address",
+            params(bStr("address"), pProg()),
+            (q, b) -> functionService.clearInstructionFlowOverride(bodyStr(b, "address"), str(q, "program")));
 
-        // /set_variable_storage — set variable storage location (POST, form-encoded)
-        post("/set_variable_storage", (q, b) ->
-            functionService.setVariableStorage(bodyStr(b, "function_address"),
+        post("/set_variable_storage", "Set variable storage location",
+            params(bStr("function_address"), bStr("variable_name"), bStr("storage"), pProg()),
+            (q, b) -> functionService.setVariableStorage(bodyStr(b, "function_address"),
                 bodyStr(b, "variable_name"), bodyStr(b, "storage"), str(q, "program")));
 
-        // /get_function_variables — list all variables in a function
-        get("/get_function_variables", (q, b) ->
-            functionService.getFunctionVariables(str(q, "function_name"), str(q, "program")));
+        get("/get_function_variables", "List all variables in a function",
+            params(qStr("function_name", "Function name"), pProg()),
+            (q, b) -> functionService.getFunctionVariables(str(q, "function_name"), str(q, "program")));
 
-        // /batch_rename_function_components — rename function and components atomically (POST, JSON)
-        post("/batch_rename_function_components", (q, b) -> {
+        post("/batch_rename_function_components", "Rename function and components atomically",
+            params(bStr("function_address"), bStrOpt("function_name"), bObj("parameter_renames"),
+                bObj("local_renames"), bStrOpt("return_type"), pProg()),
+            (q, b) -> {
             @SuppressWarnings("unchecked")
             Map<String, String> parameterRenames = b.get("parameter_renames") instanceof Map ?
                 (Map<String, String>) b.get("parameter_renames") : null;
@@ -405,23 +546,25 @@ public class EndpointRegistry {
                 parameterRenames, localRenames, bodyStr(b, "return_type"), str(q, "program"));
         });
 
-        // /batch_rename_variables — rename multiple variables atomically (POST, JSON)
-        post("/batch_rename_variables", (q, b) ->
-            functionService.batchRenameVariables(bodyStr(b, "function_address"),
+        post("/batch_rename_variables", "Rename multiple variables atomically",
+            params(bStr("function_address"), bObj("variable_renames"), bBool("force_individual"), pProg()),
+            (q, b) -> functionService.batchRenameVariables(bodyStr(b, "function_address"),
                 bodyStringMap(b, "variable_renames"),
                 bodyBool(b, "force_individual"), str(q, "program")));
 
-        // /delete_function — delete function at address (POST, JSON)
-        post("/delete_function", (q, b) ->
-            functionService.deleteFunctionAtAddress(bodyStr(b, "address"), str(q, "program")));
+        post("/delete_function", "Delete function at address",
+            params(bStr("address"), pProg()),
+            (q, b) -> functionService.deleteFunctionAtAddress(bodyStr(b, "address"), str(q, "program")));
 
-        // /create_function — create function at address (POST, JSON)
-        post("/create_function", (q, b) ->
-            functionService.createFunctionAtAddress(bodyStr(b, "address"), bodyStr(b, "name"),
+        post("/create_function", "Create function at address",
+            params(bStr("address"), bStrOpt("name"), bBool("disassemble_first"), pProg()),
+            (q, b) -> functionService.createFunctionAtAddress(bodyStr(b, "address"), bodyStr(b, "name"),
                 bodyBool(b, "disassemble_first", true), str(q, "program")));
 
-        // /disassemble_bytes — disassemble a range of bytes (POST, JSON)
-        post("/disassemble_bytes", (q, b) -> {
+        post("/disassemble_bytes", "Disassemble a range of bytes",
+            params(bStr("start_address"), bStrOpt("end_address"), bInt("length", 0),
+                bBool("restrict_to_execute_memory"), pProg()),
+            (q, b) -> {
             Integer length = b.get("length") != null ? JsonHelper.getInt(b.get("length"), 0) : null;
             if (length != null && length == 0) length = null;
             return functionService.disassembleBytes(bodyStr(b, "start_address"), bodyStr(b, "end_address"),
@@ -435,31 +578,32 @@ public class EndpointRegistry {
 
     private void registerCommentEndpoints() {
 
-        // /set_decompiler_comment — set PRE_COMMENT at address (POST, form-encoded)
-        post("/set_decompiler_comment", (q, b) ->
-            commentService.setDecompilerComment(bodyStr(b, "address"), bodyStr(b, "comment"), str(q, "program")));
+        post("/set_decompiler_comment", "Set decompiler PRE_COMMENT at address",
+            params(bStr("address"), bStr("comment"), pProg()),
+            (q, b) -> commentService.setDecompilerComment(bodyStr(b, "address"), bodyStr(b, "comment"), str(q, "program")));
 
-        // /set_disassembly_comment — set EOL_COMMENT at address (POST, form-encoded)
-        post("/set_disassembly_comment", (q, b) ->
-            commentService.setDisassemblyComment(bodyStr(b, "address"), bodyStr(b, "comment"), str(q, "program")));
+        post("/set_disassembly_comment", "Set disassembly EOL_COMMENT at address",
+            params(bStr("address"), bStr("comment"), pProg()),
+            (q, b) -> commentService.setDisassemblyComment(bodyStr(b, "address"), bodyStr(b, "comment"), str(q, "program")));
 
-        // /get_plate_comment — get function header/plate comment
-        get("/get_plate_comment", (q, b) ->
-            commentService.getPlateComment(str(q, "address"), str(q, "program")));
+        get("/get_plate_comment", "Get function header/plate comment",
+            params(qStr("address", "Function address"), pProg()),
+            (q, b) -> commentService.getPlateComment(str(q, "address"), str(q, "program")));
 
-        // /set_plate_comment — set function header/plate comment (POST, form-encoded)
-        post("/set_plate_comment", (q, b) ->
-            commentService.setPlateComment(bodyStr(b, "function_address"), bodyStr(b, "comment"), str(q, "program")));
+        post("/set_plate_comment", "Set function header/plate comment",
+            params(bStr("function_address"), bStr("comment"), pProg()),
+            (q, b) -> commentService.setPlateComment(bodyStr(b, "function_address"), bodyStr(b, "comment"), str(q, "program")));
 
-        // /batch_set_comments — set multiple comments in one operation (POST, JSON)
-        post("/batch_set_comments", (q, b) ->
-            commentService.batchSetComments(bodyStr(b, "function_address"),
+        post("/batch_set_comments", "Set multiple comments in one operation",
+            params(bStr("function_address"), bArr("decompiler_comments"), bArr("disassembly_comments"),
+                bStrOpt("plate_comment"), pProg()),
+            (q, b) -> commentService.batchSetComments(bodyStr(b, "function_address"),
                 bodyMapList(b, "decompiler_comments"), bodyMapList(b, "disassembly_comments"),
                 bodyStr(b, "plate_comment"), str(q, "program")));
 
-        // /clear_function_comments — clear all comments within a function (POST, JSON)
-        post("/clear_function_comments", (q, b) ->
-            commentService.clearFunctionComments(bodyStr(b, "function_address"),
+        post("/clear_function_comments", "Clear all comments within a function",
+            params(bStr("function_address"), bBool("clear_plate"), bBool("clear_pre"), bBool("clear_eol"), pProg()),
+            (q, b) -> commentService.clearFunctionComments(bodyStr(b, "function_address"),
                 bodyBool(b, "clear_plate", true), bodyBool(b, "clear_pre", true),
                 bodyBool(b, "clear_eol", true), str(q, "program")));
     }
@@ -470,50 +614,50 @@ public class EndpointRegistry {
 
     private void registerSymbolLabelEndpoints() {
 
-        // /rename_data — rename data at address (POST, form-encoded)
-        post("/rename_data", (q, b) ->
-            symbolLabelService.renameDataAtAddress(bodyStr(b, "address"), bodyStr(b, "newName"), str(q, "program")));
+        post("/rename_data", "Rename data at address",
+            params(bStr("address"), bStr("newName"), pProg()),
+            (q, b) -> symbolLabelService.renameDataAtAddress(bodyStr(b, "address"), bodyStr(b, "newName"), str(q, "program")));
 
-        // /rename_label — rename a label at address (POST, form-encoded)
-        post("/rename_label", (q, b) ->
-            symbolLabelService.renameLabel(bodyStr(b, "address"), bodyStr(b, "old_name"),
+        post("/rename_label", "Rename a label at address",
+            params(bStr("address"), bStr("old_name"), bStr("new_name"), pProg()),
+            (q, b) -> symbolLabelService.renameLabel(bodyStr(b, "address"), bodyStr(b, "old_name"),
                 bodyStr(b, "new_name"), str(q, "program")));
 
-        // /rename_external_location — rename external location (POST, form-encoded)
-        post("/rename_external_location", (q, b) ->
-            symbolLabelService.renameExternalLocation(bodyStr(b, "address"), bodyStr(b, "new_name"), str(q, "program")));
+        post("/rename_external_location", "Rename external location",
+            params(bStr("address"), bStr("new_name"), pProg()),
+            (q, b) -> symbolLabelService.renameExternalLocation(bodyStr(b, "address"), bodyStr(b, "new_name"), str(q, "program")));
 
-        // /rename_global_variable — rename a global variable (POST, form-encoded)
-        post("/rename_global_variable", (q, b) ->
-            symbolLabelService.renameGlobalVariable(bodyStr(b, "old_name"), bodyStr(b, "new_name"), str(q, "program")));
+        post("/rename_global_variable", "Rename a global variable",
+            params(bStr("old_name"), bStr("new_name"), pProg()),
+            (q, b) -> symbolLabelService.renameGlobalVariable(bodyStr(b, "old_name"), bodyStr(b, "new_name"), str(q, "program")));
 
-        // /create_label — create a label at address (POST, form-encoded)
-        post("/create_label", (q, b) ->
-            symbolLabelService.createLabel(bodyStr(b, "address"), bodyStr(b, "name"), str(q, "program")));
+        post("/create_label", "Create a label at address",
+            params(bStr("address"), bStr("name"), pProg()),
+            (q, b) -> symbolLabelService.createLabel(bodyStr(b, "address"), bodyStr(b, "name"), str(q, "program")));
 
-        // /batch_create_labels — create multiple labels (POST, JSON)
-        post("/batch_create_labels", (q, b) ->
-            symbolLabelService.batchCreateLabels(bodyMapList(b, "labels"), str(q, "program")));
+        post("/batch_create_labels", "Create multiple labels at once",
+            params(bArr("labels"), pProg()),
+            (q, b) -> symbolLabelService.batchCreateLabels(bodyMapList(b, "labels"), str(q, "program")));
 
-        // /rename_or_label — rename or create label at address (POST, form-encoded)
-        post("/rename_or_label", (q, b) ->
-            symbolLabelService.renameOrLabel(bodyStr(b, "address"), bodyStr(b, "name"), str(q, "program")));
+        post("/rename_or_label", "Rename or create label at address",
+            params(bStr("address"), bStr("name"), pProg()),
+            (q, b) -> symbolLabelService.renameOrLabel(bodyStr(b, "address"), bodyStr(b, "name"), str(q, "program")));
 
-        // /delete_label — delete a label at address (POST, form-encoded)
-        post("/delete_label", (q, b) ->
-            symbolLabelService.deleteLabel(bodyStr(b, "address"), bodyStr(b, "name"), str(q, "program")));
+        post("/delete_label", "Delete a label at address",
+            params(bStr("address"), bStr("name"), pProg()),
+            (q, b) -> symbolLabelService.deleteLabel(bodyStr(b, "address"), bodyStr(b, "name"), str(q, "program")));
 
-        // /batch_delete_labels — delete multiple labels (POST, JSON)
-        post("/batch_delete_labels", (q, b) ->
-            symbolLabelService.batchDeleteLabels(bodyMapList(b, "labels"), str(q, "program")));
+        post("/batch_delete_labels", "Delete multiple labels at once",
+            params(bArr("labels"), pProg()),
+            (q, b) -> symbolLabelService.batchDeleteLabels(bodyMapList(b, "labels"), str(q, "program")));
 
-        // /can_rename_at_address — check if address supports rename
-        get("/can_rename_at_address", (q, b) ->
-            symbolLabelService.canRenameAtAddress(str(q, "address"), str(q, "program")));
+        get("/can_rename_at_address", "Check if address supports rename",
+            params(qStr("address", "Address to check"), pProg()),
+            (q, b) -> symbolLabelService.canRenameAtAddress(str(q, "address"), str(q, "program")));
 
-        // /get_function_labels — labels within a function body
-        get("/get_function_labels", (q, b) ->
-            symbolLabelService.getFunctionLabels(str(q, "name"), num(q, "offset", 0),
+        get("/get_function_labels", "Get labels within a function body",
+            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 20), pProg()),
+            (q, b) -> symbolLabelService.getFunctionLabels(str(q, "name"), num(q, "offset", 0),
                 num(q, "limit", 20), str(q, "program")));
     }
 
@@ -523,58 +667,60 @@ public class EndpointRegistry {
 
     private void registerXrefCallGraphEndpoints() {
 
-        // /get_xrefs_to — references to an address
-        get("/get_xrefs_to", (q, b) ->
-            xrefCallGraphService.getXrefsTo(str(q, "address"), num(q, "offset", 0),
+        get("/get_xrefs_to", "Get cross-references to an address",
+            params(qStr("address", "Target address"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getXrefsTo(str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
-        // /get_xrefs_from — references from an address
-        get("/get_xrefs_from", (q, b) ->
-            xrefCallGraphService.getXrefsFrom(str(q, "address"), num(q, "offset", 0),
+        get("/get_xrefs_from", "Get cross-references from an address",
+            params(qStr("address", "Source address"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getXrefsFrom(str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
-        // /get_function_xrefs — references to a function by name
-        get("/get_function_xrefs", (q, b) ->
-            xrefCallGraphService.getFunctionXrefs(str(q, "name"), num(q, "offset", 0),
+        get("/get_function_xrefs", "Get cross-references to a function by name",
+            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionXrefs(str(q, "name"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
-        // /get_function_jump_targets — jump targets within a function
-        get("/get_function_jump_targets", (q, b) ->
-            xrefCallGraphService.getFunctionJumpTargets(str(q, "name"), num(q, "offset", 0),
+        get("/get_function_jump_targets", "Get jump targets within a function",
+            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionJumpTargets(str(q, "name"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
-        // /get_function_callees — functions called by a function
-        get("/get_function_callees", (q, b) ->
-            xrefCallGraphService.getFunctionCallees(str(q, "name"), num(q, "offset", 0),
+        get("/get_function_callees", "Get functions called by a function",
+            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionCallees(str(q, "name"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
-        // /get_function_callers — functions calling a function
-        get("/get_function_callers", (q, b) ->
-            xrefCallGraphService.getFunctionCallers(str(q, "name"), num(q, "offset", 0),
+        get("/get_function_callers", "Get functions calling a function",
+            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionCallers(str(q, "name"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
-        // /get_function_call_graph — call graph traversal
-        get("/get_function_call_graph", (q, b) ->
-            xrefCallGraphService.getFunctionCallGraph(str(q, "name"), num(q, "depth", 2),
+        get("/get_function_call_graph", "Traverse call graph from a function",
+            params(qStr("name", "Function name"), qInt("depth", 2, "Traversal depth"),
+                qStr("direction", "Traversal direction (both/callers/callees)"), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionCallGraph(str(q, "name"), num(q, "depth", 2),
                 str(q, "direction", "both"), str(q, "program")));
 
-        // /get_full_call_graph — entire program call graph
-        get("/get_full_call_graph", (q, b) ->
-            xrefCallGraphService.getFullCallGraph(str(q, "format", "edges"),
+        get("/get_full_call_graph", "Get entire program call graph",
+            params(qStr("format", "Output format (edges or adjacency)"), qInt("limit", 1000), pProg()),
+            (q, b) -> xrefCallGraphService.getFullCallGraph(str(q, "format", "edges"),
                 num(q, "limit", 1000), str(q, "program")));
 
-        // /analyze_call_graph — call graph path analysis
-        get("/analyze_call_graph", (q, b) ->
-            xrefCallGraphService.analyzeCallGraph(str(q, "start_function"), str(q, "end_function"),
+        get("/analyze_call_graph", "Analyze call graph paths between functions",
+            params(qStr("start_function", "Start function name"), qStr("end_function", "End function name"),
+                qStr("analysis_type", "Analysis type (summary/paths/cycles)"), pProg()),
+            (q, b) -> xrefCallGraphService.analyzeCallGraph(str(q, "start_function"), str(q, "end_function"),
                 str(q, "analysis_type", "summary"), str(q, "program")));
 
-        // /get_bulk_xrefs — batch xref retrieval (POST, JSON)
-        post("/get_bulk_xrefs", (q, b) ->
-            xrefCallGraphService.getBulkXrefs(b.get("addresses"), str(q, "program")));
+        post("/get_bulk_xrefs", "Batch cross-reference retrieval",
+            params(bArr("addresses"), pProg()),
+            (q, b) -> xrefCallGraphService.getBulkXrefs(b.get("addresses"), str(q, "program")));
 
-        // /get_assembly_context — assembly pattern analysis (POST, JSON)
-        post("/get_assembly_context", (q, b) ->
-            xrefCallGraphService.getAssemblyContext(b.get("xref_sources"),
+        post("/get_assembly_context", "Get assembly pattern context for xref sources",
+            params(bArr("xref_sources"), bInt("context_instructions", 5), bArr("include_patterns"), pProg()),
+            (q, b) -> xrefCallGraphService.getAssemblyContext(b.get("xref_sources"),
                 bodyInt(b, "context_instructions", 5), b.get("include_patterns"), str(q, "program")));
     }
 
@@ -584,81 +730,83 @@ public class EndpointRegistry {
 
     private void registerDataTypeEndpoints() {
 
-        // /list_data_types — list all data types with optional category filter
-        get("/list_data_types", (q, b) ->
-            dataTypeService.listDataTypes(str(q, "category"), num(q, "offset", 0),
+        get("/list_data_types", "List all data types with optional category filter",
+            params(qStr("category", "Category filter"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> dataTypeService.listDataTypes(str(q, "category"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
-        // /search_data_types — search data types by pattern
-        get("/search_data_types", (q, b) ->
-            dataTypeService.searchDataTypes(str(q, "pattern"), num(q, "offset", 0),
+        get("/search_data_types", "Search data types by pattern",
+            params(qStr("pattern", "Search pattern"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> dataTypeService.searchDataTypes(str(q, "pattern"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
-        // /get_type_size — get data type size/info
-        get("/get_type_size", (q, b) ->
-            dataTypeService.getTypeSize(str(q, "type_name"), str(q, "program")));
+        get("/get_type_size", "Get data type size and info",
+            params(qStr("type_name", "Data type name"), pProg()),
+            (q, b) -> dataTypeService.getTypeSize(str(q, "type_name"), str(q, "program")));
 
-        // /get_struct_layout — get structure field layout
-        get("/get_struct_layout", (q, b) ->
-            dataTypeService.getStructLayout(str(q, "struct_name"), str(q, "program")));
+        get("/get_struct_layout", "Get structure field layout",
+            params(qStr("struct_name", "Structure name"), pProg()),
+            (q, b) -> dataTypeService.getStructLayout(str(q, "struct_name"), str(q, "program")));
 
-        // /get_enum_values — get enum member values
-        get("/get_enum_values", (q, b) ->
-            dataTypeService.getEnumValues(str(q, "enum_name"), str(q, "program")));
+        get("/get_enum_values", "Get enum member values",
+            params(qStr("enum_name", "Enum name"), pProg()),
+            (q, b) -> dataTypeService.getEnumValues(str(q, "enum_name"), str(q, "program")));
 
-        // /get_valid_data_types — list valid Ghidra data type strings
-        get("/get_valid_data_types", (q, b) ->
-            dataTypeService.getValidDataTypes(str(q, "category"), str(q, "program")));
+        get("/get_valid_data_types", "List valid Ghidra data type strings",
+            params(qStr("category", "Category filter"), pProg()),
+            (q, b) -> dataTypeService.getValidDataTypes(str(q, "category"), str(q, "program")));
 
-        // /validate_data_type_exists — check if a data type exists
-        get("/validate_data_type_exists", (q, b) ->
-            dataTypeService.validateDataTypeExists(str(q, "type_name"), str(q, "program")));
+        get("/validate_data_type_exists", "Check if a data type exists",
+            params(qStr("type_name", "Data type name"), pProg()),
+            (q, b) -> dataTypeService.validateDataTypeExists(str(q, "type_name"), str(q, "program")));
 
-        // /validate_data_type — validate data type applicability at address
-        get("/validate_data_type", (q, b) ->
-            dataTypeService.validateDataType(str(q, "address"), str(q, "type_name"), str(q, "program")));
+        get("/validate_data_type", "Validate data type applicability at address",
+            params(qStr("address", "Target address"), qStr("type_name", "Data type name"), pProg()),
+            (q, b) -> dataTypeService.validateDataType(str(q, "address"), str(q, "type_name"), str(q, "program")));
 
-        // /validate_function_prototype — validate prototype before applying
-        get("/validate_function_prototype", (q, b) ->
-            dataTypeService.validateFunctionPrototype(str(q, "function_address"),
+        get("/validate_function_prototype", "Validate prototype before applying",
+            params(qStr("function_address", "Function address"), qStr("prototype", "Function prototype"),
+                qStr("calling_convention", "Calling convention"), pProg()),
+            (q, b) -> dataTypeService.validateFunctionPrototype(str(q, "function_address"),
                 str(q, "prototype"), str(q, "calling_convention"), str(q, "program")));
 
-        // /list_data_type_categories — list all data type categories
-        get("/list_data_type_categories", (q, b) ->
-            dataTypeService.listDataTypeCategories(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
+        get("/list_data_type_categories", "List all data type categories",
+            params(qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> dataTypeService.listDataTypeCategories(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        // /create_struct — create a structure data type (POST, JSON)
-        post("/create_struct", (q, b) ->
-            dataTypeService.createStruct(bodyStr(b, "name"), bodyFieldsJson(b, "fields"), str(q, "program")));
+        post("/create_struct", "Create a structure data type",
+            params(bStr("name"), bJson("fields"), pProg()),
+            (q, b) -> dataTypeService.createStruct(bodyStr(b, "name"), bodyFieldsJson(b, "fields"), str(q, "program")));
 
-        // /create_enum — create an enum data type (POST, JSON)
-        post("/create_enum", (q, b) ->
-            dataTypeService.createEnum(bodyStr(b, "name"), bodyFieldsJson(b, "values"),
+        post("/create_enum", "Create an enum data type",
+            params(bStr("name"), bJson("values"), bInt("size", 4), pProg()),
+            (q, b) -> dataTypeService.createEnum(bodyStr(b, "name"), bodyFieldsJson(b, "values"),
                 bodyInt(b, "size", 4), str(q, "program")));
 
-        // /create_union — create a union data type (POST, JSON)
-        post("/create_union", (q, b) ->
-            dataTypeService.createUnion(bodyStr(b, "name"), bodyFieldsJson(b, "fields"), str(q, "program")));
+        post("/create_union", "Create a union data type",
+            params(bStr("name"), bJson("fields"), pProg()),
+            (q, b) -> dataTypeService.createUnion(bodyStr(b, "name"), bodyFieldsJson(b, "fields"), str(q, "program")));
 
-        // /create_typedef — create a typedef (POST, JSON)
-        post("/create_typedef", (q, b) ->
-            dataTypeService.createTypedef(bodyStr(b, "name"), bodyStr(b, "base_type"), str(q, "program")));
+        post("/create_typedef", "Create a typedef alias",
+            params(bStr("name"), bStr("base_type"), pProg()),
+            (q, b) -> dataTypeService.createTypedef(bodyStr(b, "name"), bodyStr(b, "base_type"), str(q, "program")));
 
-        // /clone_data_type — clone a data type with new name (POST, JSON)
-        post("/clone_data_type", (q, b) ->
-            dataTypeService.cloneDataType(bodyStr(b, "source_type"), bodyStr(b, "new_name"), str(q, "program")));
+        post("/clone_data_type", "Clone a data type with new name",
+            params(bStr("source_type"), bStr("new_name"), pProg()),
+            (q, b) -> dataTypeService.cloneDataType(bodyStr(b, "source_type"), bodyStr(b, "new_name"), str(q, "program")));
 
-        // /create_array_type — create an array data type (POST, JSON)
-        post("/create_array_type", (q, b) ->
-            dataTypeService.createArrayType(bodyStr(b, "base_type"), bodyInt(b, "length", 1),
+        post("/create_array_type", "Create an array data type",
+            params(bStr("base_type"), bInt("length", 1), bStrOpt("name"), pProg()),
+            (q, b) -> dataTypeService.createArrayType(bodyStr(b, "base_type"), bodyInt(b, "length", 1),
                 bodyStr(b, "name"), str(q, "program")));
 
-        // /create_pointer_type — create a pointer data type (POST, form-encoded)
-        post("/create_pointer_type", (q, b) ->
-            dataTypeService.createPointerType(bodyStr(b, "base_type"), bodyStr(b, "name"), str(q, "program")));
+        post("/create_pointer_type", "Create a pointer data type",
+            params(bStr("base_type"), bStrOpt("name"), pProg()),
+            (q, b) -> dataTypeService.createPointerType(bodyStr(b, "base_type"), bodyStr(b, "name"), str(q, "program")));
 
-        // /create_function_signature — create a function signature data type (POST, JSON)
-        post("/create_function_signature", (q, b) -> {
+        post("/create_function_signature", "Create a function signature data type",
+            params(bStr("name"), bStr("return_type"), bStr("parameters"), pProg()),
+            (q, b) -> {
             Object parametersObj = b.get("parameters");
             String parametersJson = (parametersObj instanceof String) ? (String) parametersObj :
                                    (parametersObj != null ? parametersObj.toString() : null);
@@ -666,58 +814,59 @@ public class EndpointRegistry {
                 parametersJson, str(q, "program"));
         });
 
-        // /apply_data_type — apply data type at address (POST, JSON)
-        post("/apply_data_type", (q, b) ->
-            dataTypeService.applyDataType(bodyStr(b, "address"), bodyStr(b, "type_name"),
+        post("/apply_data_type", "Apply data type at address",
+            params(bStr("address"), bStr("type_name"), bBool("clear_existing"), pProg()),
+            (q, b) -> dataTypeService.applyDataType(bodyStr(b, "address"), bodyStr(b, "type_name"),
                 bodyBool(b, "clear_existing", true), str(q, "program")));
 
-        // /delete_data_type — delete a data type (POST, JSON)
-        post("/delete_data_type", (q, b) ->
-            dataTypeService.deleteDataType(bodyStr(b, "type_name"), str(q, "program")));
+        post("/delete_data_type", "Delete a data type",
+            params(bStr("type_name"), pProg()),
+            (q, b) -> dataTypeService.deleteDataType(bodyStr(b, "type_name"), str(q, "program")));
 
-        // /modify_struct_field — modify a field in a structure (POST, JSON)
-        post("/modify_struct_field", (q, b) ->
-            dataTypeService.modifyStructField(bodyStr(b, "struct_name"), bodyStr(b, "field_name"),
+        post("/modify_struct_field", "Modify a field in a structure",
+            params(bStr("struct_name"), bStr("field_name"), bStrOpt("new_type"), bStrOpt("new_name"), pProg()),
+            (q, b) -> dataTypeService.modifyStructField(bodyStr(b, "struct_name"), bodyStr(b, "field_name"),
                 bodyStr(b, "new_type"), bodyStr(b, "new_name"), str(q, "program")));
 
-        // /add_struct_field — add a field to a structure (POST, JSON)
-        post("/add_struct_field", (q, b) ->
-            dataTypeService.addStructField(bodyStr(b, "struct_name"), bodyStr(b, "field_name"),
+        post("/add_struct_field", "Add a field to a structure",
+            params(bStr("struct_name"), bStr("field_name"), bStr("field_type"), bInt("offset", -1), pProg()),
+            (q, b) -> dataTypeService.addStructField(bodyStr(b, "struct_name"), bodyStr(b, "field_name"),
                 bodyStr(b, "field_type"), bodyInt(b, "offset", -1), str(q, "program")));
 
-        // /remove_struct_field — remove a field from a structure (POST, JSON)
-        post("/remove_struct_field", (q, b) ->
-            dataTypeService.removeStructField(bodyStr(b, "struct_name"), bodyStr(b, "field_name"), str(q, "program")));
+        post("/remove_struct_field", "Remove a field from a structure",
+            params(bStr("struct_name"), bStr("field_name"), pProg()),
+            (q, b) -> dataTypeService.removeStructField(bodyStr(b, "struct_name"), bodyStr(b, "field_name"), str(q, "program")));
 
-        // /import_data_types — import data types from source (POST, JSON)
-        post("/import_data_types", (q, b) ->
-            dataTypeService.importDataTypes(bodyStr(b, "source"), bodyStr(b, "format", "c")));
+        post("/import_data_types", "Import data types from C source",
+            params(bStr("source"), bStr("format")),
+            (q, b) -> dataTypeService.importDataTypes(bodyStr(b, "source"), bodyStr(b, "format", "c")));
 
-        // /create_data_type_category — create a new data type category (POST, form-encoded)
-        post("/create_data_type_category", (q, b) ->
-            dataTypeService.createDataTypeCategory(bodyStr(b, "category_path"), str(q, "program")));
+        post("/create_data_type_category", "Create a new data type category",
+            params(bStr("category_path"), pProg()),
+            (q, b) -> dataTypeService.createDataTypeCategory(bodyStr(b, "category_path"), str(q, "program")));
 
-        // /move_data_type_to_category — move data type to category (POST, form-encoded)
-        post("/move_data_type_to_category", (q, b) ->
-            dataTypeService.moveDataTypeToCategory(bodyStr(b, "type_name"), bodyStr(b, "category_path"), str(q, "program")));
+        post("/move_data_type_to_category", "Move data type to category",
+            params(bStr("type_name"), bStr("category_path"), pProg()),
+            (q, b) -> dataTypeService.moveDataTypeToCategory(bodyStr(b, "type_name"), bodyStr(b, "category_path"), str(q, "program")));
 
-        // /analyze_struct_field_usage — analyze structure field access patterns (POST, JSON)
-        post("/analyze_struct_field_usage", (q, b) ->
-            dataTypeService.analyzeStructFieldUsage(bodyStr(b, "address"), bodyStr(b, "struct_name"),
+        post("/analyze_struct_field_usage", "Analyze structure field access patterns",
+            params(bStr("address"), bStr("struct_name"), bInt("max_functions", 10), pProg()),
+            (q, b) -> dataTypeService.analyzeStructFieldUsage(bodyStr(b, "address"), bodyStr(b, "struct_name"),
                 bodyInt(b, "max_functions", 10), str(q, "program")));
 
-        // /get_field_access_context — assembly/decompilation context for field offsets (POST, JSON)
-        post("/get_field_access_context", (q, b) ->
-            analysisService.getFieldAccessContext(bodyStr(b, "struct_address"),
+        post("/get_field_access_context", "Get assembly context for struct field offsets",
+            params(bStr("struct_address"), bInt("field_offset", 0), bInt("num_examples", 5), pProg()),
+            (q, b) -> analysisService.getFieldAccessContext(bodyStr(b, "struct_address"),
                 bodyInt(b, "field_offset", 0), bodyInt(b, "num_examples", 5), str(q, "program")));
 
-        // /suggest_field_names — AI-assisted field name suggestions (POST, JSON)
-        post("/suggest_field_names", (q, b) ->
-            dataTypeService.suggestFieldNames(bodyStr(b, "struct_address"), bodyInt(b, "struct_size", 0), str(q, "program")));
+        post("/suggest_field_names", "AI-assisted field name suggestions",
+            params(bStr("struct_address"), bInt("struct_size", 0), pProg()),
+            (q, b) -> dataTypeService.suggestFieldNames(bodyStr(b, "struct_address"), bodyInt(b, "struct_size", 0), str(q, "program")));
 
-        // /apply_data_classification — atomic type application (POST, JSON)
-        post("/apply_data_classification", (q, b) ->
-            dataTypeService.applyDataClassification(bodyStr(b, "address"), bodyStr(b, "classification"),
+        post("/apply_data_classification", "Atomic type application with classification",
+            params(bStr("address"), bStr("classification"), bStrOpt("name"), bStrOpt("comment"),
+                bObj("type_definition"), pProg()),
+            (q, b) -> dataTypeService.applyDataClassification(bodyStr(b, "address"), bodyStr(b, "classification"),
                 bodyStr(b, "name"), bodyStr(b, "comment"), b.get("type_definition"), str(q, "program")));
     }
 
@@ -727,64 +876,68 @@ public class EndpointRegistry {
 
     private void registerAnalysisEndpoints() {
 
-        // /list_analyzers — list available analyzers
-        get("/list_analyzers", (q, b) ->
-            analysisService.listAnalyzers(str(q, "program")));
+        get("/list_analyzers", "List available analyzers",
+            params(pProg()),
+            (q, b) -> analysisService.listAnalyzers(str(q, "program")));
 
-        // /run_analysis — trigger auto-analysis (POST, form-encoded)
-        post("/run_analysis", (q, b) ->
-            analysisService.runAnalysis(bodyStr(b, "program")));
+        post("/run_analysis", "Trigger auto-analysis on program",
+            params(bStr("program")),
+            (q, b) -> analysisService.runAnalysis(bodyStr(b, "program")));
 
-        // /analyze_data_region — comprehensive data region analysis (POST, JSON)
-        post("/analyze_data_region", (q, b) ->
-            analysisService.analyzeDataRegion(bodyStr(b, "address"),
+        post("/analyze_data_region", "Comprehensive data region analysis",
+            params(bStr("address"), bInt("max_scan_bytes", 1024), bBool("include_xref_map"),
+                bBool("include_assembly_patterns"), bBool("include_boundary_detection"), pProg()),
+            (q, b) -> analysisService.analyzeDataRegion(bodyStr(b, "address"),
                 bodyInt(b, "max_scan_bytes", 1024),
                 bodyBool(b, "include_xref_map", true),
                 bodyBool(b, "include_assembly_patterns", true),
                 bodyBool(b, "include_boundary_detection", true),
                 str(q, "program")));
 
-        // /detect_array_bounds — array/table size detection (POST, JSON)
-        post("/detect_array_bounds", (q, b) ->
-            analysisService.detectArrayBounds(bodyStr(b, "address"),
+        post("/detect_array_bounds", "Detect array/table size from context",
+            params(bStr("address"), bBool("analyze_loop_bounds"), bBool("analyze_indexing"),
+                bInt("max_scan_range", 2048), pProg()),
+            (q, b) -> analysisService.detectArrayBounds(bodyStr(b, "address"),
                 bodyBool(b, "analyze_loop_bounds", true),
                 bodyBool(b, "analyze_indexing", true),
                 bodyInt(b, "max_scan_range", 2048),
                 str(q, "program")));
 
-        // /inspect_memory_content — memory inspection with string detection
-        get("/inspect_memory_content", (q, b) ->
-            analysisService.inspectMemoryContent(str(q, "address"), num(q, "length", 64),
+        get("/inspect_memory_content", "Inspect memory with string detection",
+            params(qStr("address", "Start address"), qInt("length", 64, "Bytes to read"),
+                qBool("detect_strings", true, "Auto-detect strings"), pProg()),
+            (q, b) -> analysisService.inspectMemoryContent(str(q, "address"), num(q, "length", 64),
                 bool(q, "detect_strings", true), str(q, "program")));
 
-        // /search_byte_patterns — search for byte patterns with masks
-        get("/search_byte_patterns", (q, b) ->
-            analysisService.searchBytePatterns(str(q, "pattern"), str(q, "mask"), str(q, "program")));
+        get("/search_byte_patterns", "Search for byte patterns with masks",
+            params(qStr("pattern", "Hex byte pattern"), qStr("mask", "Pattern mask"), pProg()),
+            (q, b) -> analysisService.searchBytePatterns(str(q, "pattern"), str(q, "mask"), str(q, "program")));
 
-        // /find_similar_functions — find structurally similar functions
-        get("/find_similar_functions", (q, b) ->
-            analysisService.findSimilarFunctions(str(q, "target_function"),
+        get("/find_similar_functions", "Find structurally similar functions",
+            params(qStr("target_function", "Function name"), qDbl("threshold", 0.8, "Similarity threshold"), pProg()),
+            (q, b) -> analysisService.findSimilarFunctions(str(q, "target_function"),
                 dbl(q, "threshold", 0.8), str(q, "program")));
 
-        // /analyze_control_flow — function control flow complexity analysis
-        get("/analyze_control_flow", (q, b) ->
-            analysisService.analyzeControlFlow(str(q, "function_name"), str(q, "program")));
+        get("/analyze_control_flow", "Analyze function control flow complexity",
+            params(qStr("function_name", "Function name"), pProg()),
+            (q, b) -> analysisService.analyzeControlFlow(str(q, "function_name"), str(q, "program")));
 
-        // /find_dead_code — identify unreachable code blocks
-        get("/find_dead_code", (q, b) ->
-            analysisService.findDeadCode(str(q, "function_name"), str(q, "program")));
+        get("/find_dead_code", "Identify unreachable code blocks",
+            params(qStr("function_name", "Function name"), pProg()),
+            (q, b) -> analysisService.findDeadCode(str(q, "function_name"), str(q, "program")));
 
-        // /analyze_function_completeness — check function documentation completeness
-        get("/analyze_function_completeness", (q, b) ->
-            analysisService.analyzeFunctionCompleteness(str(q, "function_address"),
+        get("/analyze_function_completeness", "Check function documentation completeness",
+            params(qStr("function_address", "Function address"), qBool("compact", false, "Compact output"), pProg()),
+            (q, b) -> analysisService.analyzeFunctionCompleteness(str(q, "function_address"),
                 bool(q, "compact"), str(q, "program")));
 
-        // /analyze_for_documentation — composite endpoint for RE documentation workflow
-        get("/analyze_for_documentation", (q, b) ->
-            analysisService.analyzeForDocumentation(str(q, "function_address"), str(q, "program")));
+        get("/analyze_for_documentation", "Composite analysis for RE documentation workflow",
+            params(qStr("function_address", "Function address"), pProg()),
+            (q, b) -> analysisService.analyzeForDocumentation(str(q, "function_address"), str(q, "program")));
 
-        // /batch_analyze_completeness — analyze completeness for multiple functions (POST, JSON)
-        post("/batch_analyze_completeness", (q, b) -> {
+        post("/batch_analyze_completeness", "Analyze completeness for multiple functions",
+            params(bArr("addresses"), pProg()),
+            (q, b) -> {
             @SuppressWarnings("unchecked")
             List<String> addresses = (List<String>) b.get("addresses");
             if (addresses == null || addresses.isEmpty()) {
@@ -800,21 +953,27 @@ public class EndpointRegistry {
             return Response.text(sb.toString());
         });
 
-        // /find_next_undefined_function — find next function needing analysis
-        get("/find_next_undefined_function", (q, b) ->
-            analysisService.findNextUndefinedFunction(str(q, "start_address"), str(q, "criteria"),
+        get("/find_next_undefined_function", "Find next function needing analysis",
+            params(qStr("start_address", "Starting address"), qStr("criteria", "Search criteria"),
+                qStr("pattern", "Name pattern filter"), qStr("direction", "Search direction"), pProg()),
+            (q, b) -> analysisService.findNextUndefinedFunction(str(q, "start_address"), str(q, "criteria"),
                 str(q, "pattern"), str(q, "direction"), str(q, "program")));
 
-        // /analyze_function_complete — comprehensive single-call analysis
-        get("/analyze_function_complete", (q, b) ->
-            analysisService.analyzeFunctionComplete(str(q, "name"),
+        get("/analyze_function_complete", "Comprehensive single-call function analysis",
+            params(qStr("name", "Function name"), qBool("include_xrefs", true), qBool("include_callees", true),
+                qBool("include_callers", true), qBool("include_disasm", true),
+                qBool("include_variables", true), pProg()),
+            (q, b) -> analysisService.analyzeFunctionComplete(str(q, "name"),
                 bool(q, "include_xrefs", true), bool(q, "include_callees", true),
                 bool(q, "include_callers", true), bool(q, "include_disasm", true),
                 bool(q, "include_variables", true), str(q, "program")));
 
-        // /search_functions_enhanced — advanced search with filtering
-        get("/search_functions_enhanced", (q, b) ->
-            analysisService.searchFunctionsEnhanced(str(q, "name_pattern"),
+        get("/search_functions_enhanced", "Advanced function search with filtering",
+            params(qStr("name_pattern", "Name pattern"), qNullInt("min_xrefs"), qNullInt("max_xrefs"),
+                qStr("calling_convention", "Calling convention filter"), qNullBool("has_custom_name"),
+                qBool("regex", false, "Use regex matching"), qStr("sort_by", "Sort field"),
+                qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> analysisService.searchFunctionsEnhanced(str(q, "name_pattern"),
                 nullableInt(q, "min_xrefs"), nullableInt(q, "max_xrefs"),
                 str(q, "calling_convention"), nullableBool(q, "has_custom_name"),
                 bool(q, "regex"), str(q, "sort_by", "address"),
@@ -827,62 +986,64 @@ public class EndpointRegistry {
 
     private void registerDocumentationHashEndpoints() {
 
-        // /get_function_hash — compute normalized opcode hash
-        get("/get_function_hash", (q, b) ->
-            documentationHashService.getFunctionHash(str(q, "address"), str(q, "program")));
+        get("/get_function_hash", "Compute normalized opcode hash for function",
+            params(qStr("address", "Function address"), pProg()),
+            (q, b) -> documentationHashService.getFunctionHash(str(q, "address"), str(q, "program")));
 
-        // /get_bulk_function_hashes — get hashes for multiple/all functions
-        get("/get_bulk_function_hashes", (q, b) ->
-            documentationHashService.getBulkFunctionHashes(num(q, "offset", 0), num(q, "limit", 100),
+        get("/get_bulk_function_hashes", "Get hashes for multiple or all functions",
+            params(qInt("offset", 0), qInt("limit", 100), qStr("filter", "Name filter"), pProg()),
+            (q, b) -> documentationHashService.getBulkFunctionHashes(num(q, "offset", 0), num(q, "limit", 100),
                 str(q, "filter"), str(q, "program")));
 
-        // /get_function_documentation — export all documentation for a function
-        get("/get_function_documentation", (q, b) ->
-            documentationHashService.getFunctionDocumentation(str(q, "address"), str(q, "program")));
+        get("/get_function_documentation", "Export all documentation for a function",
+            params(qStr("address", "Function address"), pProg()),
+            (q, b) -> documentationHashService.getFunctionDocumentation(str(q, "address"), str(q, "program")));
 
-        // /apply_function_documentation — import documentation to a target function (POST, raw body)
-        // NOTE: This endpoint reads the raw request body as JSON text.
-        // The registry handler will receive the body as a Map, so callers must pass the
-        // raw JSON string via bodyStr(b, "json_body") or reconstruct it.
-        post("/apply_function_documentation", (q, b) -> {
+        post("/apply_function_documentation", "Import documentation to a target function",
+            params(bStr("json_body"), pProg()),
+            (q, b) -> {
             String jsonBody = bodyStr(b, "json_body");
             if (jsonBody == null) {
-                // Fallback: re-serialize the body map to JSON for callers that pass structured data
                 jsonBody = JsonHelper.toJson(b);
             }
             return documentationHashService.applyFunctionDocumentation(jsonBody, str(q, "program"));
         });
 
-        // /compare_programs_documentation — compare documented vs undocumented counts
-        get("/compare_programs_documentation", (q, b) ->
-            documentationHashService.compareProgramsDocumentation(str(q, "program")));
+        get("/compare_programs_documentation", "Compare documented vs undocumented counts",
+            params(pProg()),
+            (q, b) -> documentationHashService.compareProgramsDocumentation(str(q, "program")));
 
-        // /find_undocumented_by_string — find FUN_* functions referencing a string
-        get("/find_undocumented_by_string", (q, b) ->
-            documentationHashService.findUndocumentedByString(str(q, "address"), str(q, "program")));
+        get("/find_undocumented_by_string", "Find FUN_* functions referencing a string",
+            params(qStr("address", "String address"), pProg()),
+            (q, b) -> documentationHashService.findUndocumentedByString(str(q, "address"), str(q, "program")));
 
-        // /batch_string_anchor_report — report of source file strings and their FUN_* functions
-        get("/batch_string_anchor_report", (q, b) ->
-            documentationHashService.batchStringAnchorReport(str(q, "pattern", ".cpp"), str(q, "program")));
+        get("/batch_string_anchor_report", "Report of source file strings and their FUN_* functions",
+            params(qStr("pattern", "File pattern (e.g. .cpp)"), pProg()),
+            (q, b) -> documentationHashService.batchStringAnchorReport(str(q, "pattern", ".cpp"), str(q, "program")));
 
-        // /get_function_signature — get function signature for cross-binary comparison
-        get("/get_function_signature", (q, b) ->
-            documentationHashService.handleGetFunctionSignature(str(q, "address"), str(q, "program")));
+        get("/get_function_signature", "Get function signature for cross-binary comparison",
+            params(qStr("address", "Function address"), pProg()),
+            (q, b) -> documentationHashService.handleGetFunctionSignature(str(q, "address"), str(q, "program")));
 
-        // /find_similar_functions_fuzzy — cross-binary fuzzy function matching
-        get("/find_similar_functions_fuzzy", (q, b) ->
-            documentationHashService.handleFindSimilarFunctionsFuzzy(str(q, "address"),
+        get("/find_similar_functions_fuzzy", "Cross-binary fuzzy function matching",
+            params(qStr("address", "Function address"), qStr("source_program", "Source program name"),
+                qStr("target_program", "Target program name"), qDbl("threshold", 0.7, "Similarity threshold"),
+                qInt("limit", 20)),
+            (q, b) -> documentationHashService.handleFindSimilarFunctionsFuzzy(str(q, "address"),
                 str(q, "source_program"), str(q, "target_program"),
                 dbl(q, "threshold", 0.7), num(q, "limit", 20)));
 
-        // /bulk_fuzzy_match — bulk cross-binary function matching
-        get("/bulk_fuzzy_match", (q, b) ->
-            documentationHashService.handleBulkFuzzyMatch(str(q, "source_program"), str(q, "target_program"),
+        get("/bulk_fuzzy_match", "Bulk cross-binary function matching",
+            params(qStr("source_program", "Source program name"), qStr("target_program", "Target program name"),
+                qDbl("threshold", 0.7, "Similarity threshold"), qInt("offset", 0), qInt("limit", 50),
+                qStr("filter", "Name filter")),
+            (q, b) -> documentationHashService.handleBulkFuzzyMatch(str(q, "source_program"), str(q, "target_program"),
                 dbl(q, "threshold", 0.7), num(q, "offset", 0), num(q, "limit", 50), str(q, "filter")));
 
-        // /diff_functions — compute structured diff between two functions
-        get("/diff_functions", (q, b) ->
-            documentationHashService.handleDiffFunctions(str(q, "address_a"), str(q, "address_b"),
+        get("/diff_functions", "Compute structured diff between two functions",
+            params(qStr("address_a", "First function address"), qStr("address_b", "Second function address"),
+                qStr("program_a", "First program name"), qStr("program_b", "Second program name")),
+            (q, b) -> documentationHashService.handleDiffFunctions(str(q, "address_a"), str(q, "address_b"),
                 str(q, "program_a"), str(q, "program_b")));
     }
 
@@ -892,25 +1053,25 @@ public class EndpointRegistry {
 
     private void registerMalwareSecurityEndpoints() {
 
-        // /find_anti_analysis_techniques — detect anti-analysis/anti-debug techniques
-        get("/find_anti_analysis_techniques", (q, b) ->
-            malwareSecurityService.findAntiAnalysisTechniques(str(q, "program")));
+        get("/find_anti_analysis_techniques", "Detect anti-analysis and anti-debug techniques",
+            params(pProg()),
+            (q, b) -> malwareSecurityService.findAntiAnalysisTechniques(str(q, "program")));
 
-        // /analyze_api_call_chains — detect suspicious API call patterns
-        get("/analyze_api_call_chains", (q, b) ->
-            malwareSecurityService.analyzeAPICallChains(str(q, "program")));
+        get("/analyze_api_call_chains", "Detect suspicious API call patterns",
+            params(pProg()),
+            (q, b) -> malwareSecurityService.analyzeAPICallChains(str(q, "program")));
 
-        // /extract_iocs_with_context — enhanced IOC extraction with context
-        get("/extract_iocs_with_context", (q, b) ->
-            malwareSecurityService.extractIOCsWithContext(str(q, "program")));
+        get("/extract_iocs_with_context", "Enhanced IOC extraction with context",
+            params(pProg()),
+            (q, b) -> malwareSecurityService.extractIOCsWithContext(str(q, "program")));
 
-        // /detect_malware_behaviors — detect common malware behaviors
-        get("/detect_malware_behaviors", (q, b) ->
-            malwareSecurityService.detectMalwareBehaviors(str(q, "program")));
+        get("/detect_malware_behaviors", "Detect common malware behaviors",
+            params(pProg()),
+            (q, b) -> malwareSecurityService.detectMalwareBehaviors(str(q, "program")));
 
-        // /detect_crypto_constants — detect crypto algorithm constants
-        get("/detect_crypto_constants", (q, b) ->
-            analysisService.detectCryptoConstants(str(q, "program")));
+        get("/detect_crypto_constants", "Detect crypto algorithm constants",
+            params(pProg()),
+            (q, b) -> analysisService.detectCryptoConstants(str(q, "program")));
     }
 
     // ======================================================================
@@ -919,77 +1080,76 @@ public class EndpointRegistry {
 
     private void registerProgramScriptEndpoints() {
 
-        // /get_metadata — program metadata
-        get("/get_metadata", (q, b) ->
-            programScriptService.getMetadata(str(q, "program")));
+        get("/get_metadata", "Get program metadata",
+            params(pProg()),
+            (q, b) -> programScriptService.getMetadata(str(q, "program")));
 
-        // /save_program — save current program
-        get("/save_program", (q, b) ->
-            programScriptService.saveCurrentProgram(str(q, "program")));
+        get("/save_program", "Save current program",
+            params(pProg()),
+            (q, b) -> programScriptService.saveCurrentProgram(str(q, "program")));
 
-        // /list_open_programs — list all open programs
-        get("/list_open_programs", (q, b) ->
-            programScriptService.listOpenPrograms());
+        get("/list_open_programs", "List all open programs",
+            params(),
+            (q, b) -> programScriptService.listOpenPrograms());
 
-        // /get_current_program_info — detailed info about the active program
-        get("/get_current_program_info", (q, b) ->
-            programScriptService.getCurrentProgramInfo(str(q, "program")));
+        get("/get_current_program_info", "Get detailed info about the active program",
+            params(pProg()),
+            (q, b) -> programScriptService.getCurrentProgramInfo(str(q, "program")));
 
-        // /switch_program — switch MCP context to a different program
-        get("/switch_program", (q, b) ->
-            programScriptService.switchProgram(str(q, "name")));
+        get("/switch_program", "Switch MCP context to a different program",
+            params(qStr("name", "Program name to switch to")),
+            (q, b) -> programScriptService.switchProgram(str(q, "name")));
 
-        // /list_project_files — list files in the current project
-        get("/list_project_files", (q, b) ->
-            programScriptService.listProjectFiles(str(q, "folder")));
+        get("/list_project_files", "List files in the current project",
+            params(qStr("folder", "Project folder path")),
+            (q, b) -> programScriptService.listProjectFiles(str(q, "folder")));
 
-        // /open_program — open a program from the current project
-        get("/open_program", (q, b) ->
-            programScriptService.openProgramFromProject(str(q, "path"), bool(q, "auto_analyze")));
+        get("/open_program", "Open a program from the current project",
+            params(qStr("path", "Program path in project"), qBool("auto_analyze", false, "Run auto-analysis")),
+            (q, b) -> programScriptService.openProgramFromProject(str(q, "path"), bool(q, "auto_analyze")));
 
-        // /run_script — execute a Ghidra script (POST, form-encoded)
-        post("/run_script", (q, b) ->
-            programScriptService.runGhidraScript(bodyStr(b, "script_path"), bodyStr(b, "args"), str(q, "program")));
+        post("/run_script", "Execute a Ghidra script by path",
+            params(bStr("script_path"), bStrOpt("args"), pProg()),
+            (q, b) -> programScriptService.runGhidraScript(bodyStr(b, "script_path"), bodyStr(b, "args"), str(q, "program")));
 
-        // /run_script_inline — execute inline Ghidra script code (POST, JSON)
-        // NOTE: This endpoint has special class-rewriting logic that stays inline in the plugin.
-        // The registry version delegates to ProgramScriptService which may not have
-        // the same OSGi class-name rewriting. Callers should verify behavior.
-        post("/run_script_inline", (q, b) ->
-            programScriptService.runGhidraScript(bodyStr(b, "code"), bodyStr(b, "args")));
+        post("/run_script_inline", "Execute inline Ghidra script code",
+            params(bStr("code"), bStrOpt("args")),
+            (q, b) -> programScriptService.runGhidraScript(bodyStr(b, "code"), bodyStr(b, "args")));
 
-        // /run_ghidra_script — execute script with capture and timeout (POST, JSON)
-        post("/run_ghidra_script", (q, b) ->
-            programScriptService.runGhidraScriptWithCapture(bodyStr(b, "script_name"), bodyStr(b, "args"),
+        post("/run_ghidra_script", "Execute script with output capture and timeout",
+            params(bStr("script_name"), bStrOpt("args"), bInt("timeout_seconds", 300),
+                bBool("capture_output"), pProg()),
+            (q, b) -> programScriptService.runGhidraScriptWithCapture(bodyStr(b, "script_name"), bodyStr(b, "args"),
                 bodyInt(b, "timeout_seconds", 300), bodyBool(b, "capture_output", true), str(q, "program")));
 
-        // /list_scripts — list available Ghidra scripts
-        get("/list_scripts", (q, b) ->
-            programScriptService.listGhidraScripts(str(q, "filter")));
+        get("/list_scripts", "List available Ghidra scripts",
+            params(qStr("filter", "Script name filter")),
+            (q, b) -> programScriptService.listGhidraScripts(str(q, "filter")));
 
-        // /read_memory — read raw memory bytes
-        get("/read_memory", (q, b) ->
-            programScriptService.readMemory(str(q, "address"), num(q, "length", 16), str(q, "program")));
+        get("/read_memory", "Read raw memory bytes",
+            params(qStr("address", "Start address"), qInt("length", 16, "Number of bytes"), pProg()),
+            (q, b) -> programScriptService.readMemory(str(q, "address"), num(q, "length", 16), str(q, "program")));
 
-        // /create_memory_block — create a new memory block (POST, JSON)
-        post("/create_memory_block", (q, b) ->
-            programScriptService.createMemoryBlock(bodyStr(b, "name"), bodyStr(b, "address"),
+        post("/create_memory_block", "Create a new memory block",
+            params(bStr("name"), bStr("address"), bLong("size", 0), bBool("read"), bBool("write"),
+                bBool("execute"), bBool("volatile"), bStrOpt("comment"), pProg()),
+            (q, b) -> programScriptService.createMemoryBlock(bodyStr(b, "name"), bodyStr(b, "address"),
                 bodyLong(b, "size", 0),
                 bodyBool(b, "read", true), bodyBool(b, "write", true),
                 bodyBool(b, "execute", false), bodyBool(b, "volatile", false),
                 bodyStr(b, "comment"), str(q, "program")));
 
-        // /set_bookmark — create or update a bookmark (POST, JSON)
-        post("/set_bookmark", (q, b) ->
-            programScriptService.setBookmark(bodyStr(b, "address"), bodyStr(b, "category"),
+        post("/set_bookmark", "Create or update a bookmark",
+            params(bStr("address"), bStrOpt("category"), bStrOpt("comment"), pProg()),
+            (q, b) -> programScriptService.setBookmark(bodyStr(b, "address"), bodyStr(b, "category"),
                 bodyStr(b, "comment"), str(q, "program")));
 
-        // /list_bookmarks — list bookmarks, optionally filtered
-        get("/list_bookmarks", (q, b) ->
-            programScriptService.listBookmarks(str(q, "category"), str(q, "address"), str(q, "program")));
+        get("/list_bookmarks", "List bookmarks with optional filter",
+            params(qStr("category", "Category filter"), qStr("address", "Address filter"), pProg()),
+            (q, b) -> programScriptService.listBookmarks(str(q, "category"), str(q, "address"), str(q, "program")));
 
-        // /delete_bookmark — delete a bookmark (POST, JSON)
-        post("/delete_bookmark", (q, b) ->
-            programScriptService.deleteBookmark(bodyStr(b, "address"), bodyStr(b, "category"), str(q, "program")));
+        post("/delete_bookmark", "Delete a bookmark",
+            params(bStr("address"), bStrOpt("category"), pProg()),
+            (q, b) -> programScriptService.deleteBookmark(bodyStr(b, "address"), bodyStr(b, "category"), str(q, "program")));
     }
 }

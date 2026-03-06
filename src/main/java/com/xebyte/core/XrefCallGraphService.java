@@ -119,24 +119,24 @@ public class XrefCallGraphService {
         if (functionName == null || functionName.isEmpty()) return Response.err("Function name is required");
 
         try {
+            FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+            if (!resolved.isSuccess()) return Response.text("No references found to function: " + functionName);
+            Function function = resolved.function();
+
             List<String> refs = new ArrayList<>();
             FunctionManager funcManager = program.getFunctionManager();
-            for (Function function : funcManager.getFunctions(true)) {
-                if (function.getName().equals(functionName)) {
-                    Address entryPoint = function.getEntryPoint();
-                    ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
+            Address entryPoint = function.getEntryPoint();
+            ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
 
-                    while (refIter.hasNext()) {
-                        Reference ref = refIter.next();
-                        Address fromAddr = ref.getFromAddress();
-                        RefType refType = ref.getReferenceType();
+            while (refIter.hasNext()) {
+                Reference ref = refIter.next();
+                Address fromAddr = ref.getFromAddress();
+                RefType refType = ref.getReferenceType();
 
-                        Function fromFunc = funcManager.getFunctionContaining(fromAddr);
-                        String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
+                Function fromFunc = funcManager.getFunctionContaining(fromAddr);
+                String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
 
-                        refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
-                    }
-                }
+                refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
             }
 
             if (refs.isEmpty()) {
@@ -168,18 +168,12 @@ public class XrefCallGraphService {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
-        Function function = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                function = f;
-                break;
-            }
-        }
-
-        if (function == null) {
+        // Find the function by name or address
+        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
+        Function function = resolved.function();
 
         AddressSetView functionBody = function.getBody();
         Listing listing = program.getListing();
@@ -270,18 +264,12 @@ public class XrefCallGraphService {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
-        Function function = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                function = f;
-                break;
-            }
-        }
-
-        if (function == null) {
+        // Find the function by name or address
+        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
+        Function function = resolved.function();
 
         Set<Function> callees = new HashSet<>();
         AddressSetView functionBody = function.getBody();
@@ -350,18 +338,13 @@ public class XrefCallGraphService {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
+        // Find the function by name or address
         Function targetFunction = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                targetFunction = f;
-                break;
-            }
-        }
-
-        if (targetFunction == null) {
+        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
+        targetFunction = resolved.function();
 
         Set<Function> callers = new HashSet<>();
         ReferenceManager refManager = program.getReferenceManager();
@@ -424,18 +407,13 @@ public class XrefCallGraphService {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
+        // Find the function by name or address
         Function rootFunction = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                rootFunction = f;
-                break;
-            }
-        }
-
-        if (rootFunction == null) {
+        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
+        rootFunction = resolved.function();
 
         Set<String> visited = new HashSet<>();
         Map<String, Set<String>> callGraph = new HashMap<>();

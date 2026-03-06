@@ -315,6 +315,15 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         }
 
         // ==========================================================================
+        // SCHEMA ENDPOINT — Serves machine-readable API metadata
+        // ==========================================================================
+
+        String schemaJson = registry.generateSchema();
+        server.createContext("/mcp/schema", exchange -> {
+            sendResponse(exchange, schemaJson);
+        });
+
+        // ==========================================================================
         // HEADLESS-ONLY ENDPOINTS (no GUI equivalent)
         // ==========================================================================
 
