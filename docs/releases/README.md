@@ -14,6 +14,13 @@ This directory contains version-specific release documentation for the Ghidra MC
 - 193 MCP tools, 175 GUI endpoints, 183 headless endpoints
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details
 
+### v4.1.0
+
+- **Feature Release** - Parallel multi-binary support via universal `program` parameter
+- Every program-scoped MCP tool now accepts optional `program` parameter for parallel workflows
+- 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
 ### v4.0.0
 
 - **Major Release** - Service layer architecture refactor

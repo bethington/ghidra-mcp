@@ -22,7 +22,7 @@ AI/Automation Tools <-> MCP Bridge (bridge_mcp_ghidra.py) <-> Ghidra Plugin (Ghi
 |-----------|----------|---------|
 | Ghidra Plugin | `src/main/java/com/xebyte/GhidraMCPPlugin.java` | HTTP server + endpoint wiring (~5,270 lines), delegates to services |
 | MCP Bridge | `bridge_mcp_ghidra.py` | Translates MCP protocol to HTTP calls (193 tools) |
-| Headless Server | `src/main/java/com/xebyte/headless/` | Standalone server without Ghidra GUI (173 endpoints) |
+| Headless Server | `src/main/java/com/xebyte/headless/` | Standalone server without Ghidra GUI (183 endpoints) |
 | Service Layer | `src/main/java/com/xebyte/core/` | 12 shared service classes with business logic (~15K lines) |
 
 ### Service Layer (v4.0.0)

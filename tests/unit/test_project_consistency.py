@@ -70,7 +70,16 @@ def count_registry_endpoints() -> int:
 
 def count_total_endpoints(java_path: Path) -> int:
     """Count total endpoints: direct createContext + shared EndpointRegistry entries."""
-    return count_create_context(java_path) + count_registry_endpoints()
+    direct = count_create_context(java_path)
+    registry = count_registry_endpoints()
+    # The registry loop's createContext(ep.path(), ...) is matched by
+    # count_create_context, but those endpoints are already counted by
+    # count_registry_endpoints.  Subtract 1 to avoid double-counting.
+    if registry > 0:
+        content = java_path.read_text(encoding="utf-8")
+        if re.search(r'\.createContext\(ep\.path\(\)', content):
+            direct -= 1
+    return direct + registry
 
 
 def count_mcp_tools() -> int:
