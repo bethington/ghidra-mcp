@@ -79,7 +79,11 @@ public class CommentService {
         return setCommentAtAddress(addressStr, comment, commentType, transactionName, null);
     }
 
-    public Response setDecompilerComment(String addressStr, String comment, String programName) {
+    @McpTool(path = "/set_decompiler_comment", method = "POST", description = "Set decompiler PRE_COMMENT at address", category = "comment")
+    public Response setDecompilerComment(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "comment", source = ParamSource.BODY) String comment,
+            @Param(value = "program", description = "Target program name") String programName) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment", programName);
     }
 
@@ -87,7 +91,11 @@ public class CommentService {
         return setDecompilerComment(addressStr, comment, null);
     }
 
-    public Response setDisassemblyComment(String addressStr, String comment, String programName) {
+    @McpTool(path = "/set_disassembly_comment", method = "POST", description = "Set disassembly EOL_COMMENT at address", category = "comment")
+    public Response setDisassemblyComment(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "comment", source = ParamSource.BODY) String comment,
+            @Param(value = "program", description = "Target program name") String programName) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment", programName);
     }
 
@@ -98,7 +106,10 @@ public class CommentService {
     /**
      * Get the plate (header) comment for a function.
      */
-    public Response getPlateComment(String address, String programName) {
+    @McpTool(path = "/get_plate_comment", description = "Get function header/plate comment", category = "comment")
+    public Response getPlateComment(
+            @Param(value = "address", description = "Function address") String address,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -130,7 +141,11 @@ public class CommentService {
     /**
      * Set function plate (header) comment.
      */
-    public Response setPlateComment(String functionAddress, String comment, String programName) {
+    @McpTool(path = "/set_plate_comment", method = "POST", description = "Set function header/plate comment", category = "comment")
+    public Response setPlateComment(
+            @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "comment", source = ParamSource.BODY) String comment,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -194,8 +209,13 @@ public class CommentService {
     /**
      * Batch set multiple comments (decompiler, disassembly, and plate) in a single operation.
      */
-    public Response batchSetComments(String functionAddress, List<Map<String, String>> decompilerComments,
-                                     List<Map<String, String>> disassemblyComments, String plateComment, String programName) {
+    @McpTool(path = "/batch_set_comments", method = "POST", description = "Set multiple comments in one operation", category = "comment")
+    public Response batchSetComments(
+            @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "decompiler_comments", source = ParamSource.BODY) List<Map<String, String>> decompilerComments,
+            @Param(value = "disassembly_comments", source = ParamSource.BODY) List<Map<String, String>> disassemblyComments,
+            @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "") String plateComment,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -306,7 +326,13 @@ public class CommentService {
     /**
      * Clear all comments (plate, PRE, EOL) within a function's address range.
      */
-    public Response clearFunctionComments(String functionAddress, boolean clearPlate, boolean clearPre, boolean clearEol, String programName) {
+    @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function", category = "comment")
+    public Response clearFunctionComments(
+            @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "clear_plate", source = ParamSource.BODY, defaultValue = "true") boolean clearPlate,
+            @Param(value = "clear_pre", source = ParamSource.BODY, defaultValue = "true") boolean clearPre,
+            @Param(value = "clear_eol", source = ParamSource.BODY, defaultValue = "true") boolean clearEol,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

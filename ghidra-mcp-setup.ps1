@@ -59,7 +59,7 @@ function Write-LogError { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor
 
 # Configuration
 $DefaultGhidraVersion = "12.0.3"
-$PluginVersion = "4.2.0"
+$PluginVersion = "4.3.0"
 
 function Show-Usage {
     Write-Host ""
@@ -225,9 +225,17 @@ if (-not $pathGhidraVersion) {
     $pathGhidraVersion = Get-VersionFromGhidraPath -PathValue $GhidraPath
 }
 if ($pathGhidraVersion -and $pathGhidraVersion -ne $GhidraVersion) {
-    Write-LogError "Version mismatch: GhidraPath implies version '$pathGhidraVersion', but selected/pom version is '$GhidraVersion'."
-    Write-LogInfo "Use a matching -GhidraPath or update pom.xml ghidra.version."
-    exit 1
+    # Extract major.minor for compatibility check
+    $pathMajorMinor = ($pathGhidraVersion -split '\.')[0..1] -join '.'
+    $selectedMajorMinor = ($GhidraVersion -split '\.')[0..1] -join '.'
+    if ($pathMajorMinor -eq $selectedMajorMinor) {
+        Write-LogWarning "GhidraPath version '$pathGhidraVersion' differs from build version '$GhidraVersion' (patch mismatch)."
+        Write-LogInfo "Extensions are generally compatible across patch versions. Continuing."
+    } else {
+        Write-LogError "Version mismatch: GhidraPath implies version '$pathGhidraVersion', but selected/pom version is '$GhidraVersion'."
+        Write-LogInfo "Use a matching -GhidraPath or update pom.xml ghidra.version."
+        exit 1
+    }
 }
 
 if (-not $GhidraPath -and ($SetupDeps -or -not $BuildOnly -and -not $Clean)) {
@@ -251,13 +259,13 @@ Write-Host ""
 # Function to find all Ghidra processes
 function Get-GhidraProcesses {
     $ghidraProcs = @()
-    
+
     # Method 1: Check for javaw/java processes with Ghidra in window title
     $javaProcs = Get-Process -Name javaw, java -ErrorAction SilentlyContinue | Where-Object {
         $_.MainWindowTitle -match "Ghidra"
     }
     if ($javaProcs) { $ghidraProcs += $javaProcs }
-    
+
     # Method 2: Check for processes started from Ghidra directory
     $allProcs = Get-Process -Name javaw, java -ErrorAction SilentlyContinue | Where-Object {
         try {
@@ -269,7 +277,7 @@ function Get-GhidraProcesses {
             $ghidraProcs += $proc
         }
     }
-    
+
     # Method 3: Check command line for ghidra references (requires admin for full access)
     try {
         $wmiProcs = Get-CimInstance Win32_Process -Filter "Name='javaw.exe' OR Name='java.exe'" -ErrorAction SilentlyContinue
@@ -282,7 +290,7 @@ function Get-GhidraProcesses {
             }
         }
     } catch { }
-    
+
     return $ghidraProcs
 }
 
@@ -290,26 +298,26 @@ function Get-GhidraProcesses {
 function Close-Ghidra {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([switch]$Force)
-    
+
     $ghidraProcesses = Get-GhidraProcesses
     if (-not $ghidraProcesses) {
         return $false
     }
-    
+
     Write-LogInfo "Detected $($ghidraProcesses.Count) Ghidra process(es) running"
-    
+
     foreach ($ghidraProcess in $ghidraProcesses) {
         $procInfo = "PID $($ghidraProcess.Id)"
         if ($ghidraProcess.MainWindowTitle) {
             $procInfo = "'$($ghidraProcess.MainWindowTitle)' ($procInfo)"
         }
-        
+
         Write-LogInfo "Closing Ghidra $procInfo..."
         try {
             # Try graceful close first
             if ($ghidraProcess.MainWindowHandle -ne 0) {
                 $ghidraProcess.CloseMainWindow() | Out-Null
-                
+
                 # Wait up to 5 seconds for graceful close
                 $waited = 0
                 while (!$ghidraProcess.HasExited -and $waited -lt 5) {
@@ -318,7 +326,7 @@ function Close-Ghidra {
                     $ghidraProcess.Refresh()
                 }
             }
-            
+
             # Force kill if still running
             if (!$ghidraProcess.HasExited) {
                 if ($Force) {
@@ -336,7 +344,7 @@ function Close-Ghidra {
             Write-LogWarning "Could not close Ghidra $procInfo : $($_.Exception.Message)"
         }
     }
-    
+
     # Wait for processes to fully terminate
     Start-Sleep -Seconds 2
     return $true
@@ -821,7 +829,7 @@ if (-not (Test-Path $artifactPath)) {
 
 if (-not (Test-Path $artifactPath)) {
     # Auto-detect latest artifact if direct names not found
-    $artifacts = Get-ChildItem -Path "$PSScriptRoot\target" -Filter "GhidraMCP*.zip" -ErrorAction SilentlyContinue | 
+    $artifacts = Get-ChildItem -Path "$PSScriptRoot\target" -Filter "GhidraMCP*.zip" -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending
     if ($artifacts) {
         $artifactPath = $artifacts[0].FullName
@@ -955,7 +963,7 @@ $requirementsSourcePath = "$PSScriptRoot\requirements.txt"
 if (Test-Path $bridgeSourcePath) {
     try {
         $bridgeDestinationPath = Join-Path $GhidraPath "bridge_mcp_ghidra.py"
-        
+
         # Remove existing bridge if it exists
         if (Test-Path $bridgeDestinationPath) {
             if ($PSCmdlet.ShouldProcess($bridgeDestinationPath, "Remove existing Python bridge")) {
@@ -963,12 +971,12 @@ if (Test-Path $bridgeSourcePath) {
                 Write-LogSuccess "Removed existing bridge"
             }
         }
-        
+
         if ($PSCmdlet.ShouldProcess($bridgeDestinationPath, "Copy Python bridge to Ghidra root")) {
             Copy-Item $bridgeSourcePath $bridgeDestinationPath -Force
             Write-LogSuccess "Installed: bridge_mcp_ghidra.py → $GhidraPath"
         }
-        
+
         # Also copy requirements.txt for convenience
         if (Test-Path $requirementsSourcePath) {
             $requirementsDestinationPath = Join-Path $GhidraPath "requirements.txt"
@@ -977,7 +985,7 @@ if (Test-Path $bridgeSourcePath) {
                 Write-LogSuccess "Installed: requirements.txt → $GhidraPath"
             }
         }
-        
+
     } catch {
         Write-LogWarning "Failed to copy Python bridge: $($_.Exception.Message)"
         Write-LogInfo "You can manually copy bridge_mcp_ghidra.py to your Ghidra installation"
@@ -1132,7 +1140,7 @@ Write-Host ""
 if (Test-Path $destinationPath) {
     $fileSize = (Get-Item $destinationPath).Length
     Write-LogSuccess "Installation verified: $([math]::Round($fileSize/1KB, 2)) KB"
-    
+
     if (-not $SkipRestart) {
         # Check if any Ghidra is still running (shouldn't be if we closed it earlier)
         $remainingProcesses = Get-GhidraProcesses
@@ -1141,7 +1149,7 @@ if (Test-Path $destinationPath) {
             Close-Ghidra -Force
             Start-Sleep -Seconds 2
         }
-        
+
         # If AutoOpen specified, inject RUNNING_TOOL into projectState before launch.
         # This makes Ghidra restore CodeBrowser with the target program on startup.
         # Format: "ProjectDir\ProjectName|/folder/file"

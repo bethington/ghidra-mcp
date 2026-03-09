@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-12.0.3-green.svg)](https://ghidra-sre.org/)
-[![Version](https://img.shields.io/badge/Version-4.2.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-4.3.0-brightgreen.svg)](CHANGELOG.md)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
 
@@ -172,7 +172,7 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 
 #### In Ghidra
 1. Start Ghidra and open a **CodeBrowser** window
-2. In **CodeBrowser**, enable the plugin via **File > Configure > Configure All Plugins (top right corner) > GhidraMCP**
+2. In **CodeBrowser**, enable the plugin via **File > Configure > Configure All Plugins > GhidraMCP**
 3. Optional: configure custom port via **CodeBrowser > Edit > Tool Options > GhidraMCP HTTP Server**
 4. Start the server via **Tools > GhidraMCP > Start MCP Server**
 5. The server runs on `http://127.0.0.1:8089/` by default
@@ -195,7 +195,7 @@ curl http://127.0.0.1:8089/get_version
 
 **Solution:**
 1. Verify extension is installed: **File > Install Extensions** — GhidraMCP should be listed
-2. Enable the plugin: **File > Configure > Configure All Plugins (top right corner) > GhidraMCP** (check the box)
+2. Enable the plugin: **File > Configure > Configure All Plugins > GhidraMCP** (check the box)
 3. **Restart Ghidra** after installation/enabling
 
 ### Server not responding / Connection refused
@@ -506,8 +506,8 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 ### Components
 
 - **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (193 tools)
-- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (175 GUI endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 183 endpoints, no GUI required
+- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (176 GUI endpoints)
+- **GhidraMCPHeadlessServer** — Standalone headless server — 184 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
@@ -573,13 +573,13 @@ ghidra-mcp/
 ├── bridge_mcp_ghidra.py     # MCP server (Python, 193 tools)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (175 endpoints)
-│       ├── headless/                    # Headless server (183 endpoints)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (176 endpoints)
+│       ├── headless/                    # Headless server (184 endpoints)
 │       └── core/                        # Shared service layer (12 services)
 ├── ghidra_scripts/          # Automation scripts
 ├── tests/                   # Python unit tests + endpoint catalog
 │   ├── unit/               # Catalog consistency, schema, tool function tests
-│   └── endpoints.json      # Endpoint specification (185 entries)
+│   └── endpoints.json      # Endpoint specification (191 entries)
 ├── docs/                    # Documentation
 │   ├── prompts/            # AI workflow prompts
 │   ├── releases/           # Version release notes
@@ -686,7 +686,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v4.2.0
+# Connection OK - GhidraMCP Headless Server v4.3.0
 ```
 
 ### Headless API Workflow
@@ -752,7 +752,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 4.2.0 |
+| **Version** | 4.3.0 |
 | **MCP Tools** | 193 fully implemented |
 | **GUI Endpoints** | 175 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 183 (GhidraMCPHeadlessServer) |

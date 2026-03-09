@@ -60,7 +60,10 @@ public class DocumentationHashService {
      *
      * This allows matching identical functions that are located at different addresses.
      */
-    public Response getFunctionHash(String functionAddress, String programName) {
+    @McpTool(path = "/get_function_hash", description = "Compute normalized opcode hash for function", category = "documentation")
+    public Response getFunctionHash(
+            @Param(value = "address", description = "Function address") String functionAddress,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -222,7 +225,12 @@ public class DocumentationHashService {
     /**
      * Get hashes for multiple functions efficiently
      */
-    public Response getBulkFunctionHashes(int offset, int limit, String filter, String programName) {
+    @McpTool(path = "/get_bulk_function_hashes", description = "Get hashes for multiple or all functions", category = "documentation")
+    public Response getBulkFunctionHashes(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "filter", description = "Name filter") String filter,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -294,7 +302,10 @@ public class DocumentationHashService {
         return getFunctionDocumentation(functionAddress, null);
     }
 
-    public Response getFunctionDocumentation(String functionAddress, String programName) {
+    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function", category = "documentation")
+    public Response getFunctionDocumentation(
+            @Param(value = "address", description = "Function address") String functionAddress,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -444,7 +455,10 @@ public class DocumentationHashService {
         return applyFunctionDocumentation(jsonBody, null);
     }
 
-    public Response applyFunctionDocumentation(String jsonBody, String programName) {
+    @McpTool(path = "/apply_function_documentation", method = "POST", description = "Import documentation to a target function", category = "documentation")
+    public Response applyFunctionDocumentation(
+            @Param(value = "json_body", source = ParamSource.BODY) String jsonBody,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -702,7 +716,9 @@ public class DocumentationHashService {
         return compareProgramsDocumentation(null);
     }
 
-    public Response compareProgramsDocumentation(String programName) {
+    @McpTool(path = "/compare_programs_documentation", description = "Compare documented vs undocumented counts", category = "documentation")
+    public Response compareProgramsDocumentation(
+            @Param(value = "program", description = "Target program name") String programName) {
         try {
             Program[] allPrograms = programProvider.getAllOpenPrograms();
             ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -755,7 +771,10 @@ public class DocumentationHashService {
      * Find undocumented (FUN_*) functions that reference a given string address.
      * This filters get_xrefs_to results to only return FUN_* functions.
      */
-    public Response findUndocumentedByString(String stringAddress, String programName) {
+    @McpTool(path = "/find_undocumented_by_string", description = "Find FUN_* functions referencing a string", category = "documentation")
+    public Response findUndocumentedByString(
+            @Param(value = "address", description = "String address") String stringAddress,
+            @Param(value = "program", description = "Target program name") String programName) {
         if (stringAddress == null || stringAddress.isEmpty()) {
             return Response.err("String address is required");
         }
@@ -826,7 +845,10 @@ public class DocumentationHashService {
      * Generate a report of all strings matching a pattern (e.g., ".cpp") and their referencing FUN_* functions.
      * This helps identify undocumented functions that can be matched using string anchors.
      */
-    public Response batchStringAnchorReport(String pattern, String programName) {
+    @McpTool(path = "/batch_string_anchor_report", description = "Report of source file strings and their FUN_* functions", category = "documentation")
+    public Response batchStringAnchorReport(
+            @Param(value = "pattern", defaultValue = ".cpp", description = "File pattern (e.g. .cpp)") String pattern,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -923,7 +945,10 @@ public class DocumentationHashService {
     /**
      * Get the function signature (feature vector) for a function at the given address.
      */
-    public Response handleGetFunctionSignature(String addressStr, String programName) {
+    @McpTool(path = "/get_function_signature", description = "Get function signature for cross-binary comparison", category = "documentation")
+    public Response handleGetFunctionSignature(
+            @Param(value = "address", description = "Function address") String addressStr,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -946,8 +971,13 @@ public class DocumentationHashService {
     /**
      * Find functions in target program similar to the source function.
      */
-    public Response handleFindSimilarFunctionsFuzzy(String addressStr, String sourceProgramName,
-            String targetProgramName, double threshold, int limit) {
+    @McpTool(path = "/find_similar_functions_fuzzy", description = "Cross-binary fuzzy function matching", category = "documentation")
+    public Response handleFindSimilarFunctionsFuzzy(
+            @Param(value = "address", description = "Function address") String addressStr,
+            @Param(value = "source_program", description = "Source program name") String sourceProgramName,
+            @Param(value = "target_program", description = "Target program name") String targetProgramName,
+            @Param(value = "threshold", defaultValue = "0.7", description = "Similarity threshold") double threshold,
+            @Param(value = "limit", defaultValue = "20") int limit) {
         // Source program: use sourceProgramName if given, otherwise current program
         ServiceUtils.ProgramOrError srcPe = ServiceUtils.getProgramOrError(programProvider, sourceProgramName);
         if (srcPe.hasError()) return srcPe.error();
@@ -978,8 +1008,14 @@ public class DocumentationHashService {
     /**
      * Bulk fuzzy match: find best match for each source function in target program.
      */
-    public Response handleBulkFuzzyMatch(String sourceProgramName, String targetProgramName,
-            double threshold, int offset, int limit, String filter) {
+    @McpTool(path = "/bulk_fuzzy_match", description = "Bulk cross-binary function matching", category = "documentation")
+    public Response handleBulkFuzzyMatch(
+            @Param(value = "source_program", description = "Source program name") String sourceProgramName,
+            @Param(value = "target_program", description = "Target program name") String targetProgramName,
+            @Param(value = "threshold", defaultValue = "0.7", description = "Similarity threshold") double threshold,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "50") int limit,
+            @Param(value = "filter", description = "Name filter") String filter) {
         if (sourceProgramName == null || sourceProgramName.trim().isEmpty()) {
             return Response.err("source_program parameter is required");
         }
@@ -1005,7 +1041,12 @@ public class DocumentationHashService {
     /**
      * Compute a structured diff between two functions.
      */
-    public Response handleDiffFunctions(String addressA, String addressB, String programAName, String programBName) {
+    @McpTool(path = "/diff_functions", description = "Compute structured diff between two functions", category = "documentation")
+    public Response handleDiffFunctions(
+            @Param(value = "address_a", description = "First function address") String addressA,
+            @Param(value = "address_b", description = "Second function address") String addressB,
+            @Param(value = "program_a", description = "First program name") String programAName,
+            @Param(value = "program_b", description = "Second program name") String programBName) {
         // Program A
         ServiceUtils.ProgramOrError peA = ServiceUtils.getProgramOrError(programProvider, programAName);
         if (peA.hasError()) return peA.error();

@@ -53,7 +53,9 @@ public class ProgramScriptService {
         return getMetadata(null);
     }
 
-    public Response getMetadata(String programName) {
+    @McpTool(path = "/get_metadata", description = "Get program metadata", category = "program")
+    public Response getMetadata(
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -100,7 +102,9 @@ public class ProgramScriptService {
         return saveCurrentProgram(null);
     }
 
-    public Response saveCurrentProgram(String programName) {
+    @McpTool(path = "/save_program", description = "Save current program", category = "program")
+    public Response saveCurrentProgram(
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -143,6 +147,7 @@ public class ProgramScriptService {
     /**
      * List all currently open programs in Ghidra.
      */
+    @McpTool(path = "/list_open_programs", description = "List all open programs", category = "program")
     public Response listOpenPrograms() {
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
@@ -180,7 +185,9 @@ public class ProgramScriptService {
         return getCurrentProgramInfo(null);
     }
 
-    public Response getCurrentProgramInfo(String programName) {
+    @McpTool(path = "/get_current_program_info", description = "Get detailed info about the active program", category = "program")
+    public Response getCurrentProgramInfo(
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -208,7 +215,9 @@ public class ProgramScriptService {
     /**
      * Switch MCP context to a different open program by name.
      */
-    public Response switchProgram(String programName) {
+    @McpTool(path = "/switch_program", description = "Switch MCP context to a different program", category = "program")
+    public Response switchProgram(
+            @Param(value = "name", description = "Program name to switch to") String programName) {
         if (programName == null || programName.trim().isEmpty()) {
             return Response.err("Program name is required");
         }
@@ -262,7 +271,9 @@ public class ProgramScriptService {
     /**
      * List all files in the current Ghidra project.
      */
-    public Response listProjectFiles(String folderPath) {
+    @McpTool(path = "/list_project_files", description = "List files in the current project", category = "program")
+    public Response listProjectFiles(
+            @Param(value = "folder", description = "Project folder path") String folderPath) {
         PluginTool tool = getToolFromProvider();
         if (tool == null) {
             return Response.err("Project listing requires GUI mode (PluginTool not available)");
@@ -328,7 +339,10 @@ public class ProgramScriptService {
         return openProgramFromProject(path, false);
     }
 
-    public Response openProgramFromProject(String path, boolean autoAnalyze) {
+    @McpTool(path = "/open_program", description = "Open a program from the current project", category = "program")
+    public Response openProgramFromProject(
+            @Param(value = "path", description = "Program path in project") String path,
+            @Param(value = "auto_analyze", defaultValue = "false", description = "Run auto-analysis") boolean autoAnalyze) {
         if (path == null || path.trim().isEmpty()) {
             return Response.err("Program path is required");
         }
@@ -422,7 +436,11 @@ public class ProgramScriptService {
         return runGhidraScript(scriptPath, scriptArgs, (String) null);
     }
 
-    public Response runGhidraScript(String scriptPath, String scriptArgs, String programName) {
+    @McpTool(path = "/run_script", method = "POST", description = "Execute a Ghidra script by path", category = "program")
+    public Response runGhidraScript(
+            @Param(value = "script_path", source = ParamSource.BODY) String scriptPath,
+            @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -601,13 +619,22 @@ public class ProgramScriptService {
         return Response.text(resultMsg.toString());
     }
 
+    @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code", category = "program")
+    public Response runScriptInline(
+            @Param(value = "code", source = ParamSource.BODY) String code,
+            @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String args) {
+        return runGhidraScript(code, args);
+    }
+
     /**
      * List available Ghidra scripts.
      *
      * @param filter Optional filter string to match script names
      * @return JSON list of available scripts
      */
-    public Response listGhidraScripts(String filter) {
+    @McpTool(path = "/list_scripts", description = "List available Ghidra scripts", category = "program")
+    public Response listGhidraScripts(
+            @Param(value = "filter", description = "Script name filter") String filter) {
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
@@ -650,7 +677,11 @@ public class ProgramScriptService {
     /**
      * Read memory at a specific address.
      */
-    public Response readMemory(String addressStr, int length, String programName) {
+    @McpTool(path = "/read_memory", description = "Read raw memory bytes", category = "program")
+    public Response readMemory(
+            @Param(value = "address", description = "Start address") String addressStr,
+            @Param(value = "length", defaultValue = "16", description = "Number of bytes") int length,
+            @Param(value = "program", description = "Target program name") String programName) {
         try {
             ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
             if (pe.hasError()) return pe.error();
@@ -694,9 +725,17 @@ public class ProgramScriptService {
         return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, null);
     }
 
-    public Response createMemoryBlock(String name, String addressStr, long size,
-                                     boolean read, boolean write, boolean execute,
-                                     boolean isVolatile, String comment, String programName) {
+    @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block", category = "program")
+    public Response createMemoryBlock(
+            @Param(value = "name", source = ParamSource.BODY) String name,
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "size", source = ParamSource.BODY, defaultValue = "0") long size,
+            @Param(value = "read", source = ParamSource.BODY, defaultValue = "true") boolean read,
+            @Param(value = "write", source = ParamSource.BODY, defaultValue = "true") boolean write,
+            @Param(value = "execute", source = ParamSource.BODY, defaultValue = "false") boolean execute,
+            @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "false") boolean isVolatile,
+            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -792,7 +831,12 @@ public class ProgramScriptService {
         return setBookmark(addressStr, category, comment, null);
     }
 
-    public Response setBookmark(String addressStr, String category, String comment, String programName) {
+    @McpTool(path = "/set_bookmark", method = "POST", description = "Create or update a bookmark", category = "program")
+    public Response setBookmark(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
+            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -854,7 +898,11 @@ public class ProgramScriptService {
         return listBookmarks(category, addressStr, null);
     }
 
-    public Response listBookmarks(String category, String addressStr, String programName) {
+    @McpTool(path = "/list_bookmarks", description = "List bookmarks with optional filter", category = "program")
+    public Response listBookmarks(
+            @Param(value = "category", description = "Category filter") String category,
+            @Param(value = "address", description = "Address filter") String addressStr,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -918,7 +966,11 @@ public class ProgramScriptService {
         return deleteBookmark(addressStr, category, null);
     }
 
-    public Response deleteBookmark(String addressStr, String category, String programName) {
+    @McpTool(path = "/delete_bookmark", method = "POST", description = "Delete a bookmark", category = "program")
+    public Response deleteBookmark(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -972,7 +1024,13 @@ public class ProgramScriptService {
         return runGhidraScriptWithCapture(scriptName, scriptArgs, timeoutSeconds, captureOutput, null);
     }
 
-    public Response runGhidraScriptWithCapture(String scriptName, String scriptArgs, int timeoutSeconds, boolean captureOutput, String programName) {
+    @McpTool(path = "/run_ghidra_script", method = "POST", description = "Execute script with output capture and timeout", category = "program")
+    public Response runGhidraScriptWithCapture(
+            @Param(value = "script_name", source = ParamSource.BODY) String scriptName,
+            @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
+            @Param(value = "timeout_seconds", source = ParamSource.BODY, defaultValue = "300") int timeoutSeconds,
+            @Param(value = "capture_output", source = ParamSource.BODY, defaultValue = "true") boolean captureOutput,
+            @Param(value = "program", description = "Target program name") String programName) {
         if (scriptName == null || scriptName.isEmpty()) {
             return Response.err("Script name is required");
         }

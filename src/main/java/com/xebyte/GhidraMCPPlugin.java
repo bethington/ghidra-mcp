@@ -60,8 +60,8 @@ import ghidra.program.model.block.CodeBlockReference;
 import ghidra.program.model.block.CodeBlockReferenceIterator;
 
 import com.xebyte.core.BinaryComparisonService;
+import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.EndpointDef;
-import com.xebyte.core.EndpointRegistry;
 import com.xebyte.core.FrontEndProgramProvider;
 import com.xebyte.core.JsonHelper;
 
@@ -95,20 +95,20 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "4.2.0"; // Default fallback
+    private static String VERSION = "4.3.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 175;
-    
+    private static final int ENDPOINT_COUNT = 176;
+
     static {
         try (InputStream input = GhidraMCPPlugin.class
                 .getResourceAsStream("/version.properties")) {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "4.2.0");
+                VERSION = props.getProperty("app.version", "4.3.0");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
                 GHIDRA_VERSION = props.getProperty("ghidra.version", "unknown");
                 BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
@@ -118,31 +118,31 @@ class VersionInfo {
             // Use defaults if file not found
         }
     }
-    
+
     public static String getVersion() {
         return VERSION;
     }
-    
+
     public static String getAppName() {
         return APP_NAME;
     }
-    
+
     public static String getGhidraVersion() {
         return GHIDRA_VERSION;
     }
-    
+
     public static String getBuildTimestamp() {
         return BUILD_TIMESTAMP;
     }
-    
+
     public static String getBuildNumber() {
         return BUILD_NUMBER;
     }
-    
+
     public static int getEndpointCount() {
         return ENDPOINT_COUNT;
     }
-    
+
     public static String getFullVersion() {
         return VERSION + " (build " + BUILD_NUMBER + ", " + BUILD_TIMESTAMP + ")";
     }
@@ -410,16 +410,16 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }
 
         // ==========================================================================
-        // SHARED ENDPOINTS — Declarative registration via EndpointRegistry
-        // Replaces ~1,950 lines of individual createContext() calls
+        // SHARED ENDPOINTS — Annotation-driven registration via AnnotationScanner
+        // Discovers @McpTool-annotated methods on service instances via reflection
         // ==========================================================================
 
-        EndpointRegistry registry = new EndpointRegistry(
+        AnnotationScanner scanner = new AnnotationScanner(
             listingService, functionService, commentService, symbolLabelService,
             xrefCallGraphService, dataTypeService, analysisService,
             documentationHashService, malwareSecurityService, programScriptService);
 
-        for (EndpointDef ep : registry.getEndpoints()) {
+        for (EndpointDef ep : scanner.getEndpoints()) {
             server.createContext(ep.path(), safeHandler(exchange -> {
                 Map<String, String> query = parseQueryParams(exchange);
                 Map<String, Object> body = "POST".equalsIgnoreCase(exchange.getRequestMethod())
@@ -433,6 +433,15 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 }
             }));
         }
+
+        // ==========================================================================
+        // SCHEMA ENDPOINT — Serves machine-readable API metadata
+        // ==========================================================================
+
+        String schemaJson = scanner.generateSchema();
+        server.createContext("/mcp/schema", safeHandler(exchange -> {
+            sendResponse(exchange, schemaJson);
+        }));
 
         // ==========================================================================
         // INFRASTRUCTURE ENDPOINTS (not in service layer)
@@ -1342,7 +1351,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 return null;
         }
     }
-    
+
     /**
      * Find a data type by name in all categories/folders of the data type manager
      * This searches through all categories rather than just the root
@@ -1366,7 +1375,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         Iterator<DataType> allTypes = dtm.getAllDataTypes();
         while (allTypes.hasNext()) {
             DataType dt = allTypes.next();
-            // Check if the name matches exactly (case-sensitive) 
+            // Check if the name matches exactly (case-sensitive)
             if (dt.getName().equals(name)) {
                 return dt;
             }
@@ -1436,7 +1445,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private Map<String, Object> parseJsonParams(HttpExchange exchange) throws IOException {
         return com.xebyte.core.JsonHelper.parseBody(exchange.getRequestBody());
     }
-    
+
     /**
      * Convert Object (potentially List<Object>) to List<Map<String, String>>.
      * Delegates to JsonHelper.toMapStringList for Gson compatibility.
@@ -1580,7 +1589,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * - Absolute addresses (call targets, jump targets, data refs) are replaced with placeholders
      * - Register-based operations are preserved
      * - Instruction mnemonics and operand types are included
-     * 
+     *
      * This allows matching identical functions that are located at different addresses.
      */
     private String getFunctionHash(String functionAddress, String programName) {
@@ -2257,8 +2266,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private String findSimilarFunctions(String targetFunction, double threshold) {
         return analysisService.findSimilarFunctions(targetFunction, threshold).toJson();
     }
-    
-    
+
+
     /**
      * Analyze function control flow complexity
      * Calculates cyclomatic complexity, basic blocks, edges, and detailed metrics
@@ -2274,7 +2283,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private String findAntiAnalysisTechniques() {
         return malwareSecurityService.findAntiAnalysisTechniques().toJson();
     }
-    
+
 
     /**
      * Batch decompile multiple functions
@@ -2304,8 +2313,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private String analyzeAPICallChains() {
         return malwareSecurityService.analyzeAPICallChains().toJson();
     }
-    
-    
+
+
 
     /**
      * Enhanced IOC extraction with context and confidence scoring
@@ -2313,8 +2322,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private String extractIOCsWithContext() {
         return malwareSecurityService.extractIOCsWithContext().toJson();
     }
-    
-    
+
+
 
     /**
      * Detect common malware behaviors and techniques
@@ -2322,7 +2331,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private String detectMalwareBehaviors() {
         return malwareSecurityService.detectMalwareBehaviors().toJson();
     }
-    
+
 
     /**
      * v1.5.0: Batch set multiple comments in a single operation

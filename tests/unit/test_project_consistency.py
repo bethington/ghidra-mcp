@@ -24,8 +24,19 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 # Source file paths
 POM_XML = PROJECT_ROOT / "pom.xml"
-JAVA_PLUGIN = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "GhidraMCPPlugin.java"
-JAVA_HEADLESS = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "headless" / "GhidraMCPHeadlessServer.java"
+JAVA_PLUGIN = (
+    PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "GhidraMCPPlugin.java"
+)
+JAVA_HEADLESS = (
+    PROJECT_ROOT
+    / "src"
+    / "main"
+    / "java"
+    / "com"
+    / "xebyte"
+    / "headless"
+    / "GhidraMCPHeadlessServer.java"
+)
 PYTHON_BRIDGE = PROJECT_ROOT / "bridge_mcp_ghidra.py"
 ENDPOINTS_JSON = PROJECT_ROOT / "tests" / "endpoints.json"
 CLAUDE_MD = PROJECT_ROOT / "CLAUDE.md"
@@ -43,6 +54,7 @@ WORKFLOWS_DIR = PROJECT_ROOT / ".github" / "workflows"
 # Helpers
 # =============================================================================
 
+
 def get_pom_version() -> str:
     """Extract the project version from pom.xml (single source of truth)."""
     content = POM_XML.read_text(encoding="utf-8")
@@ -51,13 +63,22 @@ def get_pom_version() -> str:
     return match.group(1)
 
 
-JAVA_REGISTRY = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "core" / "EndpointRegistry.java"
+JAVA_REGISTRY = (
+    PROJECT_ROOT
+    / "src"
+    / "main"
+    / "java"
+    / "com"
+    / "xebyte"
+    / "core"
+    / "EndpointRegistry.java"
+)
 
 
 def count_create_context(java_path: Path) -> int:
     """Count server.createContext() calls in a Java file."""
     content = java_path.read_text(encoding="utf-8")
-    return len(re.findall(r'(?:server|httpServer)\.createContext\(', content))
+    return len(re.findall(r"(?:server|httpServer)\.createContext\(", content))
 
 
 def count_registry_endpoints() -> int:
@@ -70,7 +91,16 @@ def count_registry_endpoints() -> int:
 
 def count_total_endpoints(java_path: Path) -> int:
     """Count total endpoints: direct createContext + shared EndpointRegistry entries."""
-    return count_create_context(java_path) + count_registry_endpoints()
+    direct = count_create_context(java_path)
+    registry = count_registry_endpoints()
+    # The registry loop's createContext(ep.path(), ...) is matched by
+    # count_create_context, but those endpoints are already counted by
+    # count_registry_endpoints.  Subtract 1 to avoid double-counting.
+    if registry > 0:
+        content = java_path.read_text(encoding="utf-8")
+        if re.search(r"\.createContext\(ep\.path\(\)", content):
+            direct -= 1
+    return direct + registry
 
 
 def count_mcp_tools() -> int:
@@ -81,15 +111,28 @@ def count_mcp_tools() -> int:
 
 # Required Ghidra JARs that all CI workflows must install
 REQUIRED_GHIDRA_JARS = {
-    "Generic", "SoftwareModeling", "Project", "Docking", "Utility",
-    "Gui", "FileSystem", "Graph", "DB", "Emulation", "Help",
-    "Base", "Decompiler", "PDB", "FunctionID",
+    "Generic",
+    "SoftwareModeling",
+    "Project",
+    "Docking",
+    "Utility",
+    "Gui",
+    "FileSystem",
+    "Graph",
+    "DB",
+    "Emulation",
+    "Help",
+    "Base",
+    "Decompiler",
+    "PDB",
+    "FunctionID",
 }
 
 
 # =============================================================================
 # Version Consistency Tests
 # =============================================================================
+
 
 class TestVersionConsistency:
     """All version references must match pom.xml (single source of truth)."""
@@ -113,88 +156,89 @@ class TestVersionConsistency:
             # (not Ghidra version or other constants)
         fallback = re.search(r'VERSION\s*=\s*"(\d+\.\d+\.\d+)"', content)
         assert fallback, "VERSION fallback string not found in GhidraMCPPlugin.java"
-        assert fallback.group(1) == self.version, (
-            f"Java VERSION fallback {fallback.group(1)} != pom.xml {self.version}"
-        )
+        assert (
+            fallback.group(1) == self.version
+        ), f"Java VERSION fallback {fallback.group(1)} != pom.xml {self.version}"
 
     def test_endpoints_json_version(self):
         """tests/endpoints.json version should match pom.xml."""
         data = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))
-        assert data.get("version") == self.version, (
-            f"endpoints.json version {data.get('version')} != pom.xml {self.version}"
-        )
+        assert (
+            data.get("version") == self.version
+        ), f"endpoints.json version {data.get('version')} != pom.xml {self.version}"
 
     def test_claude_md_version(self):
         """CLAUDE.md should reference the current version."""
         content = CLAUDE_MD.read_text(encoding="utf-8")
-        assert f"**Version**: {self.version}" in content, (
-            f"CLAUDE.md missing '**Version**: {self.version}'"
-        )
+        assert (
+            f"**Version**: {self.version}" in content
+        ), f"CLAUDE.md missing '**Version**: {self.version}'"
 
     def test_readme_version_badge(self):
         """README.md version badge should match pom.xml."""
         content = README_MD.read_text(encoding="utf-8")
-        assert f"Version-{self.version}-brightgreen" in content, (
-            f"README.md badge missing 'Version-{self.version}-brightgreen'"
-        )
+        assert (
+            f"Version-{self.version}-brightgreen" in content
+        ), f"README.md badge missing 'Version-{self.version}-brightgreen'"
 
     def test_readme_version_table(self):
         """README.md version table should match pom.xml."""
         content = README_MD.read_text(encoding="utf-8")
-        assert f"| **Version** | {self.version} |" in content, (
-            f"README.md table missing '| **Version** | {self.version} |'"
-        )
+        assert (
+            f"| **Version** | {self.version} |" in content
+        ), f"README.md table missing '| **Version** | {self.version} |'"
 
     def test_agents_md_version(self):
         """AGENTS.md should reference the current version."""
         if not AGENTS_MD.exists():
             pytest.skip("AGENTS.md not found")
         content = AGENTS_MD.read_text(encoding="utf-8")
-        assert f"**Version**: {self.version}" in content, (
-            f"AGENTS.md missing '**Version**: {self.version}'"
-        )
+        assert (
+            f"**Version**: {self.version}" in content
+        ), f"AGENTS.md missing '**Version**: {self.version}'"
 
     def test_setup_script_version(self):
         """ghidra-mcp-setup.ps1 $PluginVersion should match pom.xml."""
         content = SETUP_PS1.read_text(encoding="utf-8")
         match = re.search(r'\$PluginVersion\s*=\s*"(\d+\.\d+\.\d+)"', content)
         assert match, "$PluginVersion not found in ghidra-mcp-setup.ps1"
-        assert match.group(1) == self.version, (
-            f"ghidra-mcp-setup.ps1 version {match.group(1)} != pom.xml {self.version}"
-        )
+        assert (
+            match.group(1) == self.version
+        ), f"ghidra-mcp-setup.ps1 version {match.group(1)} != pom.xml {self.version}"
 
     def test_releases_readme_latest(self):
         """docs/releases/README.md should mark current version as Latest."""
         if not RELEASES_README.exists():
             pytest.skip("docs/releases/README.md not found")
         content = RELEASES_README.read_text(encoding="utf-8")
-        assert f"### v{self.version} (Latest)" in content, (
-            f"docs/releases/README.md missing '### v{self.version} (Latest)'"
-        )
+        assert (
+            f"### v{self.version} (Latest)" in content
+        ), f"docs/releases/README.md missing '### v{self.version} (Latest)'"
 
     def test_extension_properties_uses_maven_filtering(self):
         """extension.properties should use ${project.version}, not hardcoded version."""
         content = EXT_PROPERTIES.read_text(encoding="utf-8")
-        assert "${project.version}" in content, (
-            "extension.properties should use ${project.version} for Maven filtering"
-        )
+        assert (
+            "${project.version}" in content
+        ), "extension.properties should use ${project.version} for Maven filtering"
         # Should NOT contain a hardcoded version like "Plugin version 3.2.0"
         hardcoded = re.search(r"Plugin version \d+\.\d+\.\d+", content)
-        assert not hardcoded, (
-            f"extension.properties has hardcoded version: {hardcoded.group()}"
-        )
+        assert (
+            not hardcoded
+        ), f"extension.properties has hardcoded version: {hardcoded.group()}"
 
     def test_version_properties_uses_maven_filtering(self):
         """version.properties should use ${project.version}."""
         content = VER_PROPERTIES.read_text(encoding="utf-8")
-        assert "${project.version}" in content, (
-            "version.properties should use ${project.version} for Maven filtering"
-        )
+        assert (
+            "${project.version}" in content
+        ), "version.properties should use ${project.version} for Maven filtering"
 
 
 # =============================================================================
 # Endpoint Count Tests
 # =============================================================================
+
 
 class TestEndpointCounts:
     """Endpoint counts in code and docs should match actual registrations."""
@@ -216,15 +260,19 @@ class TestEndpointCounts:
         data = json.loads(ENDPOINTS_JSON.read_text(encoding="utf-8"))
         declared = data.get("total_endpoints")
         actual = len(data.get("endpoints", []))
-        assert declared == actual, (
-            f"total_endpoints ({declared}) != actual entries ({actual}) in endpoints.json"
-        )
+        assert (
+            declared == actual
+        ), f"total_endpoints ({declared}) != actual entries ({actual}) in endpoints.json"
 
     def test_mcp_tool_count_reasonable(self):
-        """MCP tool count should be within expected range."""
+        """Static MCP tool count should be within expected range.
+
+        Most tools are now dynamically registered from /mcp/schema at runtime.
+        Only ~22 complex bridge-only tools remain as static @mcp.tool() decorators.
+        """
         count = count_mcp_tools()
-        assert count >= 170, f"MCP tool count {count} seems too low (expected 170+)"
-        assert count <= 250, f"MCP tool count {count} seems too high (expected <250)"
+        assert count >= 15, f"Static MCP tool count {count} seems too low (expected 15+)"
+        assert count <= 50, f"Static MCP tool count {count} seems too high (expected <50)"
 
     def test_gui_endpoint_count_reasonable(self):
         """GUI endpoint count should be within expected range."""
@@ -244,6 +292,7 @@ class TestEndpointCounts:
 # =============================================================================
 # Bridge Configuration Tests
 # =============================================================================
+
 
 class TestBridgeConfiguration:
     """Validate bridge_mcp_ghidra.py configuration and conventions."""
@@ -266,31 +315,36 @@ class TestBridgeConfiguration:
             f"This breaks urljoin() path resolution."
         )
 
-    def test_fuzzy_match_uses_safe_get_json(self):
-        """find_similar_functions_fuzzy should use safe_get_json, not safe_get.
+    def test_fuzzy_match_is_dynamic_tool(self):
+        """find_similar_functions_fuzzy should be a dynamic tool (not static).
 
-        safe_get() returns response.text.splitlines() which destroys JSON
-        structure. These endpoints return JSON objects, not line-delimited text.
+        Dynamic GET tools automatically use safe_get_json, which preserves
+        JSON structure. This verifies the tool isn't accidentally in
+        STATIC_TOOL_NAMES where it could use the wrong HTTP helper.
         """
-        # Find the function and check it uses safe_get_json
-        fuzzy_section = re.search(
-            r'def find_similar_functions_fuzzy\(.*?\n(?:.*\n)*?.*?return\s+(safe_get\w*)\(',
-            self.content,
+        # Should NOT be in STATIC_TOOL_NAMES
+        static_match = re.search(
+            r'STATIC_TOOL_NAMES\s*=\s*\{([^}]+)\}', self.content, re.DOTALL
         )
-        assert fuzzy_section, "find_similar_functions_fuzzy function not found"
-        assert fuzzy_section.group(1) == "safe_get_json", (
-            f"find_similar_functions_fuzzy uses {fuzzy_section.group(1)}, should use safe_get_json"
+        assert static_match, "STATIC_TOOL_NAMES not found in bridge"
+        assert "find_similar_functions_fuzzy" not in static_match.group(1), (
+            "find_similar_functions_fuzzy should NOT be in STATIC_TOOL_NAMES. "
+            "Dynamic registration automatically uses safe_get_json for GET endpoints."
         )
 
-    def test_bulk_fuzzy_uses_safe_get_json(self):
-        """bulk_fuzzy_match should use safe_get_json, not safe_get."""
-        bulk_section = re.search(
-            r'def bulk_fuzzy_match\(.*?\n(?:.*\n)*?.*?return\s+(safe_get\w*)\(',
-            self.content,
+    def test_bulk_fuzzy_is_dynamic_tool(self):
+        """bulk_fuzzy_match should be a dynamic tool (not static).
+
+        Dynamic POST tools automatically use safe_post_json, which preserves
+        JSON structure.
+        """
+        static_match = re.search(
+            r'STATIC_TOOL_NAMES\s*=\s*\{([^}]+)\}', self.content, re.DOTALL
         )
-        assert bulk_section, "bulk_fuzzy_match function not found"
-        assert bulk_section.group(1) == "safe_get_json", (
-            f"bulk_fuzzy_match uses {bulk_section.group(1)}, should use safe_get_json"
+        assert static_match, "STATIC_TOOL_NAMES not found in bridge"
+        assert "bulk_fuzzy_match" not in static_match.group(1), (
+            "bulk_fuzzy_match should NOT be in STATIC_TOOL_NAMES. "
+            "Dynamic registration automatically uses safe_post_json for POST endpoints."
         )
 
     def test_bridge_importable(self):
@@ -306,9 +360,9 @@ class TestBridgeConfiguration:
             cwd=str(PROJECT_ROOT),
             timeout=30,
         )
-        assert result.returncode == 0, (
-            f"bridge_mcp_ghidra.py import failed:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"bridge_mcp_ghidra.py import failed:\n{result.stderr}"
 
     def test_all_mcp_tools_have_docstrings(self):
         """Every @mcp.tool() function should have a docstring."""
@@ -317,15 +371,18 @@ class TestBridgeConfiguration:
             r'@mcp\.tool\(\)\s*\ndef\s+(\w+)\([^)]*\)[^:]*:\s*\n(\s+"""|\s+\'\'\'|\s+[^\s])',
         )
         matches = pattern.findall(self.content)
-        missing = [name for name, first_line in matches if '"""' not in first_line and "'''" not in first_line]
-        assert not missing, (
-            f"MCP tools missing docstrings: {missing[:10]}..."
-        )
+        missing = [
+            name
+            for name, first_line in matches
+            if '"""' not in first_line and "'''" not in first_line
+        ]
+        assert not missing, f"MCP tools missing docstrings: {missing[:10]}..."
 
 
 # =============================================================================
 # Java Source Consistency Tests
 # =============================================================================
+
 
 class TestJavaConsistency:
     """Validate Java source file consistency."""
@@ -339,9 +396,11 @@ class TestJavaConsistency:
         content = JAVA_PLUGIN.read_text(encoding="utf-8")
         # Strip Java comments before checking -- the old prefix may appear
         # in explanatory comments but must not be used as actual code.
-        code_only = re.sub(r'//.*', '', content)           # line comments
-        code_only = re.sub(r'/\*.*?\*/', '', code_only, flags=re.DOTALL)  # block comments
-        assert '_mcp_inline_' not in code_only, (
+        code_only = re.sub(r"//.*", "", content)  # line comments
+        code_only = re.sub(
+            r"/\*.*?\*/", "", code_only, flags=re.DOTALL
+        )  # block comments
+        assert "_mcp_inline_" not in code_only, (
             "GhidraMCPPlugin.java still uses _mcp_inline_ prefix in code. "
             "Should use unique class names to avoid OSGi cache collisions."
         )
@@ -350,14 +409,15 @@ class TestJavaConsistency:
         """pom.xml description should reference the current version."""
         content = POM_XML.read_text(encoding="utf-8")
         version = get_pom_version()
-        assert f"v{version}:" in content, (
-            f"pom.xml description should contain 'v{version}:'"
-        )
+        assert (
+            f"v{version}:" in content
+        ), f"pom.xml description should contain 'v{version}:'"
 
 
 # =============================================================================
 # CI Workflow Consistency Tests
 # =============================================================================
+
 
 class TestWorkflowConsistency:
     """Validate GitHub Actions workflow files."""
@@ -404,13 +464,20 @@ class TestWorkflowConsistency:
                 continue
 
             # Skip if it's just running mvn with a non-build goal
-            if "mvn clean" not in content and "mvn -q install:install-file" not in content:
+            if (
+                "mvn clean" not in content
+                and "mvn -q install:install-file" not in content
+            ):
                 continue
 
             # Check that workflow installs JARs to Maven (not just copies to ./lib/)
             if "install:install-file" not in content:
                 # Check if it uses the broken cp-to-lib pattern
-                if "cp " in content and "/lib/" in content and "ghidra" in content.lower():
+                if (
+                    "cp " in content
+                    and "/lib/" in content
+                    and "ghidra" in content.lower()
+                ):
                     pytest.fail(
                         f"{workflow.name} copies Ghidra JARs to ./lib/ instead of "
                         f"using mvn install:install-file. Maven can't find them."
@@ -433,7 +500,9 @@ class TestWorkflowConsistency:
     def test_workflows_use_current_ghidra_version(self):
         """Workflows should reference the same Ghidra version as pom.xml."""
         pom_content = POM_XML.read_text(encoding="utf-8")
-        ghidra_match = re.search(r"<ghidra\.version>(\d+\.\d+\.\d+)</ghidra\.version>", pom_content)
+        ghidra_match = re.search(
+            r"<ghidra\.version>(\d+\.\d+\.\d+)</ghidra\.version>", pom_content
+        )
         if not ghidra_match:
             pytest.skip("ghidra.version not found in pom.xml")
         ghidra_version = ghidra_match.group(1)
@@ -464,6 +533,7 @@ class TestWorkflowConsistency:
 # =============================================================================
 # Bump Version Script Tests
 # =============================================================================
+
 
 class TestBumpVersionScript:
     """Validate bump-version.ps1 covers all version references."""
@@ -509,6 +579,6 @@ class TestBumpVersionScript:
         """
         content = BUMP_VERSION_PS1.read_text(encoding="utf-8")
         # These lines should NOT appear as File targets in rules
-        assert "extension.properties" not in content.split("Pat =")[0] or True, (
-            "bump-version.ps1 should not manage extension.properties (Maven-filtered)"
-        )
+        assert (
+            "extension.properties" not in content.split("Pat =")[0] or True
+        ), "bump-version.ps1 should not manage extension.properties (Maven-filtered)"

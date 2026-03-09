@@ -89,7 +89,12 @@ public class DataTypeService {
     /**
      * List all data types available in the program with optional category filtering
      */
-    public Response listDataTypes(String category, int offset, int limit, String programName) {
+    @McpTool(path = "/list_data_types", description = "List all data types with optional category filter", category = "datatype")
+    public Response listDataTypes(
+            @Param(value = "category", description = "Category filter") String category,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -184,7 +189,12 @@ public class DataTypeService {
     /**
      * Search for data types by pattern
      */
-    public Response searchDataTypes(String pattern, int offset, int limit, String programName) {
+    @McpTool(path = "/search_data_types", description = "Search data types by pattern", category = "datatype")
+    public Response searchDataTypes(
+            @Param(value = "pattern", description = "Search pattern") String pattern,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -218,7 +228,10 @@ public class DataTypeService {
     /**
      * Get the size of a data type
      */
-    public Response getTypeSize(String typeName, String programName) {
+    @McpTool(path = "/get_type_size", description = "Get data type size and info", category = "datatype")
+    public Response getTypeSize(
+            @Param(value = "type_name", description = "Data type name") String typeName,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -247,7 +260,10 @@ public class DataTypeService {
     /**
      * Get the layout of a structure
      */
-    public Response getStructLayout(String structName, String programName) {
+    @McpTool(path = "/get_struct_layout", description = "Get structure field layout", category = "datatype")
+    public Response getStructLayout(
+            @Param(value = "struct_name", description = "Structure name") String structName,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -293,7 +309,10 @@ public class DataTypeService {
     /**
      * Get all values in an enumeration
      */
-    public Response getEnumValues(String enumName, String programName) {
+    @McpTool(path = "/get_enum_values", description = "Get enum member values", category = "datatype")
+    public Response getEnumValues(
+            @Param(value = "enum_name", description = "Enum name") String enumName,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -336,7 +355,10 @@ public class DataTypeService {
     /**
      * v1.5.0: Get valid Ghidra data type strings
      */
-    public Response getValidDataTypes(String category, String programName) {
+    @McpTool(path = "/get_valid_data_types", description = "List valid Ghidra data type strings", category = "datatype")
+    public Response getValidDataTypes(
+            @Param(value = "category", description = "Category filter") String category,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -390,7 +412,10 @@ public class DataTypeService {
     /**
      * NEW v1.6.0: Check if data type exists in type manager
      */
-    public Response validateDataTypeExists(String typeName, String programName) {
+    @McpTool(path = "/validate_data_type_exists", description = "Check if a data type exists", category = "datatype")
+    public Response validateDataTypeExists(
+            @Param(value = "type_name", description = "Data type name") String typeName,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -441,7 +466,11 @@ public class DataTypeService {
     /**
      * Create a new structure data type with specified fields
      */
-    public Response createStruct(String name, String fieldsJson, String programName) {
+    @McpTool(path = "/create_struct", method = "POST", description = "Create a structure data type", category = "datatype")
+    public Response createStruct(
+            @Param(value = "name", source = ParamSource.BODY) String name,
+            @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true) String fieldsJson,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -565,7 +594,12 @@ public class DataTypeService {
     /**
      * Create a new enumeration data type with name-value pairs
      */
-    public Response createEnum(String name, String valuesJson, int size, String programName) {
+    @McpTool(path = "/create_enum", method = "POST", description = "Create an enum data type", category = "datatype")
+    public Response createEnum(
+            @Param(value = "name", source = ParamSource.BODY) String name,
+            @Param(value = "values", source = ParamSource.BODY, fieldsJson = true) String valuesJson,
+            @Param(value = "size", source = ParamSource.BODY, defaultValue = "4") int size,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -720,7 +754,11 @@ public class DataTypeService {
     /**
      * Create a union data type (legacy method)
      */
-    public Response createUnion(String name, String fieldsJson, String programName) {
+    @McpTool(path = "/create_union", method = "POST", description = "Create a union data type", category = "datatype")
+    public Response createUnion(
+            @Param(value = "name", source = ParamSource.BODY) String name,
+            @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true) String fieldsJson,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -780,7 +818,11 @@ public class DataTypeService {
     /**
      * Create a typedef (type alias)
      */
-    public Response createTypedef(String name, String baseType, String programName) {
+    @McpTool(path = "/create_typedef", method = "POST", description = "Create a typedef alias", category = "datatype")
+    public Response createTypedef(
+            @Param(value = "name", source = ParamSource.BODY) String name,
+            @Param(value = "base_type", source = ParamSource.BODY) String baseType,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -843,7 +885,11 @@ public class DataTypeService {
     /**
      * Clone/copy a data type with a new name
      */
-    public Response cloneDataType(String sourceType, String newName, String programName) {
+    @McpTool(path = "/clone_data_type", method = "POST", description = "Clone a data type with new name", category = "datatype")
+    public Response cloneDataType(
+            @Param(value = "source_type", source = ParamSource.BODY) String sourceType,
+            @Param(value = "new_name", source = ParamSource.BODY) String newName,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -892,7 +938,12 @@ public class DataTypeService {
     /**
      * Create an array data type
      */
-    public Response createArrayType(String baseType, int length, String name, String programName) {
+    @McpTool(path = "/create_array_type", method = "POST", description = "Create an array data type", category = "datatype")
+    public Response createArrayType(
+            @Param(value = "base_type", source = ParamSource.BODY) String baseType,
+            @Param(value = "length", source = ParamSource.BODY, defaultValue = "1") int length,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -947,7 +998,11 @@ public class DataTypeService {
     /**
      * Create a pointer data type
      */
-    public Response createPointerType(String baseType, String name, String programName) {
+    @McpTool(path = "/create_pointer_type", method = "POST", description = "Create a pointer data type", category = "datatype")
+    public Response createPointerType(
+            @Param(value = "base_type", source = ParamSource.BODY) String baseType,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1010,7 +1065,12 @@ public class DataTypeService {
     /**
      * Create a function signature data type
      */
-    public Response createFunctionSignature(String name, String returnType, String parametersJson, String programName) {
+    @McpTool(path = "/create_function_signature", method = "POST", description = "Create a function signature data type", category = "datatype")
+    public Response createFunctionSignature(
+            @Param(value = "name", source = ParamSource.BODY) String name,
+            @Param(value = "return_type", source = ParamSource.BODY) String returnType,
+            @Param(value = "parameters", source = ParamSource.BODY) String parametersJson,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1095,7 +1155,12 @@ public class DataTypeService {
     /**
      * Apply a specific data type at the given memory address
      */
-    public Response applyDataType(String addressStr, String typeName, boolean clearExisting, String programName) {
+    @McpTool(path = "/apply_data_type", method = "POST", description = "Apply data type at address", category = "datatype")
+    public Response applyDataType(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "type_name", source = ParamSource.BODY) String typeName,
+            @Param(value = "clear_existing", source = ParamSource.BODY, defaultValue = "true") boolean clearExisting,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1183,7 +1248,10 @@ public class DataTypeService {
     /**
      * Delete a data type from the program
      */
-    public Response deleteDataType(String typeName, String programName) {
+    @McpTool(path = "/delete_data_type", method = "POST", description = "Delete a data type", category = "datatype")
+    public Response deleteDataType(
+            @Param(value = "type_name", source = ParamSource.BODY) String typeName,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1236,7 +1304,13 @@ public class DataTypeService {
     /**
      * Modify a field in an existing structure
      */
-    public Response modifyStructField(String structName, String fieldName, String newType, String newName, String programName) {
+    @McpTool(path = "/modify_struct_field", method = "POST", description = "Modify a field in a structure", category = "datatype")
+    public Response modifyStructField(
+            @Param(value = "struct_name", source = ParamSource.BODY) String structName,
+            @Param(value = "field_name", source = ParamSource.BODY) String fieldName,
+            @Param(value = "new_type", source = ParamSource.BODY, defaultValue = "") String newType,
+            @Param(value = "new_name", source = ParamSource.BODY, defaultValue = "") String newName,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1320,7 +1394,13 @@ public class DataTypeService {
     /**
      * Add a new field to an existing structure
      */
-    public Response addStructField(String structName, String fieldName, String fieldType, int offset, String programName) {
+    @McpTool(path = "/add_struct_field", method = "POST", description = "Add a field to a structure", category = "datatype")
+    public Response addStructField(
+            @Param(value = "struct_name", source = ParamSource.BODY) String structName,
+            @Param(value = "field_name", source = ParamSource.BODY) String fieldName,
+            @Param(value = "field_type", source = ParamSource.BODY) String fieldType,
+            @Param(value = "offset", source = ParamSource.BODY, defaultValue = "-1") int offset,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1387,7 +1467,11 @@ public class DataTypeService {
     /**
      * Remove a field from an existing structure
      */
-    public Response removeStructField(String structName, String fieldName, String programName) {
+    @McpTool(path = "/remove_struct_field", method = "POST", description = "Remove a field from a structure", category = "datatype")
+    public Response removeStructField(
+            @Param(value = "struct_name", source = ParamSource.BODY) String structName,
+            @Param(value = "field_name", source = ParamSource.BODY) String fieldName,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1456,7 +1540,11 @@ public class DataTypeService {
     /**
      * Move a data type to a different category
      */
-    public Response moveDataTypeToCategory(String typeName, String categoryPath, String programName) {
+    @McpTool(path = "/move_data_type_to_category", method = "POST", description = "Move data type to category", category = "datatype")
+    public Response moveDataTypeToCategory(
+            @Param(value = "type_name", source = ParamSource.BODY) String typeName,
+            @Param(value = "category_path", source = ParamSource.BODY) String categoryPath,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1513,7 +1601,11 @@ public class DataTypeService {
     /**
      * Validate if a data type fits at a given address
      */
-    public Response validateDataType(String addressStr, String typeName, String programName) {
+    @McpTool(path = "/validate_data_type", description = "Validate data type applicability at address", category = "datatype")
+    public Response validateDataType(
+            @Param(value = "address", description = "Target address") String addressStr,
+            @Param(value = "type_name", description = "Data type name") String typeName,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1576,7 +1668,12 @@ public class DataTypeService {
     /**
      * NEW v1.6.0: Validate function prototype before applying
      */
-    public Response validateFunctionPrototype(String functionAddress, String prototype, String callingConvention, String programName) {
+    @McpTool(path = "/validate_function_prototype", description = "Validate prototype before applying", category = "datatype")
+    public Response validateFunctionPrototype(
+            @Param(value = "function_address", description = "Function address") String functionAddress,
+            @Param(value = "prototype", description = "Function prototype") String prototype,
+            @Param(value = "calling_convention", description = "Calling convention") String callingConvention,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1679,7 +1776,10 @@ public class DataTypeService {
     /**
      * Import data types (placeholder)
      */
-    public Response importDataTypes(String source, String format) {
+    @McpTool(path = "/import_data_types", method = "POST", description = "Import data types from C source", category = "datatype")
+    public Response importDataTypes(
+            @Param(value = "source", source = ParamSource.BODY) String source,
+            @Param(value = "format", source = ParamSource.BODY, defaultValue = "c") String format) {
         // This is a placeholder for import functionality
         // In a real implementation, you would parse the source based on format
         return Response.text("Import functionality not yet implemented. Source: " + source + ", Format: " + format);
@@ -1692,7 +1792,10 @@ public class DataTypeService {
     /**
      * Create a new data type category
      */
-    public Response createDataTypeCategory(String categoryPath, String programName) {
+    @McpTool(path = "/create_data_type_category", method = "POST", description = "Create a new data type category", category = "datatype")
+    public Response createDataTypeCategory(
+            @Param(value = "category_path", source = ParamSource.BODY) String categoryPath,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1720,7 +1823,11 @@ public class DataTypeService {
     /**
      * List all data type categories
      */
-    public Response listDataTypeCategories(int offset, int limit, String programName) {
+    @McpTool(path = "/list_data_type_categories", description = "List all data type categories", category = "datatype")
+    public Response listDataTypeCategories(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1771,7 +1878,12 @@ public class DataTypeService {
      * @param maxFunctionsToAnalyze Maximum number of referencing functions to analyze
      * @return Response with field usage analysis
      */
-    public Response analyzeStructFieldUsage(String addressStr, String structName, int maxFunctionsToAnalyze, String programName) {
+    @McpTool(path = "/analyze_struct_field_usage", method = "POST", description = "Analyze structure field access patterns", category = "datatype")
+    public Response analyzeStructFieldUsage(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "struct_name", source = ParamSource.BODY) String structName,
+            @Param(value = "max_functions", source = ParamSource.BODY, defaultValue = "10") int maxFunctionsToAnalyze,
+            @Param(value = "program", description = "Target program name") String programName) {
         // CRITICAL FIX #3: Validate input parameters
         if (maxFunctionsToAnalyze < MIN_FUNCTIONS_TO_ANALYZE || maxFunctionsToAnalyze > MAX_FUNCTIONS_TO_ANALYZE) {
             return Response.err("maxFunctionsToAnalyze must be between " + MIN_FUNCTIONS_TO_ANALYZE +
@@ -2006,7 +2118,11 @@ public class DataTypeService {
      * @param structSize Size of the structure in bytes (0 for auto-detect)
      * @return Response with field name suggestions
      */
-    public Response suggestFieldNames(String structAddressStr, int structSize, String programName) {
+    @McpTool(path = "/suggest_field_names", method = "POST", description = "AI-assisted field name suggestions", category = "datatype")
+    public Response suggestFieldNames(
+            @Param(value = "struct_address", source = ParamSource.BODY) String structAddressStr,
+            @Param(value = "struct_size", source = ParamSource.BODY, defaultValue = "0") int structSize,
+            @Param(value = "program", description = "Target program name") String programName) {
         // Validate input parameters
         if (structSize < 0 || structSize > MAX_FIELD_OFFSET) {
             return Response.err("structSize must be between 0 and " + MAX_FIELD_OFFSET);
@@ -2131,10 +2247,15 @@ public class DataTypeService {
     /**
      * 6. APPLY_DATA_CLASSIFICATION - Atomic type application
      */
+    @McpTool(path = "/apply_data_classification", method = "POST", description = "Atomic type application with classification", category = "datatype")
     @SuppressWarnings("unchecked")
-    public Response applyDataClassification(String addressStr, String classification,
-                                           String name, String comment,
-                                           Object typeDefinitionObj, String programName) {
+    public Response applyDataClassification(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "classification", source = ParamSource.BODY) String classification,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
+            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
+            @Param(value = "type_definition", source = ParamSource.BODY) Object typeDefinitionObj,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

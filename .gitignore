@@ -498,3 +498,63 @@ nul
 # =============================================================================
 
 CLAUDE.local.md
+
+# =============================================================================
+# PROJECT-SPECIFIC ANALYSIS REPOS (nested repos, tracked separately)
+# =============================================================================
+# Project-specific analysis files live in their own repos inside this workspace.
+# Clone them as needed: git clone <repo-url> <folder-name>
+
+# Diablo 2 analysis: https://github.com/bethington/d2-ghidra-analysis
+d2-analysis/
+
+# =============================================================================
+# PROJECT-SPECIFIC FILES (Not part of universal ghidra-mcp)
+# =============================================================================
+# These files are specific to individual reverse engineering projects
+# (e.g., Diablo 2) and should not be committed to the universal repo.
+
+# DLL export/ordinal mapping files (project-specific binaries)
+dll_exports/
+
+# Project-specific examples and reference data
+examples/
+
+# Function documentation output (generated per-binary)
+output/
+
+# Function tracking and todo lists (project-specific)
+FunctionsTodo.txt
+
+# Project-specific batch processing scripts
+apply_prefix_renames.py
+batch-unify-ordinals.bat
+functions-extract.ps1
+functions-extract.sh
+functions-process.ps1
+functions-process.sh
+
+# Project-specific session notes and enhancement docs
+MEMORY.md
+ISSUES.md
+SHARED_SERVER_ENHANCEMENT.md
+
+# Project-specific analysis/investigation documents
+docs/Analysis_*.md
+docs/Detailed_Investigation_*.md
+docs/Investigation_*.md
+
+# Project-specific Ghidra scripts (D2/ordinal-specific)
+ghidra_scripts/AnalyzeD2*.py
+ghidra_scripts/AutoTypeD2*.py
+ghidra_scripts/CreateD2*.py
+ghidra_scripts/DetectD2*.py
+ghidra_scripts/DetectD2*.java
+ghidra_scripts/DetectAndApplyD2*.java
+ghidra_scripts/DebugOrdinalRename.py
+ghidra_scripts/ExportOrdinalLister.py
+ghidra_scripts/ResolveOrdinalImports*.java
+ghidra_scripts/UltimateOrdinalFixer.py
+ghidra_scripts/UnifyOrdinalNames*.java
+ghidra_scripts/AutoFixOrdinalLinkage.py
+ghidra_scripts/ExportDLLFunctionMappings*.java
