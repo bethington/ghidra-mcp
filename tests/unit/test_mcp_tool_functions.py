@@ -495,8 +495,10 @@ class TestRenameVariables:
 class TestSetFunctionPrototype:
     """Test set_function_prototype static tool."""
 
+    @patch.object(bridge_mcp_ghidra, "safe_get")
     @patch.object(bridge_mcp_ghidra, "safe_post_json")
-    def test_set_prototype(self, mock_post):
+    def test_set_prototype(self, mock_post, mock_get):
+        mock_get.return_value = "Function: main @ 0x401000"
         mock_post.return_value = "success: prototype set"
         result = bridge_mcp_ghidra.set_function_prototype(
             function_address="0x401000",
