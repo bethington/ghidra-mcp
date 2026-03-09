@@ -764,7 +764,20 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
+
 ## 🙏 Acknowledgments
+## 👥 Contributors
+
+This project has benefited from the work of dedicated contributors:
+
+### Core Contributors
+
+**[@heeen](https://github.com/heeen)** — Significant contributions including:
+- Fuzzy function matching and structured diff for cross-binary comparison (#13)
+- Script execution improvements and bug fixes (#12)
+- New API endpoints: `save_program`, `exit_ghidra`, `delete_function`, `create_memory_block`, `run_script_inline` (#11)
+- Architectural vision: annotation-driven design, UDS transport, Python bridge optimization proposals
+
 
 - **Ghidra Team** - For the incredible reverse engineering platform
 - **Model Context Protocol** - For the standardized AI integration framework
