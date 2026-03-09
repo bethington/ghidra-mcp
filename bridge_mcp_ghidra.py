@@ -957,6 +957,9 @@ def _make_tool_handler(tool_def: dict):
             )
         )
 
+    # Reorder the param names list so that params with default values are at the end of the list
+    sig_params.sort(key=lambda x: x.default == inspect.Parameter.empty, reverse=True)
+
     sig = inspect.Signature(sig_params, return_annotation=str)
 
     # Separate query vs body params
