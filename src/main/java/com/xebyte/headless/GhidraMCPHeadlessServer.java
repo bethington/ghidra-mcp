@@ -17,8 +17,8 @@ package com.xebyte.headless;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.EndpointDef;
-import com.xebyte.core.EndpointRegistry;
 import com.xebyte.core.JsonHelper;
 import com.xebyte.core.ProgramProvider;
 import com.xebyte.core.ThreadingStrategy;
@@ -65,6 +65,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
     // Endpoint handler registry
     private HeadlessEndpointHandler endpointHandler;
+    private int registeredEndpointCount;
 
     // Ghidra server connection manager
     private GhidraServerManager serverManager;
@@ -128,7 +129,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         if (envBindAddress != null && !envBindAddress.isEmpty()) {
             bindAddress = envBindAddress;
         }
-        
+
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
                 case "--port":
@@ -290,17 +291,17 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         });
 
         // ==========================================================================
-        // SHARED ENDPOINTS — Declarative registration via EndpointRegistry
+        // SHARED ENDPOINTS — Annotation-driven registration via AnnotationScanner
         // ==========================================================================
 
-        EndpointRegistry registry = new EndpointRegistry(
+        AnnotationScanner scanner = new AnnotationScanner(
             endpointHandler.getListingService(), endpointHandler.getFunctionService(),
             endpointHandler.getCommentService(), endpointHandler.getSymbolLabelService(),
             endpointHandler.getXrefCallGraphService(), endpointHandler.getDataTypeService(),
             endpointHandler.getAnalysisService(), endpointHandler.getDocumentationHashService(),
             endpointHandler.getMalwareSecurityService(), endpointHandler.getProgramScriptService());
 
-        for (EndpointDef ep : registry.getEndpoints()) {
+        for (EndpointDef ep : scanner.getEndpoints()) {
             server.createContext(ep.path(), exchange -> {
                 try {
                     Map<String, String> query = parseQueryParams(exchange);
@@ -314,11 +315,14 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             });
         }
 
+        // Store scanner size for dynamic endpoint count reporting
+        registeredEndpointCount = scanner.getEndpoints().size();
+
         // ==========================================================================
         // SCHEMA ENDPOINT — Serves machine-readable API metadata
         // ==========================================================================
 
-        String schemaJson = registry.generateSchema();
+        String schemaJson = scanner.generateSchema();
         server.createContext("/mcp/schema", exchange -> {
             sendResponse(exchange, schemaJson);
         });
@@ -542,8 +546,9 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     }
 
     private int countEndpoints() {
-        // Count contexts registered - this is an approximation
-        return 171; // updated to reflect all registered endpoints
+        // registeredEndpointCount = shared endpoints from EndpointRegistry
+        // 39 = infrastructure + schema + headless-only endpoints registered via createContext
+        return registeredEndpointCount + 39;
     }
 
     public void stop() {

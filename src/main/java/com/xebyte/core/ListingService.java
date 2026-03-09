@@ -27,7 +27,11 @@ public class ListingService {
     // Listing endpoints
     // ========================================================================
 
-    public Response getAllFunctionNames(int offset, int limit, String programName) {
+    @McpTool(path = "/list_methods", description = "List all function names with pagination", category = "listing")
+    public Response getAllFunctionNames(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -39,7 +43,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(names, offset, limit));
     }
 
-    public Response getAllClassNames(int offset, int limit, String programName) {
+    @McpTool(path = "/list_classes", description = "List class and namespace names with pagination", category = "listing")
+    public Response getAllClassNames(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -56,7 +64,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(sorted, offset, limit));
     }
 
-    public Response listSegments(int offset, int limit, String programName) {
+    @McpTool(path = "/list_segments", description = "List memory blocks/segments", category = "listing")
+    public Response listSegments(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -68,7 +80,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public Response listImports(int offset, int limit, String programName) {
+    @McpTool(path = "/list_imports", description = "List external/imported symbols", category = "listing")
+    public Response listImports(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -80,7 +96,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public Response listExports(int offset, int limit, String programName) {
+    @McpTool(path = "/list_exports", description = "List exported entry points", category = "listing")
+    public Response listExports(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -98,7 +118,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public Response listNamespaces(int offset, int limit, String programName) {
+    @McpTool(path = "/list_namespaces", description = "List namespace hierarchy", category = "listing")
+    public Response listNamespaces(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -115,7 +139,11 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(sorted, offset, limit));
     }
 
-    public Response listDefinedData(int offset, int limit, String programName) {
+    @McpTool(path = "/list_data_items", description = "List defined data items", category = "listing")
+    public Response listDefinedData(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -146,7 +174,12 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public Response listDataItemsByXrefs(int offset, int limit, String format, String programName) {
+    @McpTool(path = "/list_data_items_by_xrefs", description = "List data items sorted by cross-reference count", category = "listing")
+    public Response listDataItemsByXrefs(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "format", defaultValue = "text", description = "Output format (text or json)") String format,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -183,7 +216,12 @@ public class ListingService {
         }
     }
 
-    public Response searchFunctionsByName(String searchTerm, int offset, int limit, String programName) {
+    @McpTool(path = "/search_functions", description = "Search functions by name pattern", category = "listing")
+    public Response searchFunctionsByName(
+            @Param(value = "query", description = "Search pattern") String searchTerm,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -206,7 +244,9 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(matches, offset, limit));
     }
 
-    public Response listFunctions(String programName) {
+    @McpTool(path = "/list_functions", description = "List all functions (no pagination)", category = "listing")
+    public Response listFunctions(
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -221,7 +261,11 @@ public class ListingService {
         return Response.text(result.toString());
     }
 
-    public Response listFunctionsEnhanced(int offset, int limit, String programName) {
+    @McpTool(path = "/list_functions_enhanced", description = "List functions with thunk/external flags as JSON", category = "listing")
+    public Response listFunctionsEnhanced(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "10000") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -254,7 +298,9 @@ public class ListingService {
         ));
     }
 
-    public Response listCallingConventions(String programName) {
+    @McpTool(path = "/list_calling_conventions", description = "List available calling conventions", category = "listing")
+    public Response listCallingConventions(
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -276,7 +322,12 @@ public class ListingService {
         }
     }
 
-    public Response listDefinedStrings(int offset, int limit, String filter, String programName) {
+    @McpTool(path = "/list_strings", description = "List defined strings with optional filter", category = "listing")
+    public Response listDefinedStrings(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "filter", description = "Substring filter") String filter,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -308,7 +359,9 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
-    public Response getFunctionCount(String programName) {
+    @McpTool(path = "/get_function_count", description = "Get total function count", category = "listing")
+    public Response getFunctionCount(
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -320,7 +373,14 @@ public class ListingService {
         ));
     }
 
-    public Response searchStrings(String query, int minLength, String encoding, int offset, int limit, String programName) {
+    @McpTool(path = "/search_strings", description = "Search strings by regex pattern", category = "listing")
+    public Response searchStrings(
+            @Param(value = "query", description = "Regex search pattern") String query,
+            @Param(value = "min_length", defaultValue = "4") int minLength,
+            @Param(value = "encoding", description = "String encoding") String encoding,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -362,7 +422,12 @@ public class ListingService {
         ));
     }
 
-    public Response listGlobals(int offset, int limit, String filter, String programName) {
+    @McpTool(path = "/list_globals", description = "List global symbols with optional filter", category = "listing")
+    public Response listGlobals(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "filter", description = "Substring filter") String filter,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -389,7 +454,9 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(globals, offset, limit));
     }
 
-    public Response getEntryPoints(String programName) {
+    @McpTool(path = "/get_entry_points", description = "Get program entry points", category = "listing")
+    public Response getEntryPoints(
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -571,7 +638,11 @@ public class ListingService {
     // External Location Listing
     // ========================================================================
 
-    public Response listExternalLocations(int offset, int limit, String programName) {
+    @McpTool(path = "/list_external_locations", description = "List external symbol locations", category = "listing")
+    public Response listExternalLocations(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -604,7 +675,11 @@ public class ListingService {
         return listExternalLocations(offset, limit, null);
     }
 
-    public Response getExternalLocationDetails(String address, String dllName, String programName) {
+    @McpTool(path = "/get_external_location", description = "Get external location details by address or DLL name", category = "listing")
+    public Response getExternalLocationDetails(
+            @Param(value = "address") String address,
+            @Param(value = "dll_name") String dllName,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -650,5 +725,16 @@ public class ListingService {
 
     public Response getExternalLocationDetails(String address, String dllName) {
         return getExternalLocationDetails(address, dllName, null);
+    }
+
+    // ======================================================================
+    // Utility endpoints (not program-scoped)
+    // ======================================================================
+
+    @McpTool(path = "/convert_number", description = "Convert number between hex/decimal/binary formats", category = "listing")
+    public Response convertNumber(
+            @Param(value = "text", description = "Number to convert") String text,
+            @Param(value = "size", defaultValue = "4", description = "Size in bytes") int size) {
+        return Response.text(ServiceUtils.convertNumber(text, size));
     }
 }

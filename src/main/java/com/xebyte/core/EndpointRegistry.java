@@ -513,6 +513,11 @@ public class EndpointRegistry {
             (q, b) -> functionService.setLocalVariableType(bodyStr(b, "function_address"),
                 bodyStr(b, "variable_name"), bodyStr(b, "new_type"), str(q, "program")));
 
+        post("/set_parameter_type", "Set the data type of a function parameter",
+            params(bStr("function_address"), bStr("parameter_name"), bStr("new_type"), pProg()),
+            (q, b) -> functionService.setLocalVariableType(bodyStr(b, "function_address"),
+                bodyStr(b, "parameter_name"), bodyStr(b, "new_type"), str(q, "program")));
+
         post("/set_function_no_return", "Mark function as no-return",
             params(bStr("function_address"), bBool("no_return"), pProg()),
             (q, b) -> functionService.setFunctionNoReturn(bodyStr(b, "function_address"),

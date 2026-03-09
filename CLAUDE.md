@@ -20,10 +20,12 @@ AI/Automation Tools <-> MCP Bridge (bridge_mcp_ghidra.py) <-> Ghidra Plugin (Ghi
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Ghidra Plugin | `src/main/java/com/xebyte/GhidraMCPPlugin.java` | HTTP server + endpoint wiring (~5,270 lines), delegates to services |
-| MCP Bridge | `bridge_mcp_ghidra.py` | Translates MCP protocol to HTTP calls (193 tools) |
-| Headless Server | `src/main/java/com/xebyte/headless/` | Standalone server without Ghidra GUI (183 endpoints) |
-| Service Layer | `src/main/java/com/xebyte/core/` | 12 shared service classes with business logic (~15K lines) |
+| Ghidra Plugin | `src/main/java/com/xebyte/GhidraMCPPlugin.java` | HTTP server + endpoint wiring, delegates to services |
+| MCP Bridge | `bridge_mcp_ghidra.py` | Dynamic MCP tool registration from `/mcp/schema` + 22 static complex tools |
+| Headless Server | `src/main/java/com/xebyte/headless/` | Standalone server without Ghidra GUI |
+| Service Layer | `src/main/java/com/xebyte/core/` | 12 annotated service classes with `@McpTool`/`@Param` (~15K lines) |
+| Annotation Scanner | `src/main/java/com/xebyte/core/AnnotationScanner.java` | Discovers `@McpTool` methods via reflection, generates `/mcp/schema` |
+| Endpoint Registry | `src/main/java/com/xebyte/core/EndpointRegistry.java` | Declarative endpoint definitions (shared GUI/headless) |
 
 ### Service Layer (v4.0.0)
 
@@ -111,11 +113,13 @@ ghidra-mcp/
 - Transactions must be committed for Ghidra database changes
 
 ### Adding New Endpoints
-1. Add handler method in `GhidraMCPPlugin.java` (GUI plugin) and/or `HeadlessEndpointHandler.java`
-2. Register in `createContextsForServer()` (GUI) and/or `registerEndpoints()` (headless)
-3. Add corresponding MCP tool in `bridge_mcp_ghidra.py`
+1. Add a method annotated with `@McpTool` and `@Param` in the appropriate service class (e.g., `FunctionService.java`)
+2. The `AnnotationScanner` automatically discovers it and registers the HTTP endpoint + `/mcp/schema` entry
+3. The bridge dynamically registers the MCP tool at startup from `/mcp/schema` (no bridge code changes needed)
 4. Add entry to `tests/endpoints.json` with path, method, category, description
 5. Update `total_endpoints` count in `tests/endpoints.json`
+
+For complex tools requiring bridge-side logic (retries, local I/O, multi-call), add a static `@mcp.tool()` function in `bridge_mcp_ghidra.py` and add the tool name to `STATIC_TOOL_NAMES`.
 
 ### Testing
 - Tests: `src/test/java/com/xebyte/`
@@ -151,6 +155,7 @@ Located in `ghidra_scripts/`. Execute via:
 ## Version History
 
 See `CHANGELOG.md` for complete history. Key releases:
+- v4.3.0: `@McpTool`/`@Param` annotations on all service methods, dynamic bridge registration from `/mcp/schema`, 72% bridge reduction (8,600 -> 2,400 lines), 193 MCP tools (22 static + ~170 dynamic)
 - v4.2.0: Knowledge database integration, BSim cross-version matching, enum fix (#44), 193 MCP tools, 175 GUI endpoints, 183 headless endpoints
 - v4.1.0: Parallel multi-binary support via universal `program` parameter, 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
 - v4.0.0: Service layer architecture refactor (12 shared services), 69% plugin reduction, 188 MCP tools, 169 GUI endpoints, 173 headless endpoints

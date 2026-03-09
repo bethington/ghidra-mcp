@@ -265,10 +265,14 @@ class TestEndpointCounts:
         ), f"total_endpoints ({declared}) != actual entries ({actual}) in endpoints.json"
 
     def test_mcp_tool_count_reasonable(self):
-        """MCP tool count should be within expected range."""
+        """Static MCP tool count should be within expected range.
+
+        Most tools are now dynamically registered from /mcp/schema at runtime.
+        Only ~22 complex bridge-only tools remain as static @mcp.tool() decorators.
+        """
         count = count_mcp_tools()
-        assert count >= 170, f"MCP tool count {count} seems too low (expected 170+)"
-        assert count <= 250, f"MCP tool count {count} seems too high (expected <250)"
+        assert count >= 15, f"Static MCP tool count {count} seems too low (expected 15+)"
+        assert count <= 50, f"Static MCP tool count {count} seems too high (expected <50)"
 
     def test_gui_endpoint_count_reasonable(self):
         """GUI endpoint count should be within expected range."""
@@ -311,32 +315,37 @@ class TestBridgeConfiguration:
             f"This breaks urljoin() path resolution."
         )
 
-    def test_fuzzy_match_uses_safe_get_json(self):
-        """find_similar_functions_fuzzy should use safe_get_json, not safe_get.
+    def test_fuzzy_match_is_dynamic_tool(self):
+        """find_similar_functions_fuzzy should be a dynamic tool (not static).
 
-        safe_get() returns response.text.splitlines() which destroys JSON
-        structure. These endpoints return JSON objects, not line-delimited text.
+        Dynamic GET tools automatically use safe_get_json, which preserves
+        JSON structure. This verifies the tool isn't accidentally in
+        STATIC_TOOL_NAMES where it could use the wrong HTTP helper.
         """
-        # Find the function and check it uses safe_get_json
-        fuzzy_section = re.search(
-            r"def find_similar_functions_fuzzy\(.*?\n(?:.*\n)*?.*?return\s+(safe_get\w*)\(",
-            self.content,
+        # Should NOT be in STATIC_TOOL_NAMES
+        static_match = re.search(
+            r'STATIC_TOOL_NAMES\s*=\s*\{([^}]+)\}', self.content, re.DOTALL
         )
-        assert fuzzy_section, "find_similar_functions_fuzzy function not found"
-        assert (
-            fuzzy_section.group(1) == "safe_get_json"
-        ), f"find_similar_functions_fuzzy uses {fuzzy_section.group(1)}, should use safe_get_json"
+        assert static_match, "STATIC_TOOL_NAMES not found in bridge"
+        assert "find_similar_functions_fuzzy" not in static_match.group(1), (
+            "find_similar_functions_fuzzy should NOT be in STATIC_TOOL_NAMES. "
+            "Dynamic registration automatically uses safe_get_json for GET endpoints."
+        )
 
-    def test_bulk_fuzzy_uses_safe_get_json(self):
-        """bulk_fuzzy_match should use safe_get_json, not safe_get."""
-        bulk_section = re.search(
-            r"def bulk_fuzzy_match\(.*?\n(?:.*\n)*?.*?return\s+(safe_get\w*)\(",
-            self.content,
+    def test_bulk_fuzzy_is_dynamic_tool(self):
+        """bulk_fuzzy_match should be a dynamic tool (not static).
+
+        Dynamic POST tools automatically use safe_post_json, which preserves
+        JSON structure.
+        """
+        static_match = re.search(
+            r'STATIC_TOOL_NAMES\s*=\s*\{([^}]+)\}', self.content, re.DOTALL
         )
-        assert bulk_section, "bulk_fuzzy_match function not found"
-        assert (
-            bulk_section.group(1) == "safe_get_json"
-        ), f"bulk_fuzzy_match uses {bulk_section.group(1)}, should use safe_get_json"
+        assert static_match, "STATIC_TOOL_NAMES not found in bridge"
+        assert "bulk_fuzzy_match" not in static_match.group(1), (
+            "bulk_fuzzy_match should NOT be in STATIC_TOOL_NAMES. "
+            "Dynamic registration automatically uses safe_post_json for POST endpoints."
+        )
 
     def test_bridge_importable(self):
         """bridge_mcp_ghidra.py should be importable without errors.

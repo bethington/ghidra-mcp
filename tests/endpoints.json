@@ -1,7 +1,7 @@
 {
   "version": "4.3.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 190,
+  "total_endpoints": 191,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -802,6 +802,18 @@
         "program"
       ],
       "description": "Set variable type"
+    },
+    {
+      "path": "/set_parameter_type",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "function_address",
+        "parameter_name",
+        "new_type",
+        "program"
+      ],
+      "description": "Set parameter type"
     },
     {
       "path": "/set_variable_storage",

@@ -36,7 +36,12 @@ public class SymbolLabelService {
         return getFunctionLabels(functionName, offset, limit, null);
     }
 
-    public Response getFunctionLabels(String functionName, int offset, int limit, String programName) {
+    @McpTool(path = "/get_function_labels", description = "Get labels within a function body", category = "symbol")
+    public Response getFunctionLabels(
+            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "20") int limit,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -94,7 +99,12 @@ public class SymbolLabelService {
         return renameLabel(addressStr, oldName, newName, null);
     }
 
-    public Response renameLabel(String addressStr, String oldName, String newName, String programName) {
+    @McpTool(path = "/rename_label", method = "POST", description = "Rename a label at address", category = "symbol")
+    public Response renameLabel(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "old_name", source = ParamSource.BODY) String oldName,
+            @Param(value = "new_name", source = ParamSource.BODY) String newName,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -146,7 +156,11 @@ public class SymbolLabelService {
         return createLabel(addressStr, labelName, null);
     }
 
-    public Response createLabel(String addressStr, String labelName, String programName) {
+    @McpTool(path = "/create_label", method = "POST", description = "Create a label at address", category = "symbol")
+    public Response createLabel(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "name", source = ParamSource.BODY) String labelName,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -206,7 +220,10 @@ public class SymbolLabelService {
         return batchCreateLabels(labels, null);
     }
 
-    public Response batchCreateLabels(List<Map<String, String>> labels, String programName) {
+    @McpTool(path = "/batch_create_labels", method = "POST", description = "Create multiple labels at once", category = "symbol")
+    public Response batchCreateLabels(
+            @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -305,7 +322,11 @@ public class SymbolLabelService {
         return renameOrLabel(addressStr, newName, null);
     }
 
-    public Response renameOrLabel(String addressStr, String newName, String programName) {
+    @McpTool(path = "/rename_or_label", method = "POST", description = "Rename or create label at address", category = "symbol")
+    public Response renameOrLabel(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "name", source = ParamSource.BODY) String newName,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -341,7 +362,11 @@ public class SymbolLabelService {
         return deleteLabel(addressStr, labelName, null);
     }
 
-    public Response deleteLabel(String addressStr, String labelName, String programName) {
+    @McpTool(path = "/delete_label", method = "POST", description = "Delete a label at address", category = "symbol")
+    public Response deleteLabel(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "name", source = ParamSource.BODY) String labelName,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -416,7 +441,10 @@ public class SymbolLabelService {
         return batchDeleteLabels(labels, null);
     }
 
-    public Response batchDeleteLabels(List<Map<String, String>> labels, String programName) {
+    @McpTool(path = "/batch_delete_labels", method = "POST", description = "Delete multiple labels at once", category = "symbol")
+    public Response batchDeleteLabels(
+            @Param(value = "labels", source = ParamSource.BODY) List<Map<String, String>> labels,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -513,7 +541,11 @@ public class SymbolLabelService {
         return renameDataAtAddress(addressStr, newName, null);
     }
 
-    public Response renameDataAtAddress(String addressStr, String newName, String programName) {
+    @McpTool(path = "/rename_data", method = "POST", description = "Rename data at address", category = "symbol")
+    public Response renameDataAtAddress(
+            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "newName", source = ParamSource.BODY) String newName,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -571,7 +603,11 @@ public class SymbolLabelService {
         return renameGlobalVariable(oldName, newName, null);
     }
 
-    public Response renameGlobalVariable(String oldName, String newName, String programName) {
+    @McpTool(path = "/rename_global_variable", method = "POST", description = "Rename a global variable", category = "symbol")
+    public Response renameGlobalVariable(
+            @Param(value = "old_name", source = ParamSource.BODY) String oldName,
+            @Param(value = "new_name", source = ParamSource.BODY) String newName,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -629,7 +665,11 @@ public class SymbolLabelService {
         return renameExternalLocation(address, newName, null);
     }
 
-    public Response renameExternalLocation(String address, String newName, String programName) {
+    @McpTool(path = "/rename_external_location", method = "POST", description = "Rename external location", category = "symbol")
+    public Response renameExternalLocation(
+            @Param(value = "address", source = ParamSource.BODY) String address,
+            @Param(value = "new_name", source = ParamSource.BODY) String newName,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -699,7 +739,10 @@ public class SymbolLabelService {
         return canRenameAtAddress(addressStr, null);
     }
 
-    public Response canRenameAtAddress(String addressStr, String programName) {
+    @McpTool(path = "/can_rename_at_address", description = "Check if address supports rename", category = "symbol")
+    public Response canRenameAtAddress(
+            @Param(value = "address", description = "Address to check") String addressStr,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

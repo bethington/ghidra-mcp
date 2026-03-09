@@ -211,9 +211,11 @@ test_write_access() {
     return $?
 }
 
-# Find Ghidra processes (match the actual Ghidra JVM launcher, not scripts/paths containing "ghidra")
+# Find Ghidra processes (match the Ghidra JVM class name in command line)
 get_ghidra_pids() {
-    pgrep -f 'ghidra\.Ghidra(Run|Launcher)|ghidraRun|support/launch\.sh' 2>/dev/null || true
+    # Match only the Java class name pattern (ghidra.GhidraRun or ghidra.GhidraLauncher)
+    # to avoid false positives from editors/file managers viewing Ghidra files
+    pgrep -f 'ghidra\.Ghidra(Run|Launcher)' 2>/dev/null || true
 }
 
 # Close Ghidra processes
@@ -636,9 +638,17 @@ if [[ -n "$GHIDRA_PATH" ]]; then
         path_ghidra_version=$(get_version_from_ghidra_path "$GHIDRA_PATH")
     fi
     if [[ -n "$path_ghidra_version" && "$path_ghidra_version" != "$GHIDRA_VERSION" ]]; then
-        log_error "Version mismatch: GhidraPath implies version '${path_ghidra_version}', but selected/pom version is '${GHIDRA_VERSION}'."
-        log_info "Use a matching --ghidra-path or update pom.xml ghidra.version."
-        exit 1
+        # Extract major.minor for compatibility check
+        path_major_minor=$(echo "$path_ghidra_version" | cut -d. -f1-2)
+        selected_major_minor=$(echo "$GHIDRA_VERSION" | cut -d. -f1-2)
+        if [[ "$path_major_minor" == "$selected_major_minor" ]]; then
+            log_warning "GhidraPath version '${path_ghidra_version}' differs from build version '${GHIDRA_VERSION}' (patch mismatch)."
+            log_info "Extensions are generally compatible across patch versions. Continuing."
+        else
+            log_error "Version mismatch: GhidraPath implies version '${path_ghidra_version}', but selected/pom version is '${GHIDRA_VERSION}'."
+            log_info "Use a matching --ghidra-path or update pom.xml ghidra.version."
+            exit 1
+        fi
     fi
 fi
 
