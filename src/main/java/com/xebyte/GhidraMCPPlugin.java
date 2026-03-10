@@ -64,6 +64,7 @@ import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.EndpointDef;
 import com.xebyte.core.FrontEndProgramProvider;
 import com.xebyte.core.JsonHelper;
+import com.xebyte.core.ServerManager;
 
 import ghidra.framework.main.ApplicationLevelPlugin;
 
@@ -170,6 +171,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private static final String OPTION_CATEGORY_NAME = "GhidraMCP HTTP Server";
     private static final String PORT_OPTION_NAME = "Server Port";
     private static final int DEFAULT_PORT = 8089;
+    private static final String UDS_ENABLED_OPTION = "Enable UDS Transport";
+    private static final String TCP_ENABLED_OPTION = "Enable TCP Transport";
+    private static final boolean DEFAULT_UDS_ENABLED = !System.getProperty("os.name", "").toLowerCase().contains("win");
+    private static final boolean DEFAULT_TCP_ENABLED = System.getProperty("os.name", "").toLowerCase().contains("win");
 
     // Field analysis constants (v1.4.0)
     private static final int MAX_FUNCTIONS_TO_ANALYZE = 100;
@@ -249,32 +254,55 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             Msg.info(this, "GhidraMCP: Server authenticator was registered at startup");
         }
 
-        // Register the configuration option
+        // Register configuration options
         Options options = tool.getOptions(OPTION_CATEGORY_NAME);
         options.registerOption(PORT_OPTION_NAME, DEFAULT_PORT,
-            null, // No help location for now
-            "The network port number the embedded HTTP server will listen on. " +
+            null,
+            "The network port number the TCP transport will listen on. " +
             "Requires Ghidra restart or plugin reload to take effect after changing.");
+        options.registerOption(UDS_ENABLED_OPTION, DEFAULT_UDS_ENABLED, null,
+            "Enable Unix Domain Socket transport for local multi-instance support.");
+        options.registerOption(TCP_ENABLED_OPTION, DEFAULT_TCP_ENABLED, null,
+            "Enable TCP transport for remote/network access.");
 
-        // Only start server if not already running (fixes #35: multi-window port collision)
-        if (server != null && isServerRunning()) {
-            Msg.info(this, "GhidraMCP HTTP server already running — sharing with this tool window.");
-        } else {
+        boolean udsEnabled = options.getBoolean(UDS_ENABLED_OPTION, DEFAULT_UDS_ENABLED);
+        boolean tcpEnabled = options.getBoolean(TCP_ENABLED_OPTION, DEFAULT_TCP_ENABLED);
+
+        // Start UDS if enabled
+        boolean udsOk = false;
+        if (udsEnabled) {
             try {
-                startServer();
-                ownsServer = true;
-                Msg.info(this, "GhidraMCPPlugin loaded successfully with HTTP server on port " +
-                    options.getInt(PORT_OPTION_NAME, DEFAULT_PORT));
+                ServerManager.getInstance().registerTool(tool, null);
+                udsOk = true;
+                Msg.info(this, "GhidraMCP UDS server active at " + ServerManager.getInstance().getSocketPath());
+            } catch (IOException e) {
+                Msg.warn(this, "Failed to start UDS server: " + e.getMessage());
             }
-            catch (IOException e) {
-                Msg.error(this, "Failed to start HTTP server: " + e.getMessage(), e);
-                Msg.showError(this, null, "GhidraMCP Server Error",
-                    "Failed to start MCP server on port " + options.getInt(PORT_OPTION_NAME, DEFAULT_PORT) +
-                    ".\n\nThe port may already be in use. Try:\n" +
-                    "1. Restarting Ghidra\n" +
-                    "2. Changing the port in Edit > Tool Options > GhidraMCP\n" +
-                    "3. Checking if another Ghidra instance is running\n\n" +
-                    "Error: " + e.getMessage());
+        }
+
+        // Start TCP if enabled, or as safety net if nothing else is running
+        if (tcpEnabled || (!udsOk && !tcpEnabled)) {
+            if (server != null && isServerRunning()) {
+                Msg.info(this, "GhidraMCP TCP server already running — sharing with this tool window.");
+            } else {
+                try {
+                    startServer();
+                    ownsServer = true;
+                    int port = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
+                    if (!tcpEnabled) {
+                        Msg.warn(this, "GhidraMCP: Both transports disabled or UDS failed — started TCP on port " + port + " as safety net.");
+                    } else {
+                        Msg.info(this, "GhidraMCP TCP server active on port " + port);
+                    }
+                } catch (IOException e) {
+                    Msg.error(this, "Failed to start TCP server: " + e.getMessage(), e);
+                    if (!udsOk) {
+                        Msg.showError(this, null, "GhidraMCP Server Error",
+                            "Failed to start MCP server.\n\n" +
+                            "No transports are running.\n\n" +
+                            "Error: " + e.getMessage());
+                    }
+                }
             }
         }
 
@@ -300,24 +328,41 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     }
 
     private void updateMenuActionStates() {
-        boolean running = isServerRunning();
-        startServerAction.setEnabled(!running);
-        stopServerAction.setEnabled(running);
-        restartServerAction.setEnabled(running);
+        boolean anyRunning = isServerRunning() || ServerManager.getInstance().isRunning();
+        startServerAction.setEnabled(!anyRunning);
+        stopServerAction.setEnabled(anyRunning);
+        restartServerAction.setEnabled(anyRunning);
     }
 
     private void createMenuActions() {
         startServerAction = new DockingAction("Start Server", getName()) {
             @Override
             public void actionPerformed(ActionContext context) {
-                try {
-                    startServer();
-                    updateMenuActionStates();
-                    Options options = tool.getOptions(OPTION_CATEGORY_NAME);
-                    int port = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
-                    Msg.showInfo(getClass(), null, "GhidraMCP", "Server started on port " + port + ".");
-                } catch (IOException e) {
-                    Msg.showError(getClass(), null, "GhidraMCP", "Failed to start server: " + e.getMessage());
+                Options opts = tool.getOptions(OPTION_CATEGORY_NAME);
+                boolean uds = opts.getBoolean(UDS_ENABLED_OPTION, DEFAULT_UDS_ENABLED);
+                boolean tcp = opts.getBoolean(TCP_ENABLED_OPTION, DEFAULT_TCP_ENABLED);
+                StringBuilder started = new StringBuilder();
+                if (uds && !ServerManager.getInstance().isRunning()) {
+                    try {
+                        ServerManager.getInstance().registerTool(tool, null);
+                        started.append("UDS: ").append(ServerManager.getInstance().getSocketPath());
+                    } catch (IOException e) {
+                        Msg.showError(getClass(), null, "GhidraMCP", "Failed to start UDS server: " + e.getMessage());
+                    }
+                }
+                if (tcp && !isServerRunning()) {
+                    try {
+                        startServer();
+                        ownsServer = true;
+                        if (started.length() > 0) started.append("\n");
+                        started.append("TCP: port ").append(opts.getInt(PORT_OPTION_NAME, DEFAULT_PORT));
+                    } catch (IOException e) {
+                        Msg.showError(getClass(), null, "GhidraMCP", "Failed to start TCP server: " + e.getMessage());
+                    }
+                }
+                updateMenuActionStates();
+                if (started.length() > 0) {
+                    Msg.showInfo(getClass(), null, "GhidraMCP", "Server started.\n" + started);
                 }
             }
         };
@@ -327,8 +372,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             @Override
             public void actionPerformed(ActionContext context) {
                 stopServer();
+                ServerManager.getInstance().stopUdsServer();
                 updateMenuActionStates();
-                Msg.showInfo(getClass(), null, "GhidraMCP", "Server stopped.");
+                Msg.showInfo(getClass(), null, "GhidraMCP", "All servers stopped.");
             }
         };
         stopServerAction.setMenuBarData(new MenuData(new String[]{"Tools", "GhidraMCP", "Stop Server"}));
@@ -336,17 +382,11 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         restartServerAction = new DockingAction("Restart Server", getName()) {
             @Override
             public void actionPerformed(ActionContext context) {
+                // Stop everything
                 stopServer();
-                try {
-                    startServer();
-                    updateMenuActionStates();
-                    Options options = tool.getOptions(OPTION_CATEGORY_NAME);
-                    int port = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
-                    Msg.showInfo(getClass(), null, "GhidraMCP", "Server restarted on port " + port + ".");
-                } catch (IOException e) {
-                    updateMenuActionStates();
-                    Msg.showError(getClass(), null, "GhidraMCP", "Failed to restart server: " + e.getMessage());
-                }
+                ServerManager.getInstance().stopUdsServer();
+                // Re-start based on current config
+                startServerAction.actionPerformed(context);
             }
         };
         restartServerAction.setMenuBarData(new MenuData(new String[]{"Tools", "GhidraMCP", "Restart Server"}));
@@ -354,12 +394,18 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         serverStatusAction = new DockingAction("Server Status", getName()) {
             @Override
             public void actionPerformed(ActionContext context) {
-                Options options = tool.getOptions(OPTION_CATEGORY_NAME);
-                int port = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
-                String status = isServerRunning() ? "Running" : "Stopped";
+                Options opts = tool.getOptions(OPTION_CATEGORY_NAME);
+                int port = opts.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
+                boolean udsRunning = ServerManager.getInstance().isRunning();
+                String udsStatus = udsRunning
+                    ? "Running (" + ServerManager.getInstance().getSocketPath() + ")"
+                    : "Disabled";
+                String tcpStatus = isServerRunning()
+                    ? "Running (port " + port + ")"
+                    : "Disabled";
                 String message = "GhidraMCP Server Status\n\n" +
-                    "Status: " + status + "\n" +
-                    "Port: " + port + "\n" +
+                    "UDS: " + udsStatus + "\n" +
+                    "TCP: " + tcpStatus + "\n" +
                     "Version: " + VersionInfo.getFullVersion() + "\n" +
                     "Endpoints: " + VersionInfo.getEndpointCount();
                 Msg.showInfo(getClass(), null, "GhidraMCP", message);
@@ -3569,6 +3615,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
     @Override
     public void dispose() {
+        // Deregister from UDS ServerManager
+        ServerManager.getInstance().deregisterTool(tool);
+
         instanceCount--;
         // Only stop the server when the last plugin instance is disposed
         if (instanceCount <= 0) {
