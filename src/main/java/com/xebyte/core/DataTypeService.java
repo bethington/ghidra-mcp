@@ -26,6 +26,7 @@ import java.util.regex.Pattern;
  * Service for data type operations: list, create, modify, validate, and analyze data types.
  * Extracted from GhidraMCPPlugin as part of v4.0.0 refactor.
  */
+@McpToolGroup(value = "datatype", description = "Struct/enum/union CRUD, apply data types, type conflicts, validation")
 public class DataTypeService {
 
     private final ProgramProvider programProvider;

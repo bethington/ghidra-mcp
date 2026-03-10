@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
  * Service for listing and enumeration endpoints.
  * All methods are read-only and do not require transactions.
  */
+@McpToolGroup(value = "listing", description = "Enumerate functions, strings, segments, imports, exports, namespaces, classes, data items")
 public class ListingService {
 
     private final ProgramProvider programProvider;
