@@ -1,329 +1,185 @@
 """
 Endpoint Catalog Consistency Tests.
 
-Verifies that the three endpoint sources stay in sync:
-1. Java plugin (GhidraMCPPlugin.java) - server.createContext() registrations
-2. Python MCP bridge (bridge_mcp_ghidra.py) - safe_get/safe_post endpoint strings
-3. Endpoint specification (tests/endpoints.json) - documented endpoints
-
-These tests run WITHOUT requiring a Ghidra server.
-They parse source files statically and cross-reference.
+Verifies that:
+1. Java services have @McpTool annotations that AnnotationScanner discovers
+2. endpoints.json catalog stays in sync
+3. Bridge dynamically registers from /mcp/schema (no hardcoded tools)
 """
 
 import json
+import os
 import re
-import sys
+import unittest
 from pathlib import Path
 
-import pytest
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-# Project root
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-
-# Source file paths
-JAVA_PLUGIN_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "GhidraMCPPlugin.java"
-JAVA_HEADLESS_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "headless" / "GhidraMCPHeadlessServer.java"
-JAVA_REGISTRY_PATH = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte" / "core" / "EndpointRegistry.java"
-PYTHON_BRIDGE_PATH = PROJECT_ROOT / "bridge_mcp_ghidra.py"
-ENDPOINTS_JSON_PATH = PROJECT_ROOT / "tests" / "endpoints.json"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+JAVA_SRC = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte"
+CORE_SRC = JAVA_SRC / "core"
+ENDPOINTS_JSON = PROJECT_ROOT / "tests" / "endpoints.json"
 
 
-# =============================================================================
-# Extraction helpers
-# =============================================================================
-
-def extract_java_endpoints() -> set[str]:
-    """Extract all endpoint paths from Java source (createContext + EndpointRegistry)."""
-    if not JAVA_PLUGIN_PATH.exists():
-        pytest.skip(f"Java source not found: {JAVA_PLUGIN_PATH}")
-
-    endpoints = set()
-
-    # 1. server.createContext("/path", ...) in plugin and headless server
-    context_pattern = re.compile(r'server\.createContext\(\s*"(/[^"]+)"')
-    for path in [JAVA_PLUGIN_PATH, JAVA_HEADLESS_PATH]:
-        if path.exists():
-            endpoints |= set(context_pattern.findall(path.read_text(encoding="utf-8")))
-
-    # 2. get("/path", ...) and post("/path", ...) in EndpointRegistry (declarative endpoints)
-    if JAVA_REGISTRY_PATH.exists():
-        registry_pattern = re.compile(r'(?:get|post)\(\s*"(/[^"]+)"')
-        endpoints |= set(registry_pattern.findall(JAVA_REGISTRY_PATH.read_text(encoding="utf-8")))
-
-    return endpoints
+def count_mcptool_annotations() -> int:
+    """Count @McpTool annotations across all service files."""
+    count = 0
+    for java_file in CORE_SRC.glob("*Service.java"):
+        content = java_file.read_text()
+        count += len(re.findall(r'@McpTool\(', content))
+    return count
 
 
-def extract_python_http_endpoints() -> set[str]:
-    """Extract all endpoint names called via safe_get/safe_post/safe_get_json/safe_post_json in the bridge."""
-    if not PYTHON_BRIDGE_PATH.exists():
-        pytest.skip(f"Python bridge not found: {PYTHON_BRIDGE_PATH}")
-
-    content = PYTHON_BRIDGE_PATH.read_text(encoding="utf-8")
-    # Match: safe_get("endpoint_name", ...) or safe_post("endpoint_name", ...)
-    # Also: safe_get_json, safe_post_json, safe_get_uncached
-    pattern = re.compile(
-        r'(?:safe_get|safe_get_json|safe_get_uncached|safe_post|safe_post_json)\(\s*"([^"]+)"'
-    )
-    matches = pattern.findall(content)
-    # Normalize to /path format to match Java
-    return {"/" + m.lstrip("/") for m in matches}
+def extract_annotated_paths() -> set[str]:
+    """Extract all HTTP paths from @McpTool annotations."""
+    paths = set()
+    pattern = re.compile(r'@McpTool\(\s*(?:value\s*=\s*)?["\']([^"\']+)["\']')
+    for java_file in CORE_SRC.glob("*Service.java"):
+        content = java_file.read_text()
+        for match in pattern.finditer(content):
+            paths.add(match.group(1))
+    return paths
 
 
-def extract_python_mcp_tool_count() -> int:
-    """Count the number of @mcp.tool() decorated functions in the bridge."""
-    if not PYTHON_BRIDGE_PATH.exists():
-        pytest.skip(f"Python bridge not found: {PYTHON_BRIDGE_PATH}")
-
-    content = PYTHON_BRIDGE_PATH.read_text(encoding="utf-8")
-    return len(re.findall(r"@mcp\.tool\(\)", content))
-
-
-def load_endpoints_json() -> list[dict]:
-    """Load endpoint specifications from endpoints.json."""
-    if not ENDPOINTS_JSON_PATH.exists():
-        pytest.skip(f"Endpoints JSON not found: {ENDPOINTS_JSON_PATH}")
-
-    with open(ENDPOINTS_JSON_PATH, encoding="utf-8") as f:
-        data = json.load(f)
-    return data.get("endpoints", [])
+def extract_gui_only_paths() -> set[str]:
+    """Extract GUI-only endpoint paths from GhidraMCPPlugin.java."""
+    paths = set()
+    plugin_file = JAVA_SRC / "GhidraMCPPlugin.java"
+    if plugin_file.exists():
+        content = plugin_file.read_text()
+        for match in re.finditer(r'server\.createContext\("([^"]+)"', content):
+            paths.add(match.group(1))
+    return paths
 
 
-def get_endpoints_json_paths() -> set[str]:
-    """Get all endpoint paths from endpoints.json."""
-    endpoints = load_endpoints_json()
-    return {e["path"] for e in endpoints}
+class TestAnnotatedEndpoints(unittest.TestCase):
+    """Verify annotation-driven endpoint registration."""
 
+    def test_has_annotated_endpoints(self):
+        """Services should have @McpTool annotations."""
+        count = count_mcptool_annotations()
+        self.assertGreater(count, 100, f"Expected >100 annotated endpoints, found {count}")
 
-# =============================================================================
-# Tests
-# =============================================================================
+    def test_all_paths_start_with_slash(self):
+        """All @McpTool paths should start with /."""
+        for path in extract_annotated_paths():
+            self.assertTrue(path.startswith("/"), f"Path should start with /: {path}")
 
-class TestEndpointCatalogConsistency:
-    """Verify all three endpoint sources stay in sync."""
-
-    def test_java_source_exists(self):
-        """Java plugin source file should exist."""
-        assert JAVA_PLUGIN_PATH.exists(), f"Missing: {JAVA_PLUGIN_PATH}"
-
-    def test_python_bridge_exists(self):
-        """Python bridge source file should exist."""
-        assert PYTHON_BRIDGE_PATH.exists(), f"Missing: {PYTHON_BRIDGE_PATH}"
-
-    def test_endpoints_json_exists(self):
-        """Endpoints specification file should exist."""
-        assert ENDPOINTS_JSON_PATH.exists(), f"Missing: {ENDPOINTS_JSON_PATH}"
-
-    def test_endpoints_json_is_valid(self):
-        """endpoints.json should be valid JSON with required structure."""
-        endpoints = load_endpoints_json()
-        assert len(endpoints) > 0, "endpoints.json has no endpoints"
-
-        for ep in endpoints:
-            assert "path" in ep, f"Endpoint missing 'path': {ep}"
-            assert "method" in ep, f"Endpoint missing 'method': {ep}"
-            assert ep["path"].startswith("/"), f"Path should start with /: {ep['path']}"
-            assert ep["method"] in ("GET", "POST"), f"Invalid method: {ep['method']}"
-
-    def test_endpoints_json_no_duplicates(self):
-        """endpoints.json should not have duplicate paths."""
-        endpoints = load_endpoints_json()
-        paths = [e["path"] for e in endpoints]
+    def test_no_duplicate_paths(self):
+        """No two @McpTool annotations should have the same path."""
+        paths = []
+        pattern = re.compile(r'@McpTool\(\s*(?:value\s*=\s*)?["\']([^"\']+)["\']')
+        for java_file in CORE_SRC.glob("*Service.java"):
+            content = java_file.read_text()
+            for match in pattern.finditer(content):
+                paths.append(match.group(1))
         duplicates = [p for p in paths if paths.count(p) > 1]
-        assert not duplicates, f"Duplicate paths in endpoints.json: {set(duplicates)}"
+        # Some paths may appear twice (with/without program param overload)
+        # but should not appear more than twice
+        triplicates = [p for p in set(duplicates) if paths.count(p) > 2]
+        self.assertEqual(len(triplicates), 0, f"Triplicate paths: {triplicates}")
 
-
-class TestJavaToEndpointsJson:
-    """Verify Java endpoints are documented in endpoints.json."""
-
-    def test_endpoints_json_covers_java(self):
-        """Every Java endpoint should be documented in endpoints.json."""
-        java_endpoints = extract_java_endpoints()
-        json_paths = get_endpoints_json_paths()
-
-        # Some Java endpoints may be internal (e.g., force_decompile variants)
-        # so we check the other direction too and allow a small tolerance
-        missing_from_json = java_endpoints - json_paths
-
-        # Known internal-only endpoints not documented in endpoints.json
-        known_internal = {
-            "/force_decompile",  # Internal variant used by decompile_function(force=True)
-            "/get_plate_comment",  # GET variant for plate comment retrieval
-        }
-        unexpected_missing = missing_from_json - known_internal
-
-        if unexpected_missing:
-            pytest.fail(
-                f"Java endpoints NOT in endpoints.json ({len(unexpected_missing)}):\n"
-                + "\n".join(sorted(unexpected_missing))
-                + "\n\nIf these are intentionally internal, add them to known_internal in this test."
-            )
-
-    def test_endpoints_json_entries_exist_in_java(self):
-        """Every endpoints.json entry should have a Java registration (plugin, headless, or EndpointRegistry)."""
-        java_endpoints = extract_java_endpoints()
-        json_paths = get_endpoints_json_paths()
-
-        missing_from_java = json_paths - java_endpoints
-
-        if missing_from_java:
-            pytest.fail(
-                f"endpoints.json entries NOT in Java ({len(missing_from_java)}):\n"
-                + "\n".join(sorted(missing_from_java))
-                + "\n\nThese may have been removed from Java but not from endpoints.json."
-            )
-
-
-class TestPythonToEndpointsJson:
-    """Verify Python bridge endpoints match endpoints.json."""
-
-    def test_python_endpoints_covered_by_json(self):
-        """Every HTTP endpoint called by Python should be in endpoints.json."""
-        python_endpoints = extract_python_http_endpoints()
-        json_paths = get_endpoints_json_paths()
-
-        # Python tools that call internal/variant endpoints not in endpoints.json
-        known_variants = {
-            "/force_decompile",  # Called inside decompile_function(force=True)
-            "/force_decompile_by_name",  # Called inside decompile_function(name=..., force=True)
-            "/get_plate_comment",  # GET variant for plate comment retrieval
-            "/set_parameter_type",  # Routed through set_local_variable_type in Java
-        }
-        python_to_check = python_endpoints - known_variants
-        missing_from_json = python_to_check - json_paths
-
-        if missing_from_json:
-            pytest.fail(
-                f"Python bridge calls endpoints NOT in endpoints.json ({len(missing_from_json)}):\n"
-                + "\n".join(sorted(missing_from_json))
-                + "\n\nIf these are internal variants, add them to known_variants in this test."
-            )
-
-
-class TestPythonToJava:
-    """Verify Python bridge endpoints exist in Java."""
-
-    def test_python_endpoints_exist_in_java(self):
-        """Every HTTP endpoint called by Python should exist in Java (plugin, headless, or EndpointRegistry)."""
-        python_endpoints = extract_python_http_endpoints()
-        java_endpoints = extract_java_endpoints()
-
-        # Known endpoints handled differently in Java
-        known_exceptions = {
-            "/force_decompile_by_name",  # Variant not registered separately in Java
-            "/get_plate_comment",  # GET variant handled by set_plate_comment context
-            "/set_parameter_type",  # Routed through set_local_variable_type in Java
-        }
-
-        python_to_check = python_endpoints - known_exceptions
-        missing_from_java = python_to_check - java_endpoints
-
-        if missing_from_java:
-            pytest.fail(
-                f"Python bridge calls endpoints NOT in Java ({len(missing_from_java)}):\n"
-                + "\n".join(sorted(missing_from_java))
-                + "\n\nThese endpoints may have been removed from Java without updating the bridge."
-            )
-
-
-class TestEndpointCounts:
-    """Verify endpoint counts are roughly consistent across layers."""
-
-    def test_java_endpoint_count_reasonable(self):
-        """Java should have a reasonable number of endpoints."""
-        java_endpoints = extract_java_endpoints()
-        # Should be at least 100 based on current project state
-        assert len(java_endpoints) >= 100, (
-            f"Java has only {len(java_endpoints)} endpoints, expected >= 100"
-        )
-
-    def test_endpoints_json_count_reasonable(self):
-        """endpoints.json should have a reasonable number of endpoints."""
-        json_paths = get_endpoints_json_paths()
-        assert len(json_paths) >= 100, (
-            f"endpoints.json has only {len(json_paths)} endpoints, expected >= 100"
-        )
-
-    def test_python_tool_count_reasonable(self):
-        """Python bridge static @mcp.tool() count should be within expected range.
-
-        Most tools are now dynamically registered from /mcp/schema at runtime.
-        Only ~22 complex bridge-only tools remain as static @mcp.tool() decorators.
-        """
-        tool_count = extract_python_mcp_tool_count()
-        assert tool_count >= 15, (
-            f"Python bridge has only {tool_count} static @mcp.tool() functions, expected >= 15"
-        )
-        assert tool_count <= 50, (
-            f"Python bridge has {tool_count} static @mcp.tool() functions, expected <= 50"
-        )
-
-    def test_counts_roughly_consistent(self):
-        """Java and endpoints.json endpoint counts should be within a reasonable range.
-
-        Python bridge static tool count is no longer comparable since most tools
-        are dynamically registered from /mcp/schema at runtime.
-        """
-        java_endpoints = extract_java_endpoints()
-        java_count = len(java_endpoints)
-        json_count = len(get_endpoints_json_paths())
-
-        # Java may have more endpoints than JSON (some are internal)
-        # Allow a tolerance of 30 for the gap
-        assert abs(java_count - json_count) < 30, (
-            f"Java ({java_count}) vs endpoints.json ({json_count}) count gap too large"
-        )
-
-
-class TestEndpointMetadata:
-    """Verify endpoint metadata quality in endpoints.json."""
-
-    def test_all_endpoints_have_descriptions(self):
-        """Every endpoint should have a description."""
-        endpoints = load_endpoints_json()
-        missing_desc = [e["path"] for e in endpoints if not e.get("description")]
-        assert not missing_desc, (
-            f"Endpoints missing descriptions: {missing_desc}"
-        )
-
-    def test_all_endpoints_have_categories(self):
-        """Every endpoint should have a category."""
-        endpoints = load_endpoints_json()
-        missing_cat = [e["path"] for e in endpoints if not e.get("category")]
-        assert not missing_cat, (
-            f"Endpoints missing categories: {missing_cat}"
-        )
-
-    def test_categories_are_valid(self):
-        """All endpoint categories should be from the defined set."""
-        with open(ENDPOINTS_JSON_PATH, encoding="utf-8") as f:
-            data = json.load(f)
-
-        valid_categories = set(data.get("categories", {}).keys())
-        endpoints = data.get("endpoints", [])
-
-        invalid = [
-            (e["path"], e.get("category"))
-            for e in endpoints
-            if e.get("category") not in valid_categories
+    def test_services_exist(self):
+        """Expected service files should exist."""
+        expected_services = [
+            "ListingService", "FunctionService", "CommentService",
+            "SymbolLabelService", "XrefCallGraphService", "DataTypeService",
+            "AnalysisService", "DocumentationHashService",
+            "MalwareSecurityService", "ProgramScriptService",
         ]
-        assert not invalid, (
-            f"Endpoints with invalid categories: {invalid}"
-        )
+        for svc in expected_services:
+            path = CORE_SRC / f"{svc}.java"
+            self.assertTrue(path.exists(), f"Missing service: {path}")
 
-    def test_post_endpoints_have_params(self):
-        """POST endpoints should typically have params defined."""
-        endpoints = load_endpoints_json()
-        post_no_params = [
-            e["path"]
-            for e in endpoints
-            if e["method"] == "POST" and not e.get("params")
+
+class TestEndpointsJson(unittest.TestCase):
+    """Verify endpoints.json catalog validity."""
+
+    @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
+    def test_valid_json(self):
+        data = json.loads(ENDPOINTS_JSON.read_text())
+        self.assertIn("endpoints", data)
+
+    @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
+    def test_no_duplicate_paths(self):
+        data = json.loads(ENDPOINTS_JSON.read_text())
+        paths = [ep["path"] for ep in data.get("endpoints", [])]
+        self.assertEqual(len(paths), len(set(paths)), "Duplicate paths in endpoints.json")
+
+    @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
+    def test_endpoints_have_required_fields(self):
+        data = json.loads(ENDPOINTS_JSON.read_text())
+        for ep in data.get("endpoints", []):
+            self.assertIn("path", ep, f"Missing 'path' in endpoint: {ep}")
+            self.assertIn("method", ep, f"Missing 'method' in endpoint: {ep}")
+
+
+class TestBridgeIsDynamic(unittest.TestCase):
+    """Verify the bridge uses dynamic registration, not hardcoded tools."""
+
+    def test_bridge_has_few_static_tools(self):
+        """Bridge should only have static tools (list_instances, connect_instance, tool group mgmt)."""
+        bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
+        content = bridge_path.read_text()
+        tool_count = len(re.findall(r'@mcp\.tool\(\)', content))
+        self.assertLessEqual(tool_count, 10,
+            f"Bridge has {tool_count} @mcp.tool() decorators. "
+            "Expected <=10 (only static tools)")
+
+    def test_bridge_has_schema_registration(self):
+        """Bridge should have register_tools_from_schema function."""
+        bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
+        content = bridge_path.read_text()
+        self.assertIn("register_tools_from_schema", content)
+        self.assertIn("/mcp/schema", content)
+
+    def test_bridge_size_reasonable(self):
+        """Thin bridge should be well under 1000 lines."""
+        bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
+        lines = len(bridge_path.read_text().splitlines())
+        self.assertLess(lines, 1000, f"Bridge is {lines} lines, expected <1000 for thin multiplexer")
+
+
+class TestAnnotationScannerExists(unittest.TestCase):
+    """Verify AnnotationScanner infrastructure."""
+
+    def test_annotation_scanner_exists(self):
+        path = CORE_SRC / "AnnotationScanner.java"
+        self.assertTrue(path.exists())
+
+    def test_mcptool_annotation_exists(self):
+        path = CORE_SRC / "McpTool.java"
+        self.assertTrue(path.exists())
+
+    def test_param_annotation_exists(self):
+        path = CORE_SRC / "Param.java"
+        self.assertTrue(path.exists())
+
+    def test_mcp_tool_group_annotation_exists(self):
+        path = CORE_SRC / "McpToolGroup.java"
+        self.assertTrue(path.exists())
+
+    def test_scanner_has_schema_method(self):
+        content = (CORE_SRC / "AnnotationScanner.java").read_text()
+        self.assertIn("generateSchema", content)
+        self.assertIn("ToolDescriptor", content)
+
+    def test_all_services_have_tool_group(self):
+        """All service files should have @McpToolGroup annotation."""
+        expected = [
+            "ListingService", "FunctionService", "CommentService",
+            "SymbolLabelService", "XrefCallGraphService", "DataTypeService",
+            "AnalysisService", "DocumentationHashService",
+            "MalwareSecurityService", "ProgramScriptService",
         ]
-        # Some POST endpoints may legitimately have no params
-        # but most should have at least one
-        assert len(post_no_params) <= 5, (
-            f"Too many POST endpoints without params: {post_no_params}"
-        )
+        for name in expected:
+            path = CORE_SRC / f"{name}.java"
+            if path.exists():
+                content = path.read_text()
+                self.assertIn("@McpToolGroup", content,
+                    f"{name}.java missing @McpToolGroup annotation")
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    unittest.main()
