@@ -36,11 +36,14 @@ public class ProgramScriptService {
      * Returns null when running headless.
      */
     private PluginTool getToolFromProvider() {
-        if (programProvider instanceof GuiProgramProvider) {
-            return ((GuiProgramProvider) programProvider).getTool();
+        if (programProvider instanceof GuiProgramProvider gpp) {
+            return gpp.getTool();
         }
-        if (programProvider instanceof FrontEndProgramProvider) {
-            return ((FrontEndProgramProvider) programProvider).getTool();
+        if (programProvider instanceof FrontEndProgramProvider fpp) {
+            return fpp.getTool();
+        }
+        if (programProvider instanceof MultiToolProgramProvider mtp) {
+            return mtp.getActiveTool();
         }
         return null;
     }

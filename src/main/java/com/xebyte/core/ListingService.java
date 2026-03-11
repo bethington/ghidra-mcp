@@ -90,11 +90,23 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        List<String> lines = new ArrayList<>();
+        ExternalManager extMgr = program.getExternalManager();
+        List<Map<String, Object>> all = new ArrayList<>();
         for (Symbol symbol : program.getSymbolTable().getExternalSymbols()) {
-            lines.add(symbol.getName() + " -> " + symbol.getAddress());
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", symbol.getName());
+            entry.put("address", symbol.getAddress().toString());
+            ExternalLocation extLoc = extMgr.getExternalLocation(symbol);
+            if (extLoc != null) {
+                String original = extLoc.getOriginalImportedName();
+                if (original != null && !original.isEmpty() && !original.equals(symbol.getName())) {
+                    entry.put("original_imported_name", original);
+                }
+            }
+            all.add(entry);
         }
-        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
+        int end = Math.min(offset + limit, all.size());
+        return Response.ok(offset < all.size() ? all.subList(offset, end) : List.of());
     }
 
     @McpTool(path = "/list_exports", description = "List exported entry points", category = "listing")
@@ -649,27 +661,31 @@ public class ListingService {
         Program program = pe.program();
 
         ExternalManager extMgr = program.getExternalManager();
-        List<String> lines = new ArrayList<>();
 
         try {
+            List<Map<String, Object>> results = new ArrayList<>();
             String[] extLibNames = extMgr.getExternalLibraryNames();
             for (String libName : extLibNames) {
                 ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
-                    String locName = extLoc.getLabel();
-                    String address = extLoc.getAddress().toString().replace(":", "");
-                    String info = String.format("%s (%s) - %s @ %s",
-                        locName, libName, extLoc.getLabel(), address);
-                    lines.add(info);
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("name", extLoc.getLabel());
+                    entry.put("library", libName);
+                    entry.put("address", extLoc.getAddress().toString().replace(":", ""));
+                    String original = extLoc.getOriginalImportedName();
+                    if (original != null && !original.isEmpty() && !original.equals(extLoc.getLabel())) {
+                        entry.put("original_imported_name", original);
+                    }
+                    results.add(entry);
                 }
             }
+            int end = Math.min(offset + limit, results.size());
+            return Response.ok(offset < results.size() ? results.subList(offset, end) : List.of());
         } catch (Exception e) {
             Msg.error(this, "Error listing external locations: " + e.getMessage());
             return Response.err(e.getMessage());
         }
-
-        return Response.text(ServiceUtils.paginateList(lines, offset, limit));
     }
 
     public Response listExternalLocations(int offset, int limit) {
@@ -694,11 +710,7 @@ public class ListingService {
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
                     if (extLoc.getAddress().equals(addr)) {
-                        return Response.ok(JsonHelper.mapOf(
-                                "address", addr.toString(),
-                                "dll_name", dllName,
-                                "label", extLoc.getLabel()
-                        ));
+                        return Response.ok(externalLocationToMap(extLoc, dllName));
                     }
                 }
                 return Response.err("External location not found in DLL");
@@ -709,11 +721,7 @@ public class ListingService {
                     while (iter.hasNext()) {
                         ExternalLocation extLoc = iter.next();
                         if (extLoc.getAddress().equals(addr)) {
-                            return Response.ok(JsonHelper.mapOf(
-                                    "address", addr.toString(),
-                                    "dll_name", libName,
-                                    "label", extLoc.getLabel()
-                            ));
+                            return Response.ok(externalLocationToMap(extLoc, libName));
                         }
                     }
                 }
@@ -726,6 +734,18 @@ public class ListingService {
 
     public Response getExternalLocationDetails(String address, String dllName) {
         return getExternalLocationDetails(address, dllName, null);
+    }
+
+    private static Map<String, Object> externalLocationToMap(ExternalLocation extLoc, String libName) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("address", extLoc.getAddress().toString());
+        entry.put("dll_name", libName);
+        entry.put("label", extLoc.getLabel());
+        String original = extLoc.getOriginalImportedName();
+        if (original != null && !original.isEmpty() && !original.equals(extLoc.getLabel())) {
+            entry.put("original_imported_name", original);
+        }
+        return entry;
     }
 
     // ======================================================================
