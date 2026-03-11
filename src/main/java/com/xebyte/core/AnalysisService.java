@@ -1673,6 +1673,14 @@ public class AnalysisService {
         List<String> addresses;
         if (addressesObj instanceof List<?> list) {
             addresses = list.stream().map(String::valueOf).collect(java.util.stream.Collectors.toList());
+        } else if (addressesObj instanceof String s) {
+            addresses = new ArrayList<>();
+            for (String part : s.split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) {
+                    addresses.add(trimmed);
+                }
+            }
         } else {
             return Response.err("Missing required parameter: addresses (JSON array of hex addresses)");
         }

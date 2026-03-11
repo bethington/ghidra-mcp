@@ -1157,6 +1157,13 @@ public class XrefCallGraphService {
                         xrefSources.add(addr.toString());
                     }
                 }
+            } else if (xrefSourcesObj instanceof String s) {
+                for (String part : s.split(",")) {
+                    String trimmed = part.trim();
+                    if (!trimmed.isEmpty()) {
+                        xrefSources.add(trimmed);
+                    }
+                }
             }
 
             Listing listing = program.getListing();
