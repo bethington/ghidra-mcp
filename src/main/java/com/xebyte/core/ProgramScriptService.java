@@ -31,12 +31,15 @@ public class ProgramScriptService {
     }
 
     /**
-     * Retrieve the PluginTool from the ProgramProvider if it is a GuiProgramProvider.
+     * Retrieve the PluginTool from the ProgramProvider if it is a GuiProgramProvider/FrontEndProgramProvider.
      * Returns null when running headless.
      */
     private PluginTool getToolFromProvider() {
         if (programProvider instanceof GuiProgramProvider) {
             return ((GuiProgramProvider) programProvider).getTool();
+        }
+        if (programProvider instanceof FrontEndProgramProvider) {
+            return ((FrontEndProgramProvider) programProvider).getTool();
         }
         return null;
     }
@@ -1320,3 +1323,4 @@ public class ProgramScriptService {
         }
     }
 }
+
