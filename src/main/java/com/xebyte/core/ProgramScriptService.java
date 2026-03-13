@@ -519,6 +519,9 @@ public class ProgramScriptService {
                 loadResults.release(this);
             }
 
+            // Suppress the "Analysis Options" dialog — we handle analysis programmatically
+            ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
+
             // Open in CodeBrowser
             ProgramManager pm = findOrCreateProgramManager(tool);
             if (pm == null) {
