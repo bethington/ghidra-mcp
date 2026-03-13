@@ -487,19 +487,22 @@ public class ProgramScriptService {
                     compilerSpec = language.getDefaultCompilerSpec();
                 }
 
-                // Import with explicit language/compiler spec
-                LoadResults<Program> loadResults = AutoImporter.importByLookingForLcs(
+                // Import as raw binary with explicit language/compiler spec
+                ghidra.app.util.opinion.Loaded<Program> loaded = AutoImporter.importAsBinary(
                     file, project, projectFolder, language, compilerSpec,
                     this, log, ghidra.util.task.TaskMonitor.DUMMY);
 
-                if (loadResults == null) {
+                if (loaded == null) {
                     return Response.err("Import failed: no results. Log: " + log);
                 }
-                program = loadResults.getPrimaryDomainObject();
+                // getDomainObject(consumer) registers us as a consumer so the program stays open
+                program = loaded.getDomainObject(this);
                 if (program == null) {
                     return Response.err("Import failed: no primary program. Log: " + log);
                 }
-                loadResults.release(this);
+                // Save to project folder (creates DomainFile)
+                loaded.save(ghidra.util.task.TaskMonitor.DUMMY);
+                loaded.release(this);
             } else {
                 // Auto-detect format
                 LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
@@ -546,7 +549,17 @@ public class ProgramScriptService {
                 "analyzing", analyzing
             ));
         } catch (Exception e) {
-            return Response.err("Import failed: " + e.getMessage());
+            String msg = e.getMessage();
+            if (msg == null || msg.isEmpty()) {
+                msg = e.getClass().getName();
+                // Include cause if available
+                if (e.getCause() != null) {
+                    msg += ": " + (e.getCause().getMessage() != null
+                        ? e.getCause().getMessage() : e.getCause().getClass().getName());
+                }
+            }
+            Msg.error(this, "Import failed", e);
+            return Response.err("Import failed: " + msg);
         }
     }
 
