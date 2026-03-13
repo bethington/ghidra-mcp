@@ -662,7 +662,7 @@ public class ProgramScriptService {
     public Response runGhidraScript(
             @Param(value = "script_path", source = ParamSource.BODY) String scriptPath,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -957,7 +957,7 @@ public class ProgramScriptService {
             @Param(value = "execute", source = ParamSource.BODY, defaultValue = "false") boolean execute,
             @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "false") boolean isVolatile,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1058,7 +1058,7 @@ public class ProgramScriptService {
             @Param(value = "address", source = ParamSource.BODY) String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1192,7 +1192,7 @@ public class ProgramScriptService {
     public Response deleteBookmark(
             @Param(value = "address", source = ParamSource.BODY) String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1252,7 +1252,7 @@ public class ProgramScriptService {
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
             @Param(value = "timeout_seconds", source = ParamSource.BODY, defaultValue = "300") int timeoutSeconds,
             @Param(value = "capture_output", source = ParamSource.BODY, defaultValue = "true") boolean captureOutput,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         if (scriptName == null || scriptName.isEmpty()) {
             return Response.err("Script name is required");
         }

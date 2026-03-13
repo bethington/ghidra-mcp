@@ -84,7 +84,7 @@ public class CommentService {
     public Response setDecompilerComment(
             @Param(value = "address", source = ParamSource.BODY) String addressStr,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment", programName);
     }
 
@@ -96,7 +96,7 @@ public class CommentService {
     public Response setDisassemblyComment(
             @Param(value = "address", source = ParamSource.BODY) String addressStr,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment", programName);
     }
 
@@ -146,7 +146,7 @@ public class CommentService {
     public Response setPlateComment(
             @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -216,7 +216,7 @@ public class CommentService {
             @Param(value = "decompiler_comments", source = ParamSource.BODY) List<Map<String, String>> decompilerComments,
             @Param(value = "disassembly_comments", source = ParamSource.BODY) List<Map<String, String>> disassemblyComments,
             @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "") String plateComment,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -333,7 +333,7 @@ public class CommentService {
             @Param(value = "clear_plate", source = ParamSource.BODY, defaultValue = "true") boolean clearPlate,
             @Param(value = "clear_pre", source = ParamSource.BODY, defaultValue = "true") boolean clearPre,
             @Param(value = "clear_eol", source = ParamSource.BODY, defaultValue = "true") boolean clearEol,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

@@ -459,7 +459,7 @@ public class DocumentationHashService {
     @McpTool(path = "/apply_function_documentation", method = "POST", description = "Import documentation to a target function", category = "documentation")
     public Response applyFunctionDocumentation(
             @Param(value = "json_body", source = ParamSource.BODY) String jsonBody,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
