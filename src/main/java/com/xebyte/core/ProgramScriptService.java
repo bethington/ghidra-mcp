@@ -871,15 +871,16 @@ public class ProgramScriptService {
             return Response.err("code parameter required");
         }
 
-        // Derive a class name from the code, or generate one
-        String className = "InlineScript_" + Long.toHexString(System.nanoTime());
+        // Use unique class name per invocation so Ghidra recompiles each time.
+        // If user provides their own class, extract its name for the filename.
+        String className = "McpInline_" + Long.toHexString(System.nanoTime());
         java.util.regex.Matcher m = java.util.regex.Pattern
             .compile("public\\s+class\\s+(\\w+)").matcher(code);
         if (m.find()) {
             className = m.group(1);
         }
 
-        // Write to a temp file in ~/ghidra_scripts/ so OSGi classloader can find it
+        // Write to ~/ghidra_scripts/ so OSGi classloader can find the source bundle
         File scriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
         scriptsDir.mkdirs();
         File tempScript = new File(scriptsDir, className + ".java");
