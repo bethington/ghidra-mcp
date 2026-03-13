@@ -566,6 +566,28 @@ public class ProgramScriptService {
         }
     }
 
+    @McpTool(path = "/reanalyze", method = "POST", description = "Trigger full auto-analysis on a program", category = "program")
+    public Response reanalyze(
+            @Param(value = "program", source = ParamSource.BODY, defaultValue = "", description = "Program name (default: current program)") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        try {
+            AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+            mgr.reAnalyzeAll(null);
+            mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "name", program.getName(),
+                "analyzing", true,
+                "message", "Auto-analysis started for " + program.getName()
+            ));
+        } catch (Exception e) {
+            return Response.err("Failed to start analysis: " + e.getMessage());
+        }
+    }
+
     @McpTool(path = "/analysis_status", description = "Get auto-analysis status for open programs", category = "program")
     public Response analysisStatus(
             @Param(value = "program", description = "Program name (omit for all open programs)") String programName) {
@@ -845,7 +867,47 @@ public class ProgramScriptService {
     public Response runScriptInline(
             @Param(value = "code", source = ParamSource.BODY) String code,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String args) {
-        return runGhidraScript(code, args);
+        if (code == null || code.trim().isEmpty()) {
+            return Response.err("code parameter required");
+        }
+
+        // Derive a class name from the code, or generate one
+        String className = "InlineScript_" + Long.toHexString(System.nanoTime());
+        java.util.regex.Matcher m = java.util.regex.Pattern
+            .compile("public\\s+class\\s+(\\w+)").matcher(code);
+        if (m.find()) {
+            className = m.group(1);
+        }
+
+        // Write to a temp file in ~/ghidra_scripts/ so OSGi classloader can find it
+        File scriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
+        scriptsDir.mkdirs();
+        File tempScript = new File(scriptsDir, className + ".java");
+
+        try {
+            // If code doesn't contain a class definition, wrap it
+            String scriptCode = code;
+            if (!code.contains("extends GhidraScript")) {
+                scriptCode = "import ghidra.app.script.GhidraScript;\n"
+                    + "public class " + className + " extends GhidraScript {\n"
+                    + "    @Override\n"
+                    + "    public void run() throws Exception {\n"
+                    + code + "\n"
+                    + "    }\n"
+                    + "}\n";
+            }
+
+            java.nio.file.Files.writeString(tempScript.toPath(), scriptCode);
+            return runGhidraScript(tempScript.getAbsolutePath(), args);
+        } catch (Exception e) {
+            return Response.err("Failed to create inline script: " + e.getMessage());
+        } finally {
+            if (tempScript.exists()) {
+                if (!tempScript.delete()) {
+                    tempScript.deleteOnExit();
+                }
+            }
+        }
     }
 
     /**
@@ -1540,6 +1602,77 @@ public class ProgramScriptService {
             default:
                 return "CustomAnalysis.java";
         }
+    }
+
+    // ========================================================================
+    // Image Base Operations
+    // ========================================================================
+
+    @McpTool(path = "/set_image_base", method = "POST", description = "Set the base address of the program (rebases all addresses)", category = "program")
+    public Response setImageBase(
+            @Param(value = "address", source = ParamSource.BODY, description = "New base address (e.g. 0x08000000)") String addressStr,
+            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return Response.err("address parameter required");
+        }
+
+        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
+        final AtomicReference<String> errorMsg = new AtomicReference<>();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Set image base");
+                boolean txSuccess = false;
+                try {
+                    Address oldBase = program.getImageBase();
+                    Address newBase = program.getAddressFactory().getAddress(addressStr);
+                    if (newBase == null) {
+                        errorMsg.set("Invalid address: " + addressStr);
+                        return;
+                    }
+                    program.setImageBase(newBase, true);
+                    txSuccess = true;
+
+                    // Trigger re-analysis since all addresses shifted
+                    boolean reanalyzing = false;
+                    try {
+                        AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+                        mgr.reAnalyzeAll(null);
+                        mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+                        reanalyzing = true;
+                    } catch (Exception ae) {
+                        Msg.warn(this, "Re-analysis after rebase failed: " + ae.getMessage());
+                    }
+
+                    resultData.set(JsonHelper.mapOf(
+                        "success", true,
+                        "old_base", oldBase.toString(),
+                        "new_base", newBase.toString(),
+                        "analyzing", reanalyzing,
+                        "message", "Image base changed from " + oldBase + " to " + newBase
+                    ));
+                } catch (Throwable e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    errorMsg.set(msg);
+                    Msg.error(this, "Error setting image base", e);
+                } finally {
+                    program.endTransaction(tx, txSuccess);
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return Response.err(errorMsg.get());
+            }
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            return Response.err("Failed to execute on Swing thread: " + msg);
+        }
+
+        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 }
 
