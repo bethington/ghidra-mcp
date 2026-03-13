@@ -50,6 +50,7 @@ ENDPOINT_TIMEOUTS = {
     "disassemble_bytes": 120,
     "bulk_fuzzy_match": 180,
     "find_similar_functions_fuzzy": 60,
+    "import_file": 300,
     "run_ghidra_script": 1800,
     "run_script_inline": 1800,
     "decompile_function": 45,
