@@ -7,6 +7,9 @@ import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
+import ghidra.app.util.importer.AutoImporter;
+import ghidra.app.util.importer.MessageLog;
+import ghidra.app.util.opinion.LoadResults;
 import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 
@@ -388,12 +391,14 @@ public class ProgramScriptService {
 
         // Open the program
         try {
-            ProgramManager pm = tool.getService(ProgramManager.class);
+            // Find a ProgramManager from an existing CodeBrowser, or launch one
+            ProgramManager pm = findOrCreateProgramManager(tool);
             if (pm == null) {
-                return Response.err("ProgramManager service not available");
+                return Response.err("Could not find or create a CodeBrowser tool");
             }
 
-            Program program = (Program) domainFile.getDomainObject(tool, false, false, ghidra.util.task.TaskMonitor.DUMMY);
+            Program program = (Program) domainFile.getDomainObject(
+                tool, false, false, ghidra.util.task.TaskMonitor.DUMMY);
             if (program == null) {
                 return Response.err("Failed to open program: " + path);
             }
@@ -429,7 +434,201 @@ public class ProgramScriptService {
     }
 
     // ========================================================================
+    // Import & Analysis
+
+    @McpTool(path = "/import_file", method = "POST",
+            description = "Import a binary file from disk into the current Ghidra project and open it. "
+                + "For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default').",
+            category = "program")
+    public Response importFile(
+            @Param(value = "file_path", source = ParamSource.BODY, description = "Absolute path to the binary file on disk") String filePath,
+            @Param(value = "project_folder", source = ParamSource.BODY, defaultValue = "/", description = "Destination folder in the Ghidra project") String projectFolder,
+            @Param(value = "language", source = ParamSource.BODY, defaultValue = "", description = "Language ID for raw binaries (e.g. 'ARM:LE:32:Cortex', 'x86:LE:64:default'). If omitted, auto-detect.") String languageId,
+            @Param(value = "compiler_spec", source = ParamSource.BODY, defaultValue = "", description = "Compiler spec ID (e.g. 'default', 'gcc', 'windows'). If omitted, uses language default.") String compilerSpecId,
+            @Param(value = "auto_analyze", source = ParamSource.BODY, defaultValue = "true", description = "Start auto-analysis after import") boolean autoAnalyze) {
+
+        if (filePath == null || filePath.trim().isEmpty()) {
+            return Response.err("file_path is required");
+        }
+
+        File file = new File(filePath);
+        if (!file.exists()) {
+            return Response.err("File not found: " + filePath);
+        }
+
+        PluginTool tool = getToolFromProvider();
+        if (tool == null) {
+            return Response.err("Import requires GUI mode (PluginTool not available)");
+        }
+
+        ghidra.framework.model.Project project = tool.getProject();
+        if (project == null) {
+            return Response.err("No project is currently open");
+        }
+
+        boolean hasLanguage = languageId != null && !languageId.isEmpty();
+
+        try {
+            MessageLog log = new MessageLog();
+            Program program;
+
+            if (hasLanguage) {
+                // Resolve language and compiler spec
+                ghidra.program.model.lang.LanguageService langService =
+                    ghidra.program.util.DefaultLanguageService.getLanguageService();
+                ghidra.program.model.lang.Language language = langService.getLanguage(
+                    new ghidra.program.model.lang.LanguageID(languageId));
+
+                ghidra.program.model.lang.CompilerSpec compilerSpec;
+                if (compilerSpecId != null && !compilerSpecId.isEmpty()) {
+                    compilerSpec = language.getCompilerSpecByID(
+                        new ghidra.program.model.lang.CompilerSpecID(compilerSpecId));
+                } else {
+                    compilerSpec = language.getDefaultCompilerSpec();
+                }
+
+                // Import with explicit language/compiler spec
+                LoadResults<Program> loadResults = AutoImporter.importByLookingForLcs(
+                    file, project, projectFolder, language, compilerSpec,
+                    this, log, ghidra.util.task.TaskMonitor.DUMMY);
+
+                if (loadResults == null) {
+                    return Response.err("Import failed: no results. Log: " + log);
+                }
+                program = loadResults.getPrimaryDomainObject();
+                if (program == null) {
+                    return Response.err("Import failed: no primary program. Log: " + log);
+                }
+                loadResults.release(this);
+            } else {
+                // Auto-detect format
+                LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
+                    file, project, projectFolder,
+                    this, log, ghidra.util.task.TaskMonitor.DUMMY);
+
+                if (loadResults == null) {
+                    return Response.err("Import failed: no load spec found. Specify 'language' for raw binaries. Log: " + log);
+                }
+                program = loadResults.getPrimaryDomainObject();
+                if (program == null) {
+                    return Response.err("Import failed: no primary program. Log: " + log);
+                }
+                loadResults.release(this);
+            }
+
+            // Open in CodeBrowser
+            ProgramManager pm = findOrCreateProgramManager(tool);
+            if (pm == null) {
+                return Response.err("Could not find or create a CodeBrowser tool");
+            }
+
+            pm.openProgram(program);
+            pm.setCurrentProgram(program);
+
+            // Optionally trigger auto-analysis
+            boolean analyzing = false;
+            if (autoAnalyze) {
+                try {
+                    AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+                    mgr.reAnalyzeAll(null);
+                    mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+                    analyzing = true;
+                } catch (Exception ae) {
+                    Msg.warn(this, "Auto-analysis failed: " + ae.getMessage());
+                }
+            }
+
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "name", program.getName(),
+                "path", program.getDomainFile().getPathname(),
+                "language", program.getLanguageID().getIdAsString(),
+                "analyzing", analyzing
+            ));
+        } catch (Exception e) {
+            return Response.err("Import failed: " + e.getMessage());
+        }
+    }
+
+    @McpTool(path = "/analysis_status", description = "Get auto-analysis status for open programs", category = "program")
+    public Response analysisStatus(
+            @Param(value = "program", description = "Program name (omit for all open programs)") String programName) {
+
+        Program[] allPrograms = programProvider.getAllOpenPrograms();
+        if (allPrograms == null || allPrograms.length == 0) {
+            return Response.err("No programs are currently open");
+        }
+
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (Program prog : allPrograms) {
+            if (programName != null && !programName.isEmpty() && !prog.getName().equals(programName)) {
+                continue;
+            }
+            boolean analyzing = false;
+            try {
+                AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(prog);
+                analyzing = mgr.isAnalyzing();
+            } catch (Exception e) {
+                // May not have an analysis manager in headless mode
+            }
+            results.add(JsonHelper.mapOf(
+                "name", prog.getName(),
+                "analyzing", analyzing,
+                "function_count", prog.getFunctionManager().getFunctionCount()
+            ));
+        }
+
+        if (programName != null && !programName.isEmpty() && results.isEmpty()) {
+            return Response.err("Program not found: " + programName);
+        }
+
+        if (results.size() == 1) {
+            return Response.ok(results.get(0));
+        }
+        return Response.ok(JsonHelper.mapOf("programs", results));
+    }
+
+    // ========================================================================
     // Script Execution
+    /**
+     * Find an existing ProgramManager or launch a new CodeBrowser to get one.
+     */
+    private ProgramManager findOrCreateProgramManager(PluginTool tool) {
+        // 1. Try the tool directly (works if it's a CodeBrowser)
+        ProgramManager pm = tool.getService(ProgramManager.class);
+        if (pm != null) return pm;
+
+        // 2. Try MultiToolProgramProvider which searches across all running tools
+        if (programProvider instanceof MultiToolProgramProvider mtp) {
+            pm = mtp.findProgramManager();
+            if (pm != null) return pm;
+        }
+
+        // 3. Launch a new CodeBrowser via the workspace
+        try {
+            ghidra.framework.model.Project project = tool.getProject();
+            if (project != null) {
+                ghidra.framework.model.ToolManager tm = project.getToolManager();
+                if (tm != null) {
+                    ghidra.framework.model.ToolTemplate template =
+                        project.getLocalToolChest().getToolTemplate("CodeBrowser");
+                    if (template != null) {
+                        ghidra.framework.model.Workspace ws = tm.getActiveWorkspace();
+                        PluginTool newTool = ws.runTool(template);
+                        if (newTool != null) {
+                            pm = newTool.getService(ProgramManager.class);
+                            if (pm != null) return pm;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Msg.warn(this, "Failed to launch CodeBrowser: " + e.getMessage());
+        }
+
+        return null;
+    }
+
     // ========================================================================
 
     /**
