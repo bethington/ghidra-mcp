@@ -748,9 +748,14 @@ public class ProgramScriptService {
     /**
      * Read memory at a specific address.
      */
-    @McpTool(path = "/read_memory", description = "Read raw memory bytes", category = "program")
+    @McpTool(path = "/read_memory", description = "Read raw memory bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response readMemory(
-            @Param(value = "address", description = "Start address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "length", defaultValue = "16", description = "Number of bytes") int length,
             @Param(value = "program", description = "Target program name") String programName) {
         try {
@@ -758,9 +763,9 @@ public class ProgramScriptService {
             if (pe.hasError()) return pe.error();
             Program program = pe.program();
 
-            Address address = program.getAddressFactory().getAddress(addressStr);
+            Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             Memory memory = program.getMemory();
@@ -796,10 +801,15 @@ public class ProgramScriptService {
         return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, null);
     }
 
-    @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block", category = "program")
+    @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response createMemoryBlock(
             @Param(value = "name", source = ParamSource.BODY) String name,
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "size", source = ParamSource.BODY, defaultValue = "0") long size,
             @Param(value = "read", source = ParamSource.BODY, defaultValue = "true") boolean read,
             @Param(value = "write", source = ParamSource.BODY, defaultValue = "true") boolean write,
@@ -821,6 +831,12 @@ public class ProgramScriptService {
             return Response.err("size must be positive");
         }
 
+        // Resolve address before entering EDT lambda
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) {
+            return Response.err(ServiceUtils.getLastParseError());
+        }
+
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
@@ -829,12 +845,6 @@ public class ProgramScriptService {
                 int tx = program.startTransaction("Create memory block");
                 boolean txSuccess = false;
                 try {
-                    Address addr = program.getAddressFactory().getAddress(addressStr);
-                    if (addr == null) {
-                        errorMsg.set("Invalid address: " + addressStr);
-                        return;
-                    }
-
                     // Check for overlap with existing blocks
                     Address end = addr.add(size - 1);
                     for (MemoryBlock existing : program.getMemory().getBlocks()) {
@@ -902,9 +912,14 @@ public class ProgramScriptService {
         return setBookmark(addressStr, category, comment, null);
     }
 
-    @McpTool(path = "/set_bookmark", method = "POST", description = "Create or update a bookmark", category = "program")
+    @McpTool(path = "/set_bookmark", method = "POST", description = "Create or update a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response setBookmark(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -923,9 +938,9 @@ public class ProgramScriptService {
         }
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -969,10 +984,15 @@ public class ProgramScriptService {
         return listBookmarks(category, addressStr, null);
     }
 
-    @McpTool(path = "/list_bookmarks", description = "List bookmarks with optional filter", category = "program")
+    @McpTool(path = "/list_bookmarks", description = "List bookmarks with optional filter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response listBookmarks(
             @Param(value = "category", description = "Category filter") String category,
-            @Param(value = "address", description = "Address filter") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -984,9 +1004,9 @@ public class ProgramScriptService {
 
             // If specific address provided, get bookmarks at that address
             if (addressStr != null && !addressStr.isEmpty()) {
-                Address addr = program.getAddressFactory().getAddress(addressStr);
+                Address addr = ServiceUtils.parseAddress(program, addressStr);
                 if (addr == null) {
-                    return Response.err("Invalid address: " + addressStr);
+                    return Response.err(ServiceUtils.getLastParseError());
                 }
 
                 Bookmark[] bms = bookmarkManager.getBookmarks(addr);
@@ -1037,9 +1057,14 @@ public class ProgramScriptService {
         return deleteBookmark(addressStr, category, null);
     }
 
-    @McpTool(path = "/delete_bookmark", method = "POST", description = "Delete a bookmark", category = "program")
+    @McpTool(path = "/delete_bookmark", method = "POST", description = "Delete a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response deleteBookmark(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1051,9 +1076,9 @@ public class ProgramScriptService {
         }
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             BookmarkManager bookmarkManager = program.getBookmarkManager();

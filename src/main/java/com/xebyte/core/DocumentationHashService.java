@@ -60,18 +60,23 @@ public class DocumentationHashService {
      *
      * This allows matching identical functions that are located at different addresses.
      */
-    @McpTool(path = "/get_function_hash", description = "Compute normalized opcode hash for function", category = "documentation")
+    @McpTool(path = "/get_function_hash", description = "Compute normalized opcode hash for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
     public Response getFunctionHash(
-            @Param(value = "address", description = "Function address") String functionAddress,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(functionAddress);
+            Address addr = ServiceUtils.parseAddress(program, functionAddress);
             if (addr == null) {
-                return Response.err("Invalid address: " + functionAddress);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             Function func = program.getFunctionManager().getFunctionAt(addr);
@@ -302,18 +307,23 @@ public class DocumentationHashService {
         return getFunctionDocumentation(functionAddress, null);
     }
 
-    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function", category = "documentation")
+    @McpTool(path = "/get_function_documentation", description = "Export all documentation for a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
     public Response getFunctionDocumentation(
-            @Param(value = "address", description = "Function address") String functionAddress,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(functionAddress);
+            Address addr = ServiceUtils.parseAddress(program, functionAddress);
             if (addr == null) {
-                return Response.err("Invalid address: " + functionAddress);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             Function func = program.getFunctionManager().getFunctionAt(addr);
@@ -455,7 +465,7 @@ public class DocumentationHashService {
         return applyFunctionDocumentation(jsonBody, null);
     }
 
-    @McpTool(path = "/apply_function_documentation", method = "POST", description = "Import documentation to a target function", category = "documentation")
+    @McpTool(path = "/apply_function_documentation", method = "POST", description = "Import documentation to a target function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
     public Response applyFunctionDocumentation(
             @Param(value = "json_body", source = ParamSource.BODY) String jsonBody,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -475,9 +485,9 @@ public class DocumentationHashService {
                 return Response.err("target_address is required");
             }
 
-            Address addr = program.getAddressFactory().getAddress(targetAddress);
+            Address addr = ServiceUtils.parseAddress(program, targetAddress);
             if (addr == null) {
-                return Response.err("Invalid target address: " + targetAddress);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             Function func = program.getFunctionManager().getFunctionAt(addr);
@@ -771,9 +781,14 @@ public class DocumentationHashService {
      * Find undocumented (FUN_*) functions that reference a given string address.
      * This filters get_xrefs_to results to only return FUN_* functions.
      */
-    @McpTool(path = "/find_undocumented_by_string", description = "Find FUN_* functions referencing a string", category = "documentation")
+    @McpTool(path = "/find_undocumented_by_string", description = "Find FUN_* functions referencing a string. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
     public Response findUndocumentedByString(
-            @Param(value = "address", description = "String address") String stringAddress,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String stringAddress,
             @Param(value = "program", description = "Target program name") String programName) {
         if (stringAddress == null || stringAddress.isEmpty()) {
             return Response.err("String address is required");
@@ -784,9 +799,9 @@ public class DocumentationHashService {
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(stringAddress);
+            Address addr = ServiceUtils.parseAddress(program, stringAddress);
             if (addr == null) {
-                return Response.err("Invalid address format: " + stringAddress);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             ReferenceManager refMgr = program.getReferenceManager();
@@ -945,17 +960,22 @@ public class DocumentationHashService {
     /**
      * Get the function signature (feature vector) for a function at the given address.
      */
-    @McpTool(path = "/get_function_signature", description = "Get function signature for cross-binary comparison", category = "documentation")
+    @McpTool(path = "/get_function_signature", description = "Get function signature for cross-binary comparison. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
     public Response handleGetFunctionSignature(
-            @Param(value = "address", description = "Function address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
-            if (addr == null) return Response.err("Invalid address: " + addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
+            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
             Function func = program.getFunctionManager().getFunctionAt(addr);
             if (func == null) return Response.err("No function at address: " + addressStr);
@@ -971,9 +991,14 @@ public class DocumentationHashService {
     /**
      * Find functions in target program similar to the source function.
      */
-    @McpTool(path = "/find_similar_functions_fuzzy", description = "Cross-binary fuzzy function matching", category = "documentation")
+    @McpTool(path = "/find_similar_functions_fuzzy", description = "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
     public Response handleFindSimilarFunctionsFuzzy(
-            @Param(value = "address", description = "Function address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "source_program", description = "Source program name") String sourceProgramName,
             @Param(value = "target_program", description = "Target program name") String targetProgramName,
             @Param(value = "threshold", defaultValue = "0.7", description = "Similarity threshold") double threshold,
@@ -992,8 +1017,8 @@ public class DocumentationHashService {
         Program tgtProgram = tgtPe.program();
 
         try {
-            Address addr = srcProgram.getAddressFactory().getAddress(addressStr);
-            if (addr == null) return Response.err("Invalid address: " + addressStr);
+            Address addr = ServiceUtils.parseAddress(srcProgram, addressStr);
+            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
             Function srcFunc = srcProgram.getFunctionManager().getFunctionAt(addr);
             if (srcFunc == null) return Response.err("No function at address: " + addressStr);
@@ -1041,10 +1066,20 @@ public class DocumentationHashService {
     /**
      * Compute a structured diff between two functions.
      */
-    @McpTool(path = "/diff_functions", description = "Compute structured diff between two functions", category = "documentation")
+    @McpTool(path = "/diff_functions", description = "Compute structured diff between two functions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
     public Response handleDiffFunctions(
-            @Param(value = "address_a", description = "First function address") String addressA,
-            @Param(value = "address_b", description = "Second function address") String addressB,
+            @Param(value = "address_a", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressA,
+            @Param(value = "address_b", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressB,
             @Param(value = "program_a", description = "First program name") String programAName,
             @Param(value = "program_b", description = "Second program name") String programBName) {
         // Program A
@@ -1063,11 +1098,11 @@ public class DocumentationHashService {
         }
 
         try {
-            Address addrA = progA.getAddressFactory().getAddress(addressA);
-            if (addrA == null) return Response.err("Invalid address_a: " + addressA);
+            Address addrA = ServiceUtils.parseAddress(progA, addressA);
+            if (addrA == null) return Response.err(ServiceUtils.getLastParseError());
 
-            Address addrB = progB.getAddressFactory().getAddress(addressB);
-            if (addrB == null) return Response.err("Invalid address_b: " + addressB);
+            Address addrB = ServiceUtils.parseAddress(progB, addressB);
+            if (addrB == null) return Response.err(ServiceUtils.getLastParseError());
 
             Function funcA = progA.getFunctionManager().getFunctionAt(addrA);
             if (funcA == null) return Response.err("No function at address_a: " + addressA);
