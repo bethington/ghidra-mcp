@@ -218,9 +218,14 @@ public class AnalysisService {
         return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection, null);
     }
 
-    @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis", category = "analysis")
+    @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response analyzeDataRegion(
-            @Param(value = "address", source = ParamSource.BODY) String startAddressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String startAddressStr,
             @Param(value = "max_scan_bytes", source = ParamSource.BODY, defaultValue = "1024") int maxScanBytes,
             @Param(value = "include_xref_map", source = ParamSource.BODY, defaultValue = "true") boolean includeXrefMap,
             @Param(value = "include_assembly_patterns", source = ParamSource.BODY, defaultValue = "true") boolean includeAssemblyPatterns,
@@ -231,9 +236,9 @@ public class AnalysisService {
         Program program = pe.program();
 
         try {
-            Address startAddr = program.getAddressFactory().getAddress(startAddressStr);
+            Address startAddr = ServiceUtils.parseAddress(program, startAddressStr);
             if (startAddr == null) {
-                return Response.err("Invalid address: " + startAddressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             ReferenceManager refMgr = program.getReferenceManager();
@@ -386,9 +391,14 @@ public class AnalysisService {
         return detectArrayBounds(addressStr, analyzeLoopBounds, analyzeIndexing, maxScanRange, null);
     }
 
-    @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context", category = "analysis")
+    @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response detectArrayBounds(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "analyze_loop_bounds", source = ParamSource.BODY, defaultValue = "true") boolean analyzeLoopBounds,
             @Param(value = "analyze_indexing", source = ParamSource.BODY, defaultValue = "true") boolean analyzeIndexing,
             @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048") int maxScanRange,
@@ -398,9 +408,9 @@ public class AnalysisService {
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             ReferenceManager refMgr = program.getReferenceManager();
@@ -448,9 +458,14 @@ public class AnalysisService {
         return getFieldAccessContext(structAddressStr, fieldOffset, numExamples, null);
     }
 
-    @McpTool(path = "/get_field_access_context", method = "POST", description = "Get assembly context for struct field offsets", category = "analysis")
+    @McpTool(path = "/get_field_access_context", method = "POST", description = "Get assembly context for struct field offsets. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response getFieldAccessContext(
-            @Param(value = "struct_address", source = ParamSource.BODY) String structAddressStr,
+            @Param(value = "struct_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String structAddressStr,
             @Param(value = "field_offset", source = ParamSource.BODY, defaultValue = "0") int fieldOffset,
             @Param(value = "num_examples", source = ParamSource.BODY, defaultValue = "5") int numExamples,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -466,6 +481,10 @@ public class AnalysisService {
         if (pe.hasError()) return pe.error();
         Program resolvedProgram = pe.program();
 
+        // Resolve address before entering SwingUtilities lambda
+        Address structAddr = ServiceUtils.parseAddress(resolvedProgram, structAddressStr);
+        if (structAddr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicReference<Response> result = new AtomicReference<>();
 
         // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
@@ -473,12 +492,6 @@ public class AnalysisService {
             SwingUtilities.invokeAndWait(() -> {
                 try {
                     Program program = resolvedProgram;
-
-                    Address structAddr = program.getAddressFactory().getAddress(structAddressStr);
-                    if (structAddr == null) {
-                        result.set(Response.err("Invalid address: " + structAddressStr));
-                        return;
-                    }
 
                     // Calculate field address with overflow protection
                     Address fieldAddr;
@@ -548,9 +561,14 @@ public class AnalysisService {
         return inspectMemoryContent(addressStr, length, detectStrings, null);
     }
 
-    @McpTool(path = "/inspect_memory_content", description = "Inspect memory with string detection", category = "analysis")
+    @McpTool(path = "/inspect_memory_content", description = "Inspect memory with string detection. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response inspectMemoryContent(
-            @Param(value = "address", description = "Start address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "length", defaultValue = "64", description = "Bytes to read") int length,
             @Param(value = "detect_strings", defaultValue = "true", description = "Auto-detect strings") boolean detectStrings,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -559,9 +577,9 @@ public class AnalysisService {
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             Memory memory = program.getMemory();
@@ -1080,14 +1098,23 @@ public class AnalysisService {
      * @param compact When true, returns only scores and issue counts (no arrays, no recommendations).
      *                Reduces response from ~20KB to ~300 bytes.
      */
-    @McpTool(path = "/analyze_function_completeness", description = "Check function documentation completeness", category = "analysis")
+    @McpTool(path = "/analyze_function_completeness", description = "Check function documentation completeness. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response analyzeFunctionCompleteness(
-            @Param(value = "function_address", description = "Function address") String functionAddress,
+            @Param(value = "function_address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "compact", defaultValue = "false", description = "Compact output") boolean compact,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
@@ -1095,12 +1122,6 @@ public class AnalysisService {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        errorMsg.set("Invalid address: " + functionAddress);
-                        return;
-                    }
-
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
                         errorMsg.set("No function at address: " + functionAddress);
@@ -1691,9 +1712,14 @@ public class AnalysisService {
     /**
      * v1.5.0: Find next undefined function needing analysis
      */
-    @McpTool(path = "/find_next_undefined_function", description = "Find next function needing analysis", category = "analysis")
+    @McpTool(path = "/find_next_undefined_function", description = "Find next function needing analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response findNextUndefinedFunction(
-            @Param(value = "start_address", description = "Starting address") String startAddress,
+            @Param(value = "start_address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String startAddress,
             @Param(value = "criteria", description = "Search criteria") String criteria,
             @Param(value = "pattern", description = "Name pattern filter") String pattern,
             @Param(value = "direction", description = "Search direction") String direction,
@@ -1702,6 +1728,15 @@ public class AnalysisService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        // Resolve address before entering SwingUtilities lambda
+        final Address startAddr;
+        if (startAddress != null && !startAddress.isEmpty()) {
+            startAddr = ServiceUtils.parseAddress(program, startAddress);
+            if (startAddr == null) return Response.err(ServiceUtils.getLastParseError());
+        } else {
+            startAddr = program.getMinAddress();
+        }
+
         final AtomicReference<Response> responseRef = new AtomicReference<>(null);
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
@@ -1709,9 +1744,7 @@ public class AnalysisService {
             SwingUtilities.invokeAndWait(() -> {
                 try {
                     FunctionManager funcMgr = program.getFunctionManager();
-                    Address start = startAddress != null ?
-                        program.getAddressFactory().getAddress(startAddress) :
-                        program.getMinAddress();
+                    Address start = startAddr;
 
                     String searchPattern = pattern; // null means match all auto-generated names
                     boolean ascending = !"descending".equals(direction);
@@ -3486,13 +3519,22 @@ public class AnalysisService {
      * Returns decompiled code + classification + callees + variables with pre-analysis + compact completeness
      * in a single response, using only one decompilation.
      */
-    @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow", category = "analysis")
+    @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response analyzeForDocumentation(
-            @Param(value = "function_address", description = "Function address") String functionAddress,
+            @Param(value = "function_address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
@@ -3501,11 +3543,6 @@ public class AnalysisService {
             SwingUtilities.invokeAndWait(() -> {
                 try {
                     // Resolve function by address
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        errorMsg.set("Invalid address: " + functionAddress);
-                        return;
-                    }
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
                         func = program.getFunctionManager().getFunctionContaining(addr);
