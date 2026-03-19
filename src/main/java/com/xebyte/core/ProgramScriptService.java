@@ -182,6 +182,10 @@ public class ProgramScriptService {
         ));
     }
 
+    public Response getAddressSpaces() {
+        return getAddressSpaces(null);
+    }
+
     /**
      * List all physical address spaces in the program.
      * Returns only RAM and CODE spaces; excludes pseudo-spaces (EXTERNAL, STACK, etc.)
