@@ -771,6 +771,112 @@ class TestProgramManagementTools:
         exit_ghidra()
         mock_post.assert_called_once_with("exit_ghidra", {})
 
+    @patch("bridge_mcp_ghidra.safe_post_json")
+    def test_load_program(self, mock_post):
+        """load_program uses safe_post_json."""
+        mock_post.return_value = '{"success": true}'
+        from bridge_mcp_ghidra import load_program
+
+        load_program("/data/test.bin")
+        mock_post.assert_called_once_with("load_program", {"file": "/data/test.bin"})
+
+    @patch("bridge_mcp_ghidra.safe_post_json")
+    def test_close_program(self, mock_post):
+        """close_program uses safe_post_json."""
+        mock_post.return_value = '{"success": true}'
+        from bridge_mcp_ghidra import close_program
+
+        close_program("test.bin")
+        mock_post.assert_called_once_with("close_program", {"name": "test.bin"})
+
+    @patch("bridge_mcp_ghidra.safe_post_json")
+    def test_load_program_from_project(self, mock_post):
+        """load_program_from_project uses safe_post_json."""
+        mock_post.return_value = '{"success": true}'
+        from bridge_mcp_ghidra import load_program_from_project
+
+        load_program_from_project("/Test")
+        mock_post.assert_called_once_with(
+            "load_program_from_project", {"path": "/Test"}
+        )
+
+    @patch("bridge_mcp_ghidra.safe_post_json")
+    def test_open_project(self, mock_post):
+        """open_project uses safe_post_json for headless compatibility."""
+        mock_post.return_value = '{"success": true}'
+        from bridge_mcp_ghidra import open_project
+
+        open_project("/projects/Test.gpr")
+        mock_post.assert_called_once_with(
+            "open_project", {"path": "/projects/Test.gpr"}
+        )
+
+    @patch("bridge_mcp_ghidra.safe_get_json")
+    def test_project_info_falls_back_to_headless_endpoint(self, mock_get_json):
+        """project_info falls back to get_project_info when project/info is unavailable."""
+        mock_get_json.side_effect = [
+            '{"error": "Endpoint not found: project/info"}',
+            '{"has_project": false}',
+        ]
+        from bridge_mcp_ghidra import project_info
+
+        result = project_info()
+        assert result == '{"has_project": false}'
+        assert mock_get_json.call_args_list[0].args == ("project/info", {})
+        assert mock_get_json.call_args_list[1].args == ("get_project_info", {})
+
+    @patch("bridge_mcp_ghidra.safe_post_json")
+    @patch("bridge_mcp_ghidra.make_request")
+    def test_open_program_falls_back_to_headless_project_load(
+        self, mock_request, mock_post
+    ):
+        """open_program falls back to load_program_from_project in headless mode."""
+        mock_request.return_value = (
+            '{"error":"Opening programs requires GUI mode (PluginTool not available)"}'
+        )
+        mock_post.return_value = '{"success": true, "program": "Test"}'
+        from bridge_mcp_ghidra import open_program
+
+        result = open_program("/Test")
+        assert result == '{"success": true, "program": "Test"}'
+        mock_post.assert_called_once_with(
+            "load_program_from_project", {"path": "/Test"}
+        )
+
+    @patch("bridge_mcp_ghidra.run_analysis")
+    @patch("bridge_mcp_ghidra.switch_program")
+    @patch("bridge_mcp_ghidra.load_program")
+    @patch("bridge_mcp_ghidra.safe_post_json")
+    def test_upload_binary_uploads_and_loads(
+        self, mock_post, mock_load, mock_switch, mock_analyze, tmp_path
+    ):
+        """upload_binary uploads local bytes then loads and switches to the new program."""
+        sample = tmp_path / "sample.bin"
+        sample.write_bytes(b"\x7fELFtest")
+
+        mock_post.return_value = '{"success": true, "path": "/data/uploads/sample.bin", "filename": "sample.bin", "size": 8}'
+        mock_load.return_value = '{"success": true, "program": "sample.bin"}'
+        mock_switch.return_value = '{"success": true, "switched_to": "sample.bin"}'
+        mock_analyze.return_value = '{"success": true, "program": "sample.bin"}'
+
+        from bridge_mcp_ghidra import upload_binary
+
+        result = json.loads(upload_binary(str(sample), analyze=True))
+
+        assert result["uploaded"]["path"] == "/data/uploads/sample.bin"
+        assert result["load"]["program"] == "sample.bin"
+        assert result["switch"]["switched_to"] == "sample.bin"
+        assert result["analysis"]["program"] == "sample.bin"
+
+        call_endpoint, payload = mock_post.call_args.args
+        assert call_endpoint == "upload_file"
+        assert payload["filename"] == "sample.bin"
+        assert payload["directory"] == "/data/uploads"
+        assert payload["content_base64"] == "f0VMRnRlc3Q="
+        mock_load.assert_called_once_with("/data/uploads/sample.bin")
+        mock_switch.assert_called_once_with("sample.bin")
+        mock_analyze.assert_called_once_with(program="sample.bin")
+
 
 # =============================================================================
 # Bookmark Tools

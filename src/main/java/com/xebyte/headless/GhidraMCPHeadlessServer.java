@@ -301,6 +301,9 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             endpointHandler.getMalwareSecurityService(), endpointHandler.getProgramScriptService());
 
         for (EndpointDef ep : registry.getEndpoints()) {
+            if ("/list_project_files".equals(ep.path())) {
+                continue;
+            }
             server.createContext(ep.path(), exchange -> {
                 try {
                     Map<String, String> query = parseQueryParams(exchange);
@@ -334,6 +337,16 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.loadProgram(filePath));
         });
 
+        server.createContext("/upload_file", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            sendResponse(exchange, endpointHandler.uploadFile(
+                params.get("filename"),
+                params.get("content_base64"),
+                params.get("directory"),
+                parseBooleanOrDefault(params.get("overwrite"), true)
+            ));
+        });
+
         server.createContext("/close_program", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             String name = params.get("name");
@@ -360,6 +373,14 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         server.createContext("/get_project_info", exchange -> {
             sendResponse(exchange, endpointHandler.getProjectInfo());
+        });
+
+        server.createContext("/project/info", exchange -> {
+            sendResponse(exchange, endpointHandler.getProjectInfo());
+        });
+
+        server.createContext("/list_project_files", exchange -> {
+            sendResponse(exchange, endpointHandler.listProjectFiles());
         });
 
         // GET_DATA_TYPE_SIZE - Not yet in service layer

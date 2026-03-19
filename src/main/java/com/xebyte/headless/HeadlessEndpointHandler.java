@@ -29,6 +29,8 @@ import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.TaskMonitor;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.*;
 
 import ghidra.app.cmd.disassemble.DisassembleCommand;
@@ -367,6 +369,50 @@ public class HeadlessEndpointHandler {
         }
 
         return "{\"error\": \"Load not supported in this mode\"}";
+    }
+
+    public String uploadFile(String filename, String contentBase64, String directory, boolean overwrite) {
+        if (filename == null || filename.isEmpty()) {
+            return "{\"error\": \"Filename required\"}";
+        }
+        if (contentBase64 == null || contentBase64.isEmpty()) {
+            return "{\"error\": \"Base64 content required\"}";
+        }
+
+        String safeFilename = new File(filename).getName();
+        if (safeFilename.isEmpty()) {
+            return "{\"error\": \"Invalid filename\"}";
+        }
+
+        String targetDirectory = (directory == null || directory.isEmpty()) ? "/data/uploads" : directory;
+        File dir = new File(targetDirectory);
+        if (!dir.exists() && !dir.mkdirs()) {
+            return "{\"error\": \"Failed to create directory: " + escapeJson(targetDirectory) + "\"}";
+        }
+        if (!dir.isDirectory()) {
+            return "{\"error\": \"Upload target is not a directory: " + escapeJson(targetDirectory) + "\"}";
+        }
+
+        File outputFile = new File(dir, safeFilename);
+        if (outputFile.exists() && !overwrite) {
+            return "{\"error\": \"File already exists: " + escapeJson(outputFile.getAbsolutePath()) + "\"}";
+        }
+
+        try {
+            byte[] decoded = Base64.getDecoder().decode(contentBase64);
+            try (FileOutputStream fos = new FileOutputStream(outputFile, false)) {
+                fos.write(decoded);
+            }
+
+            return "{\"success\": true, " +
+                   "\"filename\": \"" + escapeJson(safeFilename) + "\", " +
+                   "\"path\": \"" + escapeJson(outputFile.getAbsolutePath()) + "\", " +
+                   "\"size\": " + outputFile.length() + "}";
+        } catch (IllegalArgumentException e) {
+            return "{\"error\": \"Invalid base64 payload\"}";
+        } catch (IOException e) {
+            return "{\"error\": \"Failed to write upload: " + escapeJson(e.getMessage()) + "\"}";
+        }
     }
 
     public String closeProgram(String name) {

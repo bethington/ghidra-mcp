@@ -7,6 +7,7 @@
 # ]
 # ///
 
+import base64
 import requests
 import argparse
 import logging
@@ -55,6 +56,7 @@ ENDPOINT_TIMEOUTS = {
     "get_function_signature": 10,  # 10 seconds - single signature extraction
     "run_ghidra_script": 1800,  # 30 minutes - scripts can iterate entire projects
     "run_script_inline": 1800,  # 30 minutes - inline scripts can also be long-running
+    "upload_file": 120,  # 2 minutes - binary transfer to headless server
     "default": 30,  # 30 seconds for all other operations
 }
 # Maximum retry attempts for transient failures (3 attempts with exponential backoff)
@@ -5488,7 +5490,177 @@ def open_program(path: str, auto_analyze: bool = False) -> str:
     params = {"path": path}
     if auto_analyze:
         params["auto_analyze"] = "true"
-    return make_request(url, method="GET", params=params)
+
+    result = make_request(url, method="GET", params=params)
+
+    if isinstance(result, str) and (
+        "requires GUI mode" in result
+        or "PluginTool not available" in result
+        or "ProgramManager service not available" in result
+    ):
+        load_result = safe_post_json("load_program_from_project", {"path": path})
+
+        if not auto_analyze:
+            return load_result
+
+        try:
+            parsed = json.loads(load_result)
+        except (TypeError, ValueError):
+            return load_result
+
+        if parsed.get("error") or not parsed.get("program"):
+            return load_result
+
+        parsed["analysis"] = json.loads(run_analysis(program=parsed["program"]))
+        return json.dumps(parsed, indent=2)
+
+    return result
+
+
+@mcp.tool()
+def load_program(file_path: str) -> str:
+    """
+    Load a program from a filesystem path visible to the Ghidra server.
+
+    This is the headless-mode companion to open_program(). Use it when the
+    binary already exists on the server filesystem, such as `/data/program.exe`
+    in Docker deployments.
+
+    Args:
+        file_path: Absolute path to the binary on the Ghidra server host.
+
+    Returns:
+        JSON with load status and program name.
+    """
+    if not file_path:
+        raise GhidraValidationError("File path is required")
+
+    return safe_post_json("load_program", {"file": file_path})
+
+
+@mcp.tool()
+def close_program(name: str = None) -> str:
+    """
+    Close a loaded program.
+
+    Args:
+        name: Optional program name. If omitted, closes the current program.
+
+    Returns:
+        JSON with close status.
+    """
+    data = {}
+    if name:
+        data["name"] = name
+    return safe_post_json("close_program", data)
+
+
+@mcp.tool()
+def load_program_from_project(path: str) -> str:
+    """
+    Load a program from the currently open Ghidra project.
+
+    Args:
+        path: Project path to the program (for example `/Game.exe`).
+
+    Returns:
+        JSON with load status and program name.
+    """
+    if not path:
+        raise GhidraValidationError("Program path is required")
+
+    return safe_post_json("load_program_from_project", {"path": path})
+
+
+@mcp.tool()
+def upload_binary(
+    local_path: str,
+    remote_filename: str = None,
+    remote_dir: str = "/data/uploads",
+    load: bool = True,
+    analyze: bool = False,
+    switch_to_program: bool = True,
+) -> str:
+    """
+    Upload a local binary file to the Ghidra server and optionally load it.
+
+    This is intended for headless/Docker workflows where the model only knows
+    the path on its own filesystem and the server cannot directly access that
+    path.
+
+    Args:
+        local_path: Local filesystem path to the binary on the MCP client host.
+        remote_filename: Optional filename to use on the Ghidra server.
+        remote_dir: Target directory on the Ghidra server. Defaults to `/data/uploads`.
+        load: If True, load the uploaded binary after transfer.
+        analyze: If True, run auto-analysis after loading.
+        switch_to_program: If True, switch the current program to the uploaded one.
+
+    Returns:
+        JSON with upload details and optional load/analysis results.
+    """
+    if not local_path:
+        raise GhidraValidationError("Local path is required")
+
+    source = Path(local_path).expanduser().resolve()
+    if not source.exists():
+        raise GhidraValidationError(f"Local file not found: {source}")
+    if not source.is_file():
+        raise GhidraValidationError(f"Local path is not a file: {source}")
+
+    file_bytes = source.read_bytes()
+    upload_result = safe_post_json(
+        "upload_file",
+        {
+            "filename": remote_filename or source.name,
+            "directory": remote_dir,
+            "content_base64": base64.b64encode(file_bytes).decode("ascii"),
+            "overwrite": True,
+        },
+    )
+
+    try:
+        upload_data = json.loads(upload_result)
+    except (TypeError, ValueError):
+        return upload_result
+
+    if upload_data.get("error"):
+        return upload_result
+
+    result = {
+        "local_path": str(source),
+        "uploaded": upload_data,
+    }
+
+    if not load:
+        return json.dumps(result, indent=2)
+
+    server_path = upload_data.get("path")
+    load_result = load_program(server_path)
+    try:
+        load_data = json.loads(load_result)
+    except (TypeError, ValueError):
+        result["load"] = load_result
+        return json.dumps(result, indent=2)
+
+    result["load"] = load_data
+    program_name = load_data.get("program")
+
+    if program_name and switch_to_program:
+        switch_result = switch_program(program_name)
+        try:
+            result["switch"] = json.loads(switch_result)
+        except (TypeError, ValueError):
+            result["switch"] = switch_result
+
+    if program_name and analyze:
+        analysis_result = run_analysis(program=program_name)
+        try:
+            result["analysis"] = json.loads(analysis_result)
+        except (TypeError, ValueError):
+            result["analysis"] = analysis_result
+
+    return json.dumps(result, indent=2)
 
 
 # ====================================================================================
