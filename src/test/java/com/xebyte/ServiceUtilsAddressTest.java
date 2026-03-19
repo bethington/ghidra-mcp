@@ -78,7 +78,7 @@ public class ServiceUtilsAddressTest {
         String err = ServiceUtils.getLastParseError();
         assertNotNull(err);
         assertTrue("Error should mention unknown space name", err.contains("foo"));
-        assertTrue("Error should list available spaces", err.contains("ram") || err.contains("code"));
+        assertTrue("Error should list available spaces", err.contains("ram") && err.contains("code"));
     }
 
     @Test
@@ -126,6 +126,7 @@ public class ServiceUtilsAddressTest {
         Map<String, Object> result = ServiceUtils.addressToJson(mockAddr, null);
         assertEquals("00001000", result.get("address"));
         assertFalse(result.containsKey("address_full"));
+        assertFalse(result.containsKey("address_space"));
     }
 
     // --- getPhysicalSpaceCount ---
