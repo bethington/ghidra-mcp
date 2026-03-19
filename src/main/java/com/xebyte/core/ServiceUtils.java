@@ -19,7 +19,8 @@ import java.util.regex.Pattern;
 
 /**
  * Shared static utility methods used by all service classes.
- * All methods are stateless and thread-safe.
+ * Methods are thread-safe. {@code parseAddress} maintains per-thread error state via a
+ * {@link ThreadLocal}; see {@link #getLastParseError()}.
  */
 public final class ServiceUtils {
 
@@ -602,7 +603,7 @@ public final class ServiceUtils {
         String spaceName = address.getAddressSpace().getName();
         return JsonHelper.mapOf(
             "address",       plainHex,
-            "address_full",  spaceName + ":" + plainHex,
+            "address_full",  address.toString(),
             "address_space", spaceName
         );
     }
