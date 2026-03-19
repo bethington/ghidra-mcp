@@ -17,6 +17,7 @@ package com.xebyte.headless;
 
 import com.xebyte.core.BinaryComparisonService;
 import com.xebyte.core.ProgramProvider;
+import com.xebyte.core.ServiceUtils;
 import com.xebyte.core.ThreadingStrategy;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
@@ -114,13 +115,6 @@ public class HeadlessEndpointHandler {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
-    }
-
-    private Address parseAddress(Program program, String addressStr) {
-        if (addressStr == null || addressStr.isEmpty()) {
-            return null;
-        }
-        return program.getAddressFactory().getAddress(addressStr);
     }
 
     // ==========================================================================
@@ -608,7 +602,7 @@ public class HeadlessEndpointHandler {
         final String finalPrototype = cleanPrototype;
         final String finalConvention = resolvedConvention;
 
-        Address addr = parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) {
             return "Error: Invalid address: " + functionAddress;
         }
@@ -717,7 +711,7 @@ public class HeadlessEndpointHandler {
             return "Error: Renames object is required";
         }
 
-        Address addr = parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) {
             return "Error: Invalid address: " + functionAddress;
         }
@@ -840,9 +834,9 @@ public class HeadlessEndpointHandler {
             return "{\"error\": \"Function address is required\"}";
         }
 
-        Address addr = parseAddress(program, functionAddress);
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) {
-            return "{\"error\": \"Invalid address: " + escapeJson(functionAddress) + "\"}";
+            return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
         }
 
         try {
@@ -878,7 +872,7 @@ public class HeadlessEndpointHandler {
                         String addrStr = comment.get("address");
                         String text = comment.get("comment");
                         if (addrStr != null && text != null) {
-                            Address commentAddr = parseAddress(program, addrStr);
+                            Address commentAddr = ServiceUtils.parseAddress(program, addrStr);
                             if (commentAddr != null) {
                                 String existing = listing.getComment(CodeUnit.PRE_COMMENT, commentAddr);
                                 if (existing != null && !existing.isEmpty()) {
@@ -898,7 +892,7 @@ public class HeadlessEndpointHandler {
                         String addrStr = comment.get("address");
                         String text = comment.get("comment");
                         if (addrStr != null && text != null) {
-                            Address commentAddr = parseAddress(program, addrStr);
+                            Address commentAddr = ServiceUtils.parseAddress(program, addrStr);
                             if (commentAddr != null) {
                                 String existing = listing.getComment(CodeUnit.EOL_COMMENT, commentAddr);
                                 if (existing != null && !existing.isEmpty()) {
@@ -960,7 +954,7 @@ public class HeadlessEndpointHandler {
                         continue;
                     }
 
-                    Address addr = parseAddress(program, addrStr);
+                    Address addr = ServiceUtils.parseAddress(program, addrStr);
                     if (addr == null) {
                         errors.add("Invalid address: " + addrStr);
                         failed++;
@@ -1014,13 +1008,13 @@ public class HeadlessEndpointHandler {
             return "{\"error\": \"Address is required\"}";
         }
 
+        Address address = ServiceUtils.parseAddress(program, addressStr);
+        if (address == null) {
+            return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
+        }
+
         try {
             return threadingStrategy.executeWrite(program, "Delete label", () -> {
-                Address address = parseAddress(program, addressStr);
-                if (address == null) {
-                    return "{\"error\": \"Invalid address: " + addressStr + "\"}";
-                }
-
                 SymbolTable symbolTable = program.getSymbolTable();
                 Symbol[] symbols = symbolTable.getSymbols(address);
 
@@ -1114,7 +1108,7 @@ public class HeadlessEndpointHandler {
                         continue;
                     }
 
-                    Address addr = parseAddress(program, addrStr);
+                    Address addr = ServiceUtils.parseAddress(program, addrStr);
                     if (addr == null) {
                         errors.add("Invalid address: " + addrStr);
                         failed++;
@@ -2048,8 +2042,8 @@ public class HeadlessEndpointHandler {
         Program program = getProgram(programName);
         if (program == null) return getProgramError(programName);
         try {
-            Address addr = program.getAddressFactory().getAddress(functionAddress);
-            if (addr == null) return "{\"error\": \"Invalid address: " + escapeJson(functionAddress) + "\"}";
+            Address addr = ServiceUtils.parseAddress(program, functionAddress);
+            if (addr == null) return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
             Function func = program.getFunctionManager().getFunctionAt(addr);
             if (func == null) return "{\"error\": \"No function at address: " + escapeJson(functionAddress) + "\"}";
             return threadingStrategy.executeWrite(program, "Batch rename function components", () -> {
@@ -2080,10 +2074,10 @@ public class HeadlessEndpointHandler {
         if (program == null) return getProgramError(programName);
         if (functionAddress == null || functionAddress.isEmpty()) return "{\"error\": \"function_address required\"}";
         if (variableTypesJson == null || variableTypesJson.isEmpty()) return "{\"error\": \"variable_types required\"}";
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
         try {
             return threadingStrategy.executeWrite(program, "Batch set variable types", () -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddress);
-                if (addr == null) return "{\"error\": \"Invalid address\"}";
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) return "{\"error\": \"No function at address\"}";
                 return "{\"success\": true, \"function\": \"" + escapeJson(func.getName()) + "\"," +
