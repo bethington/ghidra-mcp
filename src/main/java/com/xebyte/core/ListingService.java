@@ -507,7 +507,7 @@ public class ListingService {
             String[] commonHexAddresses = {"0x401000", "0x400000", "0x1000", "0x10000"};
             for (String hexAddr : commonHexAddresses) {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(hexAddr);
+                    Address addr = ServiceUtils.parseAddress(program, hexAddr);
                     if (addr != null && program.getMemory().contains(addr)) {
                         Function func = program.getFunctionManager().getFunctionAt(addr);
                         if (func != null) {
