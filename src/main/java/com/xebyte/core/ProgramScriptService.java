@@ -162,6 +162,7 @@ public class ProgramScriptService {
 
         List<Map<String, Object>> programList = new ArrayList<>();
         for (Program prog : programs) {
+            int physicalSpaceCount = ServiceUtils.getPhysicalSpaceCount(prog);
             programList.add(JsonHelper.mapOf(
                 "name", prog.getName(),
                 "path", prog.getDomainFile().getPathname(),
@@ -171,7 +172,8 @@ public class ProgramScriptService {
                 "compiler", prog.getCompilerSpec().getCompilerSpecID().getIdAsString(),
                 "image_base", prog.getImageBase().toString(),
                 "memory_size", prog.getMemory().getSize(),
-                "function_count", prog.getFunctionManager().getFunctionCount()
+                "function_count", prog.getFunctionManager().getFunctionCount(),
+                "has_multiple_address_spaces", physicalSpaceCount > 1
             ));
         }
 
@@ -250,24 +252,35 @@ public class ProgramScriptService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        return Response.ok(JsonHelper.mapOf(
-            "name", program.getName(),
-            "path", program.getDomainFile().getPathname(),
-            "executable_path", program.getExecutablePath() != null ? program.getExecutablePath() : "",
-            "executable_format", program.getExecutableFormat(),
-            "language", program.getLanguageID().getIdAsString(),
-            "compiler", program.getCompilerSpec().getCompilerSpecID().getIdAsString(),
-            "address_size", program.getAddressFactory().getDefaultAddressSpace().getSize(),
-            "image_base", program.getImageBase().toString(),
-            "min_address", program.getMinAddress() != null ? program.getMinAddress().toString() : "null",
-            "max_address", program.getMaxAddress() != null ? program.getMaxAddress().toString() : "null",
-            "memory_size", program.getMemory().getSize(),
-            "function_count", program.getFunctionManager().getFunctionCount(),
-            "symbol_count", program.getSymbolTable().getNumSymbols(),
-            "data_type_count", program.getDataTypeManager().getDataTypeCount(true),
-            "creation_date", program.getCreationDate() != null ? program.getCreationDate().toString() : "unknown",
-            "memory_block_count", program.getMemory().getBlocks().length
-        ));
+        List<Map<String, Object>> addressSpaces = buildAddressSpacesList(program);
+        boolean multiSpace = addressSpaces.size() > 1;
+
+        Map<String, Object> info = new java.util.LinkedHashMap<>();
+        info.put("name", program.getName());
+        info.put("path", program.getDomainFile().getPathname());
+        info.put("executable_path", program.getExecutablePath() != null ? program.getExecutablePath() : "");
+        info.put("executable_format", program.getExecutableFormat());
+        info.put("language", program.getLanguageID().getIdAsString());
+        info.put("compiler", program.getCompilerSpec().getCompilerSpecID().getIdAsString());
+        info.put("address_size", program.getAddressFactory().getDefaultAddressSpace().getSize());
+        info.put("image_base", program.getImageBase().toString());
+        info.put("min_address", program.getMinAddress() != null ? program.getMinAddress().toString() : "null");
+        info.put("max_address", program.getMaxAddress() != null ? program.getMaxAddress().toString() : "null");
+        info.put("memory_size", program.getMemory().getSize());
+        info.put("function_count", program.getFunctionManager().getFunctionCount());
+        info.put("symbol_count", program.getSymbolTable().getNumSymbols());
+        info.put("data_type_count", program.getDataTypeManager().getDataTypeCount(true));
+        info.put("creation_date", program.getCreationDate() != null ? program.getCreationDate().toString() : "unknown");
+        info.put("memory_block_count", program.getMemory().getBlocks().length);
+        info.put("address_spaces", addressSpaces);
+        info.put("has_multiple_address_spaces", multiSpace);
+        if (multiSpace) {
+            info.put("address_space_warning",
+                "This program has multiple address spaces. Plain hex addresses will resolve to the "
+                + "default space and may be incorrect. Use <space>:<hex> format (e.g., mem:1000) "
+                + "or call get_address_spaces first.");
+        }
+        return Response.ok(info);
     }
 
     /**
