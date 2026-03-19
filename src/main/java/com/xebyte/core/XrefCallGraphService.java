@@ -29,9 +29,14 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific address (xref to)
      */
-    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to an address", category = "xref")
+    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref")
     public Response getXrefsTo(
-            @Param(value = "address", description = "Target address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -41,7 +46,8 @@ public class XrefCallGraphService {
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
+            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
             ReferenceManager refManager = program.getReferenceManager();
 
             ReferenceIterator refIter = refManager.getReferencesTo(addr);
@@ -72,9 +78,14 @@ public class XrefCallGraphService {
     /**
      * Get all references from a specific address (xref from)
      */
-    @McpTool(path = "/get_xrefs_from", description = "Get cross-references from an address", category = "xref")
+    @McpTool(path = "/get_xrefs_from", description = "Get cross-references from an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref")
     public Response getXrefsFrom(
-            @Param(value = "address", description = "Source address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program") String programName) {
@@ -84,7 +95,8 @@ public class XrefCallGraphService {
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
+            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
             ReferenceManager refManager = program.getReferenceManager();
 
             Reference[] references = refManager.getReferencesFrom(addr);
@@ -1104,7 +1116,7 @@ public class XrefCallGraphService {
                 List<Map<String, Object>> refsList = new ArrayList<>();
 
                 try {
-                    Address addr = program.getAddressFactory().getAddress(addrStr);
+                    Address addr = ServiceUtils.parseAddress(program, addrStr);
                     if (addr != null) {
                         ReferenceIterator refIter = refMgr.getReferencesTo(addr);
 
@@ -1163,7 +1175,7 @@ public class XrefCallGraphService {
 
             for (String addrStr : xrefSources) {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(addrStr);
+                    Address addr = ServiceUtils.parseAddress(program, addrStr);
                     if (addr != null) {
                         Instruction instr = listing.getInstructionAt(addr);
 
