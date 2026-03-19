@@ -3,6 +3,7 @@ package com.xebyte.core;
 import ghidra.app.services.ProgramManager;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
@@ -179,6 +180,56 @@ public class ProgramScriptService {
             "count", programs.length,
             "current_program", currentProgram != null ? currentProgram.getName() : ""
         ));
+    }
+
+    /**
+     * List all physical address spaces in the program.
+     * Returns only RAM and CODE spaces; excludes pseudo-spaces (EXTERNAL, STACK, etc.)
+     * and overlay spaces. Useful for embedded/microcontroller targets where multiple
+     * address spaces exist and plain hex addresses may be ambiguous.
+     */
+    @McpTool(path = "/get_address_spaces",
+             description = "List all physical address spaces in the program. On programs with multiple "
+                         + "address spaces (e.g., embedded targets), use the returned space names to "
+                         + "prefix addresses (e.g., mem:1000, code:ff00) for unambiguous resolution.",
+             category = "program")
+    public Response getAddressSpaces(
+            @Param(value = "program", description = "Target program name") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        List<Map<String, Object>> spaces = buildAddressSpacesList(program);
+        return Response.ok(JsonHelper.mapOf("address_spaces", spaces, "count", spaces.size()));
+    }
+
+    private List<Map<String, Object>> buildAddressSpacesList(Program program) {
+        List<Map<String, Object>> spaces = new ArrayList<>();
+        AddressSpace defaultSpace = program.getAddressFactory().getDefaultAddressSpace();
+        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
+            if (space.isOverlaySpace()) continue;
+            int type = space.getType();
+            if (type != AddressSpace.TYPE_RAM && type != AddressSpace.TYPE_CODE) continue;
+            long maxOff = space.getMaxAddress().getOffset();
+            long minOff = space.getMinAddress().getOffset();
+            // Safe unsigned size: (maxOff - minOff + 1) overflows for full 64-bit spaces (maxOff == -1L)
+            long size = maxOff - minOff + 1;
+            if (size == 0 && Long.compareUnsigned(maxOff, minOff) > 0) {
+                size = Long.MAX_VALUE; // Full 64-bit space; clamp to avoid emitting 0
+            }
+            int unitSize = space.getAddressableUnitSize();
+            spaces.add(JsonHelper.mapOf(
+                "name",                  space.getName(),
+                "start",                 space.getMinAddress().toString(false),
+                "end",                   space.getMaxAddress().toString(false),
+                "size",                  size,
+                "addressable_unit_size", unitSize,
+                "size_bytes",            size * unitSize,
+                "address_size_bits",     space.getSize(),
+                "is_default",            space == defaultSpace
+            ));
+        }
+        return spaces;
     }
 
     /**
