@@ -284,7 +284,7 @@ public class AnalysisService {
             // Get current name and type
             Data data = listing.getDataAt(startAddr);
             String currentName = (data != null && data.getLabel() != null) ?
-                                data.getLabel() : "DAT_" + startAddr.toString().replace(":", "");
+                                data.getLabel() : "DAT_" + startAddr.toString(false);
             String currentType = (data != null) ?
                                 data.getDataType().getName() : "undefined";
 

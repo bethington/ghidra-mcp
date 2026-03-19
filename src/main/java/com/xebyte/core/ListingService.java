@@ -155,9 +155,9 @@ public class ListingService {
                 Data data = it.next();
                 if (block.contains(data.getAddress())) {
                     StringBuilder info = new StringBuilder();
-                    String label = data.getLabel() != null ? data.getLabel() : "DAT_" + data.getAddress().toString().replace(":", "");
+                    String label = data.getLabel() != null ? data.getLabel() : "DAT_" + data.getAddress().toString(false);
                     info.append(label);
-                    info.append(" @ ").append(data.getAddress().toString().replace(":", ""));
+                    info.append(" @ ").append(data.getAddress().toString(false));
 
                     DataType dt = data.getDataType();
                     String typeName = (dt != null) ? dt.getName() : "undefined";
@@ -196,13 +196,13 @@ public class ListingService {
                     int xrefCount = refMgr.getReferenceCountTo(addr);
 
                     String label = data.getLabel() != null ? data.getLabel() :
-                                   "DAT_" + addr.toString().replace(":", "");
+                                   "DAT_" + addr.toString(false);
 
                     DataType dt = data.getDataType();
                     String typeName = (dt != null) ? dt.getName() : "undefined";
                     int length = data.getLength();
 
-                    dataItems.add(new DataItemInfo(addr.toString().replace(":", ""), label, typeName, length, xrefCount));
+                    dataItems.add(new DataItemInfo(addr.toString(false), label, typeName, length, xrefCount));
                 }
             }
         }
@@ -657,7 +657,7 @@ public class ListingService {
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
                     String locName = extLoc.getLabel();
-                    String address = extLoc.getAddress().toString().replace(":", "");
+                    String address = extLoc.getAddress().toString(false);
                     String info = String.format("%s (%s) - %s @ %s",
                         locName, libName, extLoc.getLabel(), address);
                     lines.add(info);
@@ -684,42 +684,39 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        try {
-            Address addr = program.getAddressFactory().getAddress(address);
-            ExternalManager extMgr = program.getExternalManager();
+        Address addr = ServiceUtils.parseAddress(program, address);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        ExternalManager extMgr = program.getExternalManager();
 
-            if (dllName != null && !dllName.isEmpty()) {
-                ExternalLocationIterator iter = extMgr.getExternalLocations(dllName);
+        if (dllName != null && !dllName.isEmpty()) {
+            ExternalLocationIterator iter = extMgr.getExternalLocations(dllName);
+            while (iter.hasNext()) {
+                ExternalLocation extLoc = iter.next();
+                if (extLoc.getAddress().equals(addr)) {
+                    return Response.ok(JsonHelper.mapOf(
+                            "address", addr.toString(),
+                            "dll_name", dllName,
+                            "label", extLoc.getLabel()
+                    ));
+                }
+            }
+            return Response.err("External location not found in DLL");
+        } else {
+            String[] libNames = extMgr.getExternalLibraryNames();
+            for (String libName : libNames) {
+                ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
                     if (extLoc.getAddress().equals(addr)) {
                         return Response.ok(JsonHelper.mapOf(
                                 "address", addr.toString(),
-                                "dll_name", dllName,
+                                "dll_name", libName,
                                 "label", extLoc.getLabel()
                         ));
                     }
                 }
-                return Response.err("External location not found in DLL");
-            } else {
-                String[] libNames = extMgr.getExternalLibraryNames();
-                for (String libName : libNames) {
-                    ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
-                    while (iter.hasNext()) {
-                        ExternalLocation extLoc = iter.next();
-                        if (extLoc.getAddress().equals(addr)) {
-                            return Response.ok(JsonHelper.mapOf(
-                                    "address", addr.toString(),
-                                    "dll_name", libName,
-                                    "label", extLoc.getLabel()
-                            ));
-                        }
-                    }
-                }
-                return Response.ok(JsonHelper.mapOf("address", address));
             }
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return Response.ok(JsonHelper.mapOf("address", address));
         }
     }
 
