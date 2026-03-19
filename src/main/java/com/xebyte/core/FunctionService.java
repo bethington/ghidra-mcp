@@ -105,9 +105,14 @@ public class FunctionService {
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(path = "/decompile_function", description = "Decompile function at address to pseudocode", category = "function")
+    @McpTool(path = "/decompile_function", description = "Decompile function at address to pseudocode. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response decompileFunctionByAddress(
-            @Param(value = "address", description = "Function address in hex") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "program", description = "Target program name") String programName,
             @Param(value = "timeout", defaultValue = "60", description = "Decompile timeout in seconds") int timeoutSeconds) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -304,9 +309,14 @@ public class FunctionService {
     /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
-    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function", category = "function")
+    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response forceDecompile(
-            @Param(value = "address", description = "Function address in hex") String functionAddrStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddrStr,
             @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -319,15 +329,13 @@ public class FunctionService {
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
 
+        // Resolve address before entering threading lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         try {
             threadingStrategy.executeRead(() -> {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-                    if (addr == null) {
-                        resultMsg.append("Error: Invalid function address: ").append(functionAddrStr);
-                        return null;
-                    }
-
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
                         resultMsg.append("Error: No function found at address ").append(functionAddrStr);
@@ -409,9 +417,14 @@ public class FunctionService {
      * Get assembly code for a function.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(path = "/disassemble_function", description = "Get assembly listing of function", category = "function")
+    @McpTool(path = "/disassemble_function", description = "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response disassembleFunction(
-            @Param(value = "address", description = "Function address in hex") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -419,7 +432,8 @@ public class FunctionService {
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
+            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
             Function func = ServiceUtils.getFunctionForAddress(program, addr);
             if (func == null) return Response.err("No function found at or containing address " + addressStr);
 
@@ -461,9 +475,14 @@ public class FunctionService {
     /**
      * Get function by address.
      */
-    @McpTool(path = "/get_function_by_address", description = "Get function info at a specific address", category = "function")
+    @McpTool(path = "/get_function_by_address", description = "Get function info at a specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response getFunctionByAddress(
-            @Param(value = "address", description = "Function address in hex") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -697,9 +716,14 @@ public class FunctionService {
     /**
      * Rename a function by its address.
      */
-    @McpTool(path = "/rename_function_by_address", method = "POST", description = "Rename function at specific address", category = "function")
+    @McpTool(path = "/rename_function_by_address", method = "POST", description = "Rename function at specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response renameFunctionByAddress(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddrStr,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddrStr,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
             @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -819,9 +843,14 @@ public class FunctionService {
     /**
      * Endpoint wrapper for setFunctionPrototype that converts PrototypeResult to Response.
      */
-    @McpTool(path = "/set_function_prototype", method = "POST", description = "Set function prototype with calling convention", category = "function")
+    @McpTool(path = "/set_function_prototype", method = "POST", description = "Set function prototype with calling convention. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response setFunctionPrototypeEndpoint(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "prototype", source = ParamSource.BODY) String prototype,
             @Param(value = "calling_convention", source = ParamSource.BODY, defaultValue = "") String callingConvention,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -848,7 +877,13 @@ public class FunctionService {
                                        String callingConvention, AtomicBoolean success, StringBuilder errorMessage) {
         try {
             // Get the address and function
-            Address addr = program.getAddressFactory().getAddress(functionAddrStr);
+            Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
+            if (addr == null) {
+                String msg = ServiceUtils.getLastParseError();
+                errorMessage.append(msg);
+                Msg.error(this, msg);
+                return;
+            }
             Function func = ServiceUtils.getFunctionForAddress(program, addr);
 
             if (func == null) {
@@ -1030,9 +1065,14 @@ public class FunctionService {
     /**
      * Set a local variable's type using HighFunctionDBUtil.updateDBVariable.
      */
-    @McpTool(path = "/set_local_variable_type", method = "POST", description = "Set the data type of a local variable", category = "function")
+    @McpTool(path = "/set_local_variable_type", method = "POST", description = "Set the data type of a local variable. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response setLocalVariableType(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddrStr,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddrStr,
             @Param(value = "variable_name", source = ParamSource.BODY) String variableName,
             @Param(value = "new_type", source = ParamSource.BODY) String newType,
             @Param(value = "program") String programName) {
@@ -1053,6 +1093,10 @@ public class FunctionService {
             return Response.err("New type is required");
         }
 
+        // Resolve address before entering threading lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
 
@@ -1060,12 +1104,6 @@ public class FunctionService {
             threadingStrategy.executeRead(() -> {
                 try {
                     // Find the function
-                    Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-                    if (addr == null) {
-                        resultMsg.append("Error: Invalid address: ").append(functionAddrStr);
-                        return null;
-                    }
-
                     Function func = ServiceUtils.getFunctionForAddress(program, addr);
                     if (func == null) {
                         resultMsg.append("Error: No function found at address ").append(functionAddrStr);
@@ -1207,9 +1245,14 @@ public class FunctionService {
     /**
      * Endpoint wrapper for set_parameter_type (delegates to setLocalVariableType).
      */
-    @McpTool(path = "/set_parameter_type", method = "POST", description = "Set the data type of a function parameter", category = "function")
+    @McpTool(path = "/set_parameter_type", method = "POST", description = "Set the data type of a function parameter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response setParameterTypeEndpoint(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "parameter_name", source = ParamSource.BODY) String parameterName,
             @Param(value = "new_type", source = ParamSource.BODY) String newType,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -1329,9 +1372,14 @@ public class FunctionService {
      * @param noReturn true to mark as non-returning, false to mark as returning
      * @return Success or error message
      */
-    @McpTool(path = "/set_function_no_return", method = "POST", description = "Mark function as no-return", category = "function")
+    @McpTool(path = "/set_function_no_return", method = "POST", description = "Mark function as no-return. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response setFunctionNoReturn(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddrStr,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddrStr,
             @Param(value = "no_return", source = ParamSource.BODY) boolean noReturn,
             @Param(value = "program") String programName) {
         // Input validation
@@ -1343,16 +1391,15 @@ public class FunctionService {
             return Response.err("Function address is required");
         }
 
+        // Resolve address before entering threading lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
 
         try {
             threadingStrategy.executeWrite(program, "Set function no return", () -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-                if (addr == null) {
-                    resultMsg.append("Error: Invalid address: ").append(functionAddrStr);
-                    return null;
-                }
 
                 Function func = ServiceUtils.getFunctionForAddress(program, addr);
                 if (func == null) {
@@ -1410,9 +1457,14 @@ public class FunctionService {
      * @param instructionAddrStr The instruction address in hex format (e.g., "0x6fb5c8b9")
      * @return Success or error message
      */
-    @McpTool(path = "/clear_instruction_flow_override", method = "POST", description = "Clear flow override at address", category = "function")
+    @McpTool(path = "/clear_instruction_flow_override", method = "POST", description = "Clear flow override at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response clearInstructionFlowOverride(
-            @Param(value = "address", source = ParamSource.BODY) String instructionAddrStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String instructionAddrStr,
             @Param(value = "program") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1423,16 +1475,15 @@ public class FunctionService {
             return Response.err("Instruction address is required");
         }
 
+        // Resolve address before entering threading lambda
+        Address addr = ServiceUtils.parseAddress(program, instructionAddrStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
 
         try {
             threadingStrategy.executeWrite(program, "Clear instruction flow override", () -> {
-                Address addr = program.getAddressFactory().getAddress(instructionAddrStr);
-                if (addr == null) {
-                    resultMsg.append("Error: Invalid address: ").append(instructionAddrStr);
-                    return null;
-                }
 
                 // Get the instruction at the address
                 Listing listing = program.getListing();
@@ -1486,9 +1537,14 @@ public class FunctionService {
      * @param storageSpec Storage specification (e.g., "Stack[-0x10]:4", "EBP:4", "EAX:4")
      * @return Success or error message
      */
-    @McpTool(path = "/set_variable_storage", method = "POST", description = "Set variable storage location", category = "function")
+    @McpTool(path = "/set_variable_storage", method = "POST", description = "Set variable storage location. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response setVariableStorage(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddrStr,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddrStr,
             @Param(value = "variable_name", source = ParamSource.BODY) String variableName,
             @Param(value = "storage", source = ParamSource.BODY) String storageSpec,
             @Param(value = "program") String programName) {
@@ -1506,16 +1562,15 @@ public class FunctionService {
             return Response.err("Storage specification is required");
         }
 
+        // Resolve address before entering threading lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
 
         try {
             threadingStrategy.executeWrite(program, "Set variable storage", () -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-                if (addr == null) {
-                    resultMsg.append("Error: Invalid function address: ").append(functionAddrStr);
-                    return null;
-                }
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
@@ -1771,9 +1826,14 @@ public class FunctionService {
     /**
      * v1.5.0: Batch rename function and all its components atomically.
      */
-    @McpTool(path = "/batch_rename_function_components", method = "POST", description = "Rename function and components atomically", category = "function")
+    @McpTool(path = "/batch_rename_function_components", method = "POST", description = "Rename function and components atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response batchRenameFunctionComponents(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "function_name", source = ParamSource.BODY, defaultValue = "") String functionName,
             @Param(value = "parameter_renames", source = ParamSource.BODY) Map<String, String> parameterRenames,
             @Param(value = "local_renames", source = ParamSource.BODY) Map<String, String> localRenames,
@@ -1783,6 +1843,10 @@ public class FunctionService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        // Resolve address before entering threading lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicInteger paramsRenamed = new AtomicInteger(0);
         final AtomicInteger localsRenamed = new AtomicInteger(0);
@@ -1790,11 +1854,6 @@ public class FunctionService {
 
         try {
             threadingStrategy.executeWrite(program, "Batch Rename Function Components", () -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddress);
-                if (addr == null) {
-                    errorRef.set("Invalid address: " + functionAddress);
-                    return null;
-                }
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
@@ -1877,9 +1936,14 @@ public class FunctionService {
     /**
      * Delete a function at the given address.
      */
-    @McpTool(path = "/delete_function", method = "POST", description = "Delete function at address", category = "function")
+    @McpTool(path = "/delete_function", method = "POST", description = "Delete function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response deleteFunctionAtAddress(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1888,16 +1952,15 @@ public class FunctionService {
             return Response.err("address parameter required");
         }
 
+        // Resolve address before entering threading lambda
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Delete function at address", () -> {
-                Address addr = program.getAddressFactory().getAddress(addressStr);
-                if (addr == null) {
-                    errorMsg.set("Invalid address: " + addressStr);
-                    return null;
-                }
 
                 Function func = program.getFunctionManager().getFunctionAt(addr);
                 if (func == null) {
@@ -1940,9 +2003,14 @@ public class FunctionService {
     /**
      * Create a function at the given address.
      */
-    @McpTool(path = "/create_function", method = "POST", description = "Create function at address", category = "function")
+    @McpTool(path = "/create_function", method = "POST", description = "Create function at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response createFunctionAtAddress(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
             @Param(value = "disassemble_first", source = ParamSource.BODY, defaultValue = "true") boolean disassembleFirst,
             @Param(value = "program") String programName) {
@@ -1954,16 +2022,15 @@ public class FunctionService {
             return Response.err("address parameter required");
         }
 
+        // Resolve address before entering threading lambda
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
         try {
             threadingStrategy.executeWrite(program, "Create function at address", () -> {
-                Address addr = program.getAddressFactory().getAddress(addressStr);
-                if (addr == null) {
-                    errorMsg.set("Invalid address: " + addressStr);
-                    return null;
-                }
 
                 // Check if a function already exists at this address
                 Function existing = program.getFunctionManager().getFunctionAt(addr);
@@ -2047,10 +2114,20 @@ public class FunctionService {
      * @param restrictToExecuteMemory If true, restricts disassembly to executable memory (default: true)
      * @return JSON result with disassembly status
      */
-    @McpTool(path = "/disassemble_bytes", method = "POST", description = "Disassemble a range of bytes", category = "function")
+    @McpTool(path = "/disassemble_bytes", method = "POST", description = "Disassemble a range of bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response disassembleBytes(
-            @Param(value = "start_address", source = ParamSource.BODY) String startAddress,
-            @Param(value = "end_address", source = ParamSource.BODY, defaultValue = "") String endAddress,
+            @Param(value = "start_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String startAddress,
+            @Param(value = "end_address", paramType = "address", source = ParamSource.BODY, defaultValue = "",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String endAddress,
             @Param(value = "length", source = ParamSource.BODY, defaultValue = "0") Integer length,
             @Param(value = "restrict_to_execute_memory", source = ParamSource.BODY, defaultValue = "true") boolean restrictToExecuteMemory,
             @Param(value = "program") String programName) {
@@ -2061,6 +2138,17 @@ public class FunctionService {
         if (startAddress == null || startAddress.isEmpty()) {
             return Response.err("start_address parameter required");
         }
+
+        // Resolve addresses before entering SwingUtilities lambda
+        Address start = ServiceUtils.parseAddress(program, startAddress);
+        if (start == null) return Response.err(ServiceUtils.getLastParseError());
+
+        Address parsedEnd = null;
+        if (endAddress != null && !endAddress.isEmpty()) {
+            parsedEnd = ServiceUtils.parseAddress(program, endAddress);
+            if (parsedEnd == null) return Response.err(ServiceUtils.getLastParseError());
+        }
+        final Address resolvedEnd = parsedEnd;
 
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
@@ -2075,25 +2163,12 @@ public class FunctionService {
                 boolean success = false;
 
                 try {
-                    // Parse start address
-                    Address start = program.getAddressFactory().getAddress(startAddress);
-                    if (start == null) {
-                        errorMsg.set("Invalid start address: " + startAddress);
-                        return;
-                    }
-
                     // Determine end address
                     Address end;
-                    if (endAddress != null && !endAddress.isEmpty()) {
-                        // Use explicit end address (exclusive)
-                        end = program.getAddressFactory().getAddress(endAddress);
-                        if (end == null) {
-                            errorMsg.set("Invalid end address: " + endAddress);
-                            return;
-                        }
+                    if (resolvedEnd != null) {
                         // Make end address inclusive for AddressSet
                         try {
-                            end = end.subtract(1);
+                            end = resolvedEnd.subtract(1);
                         } catch (Exception e) {
                             errorMsg.set("End address calculation failed: " + e.getMessage());
                             return;
@@ -2221,15 +2296,24 @@ public class FunctionService {
      * @param forceIndividual If true, skip batch mode and use individual renames
      * @return JSON result with rename status
      */
-    @McpTool(path = "/batch_rename_variables", method = "POST", description = "Rename multiple variables atomically", category = "function")
+    @McpTool(path = "/batch_rename_variables", method = "POST", description = "Rename multiple variables atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response batchRenameVariables(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "variable_renames", source = ParamSource.BODY) Map<String, String> variableRenames,
             @Param(value = "force_individual", source = ParamSource.BODY, defaultValue = "false") boolean forceIndividual,
             @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicInteger variablesRenamed = new AtomicInteger(0);
@@ -2247,11 +2331,6 @@ public class FunctionService {
                 program.flushEvents();
 
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        errorRef.set("Invalid address: " + functionAddress);
-                        return;
-                    }
 
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     funcRef.set(func);
@@ -2439,6 +2518,10 @@ public class FunctionService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicInteger variablesRenamed = new AtomicInteger(0);
         final AtomicInteger variablesFailed = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
@@ -2447,7 +2530,6 @@ public class FunctionService {
         final String[] functionName = new String[1];
         try {
             SwingUtilities.invokeAndWait(() -> {
-                Address addr = program.getAddressFactory().getAddress(functionAddress);
                 if (addr != null) {
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func != null) {
@@ -2506,17 +2588,16 @@ public class FunctionService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
         final AtomicReference<String> errorRef = new AtomicReference<>(null);
 
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        errorRef.set("Invalid address: " + functionAddress);
-                        return;
-                    }
 
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
