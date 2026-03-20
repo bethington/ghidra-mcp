@@ -29,7 +29,12 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific address (xref to)
      */
-    public Response getXrefsTo(String addressStr, int offset, int limit, String programName) {
+    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to an address", category = "xref")
+    public Response getXrefsTo(
+            @Param(value = "address", description = "Target address") String addressStr,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -67,7 +72,12 @@ public class XrefCallGraphService {
     /**
      * Get all references from a specific address (xref from)
      */
-    public Response getXrefsFrom(String addressStr, int offset, int limit, String programName) {
+    @McpTool(path = "/get_xrefs_from", description = "Get cross-references from an address", category = "xref")
+    public Response getXrefsFrom(
+            @Param(value = "address", description = "Source address") String addressStr,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -112,31 +122,36 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific function by name
      */
-    public Response getFunctionXrefs(String functionName, int offset, int limit, String programName) {
+    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function by name", category = "xref")
+    public Response getFunctionXrefs(
+            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
         if (functionName == null || functionName.isEmpty()) return Response.err("Function name is required");
 
         try {
+            FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+            if (!resolved.isSuccess()) return Response.text("No references found to function: " + functionName);
+            Function function = resolved.function();
+
             List<String> refs = new ArrayList<>();
             FunctionManager funcManager = program.getFunctionManager();
-            for (Function function : funcManager.getFunctions(true)) {
-                if (function.getName().equals(functionName)) {
-                    Address entryPoint = function.getEntryPoint();
-                    ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
+            Address entryPoint = function.getEntryPoint();
+            ReferenceIterator refIter = program.getReferenceManager().getReferencesTo(entryPoint);
 
-                    while (refIter.hasNext()) {
-                        Reference ref = refIter.next();
-                        Address fromAddr = ref.getFromAddress();
-                        RefType refType = ref.getReferenceType();
+            while (refIter.hasNext()) {
+                Reference ref = refIter.next();
+                Address fromAddr = ref.getFromAddress();
+                RefType refType = ref.getReferenceType();
 
-                        Function fromFunc = funcManager.getFunctionContaining(fromAddr);
-                        String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
+                Function fromFunc = funcManager.getFunctionContaining(fromAddr);
+                String funcInfo = (fromFunc != null) ? " in " + fromFunc.getName() : "";
 
-                        refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
-                    }
-                }
+                refs.add(String.format("From %s%s [%s]", fromAddr, funcInfo, refType.getName()));
             }
 
             if (refs.isEmpty()) {
@@ -160,7 +175,12 @@ public class XrefCallGraphService {
         return getFunctionJumpTargets(functionName, offset, limit, null);
     }
 
-    public Response getFunctionJumpTargets(String functionName, int offset, int limit, String programName) {
+    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function", category = "xref")
+    public Response getFunctionJumpTargets(
+            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -168,18 +188,12 @@ public class XrefCallGraphService {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
-        Function function = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                function = f;
-                break;
-            }
-        }
-
-        if (function == null) {
+        // Find the function by name or address
+        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
+        Function function = resolved.function();
 
         AddressSetView functionBody = function.getBody();
         Listing listing = program.getListing();
@@ -262,7 +276,12 @@ public class XrefCallGraphService {
     /**
      * Get all functions called by the specified function (callees)
      */
-    public Response getFunctionCallees(String functionName, int offset, int limit, String programName) {
+    @McpTool(path = "/get_function_callees", description = "Get functions called by a function", category = "xref")
+    public Response getFunctionCallees(
+            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -270,18 +289,12 @@ public class XrefCallGraphService {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
-        Function function = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                function = f;
-                break;
-            }
-        }
-
-        if (function == null) {
+        // Find the function by name or address
+        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
+        Function function = resolved.function();
 
         Set<Function> callees = new HashSet<>();
         AddressSetView functionBody = function.getBody();
@@ -342,7 +355,12 @@ public class XrefCallGraphService {
     /**
      * Get all functions that call the specified function (callers)
      */
-    public Response getFunctionCallers(String functionName, int offset, int limit, String programName) {
+    @McpTool(path = "/get_function_callers", description = "Get functions calling a function", category = "xref")
+    public Response getFunctionCallers(
+            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -350,18 +368,13 @@ public class XrefCallGraphService {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
+        // Find the function by name or address
         Function targetFunction = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                targetFunction = f;
-                break;
-            }
-        }
-
-        if (targetFunction == null) {
+        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
+        targetFunction = resolved.function();
 
         Set<Function> callers = new HashSet<>();
         ReferenceManager refManager = program.getReferenceManager();
@@ -416,7 +429,12 @@ public class XrefCallGraphService {
     /**
      * Get a call graph subgraph centered on the specified function
      */
-    public Response getFunctionCallGraph(String functionName, int depth, String direction, String programName) {
+    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function", category = "xref")
+    public Response getFunctionCallGraph(
+            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "depth", defaultValue = "2", description = "Traversal depth") int depth,
+            @Param(value = "direction", defaultValue = "both", description = "Traversal direction (both/callers/callees)") String direction,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -424,18 +442,13 @@ public class XrefCallGraphService {
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
 
-        // Find the function by name
+        // Find the function by name or address
         Function rootFunction = null;
-        for (Function f : functionManager.getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                rootFunction = f;
-                break;
-            }
-        }
-
-        if (rootFunction == null) {
+        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
+        rootFunction = resolved.function();
 
         Set<String> visited = new HashSet<>();
         Map<String, Set<String>> callGraph = new HashMap<>();
@@ -544,7 +557,11 @@ public class XrefCallGraphService {
     /**
      * Get the complete call graph for the entire program
      */
-    public Response getFullCallGraph(String format, int limit, String programName) {
+    @McpTool(path = "/get_full_call_graph", description = "Get entire program call graph", category = "xref")
+    public Response getFullCallGraph(
+            @Param(value = "format", defaultValue = "edges", description = "Output format (edges or adjacency)") String format,
+            @Param(value = "limit", defaultValue = "1000") int limit,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -653,7 +670,12 @@ public class XrefCallGraphService {
      * Enhanced call graph analysis with cycle detection and path finding
      * Provides advanced graph algorithms for understanding function relationships
      */
-    public Response analyzeCallGraph(String startFunction, String endFunction, String analysisType, String programName) {
+    @McpTool(path = "/analyze_call_graph", description = "Analyze call graph paths between functions", category = "xref")
+    public Response analyzeCallGraph(
+            @Param(value = "start_function", description = "Start function name") String startFunction,
+            @Param(value = "end_function", description = "End function name") String endFunction,
+            @Param(value = "analysis_type", defaultValue = "summary", description = "Analysis type (summary/paths/cycles)") String analysisType,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1049,7 +1071,10 @@ public class XrefCallGraphService {
         return getBulkXrefs(addressesObj, null);
     }
 
-    public Response getBulkXrefs(Object addressesObj, String programName) {
+    @McpTool(path = "/get_bulk_xrefs", method = "POST", description = "Batch cross-reference retrieval", category = "xref")
+    public Response getBulkXrefs(
+            @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1112,8 +1137,12 @@ public class XrefCallGraphService {
         return getAssemblyContext(xrefSourcesObj, contextInstructions, includePatternsObj, null);
     }
 
-    public Response getAssemblyContext(Object xrefSourcesObj, int contextInstructions,
-                                      Object includePatternsObj, String programName) {
+    @McpTool(path = "/get_assembly_context", method = "POST", description = "Get assembly pattern context for xref sources", category = "xref")
+    public Response getAssemblyContext(
+            @Param(value = "xref_sources", source = ParamSource.BODY) Object xrefSourcesObj,
+            @Param(value = "context_instructions", source = ParamSource.BODY, defaultValue = "5") int contextInstructions,
+            @Param(value = "include_patterns", source = ParamSource.BODY) Object includePatternsObj,
+            @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

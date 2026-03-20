@@ -244,22 +244,31 @@ class TestEndpointCounts:
         )
 
     def test_python_tool_count_reasonable(self):
-        """Python bridge should have a reasonable number of MCP tools."""
+        """Python bridge static @mcp.tool() count should be within expected range.
+
+        Most tools are now dynamically registered from /mcp/schema at runtime.
+        Only ~22 complex bridge-only tools remain as static @mcp.tool() decorators.
+        """
         tool_count = extract_python_mcp_tool_count()
-        assert tool_count >= 90, (
-            f"Python bridge has only {tool_count} @mcp.tool() functions, expected >= 90"
+        assert tool_count >= 15, (
+            f"Python bridge has only {tool_count} static @mcp.tool() functions, expected >= 15"
+        )
+        assert tool_count <= 50, (
+            f"Python bridge has {tool_count} static @mcp.tool() functions, expected <= 50"
         )
 
     def test_counts_roughly_consistent(self):
-        """Endpoint counts across layers should be within a reasonable range."""
+        """Java and endpoints.json endpoint counts should be within a reasonable range.
+
+        Python bridge static tool count is no longer comparable since most tools
+        are dynamically registered from /mcp/schema at runtime.
+        """
         java_endpoints = extract_java_endpoints()
         java_count = len(java_endpoints)
         json_count = len(get_endpoints_json_paths())
-        python_count = extract_python_mcp_tool_count()
 
-        # Java may have more endpoints than Python tools (some are internal)
-        # Python may have more tools than JSON (some tools don't map 1:1)
-        # Allow a tolerance of 30 for the gap between any two
+        # Java may have more endpoints than JSON (some are internal)
+        # Allow a tolerance of 30 for the gap
         assert abs(java_count - json_count) < 30, (
             f"Java ({java_count}) vs endpoints.json ({json_count}) count gap too large"
         )

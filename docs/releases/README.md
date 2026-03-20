@@ -4,14 +4,21 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v4.2.0 (Latest)
+### v4.3.0 (Latest)
 
 - **Feature Release** - Knowledge database integration, BSim cross-version matching, enum fix
 - 5 new knowledge DB MCP tools (store/query function knowledge, ordinal mappings, export)
 - BSim Ghidra scripts for cross-version function similarity matching
 - Fixed enum value parsing (GitHub issue #44)
 - Dead code cleanup (~243KB of deprecated workflow modules removed)
-- 193 MCP tools, 175 GUI endpoints, 183 headless endpoints
+- 193 MCP tools, 176 GUI endpoints, 184 headless endpoints
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
+### v4.1.0
+
+- **Feature Release** - Parallel multi-binary support via universal `program` parameter
+- Every program-scoped MCP tool now accepts optional `program` parameter for parallel workflows
+- 188 MCP tools, 169 GUI endpoints, 173 headless endpoints
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details
 
 ### v4.0.0
@@ -127,6 +134,6 @@ Each release directory should contain:
 
 ## Navigation
 
-- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v4.2.0)
+- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v4.3.0)
 - For specific versions: Browse the version directories above
 - For overall project changes: See [CHANGELOG.md](../CHANGELOG.md) in the project root

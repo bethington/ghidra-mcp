@@ -43,6 +43,7 @@ public class FrontEndProgramProvider implements ProgramProvider {
 
     private final PluginTool tool;
     private final Map<String, Program> openPrograms = new ConcurrentHashMap<>();
+    private final Map<String, String> pathToName = new ConcurrentHashMap<>(); // project path -> cache key
     private volatile Program currentProgram;
     private final TaskMonitor monitor;
     private final Object consumer; // DomainObject consumer for release tracking
@@ -80,7 +81,18 @@ public class FrontEndProgramProvider implements ProgramProvider {
 
         String searchName = name.trim();
 
-        // 1. Check all running CodeBrowsers for this program
+        // 1. Check path-based cache first (handles multi-version same-name DLLs)
+        if (searchName.startsWith("/")) {
+            String cacheKey = pathToName.get(searchName);
+            if (cacheKey != null) {
+                Program cached = openPrograms.get(cacheKey);
+                if (cached != null) {
+                    return cached;
+                }
+            }
+        }
+
+        // 2. Check all running CodeBrowsers for this program
         List<Program> cbPrograms = collectCodeBrowserPrograms();
         for (Program prog : cbPrograms) {
             if (prog.getName().equalsIgnoreCase(searchName)) {
@@ -94,32 +106,37 @@ public class FrontEndProgramProvider implements ProgramProvider {
             }
         }
 
-        // 2. Check our cache
-        Program cached = openPrograms.get(searchName);
-        if (cached != null) {
-            return cached;
-        }
-        // Case-insensitive cache lookup
-        for (Map.Entry<String, Program> entry : openPrograms.entrySet()) {
-            if (entry.getKey().equalsIgnoreCase(searchName)) {
-                return entry.getValue();
+        // 3. Check our cache (only for non-path lookups to avoid collisions)
+        if (!searchName.startsWith("/")) {
+            Program cached = openPrograms.get(searchName);
+            if (cached != null) {
+                return cached;
+            }
+            // Case-insensitive cache lookup
+            for (Map.Entry<String, Program> entry : openPrograms.entrySet()) {
+                if (entry.getKey().equalsIgnoreCase(searchName)) {
+                    return entry.getValue();
+                }
             }
         }
 
-        // 3. Try to open from project by name or path
+        // 4. Try to open from project by name or path
         return openFromProject(searchName);
     }
 
     @Override
     public Program[] getAllOpenPrograms() {
-        // Collect programs from ALL CodeBrowser instances (deduped)
+        // Collect programs from ALL CodeBrowser instances (deduped by identity)
         List<Program> allPrograms = collectCodeBrowserPrograms();
 
         // Add our cached programs that aren't already in the list
+        // Deduplicate by object identity only — same-named programs from
+        // different versions (e.g., /Vanilla/1.00/D2Common.dll vs /Vanilla/1.13d/D2Common.dll)
+        // must both appear in the list
         for (Program prog : openPrograms.values()) {
             boolean alreadyListed = false;
             for (Program existing : allPrograms) {
-                if (existing == prog || existing.getName().equals(prog.getName())) {
+                if (existing == prog) {
                     alreadyListed = true;
                     break;
                 }
@@ -159,9 +176,11 @@ public class FrontEndProgramProvider implements ProgramProvider {
         List<Program> allPrograms = new ArrayList<>();
         for (ProgramManager pm : findAllCodeBrowserProgramManagers()) {
             for (Program prog : pm.getAllOpenPrograms()) {
+                // Deduplicate by object identity only — not by name,
+                // since multiple versions of the same DLL are distinct programs
                 boolean alreadyListed = false;
                 for (Program existing : allPrograms) {
-                    if (existing == prog || existing.getName().equals(prog.getName())) {
+                    if (existing == prog) {
                         alreadyListed = true;
                         break;
                     }
@@ -209,23 +228,60 @@ public class FrontEndProgramProvider implements ProgramProvider {
             return null;
         }
 
+        String projectPath = domainFile.getPathname();
+        // Use project path as unique cache key (handles multiple versions of same DLL)
+        String cacheKey = projectPath;
+
         try {
             // getDomainObject returns the SAME instance if already open in CodeBrowser
             // This is the key to seamless integration — shared domain objects
             Program program = (Program) domainFile.getDomainObject(consumer, false, false, monitor);
-            openPrograms.put(program.getName(), program);
+
+            // Release previous consumer reference if overwriting a cache entry
+            // to prevent reference count leaks on the DomainObject
+            Program previousProgram = openPrograms.get(cacheKey);
+            if (previousProgram != null && previousProgram != program) {
+                try {
+                    previousProgram.release(consumer);
+                    Msg.info(this, "Released previous cached program for: " + cacheKey);
+                } catch (Exception ex) {
+                    Msg.warn(this, "Error releasing previous program " + cacheKey + ": " + ex.getMessage());
+                }
+            }
+
+            openPrograms.put(cacheKey, program);
+            pathToName.put(projectPath, cacheKey);
+            // Also map the input path if different from project path
+            if (!nameOrPath.equals(projectPath)) {
+                pathToName.put(nameOrPath, cacheKey);
+            }
             if (currentProgram == null) {
                 currentProgram = program;
             }
             Msg.info(this, "Opened program from project: " + program.getName() +
-                " (" + domainFile.getPathname() + ")");
+                " (" + projectPath + ")");
             return program;
         } catch (Exception e) {
             Msg.error(this, "Failed to open program: " + nameOrPath + " — " + e.getMessage());
             // Try read-only as fallback
             try {
                 Program program = (Program) domainFile.getImmutableDomainObject(consumer, DomainFile.DEFAULT_VERSION, monitor);
-                openPrograms.put(program.getName(), program);
+
+                // Release previous consumer reference if overwriting
+                Program previousProgram = openPrograms.get(cacheKey);
+                if (previousProgram != null && previousProgram != program) {
+                    try {
+                        previousProgram.release(consumer);
+                    } catch (Exception ex) {
+                        Msg.warn(this, "Error releasing previous program " + cacheKey + ": " + ex.getMessage());
+                    }
+                }
+
+                openPrograms.put(cacheKey, program);
+                pathToName.put(projectPath, cacheKey);
+                if (!nameOrPath.equals(projectPath)) {
+                    pathToName.put(nameOrPath, cacheKey);
+                }
                 if (currentProgram == null) {
                     currentProgram = program;
                 }
@@ -317,6 +373,7 @@ public class FrontEndProgramProvider implements ProgramProvider {
             }
         }
         openPrograms.clear();
+        pathToName.clear();
         currentProgram = null;
     }
 

@@ -4,7 +4,12 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.data.*;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.symbol.Symbol;
+import ghidra.program.model.symbol.SymbolIterator;
+import ghidra.program.model.symbol.SymbolTable;
+import ghidra.program.model.symbol.SymbolType;
 import ghidra.util.Msg;
 
 import java.util.*;
@@ -433,6 +438,43 @@ public final class ServiceUtils {
             func = program.getFunctionManager().getFunctionContaining(addr);
         }
         return func;
+    }
+
+    /**
+     * Resolve a function by either address or name.
+     * Resolution order:
+     * 1. Try parsing as an address → getFunctionAt → getFunctionContaining
+     * 2. If address resolution fails, try exact name match via SymbolTable
+     * Returns null if no function is found.
+     */
+    public static Function resolveFunction(Program program, String functionRef) {
+        if (functionRef == null || functionRef.trim().isEmpty()) return null;
+        functionRef = functionRef.trim();
+
+        // Try as address first
+        try {
+            Address addr = program.getAddressFactory().getAddress(functionRef);
+            if (addr != null) {
+                Function func = getFunctionForAddress(program, addr);
+                if (func != null) return func;
+            }
+        } catch (Exception e) {
+            // Not a valid address — fall through to name resolution
+        }
+
+        // Try as exact function name via symbol table
+        FunctionManager funcManager = program.getFunctionManager();
+        SymbolTable symbolTable = program.getSymbolTable();
+        SymbolIterator symbols = symbolTable.getSymbols(functionRef);
+        while (symbols.hasNext()) {
+            Symbol symbol = symbols.next();
+            if (symbol.getSymbolType() == SymbolType.FUNCTION) {
+                Function func = funcManager.getFunctionAt(symbol.getAddress());
+                if (func != null) return func;
+            }
+        }
+
+        return null;
     }
 
     // ========================================================================
