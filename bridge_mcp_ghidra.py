@@ -331,16 +331,19 @@ knowledge_db = KnowledgeDB()
 # Enhanced error classes
 class GhidraConnectionError(Exception):
     """Raised when connection to Ghidra server fails"""
+
     pass
 
 
 class GhidraAnalysisError(Exception):
     """Raised when Ghidra analysis operation fails"""
+
     pass
 
 
 class GhidraValidationError(Exception):
     """Raised when input validation fails"""
+
     pass
 
 
@@ -471,6 +474,7 @@ def format_error_response(
 
 def calculate_function_hash(bytecode: bytes) -> str:
     import hashlib
+
     return hashlib.sha256(bytecode).hexdigest()
 
 
@@ -558,6 +562,7 @@ T = TypeVar("T")
 
 def cache_key(*args: Any, **kwargs: Any) -> str:
     import hashlib
+
     key_data = {"args": args, "kwargs": kwargs}
     return hashlib.md5(
         json.dumps(key_data, sort_keys=True, default=str).encode()
@@ -688,7 +693,9 @@ def safe_get_json(
             response = session.get(url, params=params, timeout=timeout)
             response.encoding = "utf-8"
             duration = time.time() - start_time
-            logger.info(f"Request to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries})")
+            logger.info(
+                f"Request to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries})"
+            )
             if response.ok:
                 return response.text
             elif response.status_code == 404:
@@ -721,7 +728,9 @@ def safe_post_json(
     if program:
         url += f"?program={program}"
     timeout = calculate_dynamic_timeout(endpoint, data)
-    logger.info(f"Using dynamic timeout of {timeout}s for endpoint {endpoint} (payload items: {len(data)})")
+    logger.info(
+        f"Using dynamic timeout of {timeout}s for endpoint {endpoint} (payload items: {len(data)})"
+    )
     headers = {"Connection": "close"}
     for attempt in range(retries):
         try:
@@ -730,7 +739,9 @@ def safe_post_json(
             response = session.post(url, json=data, headers=headers, timeout=timeout)
             response.encoding = "utf-8"
             duration = time.time() - start_time
-            logger.info(f"JSON POST to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries}), status: {response.status_code}")
+            logger.info(
+                f"JSON POST to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries}), status: {response.status_code}"
+            )
             if response.ok:
                 return response.text.strip()
             elif response.status_code == 404:
@@ -812,7 +823,9 @@ def make_request(
         try:
             if method.upper() == "POST":
                 headers = {"Content-Type": "application/json"}
-                response = session.post(url, data=data, headers=headers, timeout=timeout)
+                response = session.post(
+                    url, data=data, headers=headers, timeout=timeout
+                )
             else:
                 response = session.get(url, params=params, timeout=timeout)
             response.encoding = "utf-8"
@@ -994,6 +1007,7 @@ def _make_tool_handler(tool_def: dict):
             if q_params:
                 # Append query params to endpoint URL
                 from urllib.parse import urlencode
+
                 endpoint += "?" + urlencode(q_params)
 
             return safe_post_json(endpoint, body_data, program=program)
@@ -1008,9 +1022,7 @@ def _register_schema_tools():
     all tools that don't have static implementations.
     """
     try:
-        response = session.get(
-            urljoin(ghidra_server_url, "mcp/schema"), timeout=10
-        )
+        response = session.get(urljoin(ghidra_server_url, "mcp/schema"), timeout=10)
         if not response.ok:
             logger.warning(
                 f"Could not fetch /mcp/schema (HTTP {response.status_code}). "
@@ -1039,7 +1051,9 @@ def _register_schema_tools():
             mcp.tool(name=tool_name, description=description)(handler)
             registered += 1
 
-        logger.info(f"Dynamically registered {registered} tools from /mcp/schema ({len(tools)} total in schema)")
+        logger.info(
+            f"Dynamically registered {registered} tools from /mcp/schema ({len(tools)} total in schema)"
+        )
         return registered
 
     except requests.exceptions.ConnectionError:
@@ -1133,15 +1147,21 @@ def decompile_function(
             search_result = safe_get("search_functions", search_params)
             func_address = None
             for line in search_result:
-                if f"{name} @" in line or line.startswith(f"{name} "):
-                    parts = line.split("@")
-                    if len(parts) >= 2:
-                        func_address = parts[-1].strip()
-                        break
+                if "@" not in line:
+                    continue
+                func_name, _, candidate_address = line.partition("@")
+                if func_name.strip() == name:
+                    func_address = candidate_address.strip()
+                    break
             if not func_address:
                 return f"Error: Function '{name}' not found"
             if force:
-                result = safe_post("force_decompile", {"function_address": func_address})
+                from urllib.parse import urlencode
+
+                params = {"address": func_address}
+                if program:
+                    params["program"] = program
+                result = safe_post(f"force_decompile?{urlencode(params)}", {})
             else:
                 params = {"address": func_address}
                 if program:
@@ -1154,7 +1174,12 @@ def decompile_function(
             if not validate_hex_address(address):
                 raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
             if force:
-                result = safe_post("force_decompile", {"function_address": address})
+                from urllib.parse import urlencode
+
+                params = {"address": address}
+                if program:
+                    params["program"] = program
+                result = safe_post(f"force_decompile?{urlencode(params)}", {})
             else:
                 params = {"address": address}
                 if program:
@@ -1258,10 +1283,15 @@ def rename_variables(
     validate_hex_address(function_address)
 
     if not variable_renames:
-        return json.dumps({
-            "success": True, "variables_renamed": 0, "variables_failed": 0,
-            "backend_used": "none", "message": "No variables to rename",
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "variables_renamed": 0,
+                "variables_failed": 0,
+                "backend_used": "none",
+                "message": "No variables to rename",
+            }
+        )
 
     num_variables = len(variable_renames)
 
@@ -1270,39 +1300,65 @@ def rename_variables(
     elif backend in ["batch", "progressive"]:
         actual_backend = backend
     else:
-        raise GhidraValidationError(f"Invalid backend: {backend}. Must be 'auto', 'batch', or 'progressive'")
+        raise GhidraValidationError(
+            f"Invalid backend: {backend}. Must be 'auto', 'batch', or 'progressive'"
+        )
 
     if actual_backend == "batch":
         try:
-            payload = {"function_address": function_address, "variable_renames": variable_renames}
-            result_json = safe_post_json("batch_rename_variables", payload, program=program)
+            payload = {
+                "function_address": function_address,
+                "variable_renames": variable_renames,
+            }
+            result_json = safe_post_json(
+                "batch_rename_variables", payload, program=program
+            )
             result = json.loads(result_json)
             result["backend_used"] = "batch"
             return json.dumps(result)
         except Exception as e:
             error_msg = str(e)
-            if ("timeout" in error_msg.lower() or "connection" in error_msg.lower()) and backend == "auto":
-                return _rename_variables_progressive_internal(function_address, variable_renames, program=program)
-            return json.dumps({
-                "success": False, "variables_renamed": 0, "variables_failed": num_variables,
-                "backend_used": "batch", "errors": [{"error": error_msg}],
-            })
+            if (
+                "timeout" in error_msg.lower() or "connection" in error_msg.lower()
+            ) and backend == "auto":
+                return _rename_variables_progressive_internal(
+                    function_address, variable_renames, program=program
+                )
+            return json.dumps(
+                {
+                    "success": False,
+                    "variables_renamed": 0,
+                    "variables_failed": num_variables,
+                    "backend_used": "batch",
+                    "errors": [{"error": error_msg}],
+                }
+            )
     else:
-        return _rename_variables_progressive_internal(function_address, variable_renames, program=program)
+        return _rename_variables_progressive_internal(
+            function_address, variable_renames, program=program
+        )
 
 
 def _rename_variables_progressive_internal(
-    function_address: str, variable_renames: dict, chunk_size: int = 5,
-    retry_attempts: int = 3, program: str = None,
+    function_address: str,
+    variable_renames: dict,
+    chunk_size: int = 5,
+    retry_attempts: int = 3,
+    program: str = None,
 ) -> str:
     variables_list = list(variable_renames.items())
     total_variables = len(variables_list)
     results = {
-        "success": True, "total_variables": total_variables,
-        "variables_renamed": 0, "variables_failed": 0,
-        "backend_used": "progressive", "chunks_processed": 0,
-        "chunks_failed": 0, "chunk_size": chunk_size,
-        "failed_variables": [], "errors": [],
+        "success": True,
+        "total_variables": total_variables,
+        "variables_renamed": 0,
+        "variables_failed": 0,
+        "backend_used": "progressive",
+        "chunks_processed": 0,
+        "chunks_failed": 0,
+        "chunk_size": chunk_size,
+        "failed_variables": [],
+        "errors": [],
     }
     for i in range(0, total_variables, chunk_size):
         chunk = dict(variables_list[i : i + chunk_size])
@@ -1310,11 +1366,18 @@ def _rename_variables_progressive_internal(
         last_error = None
         for attempt in range(retry_attempts):
             try:
-                payload = {"function_address": function_address, "variable_renames": chunk}
-                result_json = safe_post_json("batch_rename_variables", payload, program=program)
+                payload = {
+                    "function_address": function_address,
+                    "variable_renames": chunk,
+                }
+                result_json = safe_post_json(
+                    "batch_rename_variables", payload, program=program
+                )
                 result = json.loads(result_json)
                 if result.get("success"):
-                    results["variables_renamed"] += result.get("variables_renamed", len(chunk))
+                    results["variables_renamed"] += result.get(
+                        "variables_renamed", len(chunk)
+                    )
                     results["variables_failed"] += result.get("variables_failed", 0)
                     if result.get("errors"):
                         results["errors"].extend(result["errors"])
@@ -1334,10 +1397,12 @@ def _rename_variables_progressive_internal(
             results["success"] = False
             for old_name in chunk.keys():
                 results["failed_variables"].append(old_name)
-                results["errors"].append({
-                    "old_name": old_name,
-                    "error": f"Chunk timeout after {retry_attempts} attempts: {last_error}",
-                })
+                results["errors"].append(
+                    {
+                        "old_name": old_name,
+                        "error": f"Chunk timeout after {retry_attempts} attempts: {last_error}",
+                    }
+                )
             results["variables_failed"] += len(chunk)
     return json.dumps(results)
 
@@ -1367,12 +1432,18 @@ def rename_function_by_address(
         raise GhidraValidationError("Function name cannot be empty.")
     new_name = new_name.strip()
     if not new_name[0].isalpha() and new_name[0] != "_":
-        raise GhidraValidationError(f"Invalid function name '{new_name}'. Names must start with a letter or underscore.")
+        raise GhidraValidationError(
+            f"Invalid function name '{new_name}'. Names must start with a letter or underscore."
+        )
     if not all(c.isalnum() or c == "_" for c in new_name):
-        raise GhidraValidationError(f"Invalid function name '{new_name}'. Names can only contain letters, numbers, and underscores.")
+        raise GhidraValidationError(
+            f"Invalid function name '{new_name}'. Names can only contain letters, numbers, and underscores."
+        )
 
     # Verify function exists at this address
-    func_check = safe_get("get_function_by_address", {"address": function_address}, program=program)
+    func_check = safe_get(
+        "get_function_by_address", {"address": function_address}, program=program
+    )
     if not func_check or any(
         "Error" in str(line) or "not found" in str(line).lower() for line in func_check
     ):
@@ -1422,7 +1493,9 @@ def set_function_prototype(
         raise GhidraValidationError("Function prototype cannot be empty.")
 
     # Verify function exists
-    func_check = safe_get("get_function_by_address", {"address": function_address}, program=program)
+    func_check = safe_get(
+        "get_function_by_address", {"address": function_address}, program=program
+    )
     if not func_check or any(
         "Error" in str(line) or "not found" in str(line).lower() for line in func_check
     ):
@@ -1505,6 +1578,7 @@ def get_function_metrics(
 
 # ========== SCRIPT LIFECYCLE MANAGEMENT ==========
 
+
 @mcp.tool()
 def save_ghidra_script(
     script_name: str, script_content: str, overwrite: bool = False, backup: bool = True
@@ -1526,7 +1600,9 @@ def save_ghidra_script(
     if not script_content or not isinstance(script_content, str):
         raise GhidraValidationError("script_content is required and must be a string")
     if not all(c.isalnum() or c == "_" for c in script_name):
-        raise GhidraValidationError("script_name must be alphanumeric or underscore only")
+        raise GhidraValidationError(
+            "script_name must be alphanumeric or underscore only"
+        )
 
     script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
     script_file = f"{script_name}.java"
@@ -1538,13 +1614,16 @@ def save_ghidra_script(
         raise GhidraValidationError(f"Could not create ghidra_scripts directory: {e}")
 
     if os.path.exists(script_path) and not overwrite:
-        raise GhidraValidationError(f"Script {script_name} already exists. Use overwrite=True to replace.")
+        raise GhidraValidationError(
+            f"Script {script_name} already exists. Use overwrite=True to replace."
+        )
 
     backup_path = None
     if os.path.exists(script_path) and backup:
         backup_path = f"{script_path}.backup"
         try:
             import shutil
+
             shutil.copy2(script_path, backup_path)
         except Exception as e:
             logger.warning(f"Could not create backup: {e}")
@@ -1558,8 +1637,11 @@ def save_ghidra_script(
         raise GhidraValidationError(f"Could not write script file: {e}")
 
     response = {
-        "success": True, "script_name": script_name, "script_path": script_path,
-        "file_size": file_size, "message": "Script saved successfully",
+        "success": True,
+        "script_name": script_name,
+        "script_path": script_path,
+        "file_size": file_size,
+        "message": "Script saved successfully",
     }
     if backup_path:
         response["backup_path"] = backup_path
@@ -1676,6 +1758,7 @@ def update_ghidra_script(
         backup_path = f"{script_path}.backup"
         try:
             import shutil
+
             shutil.copy2(script_path, backup_path)
         except Exception as e:
             logger.warning(f"Could not create backup: {e}")
@@ -1687,10 +1770,15 @@ def update_ghidra_script(
     except Exception as e:
         raise GhidraValidationError(f"Could not update script: {e}")
 
-    lines_changed = sum(1 for a, b in zip(old_content.split("\n"), new_content.split("\n")) if a != b)
+    lines_changed = sum(
+        1 for a, b in zip(old_content.split("\n"), new_content.split("\n")) if a != b
+    )
     response = {
-        "success": True, "script_name": script_name, "lines_changed": lines_changed,
-        "size_delta": new_size - old_size, "message": "Script updated successfully",
+        "success": True,
+        "script_name": script_name,
+        "lines_changed": lines_changed,
+        "size_delta": new_size - old_size,
+        "message": "Script updated successfully",
     }
     if backup_path:
         response["previous_version_backup"] = backup_path
@@ -1715,7 +1803,9 @@ def delete_ghidra_script(
     if not script_name or not isinstance(script_name, str):
         raise GhidraValidationError("script_name is required")
     if not confirm:
-        raise GhidraValidationError("confirm=True required for safety (prevents accidents)")
+        raise GhidraValidationError(
+            "confirm=True required for safety (prevents accidents)"
+        )
 
     script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
     script_path = os.path.join(script_dir, f"{script_name}.java")
@@ -1729,6 +1819,7 @@ def delete_ghidra_script(
             os.makedirs(archive_dir, exist_ok=True)
             archive_path = os.path.join(archive_dir, f"{script_name}.java")
             import shutil
+
             shutil.copy2(script_path, archive_path)
         except Exception as e:
             logger.warning(f"Could not archive script: {e}")
@@ -1739,7 +1830,9 @@ def delete_ghidra_script(
         raise GhidraValidationError(f"Could not delete script: {e}")
 
     response = {
-        "success": True, "script_name": script_name, "deleted": True,
+        "success": True,
+        "script_name": script_name,
+        "deleted": True,
         "message": "Script deleted successfully",
     }
     if archive_path:
@@ -1931,7 +2024,9 @@ def open_program(path: str, auto_analyze: bool = False) -> str:
         if parsed.get("error") or not parsed.get("program"):
             return load_result
 
-        parsed["analysis"] = json.loads(run_analysis(program=parsed["program"]))
+        parsed["analysis"] = json.loads(
+            _run_analysis_request(program=parsed["program"])
+        )
         return json.dumps(parsed, indent=2)
 
     return result
@@ -1956,6 +2051,27 @@ def load_program(file_path: str) -> str:
         raise GhidraValidationError("File path is required")
 
     return safe_post_json("load_program", {"file": file_path})
+
+
+def _run_analysis_request(program: str = None) -> str:
+    return safe_post_json("run_analysis", {}, program=program)
+
+
+@mcp.tool()
+def run_analysis(program: str = None) -> str:
+    """
+    Run auto-analysis on the current or specified program.
+
+    This triggers Ghidra's analyzers to identify functions, strings,
+    data types, references, and other program structure.
+
+    Args:
+        program: Optional program name. Uses the current program when omitted.
+
+    Returns:
+        JSON with analysis status and statistics.
+    """
+    return _run_analysis_request(program=program)
 
 
 @mcp.tool()
@@ -2074,7 +2190,7 @@ def upload_binary(
             result["switch"] = switch_result
 
     if program_name and analyze:
-        analysis_result = run_analysis(program=program_name)
+        analysis_result = _run_analysis_request(program=program_name)
         try:
             result["analysis"] = json.loads(analysis_result)
         except (TypeError, ValueError):
@@ -2085,10 +2201,7 @@ def upload_binary(
 
 @mcp.tool()
 def search_memory_strings(
-    query: str, 
-    min_length: int = 4,
-    encoding: str = "ascii",
-    program: str = None
+    query: str, min_length: int = 4, encoding: str = "ascii", program: str = None
 ) -> str:
     """
     Search for string patterns in program memory.
@@ -2109,22 +2222,18 @@ def search_memory_strings(
     Example:
         # Find error messages
         results = search_memory_strings("error")
-        
+
         # Find version strings
         results = search_memory_strings("v1\\.[0-9]+")
-        
+
         # Find Unicode strings
         results = search_memory_strings("Player", encoding="utf16")
     """
     if not query:
         raise GhidraValidationError("Query string is required")
-    
+
     url = f"{ghidra_server_url}/search_strings"
-    params = {
-        "query": query,
-        "min_length": min_length,
-        "encoding": encoding
-    }
+    params = {"query": query, "min_length": min_length, "encoding": encoding}
     if program:
         params["program"] = program
     return make_request(url, method="GET", params=params)
@@ -2182,7 +2291,7 @@ def set_bookmark(
     category: str = "Analysis",
     comment: str = "",
     bookmark_type: str = "Note",
-    program: str = None
+    program: str = None,
 ) -> str:
     """
     Set a bookmark at the specified address.
@@ -2218,7 +2327,7 @@ def set_bookmark(
         "address": address,
         "category": category,
         "comment": comment,
-        "type": bookmark_type
+        "type": bookmark_type,
     }
     return make_request(url, method="POST", data=json.dumps(params))
 
@@ -2393,7 +2502,9 @@ def batch_decompile(functions: str, program: str = None) -> str:
 
 
 @mcp.tool()
-def get_function_metrics(function_name: str = None, address: str = None, program: str = None) -> str:
+def get_function_metrics(
+    function_name: str = None, address: str = None, program: str = None
+) -> str:
     """
     Get complexity metrics for a function.
 
@@ -2870,8 +2981,10 @@ FUNCTION_HASH_INDEX_FILE = "function_hash_index.json"
 
 @mcp.tool()
 def build_function_hash_index(
-    programs: list = None, filter: str = "documented",
-    index_file: str = None, merge: bool = True,
+    programs: list = None,
+    filter: str = "documented",
+    index_file: str = None,
+    merge: bool = True,
 ) -> str:
     """
     Build or update a function hash index from one or more programs for cross-binary doc propagation.
@@ -2886,7 +2999,11 @@ def build_function_hash_index(
         JSON with programs scanned, functions indexed, unique hashes, and duplicates found.
     """
     index_path = index_file or FUNCTION_HASH_INDEX_FILE
-    existing_index = {"version": "1.0", "hash_algorithm": "normalized_opcodes_sha256", "functions": {}}
+    existing_index = {
+        "version": "1.0",
+        "hash_algorithm": "normalized_opcodes_sha256",
+        "functions": {},
+    }
     if merge and os.path.exists(index_path):
         try:
             with open(index_path, "r") as f:
@@ -2899,7 +3016,9 @@ def build_function_hash_index(
     functions_indexed = 0
 
     try:
-        current_info = json.loads(make_request(f"{ghidra_server_url}/get_current_program_info"))
+        current_info = json.loads(
+            make_request(f"{ghidra_server_url}/get_current_program_info")
+        )
         current_program = current_info.get("name", "Unknown")
     except Exception:
         current_program = "Unknown"
@@ -2909,7 +3028,12 @@ def build_function_hash_index(
     for program_path in programs_to_scan:
         try:
             if program_path:
-                result = json.loads(make_request(f"{ghidra_server_url}/open_program", params={"path": program_path}))
+                result = json.loads(
+                    make_request(
+                        f"{ghidra_server_url}/open_program",
+                        params={"path": program_path},
+                    )
+                )
                 if "error" in result:
                     continue
                 program_name = result.get("name", program_path)
@@ -2919,10 +3043,16 @@ def build_function_hash_index(
             offset = 0
             batch_size = 500
             while True:
-                result = json.loads(make_request(
-                    f"{ghidra_server_url}/get_bulk_function_hashes",
-                    params={"offset": offset, "limit": batch_size, "filter": filter},
-                ))
+                result = json.loads(
+                    make_request(
+                        f"{ghidra_server_url}/get_bulk_function_hashes",
+                        params={
+                            "offset": offset,
+                            "limit": batch_size,
+                            "filter": filter,
+                        },
+                    )
+                )
                 if "error" in result:
                     break
                 functions = result.get("functions", [])
@@ -2938,17 +3068,21 @@ def build_function_hash_index(
                     completeness = 0
                     if has_custom:
                         try:
-                            comp_result = json.loads(make_request(
-                                f"{ghidra_server_url}/analyze_function_completeness",
-                                params={"address": func_addr},
-                            ))
+                            comp_result = json.loads(
+                                make_request(
+                                    f"{ghidra_server_url}/analyze_function_completeness",
+                                    params={"address": func_addr},
+                                )
+                            )
                             completeness = comp_result.get("completeness_score", 0)
                         except Exception:
                             pass
 
                     instance = {
-                        "program": program_name, "address": func_addr,
-                        "name": func_name, "completeness_score": completeness,
+                        "program": program_name,
+                        "address": func_addr,
+                        "name": func_name,
+                        "completeness_score": completeness,
                         "indexed_at": datetime.now().isoformat(),
                     }
 
@@ -2961,7 +3095,10 @@ def build_function_hash_index(
                         entry = index["functions"][hash_val]
                         existing = False
                         for idx, inst in enumerate(entry["instances"]):
-                            if inst["program"] == program_name and inst["address"] == func_addr:
+                            if (
+                                inst["program"] == program_name
+                                and inst["address"] == func_addr
+                            ):
                                 entry["instances"][idx] = instance
                                 existing = True
                                 break
@@ -2970,7 +3107,9 @@ def build_function_hash_index(
                         if has_custom:
                             if entry["canonical"] is None:
                                 entry["canonical"] = instance
-                            elif completeness > entry["canonical"].get("completeness_score", 0):
+                            elif completeness > entry["canonical"].get(
+                                "completeness_score", 0
+                            ):
                                 entry["canonical"] = instance
 
                     functions_indexed += 1
@@ -2983,22 +3122,32 @@ def build_function_hash_index(
             logger.warning(f"Error processing program {program_path}: {e}")
 
     unique_hashes = len(index["functions"])
-    duplicates = sum(1 for entry in index["functions"].values() if len(entry["instances"]) > 1)
+    duplicates = sum(
+        1 for entry in index["functions"].values() if len(entry["instances"]) > 1
+    )
 
     try:
         with open(index_path, "w") as f:
             json.dump(index, f, indent=2)
     except Exception as e:
-        return json.dumps({
-            "error": f"Could not save index: {str(e)}",
-            "programs_scanned": programs_scanned, "functions_indexed": functions_indexed,
-        })
+        return json.dumps(
+            {
+                "error": f"Could not save index: {str(e)}",
+                "programs_scanned": programs_scanned,
+                "functions_indexed": functions_indexed,
+            }
+        )
 
-    return json.dumps({
-        "success": True, "programs_scanned": programs_scanned,
-        "functions_indexed": functions_indexed, "unique_hashes": unique_hashes,
-        "duplicates_found": duplicates, "index_file": index_path,
-    })
+    return json.dumps(
+        {
+            "success": True,
+            "programs_scanned": programs_scanned,
+            "functions_indexed": functions_indexed,
+            "unique_hashes": unique_hashes,
+            "duplicates_found": duplicates,
+            "index_file": index_path,
+        }
+    )
 
 
 @mcp.tool()
@@ -3035,7 +3184,11 @@ def lookup_function_by_hash(
             req_params = {"address": address}
             if program:
                 req_params["program"] = program
-            result = json.loads(make_request(f"{ghidra_server_url}/get_function_hash", params=req_params))
+            result = json.loads(
+                make_request(
+                    f"{ghidra_server_url}/get_function_hash", params=req_params
+                )
+            )
             if "error" in result:
                 return json.dumps(result)
             hash = result["hash"]
@@ -3043,19 +3196,33 @@ def lookup_function_by_hash(
             return json.dumps({"error": f"Could not compute hash: {str(e)}"})
 
     if hash not in index.get("functions", {}):
-        return json.dumps({"found": False, "hash": hash, "message": "No matching functions found in index"})
+        return json.dumps(
+            {
+                "found": False,
+                "hash": hash,
+                "message": "No matching functions found in index",
+            }
+        )
 
     entry = index["functions"][hash]
-    return json.dumps({
-        "found": True, "hash": hash, "canonical": entry.get("canonical"),
-        "instances": entry.get("instances", []), "total_instances": len(entry.get("instances", [])),
-    })
+    return json.dumps(
+        {
+            "found": True,
+            "hash": hash,
+            "canonical": entry.get("canonical"),
+            "instances": entry.get("instances", []),
+            "total_instances": len(entry.get("instances", [])),
+        }
+    )
 
 
 @mcp.tool()
 def propagate_documentation(
-    source_address: str = None, source_hash: str = None,
-    target_programs: list = None, dry_run: bool = False, index_file: str = None,
+    source_address: str = None,
+    source_hash: str = None,
+    target_programs: list = None,
+    dry_run: bool = False,
+    index_file: str = None,
 ) -> str:
     """
     Propagate documentation from a source function to all matching functions across binaries.
@@ -3071,38 +3238,63 @@ def propagate_documentation(
         JSON with targets updated/skipped counts and per-target details.
     """
     if not source_address and not source_hash:
-        raise GhidraValidationError("Either source_address or source_hash must be provided")
+        raise GhidraValidationError(
+            "Either source_address or source_hash must be provided"
+        )
 
     index_path = index_file or FUNCTION_HASH_INDEX_FILE
 
     if source_address:
         try:
-            docs = json.loads(make_request(
-                f"{ghidra_server_url}/get_function_documentation",
-                params={"address": source_address},
-            ))
+            docs = json.loads(
+                make_request(
+                    f"{ghidra_server_url}/get_function_documentation",
+                    params={"address": source_address},
+                )
+            )
             if "error" in docs:
                 return json.dumps(docs)
             source_hash = docs["hash"]
-            source_info = {"program": docs["source_program"], "address": docs["source_address"], "name": docs["function_name"]}
+            source_info = {
+                "program": docs["source_program"],
+                "address": docs["source_address"],
+                "name": docs["function_name"],
+            }
         except Exception as e:
-            return json.dumps({"error": f"Could not get source documentation: {str(e)}"})
+            return json.dumps(
+                {"error": f"Could not get source documentation: {str(e)}"}
+            )
     else:
-        lookup_result = json.loads(lookup_function_by_hash(hash=source_hash, index_file=index_path))
+        lookup_result = json.loads(
+            lookup_function_by_hash(hash=source_hash, index_file=index_path)
+        )
         if not lookup_result.get("found") or not lookup_result.get("canonical"):
-            return json.dumps({"error": "Source hash not found or has no canonical documentation"})
+            return json.dumps(
+                {"error": "Source hash not found or has no canonical documentation"}
+            )
         canonical = lookup_result["canonical"]
         try:
-            make_request(f"{ghidra_server_url}/switch_program", params={"name": canonical["program"]})
-            docs = json.loads(make_request(
-                f"{ghidra_server_url}/get_function_documentation",
-                params={"address": canonical["address"]},
-            ))
+            make_request(
+                f"{ghidra_server_url}/switch_program",
+                params={"name": canonical["program"]},
+            )
+            docs = json.loads(
+                make_request(
+                    f"{ghidra_server_url}/get_function_documentation",
+                    params={"address": canonical["address"]},
+                )
+            )
             if "error" in docs:
                 return json.dumps(docs)
-            source_info = {"program": canonical["program"], "address": canonical["address"], "name": canonical["name"]}
+            source_info = {
+                "program": canonical["program"],
+                "address": canonical["address"],
+                "name": canonical["name"],
+            }
         except Exception as e:
-            return json.dumps({"error": f"Could not get canonical documentation: {str(e)}"})
+            return json.dumps(
+                {"error": f"Could not get canonical documentation: {str(e)}"}
+            )
 
     try:
         with open(index_path, "r") as f:
@@ -3114,56 +3306,124 @@ def propagate_documentation(
         return json.dumps({"error": f"Hash {source_hash} not found in index"})
 
     instances = index["functions"][source_hash].get("instances", [])
-    results = {"success": True, "source": source_info, "targets_updated": 0, "targets_skipped": 0, "dry_run": dry_run, "details": []}
+    results = {
+        "success": True,
+        "source": source_info,
+        "targets_updated": 0,
+        "targets_skipped": 0,
+        "dry_run": dry_run,
+        "details": [],
+    }
 
     for instance in instances:
         target_program = instance["program"]
         target_address = instance["address"]
 
-        if target_program == source_info["program"] and target_address == source_info["address"]:
-            results["details"].append({"program": target_program, "address": target_address, "status": "skipped", "reason": "source function"})
+        if (
+            target_program == source_info["program"]
+            and target_address == source_info["address"]
+        ):
+            results["details"].append(
+                {
+                    "program": target_program,
+                    "address": target_address,
+                    "status": "skipped",
+                    "reason": "source function",
+                }
+            )
             results["targets_skipped"] += 1
             continue
 
         if target_programs and target_program not in target_programs:
-            results["details"].append({"program": target_program, "address": target_address, "status": "skipped", "reason": "not in target_programs filter"})
+            results["details"].append(
+                {
+                    "program": target_program,
+                    "address": target_address,
+                    "status": "skipped",
+                    "reason": "not in target_programs filter",
+                }
+            )
             results["targets_skipped"] += 1
             continue
 
         if dry_run:
-            results["details"].append({"program": target_program, "address": target_address, "status": "would_update", "current_name": instance.get("name", "unknown")})
+            results["details"].append(
+                {
+                    "program": target_program,
+                    "address": target_address,
+                    "status": "would_update",
+                    "current_name": instance.get("name", "unknown"),
+                }
+            )
             results["targets_updated"] += 1
         else:
             try:
-                switch_result = json.loads(make_request(f"{ghidra_server_url}/switch_program", params={"name": target_program}))
+                switch_result = json.loads(
+                    make_request(
+                        f"{ghidra_server_url}/switch_program",
+                        params={"name": target_program},
+                    )
+                )
                 if "error" in switch_result:
-                    results["details"].append({"program": target_program, "address": target_address, "status": "error", "reason": switch_result["error"]})
+                    results["details"].append(
+                        {
+                            "program": target_program,
+                            "address": target_address,
+                            "status": "error",
+                            "reason": switch_result["error"],
+                        }
+                    )
                     results["targets_skipped"] += 1
                     continue
 
-                apply_result = json.loads(make_request(
-                    f"{ghidra_server_url}/apply_function_documentation",
-                    method="POST",
-                    data=json.dumps({
-                        "target_address": target_address,
-                        "function_name": docs.get("function_name"),
-                        "return_type": docs.get("return_type"),
-                        "calling_convention": docs.get("calling_convention"),
-                        "plate_comment": docs.get("plate_comment"),
-                        "parameters": docs.get("parameters"),
-                        "comments": docs.get("comments"),
-                        "labels": docs.get("labels"),
-                    }),
-                ))
+                apply_result = json.loads(
+                    make_request(
+                        f"{ghidra_server_url}/apply_function_documentation",
+                        method="POST",
+                        data=json.dumps(
+                            {
+                                "target_address": target_address,
+                                "function_name": docs.get("function_name"),
+                                "return_type": docs.get("return_type"),
+                                "calling_convention": docs.get("calling_convention"),
+                                "plate_comment": docs.get("plate_comment"),
+                                "parameters": docs.get("parameters"),
+                                "comments": docs.get("comments"),
+                                "labels": docs.get("labels"),
+                            }
+                        ),
+                    )
+                )
 
                 if "error" in apply_result:
-                    results["details"].append({"program": target_program, "address": target_address, "status": "error", "reason": apply_result["error"]})
+                    results["details"].append(
+                        {
+                            "program": target_program,
+                            "address": target_address,
+                            "status": "error",
+                            "reason": apply_result["error"],
+                        }
+                    )
                     results["targets_skipped"] += 1
                 else:
-                    results["details"].append({"program": target_program, "address": target_address, "status": "updated", "changes": apply_result.get("changes_applied", 0)})
+                    results["details"].append(
+                        {
+                            "program": target_program,
+                            "address": target_address,
+                            "status": "updated",
+                            "changes": apply_result.get("changes_applied", 0),
+                        }
+                    )
                     results["targets_updated"] += 1
             except Exception as e:
-                results["details"].append({"program": target_program, "address": target_address, "status": "error", "reason": str(e)})
+                results["details"].append(
+                    {
+                        "program": target_program,
+                        "address": target_address,
+                        "status": "error",
+                        "reason": str(e),
+                    }
+                )
                 results["targets_skipped"] += 1
 
     return json.dumps(results)
@@ -3174,10 +3434,19 @@ def propagate_documentation(
 
 @mcp.tool()
 def store_function_knowledge(
-    address: str, binary_name: str, version: str, new_name: str,
-    old_name: str = None, score: int = None, status: str = "complete",
-    classification: str = None, iteration: int = None, strategy: str = None,
-    plate_comment: str = None, prototype: str = None, deductions: str = None,
+    address: str,
+    binary_name: str,
+    version: str,
+    new_name: str,
+    old_name: str = None,
+    score: int = None,
+    status: str = "complete",
+    classification: str = None,
+    iteration: int = None,
+    strategy: str = None,
+    plate_comment: str = None,
+    prototype: str = None,
+    deductions: str = None,
     game_system: str = None,
 ) -> str:
     """
@@ -3230,8 +3499,22 @@ def store_function_knowledge(
                deductions = EXCLUDED.deductions,
                game_system = COALESCE(EXCLUDED.game_system, documented_functions.game_system)
         """,
-        (address, binary_name, version, old_name, new_name, score, status,
-         classification, iteration, strategy, plate_comment, prototype, deductions_json, game_system),
+        (
+            address,
+            binary_name,
+            version,
+            old_name,
+            new_name,
+            score,
+            status,
+            classification,
+            iteration,
+            strategy,
+            plate_comment,
+            prototype,
+            deductions_json,
+            game_system,
+        ),
     )
 
     if success:
@@ -3241,8 +3524,11 @@ def store_function_knowledge(
 
 @mcp.tool()
 def query_knowledge_context(
-    description: str = None, binary_name: str = None, version: str = None,
-    game_system: str = None, limit: int = 10,
+    description: str = None,
+    binary_name: str = None,
+    version: str = None,
+    game_system: str = None,
+    limit: int = 10,
 ) -> str:
     """
     Query the knowledge database for context about functions.
@@ -3296,14 +3582,22 @@ def query_knowledge_context(
     rows = knowledge_db.execute_read(query, params)
     if rows is None:
         return json.dumps({"available": False, "error": "Query failed"})
-    return json.dumps({"success": True, "count": len(rows), "functions": rows}, default=str)
+    return json.dumps(
+        {"success": True, "count": len(rows), "functions": rows}, default=str
+    )
 
 
 @mcp.tool()
 def store_ordinal_mapping(
-    ordinal: int, binary_name: str, version: str, function_name: str,
-    calling_convention: str = None, parameter_count: int = None,
-    source: str = "re_loop", confidence: float = 1.0, notes: str = None,
+    ordinal: int,
+    binary_name: str,
+    version: str,
+    function_name: str,
+    calling_convention: str = None,
+    parameter_count: int = None,
+    source: str = "re_loop",
+    confidence: float = 1.0,
+    notes: str = None,
 ) -> str:
     """
     Store an ordinal-to-function-name mapping in the knowledge database.
@@ -3338,18 +3632,31 @@ def store_ordinal_mapping(
                confidence = GREATEST(EXCLUDED.confidence, ordinal_mappings.confidence),
                notes = COALESCE(EXCLUDED.notes, ordinal_mappings.notes)
         """,
-        (ordinal, binary_name, version, function_name, calling_convention,
-         parameter_count, source, confidence, notes),
+        (
+            ordinal,
+            binary_name,
+            version,
+            function_name,
+            calling_convention,
+            parameter_count,
+            source,
+            confidence,
+            notes,
+        ),
     )
 
     if success:
-        return json.dumps({"success": True, "stored": f"Ordinal_{ordinal} -> {function_name}"})
+        return json.dumps(
+            {"success": True, "stored": f"Ordinal_{ordinal} -> {function_name}"}
+        )
     return json.dumps({"success": False, "error": "Write failed (logged)"})
 
 
 @mcp.tool()
 def get_ordinal_mapping(
-    ordinal: int = None, binary_name: str = None, version: str = None,
+    ordinal: int = None,
+    binary_name: str = None,
+    version: str = None,
     function_name: str = None,
 ) -> str:
     """
@@ -3398,13 +3705,17 @@ def get_ordinal_mapping(
     rows = knowledge_db.execute_read(query, params)
     if rows is None:
         return json.dumps({"available": False, "error": "Query failed"})
-    return json.dumps({"success": True, "count": len(rows), "mappings": rows}, default=str)
+    return json.dumps(
+        {"success": True, "count": len(rows), "mappings": rows}, default=str
+    )
 
 
 @mcp.tool()
 def export_system_knowledge(
-    game_system: str = None, binary_name: str = None,
-    version: str = None, format: str = "markdown",
+    game_system: str = None,
+    binary_name: str = None,
+    version: str = None,
+    format: str = "markdown",
 ) -> str:
     """
     Export documented knowledge for content creation (books, articles).
@@ -3453,7 +3764,9 @@ def export_system_knowledge(
         return json.dumps({"available": False, "error": "Query failed"})
 
     if format == "json":
-        return json.dumps({"success": True, "count": len(rows), "functions": rows}, default=str)
+        return json.dumps(
+            {"success": True, "count": len(rows), "functions": rows}, default=str
+        )
 
     # Markdown format grouped by game system
     systems = {}
@@ -3464,7 +3777,9 @@ def export_system_knowledge(
     lines = ["# Diablo 2 Function Knowledge Export", ""]
     binary_label = binary_name or "All binaries"
     version_label = version or "all versions"
-    lines.append(f"**Binary:** {binary_label} | **Version:** {version_label} | **Functions:** {len(rows)}")
+    lines.append(
+        f"**Binary:** {binary_label} | **Version:** {version_label} | **Functions:** {len(rows)}"
+    )
     lines.append("")
 
     for sys_name, funcs in sorted(systems.items()):
@@ -3477,7 +3792,9 @@ def export_system_knowledge(
                 lines.append(f"```c\n{f['prototype']}\n```")
             if f.get("plate_comment"):
                 lines.append(f"{f['plate_comment']}")
-            lines.append(f"*Address: {f['address']} | Score: {f.get('score', 'N/A')} | Type: {f.get('classification', 'N/A')}*")
+            lines.append(
+                f"*Address: {f['address']} | Score: {f.get('score', 'N/A')} | Type: {f.get('classification', 'N/A')}*"
+            )
             lines.append("")
 
     return "\n".join(lines)
@@ -3489,23 +3806,33 @@ def export_system_knowledge(
 def main():
     parser = argparse.ArgumentParser(description="MCP server for Ghidra")
     parser.add_argument(
-        "--ghidra-server", type=str, default=DEFAULT_GHIDRA_SERVER,
+        "--ghidra-server",
+        type=str,
+        default=DEFAULT_GHIDRA_SERVER,
         help=f"Ghidra server URL, default: {DEFAULT_GHIDRA_SERVER}",
     )
     parser.add_argument(
-        "--mcp-host", type=str, default="127.0.0.1",
+        "--mcp-host",
+        type=str,
+        default="127.0.0.1",
         help="Host to run MCP server on (only used for sse), default: 127.0.0.1",
     )
     parser.add_argument(
-        "--mcp-port", type=int,
+        "--mcp-port",
+        type=int,
         help="Port to run MCP server on (only used for sse), default: 8089",
     )
     parser.add_argument(
-        "--transport", type=str, default="stdio", choices=["stdio", "sse"],
+        "--transport",
+        type=str,
+        default="stdio",
+        choices=["stdio", "sse"],
         help="Transport protocol for MCP, default: stdio",
     )
     parser.add_argument(
-        "--profile", type=str, choices=list(TOOL_PROFILES.keys()),
+        "--profile",
+        type=str,
+        choices=list(TOOL_PROFILES.keys()),
         help="Load only tools for a specific workflow (e.g., 're' for reverse engineering)",
     )
     args = parser.parse_args()
@@ -3516,7 +3843,9 @@ def main():
 
     # Dynamic tool registration from Ghidra's /mcp/schema
     dynamic_count = _register_schema_tools()
-    logger.info(f"Total tools: {dynamic_count} dynamic + {len(STATIC_TOOL_NAMES)} static")
+    logger.info(
+        f"Total tools: {dynamic_count} dynamic + {len(STATIC_TOOL_NAMES)} static"
+    )
 
     if args.profile:
         apply_tool_profile(mcp, args.profile)
@@ -3533,7 +3862,9 @@ def main():
             else:
                 mcp.settings.port = 8089
             logger.info(f"Connecting to Ghidra server at {ghidra_server_url}")
-            logger.info(f"Starting MCP server on http://{mcp.settings.host}:{mcp.settings.port}/sse")
+            logger.info(
+                f"Starting MCP server on http://{mcp.settings.host}:{mcp.settings.port}/sse"
+            )
             mcp.run(transport="sse")
         except KeyboardInterrupt:
             logger.info("Server stopped by user")

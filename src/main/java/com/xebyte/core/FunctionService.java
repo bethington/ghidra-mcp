@@ -107,24 +107,29 @@ public class FunctionService {
      */
     @McpTool(path = "/decompile_function", description = "Decompile function at address to pseudocode", category = "function")
     public Response decompileFunctionByAddress(
-            @Param(value = "address", description = "Function address in hex") String addressStr,
-            @Param(value = "program", description = "Target program name") String programName,
+            @Param(value = "name", defaultValue = "", description = "Function name to decompile") String functionName,
+            @Param(value = "address", defaultValue = "", description = "Function address in hex") String addressStr,
+            @Param(value = "program", defaultValue = "", description = "Target program name") String programName,
             @Param(value = "timeout", defaultValue = "60", description = "Decompile timeout in seconds") int timeoutSeconds) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (addressStr == null || addressStr.isEmpty()) return Response.err("Address or function name is required");
+
+        String functionRef = (addressStr != null && !addressStr.isEmpty()) ? addressStr : functionName;
+        if (functionRef == null || functionRef.isEmpty()) {
+            return Response.err("Address or function name is required");
+        }
 
         try {
-            Function func = ServiceUtils.resolveFunction(program, addressStr);
-            if (func == null) return Response.err("No function found for " + addressStr);
+            Function func = ServiceUtils.resolveFunction(program, functionRef);
+            if (func == null) return Response.err("No function found for " + functionRef);
 
             DecompInterface decomp = new DecompInterface();
             decomp.openProgram(program);
             DecompileResults decompResult = decomp.decompileFunction(func, timeoutSeconds, new ConsoleTaskMonitor());
 
             if (decompResult == null) {
-                return Response.err("Decompiler returned null result for function at " + addressStr);
+                return Response.err("Decompiler returned null result for function " + functionRef);
             }
 
             if (!decompResult.decompileCompleted()) {
@@ -145,6 +150,10 @@ public class FunctionService {
     }
 
     // Backward compatible overloads for internal callers
+    public Response decompileFunctionByAddress(String addressStr, String programName, int timeoutSeconds) {
+        return decompileFunctionByAddress(null, addressStr, programName, timeoutSeconds);
+    }
+
     public Response decompileFunctionByAddress(String addressStr, String programName) {
         return decompileFunctionByAddress(addressStr, programName, DECOMPILE_TIMEOUT_SECONDS);
     }
@@ -306,13 +315,24 @@ public class FunctionService {
      */
     @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function", category = "function")
     public Response forceDecompile(
-            @Param(value = "address", description = "Function address in hex") String functionAddrStr,
-            @Param(value = "program") String programName) {
+            @Param(value = "name", defaultValue = "", description = "Function name to redecompile") String functionName,
+            @Param(value = "name", source = ParamSource.BODY, defaultValue = "", description = "Function name to redecompile") String functionNameBody,
+            @Param(value = "address", defaultValue = "", description = "Function address in hex") String functionAddrStr,
+            @Param(value = "address", source = ParamSource.BODY, defaultValue = "", description = "Function address in hex") String functionAddrBody,
+            @Param(value = "function_address", defaultValue = "", description = "Legacy function address parameter") String legacyFunctionAddrStr,
+            @Param(value = "function_address", source = ParamSource.BODY, defaultValue = "", description = "Legacy function address parameter") String legacyFunctionAddrBody,
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
+        String functionRef = (functionAddrStr != null && !functionAddrStr.isEmpty()) ? functionAddrStr :
+                ((functionAddrBody != null && !functionAddrBody.isEmpty()) ? functionAddrBody :
+                ((legacyFunctionAddrStr != null && !legacyFunctionAddrStr.isEmpty()) ? legacyFunctionAddrStr :
+                ((legacyFunctionAddrBody != null && !legacyFunctionAddrBody.isEmpty()) ? legacyFunctionAddrBody :
+                ((functionName != null && !functionName.isEmpty()) ? functionName : functionNameBody))));
+
+        if (functionRef == null || functionRef.isEmpty()) {
             return Response.err("Function address is required");
         }
 
@@ -322,15 +342,9 @@ public class FunctionService {
         try {
             threadingStrategy.executeRead(() -> {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddrStr);
-                    if (addr == null) {
-                        resultMsg.append("Error: Invalid function address: ").append(functionAddrStr);
-                        return null;
-                    }
-
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    Function func = ServiceUtils.resolveFunction(program, functionRef);
                     if (func == null) {
-                        resultMsg.append("Error: No function found at address ").append(functionAddrStr);
+                        resultMsg.append("Error: No function found for ").append(functionRef);
                         return null;
                     }
 
@@ -399,6 +413,10 @@ public class FunctionService {
 
     public Response forceDecompile(String functionAddrStr) {
         return forceDecompile(functionAddrStr, null);
+    }
+
+    public Response forceDecompile(String functionAddrStr, String programName) {
+        return forceDecompile(null, null, functionAddrStr, null, null, null, programName);
     }
 
     // ========================================================================
