@@ -345,6 +345,12 @@ class GhidraValidationError(Exception):
 # Input validation patterns
 HEX_ADDRESS_PATTERN = re.compile(r"^0x[0-9a-fA-F]+$")
 SEGMENT_ADDRESS_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*:[0-9a-fA-F]+$")
+# Handles space:0xHEX form (e.g., mem:0x1000, code:0xFF00).
+# Must be checked BEFORE SEGMENT_ADDRESS_PATTERN because the 'x' in '0x' is not
+# in [0-9a-fA-F], so the existing pattern rejects this form entirely.
+SEGMENT_ADDR_WITH_0X_PATTERN = re.compile(
+    r"^([a-zA-Z_][a-zA-Z0-9_]*):0[xX]([0-9a-fA-F]+)$"
+)
 FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
@@ -419,12 +425,30 @@ def validate_hex_address(address: str) -> bool:
 
 
 def sanitize_address(address: str) -> str:
-    """Normalize address format (handle with/without 0x prefix, case normalization)."""
+    """Normalize address format for Ghidra AddressFactory.
+
+    Handles:
+    - space:0xHEX  -> space:HEX   (strip 0x from offset; AddressFactory rejects 0x after colon)
+    - SPACE:HEX    -> space:HEX   (lowercase space name; AddressFactory is case-sensitive)
+    - 0xHEX        -> 0xhex       (lowercase)
+    - HEX          -> 0xHEX       (add 0x prefix)
+    """
     if not address:
         return address
     address = address.strip()
+
+    # Step 1: handle space:0xHEX form (checked first — 'x' not in [0-9a-fA-F])
+    m = SEGMENT_ADDR_WITH_0X_PATTERN.match(address)
+    if m:
+        # Lowercase space name; preserve offset case (AddressFactory handles hex case)
+        return f"{m.group(1).lower()}:{m.group(2)}"
+
+    # Step 2: normalize valid space:HEX form (lowercase space name only)
     if SEGMENT_ADDRESS_PATTERN.match(address):
-        return address
+        space, offset = address.split(":", 1)
+        return f"{space.lower()}:{offset}"
+
+    # Step 3: plain hex normalization (unchanged logic)
     if not address.startswith(("0x", "0X")):
         address = "0x" + address
     return address.lower()
