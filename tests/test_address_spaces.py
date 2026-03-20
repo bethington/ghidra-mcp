@@ -134,6 +134,7 @@ class TestMakeToolHandlerSanitization:
                 f"Expected mem:1000, got {params['address']}"
         finally:
             bridge.safe_get_json = orig_get
+            bridge.safe_post_json = orig_post
 
     def test_post_tool_sanitizes_address_param(self):
         handler, calls, (orig_get, orig_post, bridge) = \
@@ -144,6 +145,7 @@ class TestMakeToolHandlerSanitization:
             _, _, body = calls[0]
             assert body["address"] == "mem:FF00"
         finally:
+            bridge.safe_get_json = orig_get
             bridge.safe_post_json = orig_post
 
     def test_non_address_param_passes_through_unchanged(self):
@@ -155,6 +157,7 @@ class TestMakeToolHandlerSanitization:
             assert params["label"] == "DO_NOT_CHANGE"
         finally:
             bridge.safe_get_json = orig_get
+            bridge.safe_post_json = orig_post
 
     def test_uppercase_space_name_lowercased(self):
         handler, calls, (orig_get, orig_post, bridge) = \
@@ -165,3 +168,4 @@ class TestMakeToolHandlerSanitization:
             assert params["address"] == "code:abcd"
         finally:
             bridge.safe_get_json = orig_get
+            bridge.safe_post_json = orig_post
