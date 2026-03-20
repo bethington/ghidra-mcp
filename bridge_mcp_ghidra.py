@@ -566,10 +566,16 @@ def parse_address_list(addresses: str, param_name: str = "addresses") -> list[st
             )
     else:
         addr_list = [addr.strip() for addr in addresses.split(",") if addr.strip()]
+    sanitized = []
     for addr in addr_list:
+        addr = sanitize_address(addr)
         if not validate_hex_address(addr):
-            raise GhidraValidationError(f"Invalid hex address format: {addr}")
-    return addr_list
+            raise GhidraValidationError(
+                f"Invalid address format: {addr!r}. "
+                f"Use 0x<hex> or <space>:<hex> (e.g., mem:1000, code:ff00)."
+            )
+        sanitized.append(addr)
+    return sanitized
 
 
 # Performance and caching utilities
@@ -1238,8 +1244,12 @@ def disassemble_function(
     Returns:
         List of assembly instructions. With pagination, first element is metadata with total count.
     """
+    address = sanitize_address(address)
     if not validate_hex_address(address):
-        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+        raise GhidraValidationError(
+            f"Invalid address format: {address!r}. "
+            f"Use 0x<hex> or <space>:<hex> (e.g., mem:1000, code:ff00)."
+        )
 
     params = {"address": address}
     if program:
@@ -1285,7 +1295,12 @@ def rename_variables(
     Returns:
         JSON with success status, variables_renamed count, variables_failed count, backend_used, and errors.
     """
-    validate_hex_address(function_address)
+    function_address = sanitize_address(function_address)
+    if not validate_hex_address(function_address):
+        raise GhidraValidationError(
+            f"Invalid address format: {function_address!r}. "
+            f"Use 0x<hex> or <space>:<hex> (e.g., mem:1000, code:ff00)."
+        )
 
     if not variable_renames:
         return json.dumps({
