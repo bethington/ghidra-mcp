@@ -604,7 +604,7 @@ public class HeadlessEndpointHandler {
 
         Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) {
-            return "Error: Invalid address: " + functionAddress;
+            return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
         }
 
         try {
@@ -713,7 +713,7 @@ public class HeadlessEndpointHandler {
 
         Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) {
-            return "Error: Invalid address: " + functionAddress;
+            return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
         }
 
         try {
