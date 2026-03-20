@@ -894,6 +894,8 @@ STATIC_TOOL_NAMES = {
     "build_function_hash_index",
     "lookup_function_by_hash",
     "propagate_documentation",
+    # Address space discovery
+    "get_address_spaces",
     # Knowledge DB tools (PostgreSQL)
     "store_function_knowledge",
     "query_knowledge_context",
@@ -1124,6 +1126,29 @@ def get_version() -> str:
         Ghidra version, Java version, and endpoint count.
     """
     return "\n".join(safe_get("get_version"))
+
+
+@mcp.tool()
+def get_address_spaces(program: str = None) -> dict:
+    """
+    List all physical address spaces in the program.
+
+    Returns RAM and CODE spaces only; excludes pseudo-spaces (EXTERNAL, STACK, etc.)
+    and overlay spaces. Use the returned space names to prefix addresses for unambiguous
+    resolution on multi-space programs (e.g., embedded/microcontroller targets).
+
+    Example response:
+        {"address_spaces": [{"name": "mem", "start": "0000", "end": "ffff",
+          "size": 65536, "addressable_unit_size": 1, "size_bytes": 65536,
+          "address_size_bits": 16, "is_default": true}], "count": 1}
+
+    Args:
+        program: Optional program name. Defaults to active program.
+
+    Returns:
+        Dict with "address_spaces" list and "count".
+    """
+    return safe_get_json("get_address_spaces", {}, program=program)
 
 
 @mcp.tool()
