@@ -1,5 +1,6 @@
-# GhidraMCP Headless Server Docker Image
-# Multi-stage build for minimal runtime image
+# GhidraMCP Docker Image - Full MCP Server
+# Includes Ghidra headless server + Python MCP bridge
+# Exposes MCP protocol via SSE transport for LLM clients
 
 # =============================================================================
 # Stage 1: Builder - Download Ghidra and build the plugin
@@ -70,9 +71,12 @@ RUN mvn clean package -P headless -DskipTests -q
 # =============================================================================
 FROM eclipse-temurin:21-jre
 
-# Install runtime dependencies
+# Install runtime dependencies (Java runtime + Python for MCP bridge)
 RUN apt-get update && apt-get install -y \
     curl \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Ghidra from builder
@@ -83,25 +87,36 @@ ENV GHIDRA_HOME=/opt/ghidra
 ENV GHIDRA_MCP_PORT=8089
 ENV JAVA_OPTS="-Xmx4g -XX:+UseG1GC"
 
+# MCP bridge configuration
+ENV MCP_TRANSPORT=sse
+ENV MCP_HOST=0.0.0.0
+ENV MCP_PORT=8081
+ENV ENABLE_MCP_BRIDGE=true
+
 # Create directories
 RUN mkdir -p /app /data /projects
 
-# Copy the built headless JAR (lib directory may not exist with system-scoped deps)
-# Copy the built JAR (naming may vary based on version)
+# Copy the built headless JAR
 COPY --from=builder /build/target/GhidraMCP-*.jar /app/GhidraMCP.jar
+
+# Copy MCP bridge and install Python dependencies
+COPY bridge_mcp_ghidra.py /app/
+COPY requirements.txt /app/
+RUN python3 -m venv /app/venv && \
+    /app/venv/bin/pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy entrypoint script and fix line endings (Windows -> Unix)
 COPY docker/entrypoint.sh /app/
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
-# Expose port
-EXPOSE 8089
+# Expose ports: 8081 = MCP SSE (primary), 8089 = Ghidra HTTP API (internal/debug)
+EXPOSE 8081 8089
 
 # Volume for persistent data and projects
 VOLUME ["/data", "/projects"]
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# Health check (checks Java server; bridge depends on it)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -f http://localhost:${GHIDRA_MCP_PORT}/check_connection || exit 1
 
 # Set working directory

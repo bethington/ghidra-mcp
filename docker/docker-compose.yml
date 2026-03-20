@@ -1,4 +1,5 @@
-# GhidraMCP Headless Server - Single Instance Deployment
+# GhidraMCP Server - Single Instance Deployment
+# Runs a full MCP server with Ghidra analysis capabilities
 # Usage: docker-compose up -d
 
 version: '3.8'
@@ -8,10 +9,11 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: ghidra-mcp-headless:latest
+    image: ghidra-mcp:latest
     container_name: ghidra-mcp
     ports:
-      - "8089:8089"
+      - "8081:8081"   # MCP SSE endpoint (primary - for LLM clients)
+      - "8089:8089"   # Ghidra HTTP API (optional - for debugging/direct access)
     volumes:
       # Persistent data storage
       - ghidra-data:/data
@@ -20,16 +22,24 @@ services:
       # Optional: Mount local binaries for analysis
       # - ./binaries:/binaries:ro
     environment:
+      # Ghidra headless server
       - GHIDRA_MCP_PORT=8089
       - JAVA_OPTS=-Xmx4g -XX:+UseG1GC
+      # MCP bridge
+      - MCP_TRANSPORT=sse
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8081
+      - ENABLE_MCP_BRIDGE=true
       # Optional: Auto-load a program on startup
       # - PROGRAM_FILE=/binaries/target.exe
+      # Optional: Set to 'false' for HTTP-only mode (no MCP bridge)
+      # - ENABLE_MCP_BRIDGE=false
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8089/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8089/check_connection"]
       interval: 30s
       timeout: 10s
-      start_period: 60s
+      start_period: 90s
       retries: 3
     deploy:
       resources:
