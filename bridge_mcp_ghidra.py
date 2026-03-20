@@ -989,9 +989,17 @@ def _make_tool_handler(tool_def: dict):
     # Separate query vs body params
     query_params = {p["name"] for p in params_schema if p.get("source") == "query"}
     body_params = {p["name"] for p in params_schema if p.get("source") == "body"}
+    # Collect param names that carry memory addresses (bridge sanitizes these before dispatch)
+    address_params = {p["name"] for p in params_schema if p.get("param_type") == "address"}
 
     def handler(**kwargs):
         program = kwargs.pop("program", None)
+
+        # Sanitize all address parameters before routing to query/body
+        # Covers: space:0xHEX normalization, uppercase space names, plain hex prefix
+        for param_name in address_params:
+            if param_name in kwargs and kwargs[param_name] is not None:
+                kwargs[param_name] = sanitize_address(kwargs[param_name])
 
         if method == "GET":
             # All params go as query string
