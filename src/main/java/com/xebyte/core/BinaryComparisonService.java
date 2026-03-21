@@ -467,19 +467,20 @@ public class BinaryComparisonService {
             int idx = indices[i];
             Function tgtFunc = matchFunctions.get(idx);
             double score = matches.get(idx)[0];
-            matchList.add(JsonHelper.mapOf(
-                "name", tgtFunc.getName(),
-                "address", tgtFunc.getEntryPoint().toString(),
-                "score", Double.parseDouble(String.format("%.4f", score))
-            ));
+            Map<String, Object> matchItem = new LinkedHashMap<>();
+            matchItem.put("name", tgtFunc.getName());
+            matchItem.putAll(ServiceUtils.addressToJson(tgtFunc.getEntryPoint(), tgtProgram));
+            matchItem.put("score", Double.parseDouble(String.format("%.4f", score)));
+            matchList.add(matchItem);
         }
 
+        Map<String, Object> srcInfo = new LinkedHashMap<>();
+        srcInfo.put("name", srcFunc.getName());
+        srcInfo.putAll(ServiceUtils.addressToJson(srcFunc.getEntryPoint(), srcProgram));
+        srcInfo.put("program", srcProgram.getName());
+
         return Response.ok(JsonHelper.mapOf(
-            "source", JsonHelper.mapOf(
-                "name", srcFunc.getName(),
-                "address", srcFunc.getEntryPoint().toString(),
-                "program", srcProgram.getName()
-            ),
+            "source", srcInfo,
             "target_program", tgtProgram.getName(),
             "threshold", threshold,
             "total_matches", indices.length,
@@ -682,19 +683,21 @@ public class BinaryComparisonService {
         List<Map<String, Object>> bodyDiffList = diffEntriesToList(bodyDiff, MAX_DIFF_ENTRIES);
         List<Map<String, Object>> epilogueDiffList = diffEntriesToList(epilogueDiff, epilogueDiff.size());
 
+        Map<String, Object> funcAInfo = new LinkedHashMap<>();
+        funcAInfo.put("name", funcA.getName());
+        funcAInfo.putAll(ServiceUtils.addressToJson(funcA.getEntryPoint(), progA));
+        funcAInfo.put("program", progA.getName());
+        funcAInfo.put("instruction_count", partsA[0].size() + partsA[1].size() + partsA[2].size());
+
+        Map<String, Object> funcBInfo = new LinkedHashMap<>();
+        funcBInfo.put("name", funcB.getName());
+        funcBInfo.putAll(ServiceUtils.addressToJson(funcB.getEntryPoint(), progB));
+        funcBInfo.put("program", progB.getName());
+        funcBInfo.put("instruction_count", partsB[0].size() + partsB[1].size() + partsB[2].size());
+
         return Response.ok(JsonHelper.mapOf(
-            "function_a", JsonHelper.mapOf(
-                "name", funcA.getName(),
-                "address", funcA.getEntryPoint().toString(),
-                "program", progA.getName(),
-                "instruction_count", partsA[0].size() + partsA[1].size() + partsA[2].size()
-            ),
-            "function_b", JsonHelper.mapOf(
-                "name", funcB.getName(),
-                "address", funcB.getEntryPoint().toString(),
-                "program", progB.getName(),
-                "instruction_count", partsB[0].size() + partsB[1].size() + partsB[2].size()
-            ),
+            "function_a", funcAInfo,
+            "function_b", funcBInfo,
             "summary", JsonHelper.mapOf(
                 "similarity_score", Double.parseDouble(String.format("%.4f", similarity)),
                 "body_equal", bodyEqual,
