@@ -784,12 +784,12 @@ public class ProgramScriptService {
                 hexStr.append(String.format("%02x", bytes[i] & 0xFF));
             }
 
-            return Response.ok(JsonHelper.mapOf(
-                "address", address.toString(),
-                "length", bytesRead,
-                "data", dataList,
-                "hex", hexStr.toString()
-            ));
+            Map<String, Object> memResult = new LinkedHashMap<>();
+            memResult.putAll(ServiceUtils.addressToJson(address, program));
+            memResult.put("length", bytesRead);
+            memResult.put("data", dataList);
+            memResult.put("hex", hexStr.toString());
+            return Response.ok(memResult);
 
         } catch (Exception e) {
             return Response.err("Failed to read memory: " + e.getMessage());
@@ -964,12 +964,12 @@ public class ProgramScriptService {
                 bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
                 program.endTransaction(transactionId, true);
 
-                return Response.ok(JsonHelper.mapOf(
-                    "success", true,
-                    "address", addr.toString(),
-                    "category", finalCategory,
-                    "comment", finalComment
-                ));
+                Map<String, Object> bmResult = new LinkedHashMap<>();
+                bmResult.put("success", true);
+                bmResult.putAll(ServiceUtils.addressToJson(addr, program));
+                bmResult.put("category", finalCategory);
+                bmResult.put("comment", finalComment);
+                return Response.ok(bmResult);
 
             } catch (Exception e) {
                 program.endTransaction(transactionId, false);
@@ -1016,12 +1016,12 @@ public class ProgramScriptService {
                 Bookmark[] bms = bookmarkManager.getBookmarks(addr);
                 for (Bookmark bm : bms) {
                     if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
-                        bookmarks.add(JsonHelper.mapOf(
-                            "address", bm.getAddress().toString(),
-                            "category", bm.getCategory(),
-                            "comment", bm.getComment(),
-                            "type", bm.getTypeString()
-                        ));
+                        Map<String, Object> bmItem = new LinkedHashMap<>();
+                        bmItem.putAll(ServiceUtils.addressToJson(bm.getAddress(), program));
+                        bmItem.put("category", bm.getCategory());
+                        bmItem.put("comment", bm.getComment());
+                        bmItem.put("type", bm.getTypeString());
+                        bookmarks.add(bmItem);
                     }
                 }
             } else {
@@ -1032,12 +1032,12 @@ public class ProgramScriptService {
                     while (iter.hasNext()) {
                         Bookmark bm = iter.next();
                         if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
-                            bookmarks.add(JsonHelper.mapOf(
-                                "address", bm.getAddress().toString(),
-                                "category", bm.getCategory(),
-                                "comment", bm.getComment(),
-                                "type", bm.getTypeString()
-                            ));
+                            Map<String, Object> bmItem = new LinkedHashMap<>();
+                            bmItem.putAll(ServiceUtils.addressToJson(bm.getAddress(), program));
+                            bmItem.put("category", bm.getCategory());
+                            bmItem.put("comment", bm.getComment());
+                            bmItem.put("type", bm.getTypeString());
+                            bookmarks.add(bmItem);
                         }
                     }
                 }
@@ -1100,11 +1100,11 @@ public class ProgramScriptService {
                 }
 
                 program.endTransaction(transactionId, true);
-                return Response.ok(JsonHelper.mapOf(
-                    "success", true,
-                    "deleted", deleted,
-                    "address", addr.toString()
-                ));
+                Map<String, Object> delResult = new LinkedHashMap<>();
+                delResult.put("success", true);
+                delResult.put("deleted", deleted);
+                delResult.putAll(ServiceUtils.addressToJson(addr, program));
+                return Response.ok(delResult);
 
             } catch (Exception e) {
                 program.endTransaction(transactionId, false);
