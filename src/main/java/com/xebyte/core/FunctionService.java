@@ -1972,13 +1972,13 @@ public class FunctionService {
                 long bodySize = func.getBody().getNumAddresses();
                 program.getFunctionManager().removeFunction(addr);
 
-                resultData.set(JsonHelper.mapOf(
-                    "success", true,
-                    "address", addr.toString(),
-                    "deleted_function", funcName,
-                    "body_size", bodySize,
-                    "message", "Function '" + funcName + "' deleted at " + addr
-                ));
+                Map<String, Object> delResult = new LinkedHashMap<>();
+                delResult.put("success", true);
+                delResult.putAll(ServiceUtils.addressToJson(addr, program));
+                delResult.put("deleted_function", funcName);
+                delResult.put("body_size", bodySize);
+                delResult.put("message", "Function '" + funcName + "' deleted at " + addr);
+                resultData.set(delResult);
                 return null;
             });
 
@@ -2071,14 +2071,19 @@ public class FunctionService {
                     func.setName(name, SourceType.USER_DEFINED);
                 }
 
-                resultData.set(JsonHelper.mapOf(
-                    "success", true,
-                    "address", addr.toString(),
-                    "function_name", func.getName(),
-                    "entry_point", func.getEntryPoint().toString(),
-                    "body_size", func.getBody().getNumAddresses(),
-                    "message", "Function created successfully at " + addr
-                ));
+                Map<String, Object> createResult = new LinkedHashMap<>();
+                createResult.put("success", true);
+                createResult.putAll(ServiceUtils.addressToJson(addr, program));
+                createResult.put("function_name", func.getName());
+                Address ep = func.getEntryPoint();
+                createResult.put("entry_point", ep.toString(false));
+                if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
+                    createResult.put("entry_point_full", ep.toString());
+                    createResult.put("entry_point_space", ep.getAddressSpace().getName());
+                }
+                createResult.put("body_size", func.getBody().getNumAddresses());
+                createResult.put("message", "Function created successfully at " + addr);
+                resultData.set(createResult);
                 return null;
             });
 
