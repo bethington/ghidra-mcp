@@ -6,6 +6,7 @@ import ghidra.program.model.listing.*;
 import ghidra.util.Msg;
 
 import javax.swing.SwingUtilities;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -145,11 +146,11 @@ public class CommentService {
             return Response.err("No function at address: " + address);
         }
 
-        return Response.ok(JsonHelper.mapOf(
-                "address", func.getEntryPoint().toString(),
-                "function_name", func.getName(),
-                "comment", func.getComment()
-        ));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+        result.put("function_name", func.getName());
+        result.put("comment", func.getComment());
+        return Response.ok(result);
     }
 
     /**
