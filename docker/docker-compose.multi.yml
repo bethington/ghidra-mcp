@@ -1,8 +1,6 @@
 # GhidraMCP Headless Server - Multi-Instance Deployment with Load Balancer
 # Usage: docker-compose -f docker-compose.multi.yml up -d --scale ghidra-mcp=3
 
-version: '3.8'
-
 services:
   # Nginx Load Balancer
   nginx:

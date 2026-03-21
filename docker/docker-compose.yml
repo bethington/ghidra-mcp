@@ -1,8 +1,6 @@
 # GhidraMCP Headless Server - Single Instance Deployment
 # Usage: docker-compose up -d
 
-version: '3.8'
-
 services:
   ghidra-mcp:
     build:

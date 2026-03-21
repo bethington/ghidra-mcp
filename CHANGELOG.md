@@ -4,6 +4,14 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Headless Upload Pipeline Fixes
+- Added a new headless `/upload_file` endpoint and MCP `upload_binary` tool so local binaries can be transferred into Docker/headless Ghidra even when the server cannot directly see the model's filesystem path
+- Added MCP wrappers for `load_program`, `close_program`, and `load_program_from_project` to complete the headless import workflow
+- Fixed `open_project` to use the correct POST transport for headless mode and taught `open_program` to fall back to `load_program_from_project` when the GUI-only endpoint is unavailable
+- Restored headless parity for project inspection by exposing `/list_project_files` and `/project/info` from the headless server
+
 ## v4.3.0 - 2026-03-09
 
 ### Annotation-Based Endpoints & Dynamic Bridge Registration

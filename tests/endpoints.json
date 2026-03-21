@@ -1,7 +1,7 @@
 {
   "version": "4.3.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 191,
+  "total_endpoints": 192,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -1463,17 +1463,28 @@
       "method": "POST",
       "category": "program",
       "params": [
-        "path"
+        "file"
       ],
       "description": "Load program into headless server"
+    },
+    {
+      "path": "/upload_file",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "filename",
+        "content_base64",
+        "directory",
+        "overwrite"
+      ],
+      "description": "Upload a local file into the headless server filesystem"
     },
     {
       "path": "/load_program_from_project",
       "method": "POST",
       "category": "program",
       "params": [
-        "project_path",
-        "program_path"
+        "path"
       ],
       "description": "Load program from Ghidra project (headless)"
     },
@@ -1482,7 +1493,7 @@
       "method": "POST",
       "category": "program",
       "params": [
-        "program"
+        "name"
       ],
       "description": "Close a loaded program (headless)"
     },
