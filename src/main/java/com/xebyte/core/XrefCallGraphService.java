@@ -1122,10 +1122,15 @@ public class XrefCallGraphService {
 
                         while (refIter.hasNext()) {
                             Reference ref = refIter.next();
-                            refsList.add(JsonHelper.mapOf(
-                                "from", ref.getFromAddress().toString(),
-                                "type", ref.getReferenceType().getName()
-                            ));
+                            Address fromAddr = ref.getFromAddress();
+                        Map<String, Object> refItem = new LinkedHashMap<>();
+                        refItem.put("from", fromAddr.toString(false));
+                        if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
+                            refItem.put("from_full", fromAddr.toString());
+                            refItem.put("from_space", fromAddr.getAddressSpace().getName());
+                        }
+                        refItem.put("type", ref.getReferenceType().getName());
+                        refsList.add(refItem);
                         }
                     }
                 } catch (Exception e) {
