@@ -438,14 +438,14 @@ public class AnalysisService {
                 scanAddr = scanAddr.add(1);
             }
 
-            return Response.ok(JsonHelper.mapOf(
-                "address", addr.toString(),
-                "estimated_size", estimatedSize,
-                "stride", 1,
-                "element_count", estimatedSize,
-                "confidence", "medium",
-                "detection_method", "xref_analysis"
-            ));
+            Map<String, Object> arrayResult = new LinkedHashMap<>();
+            arrayResult.putAll(ServiceUtils.addressToJson(addr, program));
+            arrayResult.put("estimated_size", estimatedSize);
+            arrayResult.put("stride", 1);
+            arrayResult.put("element_count", estimatedSize);
+            arrayResult.put("confidence", "medium");
+            arrayResult.put("detection_method", "xref_analysis");
+            return Response.ok(arrayResult);
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
@@ -782,7 +782,7 @@ public class AnalysisService {
 
                     if (matchFound) {
                         Address matchAddr = blockStart.add(i);
-                        matches.add(JsonHelper.mapOf("address", matchAddr.toString()));
+                        matches.add(ServiceUtils.addressToJson(matchAddr, program));
 
                         if (matches.size() >= MAX_MATCHES) {
                             matches.add(JsonHelper.mapOf("note", "Limited to " + MAX_MATCHES + " matches"));
@@ -850,15 +850,15 @@ public class AnalysisService {
                 double similarity = calculateSimilarity(targetMetrics, funcMetrics);
 
                 if (similarity >= threshold) {
-                    similarFunctions.add(JsonHelper.mapOf(
-                        "name", func.getName(),
-                        "address", func.getEntryPoint().toString(),
-                        "similarity", Math.round(similarity * 1000.0) / 1000.0,
-                        "basic_blocks", funcMetrics.basicBlockCount,
-                        "instructions", funcMetrics.instructionCount,
-                        "calls", funcMetrics.callCount,
-                        "complexity", funcMetrics.cyclomaticComplexity
-                    ));
+                    Map<String, Object> simItem = new LinkedHashMap<>();
+                    simItem.put("name", func.getName());
+                    simItem.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+                    simItem.put("similarity", Math.round(similarity * 1000.0) / 1000.0);
+                    simItem.put("basic_blocks", funcMetrics.basicBlockCount);
+                    simItem.put("instructions", funcMetrics.instructionCount);
+                    simItem.put("calls", funcMetrics.callCount);
+                    simItem.put("complexity", funcMetrics.cyclomaticComplexity);
+                    similarFunctions.add(simItem);
                 }
             }
 
@@ -946,7 +946,7 @@ public class AnalysisService {
                 basicBlockCount++;
 
                 Map<String, Object> blockInfo = new LinkedHashMap<>();
-                blockInfo.put("address", block.getFirstStartAddress().toString());
+                blockInfo.putAll(ServiceUtils.addressToJson(block.getFirstStartAddress(), program));
                 blockInfo.put("size", block.getNumAddresses());
 
                 // Count edges and detect loops
@@ -1027,24 +1027,29 @@ public class AnalysisService {
                 blockDetails.add(JsonHelper.mapOf("note", (blocks.size() - 100) + " additional blocks truncated"));
             }
 
-            return Response.ok(JsonHelper.mapOf(
-                "function_name", functionName,
-                "entry_point", func.getEntryPoint().toString(),
-                "size_bytes", func.getBody().getNumAddresses(),
-                "metrics", JsonHelper.mapOf(
-                    "cyclomatic_complexity", cyclomaticComplexity,
-                    "complexity_rating", complexityRating,
-                    "basic_blocks", basicBlockCount,
-                    "edges", edgeCount,
-                    "instructions", instructionCount,
-                    "conditional_branches", conditionalBranches,
-                    "unconditional_jumps", unconditionalJumps,
-                    "loops_detected", loops,
-                    "calls", callCount,
-                    "returns", returnCount
-                ),
-                "basic_block_details", blockDetails
+            Address ep = func.getEntryPoint();
+            Map<String, Object> cfResult = new LinkedHashMap<>();
+            cfResult.put("function_name", functionName);
+            cfResult.put("entry_point", ep.toString(false));
+            if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
+                cfResult.put("entry_point_full", ep.toString());
+                cfResult.put("entry_point_space", ep.getAddressSpace().getName());
+            }
+            cfResult.put("size_bytes", func.getBody().getNumAddresses());
+            cfResult.put("metrics", JsonHelper.mapOf(
+                "cyclomatic_complexity", cyclomaticComplexity,
+                "complexity_rating", complexityRating,
+                "basic_blocks", basicBlockCount,
+                "edges", edgeCount,
+                "instructions", instructionCount,
+                "conditional_branches", conditionalBranches,
+                "unconditional_jumps", unconditionalJumps,
+                "loops_detected", loops,
+                "calls", callCount,
+                "returns", returnCount
             ));
+            cfResult.put("basic_block_details", blockDetails);
+            return Response.ok(cfResult);
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
@@ -1837,7 +1842,7 @@ public class AnalysisService {
                     // Build structured data for Gson serialization
                     Map<String, Object> data = new LinkedHashMap<>();
                     data.put("name", func.getName());
-                    data.put("address", func.getEntryPoint().toString());
+                    data.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
                     data.put("classification", classifyFunction(func, program));
                     data.put("signature", func.getSignature().toString());
 
@@ -1868,7 +1873,14 @@ public class AnalysisService {
                         int refCount = 0;
                         while (refs.hasNext() && refCount < 100) {
                             Reference ref = refs.next();
-                            xrefList.add(JsonHelper.mapOf("from", ref.getFromAddress().toString()));
+                            Address fromAddr = ref.getFromAddress();
+                            Map<String, Object> xrefItem = new LinkedHashMap<>();
+                            xrefItem.put("from", fromAddr.toString(false));
+                            if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
+                                xrefItem.put("from_full", fromAddr.toString());
+                                xrefItem.put("from_space", fromAddr.getAddressSpace().getName());
+                            }
+                            xrefList.add(xrefItem);
                             refCount++;
                         }
                         data.put("xrefs", xrefList);
@@ -1923,10 +1935,10 @@ public class AnalysisService {
                         int instrCount = 0;
                         while (instrIter.hasNext() && instrCount < 100) {
                             Instruction instr = instrIter.next();
-                            disasmList.add(JsonHelper.mapOf(
-                                "address", instr.getAddress().toString(),
-                                "mnemonic", instr.getMnemonicString()
-                            ));
+                            Map<String, Object> instrItem = new LinkedHashMap<>();
+                            instrItem.putAll(ServiceUtils.addressToJson(instr.getAddress(), program));
+                            instrItem.put("mnemonic", instr.getMnemonicString());
+                            disasmList.add(instrItem);
                             instrCount++;
                         }
                         data.put("disassembly", disasmList);
@@ -2089,7 +2101,7 @@ public class AnalysisService {
                         // Create match entry
                         Map<String, Object> match = new LinkedHashMap<>();
                         match.put("name", func.getName());
-                        match.put("address", func.getEntryPoint().toString());
+                        match.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
                         match.put("xref_count", xrefCount);
                         matches.add(match);
                     }
@@ -3557,7 +3569,7 @@ public class AnalysisService {
 
                     // Basic info
                     data.put("name", func.getName());
-                    data.put("address", func.getEntryPoint().toString());
+                    data.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
                     data.put("signature", func.getSignature().toString());
 
                     // Classification
