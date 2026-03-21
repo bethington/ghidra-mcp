@@ -281,12 +281,12 @@ public class ListingService {
             }
             if (count >= limit) break;
 
-            functions.add(JsonHelper.mapOf(
-                    "name", func.getName(),
-                    "address", func.getEntryPoint().toString(),
-                    "isThunk", func.isThunk(),
-                    "isExternal", func.isExternal()
-            ));
+            Map<String, Object> funcItem = new LinkedHashMap<>();
+            funcItem.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+            funcItem.put("name", func.getName());
+            funcItem.put("isThunk", func.isThunk());
+            funcItem.put("isExternal", func.isExternal());
+            functions.add(funcItem);
             count++;
         }
 
@@ -403,11 +403,11 @@ public class ListingService {
             if (value.length() < minLength) continue;
             if (!pat.matcher(value).find()) continue;
             String enc = (encoding != null && !encoding.isEmpty()) ? encoding : "ascii";
-            results.add(JsonHelper.mapOf(
-                    "address", data.getAddress().toString(),
-                    "value", value,
-                    "encoding", enc
-            ));
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.putAll(ServiceUtils.addressToJson(data.getAddress(), program));
+            item.put("value", value);
+            item.put("encoding", enc);
+            results.add(item);
         }
 
         int total = results.size();
@@ -693,11 +693,11 @@ public class ListingService {
             while (iter.hasNext()) {
                 ExternalLocation extLoc = iter.next();
                 if (extLoc.getAddress().equals(addr)) {
-                    return Response.ok(JsonHelper.mapOf(
-                            "address", addr.toString(),
-                            "dll_name", dllName,
-                            "label", extLoc.getLabel()
-                    ));
+                    Map<String, Object> result = new LinkedHashMap<>();
+                    result.putAll(ServiceUtils.addressToJson(addr, program));
+                    result.put("dll_name", dllName);
+                    result.put("label", extLoc.getLabel());
+                    return Response.ok(result);
                 }
             }
             return Response.err("External location not found in DLL");
@@ -708,11 +708,11 @@ public class ListingService {
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
                     if (extLoc.getAddress().equals(addr)) {
-                        return Response.ok(JsonHelper.mapOf(
-                                "address", addr.toString(),
-                                "dll_name", libName,
-                                "label", extLoc.getLabel()
-                        ));
+                        Map<String, Object> result = new LinkedHashMap<>();
+                        result.putAll(ServiceUtils.addressToJson(addr, program));
+                        result.put("dll_name", libName);
+                        result.put("label", extLoc.getLabel());
+                        return Response.ok(result);
                     }
                 }
             }
