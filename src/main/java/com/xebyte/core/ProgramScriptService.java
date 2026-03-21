@@ -224,13 +224,17 @@ public class ProgramScriptService {
                 size = Long.MAX_VALUE; // Full 64-bit space; clamp to avoid emitting 0
             }
             int unitSize = space.getAddressableUnitSize();
+            // size_bytes: guard against overflow when size is clamped or unitSize > 1
+            long sizeBytes = (size == Long.MAX_VALUE || unitSize <= 0)
+                    ? Long.MAX_VALUE
+                    : size * unitSize;
             spaces.add(JsonHelper.mapOf(
                 "name",                  space.getName(),
                 "start",                 space.getMinAddress().toString(false),
                 "end",                   space.getMaxAddress().toString(false),
                 "size",                  size,
                 "addressable_unit_size", unitSize,
-                "size_bytes",            size * unitSize,
+                "size_bytes",            sizeBytes,
                 "address_size_bits",     space.getSize(),
                 "is_default",            space == defaultSpace
             ));

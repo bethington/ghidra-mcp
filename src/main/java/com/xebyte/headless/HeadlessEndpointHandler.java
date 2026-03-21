@@ -604,7 +604,7 @@ public class HeadlessEndpointHandler {
 
         Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) {
-            return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
+            return "{\"error\": \"" + escapeJson(ServiceUtils.getLastParseError()) + "\"}";
         }
 
         try {
@@ -713,7 +713,7 @@ public class HeadlessEndpointHandler {
 
         Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) {
-            return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
+            return "{\"error\": \"" + escapeJson(ServiceUtils.getLastParseError()) + "\"}";
         }
 
         try {
@@ -836,7 +836,7 @@ public class HeadlessEndpointHandler {
 
         Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) {
-            return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
+            return "{\"error\": \"" + escapeJson(ServiceUtils.getLastParseError()) + "\"}";
         }
 
         try {
@@ -1010,7 +1010,7 @@ public class HeadlessEndpointHandler {
 
         Address address = ServiceUtils.parseAddress(program, addressStr);
         if (address == null) {
-            return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
+            return "{\"error\": \"" + escapeJson(ServiceUtils.getLastParseError()) + "\"}";
         }
 
         try {
@@ -2043,7 +2043,7 @@ public class HeadlessEndpointHandler {
         if (program == null) return getProgramError(programName);
         try {
             Address addr = ServiceUtils.parseAddress(program, functionAddress);
-            if (addr == null) return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
+            if (addr == null) return "{\"error\": \"" + escapeJson(ServiceUtils.getLastParseError()) + "\"}";
             Function func = program.getFunctionManager().getFunctionAt(addr);
             if (func == null) return "{\"error\": \"No function at address: " + escapeJson(functionAddress) + "\"}";
             return threadingStrategy.executeWrite(program, "Batch rename function components", () -> {
@@ -2075,7 +2075,7 @@ public class HeadlessEndpointHandler {
         if (functionAddress == null || functionAddress.isEmpty()) return "{\"error\": \"function_address required\"}";
         if (variableTypesJson == null || variableTypesJson.isEmpty()) return "{\"error\": \"variable_types required\"}";
         Address addr = ServiceUtils.parseAddress(program, functionAddress);
-        if (addr == null) return "{\"error\": " + escapeJson(ServiceUtils.getLastParseError()) + "}";
+        if (addr == null) return "{\"error\": \"" + escapeJson(ServiceUtils.getLastParseError()) + "\"}";
         try {
             return threadingStrategy.executeWrite(program, "Batch set variable types", () -> {
                 Function func = program.getFunctionManager().getFunctionAt(addr);
