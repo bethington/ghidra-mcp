@@ -134,9 +134,9 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific function by name
      */
-    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function by name", category = "xref")
+    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function by name. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
     public Response getFunctionXrefs(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program") String programName) {
@@ -187,9 +187,9 @@ public class XrefCallGraphService {
         return getFunctionJumpTargets(functionName, offset, limit, null);
     }
 
-    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function", category = "xref")
+    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
     public Response getFunctionJumpTargets(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program") String programName) {
@@ -288,9 +288,9 @@ public class XrefCallGraphService {
     /**
      * Get all functions called by the specified function (callees)
      */
-    @McpTool(path = "/get_function_callees", description = "Get functions called by a function", category = "xref")
+    @McpTool(path = "/get_function_callees", description = "Get functions called by a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
     public Response getFunctionCallees(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program") String programName) {
@@ -367,9 +367,9 @@ public class XrefCallGraphService {
     /**
      * Get all functions that call the specified function (callers)
      */
-    @McpTool(path = "/get_function_callers", description = "Get functions calling a function", category = "xref")
+    @McpTool(path = "/get_function_callers", description = "Get functions calling a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
     public Response getFunctionCallers(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program") String programName) {
@@ -441,9 +441,9 @@ public class XrefCallGraphService {
     /**
      * Get a call graph subgraph centered on the specified function
      */
-    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function", category = "xref")
+    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
     public Response getFunctionCallGraph(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "depth", defaultValue = "2", description = "Traversal depth") int depth,
             @Param(value = "direction", defaultValue = "both", description = "Traversal direction (both/callers/callees)") String direction,
             @Param(value = "program") String programName) {
