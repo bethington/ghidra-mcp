@@ -994,9 +994,9 @@ public class ProgramScriptService {
 
     @McpTool(path = "/list_bookmarks", description = "List bookmarks with optional filter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response listBookmarks(
-            @Param(value = "category", description = "Category filter") String category,
-            @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+            @Param(value = "category", description = "Category filter (omit to return all categories)", defaultValue = "") String category,
+            @Param(value = "address", paramType = "address", defaultValue = "",
+                   description = "Address filter (omit to return all addresses). Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
