@@ -406,6 +406,10 @@ _loaded_groups: set[str] = set()
 # Core groups always loaded on connect (essential for basic RE workflow)
 CORE_GROUPS = {"listing", "function", "program"}
 
+# CLI-configurable: --lazy keeps only default groups, otherwise load all
+_lazy_mode = True  # default: lazy (only load default groups on connect)
+_default_groups: set[str] = CORE_GROUPS
+
 
 def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     """Build a callable that dispatches to the Ghidra HTTP endpoint."""
@@ -517,8 +521,8 @@ def _load_group(group_name: str) -> int:
 
 def _unload_group(group_name: str) -> int:
     """Unload tools for a specific group. Returns count of removed tools."""
-    if group_name in CORE_GROUPS:
-        return 0  # Core groups can't be unloaded
+    if group_name in _default_groups:
+        return 0  # Default groups can't be unloaded
 
     to_remove = []
     for tool_def in _full_schema:
@@ -555,7 +559,7 @@ def _get_group_info() -> list[dict]:
             "group": name,
             "tool_count": len(tools),
             "loaded": name in _loaded_groups,
-            "core": name in CORE_GROUPS,
+            "default": name in _default_groups,
         }
         if name in descriptions:
             info["description"] = descriptions[name]
@@ -568,16 +572,18 @@ def _fetch_and_register_schema(load_all: bool = False) -> int:
     """Fetch /mcp/schema from connected instance and register tools.
 
     Args:
-        load_all: If True, register all tools. If False, only core groups.
+        load_all: If True, register all tools. If False, only default groups.
 
     Returns: count of registered tools.
     """
+    if not load_all:
+        load_all = not _lazy_mode
     text, status = do_request("GET", "/mcp/schema", timeout=10)
     if status != 200:
         raise RuntimeError(f"Failed to fetch schema: HTTP {status}")
     raw = json.loads(text)
     schema = _parse_schema(raw)
-    groups = None if load_all else CORE_GROUPS
+    groups = None if load_all else _default_groups
     return register_tools_from_schema(schema, groups=groups)
 
 
@@ -745,13 +751,13 @@ async def load_tool_group(group: str, ctx: Context | None = None) -> str:
 @mcp.tool()
 async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
     """
-    Unload all tools in a category. Core tools are protected from unloading.
+    Unload all tools in a category. Default groups are protected from unloading.
 
     Args:
         group: Category name to unload
     """
-    if group in CORE_GROUPS:
-        return json.dumps({"error": f"Cannot unload core group '{group}'", "core_groups": sorted(CORE_GROUPS)})
+    if group in _default_groups:
+        return json.dumps({"error": f"Cannot unload default group '{group}'", "default_groups": sorted(_default_groups)})
 
     count = _unload_group(group)
     if count == 0:
@@ -806,21 +812,33 @@ def _auto_connect():
             logger.info("No Ghidra instances found. Tools will be registered on connect_instance().")
 
 
-_auto_connect()
-
-
 # ==========================================================================
 # Main
 # ==========================================================================
 
 
 def main():
+    global _lazy_mode, _default_groups
+
     parser = argparse.ArgumentParser(description="GhidraMCP Bridge — MCP↔HTTP multiplexer")
     parser.add_argument("--mcp-host", type=str, default="127.0.0.1", help="Host for SSE transport")
     parser.add_argument("--mcp-port", type=int, help="Port for SSE transport")
     parser.add_argument("--transport", type=str, default="stdio", choices=["stdio", "sse"],
                         help="MCP transport")
+    parser.add_argument("--lazy", action="store_true", default=True,
+                        help="Only load default tool groups on connect (default)")
+    parser.add_argument("--no-lazy", dest="lazy", action="store_false",
+                        help="Load all tool groups on connect")
+    parser.add_argument("--default-groups", type=str, default=None,
+                        help="Comma-separated list of default tool groups to load on connect "
+                             "(default: listing,function,program)")
     args = parser.parse_args()
+
+    _lazy_mode = args.lazy
+    if args.default_groups is not None:
+        _default_groups = {g.strip() for g in args.default_groups.split(",") if g.strip()}
+
+    _auto_connect()
 
     if args.transport == "sse":
         mcp.settings.log_level = "INFO"
