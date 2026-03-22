@@ -226,7 +226,7 @@ public class AnalysisService {
             @Param(value = "include_xref_map", source = ParamSource.BODY, defaultValue = "true") boolean includeXrefMap,
             @Param(value = "include_assembly_patterns", source = ParamSource.BODY, defaultValue = "true") boolean includeAssemblyPatterns,
             @Param(value = "include_boundary_detection", source = ParamSource.BODY, defaultValue = "true") boolean includeBoundaryDetection,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -393,7 +393,7 @@ public class AnalysisService {
             @Param(value = "analyze_loop_bounds", source = ParamSource.BODY, defaultValue = "true") boolean analyzeLoopBounds,
             @Param(value = "analyze_indexing", source = ParamSource.BODY, defaultValue = "true") boolean analyzeIndexing,
             @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048") int maxScanRange,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -454,7 +454,7 @@ public class AnalysisService {
             @Param(value = "struct_address", source = ParamSource.BODY) String structAddressStr,
             @Param(value = "field_offset", source = ParamSource.BODY, defaultValue = "0") int fieldOffset,
             @Param(value = "num_examples", source = ParamSource.BODY, defaultValue = "5") int numExamples,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         // MAJOR FIX #7: Validate input parameters
         if (fieldOffset < 0 || fieldOffset > MAX_FIELD_OFFSET) {
             return Response.err("Field offset must be between 0 and " + MAX_FIELD_OFFSET);
@@ -1669,10 +1669,18 @@ public class AnalysisService {
     @SuppressWarnings("unchecked")
     public Response batchAnalyzeCompleteness(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         List<String> addresses;
         if (addressesObj instanceof List<?> list) {
             addresses = list.stream().map(String::valueOf).collect(java.util.stream.Collectors.toList());
+        } else if (addressesObj instanceof String s) {
+            addresses = new ArrayList<>();
+            for (String part : s.split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) {
+                    addresses.add(trimmed);
+                }
+            }
         } else {
             return Response.err("Missing required parameter: addresses (JSON array of hex addresses)");
         }

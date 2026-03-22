@@ -1075,7 +1075,7 @@ public class XrefCallGraphService {
     @McpTool(path = "/get_bulk_xrefs", method = "POST", description = "Batch cross-reference retrieval", category = "xref")
     public Response getBulkXrefs(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
-            @Param(value = "program") String programName) {
+            @Param(value = "program", source = ParamSource.BODY) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1143,7 +1143,7 @@ public class XrefCallGraphService {
             @Param(value = "xref_sources", source = ParamSource.BODY) Object xrefSourcesObj,
             @Param(value = "context_instructions", source = ParamSource.BODY, defaultValue = "5") int contextInstructions,
             @Param(value = "include_patterns", source = ParamSource.BODY) Object includePatternsObj,
-            @Param(value = "program") String programName) {
+            @Param(value = "program", source = ParamSource.BODY) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1155,6 +1155,13 @@ public class XrefCallGraphService {
                 for (Object addr : (List<?>) xrefSourcesObj) {
                     if (addr != null) {
                         xrefSources.add(addr.toString());
+                    }
+                }
+            } else if (xrefSourcesObj instanceof String s) {
+                for (String part : s.split(",")) {
+                    String trimmed = part.trim();
+                    if (!trimmed.isEmpty()) {
+                        xrefSources.add(trimmed);
                     }
                 }
             }

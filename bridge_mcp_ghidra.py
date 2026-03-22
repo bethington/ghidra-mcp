@@ -17,6 +17,7 @@ Supports two transports to Ghidra:
 """
 
 import argparse
+import asyncio
 import json
 import logging
 import os
@@ -49,6 +50,7 @@ ENDPOINT_TIMEOUTS = {
     "disassemble_bytes": 120,
     "bulk_fuzzy_match": 180,
     "find_similar_functions_fuzzy": 60,
+    "import_file": 300,
     "run_ghidra_script": 1800,
     "run_script_inline": 1800,
     "decompile_function": 45,
@@ -84,6 +86,7 @@ mcp._mcp_server.create_initialization_options = _patched_init_options
 _active_socket: str | None = None  # UDS socket path
 _active_tcp: str | None = None  # TCP base URL (e.g. "http://127.0.0.1:8089")
 _transport_mode: str = "none"  # "uds", "tcp", or "none"
+_connected_project: str | None = None  # Project name for auto-reconnect
 
 
 # ==========================================================================
@@ -299,10 +302,65 @@ def get_timeout(endpoint: str, payload: dict | None = None) -> int:
     return base
 
 
+def _try_reconnect() -> bool:
+    """Try to reconnect to the previously connected project after Ghidra restarts.
+
+    Scans for UDS instances matching _connected_project. If found, updates the
+    active socket and re-fetches the schema. Returns True if reconnected.
+    """
+    global _active_socket, _active_tcp, _transport_mode
+
+    if not _connected_project:
+        return False
+
+    instances = discover_instances()
+    for inst in instances:
+        if inst.get("project", "") == _connected_project:
+            _active_socket = inst["socket"]
+            _active_tcp = None
+            _transport_mode = "uds"
+            try:
+                _fetch_and_register_schema()
+                logger.info(f"Reconnected to project '{_connected_project}' via {inst['socket']}")
+                return True
+            except Exception as e:
+                logger.warning(f"Reconnect schema fetch failed: {e}")
+                return False
+
+    # Exact match failed, try substring
+    for inst in instances:
+        if _connected_project.lower() in inst.get("project", "").lower():
+            _active_socket = inst["socket"]
+            _active_tcp = None
+            _transport_mode = "uds"
+            try:
+                _fetch_and_register_schema()
+                logger.info(f"Reconnected to project '{inst.get('project')}' via {inst['socket']}")
+                return True
+            except Exception as e:
+                logger.warning(f"Reconnect schema fetch failed: {e}")
+                return False
+
+    return False
+
+
+def _ensure_connected() -> str | None:
+    """Check connection and attempt reconnect if needed. Returns error string or None."""
+    if _transport_mode == "none":
+        if _connected_project:
+            if _try_reconnect():
+                return None
+            return (f"Ghidra instance for project '{_connected_project}' is not running. "
+                    "Start Ghidra and open the project, then retry.")
+        return "No Ghidra instance connected. Use connect_instance() first."
+    return None
+
+
 def dispatch_get(endpoint: str, params: dict | None = None, retries: int = 3) -> str:
     """GET request via active transport. Returns raw response text."""
-    if _transport_mode == "none":
-        return json.dumps({"error": "No Ghidra instance connected. Use connect_instance() first."})
+    err = _ensure_connected()
+    if err:
+        return json.dumps({"error": err})
 
     timeout = get_timeout(endpoint)
     for attempt in range(retries):
@@ -314,6 +372,13 @@ def dispatch_get(endpoint: str, params: dict | None = None, retries: int = 3) ->
                 time.sleep(2**attempt)
                 continue
             return json.dumps({"error": f"HTTP {status}: {text.strip()}"})
+        except (ConnectionError, OSError) as e:
+            # Connection lost — try reconnect once, then retry
+            if attempt == 0 and _try_reconnect():
+                continue
+            if attempt < retries - 1:
+                continue
+            return json.dumps({"error": str(e)})
         except Exception as e:
             if attempt < retries - 1:
                 continue
@@ -324,8 +389,9 @@ def dispatch_get(endpoint: str, params: dict | None = None, retries: int = 3) ->
 
 def dispatch_post(endpoint: str, data: dict, retries: int = 3) -> str:
     """POST JSON request via active transport. Returns raw response text."""
-    if _transport_mode == "none":
-        return json.dumps({"error": "No Ghidra instance connected. Use connect_instance() first."})
+    err = _ensure_connected()
+    if err:
+        return json.dumps({"error": err})
 
     timeout = get_timeout(endpoint, data)
     for attempt in range(retries):
@@ -337,6 +403,14 @@ def dispatch_post(endpoint: str, data: dict, retries: int = 3) -> str:
                 time.sleep(1)
                 continue
             return json.dumps({"error": f"HTTP {status}: {text.strip()}"})
+        except (ConnectionError, OSError) as e:
+            # Connection lost — try reconnect once, then retry
+            if attempt == 0 and _try_reconnect():
+                continue
+            if attempt < retries - 1:
+                time.sleep(1)
+                continue
+            return json.dumps({"error": str(e)})
         except Exception as e:
             if attempt < retries - 1:
                 time.sleep(1)
@@ -399,6 +473,10 @@ def _parse_schema(raw: dict) -> list[dict]:
 # Dynamic tool registration from /mcp/schema
 # ==========================================================================
 
+# Static tool names that should not be overwritten by dynamic registration
+STATIC_TOOL_NAMES = {"list_instances", "connect_instance", "list_tool_groups",
+                     "load_tool_group", "unload_tool_group", "import_file"}
+
 _dynamic_tool_names: list[str] = []
 _full_schema: list[dict] = []  # Complete parsed schema
 _loaded_groups: set[str] = set()
@@ -454,6 +532,8 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
 def _register_tool_def(tool_def: dict) -> bool:
     """Register a single tool from a schema definition. Returns True if registered."""
     name = tool_def["name"]
+    if name in STATIC_TOOL_NAMES:
+        return False  # Don't overwrite static tools
     description = tool_def.get("description", "")
     endpoint = tool_def["endpoint"]
     http_method = tool_def.get("http_method", "GET")
@@ -625,7 +705,7 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     Args:
         project: Project name (or substring) to connect to
     """
-    global _active_socket, _active_tcp, _transport_mode
+    global _active_socket, _active_tcp, _transport_mode, _connected_project
 
     instances = discover_instances()
 
@@ -645,6 +725,7 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
             _active_socket = match["socket"]
             _active_tcp = None
             _transport_mode = "uds"
+            _connected_project = match.get("project")
 
             try:
                 count = _fetch_and_register_schema()
@@ -653,7 +734,7 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
                 return json.dumps({
                     "connected": True,
                     "transport": "uds",
-                    "project": match.get("project"),
+                    "project": _connected_project,
                     "socket": match["socket"],
                     "pid": match.get("pid"),
                     "tools_registered": count,
@@ -772,6 +853,79 @@ async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
     })
 
 
+@mcp.tool()
+async def import_file(
+    file_path: str,
+    project_folder: str = "/",
+    language: str | None = None,
+    compiler_spec: str | None = None,
+    auto_analyze: bool = True,
+    ctx: Context | None = None,
+) -> str:
+    """
+    Import a binary file from disk into the current Ghidra project.
+
+    Imports the file, opens it in the CodeBrowser, and optionally starts auto-analysis.
+    When analysis is enabled, sends a log notification when analysis completes.
+
+    For raw firmware binaries, specify language (e.g. "ARM:LE:32:Cortex") and
+    optionally compiler_spec (e.g. "default"). Without language, Ghidra auto-detects
+    the format (works for ELF, PE, Mach-O, etc.).
+
+    Args:
+        file_path: Absolute path to the binary file on disk
+        project_folder: Destination folder in the Ghidra project (default: "/")
+        language: Language ID for raw binaries (e.g. "ARM:LE:32:Cortex", "x86:LE:64:default")
+        compiler_spec: Compiler spec ID (e.g. "default", "gcc"). Uses language default if omitted.
+        auto_analyze: Start auto-analysis after import (default: true)
+    """
+    payload: dict = {
+        "file_path": file_path,
+        "project_folder": project_folder,
+        "auto_analyze": auto_analyze,
+    }
+    if language:
+        payload["language"] = language
+    if compiler_spec:
+        payload["compiler_spec"] = compiler_spec
+
+    result = dispatch_post("/import_file", payload)
+
+    # Parse result to check if analysis was started
+    try:
+        data = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        return result
+
+    if data.get("data", {}).get("analyzing") and ctx is not None:
+        program_name = data["data"].get("name", "unknown")
+        # Capture the session before the tool call returns
+        session = ctx.request_context.session
+
+        async def _poll_analysis():
+            """Poll analysis_status until analysis completes, then send log notification."""
+            await asyncio.sleep(5)  # Initial delay
+            for _ in range(360):  # Up to 30 minutes
+                try:
+                    status_text = dispatch_get("/analysis_status", {"program": program_name})
+                    status = json.loads(status_text)
+                    status_data = status.get("data", status)
+                    if not status_data.get("analyzing", True):
+                        fn_count = status_data.get("function_count", "?")
+                        await session.send_log_message(
+                            level="info",
+                            data=f"Analysis complete for {program_name}: {fn_count} functions found",
+                        )
+                        return
+                except Exception as e:
+                    logger.debug(f"Analysis poll error for {program_name}: {e}")
+                await asyncio.sleep(5)
+
+        asyncio.create_task(_poll_analysis())
+
+    return result
+
+
 # ==========================================================================
 # Auto-connect on startup
 # ==========================================================================
@@ -779,17 +933,18 @@ async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
 
 def _auto_connect():
     """Try to auto-connect to a single running instance on startup."""
-    global _active_socket, _active_tcp, _transport_mode
+    global _active_socket, _active_tcp, _transport_mode, _connected_project
 
     # Try UDS first
     instances = discover_instances()
     if len(instances) == 1:
         _active_socket = instances[0]["socket"]
         _transport_mode = "uds"
-        logger.info(f"Auto-connecting via UDS to {instances[0].get('project', 'unknown')}")
+        _connected_project = instances[0].get("project")
+        logger.info(f"Auto-connecting via UDS to {_connected_project or 'unknown'}")
         try:
             count = _fetch_and_register_schema()
-            logger.info(f"Auto-registered {count} tools from {instances[0].get('project', 'unknown')}")
+            logger.info(f"Auto-registered {count} tools from {_connected_project or 'unknown'}")
             return
         except Exception as e:
             logger.warning(f"UDS auto-connect schema fetch failed: {e}")

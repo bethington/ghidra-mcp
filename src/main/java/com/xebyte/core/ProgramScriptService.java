@@ -7,6 +7,9 @@ import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
+import ghidra.app.util.importer.AutoImporter;
+import ghidra.app.util.importer.MessageLog;
+import ghidra.app.util.opinion.LoadResults;
 import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 
@@ -36,11 +39,14 @@ public class ProgramScriptService {
      * Returns null when running headless.
      */
     private PluginTool getToolFromProvider() {
-        if (programProvider instanceof GuiProgramProvider) {
-            return ((GuiProgramProvider) programProvider).getTool();
+        if (programProvider instanceof GuiProgramProvider gpp) {
+            return gpp.getTool();
         }
-        if (programProvider instanceof FrontEndProgramProvider) {
-            return ((FrontEndProgramProvider) programProvider).getTool();
+        if (programProvider instanceof FrontEndProgramProvider fpp) {
+            return fpp.getTool();
+        }
+        if (programProvider instanceof MultiToolProgramProvider mtp) {
+            return mtp.getActiveTool();
         }
         return null;
     }
@@ -385,12 +391,14 @@ public class ProgramScriptService {
 
         // Open the program
         try {
-            ProgramManager pm = tool.getService(ProgramManager.class);
+            // Find a ProgramManager from an existing CodeBrowser, or launch one
+            ProgramManager pm = findOrCreateProgramManager(tool);
             if (pm == null) {
-                return Response.err("ProgramManager service not available");
+                return Response.err("Could not find or create a CodeBrowser tool");
             }
 
-            Program program = (Program) domainFile.getDomainObject(tool, false, false, ghidra.util.task.TaskMonitor.DUMMY);
+            Program program = (Program) domainFile.getDomainObject(
+                tool, false, false, ghidra.util.task.TaskMonitor.DUMMY);
             if (program == null) {
                 return Response.err("Failed to open program: " + path);
             }
@@ -426,7 +434,239 @@ public class ProgramScriptService {
     }
 
     // ========================================================================
+    // Import & Analysis
+
+    @McpTool(path = "/import_file", method = "POST",
+            description = "Import a binary file from disk into the current Ghidra project and open it. "
+                + "For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default').",
+            category = "program")
+    public Response importFile(
+            @Param(value = "file_path", source = ParamSource.BODY, description = "Absolute path to the binary file on disk") String filePath,
+            @Param(value = "project_folder", source = ParamSource.BODY, defaultValue = "/", description = "Destination folder in the Ghidra project") String projectFolder,
+            @Param(value = "language", source = ParamSource.BODY, defaultValue = "", description = "Language ID for raw binaries (e.g. 'ARM:LE:32:Cortex', 'x86:LE:64:default'). If omitted, auto-detect.") String languageId,
+            @Param(value = "compiler_spec", source = ParamSource.BODY, defaultValue = "", description = "Compiler spec ID (e.g. 'default', 'gcc', 'windows'). If omitted, uses language default.") String compilerSpecId,
+            @Param(value = "auto_analyze", source = ParamSource.BODY, defaultValue = "true", description = "Start auto-analysis after import") boolean autoAnalyze) {
+
+        if (filePath == null || filePath.trim().isEmpty()) {
+            return Response.err("file_path is required");
+        }
+
+        File file = new File(filePath);
+        if (!file.exists()) {
+            return Response.err("File not found: " + filePath);
+        }
+
+        PluginTool tool = getToolFromProvider();
+        if (tool == null) {
+            return Response.err("Import requires GUI mode (PluginTool not available)");
+        }
+
+        ghidra.framework.model.Project project = tool.getProject();
+        if (project == null) {
+            return Response.err("No project is currently open");
+        }
+
+        boolean hasLanguage = languageId != null && !languageId.isEmpty();
+
+        try {
+            MessageLog log = new MessageLog();
+            Program program;
+
+            if (hasLanguage) {
+                // Resolve language and compiler spec
+                ghidra.program.model.lang.LanguageService langService =
+                    ghidra.program.util.DefaultLanguageService.getLanguageService();
+                ghidra.program.model.lang.Language language = langService.getLanguage(
+                    new ghidra.program.model.lang.LanguageID(languageId));
+
+                ghidra.program.model.lang.CompilerSpec compilerSpec;
+                if (compilerSpecId != null && !compilerSpecId.isEmpty()) {
+                    compilerSpec = language.getCompilerSpecByID(
+                        new ghidra.program.model.lang.CompilerSpecID(compilerSpecId));
+                } else {
+                    compilerSpec = language.getDefaultCompilerSpec();
+                }
+
+                // Import as raw binary with explicit language/compiler spec
+                ghidra.app.util.opinion.Loaded<Program> loaded = AutoImporter.importAsBinary(
+                    file, project, projectFolder, language, compilerSpec,
+                    this, log, ghidra.util.task.TaskMonitor.DUMMY);
+
+                if (loaded == null) {
+                    return Response.err("Import failed: no results. Log: " + log);
+                }
+                // getDomainObject(consumer) registers us as a consumer so the program stays open
+                program = loaded.getDomainObject(this);
+                if (program == null) {
+                    return Response.err("Import failed: no primary program. Log: " + log);
+                }
+                // Save to project folder (creates DomainFile)
+                loaded.save(ghidra.util.task.TaskMonitor.DUMMY);
+                loaded.release(this);
+            } else {
+                // Auto-detect format
+                LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
+                    file, project, projectFolder,
+                    this, log, ghidra.util.task.TaskMonitor.DUMMY);
+
+                if (loadResults == null) {
+                    return Response.err("Import failed: no load spec found. Specify 'language' for raw binaries. Log: " + log);
+                }
+                program = loadResults.getPrimaryDomainObject();
+                if (program == null) {
+                    return Response.err("Import failed: no primary program. Log: " + log);
+                }
+                loadResults.release(this);
+            }
+
+            // Suppress the "Analysis Options" dialog — we handle analysis programmatically
+            ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
+
+            // Open in CodeBrowser
+            ProgramManager pm = findOrCreateProgramManager(tool);
+            if (pm == null) {
+                return Response.err("Could not find or create a CodeBrowser tool");
+            }
+
+            pm.openProgram(program);
+            pm.setCurrentProgram(program);
+
+            // Optionally trigger auto-analysis
+            boolean analyzing = false;
+            if (autoAnalyze) {
+                try {
+                    AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+                    mgr.reAnalyzeAll(null);
+                    mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+                    analyzing = true;
+                } catch (Exception ae) {
+                    Msg.warn(this, "Auto-analysis failed: " + ae.getMessage());
+                }
+            }
+
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "name", program.getName(),
+                "path", program.getDomainFile().getPathname(),
+                "language", program.getLanguageID().getIdAsString(),
+                "analyzing", analyzing
+            ));
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            if (msg == null || msg.isEmpty()) {
+                msg = e.getClass().getName();
+                // Include cause if available
+                if (e.getCause() != null) {
+                    msg += ": " + (e.getCause().getMessage() != null
+                        ? e.getCause().getMessage() : e.getCause().getClass().getName());
+                }
+            }
+            Msg.error(this, "Import failed", e);
+            return Response.err("Import failed: " + msg);
+        }
+    }
+
+    @McpTool(path = "/reanalyze", method = "POST", description = "Trigger full auto-analysis on a program", category = "program")
+    public Response reanalyze(
+            @Param(value = "program", source = ParamSource.BODY, defaultValue = "", description = "Program name (default: current program)") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        try {
+            AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+            mgr.reAnalyzeAll(null);
+            mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "name", program.getName(),
+                "analyzing", true,
+                "message", "Auto-analysis started for " + program.getName()
+            ));
+        } catch (Exception e) {
+            return Response.err("Failed to start analysis: " + e.getMessage());
+        }
+    }
+
+    @McpTool(path = "/analysis_status", description = "Get auto-analysis status for open programs", category = "program")
+    public Response analysisStatus(
+            @Param(value = "program", description = "Program name (omit for all open programs)") String programName) {
+
+        Program[] allPrograms = programProvider.getAllOpenPrograms();
+        if (allPrograms == null || allPrograms.length == 0) {
+            return Response.err("No programs are currently open");
+        }
+
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (Program prog : allPrograms) {
+            if (programName != null && !programName.isEmpty() && !prog.getName().equals(programName)) {
+                continue;
+            }
+            boolean analyzing = false;
+            try {
+                AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(prog);
+                analyzing = mgr.isAnalyzing();
+            } catch (Exception e) {
+                // May not have an analysis manager in headless mode
+            }
+            results.add(JsonHelper.mapOf(
+                "name", prog.getName(),
+                "analyzing", analyzing,
+                "function_count", prog.getFunctionManager().getFunctionCount()
+            ));
+        }
+
+        if (programName != null && !programName.isEmpty() && results.isEmpty()) {
+            return Response.err("Program not found: " + programName);
+        }
+
+        if (results.size() == 1) {
+            return Response.ok(results.get(0));
+        }
+        return Response.ok(JsonHelper.mapOf("programs", results));
+    }
+
+    // ========================================================================
     // Script Execution
+    /**
+     * Find an existing ProgramManager or launch a new CodeBrowser to get one.
+     */
+    private ProgramManager findOrCreateProgramManager(PluginTool tool) {
+        // 1. Try the tool directly (works if it's a CodeBrowser)
+        ProgramManager pm = tool.getService(ProgramManager.class);
+        if (pm != null) return pm;
+
+        // 2. Try MultiToolProgramProvider which searches across all running tools
+        if (programProvider instanceof MultiToolProgramProvider mtp) {
+            pm = mtp.findProgramManager();
+            if (pm != null) return pm;
+        }
+
+        // 3. Launch a new CodeBrowser via the workspace
+        try {
+            ghidra.framework.model.Project project = tool.getProject();
+            if (project != null) {
+                ghidra.framework.model.ToolManager tm = project.getToolManager();
+                if (tm != null) {
+                    ghidra.framework.model.ToolTemplate template =
+                        project.getLocalToolChest().getToolTemplate("CodeBrowser");
+                    if (template != null) {
+                        ghidra.framework.model.Workspace ws = tm.getActiveWorkspace();
+                        PluginTool newTool = ws.runTool(template);
+                        if (newTool != null) {
+                            pm = newTool.getService(ProgramManager.class);
+                            if (pm != null) return pm;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Msg.warn(this, "Failed to launch CodeBrowser: " + e.getMessage());
+        }
+
+        return null;
+    }
+
     // ========================================================================
 
     /**
@@ -444,7 +684,7 @@ public class ProgramScriptService {
     public Response runGhidraScript(
             @Param(value = "script_path", source = ParamSource.BODY) String scriptPath,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -627,7 +867,48 @@ public class ProgramScriptService {
     public Response runScriptInline(
             @Param(value = "code", source = ParamSource.BODY) String code,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String args) {
-        return runGhidraScript(code, args);
+        if (code == null || code.trim().isEmpty()) {
+            return Response.err("code parameter required");
+        }
+
+        // Use unique class name per invocation so Ghidra recompiles each time.
+        // If user provides their own class, extract its name for the filename.
+        String className = "McpInline_" + Long.toHexString(System.nanoTime());
+        java.util.regex.Matcher m = java.util.regex.Pattern
+            .compile("public\\s+class\\s+(\\w+)").matcher(code);
+        if (m.find()) {
+            className = m.group(1);
+        }
+
+        // Write to ~/ghidra_scripts/ so OSGi classloader can find the source bundle
+        File scriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
+        scriptsDir.mkdirs();
+        File tempScript = new File(scriptsDir, className + ".java");
+
+        try {
+            // If code doesn't contain a class definition, wrap it
+            String scriptCode = code;
+            if (!code.contains("extends GhidraScript")) {
+                scriptCode = "import ghidra.app.script.GhidraScript;\n"
+                    + "public class " + className + " extends GhidraScript {\n"
+                    + "    @Override\n"
+                    + "    public void run() throws Exception {\n"
+                    + code + "\n"
+                    + "    }\n"
+                    + "}\n";
+            }
+
+            java.nio.file.Files.writeString(tempScript.toPath(), scriptCode);
+            return runGhidraScript(tempScript.getAbsolutePath(), args);
+        } catch (Exception e) {
+            return Response.err("Failed to create inline script: " + e.getMessage());
+        } finally {
+            if (tempScript.exists()) {
+                if (!tempScript.delete()) {
+                    tempScript.deleteOnExit();
+                }
+            }
+        }
     }
 
     /**
@@ -739,7 +1020,7 @@ public class ProgramScriptService {
             @Param(value = "execute", source = ParamSource.BODY, defaultValue = "false") boolean execute,
             @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "false") boolean isVolatile,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -840,7 +1121,7 @@ public class ProgramScriptService {
             @Param(value = "address", source = ParamSource.BODY) String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -974,7 +1255,7 @@ public class ProgramScriptService {
     public Response deleteBookmark(
             @Param(value = "address", source = ParamSource.BODY) String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1034,7 +1315,7 @@ public class ProgramScriptService {
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
             @Param(value = "timeout_seconds", source = ParamSource.BODY, defaultValue = "300") int timeoutSeconds,
             @Param(value = "capture_output", source = ParamSource.BODY, defaultValue = "true") boolean captureOutput,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         if (scriptName == null || scriptName.isEmpty()) {
             return Response.err("Script name is required");
         }
@@ -1322,6 +1603,77 @@ public class ProgramScriptService {
             default:
                 return "CustomAnalysis.java";
         }
+    }
+
+    // ========================================================================
+    // Image Base Operations
+    // ========================================================================
+
+    @McpTool(path = "/set_image_base", method = "POST", description = "Set the base address of the program (rebases all addresses)", category = "program")
+    public Response setImageBase(
+            @Param(value = "address", source = ParamSource.BODY, description = "New base address (e.g. 0x08000000)") String addressStr,
+            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return Response.err("address parameter required");
+        }
+
+        final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
+        final AtomicReference<String> errorMsg = new AtomicReference<>();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Set image base");
+                boolean txSuccess = false;
+                try {
+                    Address oldBase = program.getImageBase();
+                    Address newBase = program.getAddressFactory().getAddress(addressStr);
+                    if (newBase == null) {
+                        errorMsg.set("Invalid address: " + addressStr);
+                        return;
+                    }
+                    program.setImageBase(newBase, true);
+                    txSuccess = true;
+
+                    // Trigger re-analysis since all addresses shifted
+                    boolean reanalyzing = false;
+                    try {
+                        AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+                        mgr.reAnalyzeAll(null);
+                        mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+                        reanalyzing = true;
+                    } catch (Exception ae) {
+                        Msg.warn(this, "Re-analysis after rebase failed: " + ae.getMessage());
+                    }
+
+                    resultData.set(JsonHelper.mapOf(
+                        "success", true,
+                        "old_base", oldBase.toString(),
+                        "new_base", newBase.toString(),
+                        "analyzing", reanalyzing,
+                        "message", "Image base changed from " + oldBase + " to " + newBase
+                    ));
+                } catch (Throwable e) {
+                    String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+                    errorMsg.set(msg);
+                    Msg.error(this, "Error setting image base", e);
+                } finally {
+                    program.endTransaction(tx, txSuccess);
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return Response.err(errorMsg.get());
+            }
+        } catch (Throwable e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            return Response.err("Failed to execute on Swing thread: " + msg);
+        }
+
+        return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 }
 
