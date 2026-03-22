@@ -197,7 +197,11 @@ public class ProgramScriptService {
     @McpTool(path = "/get_address_spaces",
              description = "List all physical address spaces in the program. On programs with multiple "
                          + "address spaces (e.g., embedded targets), use the returned space names to "
-                         + "prefix addresses (e.g., mem:1000, code:ff00) for unambiguous resolution.",
+                         + "prefix addresses (e.g., mem:1000, code:ff00) for unambiguous resolution. "
+                         + "Also check addressable_unit_size: a value > 1 means the space is word-addressed "
+                         + "(e.g., AVR code space uses 2-byte words). MCP tools and Ghidra both use word "
+                         + "addresses natively for such spaces — code:001478 is word 0x1478, not byte 0x1478. "
+                         + "Do NOT multiply or divide addresses seen in Ghidra output; use them as-is.",
              category = "program")
     public Response getAddressSpaces(
             @Param(value = "program", description = "Target program name") String programName) {
