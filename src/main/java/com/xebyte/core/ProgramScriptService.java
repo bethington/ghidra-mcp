@@ -709,7 +709,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/list_scripts", description = "List available Ghidra scripts", category = "program")
     public Response listGhidraScripts(
-            @Param(value = "filter", description = "Script name filter") String filter) {
+            @Param(value = "filter", description = "Script name filter", defaultValue = "") String filter) {
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 

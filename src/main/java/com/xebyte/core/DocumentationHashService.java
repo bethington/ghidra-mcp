@@ -234,7 +234,7 @@ public class DocumentationHashService {
     public Response getBulkFunctionHashes(
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "filter", description = "Name filter") String filter,
+            @Param(value = "filter", description = "Name filter", defaultValue = "") String filter,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1044,7 +1044,7 @@ public class DocumentationHashService {
             @Param(value = "threshold", defaultValue = "0.7", description = "Similarity threshold") double threshold,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "50") int limit,
-            @Param(value = "filter", description = "Name filter") String filter) {
+            @Param(value = "filter", description = "Name filter", defaultValue = "") String filter) {
         if (sourceProgramName == null || sourceProgramName.trim().isEmpty()) {
             return Response.err("source_program parameter is required");
         }
