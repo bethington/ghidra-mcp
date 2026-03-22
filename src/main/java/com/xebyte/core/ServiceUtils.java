@@ -569,6 +569,20 @@ public final class ServiceUtils {
         // Detect if this is a segment:offset form for better error messages
         boolean hasColon = addressStr.contains(":");
 
+        // Normalize space:offset form: AddressFactory is case-sensitive and rejects "0x" prefix.
+        // Lowercase the space name and strip leading "0x"/"0X" from the offset so that inputs
+        // like "MEM:0x1000", "MEM:1000", and "Code:FF00" all resolve correctly — including
+        // addresses carried inside batch/container params that bypass bridge sanitization.
+        if (hasColon) {
+            int colonIdx = addressStr.indexOf(':');
+            String spaceName = addressStr.substring(0, colonIdx).toLowerCase();
+            String offset = addressStr.substring(colonIdx + 1);
+            if (offset.startsWith("0x") || offset.startsWith("0X")) {
+                offset = offset.substring(2);
+            }
+            addressStr = spaceName + ":" + offset;
+        }
+
         try {
             Address addr = program.getAddressFactory().getAddress(addressStr);
             if (addr != null) return addr;

@@ -100,6 +100,34 @@ public class ServiceUtilsAddressTest {
         assertNotNull("parseAddress must return non-null for factory-valid addresses", result);
     }
 
+    @Test
+    public void parseAddress_uppercaseSpaceWithHex_normalizesAndResolves() {
+        // Batch endpoints pass raw user input like "MEM:1000" bypassing bridge sanitization.
+        // parseAddress must lowercase the space name before calling AddressFactory.
+        when(factory.getAddress("mem:1000")).thenReturn(mockAddr);
+        Address result = ServiceUtils.parseAddress(program, "MEM:1000");
+        assertNotNull("Uppercase space name must be normalized to lowercase", result);
+        assertNull(ServiceUtils.getLastParseError());
+    }
+
+    @Test
+    public void parseAddress_uppercaseSpaceWith0xOffset_stripsPrefix() {
+        // Input like "MEM:0x1000" must become "mem:1000" before hitting AddressFactory.
+        when(factory.getAddress("mem:1000")).thenReturn(mockAddr);
+        Address result = ServiceUtils.parseAddress(program, "MEM:0x1000");
+        assertNotNull("0x prefix in space:offset form must be stripped", result);
+        assertNull(ServiceUtils.getLastParseError());
+    }
+
+    @Test
+    public void parseAddress_lowercase0XVariant_stripsPrefix() {
+        // "0X" (uppercase X) must also be stripped.
+        when(factory.getAddress("code:FF00")).thenReturn(mockAddr);
+        Address result = ServiceUtils.parseAddress(program, "Code:0XFF00");
+        assertNotNull("0X (uppercase X) prefix must also be stripped", result);
+        assertNull(ServiceUtils.getLastParseError());
+    }
+
     // --- addressToJson ---
 
     @Test
