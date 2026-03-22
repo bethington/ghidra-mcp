@@ -216,9 +216,9 @@ public class ListingService {
         }
     }
 
-    @McpTool(path = "/search_functions", description = "Search functions by name pattern", category = "listing")
+    @McpTool(path = "/search_functions", description = "Search functions by name pattern. Use the 'query' parameter (not 'name_pattern') for the search string; omit to list all functions.", category = "listing")
     public Response searchFunctionsByName(
-            @Param(value = "query", description = "Search pattern") String searchTerm,
+            @Param(value = "query", description = "Substring to match against function names (omit or leave empty to return all functions)", defaultValue = "") String searchTerm,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", description = "Target program name") String programName) {

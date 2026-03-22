@@ -2032,11 +2032,11 @@ public class AnalysisService {
      */
     @McpTool(path = "/search_functions_enhanced", description = "Advanced function search with filtering", category = "analysis")
     public Response searchFunctionsEnhanced(
-            @Param(value = "name_pattern", description = "Name pattern") String namePattern,
-            @Param(value = "min_xrefs") Integer minXrefs,
-            @Param(value = "max_xrefs") Integer maxXrefs,
-            @Param(value = "calling_convention", description = "Calling convention filter") String callingConvention,
-            @Param(value = "has_custom_name") Boolean hasCustomName,
+            @Param(value = "name_pattern", description = "Name pattern (omit to match all)", defaultValue = "") String namePattern,
+            @Param(value = "min_xrefs", description = "Minimum xref count filter (omit for no minimum)", defaultValue = "") Integer minXrefs,
+            @Param(value = "max_xrefs", description = "Maximum xref count filter (omit for no maximum)", defaultValue = "") Integer maxXrefs,
+            @Param(value = "calling_convention", description = "Calling convention filter (omit for any)", defaultValue = "") String callingConvention,
+            @Param(value = "has_custom_name", description = "Filter by whether function has a user-defined name (omit for any)", defaultValue = "") Boolean hasCustomName,
             @Param(value = "regex", defaultValue = "false", description = "Use regex matching") boolean regex,
             @Param(value = "sort_by", defaultValue = "address", description = "Sort field") String sortBy,
             @Param(value = "offset", defaultValue = "0") int offset,
