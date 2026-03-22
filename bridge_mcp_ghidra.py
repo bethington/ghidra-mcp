@@ -1,38 +1,42 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#     "requests>=2,<3",
 #     "mcp>=1.2.0,<2",
-#     "psycopg2-binary>=2.9,<3",
 # ]
 # ///
+"""
+GhidraMCP Bridge — thin MCP↔HTTP multiplexer.
 
-import requests
+On startup: exposes list_instances + connect_instance.
+On connect_instance: fetches /mcp/schema from the Ghidra server,
+dynamically registers every tool. All dynamic tools are generic HTTP dispatchers.
+
+Supports two transports to Ghidra:
+  - UDS (Unix domain sockets) — preferred for local instances
+  - TCP (HTTP) — fallback for headless/remote servers
+"""
+
 import argparse
-import logging
-import time
-import re
 import json
+import logging
+import os
+import socket
+import time
+import http.client
 import inspect
-import threading
-from urllib.parse import urljoin, urlparse
-from typing import Optional, Any
+from pathlib import Path
+from urllib.parse import urlencode
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.lowlevel.server import NotificationOptions
 
-# Performance optimization imports
-from functools import lru_cache, wraps
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+# ==========================================================================
+# Configuration
+# ==========================================================================
 
-DEFAULT_GHIDRA_SERVER = "http://127.0.0.1:8089"
-
-# Enhanced configuration and state management
-# HTTP request timeout (30s chosen for slow decompilation operations)
 REQUEST_TIMEOUT = 30
-DEFAULT_PAGINATION_LIMIT = 100
 
-# Per-endpoint timeout configuration for expensive operations (v1.6.1)
+# Per-endpoint timeout overrides for expensive operations
 ENDPOINT_TIMEOUTS = {
     "batch_rename_variables": 120,
     "batch_set_comments": 120,
@@ -41,2386 +45,808 @@ ENDPOINT_TIMEOUTS = {
     "batch_set_variable_types": 90,
     "analyze_data_region": 90,
     "batch_create_labels": 60,
-    "delete_label": 30,
     "batch_delete_labels": 60,
-    "set_plate_comment": 45,
-    "get_plate_comment": 10,
-    "set_function_prototype": 45,
-    "rename_function_by_address": 45,
-    "rename_variable": 30,
-    "rename_function": 45,
-    "decompile_function": 45,
     "disassemble_bytes": 120,
     "bulk_fuzzy_match": 180,
     "find_similar_functions_fuzzy": 60,
-    "diff_functions": 30,
-    "get_function_signature": 10,
     "run_ghidra_script": 1800,
     "run_script_inline": 1800,
+    "decompile_function": 45,
+    "set_function_prototype": 45,
+    "rename_function": 45,
+    "rename_function_by_address": 45,
+    "consolidate_duplicate_types": 60,
+    "batch_analyze_completeness": 120,
+    "apply_function_documentation": 60,
     "default": 30,
 }
-MAX_RETRIES = 3
-RETRY_BACKOFF_FACTOR = 0.5
-CACHE_SIZE = 256
-ENABLE_CACHING = True
 
-# Tool profiles for reducing schema overhead in specialized workflows
-TOOL_PROFILES = {
-    "re": {
-        "check_connection",
-        "get_current_program_info",
-        "get_metadata",
-        "save_program",
-        "exit_ghidra",
-        "list_open_programs",
-        "switch_program",
-        "open_program",
-        "search_functions_enhanced",
-        "find_next_undefined_function",
-        "decompile_function",
-        "analyze_function_complete",
-        "analyze_for_documentation",
-        "get_function_variables",
-        "get_function_callees",
-        "get_function_callers",
-        "batch_apply_documentation",
-        "analyze_function_completeness",
-        "batch_analyze_completeness",
-        "batch_set_variable_types",
-        "set_bookmark",
-        "get_function_xrefs",
-        "get_function_hash",
-        "propagate_documentation",
-        "build_function_hash_index",
-        "run_ghidra_script",
-        "run_script_inline",
-        "rename_function_by_address",
-        "set_function_prototype",
-        "rename_variables",
-        "batch_set_comments",
-        "set_plate_comment",
-        "set_local_variable_type",
-        "rename_or_label",
-        # Knowledge DB tools
-        "store_function_knowledge",
-        "query_knowledge_context",
-        "store_ordinal_mapping",
-        "get_ordinal_mapping",
-        "export_system_knowledge",
-    },
-}
+DEFAULT_TCP_URL = "http://127.0.0.1:8089"
 
-
-def apply_tool_profile(mcp_instance, profile_name):
-    """Remove tools not in the specified profile from the MCP server."""
-    if profile_name not in TOOL_PROFILES:
-        raise ValueError(
-            f"Unknown profile '{profile_name}'. Available: {list(TOOL_PROFILES.keys())}"
-        )
-    allowed = TOOL_PROFILES[profile_name]
-    tool_mgr = getattr(mcp_instance, "_tool_manager", None)
-    if tool_mgr is None:
-        logger.warning("Could not access tool manager for profile filtering")
-        return
-    tools_dict = getattr(tool_mgr, "_tools", None)
-    if tools_dict is None:
-        logger.warning("Could not access tools dict for profile filtering")
-        return
-    all_tools = list(tools_dict.keys())
-    removed = 0
-    for name in all_tools:
-        if name not in allowed:
-            del tools_dict[name]
-            removed += 1
-    logger.info(
-        f"Profile '{profile_name}': kept {len(allowed)} tools, removed {removed}"
-    )
-
-
-# Connection pooling for better performance
-session = requests.Session()
-retry_strategy = Retry(
-    total=MAX_RETRIES,
-    backoff_factor=RETRY_BACKOFF_FACTOR,
-    status_forcelist=[429, 500, 502, 503, 504],
-)
-adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=20, pool_maxsize=20)
-session.mount("http://", adapter)
-session.mount("https://", adapter)
-
-# Load .env file if present (for KNOWLEDGE_DB_*, GHIDRA_SERVER_URL, etc.)
-import os
-from pathlib import Path
-
-_env_file = Path(__file__).parent / ".env"
-if _env_file.exists():
-    for line in _env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.split("#")[0].strip()  # strip inline comments
-            if key and key not in os.environ:  # env vars take precedence
-                os.environ[key] = value
-
-# Configure enhanced logging
+# Logging
 LOG_LEVEL = os.getenv("GHIDRA_MCP_LOG_LEVEL", "INFO")
-
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL.upper(), logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
+# Global state
 mcp = FastMCP("ghidra-mcp")
 
-# Initialize ghidra_server_url: env var > .env file > default
-ghidra_server_url = os.getenv("GHIDRA_SERVER_URL", DEFAULT_GHIDRA_SERVER)
+# Enable tools/list_changed notifications so clients re-fetch tools after dynamic registration
+_orig_init_options = mcp._mcp_server.create_initialization_options
+def _patched_init_options(**kwargs):
+    return _orig_init_options(
+        notification_options=NotificationOptions(tools_changed=True), **kwargs)
+mcp._mcp_server.create_initialization_options = _patched_init_options
+
+_active_socket: str | None = None  # UDS socket path
+_active_tcp: str | None = None  # TCP base URL (e.g. "http://127.0.0.1:8089")
+_transport_mode: str = "none"  # "uds", "tcp", or "none"
 
 
-# ========== KNOWLEDGE DB (PostgreSQL at RE-Universe) ==========
-
-# Optional psycopg2 for knowledge database connectivity
-try:
-    import psycopg2
-    import psycopg2.pool
-    import psycopg2.extras
-
-    HAS_PSYCOPG2 = True
-except ImportError:
-    HAS_PSYCOPG2 = False
-    logger.warning("psycopg2 not installed - knowledge DB tools disabled")
-
-# Knowledge DB configuration (configure via environment variables)
-KNOWLEDGE_DB_HOST = os.getenv("KNOWLEDGE_DB_HOST", "localhost")
-KNOWLEDGE_DB_PORT = int(os.getenv("KNOWLEDGE_DB_PORT", "5432"))
-KNOWLEDGE_DB_NAME = os.getenv("KNOWLEDGE_DB_NAME", "bsim")
-KNOWLEDGE_DB_USER = os.getenv("KNOWLEDGE_DB_USER", "")
-KNOWLEDGE_DB_PASSWORD = os.getenv("KNOWLEDGE_DB_PASSWORD", "")
-KNOWLEDGE_DB_TIMEOUT = float(os.getenv("KNOWLEDGE_DB_TIMEOUT", "2.0"))  # seconds
-KNOWLEDGE_DB_READ_TIMEOUT = float(
-    os.getenv("KNOWLEDGE_DB_READ_TIMEOUT", "0.5")
-)  # seconds
+# ==========================================================================
+# UDS Transport
+# ==========================================================================
 
 
-class KnowledgeDB:
-    """Connection pool + circuit breaker for the knowledge PostgreSQL database."""
+class UnixHTTPConnection(http.client.HTTPConnection):
+    """HTTP connection over a Unix domain socket."""
 
-    def __init__(self):
-        self._pool = None
-        self._lock = threading.Lock()
-        self._consecutive_failures = 0
-        self._circuit_open = False
-        self._max_failures = 3
+    def __init__(self, socket_path: str, timeout: int = 30):
+        super().__init__("localhost", timeout=timeout)
+        self.socket_path = socket_path
 
-    def _get_pool(self):
-        if self._pool is not None:
-            return self._pool
-        with self._lock:
-            if self._pool is not None:
-                return self._pool
-            if not HAS_PSYCOPG2:
-                return None
-            try:
-                self._pool = psycopg2.pool.ThreadedConnectionPool(
-                    minconn=1,
-                    maxconn=5,
-                    host=KNOWLEDGE_DB_HOST,
-                    port=KNOWLEDGE_DB_PORT,
-                    dbname=KNOWLEDGE_DB_NAME,
-                    user=KNOWLEDGE_DB_USER,
-                    password=KNOWLEDGE_DB_PASSWORD or None,
-                    connect_timeout=int(KNOWLEDGE_DB_TIMEOUT),
-                    options=f"-c statement_timeout={int(KNOWLEDGE_DB_READ_TIMEOUT * 1000)}",
-                )
-                logger.info(
-                    f"Knowledge DB pool created: {KNOWLEDGE_DB_HOST}:{KNOWLEDGE_DB_PORT}/{KNOWLEDGE_DB_NAME}"
-                )
-                self._consecutive_failures = 0
-                self._circuit_open = False
-                return self._pool
-            except Exception as e:
-                logger.warning(f"Knowledge DB connection failed: {e}")
-                return None
-
-    def _record_failure(self):
-        self._consecutive_failures += 1
-        if self._consecutive_failures >= self._max_failures:
-            self._circuit_open = True
-            logger.warning(
-                "Knowledge DB circuit breaker OPEN - disabling for this session"
-            )
-
-    def _record_success(self):
-        self._consecutive_failures = 0
-
-    def execute_read(self, query, params=None):
-        """Execute a read query. Returns rows as list of dicts, or None on failure."""
-        if self._circuit_open or not HAS_PSYCOPG2:
-            return None
-        pool = self._get_pool()
-        if not pool:
-            return None
-        conn = None
-        try:
-            conn = pool.getconn()
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(query, params)
-                rows = cur.fetchall()
-            conn.rollback()  # read-only, release any locks
-            self._record_success()
-            return [dict(r) for r in rows]
-        except Exception as e:
-            logger.warning(f"Knowledge DB read failed: {e}")
-            self._record_failure()
-            if conn:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            return None
-        finally:
-            if conn and pool:
-                try:
-                    pool.putconn(conn)
-                except Exception:
-                    pass
-
-    def execute_write(self, query, params=None):
-        """Execute a write query. Returns True on success, False on failure. Fire-and-forget."""
-        if self._circuit_open or not HAS_PSYCOPG2:
-            return False
-        pool = self._get_pool()
-        if not pool:
-            return False
-        conn = None
-        try:
-            conn = pool.getconn()
-            with conn.cursor() as cur:
-                cur.execute(query, params)
-            conn.commit()
-            self._record_success()
-            return True
-        except Exception as e:
-            logger.warning(f"Knowledge DB write failed: {e}")
-            self._record_failure()
-            if conn:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            return False
-        finally:
-            if conn and pool:
-                try:
-                    pool.putconn(conn)
-                except Exception:
-                    pass
-
-    @property
-    def available(self):
-        return HAS_PSYCOPG2 and not self._circuit_open
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(self.socket_path)
 
 
-# Global knowledge DB instance (lazy connection)
-knowledge_db = KnowledgeDB()
+def get_socket_dir() -> Path:
+    """Get the GhidraMCP socket runtime directory."""
+    xdg = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg:
+        return Path(xdg) / "ghidra-mcp"
+    user = os.getenv("USER", "unknown")
+    tmpdir = os.environ.get("TMPDIR")
+    if tmpdir:
+        return Path(tmpdir) / f"ghidra-mcp-{user}"
+    return Path(f"/tmp/ghidra-mcp-{user}")
 
 
-# Enhanced error classes
-class GhidraConnectionError(Exception):
-    """Raised when connection to Ghidra server fails"""
-    pass
-
-
-class GhidraAnalysisError(Exception):
-    """Raised when Ghidra analysis operation fails"""
-    pass
-
-
-class GhidraValidationError(Exception):
-    """Raised when input validation fails"""
-    pass
-
-
-# Input validation patterns
-HEX_ADDRESS_PATTERN = re.compile(r"^0x[0-9a-fA-F]+$")
-SEGMENT_ADDRESS_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*:[0-9a-fA-F]+$")
-FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
-
-
-def validate_server_url(url: str) -> bool:
-    """Validate that the server URL is safe to use"""
+def is_pid_alive(pid: int) -> bool:
+    """Check if a process with the given PID is still running."""
     try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ["http", "https"]:
-            return False
-        if parsed.hostname in ["localhost", "127.0.0.1", "::1"]:
-            return True
-        if parsed.hostname and (
-            parsed.hostname.startswith("192.168.")
-            or parsed.hostname.startswith("10.")
-            or parsed.hostname.startswith("172.")
-        ):
-            return True
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
         return False
+    except PermissionError:
+        return True  # Running but owned by another user
+
+
+def uds_request(
+    socket_path: str,
+    method: str,
+    endpoint: str,
+    params: dict | None = None,
+    json_data: dict | None = None,
+    timeout: int = 30,
+) -> tuple[str, int]:
+    """Make an HTTP request over a Unix domain socket. Returns (body, status)."""
+    conn = UnixHTTPConnection(socket_path, timeout=timeout)
+    path = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+    if params:
+        path = f"{path}?{urlencode(params)}"
+
+    headers = {}
+    body = None
+    if json_data is not None:
+        body = json.dumps(json_data).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if body:
+        headers["Content-Length"] = str(len(body))
+
+    try:
+        conn.request(method, path, body=body, headers=headers)
+        response = conn.getresponse()
+        result = response.read().decode("utf-8")
+        status = response.status
+        conn.close()
+        return result, status
     except Exception:
-        return False
+        conn.close()
+        raise
 
 
-def get_timeout_for_endpoint(endpoint: str) -> int:
-    """Get the appropriate timeout for a specific endpoint"""
-    endpoint_name = endpoint.strip("/").split("/")[-1]
-    return ENDPOINT_TIMEOUTS.get(endpoint_name, ENDPOINT_TIMEOUTS["default"])
+# ==========================================================================
+# TCP Transport
+# ==========================================================================
 
 
-def calculate_dynamic_timeout(endpoint: str, payload: dict = None) -> int:
-    """
-    Calculate timeout dynamically based on operation complexity.
-    For batch operations, scales timeout based on the number of items being processed.
-    """
-    endpoint_name = endpoint.strip("/").split("/")[-1]
-    base_timeout = ENDPOINT_TIMEOUTS.get(endpoint_name, ENDPOINT_TIMEOUTS["default"])
+def tcp_request(
+    base_url: str,
+    method: str,
+    endpoint: str,
+    params: dict | None = None,
+    json_data: dict | None = None,
+    timeout: int = 30,
+) -> tuple[str, int]:
+    """Make an HTTP request over TCP. Returns (body, status)."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(base_url)
+    conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=timeout)
+
+    path = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+    if params:
+        path = f"{path}?{urlencode(params)}"
+
+    headers = {}
+    body = None
+    if json_data is not None:
+        body = json.dumps(json_data).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if body:
+        headers["Content-Length"] = str(len(body))
+
+    try:
+        conn.request(method, path, body=body, headers=headers)
+        response = conn.getresponse()
+        result = response.read().decode("utf-8")
+        status = response.status
+        conn.close()
+        return result, status
+    except Exception:
+        conn.close()
+        raise
+
+
+# ==========================================================================
+# Unified request function
+# ==========================================================================
+
+
+def do_request(
+    method: str,
+    endpoint: str,
+    params: dict | None = None,
+    json_data: dict | None = None,
+    timeout: int = 30,
+) -> tuple[str, int]:
+    """Route request to the active transport (UDS or TCP)."""
+    if _transport_mode == "uds" and _active_socket:
+        return uds_request(_active_socket, method, endpoint, params, json_data, timeout)
+    elif _transport_mode == "tcp" and _active_tcp:
+        return tcp_request(_active_tcp, method, endpoint, params, json_data, timeout)
+    else:
+        raise ConnectionError("No Ghidra instance connected. Use connect_instance() first.")
+
+
+# ==========================================================================
+# Instance discovery
+# ==========================================================================
+
+
+def discover_instances() -> list[dict]:
+    """Scan socket directory and query each live instance for info."""
+    socket_dir = get_socket_dir()
+    if not socket_dir.exists():
+        return []
+
+    instances = []
+    for sock_file in sorted(socket_dir.glob("*.sock")):
+        name = sock_file.stem  # ghidra-<pid>
+        dash = name.rfind("-")
+        if dash < 0:
+            continue
+        try:
+            pid = int(name[dash + 1:])
+        except ValueError:
+            continue
+
+        if not is_pid_alive(pid):
+            logger.debug(f"Cleaning up stale socket: {sock_file}")
+            try:
+                sock_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
+
+        info: dict = {"socket": str(sock_file), "pid": pid}
+        try:
+            text, status = uds_request(str(sock_file), "GET", "/mcp/instance_info", timeout=5)
+            if status == 200:
+                data = json.loads(text)
+                # instance_info response is wrapped in Response.ok() → {"data": {...}}
+                if "data" in data:
+                    info.update(data["data"])
+                else:
+                    info.update(data)
+        except Exception as e:
+            logger.debug(f"Could not query {sock_file}: {e}")
+
+        instances.append(info)
+
+    return instances
+
+
+# ==========================================================================
+# HTTP dispatch
+# ==========================================================================
+
+
+def get_timeout(endpoint: str, payload: dict | None = None) -> int:
+    """Get timeout for an endpoint, with dynamic scaling for batch ops."""
+    name = endpoint.strip("/").split("/")[-1]
+    base = ENDPOINT_TIMEOUTS.get(name, ENDPOINT_TIMEOUTS["default"])
 
     if not payload:
-        return base_timeout
+        return base
 
-    if endpoint_name == "batch_rename_variables":
-        variable_count = len(payload.get("variable_renames", {}))
-        per_variable_time = 25
-        safety_multiplier = 1.5
-        calculated_timeout = int(
-            base_timeout + (variable_count * per_variable_time * safety_multiplier)
-        )
-        return min(calculated_timeout, 600)
+    if name == "batch_rename_variables":
+        count = len(payload.get("variable_renames", {}))
+        return min(base + count * 38, 600)
 
-    if endpoint_name == "batch_set_comments":
-        comment_count = 0
-        comment_count += len(payload.get("decompiler_comments", []))
-        comment_count += len(payload.get("disassembly_comments", []))
-        comment_count += 1 if payload.get("plate_comment") else 0
-        calculated_timeout = int(base_timeout + (comment_count * 5 * 1.5))
-        return min(calculated_timeout, 600)
+    if name == "batch_set_comments":
+        count = len(payload.get("decompiler_comments", []))
+        count += len(payload.get("disassembly_comments", []))
+        count += 1 if payload.get("plate_comment") else 0
+        return min(base + count * 8, 600)
 
-    if endpoint_name == "batch_create_labels":
-        label_count = len(payload.get("labels", []))
-        calculated_timeout = int(base_timeout + (label_count * 2 * 1.5))
-        return min(calculated_timeout, 600)
-
-    return base_timeout
+    return base
 
 
-def validate_hex_address(address: str) -> bool:
-    """Validate hexadecimal address format (0x-prefixed or segment:offset)"""
-    if not address or not isinstance(address, str):
-        return False
-    return bool(
-        HEX_ADDRESS_PATTERN.match(address) or SEGMENT_ADDRESS_PATTERN.match(address)
-    )
+def dispatch_get(endpoint: str, params: dict | None = None, retries: int = 3) -> str:
+    """GET request via active transport. Returns raw response text."""
+    if _transport_mode == "none":
+        return json.dumps({"error": "No Ghidra instance connected. Use connect_instance() first."})
 
-
-def sanitize_address(address: str) -> str:
-    """Normalize address format (handle with/without 0x prefix, case normalization)."""
-    if not address:
-        return address
-    address = address.strip()
-    if SEGMENT_ADDRESS_PATTERN.match(address):
-        return address
-    if not address.startswith(("0x", "0X")):
-        address = "0x" + address
-    return address.lower()
-
-
-def validate_function_name(name: str) -> bool:
-    """Validate function name format"""
-    return bool(FUNCTION_NAME_PATTERN.match(name)) if name else False
-
-
-def normalize_address(address: str) -> str:
-    """Normalize address to standard format (0x prefix, no leading zeros)."""
-    if not address:
-        return address
-    address = address.strip()
-    if SEGMENT_ADDRESS_PATTERN.match(address):
-        return address
-    address = address.lower()
-    if address.startswith(("0x", "0X")):
-        address = address[2:]
-    address = address.lstrip("0") or "0"
-    return "0x" + address
-
-
-def format_success_response(operation: str, result: dict = None, **kwargs) -> str:
-    response = {"success": True, "operation": operation}
-    if result is not None:
-        response["result"] = result
-    response.update(kwargs)
-    return json.dumps(response)
-
-
-def format_error_response(
-    operation: str, error: str, error_code: str = None, **kwargs
-) -> str:
-    response = {"success": False, "operation": operation, "error": error}
-    if error_code:
-        response["error_code"] = error_code
-    response.update(kwargs)
-    return json.dumps(response)
-
-
-def calculate_function_hash(bytecode: bytes) -> str:
-    import hashlib
-    return hashlib.sha256(bytecode).hexdigest()
-
-
-def validate_hungarian_notation(name: str, type_str: str) -> bool:
-    if not name or not type_str:
-        return False
-    type_lower = type_str.lower()
-    name_lower = name.lower()
-    if "*" in type_str or "ptr" in type_lower:
-        if type_str.count("*") >= 2 or "**" in type_str:
-            return name_lower.startswith("pp")
-        return name_lower.startswith("p")
-    if "handle" in type_lower or type_str.startswith("H"):
-        return name_lower.startswith("h")
-    if type_lower in ("dword", "uint", "ulong", "unsigned int", "unsigned long"):
-        return name_lower.startswith("dw") or name_lower.startswith("n")
-    if type_lower in ("word", "ushort", "unsigned short"):
-        return name_lower.startswith("w")
-    if type_lower in ("byte", "uchar", "unsigned char"):
-        return name_lower.startswith("b")
-    if type_lower in ("bool", "boolean"):
-        return name_lower.startswith("b") or name_lower.startswith("is")
-    return True
-
-
-def validate_batch_renames(renames: dict) -> bool:
-    if not renames or not isinstance(renames, dict):
-        return False
-    for old_name, new_name in renames.items():
-        if not isinstance(old_name, str) or not isinstance(new_name, str):
-            return False
-        if not old_name or not new_name:
-            return False
-    return True
-
-
-def validate_batch_comments(comments: list) -> bool:
-    if not comments or not isinstance(comments, list):
-        return False
-    for item in comments:
-        if not isinstance(item, dict):
-            return False
-        if "address" not in item or "comment" not in item:
-            return False
-    return True
-
-
-def validate_program_path(path: str) -> bool:
-    if not path or not isinstance(path, str):
-        return False
-    if ".." in path:
-        return False
-    return True
-
-
-def _convert_escaped_newlines(text: str) -> str:
-    """Convert escaped newlines (\\n) to actual newlines"""
-    if not text:
-        return text
-    return text.replace("\\n", "\n")
-
-
-def parse_address_list(addresses: str, param_name: str = "addresses") -> list[str]:
-    addr_list = []
-    if addresses.startswith("["):
-        try:
-            addr_list = json.loads(addresses)
-        except json.JSONDecodeError as e:
-            raise GhidraValidationError(
-                f"Invalid JSON array format for {param_name}: {e}"
-            )
-    else:
-        addr_list = [addr.strip() for addr in addresses.split(",") if addr.strip()]
-    for addr in addr_list:
-        if not validate_hex_address(addr):
-            raise GhidraValidationError(f"Invalid hex address format: {addr}")
-    return addr_list
-
-
-# Performance and caching utilities
-from typing import Callable, TypeVar
-
-T = TypeVar("T")
-
-
-def cache_key(*args: Any, **kwargs: Any) -> str:
-    import hashlib
-    key_data = {"args": args, "kwargs": kwargs}
-    return hashlib.md5(
-        json.dumps(key_data, sort_keys=True, default=str).encode()
-    ).hexdigest()
-
-
-def cached_request(
-    cache_duration: int = 300,
-) -> Callable[[Callable[..., T]], Callable[..., T]]:
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
-        cache: dict[str, tuple[T, float]] = {}
-
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> T:
-            if not ENABLE_CACHING:
-                return func(*args, **kwargs)
-            key = cache_key(*args, **kwargs)
-            now = time.time()
-            if key in cache:
-                result, timestamp = cache[key]
-                if now - timestamp < cache_duration:
-                    return result
-                else:
-                    del cache[key]
-            result = func(*args, **kwargs)
-            cache[key] = (result, now)
-            if len(cache) > CACHE_SIZE:
-                oldest_key = min(cache.keys(), key=lambda k: cache[k][1])
-                del cache[oldest_key]
-            return result
-
-        return wrapper
-
-    return decorator
-
-
-def safe_get_uncached(endpoint: str, params: dict = None, retries: int = 3) -> list:
-    if params is None:
-        params = {}
-    if not validate_server_url(ghidra_server_url):
-        return ["Error: Invalid server URL - only local addresses allowed"]
-    url = urljoin(ghidra_server_url, endpoint)
-    timeout = get_timeout_for_endpoint(endpoint)
+    timeout = get_timeout(endpoint)
     for attempt in range(retries):
         try:
-            response = session.get(url, params=params, timeout=timeout)
-            response.encoding = "utf-8"
-            if response.ok:
-                return response.text.splitlines()
-            elif response.status_code == 404:
-                return [f"Endpoint not found: {endpoint}"]
-            elif response.status_code >= 500:
-                if attempt < retries - 1:
-                    time.sleep(2**attempt)
-                    continue
-                else:
-                    raise GhidraConnectionError(f"Server error: {response.status_code}")
-            else:
-                return [f"Error {response.status_code}: {response.text.strip()}"]
-        except requests.exceptions.Timeout:
+            text, status = do_request("GET", endpoint, params=params, timeout=timeout)
+            if status == 200:
+                return text
+            if status >= 500 and attempt < retries - 1:
+                time.sleep(2**attempt)
+                continue
+            return json.dumps({"error": f"HTTP {status}: {text.strip()}"})
+        except Exception as e:
             if attempt < retries - 1:
                 continue
-            return [f"Timeout connecting to Ghidra server after {retries} attempts"]
-        except requests.exceptions.RequestException as e:
-            return [f"Request failed: {str(e)}"]
-        except GhidraConnectionError:
-            raise
-        except Exception as e:
-            return [f"Unexpected error: {str(e)}"]
-    return ["Unexpected error in safe_get_uncached"]
+            return json.dumps({"error": str(e)})
+
+    return json.dumps({"error": "Max retries exceeded"})
 
 
-@cached_request(cache_duration=180)
-def safe_get(
-    endpoint: str, params: dict = None, retries: int = 3, program: str = None
-) -> list:
-    if params is None:
-        params = {}
-    if program:
-        params["program"] = program
-    if not validate_server_url(ghidra_server_url):
-        return ["Error: Invalid server URL - only local addresses allowed"]
-    url = urljoin(ghidra_server_url, endpoint)
-    timeout = get_timeout_for_endpoint(endpoint)
+def dispatch_post(endpoint: str, data: dict, retries: int = 3) -> str:
+    """POST JSON request via active transport. Returns raw response text."""
+    if _transport_mode == "none":
+        return json.dumps({"error": "No Ghidra instance connected. Use connect_instance() first."})
+
+    timeout = get_timeout(endpoint, data)
     for attempt in range(retries):
         try:
-            response = session.get(url, params=params, timeout=timeout)
-            response.encoding = "utf-8"
-            if response.ok:
-                return response.text.splitlines()
-            elif response.status_code == 404:
-                return [f"Endpoint not found: {endpoint}"]
-            elif response.status_code >= 500:
-                if attempt < retries - 1:
-                    time.sleep(2**attempt)
-                    continue
-                else:
-                    raise GhidraConnectionError(f"Server error: {response.status_code}")
-            else:
-                return [f"Error {response.status_code}: {response.text.strip()}"]
-        except requests.exceptions.Timeout:
-            if attempt < retries - 1:
+            text, status = do_request("POST", endpoint, json_data=data, timeout=timeout)
+            if status == 200:
+                return text.strip()
+            if status >= 500 and attempt < retries - 1:
+                time.sleep(1)
                 continue
-            return [f"Timeout connecting to Ghidra server after {retries} attempts"]
-        except requests.exceptions.RequestException as e:
-            return [f"Request failed: {str(e)}"]
-        except GhidraConnectionError:
-            raise
+            return json.dumps({"error": f"HTTP {status}: {text.strip()}"})
         except Exception as e:
-            return [f"Unexpected error: {str(e)}"]
-    return ["Unexpected error in safe_get"]
-
-
-def safe_get_json(
-    endpoint: str, params: dict = None, retries: int = 3, program: str = None
-) -> str:
-    if params is None:
-        params = {}
-    if program:
-        params["program"] = program
-    if not validate_server_url(ghidra_server_url):
-        return '{"error": "Invalid server URL - only local addresses allowed"}'
-    url = urljoin(ghidra_server_url, endpoint)
-    timeout = get_timeout_for_endpoint(endpoint)
-    for attempt in range(retries):
-        try:
-            start_time = time.time()
-            response = session.get(url, params=params, timeout=timeout)
-            response.encoding = "utf-8"
-            duration = time.time() - start_time
-            logger.info(f"Request to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries})")
-            if response.ok:
-                return response.text
-            elif response.status_code == 404:
-                return f'{{"error": "Endpoint not found: {endpoint}"}}'
-            elif response.status_code >= 500:
-                if attempt < retries - 1:
-                    time.sleep(2**attempt)
-                    continue
-                else:
-                    return f'{{"error": "Server error {response.status_code} after {retries} attempts"}}'
-            else:
-                return f'{{"error": "HTTP {response.status_code}: {response.text.strip()}"}}'
-        except requests.exceptions.Timeout:
-            if attempt < retries - 1:
-                continue
-            return f'{{"error": "Timeout connecting to Ghidra server after {retries} attempts"}}'
-        except requests.exceptions.RequestException as e:
-            return f'{{"error": "Request failed: {str(e)}"}}'
-        except Exception as e:
-            return f'{{"error": "Unexpected error: {str(e)}"}}'
-    return '{"error": "Unexpected error in safe_get_json"}'
-
-
-def safe_post_json(
-    endpoint: str, data: dict, retries: int = 3, program: str = None
-) -> str:
-    if not validate_server_url(ghidra_server_url):
-        return "Error: Invalid server URL - only local addresses allowed"
-    url = urljoin(ghidra_server_url, endpoint)
-    if program:
-        url += f"?program={program}"
-    timeout = calculate_dynamic_timeout(endpoint, data)
-    logger.info(f"Using dynamic timeout of {timeout}s for endpoint {endpoint} (payload items: {len(data)})")
-    headers = {"Connection": "close"}
-    for attempt in range(retries):
-        try:
-            start_time = time.time()
-            logger.info(f"Sending JSON POST to {url} with data: {data}")
-            response = session.post(url, json=data, headers=headers, timeout=timeout)
-            response.encoding = "utf-8"
-            duration = time.time() - start_time
-            logger.info(f"JSON POST to {endpoint} took {duration:.2f}s (attempt {attempt + 1}/{retries}), status: {response.status_code}")
-            if response.ok:
-                return response.text.strip()
-            elif response.status_code == 404:
-                return f"Error: Endpoint {endpoint} not found"
-            elif response.status_code >= 500:
-                if attempt < retries - 1:
-                    time.sleep(1)
-                    continue
-                else:
-                    return f"Error: Server error {response.status_code} after {retries} attempts"
-            else:
-                return f"Error: HTTP {response.status_code} - {response.text}"
-        except requests.RequestException as e:
             if attempt < retries - 1:
                 time.sleep(1)
                 continue
-            else:
-                return f"Error: Request failed - {str(e)}"
-    return "Error: Maximum retries exceeded"
+            return json.dumps({"error": str(e)})
+
+    return json.dumps({"error": "Max retries exceeded"})
 
 
-def safe_post(
-    endpoint: str, data: dict | str, retries: int = 3, program: str = None
-) -> str:
-    if not validate_server_url(ghidra_server_url):
-        return "Error: Invalid server URL - only local addresses allowed"
-    url = urljoin(ghidra_server_url, endpoint)
-    if program:
-        url += f"?program={program}"
-    timeout = get_timeout_for_endpoint(endpoint)
-    for attempt in range(retries):
-        try:
-            if isinstance(data, dict):
-                response = session.post(url, json=data, timeout=timeout)
-            else:
-                response = session.post(url, data=data.encode("utf-8"), timeout=timeout)
-            response.encoding = "utf-8"
-            if response.ok:
-                return response.text.strip()
-            elif response.status_code == 404:
-                return f"Endpoint not found: {endpoint}"
-            elif response.status_code >= 500:
-                if attempt < retries - 1:
-                    time.sleep(2**attempt)
-                    continue
-                else:
-                    raise GhidraConnectionError(f"Server error: {response.status_code}")
-            else:
-                return f"Error {response.status_code}: {response.text.strip()}"
-        except requests.exceptions.Timeout:
-            if attempt < retries - 1:
-                continue
-            return f"Timeout connecting to Ghidra server after {retries} attempts"
-        except requests.exceptions.RequestException as e:
-            return f"Request failed: {str(e)}"
-        except GhidraConnectionError:
-            raise
-        except Exception as e:
-            return f"Unexpected error: {str(e)}"
-    return "Unexpected error in safe_post"
+# ==========================================================================
+# Schema parsing — converts upstream /mcp/schema to internal tool defs
+# ==========================================================================
+
+# JSON type → Python type mapping
+_TYPE_MAP = {"string": str, "integer": int, "boolean": bool, "number": float}
 
 
-def make_request(
-    url: str,
-    method: str = "GET",
-    params: dict = None,
-    data: str = None,
-    retries: int = 3,
-    program: str = None,
-) -> str:
-    if params is None:
-        params = {}
-    if program:
-        params["program"] = program
-    if not validate_server_url(url):
-        return '{"error": "Invalid server URL - only local addresses allowed"}'
-    timeout = REQUEST_TIMEOUT
-    for attempt in range(retries):
-        try:
-            if method.upper() == "POST":
-                headers = {"Content-Type": "application/json"}
-                response = session.post(url, data=data, headers=headers, timeout=timeout)
-            else:
-                response = session.get(url, params=params, timeout=timeout)
-            response.encoding = "utf-8"
-            if response.ok:
-                return response.text
-            elif response.status_code == 404:
-                return f'{{"error": "Endpoint not found: {url}"}}'
-            elif response.status_code >= 500:
-                if attempt < retries - 1:
-                    time.sleep(2**attempt)
-                    continue
-                else:
-                    return f'{{"error": "Server error {response.status_code} after {retries} attempts"}}'
-            else:
-                return f'{{"error": "HTTP {response.status_code}: {response.text.strip()}"}}'
-        except requests.exceptions.Timeout:
-            if attempt < retries - 1:
-                continue
-            return f'{{"error": "Timeout connecting to Ghidra server after {retries} attempts"}}'
-        except requests.exceptions.RequestException as e:
-            return f'{{"error": "Request failed: {str(e)}"}}'
-        except Exception as e:
-            return f'{{"error": "Unexpected error: {str(e)}"}}'
-    return '{"error": "Unexpected error in make_request"}'
+def _parse_schema(raw: dict) -> list[dict]:
+    """Convert upstream AnnotationScanner schema to internal tool defs.
 
-
-# ===========================================================================
-# DYNAMIC TOOL REGISTRATION FROM /mcp/schema
-# ===========================================================================
-
-# Set of tool names that are registered statically (complex bridge-only logic).
-# These will NOT be overwritten by dynamic registration.
-STATIC_TOOL_NAMES = {
-    # Complex bridge-side logic
-    "check_connection",
-    "get_version",
-    "decompile_function",
-    "disassemble_function",
-    "rename_variables",
-    "rename_function_by_address",
-    "set_function_prototype",
-    "get_current_selection",
-    "get_function_metrics",
-    # Script lifecycle (local file I/O)
-    "save_ghidra_script",
-    "list_ghidra_scripts",
-    "get_ghidra_script",
-    "update_ghidra_script",
-    "delete_ghidra_script",
-    # Cross-binary hash/propagation (multi-call, file I/O)
-    "build_function_hash_index",
-    "lookup_function_by_hash",
-    "propagate_documentation",
-    # Knowledge DB tools (PostgreSQL)
-    "store_function_knowledge",
-    "query_knowledge_context",
-    "store_ordinal_mapping",
-    "get_ordinal_mapping",
-    "export_system_knowledge",
-}
-
-# Schema type -> Python type annotation mapping
-_SCHEMA_TYPE_MAP = {
-    "string": str,
-    "json": str,
-    "integer": int,
-    "boolean": bool,
-    "number": float,
-    "object": dict,
-    "array": list,
-    "any": str,
-}
-
-
-def _python_default(schema_type: str, default_str: str | None):
-    """Convert a schema default string to a Python value."""
-    if default_str is None:
-        return inspect.Parameter.empty
-    if schema_type == "integer":
-        try:
-            return int(default_str)
-        except (ValueError, TypeError):
-            return 0
-    if schema_type == "boolean":
-        return default_str.lower() == "true"
-    if schema_type == "number":
-        try:
-            return float(default_str)
-        except (ValueError, TypeError):
-            return 0.0
-    # string/json/object/array/any
-    return default_str if default_str else None
-
-
-def _make_tool_handler(tool_def: dict):
+    Upstream format: {"tools": [{"path", "method", "description", "category", "params": [...]}]}
+    Internal format: [{"name", "endpoint", "http_method", "description", "category", "input_schema"}]
     """
-    Create a handler function for a schema-defined tool with a proper signature
-    so FastMCP can introspect parameter names and types.
-    """
-    path = tool_def["path"]
-    method = tool_def["method"]
-    params_schema = tool_def.get("params", [])
+    tool_defs = []
+    for tool in raw.get("tools", []):
+        path = tool["path"]
+        name = path.lstrip("/")
+        params = tool.get("params", [])
 
-    # Build inspect.Parameter list for the function signature
-    sig_params = []
-    for p in params_schema:
-        name = p["name"]
-        ptype = _SCHEMA_TYPE_MAP.get(p.get("type", "string"), str)
-        required = p.get("required", True)
-        default_str = p.get("default")
+        properties = {}
+        required = []
+        for p in params:
+            pdef: dict = {"type": p.get("type", "string")}
+            if p.get("description"):
+                pdef["description"] = p["description"]
+            if "default" in p and p["default"] is not None:
+                pdef["default"] = p["default"]
+            properties[p["name"]] = pdef
+            if p.get("required", False):
+                required.append(p["name"])
 
-        if required and default_str is None:
-            default = inspect.Parameter.empty
-            # Required params: use bare type annotation
-            annotation = ptype
-        else:
-            default = _python_default(p.get("type", "string"), default_str)
-            # Optional params: allow None
-            if default is None or default is inspect.Parameter.empty:
-                annotation = Optional[ptype]
-                if default is inspect.Parameter.empty:
-                    default = None
-            else:
-                annotation = ptype
+        tool_defs.append({
+            "name": name,
+            "endpoint": path,
+            "http_method": tool.get("method", "GET"),
+            "description": tool.get("description", ""),
+            "category": tool.get("category", "unknown"),
+            "category_description": tool.get("category_description", ""),
+            "input_schema": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            },
+        })
 
-        sig_params.append(
-            inspect.Parameter(
-                name,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                default=default,
-                annotation=annotation,
-            )
-        )
+    return tool_defs
 
-    # Always add optional 'program' param if not already present
-    param_names = {p["name"] for p in params_schema}
-    if "program" not in param_names:
-        sig_params.append(
-            inspect.Parameter(
-                "program",
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                default=None,
-                annotation=Optional[str],
-            )
-        )
 
-    # Reorder the param names list so that params with default values are at the end of the list
-    sig_params.sort(key=lambda x: x.default == inspect.Parameter.empty, reverse=True)
+# ==========================================================================
+# Dynamic tool registration from /mcp/schema
+# ==========================================================================
 
-    sig = inspect.Signature(sig_params, return_annotation=str)
+_dynamic_tool_names: list[str] = []
+_full_schema: list[dict] = []  # Complete parsed schema
+_loaded_groups: set[str] = set()
 
-    # Separate query vs body params
-    query_params = {p["name"] for p in params_schema if p.get("source") == "query"}
-    body_params = {p["name"] for p in params_schema if p.get("source") == "body"}
+# Core groups always loaded on connect (essential for basic RE workflow)
+CORE_GROUPS = {"listing", "function", "program"}
+
+# CLI-configurable: --lazy keeps only default groups, otherwise load all
+_lazy_mode = True  # default: lazy (only load default groups on connect)
+_default_groups: set[str] = CORE_GROUPS
+
+
+def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
+    """Build a callable that dispatches to the Ghidra HTTP endpoint."""
+    properties = params_schema.get("properties", {})
+    required = set(params_schema.get("required", []))
 
     def handler(**kwargs):
-        program = kwargs.pop("program", None)
-
-        if method == "GET":
-            # All params go as query string
-            params = {k: v for k, v in kwargs.items() if v is not None}
-            return safe_get_json(path.lstrip("/"), params, program=program)
+        filtered = {k: v for k, v in kwargs.items() if v is not None}
+        if http_method == "GET":
+            str_params = {k: str(v) for k, v in filtered.items()}
+            return dispatch_get(endpoint, params=str_params if str_params else None)
         else:
-            # POST: body params go in JSON body, query params in URL
-            body_data = {}
-            q_params = {}
-            for k, v in kwargs.items():
-                if v is None:
-                    continue
-                if k in body_params:
-                    body_data[k] = v
-                elif k in query_params:
-                    q_params[k] = v
-                else:
-                    # Default: if method is POST and param source unknown, put in body
-                    body_data[k] = v
+            return dispatch_post(endpoint, data=filtered)
 
-            endpoint = path.lstrip("/")
-            if q_params:
-                # Append query params to endpoint URL
-                from urllib.parse import urlencode
-                endpoint += "?" + urlencode(q_params)
+    # Build function signature with proper types and defaults
+    # Params with defaults must come after params without defaults
+    required_params = []
+    optional_params = []
+    for pname, pdef in properties.items():
+        json_type = pdef.get("type", "string")
+        py_type = _TYPE_MAP.get(json_type, str)
+        default = pdef.get("default", inspect.Parameter.empty)
+        if pname not in required and default is inspect.Parameter.empty:
+            default = None
+            py_type = py_type | None if py_type != str else str | None
 
-            return safe_post_json(endpoint, body_data, program=program)
+        param = inspect.Parameter(pname, inspect.Parameter.KEYWORD_ONLY,
+                                  default=default, annotation=py_type)
+        if default is inspect.Parameter.empty:
+            required_params.append(param)
+        else:
+            optional_params.append(param)
 
-    handler.__signature__ = sig
+    sig_params = required_params + optional_params
+    handler.__signature__ = inspect.Signature(sig_params, return_annotation=str)
+    handler.__annotations__ = {p.name: p.annotation for p in sig_params}
+    handler.__annotations__["return"] = str
+
     return handler
 
 
-def _register_schema_tools():
-    """
-    Fetch /mcp/schema from the Ghidra HTTP server and dynamically register
-    all tools that don't have static implementations.
-    """
-    try:
-        response = session.get(
-            urljoin(ghidra_server_url, "mcp/schema"), timeout=10
-        )
-        if not response.ok:
-            logger.warning(
-                f"Could not fetch /mcp/schema (HTTP {response.status_code}). "
-                f"Dynamic tools will not be available."
-            )
-            return 0
+def _register_tool_def(tool_def: dict) -> bool:
+    """Register a single tool from a schema definition. Returns True if registered."""
+    name = tool_def["name"]
+    description = tool_def.get("description", "")
+    endpoint = tool_def["endpoint"]
+    http_method = tool_def.get("http_method", "GET")
+    input_schema = tool_def.get("input_schema", {"type": "object", "properties": {}})
 
-        schema = response.json()
-        tools = schema.get("tools", [])
-        registered = 0
+    handler = _build_tool_function(endpoint, http_method, input_schema)
+    handler.__name__ = name
+    handler.__doc__ = description
 
-        for tool_def in tools:
-            path = tool_def.get("path", "")
-            # Derive tool name from path: /list_functions -> list_functions
-            tool_name = path.lstrip("/").replace("/", "_")
-
-            # Skip tools with static implementations
-            if tool_name in STATIC_TOOL_NAMES:
-                logger.debug(f"Skipping static tool: {tool_name}")
-                continue
-
-            description = tool_def.get("description", f"Ghidra endpoint: {path}")
-            handler = _make_tool_handler(tool_def)
-
-            # Register with FastMCP
-            mcp.tool(name=tool_name, description=description)(handler)
-            registered += 1
-
-        logger.info(f"Dynamically registered {registered} tools from /mcp/schema ({len(tools)} total in schema)")
-        return registered
-
-    except requests.exceptions.ConnectionError:
-        logger.warning(
-            "Could not connect to Ghidra server for schema discovery. "
-            "Dynamic tools will not be available. Start Ghidra with the MCP plugin first."
-        )
-        return 0
-    except Exception as e:
-        logger.warning(f"Error during schema tool registration: {e}")
-        return 0
+    mcp.tool(name=name, description=description)(handler)
+    _dynamic_tool_names.append(name)
+    return True
 
 
-# ===========================================================================
-# STATIC TOOLS - Complex bridge-only logic that can't be auto-generated
-# ===========================================================================
-
-
-@mcp.tool()
-def check_connection() -> str:
-    """
-    Check if the Ghidra plugin is running and accessible.
-
-    Returns:
-        Connection status message
-    """
-    try:
-        response = session.get(
-            urljoin(ghidra_server_url, "check_connection"), timeout=REQUEST_TIMEOUT
-        )
-        if response.ok:
-            return response.text.strip()
-        else:
-            return f"Connection failed: HTTP {response.status_code}"
-    except Exception as e:
-        return f"Connection failed: {str(e)}"
-
-
-@mcp.tool()
-def get_version() -> str:
-    """
-    Get version information about the GhidraMCP plugin and Ghidra.
-
-    Returns:
-        JSON string with version information including plugin version,
-        Ghidra version, Java version, and endpoint count.
-    """
-    return "\n".join(safe_get("get_version"))
-
-
-@mcp.tool()
-def decompile_function(
-    name: str = None,
-    address: str = None,
-    force: bool = False,
-    timeout: int = None,
-    program: str = None,
-    offset: int = 0,
-    limit: int = None,
-) -> str:
-    """
-    Decompile a function by name or address and return the decompiled C code.
+def register_tools_from_schema(schema: list[dict], groups: set[str] | None = None) -> int:
+    """Register MCP tools from parsed schema.
 
     Args:
-        name: Function name to decompile (either name or address required)
-        address: Function address in hex format (e.g., "0x6fb6aef0")
-        force: Force fresh decompilation, clearing cache (default: False). Use after changing signatures, types, or storage.
-        timeout: Timeout in seconds (default: 45s)
-        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
-        offset: Line number to start from for pagination (0-indexed, default: 0)
-        limit: Max lines to return. If None, returns all. Use 100-200 for large functions.
+        schema: List of parsed tool definitions.
+        groups: If provided, only register tools in these groups. None = register all.
 
-    Returns:
-        Decompiled C pseudocode. With pagination, includes metadata header with total lines and range.
+    Returns: count of registered tools.
     """
-    if not name and not address:
-        raise GhidraValidationError("Either 'name' or 'address' parameter is required")
+    global _dynamic_tool_names, _full_schema, _loaded_groups
 
-    original_timeout = None
-    if timeout:
-        original_timeout = ENDPOINT_TIMEOUTS.get("decompile_function", 45)
-        ENDPOINT_TIMEOUTS["decompile_function"] = timeout
-        ENDPOINT_TIMEOUTS["force_decompile"] = timeout
-        ENDPOINT_TIMEOUTS["force_decompile_by_name"] = timeout
+    # Remove previously registered dynamic tools
+    for name in _dynamic_tool_names:
+        try:
+            mcp.remove_tool(name)
+        except (KeyError, ValueError):
+            pass
+    _dynamic_tool_names.clear()
+    _loaded_groups.clear()
 
-    try:
-        if name:
-            search_params = {"query": name, "offset": 0, "limit": 10}
-            if program:
-                search_params["program"] = program
-            search_result = safe_get("search_functions", search_params)
-            func_address = None
-            for line in search_result:
-                if f"{name} @" in line or line.startswith(f"{name} "):
-                    parts = line.split("@")
-                    if len(parts) >= 2:
-                        func_address = parts[-1].strip()
-                        break
-            if not func_address:
-                return f"Error: Function '{name}' not found"
-            if force:
-                result = safe_post("force_decompile", {"function_address": func_address})
-            else:
-                params = {"address": func_address}
-                if program:
-                    params["program"] = program
-                if timeout:
-                    params["timeout"] = str(timeout)
-                result = safe_get("decompile_function", params)
-        else:
-            address = sanitize_address(address)
-            if not validate_hex_address(address):
-                raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
-            if force:
-                result = safe_post("force_decompile", {"function_address": address})
-            else:
-                params = {"address": address}
-                if program:
-                    params["program"] = program
-                if timeout:
-                    params["timeout"] = str(timeout)
-                result = safe_get("decompile_function", params)
+    # Store full schema for lazy loading
+    _full_schema = schema
 
-        if isinstance(result, list):
-            result = "\n".join(result)
+    count = 0
+    for tool_def in schema:
+        category = tool_def.get("category", "unknown")
+        if groups is not None and category not in groups:
+            continue
+        _register_tool_def(tool_def)
+        _loaded_groups.add(category)
+        count += 1
 
-        # Apply pagination if offset or limit specified
-        if offset > 0 or limit is not None:
-            lines = result.split("\n")
-            total_lines = len(lines)
-            end_idx = len(lines) if limit is None else min(offset + limit, len(lines))
-            paginated_lines = lines[offset:end_idx]
-            has_more = end_idx < total_lines
-            metadata = f"/* PAGINATION: lines {offset + 1}-{end_idx} of {total_lines}"
-            if has_more:
-                metadata += f" (use offset={end_idx} for next chunk)"
-            metadata += " */\n\n"
-            result = metadata + "\n".join(paginated_lines)
-
-        return result
-    finally:
-        if original_timeout:
-            ENDPOINT_TIMEOUTS["decompile_function"] = original_timeout
-            ENDPOINT_TIMEOUTS["force_decompile"] = original_timeout
-            ENDPOINT_TIMEOUTS["force_decompile_by_name"] = original_timeout
+    return count
 
 
-@mcp.tool()
-def disassemble_function(
-    address: str,
-    program: str = None,
-    offset: int = 0,
-    limit: int = None,
-    filter_mnemonics: str = None,
-) -> list:
-    """
-    Get assembly code (address: instruction; comment) for a function.
+def _load_group(group_name: str) -> int:
+    """Load tools for a specific group from cached schema. Returns count."""
+    count = 0
+    for tool_def in _full_schema:
+        if tool_def.get("category") != group_name:
+            continue
+        name = tool_def["name"]
+        if name in _dynamic_tool_names:
+            continue  # Already loaded
+        _register_tool_def(tool_def)
+        count += 1
+    if count > 0:
+        _loaded_groups.add(group_name)
+    return count
 
-    Args:
-        address: Function address in hex format (e.g., "0x1400010a0")
-        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
-        offset: Instruction index to start from for pagination (0-indexed, default: 0)
-        limit: Max instructions to return. If None, returns all. Use 100-200 for large functions.
-        filter_mnemonics: Comma-separated mnemonics to filter (e.g., "CALL,JMP"). Applied before pagination.
 
-    Returns:
-        List of assembly instructions. With pagination, first element is metadata with total count.
-    """
-    if not validate_hex_address(address):
-        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+def _unload_group(group_name: str) -> int:
+    """Unload tools for a specific group. Returns count of removed tools."""
+    if group_name in _default_groups:
+        return 0  # Default groups can't be unloaded
 
-    params = {"address": address}
-    if program:
-        params["program"] = program
-    result = safe_get("disassemble_function", params)
+    to_remove = []
+    for tool_def in _full_schema:
+        if tool_def.get("category") == group_name:
+            name = tool_def["name"]
+            if name in _dynamic_tool_names:
+                to_remove.append(name)
 
-    if filter_mnemonics:
-        mnemonics = [m.strip().upper() for m in filter_mnemonics.split(",")]
-        result = [
-            line for line in result if any(mnem in line.upper() for mnem in mnemonics)
-        ]
+    for name in to_remove:
+        try:
+            mcp.remove_tool(name)
+            _dynamic_tool_names.remove(name)
+        except (KeyError, ValueError):
+            pass
 
-    if offset > 0 or limit is not None:
-        total_instructions = len(result)
-        end_idx = len(result) if limit is None else min(offset + limit, len(result))
-        paginated = result[offset:end_idx]
-        has_more = end_idx < total_instructions
-        metadata = f"/* PAGINATION: instructions {offset + 1}-{end_idx} of {total_instructions}"
-        if has_more:
-            metadata += f" (use offset={end_idx} for next chunk)"
-        metadata += " */"
-        return [metadata] + paginated
+    if to_remove:
+        _loaded_groups.discard(group_name)
+    return len(to_remove)
 
+
+def _get_group_info() -> list[dict]:
+    """Get info about all tool groups from cached schema."""
+    groups: dict[str, list[str]] = {}
+    descriptions: dict[str, str] = {}
+    for tool_def in _full_schema:
+        cat = tool_def.get("category", "unknown")
+        groups.setdefault(cat, []).append(tool_def["name"])
+        if cat not in descriptions and tool_def.get("category_description"):
+            descriptions[cat] = tool_def["category_description"]
+
+    result = []
+    for name, tools in sorted(groups.items()):
+        info: dict = {
+            "group": name,
+            "tool_count": len(tools),
+            "loaded": name in _loaded_groups,
+            "default": name in _default_groups,
+        }
+        if name in descriptions:
+            info["description"] = descriptions[name]
+        info["tools"] = sorted(tools)
+        result.append(info)
     return result
 
 
-@mcp.tool()
-def rename_variables(
-    function_address: str,
-    variable_renames: dict,
-    backend: str = "auto",
-    program: str = None,
-) -> str:
-    """
-    Rename one or more variables in a function with automatic backend selection.
+def _fetch_and_register_schema(load_all: bool = False) -> int:
+    """Fetch /mcp/schema from connected instance and register tools.
 
     Args:
-        function_address: Function address in hex format (e.g., "0x401000")
-        variable_renames: Dict of {"old_name": "new_name"} pairs
-        backend: "auto" (default, picks batch or progressive by count), "batch", or "progressive"
-        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
+        load_all: If True, register all tools. If False, only default groups.
 
-    Returns:
-        JSON with success status, variables_renamed count, variables_failed count, backend_used, and errors.
+    Returns: count of registered tools.
     """
-    validate_hex_address(function_address)
-
-    if not variable_renames:
-        return json.dumps({
-            "success": True, "variables_renamed": 0, "variables_failed": 0,
-            "backend_used": "none", "message": "No variables to rename",
-        })
-
-    num_variables = len(variable_renames)
-
-    if backend == "auto":
-        actual_backend = "batch" if num_variables <= 10 else "progressive"
-    elif backend in ["batch", "progressive"]:
-        actual_backend = backend
-    else:
-        raise GhidraValidationError(f"Invalid backend: {backend}. Must be 'auto', 'batch', or 'progressive'")
-
-    if actual_backend == "batch":
-        try:
-            payload = {"function_address": function_address, "variable_renames": variable_renames}
-            result_json = safe_post_json("batch_rename_variables", payload, program=program)
-            result = json.loads(result_json)
-            result["backend_used"] = "batch"
-            return json.dumps(result)
-        except Exception as e:
-            error_msg = str(e)
-            if ("timeout" in error_msg.lower() or "connection" in error_msg.lower()) and backend == "auto":
-                return _rename_variables_progressive_internal(function_address, variable_renames, program=program)
-            return json.dumps({
-                "success": False, "variables_renamed": 0, "variables_failed": num_variables,
-                "backend_used": "batch", "errors": [{"error": error_msg}],
-            })
-    else:
-        return _rename_variables_progressive_internal(function_address, variable_renames, program=program)
+    if not load_all:
+        load_all = not _lazy_mode
+    text, status = do_request("GET", "/mcp/schema", timeout=10)
+    if status != 200:
+        raise RuntimeError(f"Failed to fetch schema: HTTP {status}")
+    raw = json.loads(text)
+    schema = _parse_schema(raw)
+    groups = None if load_all else _default_groups
+    return register_tools_from_schema(schema, groups=groups)
 
 
-def _rename_variables_progressive_internal(
-    function_address: str, variable_renames: dict, chunk_size: int = 5,
-    retry_attempts: int = 3, program: str = None,
-) -> str:
-    variables_list = list(variable_renames.items())
-    total_variables = len(variables_list)
-    results = {
-        "success": True, "total_variables": total_variables,
-        "variables_renamed": 0, "variables_failed": 0,
-        "backend_used": "progressive", "chunks_processed": 0,
-        "chunks_failed": 0, "chunk_size": chunk_size,
-        "failed_variables": [], "errors": [],
-    }
-    for i in range(0, total_variables, chunk_size):
-        chunk = dict(variables_list[i : i + chunk_size])
-        chunk_success = False
-        last_error = None
-        for attempt in range(retry_attempts):
-            try:
-                payload = {"function_address": function_address, "variable_renames": chunk}
-                result_json = safe_post_json("batch_rename_variables", payload, program=program)
-                result = json.loads(result_json)
-                if result.get("success"):
-                    results["variables_renamed"] += result.get("variables_renamed", len(chunk))
-                    results["variables_failed"] += result.get("variables_failed", 0)
-                    if result.get("errors"):
-                        results["errors"].extend(result["errors"])
-                        for error in result["errors"]:
-                            results["failed_variables"].append(error.get("old_name"))
-                    chunk_success = True
-                    results["chunks_processed"] += 1
+async def _notify_tools_changed(ctx: Context | None) -> None:
+    """Send tools/list_changed notification if context is available."""
+    if ctx is not None and ctx._request_context is not None:
+        await ctx.request_context.session.send_tool_list_changed()
+
+
+# ==========================================================================
+# Static MCP tools (always available)
+# ==========================================================================
+
+
+@mcp.tool()
+def list_instances() -> str:
+    """
+    List all running Ghidra instances discovered via Unix domain sockets.
+
+    Returns JSON with each instance's project name, PID, open programs, and socket path.
+    Also shows which instance is currently connected.
+    """
+    instances = discover_instances()
+    if not instances:
+        return json.dumps({"instances": [], "note": "No running Ghidra instances found."})
+    for inst in instances:
+        inst["connected"] = inst["socket"] == _active_socket
+    return json.dumps({"instances": instances}, indent=2)
+
+
+@mcp.tool()
+async def connect_instance(project: str, ctx: Context | None = None) -> str:
+    """
+    Switch the MCP bridge to a different Ghidra instance by project name.
+
+    After connecting, fetches the tool schema from the instance and dynamically
+    registers all available tools. Use list_instances() first to see available instances.
+
+    Args:
+        project: Project name (or substring) to connect to
+    """
+    global _active_socket, _active_tcp, _transport_mode
+
+    instances = discover_instances()
+
+    # Try UDS instances first
+    if instances:
+        match = None
+        for inst in instances:
+            if inst.get("project", "") == project:
+                match = inst
+                break
+        if not match:
+            for inst in instances:
+                if project.lower() in inst.get("project", "").lower():
+                    match = inst
                     break
-                else:
-                    last_error = result.get("error", "Unknown error")
-            except Exception as e:
-                last_error = str(e)
-                if attempt < retry_attempts - 1:
-                    time.sleep(2**attempt)
-        if not chunk_success:
-            results["chunks_failed"] += 1
-            results["success"] = False
-            for old_name in chunk.keys():
-                results["failed_variables"].append(old_name)
-                results["errors"].append({
-                    "old_name": old_name,
-                    "error": f"Chunk timeout after {retry_attempts} attempts: {last_error}",
+        if match:
+            _active_socket = match["socket"]
+            _active_tcp = None
+            _transport_mode = "uds"
+
+            try:
+                count = _fetch_and_register_schema()
+                total = len(_full_schema)
+                await _notify_tools_changed(ctx)
+                return json.dumps({
+                    "connected": True,
+                    "transport": "uds",
+                    "project": match.get("project"),
+                    "socket": match["socket"],
+                    "pid": match.get("pid"),
+                    "tools_registered": count,
+                    "tools_total": total,
+                    "loaded_groups": sorted(_loaded_groups),
+                    "note": f"Loaded {count}/{total} tools (core groups). Use load_tool_group() for more.",
                 })
-            results["variables_failed"] += len(chunk)
-    return json.dumps(results)
+            except Exception as e:
+                return json.dumps({"error": f"Schema fetch failed: {e}", "socket": _active_socket})
 
-
-@mcp.tool()
-def rename_function_by_address(
-    function_address: str, new_name: str, program: str = None
-) -> str:
-    """
-    Rename a function by its address.
-
-    Args:
-        function_address: Memory address of the function in hex format (e.g., "0x1400010a0")
-        new_name: New name for the function (must be valid C identifier)
-        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
-
-    Returns:
-        Success or failure message indicating the result of the rename operation
-    """
-    function_address = sanitize_address(function_address)
-    if not validate_hex_address(function_address):
-        raise GhidraValidationError(
-            f"Invalid address format: {function_address}. "
-            f"Expected: hex (e.g., '0x401000') or segment:offset (e.g., 'mem:20de')."
-        )
-    if not new_name or not new_name.strip():
-        raise GhidraValidationError("Function name cannot be empty.")
-    new_name = new_name.strip()
-    if not new_name[0].isalpha() and new_name[0] != "_":
-        raise GhidraValidationError(f"Invalid function name '{new_name}'. Names must start with a letter or underscore.")
-    if not all(c.isalnum() or c == "_" for c in new_name):
-        raise GhidraValidationError(f"Invalid function name '{new_name}'. Names can only contain letters, numbers, and underscores.")
-
-    # Verify function exists at this address
-    func_check = safe_get("get_function_by_address", {"address": function_address}, program=program)
-    if not func_check or any(
-        "Error" in str(line) or "not found" in str(line).lower() for line in func_check
-    ):
-        raise GhidraValidationError(
-            f"No function found at address {function_address}. "
-            f"Use get_function_by_address() to verify the address, or "
-            f"list_functions() to see all available functions."
-        )
-
-    result = safe_post(
-        "rename_function_by_address",
-        {"function_address": function_address, "new_name": new_name},
-        program=program,
-    )
-    if "success" in result.lower() or "renamed" in result.lower():
-        return f"Successfully renamed function at {function_address} to '{new_name}'"
-    elif "error" in result.lower() or "failed" in result.lower():
-        return f"{result}\nVerify function exists: get_function_by_address('{function_address}')"
-    return result
-
-
-@mcp.tool()
-def set_function_prototype(
-    function_address: str,
-    prototype: str,
-    calling_convention: str = None,
-    timeout: int = None,
-    program: str = None,
-) -> str:
-    """
-    Set a function's prototype and optionally its calling convention.
-
-    Args:
-        function_address: Function address in hex format (e.g., "0x1400010a0")
-        prototype: C function declaration (e.g., "int main(int argc, char* argv[])")
-        calling_convention: Optional convention (e.g., "__cdecl", "__stdcall", "__fastcall")
-        timeout: Optional timeout in seconds (default: 45s)
-        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
-
-    Returns:
-        Success or failure message. Use force decompile afterward to see updated output.
-    """
-    function_address = sanitize_address(function_address)
-    if not validate_hex_address(function_address):
-        raise GhidraValidationError(f"Invalid address format: {function_address}.")
-    if not prototype or not prototype.strip():
-        raise GhidraValidationError("Function prototype cannot be empty.")
-
-    # Verify function exists
-    func_check = safe_get("get_function_by_address", {"address": function_address}, program=program)
-    if not func_check or any(
-        "Error" in str(line) or "not found" in str(line).lower() for line in func_check
-    ):
-        raise GhidraValidationError(f"No function found at address {function_address}.")
-
-    original_timeout = None
-    if timeout:
-        original_timeout = ENDPOINT_TIMEOUTS.get("set_function_prototype", 45)
-        ENDPOINT_TIMEOUTS["set_function_prototype"] = timeout
-
+    # Try TCP fallback
+    tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
     try:
-        data = {"function_address": function_address, "prototype": prototype.strip()}
-        if calling_convention:
-            data["calling_convention"] = calling_convention.strip()
-        result = safe_post_json("set_function_prototype", data, program=program)
-
-        if "success" in result.lower():
-            msg = result.rstrip()
-            msg += f"\nUse: get_decompiled_code('{function_address}', refresh_cache=True) to see changes"
-            return msg
-        elif "invalid calling convention" in result.lower():
-            return f"{result}\nUse list_calling_conventions() to see available conventions."
-        elif "server error 500" in result.lower():
-            return (
-                f"{result}\nCommon causes:\n"
-                f"  1. Using 'uint' instead of 'dword' (use Ghidra types)\n"
-                f"  2. Specifying calling convention twice\n"
-                f"  3. Invalid type names (check with validate_data_type_exists())"
-            )
-        elif "error" in result.lower() or "failed" in result.lower():
-            return f"{result}\nVerify prototype syntax is valid C."
-        return result
-    finally:
-        if timeout and original_timeout is not None:
-            ENDPOINT_TIMEOUTS["set_function_prototype"] = original_timeout
-
-
-@mcp.tool()
-def get_current_selection() -> dict:
-    """
-    Get the current selection context - both address and function information.
-
-    Returns:
-        Dictionary containing address and function info from Ghidra's CodeBrowser.
-    """
-    result = {
-        "address": "\n".join(safe_get_uncached("get_current_address")),
-        "function": "\n".join(safe_get_uncached("get_current_function")),
-    }
-    return result
-
-
-@mcp.tool()
-def get_function_metrics(
-    function_name: str = None, address: str = None, program: str = None
-) -> str:
-    """
-    Get complexity metrics for a function.
-
-    Args:
-        function_name: Name of function to analyze
-        address: Or address of function (alternative to name)
-        program: Optional program name (e.g., "D2Client.dll"). Defaults to active program.
-
-    Returns:
-        JSON with metrics: instruction_count, basic_block_count, cyclomatic_complexity, call_count, etc.
-    """
-    if not function_name and not address:
-        raise GhidraValidationError("Either function_name or address is required")
-    url = f"{ghidra_server_url}/find_similar_functions"
-    params = {"limit": 1}
-    if function_name:
-        params["target_function"] = function_name
-    elif address:
-        params["target_function"] = address
-    if program:
-        params["program"] = program
-    return make_request(url, method="GET", params=params)
-
-
-# ========== SCRIPT LIFECYCLE MANAGEMENT ==========
-
-@mcp.tool()
-def save_ghidra_script(
-    script_name: str, script_content: str, overwrite: bool = False, backup: bool = True
-) -> str:
-    """
-    Save a Ghidra script to disk in the ghidra_scripts/ directory.
-
-    Args:
-        script_name: Name for script without .java extension (alphanumeric + underscore only)
-        script_content: Full Java script content to save
-        overwrite: Whether to overwrite if exists (default: False)
-        backup: Create backup if overwriting (default: True)
-
-    Returns:
-        JSON with save status, script_path, file_size.
-    """
-    if not script_name or not isinstance(script_name, str):
-        raise GhidraValidationError("script_name is required and must be a string")
-    if not script_content or not isinstance(script_content, str):
-        raise GhidraValidationError("script_content is required and must be a string")
-    if not all(c.isalnum() or c == "_" for c in script_name):
-        raise GhidraValidationError("script_name must be alphanumeric or underscore only")
-
-    script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
-    script_file = f"{script_name}.java"
-    script_path = os.path.join(script_dir, script_file)
-
-    try:
-        os.makedirs(script_dir, exist_ok=True)
-    except Exception as e:
-        raise GhidraValidationError(f"Could not create ghidra_scripts directory: {e}")
-
-    if os.path.exists(script_path) and not overwrite:
-        raise GhidraValidationError(f"Script {script_name} already exists. Use overwrite=True to replace.")
-
-    backup_path = None
-    if os.path.exists(script_path) and backup:
-        backup_path = f"{script_path}.backup"
-        try:
-            import shutil
-            shutil.copy2(script_path, backup_path)
-        except Exception as e:
-            logger.warning(f"Could not create backup: {e}")
-            backup_path = None
-
-    try:
-        with open(script_path, "w", encoding="utf-8") as f:
-            f.write(script_content)
-        file_size = os.path.getsize(script_path)
-    except Exception as e:
-        raise GhidraValidationError(f"Could not write script file: {e}")
-
-    response = {
-        "success": True, "script_name": script_name, "script_path": script_path,
-        "file_size": file_size, "message": "Script saved successfully",
-    }
-    if backup_path:
-        response["backup_path"] = backup_path
-    return json.dumps(response)
-
-
-@mcp.tool()
-def list_ghidra_scripts(
-    filter_pattern: str = None, include_metadata: bool = True
-) -> str:
-    """
-    List all Ghidra scripts in the ghidra_scripts/ directory.
-
-    Args:
-        filter_pattern: Optional regex pattern to filter scripts
-        include_metadata: Include file size, modified date, LOC (default: True)
-
-    Returns:
-        JSON with total_scripts and scripts array.
-    """
-    from datetime import datetime
-
-    script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
-    scripts = []
-
-    if not os.path.exists(script_dir):
-        os.makedirs(script_dir, exist_ok=True)
-
-    try:
-        for filename in sorted(os.listdir(script_dir)):
-            if not filename.endswith(".java"):
-                continue
-            filepath = os.path.join(script_dir, filename)
-            script_name = filename[:-5]
-            if filter_pattern:
-                if not re.search(filter_pattern, script_name):
-                    continue
-            script_info = {"name": script_name, "filename": filename, "path": filepath}
-            if include_metadata:
-                try:
-                    stat_info = os.stat(filepath)
-                    script_info["size"] = stat_info.st_size
-                    modified = datetime.fromtimestamp(stat_info.st_mtime)
-                    script_info["modified"] = modified.isoformat() + "Z"
-                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                        script_info["lines_of_code"] = len(f.readlines())
-                except Exception as e:
-                    logger.warning(f"Could not get metadata for {filename}: {e}")
-            scripts.append(script_info)
-    except Exception as e:
-        raise GhidraValidationError(f"Could not list scripts: {e}")
-
-    return json.dumps({"total_scripts": len(scripts), "scripts": scripts})
-
-
-@mcp.tool()
-def get_ghidra_script(script_name: str) -> str:
-    """
-    Get full content of a Ghidra script.
-
-    Args:
-        script_name: Name of script to retrieve (without .java extension)
-
-    Returns:
-        Full script content as string
-    """
-    if not script_name or not isinstance(script_name, str):
-        raise GhidraValidationError("script_name is required")
-    script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
-    script_path = os.path.join(script_dir, f"{script_name}.java")
-    if not os.path.exists(script_path):
-        raise GhidraValidationError(f"Script not found: {script_name}")
-    try:
-        with open(script_path, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception as e:
-        raise GhidraValidationError(f"Could not read script: {e}")
-
-
-@mcp.tool()
-def update_ghidra_script(
-    script_name: str, new_content: str, keep_backup: bool = True
-) -> str:
-    """
-    Update an existing Ghidra script with new content.
-
-    Args:
-        script_name: Script to update
-        new_content: New script content
-        keep_backup: Save previous version as backup (default: True)
-
-    Returns:
-        JSON with update status, lines_changed, size_delta.
-    """
-    if not script_name or not isinstance(script_name, str):
-        raise GhidraValidationError("script_name is required")
-    if not new_content or not isinstance(new_content, str):
-        raise GhidraValidationError("new_content is required")
-
-    script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
-    script_path = os.path.join(script_dir, f"{script_name}.java")
-    if not os.path.exists(script_path):
-        raise GhidraValidationError(f"Script not found: {script_name}")
-
-    try:
-        with open(script_path, "r", encoding="utf-8") as f:
-            old_content = f.read()
-        old_size = len(old_content)
-    except Exception as e:
-        raise GhidraValidationError(f"Could not read existing script: {e}")
-
-    backup_path = None
-    if keep_backup:
-        backup_path = f"{script_path}.backup"
-        try:
-            import shutil
-            shutil.copy2(script_path, backup_path)
-        except Exception as e:
-            logger.warning(f"Could not create backup: {e}")
-
-    try:
-        with open(script_path, "w", encoding="utf-8") as f:
-            f.write(new_content)
-        new_size = len(new_content)
-    except Exception as e:
-        raise GhidraValidationError(f"Could not update script: {e}")
-
-    lines_changed = sum(1 for a, b in zip(old_content.split("\n"), new_content.split("\n")) if a != b)
-    response = {
-        "success": True, "script_name": script_name, "lines_changed": lines_changed,
-        "size_delta": new_size - old_size, "message": "Script updated successfully",
-    }
-    if backup_path:
-        response["previous_version_backup"] = backup_path
-    return json.dumps(response)
-
-
-@mcp.tool()
-def delete_ghidra_script(
-    script_name: str, confirm: bool = False, archive: bool = True
-) -> str:
-    """
-    Delete a Ghidra script safely with automatic backup.
-
-    Args:
-        script_name: Script to delete
-        confirm: Must be True to actually delete (prevents accidents)
-        archive: Create archive/backup before deletion (default: True)
-
-    Returns:
-        JSON with deletion status and archive location.
-    """
-    if not script_name or not isinstance(script_name, str):
-        raise GhidraValidationError("script_name is required")
-    if not confirm:
-        raise GhidraValidationError("confirm=True required for safety (prevents accidents)")
-
-    script_dir = os.path.join(os.path.expanduser("~"), "ghidra_scripts")
-    script_path = os.path.join(script_dir, f"{script_name}.java")
-    if not os.path.exists(script_path):
-        raise GhidraValidationError(f"Script not found: {script_name}")
-
-    archive_path = None
-    if archive:
-        try:
-            archive_dir = os.path.join(script_dir, ".archive")
-            os.makedirs(archive_dir, exist_ok=True)
-            archive_path = os.path.join(archive_dir, f"{script_name}.java")
-            import shutil
-            shutil.copy2(script_path, archive_path)
-        except Exception as e:
-            logger.warning(f"Could not archive script: {e}")
-
-    try:
-        os.remove(script_path)
-    except Exception as e:
-        raise GhidraValidationError(f"Could not delete script: {e}")
-
-    response = {
-        "success": True, "script_name": script_name, "deleted": True,
-        "message": "Script deleted successfully",
-    }
-    if archive_path:
-        response["archive_location"] = archive_path
-    return json.dumps(response)
-
-
-# ========== CROSS-BINARY FUNCTION HASH INDEX ==========
-
-from datetime import datetime
-
-FUNCTION_HASH_INDEX_FILE = "function_hash_index.json"
-
-
-@mcp.tool()
-def build_function_hash_index(
-    programs: list = None, filter: str = "documented",
-    index_file: str = None, merge: bool = True,
-) -> str:
-    """
-    Build or update a function hash index from one or more programs for cross-binary doc propagation.
-
-    Args:
-        programs: List of program paths to scan. None = current program.
-        filter: "documented" (custom names only), "undocumented" (FUN_* only), or "all"
-        index_file: Path to save index JSON (default: function_hash_index.json)
-        merge: If True, merge with existing index; if False, replace
-
-    Returns:
-        JSON with programs scanned, functions indexed, unique hashes, and duplicates found.
-    """
-    index_path = index_file or FUNCTION_HASH_INDEX_FILE
-    existing_index = {"version": "1.0", "hash_algorithm": "normalized_opcodes_sha256", "functions": {}}
-    if merge and os.path.exists(index_path):
-        try:
-            with open(index_path, "r") as f:
-                existing_index = json.load(f)
-        except Exception as e:
-            logger.warning(f"Could not load existing index: {e}")
-
-    index = existing_index
-    programs_scanned = 0
-    functions_indexed = 0
-
-    try:
-        current_info = json.loads(make_request(f"{ghidra_server_url}/get_current_program_info"))
-        current_program = current_info.get("name", "Unknown")
-    except Exception:
-        current_program = "Unknown"
-
-    programs_to_scan = programs if programs else [None]
-
-    for program_path in programs_to_scan:
-        try:
-            if program_path:
-                result = json.loads(make_request(f"{ghidra_server_url}/open_program", params={"path": program_path}))
-                if "error" in result:
-                    continue
-                program_name = result.get("name", program_path)
-            else:
-                program_name = current_program
-
-            offset = 0
-            batch_size = 500
-            while True:
-                result = json.loads(make_request(
-                    f"{ghidra_server_url}/get_bulk_function_hashes",
-                    params={"offset": offset, "limit": batch_size, "filter": filter},
-                ))
-                if "error" in result:
-                    break
-                functions = result.get("functions", [])
-                if not functions:
-                    break
-
-                for func in functions:
-                    hash_val = func["hash"]
-                    func_name = func["name"]
-                    func_addr = func["address"]
-                    has_custom = func.get("has_custom_name", False)
-
-                    completeness = 0
-                    if has_custom:
-                        try:
-                            comp_result = json.loads(make_request(
-                                f"{ghidra_server_url}/analyze_function_completeness",
-                                params={"address": func_addr},
-                            ))
-                            completeness = comp_result.get("completeness_score", 0)
-                        except Exception:
-                            pass
-
-                    instance = {
-                        "program": program_name, "address": func_addr,
-                        "name": func_name, "completeness_score": completeness,
-                        "indexed_at": datetime.now().isoformat(),
-                    }
-
-                    if hash_val not in index["functions"]:
-                        index["functions"][hash_val] = {
-                            "canonical": instance if has_custom else None,
-                            "instances": [instance],
-                        }
-                    else:
-                        entry = index["functions"][hash_val]
-                        existing = False
-                        for idx, inst in enumerate(entry["instances"]):
-                            if inst["program"] == program_name and inst["address"] == func_addr:
-                                entry["instances"][idx] = instance
-                                existing = True
-                                break
-                        if not existing:
-                            entry["instances"].append(instance)
-                        if has_custom:
-                            if entry["canonical"] is None:
-                                entry["canonical"] = instance
-                            elif completeness > entry["canonical"].get("completeness_score", 0):
-                                entry["canonical"] = instance
-
-                    functions_indexed += 1
-
-                offset += batch_size
-                if len(functions) < batch_size:
-                    break
-            programs_scanned += 1
-        except Exception as e:
-            logger.warning(f"Error processing program {program_path}: {e}")
-
-    unique_hashes = len(index["functions"])
-    duplicates = sum(1 for entry in index["functions"].values() if len(entry["instances"]) > 1)
-
-    try:
-        with open(index_path, "w") as f:
-            json.dump(index, f, indent=2)
-    except Exception as e:
+        _active_tcp = tcp_url
+        _active_socket = None
+        _transport_mode = "tcp"
+        count = _fetch_and_register_schema()
+        total = len(_full_schema)
+        await _notify_tools_changed(ctx)
         return json.dumps({
-            "error": f"Could not save index: {str(e)}",
-            "programs_scanned": programs_scanned, "functions_indexed": functions_indexed,
+            "connected": True,
+            "transport": "tcp",
+            "url": tcp_url,
+            "tools_registered": count,
+            "tools_total": total,
+            "loaded_groups": sorted(_loaded_groups),
+        })
+    except Exception as e:
+        _transport_mode = "none"
+        _active_tcp = None
+        available = [inst.get("project", "unknown") for inst in instances]
+        return json.dumps({
+            "error": f"No instance matching '{project}' (UDS: {len(instances)} found, TCP {tcp_url}: {e})",
+            "available": available,
         })
 
+
+@mcp.tool()
+def list_tool_groups() -> str:
+    """
+    List all available tool groups with their tool counts and loaded status.
+
+    Returns each category with: tool count, loaded status, and tool names.
+    Use load_tool_group(group) to load a group's tools.
+    """
+    if not _full_schema:
+        return json.dumps({"error": "No instance connected. Use connect_instance() first."})
+    groups = _get_group_info()
+    return json.dumps({"groups": groups, "total_tools": len(_full_schema)}, indent=2)
+
+
+@mcp.tool()
+async def load_tool_group(group: str, ctx: Context | None = None) -> str:
+    """
+    Load all tools in a category. Accepts a category name or "all" to load everything.
+
+    Use list_tool_groups() to see available categories.
+
+    Args:
+        group: Category name (e.g. "function", "datatype") or "all"
+    """
+    if not _full_schema:
+        return json.dumps({"error": "No instance connected. Use connect_instance() first."})
+
+    if group == "all":
+        # Load all unloaded groups
+        all_groups = {td.get("category", "unknown") for td in _full_schema}
+        total = 0
+        for g in all_groups:
+            total += _load_group(g)
+        if total > 0:
+            await _notify_tools_changed(ctx)
+        return json.dumps({
+            "loaded": "all",
+            "new_tools": total,
+            "total_loaded": len(_dynamic_tool_names),
+        })
+
+    count = _load_group(group)
+    if count == 0:
+        available = sorted({td.get("category", "unknown") for td in _full_schema})
+        if group in _loaded_groups:
+            return json.dumps({"message": f"Group '{group}' is already loaded.", "loaded_groups": sorted(_loaded_groups)})
+        return json.dumps({"error": f"No tools found for group '{group}'", "available": available})
+
+    await _notify_tools_changed(ctx)
     return json.dumps({
-        "success": True, "programs_scanned": programs_scanned,
-        "functions_indexed": functions_indexed, "unique_hashes": unique_hashes,
-        "duplicates_found": duplicates, "index_file": index_path,
+        "loaded": group,
+        "new_tools": count,
+        "total_loaded": len(_dynamic_tool_names),
+        "loaded_groups": sorted(_loaded_groups),
     })
 
 
 @mcp.tool()
-def lookup_function_by_hash(
-    address: str = None, hash: str = None, index_file: str = None, program: str = None
-) -> str:
+async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
     """
-    Look up a function in the hash index to find matches across binaries.
+    Unload all tools in a category. Default groups are protected from unloading.
 
     Args:
-        address: Function address to look up (computes hash automatically)
-        hash: Direct hash value to look up (alternative to address)
-        index_file: Path to index file (default: function_hash_index.json)
-        program: Optional program name. Defaults to active program.
-
-    Returns:
-        JSON with lookup results including canonical entry and all instances.
+        group: Category name to unload
     """
-    if not address and not hash:
-        raise GhidraValidationError("Either address or hash must be provided")
+    if group in _default_groups:
+        return json.dumps({"error": f"Cannot unload default group '{group}'", "default_groups": sorted(_default_groups)})
 
-    index_path = index_file or FUNCTION_HASH_INDEX_FILE
-    if not os.path.exists(index_path):
-        return json.dumps({"error": f"Index file not found: {index_path}"})
+    count = _unload_group(group)
+    if count == 0:
+        return json.dumps({"message": f"Group '{group}' is not loaded or has no tools."})
 
-    try:
-        with open(index_path, "r") as f:
-            index = json.load(f)
-    except Exception as e:
-        return json.dumps({"error": f"Could not load index: {str(e)}"})
-
-    if address and not hash:
-        try:
-            req_params = {"address": address}
-            if program:
-                req_params["program"] = program
-            result = json.loads(make_request(f"{ghidra_server_url}/get_function_hash", params=req_params))
-            if "error" in result:
-                return json.dumps(result)
-            hash = result["hash"]
-        except Exception as e:
-            return json.dumps({"error": f"Could not compute hash: {str(e)}"})
-
-    if hash not in index.get("functions", {}):
-        return json.dumps({"found": False, "hash": hash, "message": "No matching functions found in index"})
-
-    entry = index["functions"][hash]
+    await _notify_tools_changed(ctx)
     return json.dumps({
-        "found": True, "hash": hash, "canonical": entry.get("canonical"),
-        "instances": entry.get("instances", []), "total_instances": len(entry.get("instances", [])),
+        "unloaded": group,
+        "removed_tools": count,
+        "total_loaded": len(_dynamic_tool_names),
+        "loaded_groups": sorted(_loaded_groups),
     })
 
 
-@mcp.tool()
-def propagate_documentation(
-    source_address: str = None, source_hash: str = None,
-    target_programs: list = None, dry_run: bool = False, index_file: str = None,
-) -> str:
-    """
-    Propagate documentation from a source function to all matching functions across binaries.
+# ==========================================================================
+# Auto-connect on startup
+# ==========================================================================
 
-    Args:
-        source_address: Address of source function
-        source_hash: Hash to look up canonical source in index (alternative)
-        target_programs: List of program names to propagate to (None = all in index)
-        dry_run: If True, only report what would be changed
-        index_file: Path to index file (default: function_hash_index.json)
 
-    Returns:
-        JSON with targets updated/skipped counts and per-target details.
-    """
-    if not source_address and not source_hash:
-        raise GhidraValidationError("Either source_address or source_hash must be provided")
+def _auto_connect():
+    """Try to auto-connect to a single running instance on startup."""
+    global _active_socket, _active_tcp, _transport_mode
 
-    index_path = index_file or FUNCTION_HASH_INDEX_FILE
-
-    if source_address:
+    # Try UDS first
+    instances = discover_instances()
+    if len(instances) == 1:
+        _active_socket = instances[0]["socket"]
+        _transport_mode = "uds"
+        logger.info(f"Auto-connecting via UDS to {instances[0].get('project', 'unknown')}")
         try:
-            docs = json.loads(make_request(
-                f"{ghidra_server_url}/get_function_documentation",
-                params={"address": source_address},
-            ))
-            if "error" in docs:
-                return json.dumps(docs)
-            source_hash = docs["hash"]
-            source_info = {"program": docs["source_program"], "address": docs["source_address"], "name": docs["function_name"]}
+            count = _fetch_and_register_schema()
+            logger.info(f"Auto-registered {count} tools from {instances[0].get('project', 'unknown')}")
+            return
         except Exception as e:
-            return json.dumps({"error": f"Could not get source documentation: {str(e)}"})
-    else:
-        lookup_result = json.loads(lookup_function_by_hash(hash=source_hash, index_file=index_path))
-        if not lookup_result.get("found") or not lookup_result.get("canonical"):
-            return json.dumps({"error": "Source hash not found or has no canonical documentation"})
-        canonical = lookup_result["canonical"]
-        try:
-            make_request(f"{ghidra_server_url}/switch_program", params={"name": canonical["program"]})
-            docs = json.loads(make_request(
-                f"{ghidra_server_url}/get_function_documentation",
-                params={"address": canonical["address"]},
-            ))
-            if "error" in docs:
-                return json.dumps(docs)
-            source_info = {"program": canonical["program"], "address": canonical["address"], "name": canonical["name"]}
-        except Exception as e:
-            return json.dumps({"error": f"Could not get canonical documentation: {str(e)}"})
+            logger.warning(f"UDS auto-connect schema fetch failed: {e}")
+            _active_socket = None
+            _transport_mode = "none"
+    elif len(instances) > 1:
+        logger.info(f"Multiple UDS instances found ({len(instances)}). Use connect_instance() to choose.")
 
+    # Try TCP fallback
+    tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
     try:
-        with open(index_path, "r") as f:
-            index = json.load(f)
-    except Exception as e:
-        return json.dumps({"error": f"Could not load index: {str(e)}"})
-
-    if source_hash not in index.get("functions", {}):
-        return json.dumps({"error": f"Hash {source_hash} not found in index"})
-
-    instances = index["functions"][source_hash].get("instances", [])
-    results = {"success": True, "source": source_info, "targets_updated": 0, "targets_skipped": 0, "dry_run": dry_run, "details": []}
-
-    for instance in instances:
-        target_program = instance["program"]
-        target_address = instance["address"]
-
-        if target_program == source_info["program"] and target_address == source_info["address"]:
-            results["details"].append({"program": target_program, "address": target_address, "status": "skipped", "reason": "source function"})
-            results["targets_skipped"] += 1
-            continue
-
-        if target_programs and target_program not in target_programs:
-            results["details"].append({"program": target_program, "address": target_address, "status": "skipped", "reason": "not in target_programs filter"})
-            results["targets_skipped"] += 1
-            continue
-
-        if dry_run:
-            results["details"].append({"program": target_program, "address": target_address, "status": "would_update", "current_name": instance.get("name", "unknown")})
-            results["targets_updated"] += 1
-        else:
-            try:
-                switch_result = json.loads(make_request(f"{ghidra_server_url}/switch_program", params={"name": target_program}))
-                if "error" in switch_result:
-                    results["details"].append({"program": target_program, "address": target_address, "status": "error", "reason": switch_result["error"]})
-                    results["targets_skipped"] += 1
-                    continue
-
-                apply_result = json.loads(make_request(
-                    f"{ghidra_server_url}/apply_function_documentation",
-                    method="POST",
-                    data=json.dumps({
-                        "target_address": target_address,
-                        "function_name": docs.get("function_name"),
-                        "return_type": docs.get("return_type"),
-                        "calling_convention": docs.get("calling_convention"),
-                        "plate_comment": docs.get("plate_comment"),
-                        "parameters": docs.get("parameters"),
-                        "comments": docs.get("comments"),
-                        "labels": docs.get("labels"),
-                    }),
-                ))
-
-                if "error" in apply_result:
-                    results["details"].append({"program": target_program, "address": target_address, "status": "error", "reason": apply_result["error"]})
-                    results["targets_skipped"] += 1
-                else:
-                    results["details"].append({"program": target_program, "address": target_address, "status": "updated", "changes": apply_result.get("changes_applied", 0)})
-                    results["targets_updated"] += 1
-            except Exception as e:
-                results["details"].append({"program": target_program, "address": target_address, "status": "error", "reason": str(e)})
-                results["targets_skipped"] += 1
-
-    return json.dumps(results)
+        _active_tcp = tcp_url
+        _transport_mode = "tcp"
+        count = _fetch_and_register_schema()
+        logger.info(f"Auto-connected via TCP to {tcp_url}, registered {count} tools")
+    except Exception:
+        _active_tcp = None
+        _transport_mode = "none"
+        if not instances:
+            logger.info("No Ghidra instances found. Tools will be registered on connect_instance().")
 
 
-# ========== KNOWLEDGE DB TOOLS ==========
-
-
-@mcp.tool()
-def store_function_knowledge(
-    address: str, binary_name: str, version: str, new_name: str,
-    old_name: str = None, score: int = None, status: str = "complete",
-    classification: str = None, iteration: int = None, strategy: str = None,
-    plate_comment: str = None, prototype: str = None, deductions: str = None,
-    game_system: str = None,
-) -> str:
-    """
-    Store a documented function in the knowledge database.
-
-    Args:
-        address: Function address (e.g., "0x6fd81234")
-        binary_name: Binary name (e.g., "D2Common.dll")
-        version: Binary version (e.g., "1.00", "1.13d")
-        new_name: New function name
-        old_name: Original function name
-        score: Completeness score 0-100
-        status: Documentation status (complete, documented, needs_work, failed)
-        classification: Function classification (thunk, leaf, worker, api)
-        iteration: RE loop iteration number
-        strategy: Selection strategy used
-        plate_comment: Function plate comment / documentation
-        prototype: Function prototype / signature
-        deductions: JSON array of score deductions (as string)
-        game_system: Game system classification (e.g., "inventory", "combat")
-
-    Returns:
-        JSON with success status
-    """
-    if not knowledge_db.available:
-        return json.dumps({"available": False, "error": "Knowledge DB not available"})
-
-    deductions_json = deductions if deductions else "[]"
-    try:
-        json.loads(deductions_json)
-    except (json.JSONDecodeError, TypeError):
-        deductions_json = "[]"
-
-    success = knowledge_db.execute_write(
-        """INSERT INTO documented_functions
-           (address, binary_name, version, old_name, new_name, score, status,
-            classification, iteration, strategy, plate_comment, prototype,
-            deductions, game_system)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
-           ON CONFLICT (address, binary_name, version)
-           DO UPDATE SET
-               new_name = EXCLUDED.new_name,
-               score = EXCLUDED.score,
-               status = EXCLUDED.status,
-               classification = EXCLUDED.classification,
-               iteration = EXCLUDED.iteration,
-               strategy = EXCLUDED.strategy,
-               plate_comment = EXCLUDED.plate_comment,
-               prototype = EXCLUDED.prototype,
-               deductions = EXCLUDED.deductions,
-               game_system = COALESCE(EXCLUDED.game_system, documented_functions.game_system)
-        """,
-        (address, binary_name, version, old_name, new_name, score, status,
-         classification, iteration, strategy, plate_comment, prototype, deductions_json, game_system),
-    )
-
-    if success:
-        return json.dumps({"success": True, "stored": new_name})
-    return json.dumps({"success": False, "error": "Write failed (logged)"})
-
-
-@mcp.tool()
-def query_knowledge_context(
-    description: str = None, binary_name: str = None, version: str = None,
-    game_system: str = None, limit: int = 10,
-) -> str:
-    """
-    Query the knowledge database for context about functions.
-
-    Args:
-        description: Search text (function name, keyword, or description fragment)
-        binary_name: Filter by binary name (e.g., "D2Common.dll")
-        version: Filter by version (e.g., "1.00")
-        game_system: Filter by game system (e.g., "inventory", "combat")
-        limit: Maximum results to return (default 10)
-
-    Returns:
-        JSON with matching documented functions and their knowledge
-    """
-    if not knowledge_db.available:
-        return json.dumps({"available": False, "error": "Knowledge DB not available"})
-
-    conditions = []
-    params = []
-
-    if description:
-        conditions.append(
-            "(search_vector @@ plainto_tsquery('english', %s) OR "
-            "new_name ILIKE %s OR plate_comment ILIKE %s)"
-        )
-        like_pattern = f"%{description}%"
-        params.extend([description, like_pattern, like_pattern])
-
-    if binary_name:
-        conditions.append("binary_name = %s")
-        params.append(binary_name)
-    if version:
-        conditions.append("version = %s")
-        params.append(version)
-    if game_system:
-        conditions.append("game_system = %s")
-        params.append(game_system)
-
-    where_clause = " AND ".join(conditions) if conditions else "TRUE"
-    params.append(min(limit, 50))
-
-    query = f"""
-        SELECT address, binary_name, version, old_name, new_name, score,
-               status, classification, plate_comment, prototype, game_system
-        FROM documented_functions
-        WHERE {where_clause}
-        ORDER BY score DESC NULLS LAST, updated_at DESC
-        LIMIT %s
-    """
-
-    rows = knowledge_db.execute_read(query, params)
-    if rows is None:
-        return json.dumps({"available": False, "error": "Query failed"})
-    return json.dumps({"success": True, "count": len(rows), "functions": rows}, default=str)
-
-
-@mcp.tool()
-def store_ordinal_mapping(
-    ordinal: int, binary_name: str, version: str, function_name: str,
-    calling_convention: str = None, parameter_count: int = None,
-    source: str = "re_loop", confidence: float = 1.0, notes: str = None,
-) -> str:
-    """
-    Store an ordinal-to-function-name mapping in the knowledge database.
-
-    Args:
-        ordinal: Ordinal number (e.g., 10375)
-        binary_name: Binary name (e.g., "D2Common.dll")
-        version: Binary version (e.g., "1.00")
-        function_name: Resolved function name (e.g., "GetUnitPosition")
-        calling_convention: Calling convention (e.g., "__stdcall")
-        parameter_count: Number of parameters
-        source: Origin of mapping ("re_loop", "community", "ida_export")
-        confidence: Confidence 0.0-1.0 (default 1.0)
-        notes: Additional notes
-
-    Returns:
-        JSON with success status
-    """
-    if not knowledge_db.available:
-        return json.dumps({"available": False, "error": "Knowledge DB not available"})
-
-    success = knowledge_db.execute_write(
-        """INSERT INTO ordinal_mappings
-           (ordinal, binary_name, version, function_name, calling_convention,
-            parameter_count, source, confidence, notes)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-           ON CONFLICT (ordinal, binary_name, version)
-           DO UPDATE SET
-               function_name = EXCLUDED.function_name,
-               calling_convention = COALESCE(EXCLUDED.calling_convention, ordinal_mappings.calling_convention),
-               parameter_count = COALESCE(EXCLUDED.parameter_count, ordinal_mappings.parameter_count),
-               confidence = GREATEST(EXCLUDED.confidence, ordinal_mappings.confidence),
-               notes = COALESCE(EXCLUDED.notes, ordinal_mappings.notes)
-        """,
-        (ordinal, binary_name, version, function_name, calling_convention,
-         parameter_count, source, confidence, notes),
-    )
-
-    if success:
-        return json.dumps({"success": True, "stored": f"Ordinal_{ordinal} -> {function_name}"})
-    return json.dumps({"success": False, "error": "Write failed (logged)"})
-
-
-@mcp.tool()
-def get_ordinal_mapping(
-    ordinal: int = None, binary_name: str = None, version: str = None,
-    function_name: str = None,
-) -> str:
-    """
-    Look up ordinal-to-function-name mappings from the knowledge database.
-
-    Args:
-        ordinal: Ordinal number to look up (e.g., 10375)
-        binary_name: Filter by binary (e.g., "D2Common.dll")
-        version: Filter by version (e.g., "1.00"). Omit to search all versions.
-        function_name: Search by function name (partial match)
-
-    Returns:
-        JSON with matching ordinal mappings across all known versions
-    """
-    if not knowledge_db.available:
-        return json.dumps({"available": False, "error": "Knowledge DB not available"})
-
-    conditions = []
-    params = []
-    if ordinal is not None:
-        conditions.append("ordinal = %s")
-        params.append(ordinal)
-    if binary_name:
-        conditions.append("binary_name = %s")
-        params.append(binary_name)
-    if version:
-        conditions.append("version = %s")
-        params.append(version)
-    if function_name:
-        conditions.append("function_name ILIKE %s")
-        params.append(f"%{function_name}%")
-
-    if not conditions:
-        return json.dumps({"success": False, "error": "At least one filter required"})
-
-    where_clause = " AND ".join(conditions)
-    query = f"""
-        SELECT ordinal, binary_name, version, function_name,
-               calling_convention, parameter_count, source, confidence, notes
-        FROM ordinal_mappings
-        WHERE {where_clause}
-        ORDER BY binary_name, version, ordinal
-        LIMIT 100
-    """
-
-    rows = knowledge_db.execute_read(query, params)
-    if rows is None:
-        return json.dumps({"available": False, "error": "Query failed"})
-    return json.dumps({"success": True, "count": len(rows), "mappings": rows}, default=str)
-
-
-@mcp.tool()
-def export_system_knowledge(
-    game_system: str = None, binary_name: str = None,
-    version: str = None, format: str = "markdown",
-) -> str:
-    """
-    Export documented knowledge for content creation (books, articles).
-
-    Args:
-        game_system: Filter by game system (e.g., "inventory", "combat", "all")
-        binary_name: Filter by binary (e.g., "D2Common.dll")
-        version: Filter by version (e.g., "1.00")
-        format: Output format ("markdown" or "json")
-
-    Returns:
-        Formatted knowledge export
-    """
-    if not knowledge_db.available:
-        return json.dumps({"available": False, "error": "Knowledge DB not available"})
-
-    conditions = []
-    params = []
-    if game_system and game_system != "all":
-        conditions.append("df.game_system = %s")
-        params.append(game_system)
-    if binary_name:
-        conditions.append("df.binary_name = %s")
-        params.append(binary_name)
-    if version:
-        conditions.append("df.version = %s")
-        params.append(version)
-
-    where_clause = " AND ".join(conditions) if conditions else "TRUE"
-    query = f"""
-        SELECT df.address, df.binary_name, df.version, df.new_name,
-               df.score, df.classification, df.plate_comment, df.prototype,
-               df.game_system,
-               om.ordinal, om.calling_convention
-        FROM documented_functions df
-        LEFT JOIN ordinal_mappings om
-            ON df.new_name = om.function_name
-            AND df.binary_name = om.binary_name
-            AND df.version = om.version
-        WHERE {where_clause}
-        ORDER BY df.game_system NULLS LAST, df.new_name
-    """
-
-    rows = knowledge_db.execute_read(query, params)
-    if rows is None:
-        return json.dumps({"available": False, "error": "Query failed"})
-
-    if format == "json":
-        return json.dumps({"success": True, "count": len(rows), "functions": rows}, default=str)
-
-    # Markdown format grouped by game system
-    systems = {}
-    for row in rows:
-        sys_name = row.get("game_system") or "Unclassified"
-        systems.setdefault(sys_name, []).append(row)
-
-    lines = ["# Diablo 2 Function Knowledge Export", ""]
-    binary_label = binary_name or "All binaries"
-    version_label = version or "all versions"
-    lines.append(f"**Binary:** {binary_label} | **Version:** {version_label} | **Functions:** {len(rows)}")
-    lines.append("")
-
-    for sys_name, funcs in sorted(systems.items()):
-        lines.append(f"## {sys_name.replace('_', ' ').title()}")
-        lines.append("")
-        for f in sorted(funcs, key=lambda x: x.get("new_name", "")):
-            ordinal_str = f" (Ordinal {f['ordinal']})" if f.get("ordinal") else ""
-            lines.append(f"### {f['new_name']}{ordinal_str}")
-            if f.get("prototype"):
-                lines.append(f"```c\n{f['prototype']}\n```")
-            if f.get("plate_comment"):
-                lines.append(f"{f['plate_comment']}")
-            lines.append(f"*Address: {f['address']} | Score: {f.get('score', 'N/A')} | Type: {f.get('classification', 'N/A')}*")
-            lines.append("")
-
-    return "\n".join(lines)
-
-
-# ========== MAIN ==========
+# ==========================================================================
+# Main
+# ==========================================================================
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MCP server for Ghidra")
-    parser.add_argument(
-        "--ghidra-server", type=str, default=DEFAULT_GHIDRA_SERVER,
-        help=f"Ghidra server URL, default: {DEFAULT_GHIDRA_SERVER}",
-    )
-    parser.add_argument(
-        "--mcp-host", type=str, default="127.0.0.1",
-        help="Host to run MCP server on (only used for sse), default: 127.0.0.1",
-    )
-    parser.add_argument(
-        "--mcp-port", type=int,
-        help="Port to run MCP server on (only used for sse), default: 8089",
-    )
-    parser.add_argument(
-        "--transport", type=str, default="stdio", choices=["stdio", "sse"],
-        help="Transport protocol for MCP, default: stdio",
-    )
-    parser.add_argument(
-        "--profile", type=str, choices=list(TOOL_PROFILES.keys()),
-        help="Load only tools for a specific workflow (e.g., 're' for reverse engineering)",
-    )
+    global _lazy_mode, _default_groups
+
+    parser = argparse.ArgumentParser(description="GhidraMCP Bridge — MCP↔HTTP multiplexer")
+    parser.add_argument("--mcp-host", type=str, default="127.0.0.1", help="Host for SSE transport")
+    parser.add_argument("--mcp-port", type=int, help="Port for SSE transport")
+    parser.add_argument("--transport", type=str, default="stdio", choices=["stdio", "sse"],
+                        help="MCP transport")
+    parser.add_argument("--lazy", action="store_true", default=True,
+                        help="Only load default tool groups on connect (default)")
+    parser.add_argument("--no-lazy", dest="lazy", action="store_false",
+                        help="Load all tool groups on connect")
+    parser.add_argument("--default-groups", type=str, default=None,
+                        help="Comma-separated list of default tool groups to load on connect "
+                             "(default: listing,function,program)")
     args = parser.parse_args()
 
-    global ghidra_server_url
-    if args.ghidra_server:
-        ghidra_server_url = args.ghidra_server
+    _lazy_mode = args.lazy
+    if args.default_groups is not None:
+        _default_groups = {g.strip() for g in args.default_groups.split(",") if g.strip()}
 
-    # Dynamic tool registration from Ghidra's /mcp/schema
-    dynamic_count = _register_schema_tools()
-    logger.info(f"Total tools: {dynamic_count} dynamic + {len(STATIC_TOOL_NAMES)} static")
-
-    if args.profile:
-        apply_tool_profile(mcp, args.profile)
+    _auto_connect()
 
     if args.transport == "sse":
-        try:
-            log_level = logging.INFO
-            logging.basicConfig(level=log_level)
-            logging.getLogger().setLevel(log_level)
-            mcp.settings.log_level = "INFO"
-            mcp.settings.host = args.mcp_host or "127.0.0.1"
-            if args.mcp_port:
-                mcp.settings.port = args.mcp_port
-            else:
-                mcp.settings.port = 8089
-            logger.info(f"Connecting to Ghidra server at {ghidra_server_url}")
-            logger.info(f"Starting MCP server on http://{mcp.settings.host}:{mcp.settings.port}/sse")
-            mcp.run(transport="sse")
-        except KeyboardInterrupt:
-            logger.info("Server stopped by user")
+        mcp.settings.log_level = "INFO"
+        mcp.settings.host = args.mcp_host
+        if args.mcp_port:
+            mcp.settings.port = args.mcp_port
+        logger.info("Starting MCP bridge (SSE)")
+        mcp.run(transport="sse")
     else:
         mcp.run()
 

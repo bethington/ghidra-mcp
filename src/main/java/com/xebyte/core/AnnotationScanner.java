@@ -78,6 +78,12 @@ public class AnnotationScanner {
     // ==================================================================
 
     private void scanService(Object service) {
+        // Read @McpToolGroup for class-level category and description
+        McpToolGroup groupAnn = service.getClass().getAnnotation(McpToolGroup.class);
+        String groupCategory = groupAnn != null ? groupAnn.value()
+            : service.getClass().getSimpleName().toLowerCase().replaceAll("service$", "");
+        String groupDescription = groupAnn != null ? groupAnn.description() : "";
+
         for (Method method : service.getClass().getDeclaredMethods()) {
             McpTool tool = method.getAnnotation(McpTool.class);
             if (tool == null) continue;
@@ -87,7 +93,10 @@ public class AnnotationScanner {
                 ParamBinding[] bindings = buildBindings(method);
                 EndpointDef.EndpointHandler handler = createHandler(service, method, tool, bindings);
                 endpoints.add(new EndpointDef(tool.path(), tool.method(), handler));
-                descriptors.add(buildDescriptor(tool, method, bindings));
+                // Use @McpTool.category if set, otherwise fall back to @McpToolGroup or class name
+                String category = (tool.category() != null && !tool.category().isEmpty())
+                    ? tool.category() : groupCategory;
+                descriptors.add(buildDescriptor(tool, method, bindings, category, groupDescription));
                 LOG.fine("Registered annotated endpoint: " + tool.method() + " " + tool.path());
             } catch (Exception e) {
                 LOG.log(Level.WARNING, "Failed to register " + tool.path() + ": " + e.getMessage(), e);
@@ -298,7 +307,8 @@ public class AnnotationScanner {
     // Schema generation
     // ==================================================================
 
-    private ToolDescriptor buildDescriptor(McpTool tool, Method method, ParamBinding[] bindings) {
+    private ToolDescriptor buildDescriptor(McpTool tool, Method method, ParamBinding[] bindings,
+            String category, String categoryDescription) {
         List<ParamDescriptor> params = new ArrayList<>();
         for (ParamBinding binding : bindings) {
             if (binding == null) continue;
@@ -311,7 +321,8 @@ public class AnnotationScanner {
                 binding.param.description()
             ));
         }
-        return new ToolDescriptor(tool.path(), tool.method(), tool.description(), tool.category(), params);
+        return new ToolDescriptor(tool.path(), tool.method(), tool.description(),
+            category, categoryDescription, params);
     }
 
     private static String jsonType(Class<?> type, boolean fieldsJson) {
@@ -332,7 +343,7 @@ public class AnnotationScanner {
 
     /** Describes an MCP tool for schema generation. */
     public record ToolDescriptor(String path, String method, String description,
-            String category, List<ParamDescriptor> params) {
+            String category, String categoryDescription, List<ParamDescriptor> params) {
 
         /** Serialize to JSON. */
         public String toJson() {
@@ -344,6 +355,9 @@ public class AnnotationScanner {
             }
             if (category != null && !category.isEmpty()) {
                 sb.append(", \"category\": ").append(jsonStr(category));
+            }
+            if (categoryDescription != null && !categoryDescription.isEmpty()) {
+                sb.append(", \"category_description\": ").append(jsonStr(categoryDescription));
             }
             sb.append(", \"params\": [");
             for (int i = 0; i < params.size(); i++) {

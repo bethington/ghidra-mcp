@@ -1,223 +1,174 @@
 """
-Unit tests for MCP tool response formatting and common patterns.
+Unit tests for MCP bridge dynamic tool system.
 
-These tests verify JSON response formats, error handling patterns,
-and decorator behaviors without requiring a Ghidra server.
+Tests the thin multiplexer's core functionality: schema parsing,
+tool registration, transport mode management, and static tool contracts.
 """
 
-import pytest
-import sys
 import json
+import os
+import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-
-class TestResponseFormatting:
-    """Tests for consistent JSON response formatting."""
-
-    def test_format_success_response(self):
-        """Success responses should have consistent structure."""
-        from bridge_mcp_ghidra import format_success_response
-
-        response = format_success_response(operation="test_op", result={"key": "value"})
-
-        parsed = json.loads(response)
-        assert parsed["success"] is True
-        assert parsed["operation"] == "test_op"
-        assert parsed["result"]["key"] == "value"
-
-    def test_format_error_response(self):
-        """Error responses should include error details."""
-        from bridge_mcp_ghidra import format_error_response
-
-        response = format_error_response(
-            operation="test_op", error="Something went wrong", error_code="TEST_ERROR"
-        )
-
-        parsed = json.loads(response)
-        assert parsed["success"] is False
-        assert parsed["operation"] == "test_op"
-        assert parsed["error"] == "Something went wrong"
-        assert parsed["error_code"] == "TEST_ERROR"
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
-class TestFunctionHashCalculation:
-    """Tests for function hash calculation (deterministic)."""
+class TestTransportModes(unittest.TestCase):
+    """Test transport mode state management."""
 
-    def test_hash_is_deterministic(self):
-        """Same input should produce same hash."""
-        from bridge_mcp_ghidra import calculate_function_hash
+    def test_initial_state(self):
+        """Transport mode should be set after module init (may auto-connect)."""
+        import bridge_mcp_ghidra as bridge
+        self.assertIn(bridge._transport_mode, ("none", "uds", "tcp"))
 
-        # These are example bytes - actual implementation may differ
-        test_bytes = b"\x55\x8b\xec\x83\xec\x10"
-
-        hash1 = calculate_function_hash(test_bytes)
-        hash2 = calculate_function_hash(test_bytes)
-
-        assert hash1 == hash2
-
-    def test_different_bytes_different_hash(self):
-        """Different input should produce different hash."""
-        from bridge_mcp_ghidra import calculate_function_hash
-
-        bytes1 = b"\x55\x8b\xec\x83\xec\x10"
-        bytes2 = b"\x55\x8b\xec\x83\xec\x20"
-
-        hash1 = calculate_function_hash(bytes1)
-        hash2 = calculate_function_hash(bytes2)
-
-        assert hash1 != hash2
+    def test_do_request_raises_when_disconnected(self):
+        """do_request should raise ConnectionError when no transport active."""
+        import bridge_mcp_ghidra as bridge
+        old_mode = bridge._transport_mode
+        bridge._transport_mode = "none"
+        try:
+            with self.assertRaises(ConnectionError):
+                bridge.do_request("GET", "/test")
+        finally:
+            bridge._transport_mode = old_mode
 
 
-class TestHungarianNotationValidation:
-    """Tests for Hungarian notation validation rules."""
+class TestStaticTools(unittest.TestCase):
+    """Test that static MCP tools are always registered."""
 
-    def test_valid_pointer_prefix(self):
-        """Pointer types should have 'p' prefix."""
-        from bridge_mcp_ghidra import validate_hungarian_notation
+    def test_list_instances_registered(self):
+        """list_instances should be available as a static tool."""
+        import bridge_mcp_ghidra as bridge
+        tools = bridge.mcp._tool_manager._tools
+        self.assertIn("list_instances", tools)
 
-        assert validate_hungarian_notation("pBuffer", "byte*") is True
-        assert validate_hungarian_notation("pFunction", "void*") is True
-        assert validate_hungarian_notation("ppArray", "int**") is True
+    def test_connect_instance_registered(self):
+        """connect_instance should be available as a static tool."""
+        import bridge_mcp_ghidra as bridge
+        tools = bridge.mcp._tool_manager._tools
+        self.assertIn("connect_instance", tools)
 
-    def test_valid_dword_prefix(self):
-        """DWORD/uint types should have 'dw' prefix."""
-        from bridge_mcp_ghidra import validate_hungarian_notation
-
-        assert validate_hungarian_notation("dwCount", "uint") is True
-        assert validate_hungarian_notation("dwFlags", "DWORD") is True
-
-    def test_valid_handle_prefix(self):
-        """Handle types should have 'h' prefix."""
-        from bridge_mcp_ghidra import validate_hungarian_notation
-
-        assert validate_hungarian_notation("hFile", "HANDLE") is True
-        assert validate_hungarian_notation("hModule", "HMODULE") is True
-
-    def test_valid_bool_prefix(self):
-        """Boolean types should have 'b' or 'is' prefix."""
-        from bridge_mcp_ghidra import validate_hungarian_notation
-
-        assert validate_hungarian_notation("bEnabled", "bool") is True
-        assert validate_hungarian_notation("isValid", "BOOL") is True
-
-    def test_invalid_notation_detected(self):
-        """Incorrect prefixes should be detected."""
-        from bridge_mcp_ghidra import validate_hungarian_notation
-
-        assert validate_hungarian_notation("nBuffer", "byte*") is False  # Should be p
-        assert validate_hungarian_notation("count", "uint") is False  # Missing dw
+    def test_list_instances_returns_json(self):
+        """list_instances should return valid JSON."""
+        from bridge_mcp_ghidra import list_instances
+        result = list_instances()
+        data = json.loads(result)
+        self.assertIn("instances", data)
+        self.assertIsInstance(data["instances"], list)
 
 
-class TestAddressNormalization:
-    """Tests for address normalization across different formats."""
+class TestToolGroupManagement(unittest.TestCase):
+    """Test tool group management tools."""
 
-    def test_normalize_various_formats(self):
-        """Should normalize different address formats to standard form."""
-        from bridge_mcp_ghidra import normalize_address
+    def test_list_tool_groups_registered(self):
+        import bridge_mcp_ghidra as bridge
+        tools = bridge.mcp._tool_manager._tools
+        self.assertIn("list_tool_groups", tools)
 
-        # All these should normalize to the same address
-        assert normalize_address("0x00401000") == "0x401000"
-        assert normalize_address("0X00401000") == "0x401000"
-        assert normalize_address("00401000") == "0x401000"
-        assert normalize_address("401000") == "0x401000"
+    def test_load_tool_group_registered(self):
+        import bridge_mcp_ghidra as bridge
+        tools = bridge.mcp._tool_manager._tools
+        self.assertIn("load_tool_group", tools)
 
-    def test_preserve_significant_zeros(self):
-        """Should preserve significant zeros."""
-        from bridge_mcp_ghidra import normalize_address
+    def test_unload_tool_group_registered(self):
+        import bridge_mcp_ghidra as bridge
+        tools = bridge.mcp._tool_manager._tools
+        self.assertIn("unload_tool_group", tools)
 
-        assert normalize_address("0x10") == "0x10"
-        assert normalize_address("0x0") == "0x0"
+    def test_list_tool_groups_returns_json(self):
+        from bridge_mcp_ghidra import list_tool_groups
+        result = json.loads(list_tool_groups())
+        # Either an error (no schema) or a groups list
+        self.assertTrue("error" in result or "groups" in result)
 
+    def test_core_groups_defined(self):
+        from bridge_mcp_ghidra import CORE_GROUPS
+        self.assertIn("listing", CORE_GROUPS)
+        self.assertIn("function", CORE_GROUPS)
 
-class TestBatchOperationValidation:
-    """Tests for batch operation parameter validation."""
+    def test_unload_core_group_blocked(self):
+        import asyncio
+        from bridge_mcp_ghidra import unload_tool_group
+        result = json.loads(asyncio.run(unload_tool_group("function")))
+        self.assertIn("error", result)
+        self.assertIn("default", result["error"].lower())
 
-    def test_validate_batch_renames(self):
-        """Batch rename parameters should be validated."""
-        from bridge_mcp_ghidra import validate_batch_renames
-
-        # Valid batch
-        valid = {"old_name1": "new_name1", "old_name2": "new_name2"}
-        assert validate_batch_renames(valid) is True
-
-        # Empty batch
-        assert validate_batch_renames({}) is False
-
-        # Invalid types
-        assert validate_batch_renames({"name": 123}) is False  # Value must be string
-
-    def test_validate_batch_comments(self):
-        """Batch comment parameters should be validated."""
-        from bridge_mcp_ghidra import validate_batch_comments
-
-        # Valid batch with address:comment pairs
-        valid = [
-            {"address": "0x401000", "comment": "Entry point"},
-            {"address": "0x401010", "comment": "Loop start"},
+    def test_load_group_with_schema(self):
+        """Loading a group after register_tools_from_schema should work."""
+        from bridge_mcp_ghidra import register_tools_from_schema, _load_group, _loaded_groups
+        schema = [
+            {"name": "grp_test_a", "description": "", "endpoint": "/a",
+             "http_method": "GET", "category": "grp_alpha",
+             "input_schema": {"type": "object", "properties": {}}},
+            {"name": "grp_test_b", "description": "", "endpoint": "/b",
+             "http_method": "GET", "category": "grp_beta",
+             "input_schema": {"type": "object", "properties": {}}},
         ]
-        assert validate_batch_comments(valid) is True
+        register_tools_from_schema(schema, groups={"grp_alpha"})
+        self.assertIn("grp_alpha", _loaded_groups)
+        self.assertNotIn("grp_beta", _loaded_groups)
 
-        # Invalid: missing required fields
-        invalid = [{"address": "0x401000"}]  # Missing comment
-        assert validate_batch_comments(invalid) is False
-
-
-class TestCacheBehavior:
-    """Tests for cache behavior and invalidation."""
-
-    def test_cache_key_generation(self):
-        """Cache key generation should be consistent."""
-        from bridge_mcp_ghidra import cache_key
-
-        # Same args produce same key
-        key1 = cache_key("endpoint", param="value")
-        key2 = cache_key("endpoint", param="value")
-        assert key1 == key2
-
-        # Different args produce different keys
-        key3 = cache_key("endpoint", param="other")
-        assert key1 != key3
+        count = _load_group("grp_beta")
+        self.assertEqual(count, 1)
+        self.assertIn("grp_beta", _loaded_groups)
 
 
-class TestRetryLogic:
-    """Tests for HTTP retry logic."""
+class TestEndpointTimeouts(unittest.TestCase):
+    """Test endpoint timeout configuration."""
 
-    def test_retry_logic_exists(self):
-        """Verify retry logic function exists and has correct signature."""
-        from bridge_mcp_ghidra import safe_get_uncached
+    def test_all_timeouts_positive(self):
+        from bridge_mcp_ghidra import ENDPOINT_TIMEOUTS
+        for name, timeout in ENDPOINT_TIMEOUTS.items():
+            self.assertGreater(timeout, 0, f"Timeout for {name} should be positive")
+
+    def test_script_timeouts_high(self):
+        from bridge_mcp_ghidra import ENDPOINT_TIMEOUTS
+        self.assertGreaterEqual(ENDPOINT_TIMEOUTS.get("run_ghidra_script", 0), 600)
+        self.assertGreaterEqual(ENDPOINT_TIMEOUTS.get("run_script_inline", 0), 600)
+
+    def test_default_exists(self):
+        from bridge_mcp_ghidra import ENDPOINT_TIMEOUTS
+        self.assertIn("default", ENDPOINT_TIMEOUTS)
+
+
+class TestSchemaFormat(unittest.TestCase):
+    """Test that tool schema format matches expectations."""
+
+    def test_register_with_all_json_types(self):
+        """Schema with all JSON types should produce correct Python signatures."""
+        from bridge_mcp_ghidra import _build_tool_function
         import inspect
 
-        sig = inspect.signature(safe_get_uncached)
-        params = list(sig.parameters.keys())
+        schema = {
+            "properties": {
+                "str_param": {"type": "string"},
+                "int_param": {"type": "integer"},
+                "bool_param": {"type": "boolean"},
+                "num_param": {"type": "number"},
+            },
+            "required": ["str_param"],
+        }
+        fn = _build_tool_function("/test", "POST", schema)
+        sig = inspect.signature(fn)
+        self.assertEqual(len(sig.parameters), 4)
 
-        assert "endpoint" in params
-        assert "retries" in params
+    def test_schema_with_descriptions(self):
+        """Schema properties with descriptions should not affect function building."""
+        from bridge_mcp_ghidra import _build_tool_function
 
-
-class TestProgramPathValidation:
-    """Tests for program path validation."""
-
-    def test_valid_program_paths(self):
-        """Valid Ghidra program paths should pass."""
-        from bridge_mcp_ghidra import validate_program_path
-
-        assert validate_program_path("/D2Client.dll") is True
-        assert validate_program_path("/LoD/1.07/D2Client.dll") is True
-        assert validate_program_path("/my_program.exe") is True
-
-    def test_invalid_program_paths(self):
-        """Invalid paths should fail."""
-        from bridge_mcp_ghidra import validate_program_path
-
-        assert validate_program_path("") is False
-        assert validate_program_path(None) is False
-        # Path traversal attempts
-        assert validate_program_path("../../../etc/passwd") is False
+        schema = {
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": "The function address or name",
+                },
+            },
+            "required": ["address"],
+        }
+        fn = _build_tool_function("/decompile_function", "GET", schema)
+        self.assertTrue(callable(fn))
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    unittest.main()
