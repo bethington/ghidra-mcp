@@ -29,9 +29,14 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific address (xref to)
      */
-    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to an address", category = "xref")
+    @McpTool(path = "/get_xrefs_to", description = "Get cross-references to an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref")
     public Response getXrefsTo(
-            @Param(value = "address", description = "Target address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -41,7 +46,8 @@ public class XrefCallGraphService {
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
+            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
             ReferenceManager refManager = program.getReferenceManager();
 
             ReferenceIterator refIter = refManager.getReferencesTo(addr);
@@ -72,9 +78,14 @@ public class XrefCallGraphService {
     /**
      * Get all references from a specific address (xref from)
      */
-    @McpTool(path = "/get_xrefs_from", description = "Get cross-references from an address", category = "xref")
+    @McpTool(path = "/get_xrefs_from", description = "Get cross-references from an address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "xref")
     public Response getXrefsFrom(
-            @Param(value = "address", description = "Source address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program") String programName) {
@@ -84,7 +95,8 @@ public class XrefCallGraphService {
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
+            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
             ReferenceManager refManager = program.getReferenceManager();
 
             Reference[] references = refManager.getReferencesFrom(addr);
@@ -122,9 +134,9 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific function by name
      */
-    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function by name", category = "xref")
+    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function by name. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
     public Response getFunctionXrefs(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program") String programName) {
@@ -175,9 +187,9 @@ public class XrefCallGraphService {
         return getFunctionJumpTargets(functionName, offset, limit, null);
     }
 
-    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function", category = "xref")
+    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
     public Response getFunctionJumpTargets(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program") String programName) {
@@ -276,9 +288,9 @@ public class XrefCallGraphService {
     /**
      * Get all functions called by the specified function (callees)
      */
-    @McpTool(path = "/get_function_callees", description = "Get functions called by a function", category = "xref")
+    @McpTool(path = "/get_function_callees", description = "Get functions called by a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
     public Response getFunctionCallees(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program") String programName) {
@@ -355,9 +367,9 @@ public class XrefCallGraphService {
     /**
      * Get all functions that call the specified function (callers)
      */
-    @McpTool(path = "/get_function_callers", description = "Get functions calling a function", category = "xref")
+    @McpTool(path = "/get_function_callers", description = "Get functions calling a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
     public Response getFunctionCallers(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program") String programName) {
@@ -429,9 +441,9 @@ public class XrefCallGraphService {
     /**
      * Get a call graph subgraph centered on the specified function
      */
-    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function", category = "xref")
+    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
     public Response getFunctionCallGraph(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "depth", defaultValue = "2", description = "Traversal depth") int depth,
             @Param(value = "direction", defaultValue = "both", description = "Traversal direction (both/callers/callees)") String direction,
             @Param(value = "program") String programName) {
@@ -1104,16 +1116,21 @@ public class XrefCallGraphService {
                 List<Map<String, Object>> refsList = new ArrayList<>();
 
                 try {
-                    Address addr = program.getAddressFactory().getAddress(addrStr);
+                    Address addr = ServiceUtils.parseAddress(program, addrStr);
                     if (addr != null) {
                         ReferenceIterator refIter = refMgr.getReferencesTo(addr);
 
                         while (refIter.hasNext()) {
                             Reference ref = refIter.next();
-                            refsList.add(JsonHelper.mapOf(
-                                "from", ref.getFromAddress().toString(),
-                                "type", ref.getReferenceType().getName()
-                            ));
+                            Address fromAddr = ref.getFromAddress();
+                        Map<String, Object> refItem = new LinkedHashMap<>();
+                        refItem.put("from", fromAddr.toString(false));
+                        if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
+                            refItem.put("from_full", fromAddr.toString());
+                            refItem.put("from_space", fromAddr.getAddressSpace().getName());
+                        }
+                        refItem.put("type", ref.getReferenceType().getName());
+                        refsList.add(refItem);
                         }
                     }
                 } catch (Exception e) {
@@ -1163,7 +1180,7 @@ public class XrefCallGraphService {
 
             for (String addrStr : xrefSources) {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(addrStr);
+                    Address addr = ServiceUtils.parseAddress(program, addrStr);
                     if (addr != null) {
                         Instruction instr = listing.getInstructionAt(addr);
 

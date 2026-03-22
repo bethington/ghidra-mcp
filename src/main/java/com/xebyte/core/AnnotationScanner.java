@@ -308,7 +308,8 @@ public class AnnotationScanner {
                 binding.param.source().name().toLowerCase(),
                 !NO_DEFAULT.equals(binding.param.defaultValue()),
                 NO_DEFAULT.equals(binding.param.defaultValue()) ? null : binding.param.defaultValue(),
-                binding.param.description()
+                binding.param.description(),
+                binding.param.paramType()    // NEW
             ));
         }
         return new ToolDescriptor(tool.path(), tool.method(), tool.description(), tool.category(), params);
@@ -357,7 +358,7 @@ public class AnnotationScanner {
 
     /** Describes a tool parameter for schema generation. */
     public record ParamDescriptor(String name, String type, String source,
-            boolean optional, String defaultValue, String description) {
+            boolean optional, String defaultValue, String description, String paramType) {
 
         /** Serialize to JSON. */
         public String toJson() {
@@ -371,6 +372,9 @@ public class AnnotationScanner {
             }
             if (description != null && !description.isEmpty()) {
                 sb.append(", \"description\": ").append(jsonStr(description));
+            }
+            if (paramType != null && !paramType.isEmpty()) {
+                sb.append(", \"param_type\": ").append(jsonStr(paramType));
             }
             sb.append("}");
             return sb.toString();

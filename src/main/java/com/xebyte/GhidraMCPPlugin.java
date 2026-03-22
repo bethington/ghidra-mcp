@@ -100,7 +100,7 @@ class VersionInfo {
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 176;
+    private static final int ENDPOINT_COUNT = 177;
 
     static {
         try (InputStream input = GhidraMCPPlugin.class

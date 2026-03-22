@@ -558,3 +558,4 @@ ghidra_scripts/UltimateOrdinalFixer.py
 ghidra_scripts/UnifyOrdinalNames*.java
 ghidra_scripts/AutoFixOrdinalLinkage.py
 ghidra_scripts/ExportDLLFunctionMappings*.java
+.worktrees/

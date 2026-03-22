@@ -1,6 +1,7 @@
 package com.xebyte.core;
 
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.*;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Function;
@@ -18,7 +19,8 @@ import java.util.regex.Pattern;
 
 /**
  * Shared static utility methods used by all service classes.
- * All methods are stateless and thread-safe.
+ * Methods are thread-safe. {@code parseAddress} maintains per-thread error state via a
+ * {@link ThreadLocal}; see {@link #getLastParseError()}.
  */
 public final class ServiceUtils {
 
@@ -451,16 +453,15 @@ public final class ServiceUtils {
         if (functionRef == null || functionRef.trim().isEmpty()) return null;
         functionRef = functionRef.trim();
 
-        // Try as address first
-        try {
-            Address addr = program.getAddressFactory().getAddress(functionRef);
-            if (addr != null) {
-                Function func = getFunctionForAddress(program, addr);
-                if (func != null) return func;
-            }
-        } catch (Exception e) {
-            // Not a valid address — fall through to name resolution
+        // Try as address first (parseAddress never throws)
+        Address addr = parseAddress(program, functionRef);
+        if (addr != null) {
+            Function func = getFunctionForAddress(program, addr);
+            if (func != null) return func;
         }
+        // Clear lastParseError before the name-lookup path so a failed address parse
+        // doesn't leave a misleading error on the thread-local if name lookup also fails.
+        lastParseError.remove();
 
         // Try as exact function name via symbol table
         FunctionManager funcManager = program.getFunctionManager();
@@ -529,6 +530,142 @@ public final class ServiceUtils {
             return new ProgramOrError(null, Response.err(msg));
         }
         return new ProgramOrError(program, null);
+    }
+
+    // ========================================================================
+    // Address Resolution
+    // ========================================================================
+
+    /** Holds the error message from the most recent failed parseAddress call on this thread. */
+    private static final ThreadLocal<String> lastParseError = new ThreadLocal<>();
+
+    /**
+     * Get the error message from the most recent failed parseAddress() call on the current thread.
+     * Returns null if the last call succeeded or if parseAddress has not been called.
+     * Must be checked immediately after a null return from parseAddress, before any other call.
+     */
+    public static String getLastParseError() {
+        return lastParseError.get();
+    }
+
+    /**
+     * Parse an address string using the program's AddressFactory.
+     * Accepts both plain hex (e.g., "0x1000") and segment:offset (e.g., "mem:1000", "code:ff00").
+     *
+     * Returns null on failure and sets the thread-local error message (read via getLastParseError()).
+     *
+     * THREADING: Must be called on the HTTP worker thread, BEFORE entering any
+     * threadingStrategy.executeRead/executeWrite lambda. SwingThreadingStrategy transfers
+     * execution to the EDT inside execute*; a ThreadLocal set there is invisible to the caller.
+     */
+    public static Address parseAddress(Program program, String addressStr) {
+        lastParseError.remove();
+        if (addressStr == null || addressStr.isBlank()) {
+            lastParseError.set("Address parameter is required.");
+            return null;
+        }
+        addressStr = addressStr.strip();
+
+        // Detect if this is a segment:offset form for better error messages
+        boolean hasColon = addressStr.contains(":");
+
+        // Normalize space:offset form: AddressFactory is case-sensitive and rejects "0x" prefix.
+        // Lowercase the space name and strip leading "0x"/"0X" from the offset so that inputs
+        // like "MEM:0x1000", "MEM:1000", and "Code:FF00" all resolve correctly — including
+        // addresses carried inside batch/container params that bypass bridge sanitization.
+        if (hasColon) {
+            int colonIdx = addressStr.indexOf(':');
+            String spaceName = addressStr.substring(0, colonIdx).toLowerCase();
+            String offset = addressStr.substring(colonIdx + 1);
+            if (offset.startsWith("0x") || offset.startsWith("0X")) {
+                offset = offset.substring(2);
+            }
+            addressStr = spaceName + ":" + offset;
+        }
+
+        try {
+            Address addr = program.getAddressFactory().getAddress(addressStr);
+            if (addr != null) return addr;
+        } catch (Exception ignored) {}
+
+        // Build a rich error message listing available spaces
+        String available = buildAvailableSpacesHint(program);
+        if (hasColon) {
+            String spaceName = addressStr.substring(0, addressStr.indexOf(':'));
+            lastParseError.set("Unknown address space '" + spaceName + "' in '" + addressStr
+                + "'. Available spaces: " + available + ".");
+        } else {
+            lastParseError.set("Address '" + addressStr
+                + "' could not be resolved in the default address space. "
+                + "Available spaces: " + available
+                + ". Try <space>:<hex> (e.g., " + buildSpaceSuggestion(program, addressStr) + ").");
+        }
+        return null;
+    }
+
+    /**
+     * Return enriched address fields as a Map for JSON responses.
+     * Always includes "address" (plain hex, no space prefix).
+     * Includes "address_full" and "address_space" only when the program has >1 physical space.
+     * If program is null, emits only the "address" field.
+     */
+    public static Map<String, Object> addressToJson(Address address, Program program) {
+        String plainHex = address.toString(false);
+        if (program == null || getPhysicalSpaceCount(program) <= 1) {
+            return JsonHelper.mapOf("address", plainHex);
+        }
+        String spaceName = address.getAddressSpace().getName();
+        return JsonHelper.mapOf(
+            "address",       plainHex,
+            "address_full",  address.toString(),
+            "address_space", spaceName
+        );
+    }
+
+    /**
+     * Count the number of real (physical) address spaces in the program.
+     * Excludes Ghidra internal pseudo-spaces (EXTERNAL, STACK, HASH, OTHER, REGISTER)
+     * and overlay spaces (which map onto existing physical spaces and must not be double-counted).
+     * Only spaces of TYPE_RAM or TYPE_CODE are counted.
+     */
+    public static int getPhysicalSpaceCount(Program program) {
+        int count = 0;
+        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
+            if (space.isOverlaySpace()) continue;
+            int type = space.getType();
+            if (type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static String buildAvailableSpacesHint(Program program) {
+        StringBuilder sb = new StringBuilder();
+        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
+            if (space.isOverlaySpace()) continue;
+            int type = space.getType();
+            if (type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE) {
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(space.getName());
+            }
+        }
+        return sb.length() > 0 ? sb.toString() : "(none)";
+    }
+
+    private static String buildSpaceSuggestion(Program program, String rawOffset) {
+        // Strip leading 0x if present
+        String hex = rawOffset.toLowerCase().startsWith("0x") ? rawOffset.substring(2) : rawOffset;
+        StringBuilder sb = new StringBuilder();
+        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
+            if (space.isOverlaySpace()) continue;
+            int type = space.getType();
+            if (type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE) {
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(space.getName()).append(":").append(hex);
+            }
+        }
+        return sb.length() > 0 ? sb.toString() : "<space>:" + hex;
     }
 
     // ========================================================================

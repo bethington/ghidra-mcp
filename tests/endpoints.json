@@ -1,7 +1,7 @@
 {
   "version": "4.3.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 191,
+  "total_endpoints": 192,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -1423,6 +1423,12 @@
       "category": "program",
       "params": [],
       "description": "List open programs"
+    },
+    {
+      "path": "/get_address_spaces",
+      "method": "GET",
+      "category": "program",
+      "description": "List all physical address spaces in the program"
     },
     {
       "path": "/get_current_program_info",

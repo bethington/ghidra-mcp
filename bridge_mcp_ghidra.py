@@ -345,6 +345,12 @@ class GhidraValidationError(Exception):
 # Input validation patterns
 HEX_ADDRESS_PATTERN = re.compile(r"^0x[0-9a-fA-F]+$")
 SEGMENT_ADDRESS_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*:[0-9a-fA-F]+$")
+# Handles space:0xHEX form (e.g., mem:0x1000, code:0xFF00).
+# Must be checked BEFORE SEGMENT_ADDRESS_PATTERN because the 'x' in '0x' is not
+# in [0-9a-fA-F], so the existing pattern rejects this form entirely.
+SEGMENT_ADDR_WITH_0X_PATTERN = re.compile(
+    r"^([a-zA-Z_][a-zA-Z0-9_]*):0[xX]([0-9a-fA-F]+)$"
+)
 FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
@@ -419,12 +425,30 @@ def validate_hex_address(address: str) -> bool:
 
 
 def sanitize_address(address: str) -> str:
-    """Normalize address format (handle with/without 0x prefix, case normalization)."""
+    """Normalize address format for Ghidra AddressFactory.
+
+    Handles:
+    - space:0xHEX  -> space:HEX   (strip 0x from offset; AddressFactory rejects 0x after colon)
+    - SPACE:HEX    -> space:HEX   (lowercase space name; AddressFactory is case-sensitive)
+    - 0xHEX        -> 0xhex       (lowercase)
+    - HEX          -> 0xHEX       (add 0x prefix)
+    """
     if not address:
         return address
     address = address.strip()
+
+    # Step 1: handle space:0xHEX form (checked first — 'x' not in [0-9a-fA-F])
+    m = SEGMENT_ADDR_WITH_0X_PATTERN.match(address)
+    if m:
+        # Lowercase space name; preserve offset case (AddressFactory handles hex case)
+        return f"{m.group(1).lower()}:{m.group(2)}"
+
+    # Step 2: normalize valid space:HEX form (lowercase space name only)
     if SEGMENT_ADDRESS_PATTERN.match(address):
-        return address
+        space, offset = address.split(":", 1)
+        return f"{space.lower()}:{offset}"
+
+    # Step 3: plain hex normalization (unchanged logic)
     if not address.startswith(("0x", "0X")):
         address = "0x" + address
     return address.lower()
@@ -542,10 +566,16 @@ def parse_address_list(addresses: str, param_name: str = "addresses") -> list[st
             )
     else:
         addr_list = [addr.strip() for addr in addresses.split(",") if addr.strip()]
+    sanitized = []
     for addr in addr_list:
+        addr = sanitize_address(addr)
         if not validate_hex_address(addr):
-            raise GhidraValidationError(f"Invalid hex address format: {addr}")
-    return addr_list
+            raise GhidraValidationError(
+                f"Invalid address format: {addr!r}. "
+                f"Use 0x<hex> or <space>:<hex> (e.g., mem:1000, code:ff00)."
+            )
+        sanitized.append(addr)
+    return sanitized
 
 
 # Performance and caching utilities
@@ -864,6 +894,8 @@ STATIC_TOOL_NAMES = {
     "build_function_hash_index",
     "lookup_function_by_hash",
     "propagate_documentation",
+    # Address space discovery
+    "get_address_spaces",
     # Knowledge DB tools (PostgreSQL)
     "store_function_knowledge",
     "query_knowledge_context",
@@ -965,9 +997,17 @@ def _make_tool_handler(tool_def: dict):
     # Separate query vs body params
     query_params = {p["name"] for p in params_schema if p.get("source") == "query"}
     body_params = {p["name"] for p in params_schema if p.get("source") == "body"}
+    # Collect param names that carry memory addresses (bridge sanitizes these before dispatch)
+    address_params = {p["name"] for p in params_schema if p.get("param_type") == "address"}
 
     def handler(**kwargs):
         program = kwargs.pop("program", None)
+
+        # Sanitize all address parameters before routing to query/body
+        # Covers: space:0xHEX normalization, uppercase space names, plain hex prefix
+        for param_name in address_params:
+            if param_name in kwargs and kwargs[param_name] is not None:
+                kwargs[param_name] = sanitize_address(kwargs[param_name])
 
         if method == "GET":
             # All params go as query string
@@ -1089,6 +1129,29 @@ def get_version() -> str:
 
 
 @mcp.tool()
+def get_address_spaces(program: str = None) -> dict:
+    """
+    List all physical address spaces in the program.
+
+    Returns RAM and CODE spaces only; excludes pseudo-spaces (EXTERNAL, STACK, etc.)
+    and overlay spaces. Use the returned space names to prefix addresses for unambiguous
+    resolution on multi-space programs (e.g., embedded/microcontroller targets).
+
+    Example response:
+        {"address_spaces": [{"name": "mem", "start": "0000", "end": "ffff",
+          "size": 65536, "addressable_unit_size": 1, "size_bytes": 65536,
+          "address_size_bits": 16, "is_default": true}], "count": 1}
+
+    Args:
+        program: Optional program name. Defaults to active program.
+
+    Returns:
+        Dict with "address_spaces" list and "count".
+    """
+    return safe_get_json("get_address_spaces", {}, program=program)
+
+
+@mcp.tool()
 def decompile_function(
     name: str = None,
     address: str = None,
@@ -1206,8 +1269,12 @@ def disassemble_function(
     Returns:
         List of assembly instructions. With pagination, first element is metadata with total count.
     """
+    address = sanitize_address(address)
     if not validate_hex_address(address):
-        raise GhidraValidationError(f"Invalid hexadecimal address: {address}")
+        raise GhidraValidationError(
+            f"Invalid address format: {address!r}. "
+            f"Use 0x<hex> or <space>:<hex> (e.g., mem:1000, code:ff00)."
+        )
 
     params = {"address": address}
     if program:
@@ -1253,7 +1320,12 @@ def rename_variables(
     Returns:
         JSON with success status, variables_renamed count, variables_failed count, backend_used, and errors.
     """
-    validate_hex_address(function_address)
+    function_address = sanitize_address(function_address)
+    if not validate_hex_address(function_address):
+        raise GhidraValidationError(
+            f"Invalid address format: {function_address!r}. "
+            f"Use 0x<hex> or <space>:<hex> (e.g., mem:1000, code:ff00)."
+        )
 
     if not variable_renames:
         return json.dumps({

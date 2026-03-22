@@ -105,6 +105,20 @@
             <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
+        <!-- Mockito (test only) -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>5.8.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Ghidra DB (test only) — needed so Mockito can instrument Program's type hierarchy -->
+        <dependency>
+            <groupId>ghidra</groupId>
+            <artifactId>DB</artifactId>
+            <version>${ghidra.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
     <build>
         <finalName>${project.artifactId}-${project.version}</finalName>
@@ -128,6 +142,15 @@
             </resource>
         </resources>
         <plugins>
+            <!-- Maven Surefire Plugin — enable Byte Buddy experimental mode for Java 25 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <argLine>-Dnet.bytebuddy.experimental=true</argLine>
+                </configuration>
+            </plugin>
             <!-- Maven Compiler Plugin -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

@@ -155,9 +155,9 @@ public class ListingService {
                 Data data = it.next();
                 if (block.contains(data.getAddress())) {
                     StringBuilder info = new StringBuilder();
-                    String label = data.getLabel() != null ? data.getLabel() : "DAT_" + data.getAddress().toString().replace(":", "");
+                    String label = data.getLabel() != null ? data.getLabel() : "DAT_" + data.getAddress().toString(false);
                     info.append(label);
-                    info.append(" @ ").append(data.getAddress().toString().replace(":", ""));
+                    info.append(" @ ").append(data.getAddress().toString(false));
 
                     DataType dt = data.getDataType();
                     String typeName = (dt != null) ? dt.getName() : "undefined";
@@ -196,13 +196,13 @@ public class ListingService {
                     int xrefCount = refMgr.getReferenceCountTo(addr);
 
                     String label = data.getLabel() != null ? data.getLabel() :
-                                   "DAT_" + addr.toString().replace(":", "");
+                                   "DAT_" + addr.toString(false);
 
                     DataType dt = data.getDataType();
                     String typeName = (dt != null) ? dt.getName() : "undefined";
                     int length = data.getLength();
 
-                    dataItems.add(new DataItemInfo(addr.toString().replace(":", ""), label, typeName, length, xrefCount));
+                    dataItems.add(new DataItemInfo(addr.toString(false), label, typeName, length, xrefCount));
                 }
             }
         }
@@ -216,9 +216,9 @@ public class ListingService {
         }
     }
 
-    @McpTool(path = "/search_functions", description = "Search functions by name pattern", category = "listing")
+    @McpTool(path = "/search_functions", description = "Search functions by name pattern. Use the 'query' parameter (not 'name_pattern') for the search string; omit to list all functions.", category = "listing")
     public Response searchFunctionsByName(
-            @Param(value = "query", description = "Search pattern") String searchTerm,
+            @Param(value = "query", description = "Substring to match against function names (omit or leave empty to return all functions)", defaultValue = "") String searchTerm,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -281,12 +281,12 @@ public class ListingService {
             }
             if (count >= limit) break;
 
-            functions.add(JsonHelper.mapOf(
-                    "name", func.getName(),
-                    "address", func.getEntryPoint().toString(),
-                    "isThunk", func.isThunk(),
-                    "isExternal", func.isExternal()
-            ));
+            Map<String, Object> funcItem = new LinkedHashMap<>();
+            funcItem.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+            funcItem.put("name", func.getName());
+            funcItem.put("isThunk", func.isThunk());
+            funcItem.put("isExternal", func.isExternal());
+            functions.add(funcItem);
             count++;
         }
 
@@ -326,7 +326,7 @@ public class ListingService {
     public Response listDefinedStrings(
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "filter", description = "Substring filter") String filter,
+            @Param(value = "filter", description = "Substring filter", defaultValue = "") String filter,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -403,11 +403,11 @@ public class ListingService {
             if (value.length() < minLength) continue;
             if (!pat.matcher(value).find()) continue;
             String enc = (encoding != null && !encoding.isEmpty()) ? encoding : "ascii";
-            results.add(JsonHelper.mapOf(
-                    "address", data.getAddress().toString(),
-                    "value", value,
-                    "encoding", enc
-            ));
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.putAll(ServiceUtils.addressToJson(data.getAddress(), program));
+            item.put("value", value);
+            item.put("encoding", enc);
+            results.add(item);
         }
 
         int total = results.size();
@@ -426,7 +426,7 @@ public class ListingService {
     public Response listGlobals(
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "filter", description = "Substring filter") String filter,
+            @Param(value = "filter", description = "Substring filter", defaultValue = "") String filter,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -507,7 +507,7 @@ public class ListingService {
             String[] commonHexAddresses = {"0x401000", "0x400000", "0x1000", "0x10000"};
             for (String hexAddr : commonHexAddresses) {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(hexAddr);
+                    Address addr = ServiceUtils.parseAddress(program, hexAddr);
                     if (addr != null && program.getMemory().contains(addr)) {
                         Function func = program.getFunctionManager().getFunctionAt(addr);
                         if (func != null) {
@@ -657,7 +657,7 @@ public class ListingService {
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
                     String locName = extLoc.getLabel();
-                    String address = extLoc.getAddress().toString().replace(":", "");
+                    String address = extLoc.getAddress().toString(false);
                     String info = String.format("%s (%s) - %s @ %s",
                         locName, libName, extLoc.getLabel(), address);
                     lines.add(info);
@@ -684,42 +684,39 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        try {
-            Address addr = program.getAddressFactory().getAddress(address);
-            ExternalManager extMgr = program.getExternalManager();
+        Address addr = ServiceUtils.parseAddress(program, address);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        ExternalManager extMgr = program.getExternalManager();
 
-            if (dllName != null && !dllName.isEmpty()) {
-                ExternalLocationIterator iter = extMgr.getExternalLocations(dllName);
+        if (dllName != null && !dllName.isEmpty()) {
+            ExternalLocationIterator iter = extMgr.getExternalLocations(dllName);
+            while (iter.hasNext()) {
+                ExternalLocation extLoc = iter.next();
+                if (extLoc.getAddress().equals(addr)) {
+                    Map<String, Object> result = new LinkedHashMap<>();
+                    result.putAll(ServiceUtils.addressToJson(addr, program));
+                    result.put("dll_name", dllName);
+                    result.put("label", extLoc.getLabel());
+                    return Response.ok(result);
+                }
+            }
+            return Response.err("External location not found in DLL");
+        } else {
+            String[] libNames = extMgr.getExternalLibraryNames();
+            for (String libName : libNames) {
+                ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
                     if (extLoc.getAddress().equals(addr)) {
-                        return Response.ok(JsonHelper.mapOf(
-                                "address", addr.toString(),
-                                "dll_name", dllName,
-                                "label", extLoc.getLabel()
-                        ));
+                        Map<String, Object> result = new LinkedHashMap<>();
+                        result.putAll(ServiceUtils.addressToJson(addr, program));
+                        result.put("dll_name", libName);
+                        result.put("label", extLoc.getLabel());
+                        return Response.ok(result);
                     }
                 }
-                return Response.err("External location not found in DLL");
-            } else {
-                String[] libNames = extMgr.getExternalLibraryNames();
-                for (String libName : libNames) {
-                    ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
-                    while (iter.hasNext()) {
-                        ExternalLocation extLoc = iter.next();
-                        if (extLoc.getAddress().equals(addr)) {
-                            return Response.ok(JsonHelper.mapOf(
-                                    "address", addr.toString(),
-                                    "dll_name", libName,
-                                    "label", extLoc.getLabel()
-                            ));
-                        }
-                    }
-                }
-                return Response.ok(JsonHelper.mapOf("address", address));
             }
-        } catch (Exception e) {
-            return Response.err(e.getMessage());
+            return Response.ok(JsonHelper.mapOf("address", address));
         }
     }
 
