@@ -36,9 +36,9 @@ public class SymbolLabelService {
         return getFunctionLabels(functionName, offset, limit, null);
     }
 
-    @McpTool(path = "/get_function_labels", description = "Get labels within a function body", category = "symbol")
+    @McpTool(path = "/get_function_labels", description = "Get labels within a function body. Requires the function name — if you only have an address, call get_function_by_address first to retrieve the name.", category = "symbol")
     public Response getFunctionLabels(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "20") int limit,
             @Param(value = "program") String programName) {
