@@ -655,8 +655,8 @@ def register_tools_from_schema(schema: list[dict], groups: set[str] | None = Non
     # Remove previously registered dynamic tools
     for name in _dynamic_tool_names:
         try:
-            mcp.remove_tool(name)
-        except (KeyError, ValueError):
+            mcp._tool_manager._tools.pop(name, None)
+        except Exception:
             pass
     _dynamic_tool_names.clear()
     _loaded_groups.clear()
@@ -706,9 +706,9 @@ def _unload_group(group_name: str) -> int:
 
     for name in to_remove:
         try:
-            mcp.remove_tool(name)
+            mcp._tool_manager._tools.pop(name, None)
             _dynamic_tool_names.remove(name)
-        except (KeyError, ValueError):
+        except Exception:
             pass
 
     if to_remove:
