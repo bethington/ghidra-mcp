@@ -119,6 +119,34 @@ def get_socket_dir() -> Path:
     return Path(f"/tmp/ghidra-mcp-{user}")
 
 
+# Enhanced error classes
+class GhidraConnectionError(Exception):
+    """Raised when connection to Ghidra server fails"""
+    pass
+
+
+class GhidraAnalysisError(Exception):
+    """Raised when Ghidra analysis operation fails"""
+    pass
+
+
+class GhidraValidationError(Exception):
+    """Raised when input validation fails"""
+    pass
+
+
+# Input validation patterns
+HEX_ADDRESS_PATTERN = re.compile(r"^0x[0-9a-fA-F]+$")
+SEGMENT_ADDRESS_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*:[0-9a-fA-F]+$")
+# Handles space:0xHEX form (e.g., mem:0x1000, code:0xFF00).
+# Must be checked BEFORE SEGMENT_ADDRESS_PATTERN because the 'x' in '0x' is not
+# in [0-9a-fA-F], so the existing pattern rejects this form entirely.
+SEGMENT_ADDR_WITH_0X_PATTERN = re.compile(
+    r"^([a-zA-Z_][a-zA-Z0-9_]*):0[xX]([0-9a-fA-F]+)$"
+)
+FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
 def is_pid_alive(pid: int) -> bool:
     """Check if a process with the given PID is still running."""
     try:
@@ -128,6 +156,26 @@ def is_pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True  # Running but owned by another user
+
+
+def validate_server_url(url: str) -> bool:
+    """Validate that the server URL is safe to use"""
+    try:
+        parsed = urlparse(url)
+        return parsed.hostname in ("127.0.0.1", "localhost", "::1")
+    except Exception:
+        return False
+
+
+def validate_hex_address(address: str) -> bool:
+    """Validate that an address string looks like a valid hex address or segment:offset."""
+    if not address:
+        return False
+    if SEGMENT_ADDR_WITH_0X_PATTERN.match(address):
+        return True
+    if SEGMENT_ADDRESS_PATTERN.match(address):
+        return True
+    return bool(HEX_ADDRESS_PATTERN.match(address))
 
 
 def uds_request(
@@ -356,6 +404,36 @@ def _ensure_connected() -> str | None:
     return None
 
 
+def sanitize_address(address: str) -> str:
+    """Normalize address format for Ghidra AddressFactory.
+
+    Handles:
+    - space:0xHEX  -> space:HEX   (strip 0x from offset; AddressFactory rejects 0x after colon)
+    - SPACE:HEX    -> space:HEX   (lowercase space name; AddressFactory is case-sensitive)
+    - 0xHEX        -> 0xhex       (lowercase)
+    - HEX          -> 0xHEX       (add 0x prefix)
+    """
+    if not address:
+        return address
+    address = address.strip()
+
+    # Step 1: handle space:0xHEX form (checked first — 'x' not in [0-9a-fA-F])
+    m = SEGMENT_ADDR_WITH_0X_PATTERN.match(address)
+    if m:
+        # Lowercase space name; preserve offset case (AddressFactory handles hex case)
+        return f"{m.group(1).lower()}:{m.group(2)}"
+
+    # Step 2: normalize valid space:HEX form (lowercase space name only)
+    if SEGMENT_ADDRESS_PATTERN.match(address):
+        space, offset = address.split(":", 1)
+        return f"{space.lower()}:{offset}"
+
+    # Step 3: plain hex normalization (unchanged logic)
+    if not address.startswith(("0x", "0X")):
+        address = "0x" + address
+    return address.lower()
+
+
 def dispatch_get(endpoint: str, params: dict | None = None, retries: int = 3) -> str:
     """GET request via active transport. Returns raw response text."""
     err = _ensure_connected()
@@ -425,7 +503,17 @@ def dispatch_post(endpoint: str, data: dict, retries: int = 3) -> str:
 # ==========================================================================
 
 # JSON type → Python type mapping
-_TYPE_MAP = {"string": str, "integer": int, "boolean": bool, "number": float}
+_TYPE_MAP = {
+    "string": str,
+    "json": str,
+    "integer": int,
+    "boolean": bool,
+    "number": float,
+    "object": dict,
+    "array": list,
+    "any": str,
+    "address": str,
+}
 
 
 def _parse_schema(raw: dict) -> list[dict]:
@@ -495,6 +583,10 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     required = set(params_schema.get("required", []))
 
     def handler(**kwargs):
+        # Sanitize address parameters before dispatch
+        for pname, pdef in properties.items():
+            if pdef.get("paramType") == "address" and pname in kwargs and kwargs[pname] is not None:
+                kwargs[pname] = sanitize_address(str(kwargs[pname]))
         filtered = {k: v for k, v in kwargs.items() if v is not None}
         if http_method == "GET":
             str_params = {k: str(v) for k, v in filtered.items()}

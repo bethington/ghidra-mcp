@@ -142,7 +142,7 @@ public final class FunctionRef {
     private Function resolveByAddress(Program program, FunctionManager fm) {
         Address addr;
         try {
-            addr = program.getAddressFactory().getAddress(ref);
+            addr = ServiceUtils.parseAddress(program, ref);
         } catch (Exception e) {
             return null; // Not a valid address — will try name resolution
         }

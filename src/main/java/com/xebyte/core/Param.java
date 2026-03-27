@@ -51,4 +51,11 @@ public @interface Param {
 
     /** Human-readable description of this parameter. */
     String description() default "";
+
+    /**
+     * Semantic type hint for this parameter, propagated to /mcp/schema.
+     * Use "address" for parameters that carry memory addresses.
+     * The bridge uses this to apply address sanitization before dispatch.
+     */
+    String paramType() default "";
 }

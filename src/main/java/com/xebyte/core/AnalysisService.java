@@ -219,9 +219,14 @@ public class AnalysisService {
         return analyzeDataRegion(startAddressStr, maxScanBytes, includeXrefMap, includeAssemblyPatterns, includeBoundaryDetection, null);
     }
 
-    @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis", category = "analysis")
+    @McpTool(path = "/analyze_data_region", method = "POST", description = "Comprehensive data region analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response analyzeDataRegion(
-            @Param(value = "address", source = ParamSource.BODY) String startAddressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String startAddressStr,
             @Param(value = "max_scan_bytes", source = ParamSource.BODY, defaultValue = "1024") int maxScanBytes,
             @Param(value = "include_xref_map", source = ParamSource.BODY, defaultValue = "true") boolean includeXrefMap,
             @Param(value = "include_assembly_patterns", source = ParamSource.BODY, defaultValue = "true") boolean includeAssemblyPatterns,
@@ -232,9 +237,9 @@ public class AnalysisService {
         Program program = pe.program();
 
         try {
-            Address startAddr = program.getAddressFactory().getAddress(startAddressStr);
+            Address startAddr = ServiceUtils.parseAddress(program, startAddressStr);
             if (startAddr == null) {
-                return Response.err("Invalid address: " + startAddressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             ReferenceManager refMgr = program.getReferenceManager();
@@ -285,7 +290,7 @@ public class AnalysisService {
             // Get current name and type
             Data data = listing.getDataAt(startAddr);
             String currentName = (data != null && data.getLabel() != null) ?
-                                data.getLabel() : "DAT_" + startAddr.toString().replace(":", "");
+                                data.getLabel() : "DAT_" + startAddr.toString(false);
             String currentType = (data != null) ?
                                 data.getDataType().getName() : "undefined";
 
@@ -387,9 +392,14 @@ public class AnalysisService {
         return detectArrayBounds(addressStr, analyzeLoopBounds, analyzeIndexing, maxScanRange, null);
     }
 
-    @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context", category = "analysis")
+    @McpTool(path = "/detect_array_bounds", method = "POST", description = "Detect array/table size from context. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response detectArrayBounds(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "analyze_loop_bounds", source = ParamSource.BODY, defaultValue = "true") boolean analyzeLoopBounds,
             @Param(value = "analyze_indexing", source = ParamSource.BODY, defaultValue = "true") boolean analyzeIndexing,
             @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048") int maxScanRange,
@@ -399,9 +409,9 @@ public class AnalysisService {
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             ReferenceManager refMgr = program.getReferenceManager();
@@ -429,14 +439,14 @@ public class AnalysisService {
                 scanAddr = scanAddr.add(1);
             }
 
-            return Response.ok(JsonHelper.mapOf(
-                "address", addr.toString(),
-                "estimated_size", estimatedSize,
-                "stride", 1,
-                "element_count", estimatedSize,
-                "confidence", "medium",
-                "detection_method", "xref_analysis"
-            ));
+            Map<String, Object> arrayResult = new LinkedHashMap<>();
+            arrayResult.putAll(ServiceUtils.addressToJson(addr, program));
+            arrayResult.put("estimated_size", estimatedSize);
+            arrayResult.put("stride", 1);
+            arrayResult.put("element_count", estimatedSize);
+            arrayResult.put("confidence", "medium");
+            arrayResult.put("detection_method", "xref_analysis");
+            return Response.ok(arrayResult);
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
@@ -449,9 +459,14 @@ public class AnalysisService {
         return getFieldAccessContext(structAddressStr, fieldOffset, numExamples, null);
     }
 
-    @McpTool(path = "/get_field_access_context", method = "POST", description = "Get assembly context for struct field offsets", category = "analysis")
+    @McpTool(path = "/get_field_access_context", method = "POST", description = "Get assembly context for struct field offsets. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response getFieldAccessContext(
-            @Param(value = "struct_address", source = ParamSource.BODY) String structAddressStr,
+            @Param(value = "struct_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String structAddressStr,
             @Param(value = "field_offset", source = ParamSource.BODY, defaultValue = "0") int fieldOffset,
             @Param(value = "num_examples", source = ParamSource.BODY, defaultValue = "5") int numExamples,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
@@ -467,6 +482,10 @@ public class AnalysisService {
         if (pe.hasError()) return pe.error();
         Program resolvedProgram = pe.program();
 
+        // Resolve address before entering SwingUtilities lambda
+        Address structAddr = ServiceUtils.parseAddress(resolvedProgram, structAddressStr);
+        if (structAddr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicReference<Response> result = new AtomicReference<>();
 
         // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
@@ -474,12 +493,6 @@ public class AnalysisService {
             SwingUtilities.invokeAndWait(() -> {
                 try {
                     Program program = resolvedProgram;
-
-                    Address structAddr = program.getAddressFactory().getAddress(structAddressStr);
-                    if (structAddr == null) {
-                        result.set(Response.err("Invalid address: " + structAddressStr));
-                        return;
-                    }
 
                     // Calculate field address with overflow protection
                     Address fieldAddr;
@@ -549,9 +562,14 @@ public class AnalysisService {
         return inspectMemoryContent(addressStr, length, detectStrings, null);
     }
 
-    @McpTool(path = "/inspect_memory_content", description = "Inspect memory with string detection", category = "analysis")
+    @McpTool(path = "/inspect_memory_content", description = "Inspect memory with string detection. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response inspectMemoryContent(
-            @Param(value = "address", description = "Start address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "length", defaultValue = "64", description = "Bytes to read") int length,
             @Param(value = "detect_strings", defaultValue = "true", description = "Auto-detect strings") boolean detectStrings,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -560,9 +578,9 @@ public class AnalysisService {
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             Memory memory = program.getMemory();
@@ -765,7 +783,7 @@ public class AnalysisService {
 
                     if (matchFound) {
                         Address matchAddr = blockStart.add(i);
-                        matches.add(JsonHelper.mapOf("address", matchAddr.toString()));
+                        matches.add(ServiceUtils.addressToJson(matchAddr, program));
 
                         if (matches.size() >= MAX_MATCHES) {
                             matches.add(JsonHelper.mapOf("note", "Limited to " + MAX_MATCHES + " matches"));
@@ -833,15 +851,15 @@ public class AnalysisService {
                 double similarity = calculateSimilarity(targetMetrics, funcMetrics);
 
                 if (similarity >= threshold) {
-                    similarFunctions.add(JsonHelper.mapOf(
-                        "name", func.getName(),
-                        "address", func.getEntryPoint().toString(),
-                        "similarity", Math.round(similarity * 1000.0) / 1000.0,
-                        "basic_blocks", funcMetrics.basicBlockCount,
-                        "instructions", funcMetrics.instructionCount,
-                        "calls", funcMetrics.callCount,
-                        "complexity", funcMetrics.cyclomaticComplexity
-                    ));
+                    Map<String, Object> simItem = new LinkedHashMap<>();
+                    simItem.put("name", func.getName());
+                    simItem.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+                    simItem.put("similarity", Math.round(similarity * 1000.0) / 1000.0);
+                    simItem.put("basic_blocks", funcMetrics.basicBlockCount);
+                    simItem.put("instructions", funcMetrics.instructionCount);
+                    simItem.put("calls", funcMetrics.callCount);
+                    simItem.put("complexity", funcMetrics.cyclomaticComplexity);
+                    similarFunctions.add(simItem);
                 }
             }
 
@@ -929,7 +947,7 @@ public class AnalysisService {
                 basicBlockCount++;
 
                 Map<String, Object> blockInfo = new LinkedHashMap<>();
-                blockInfo.put("address", block.getFirstStartAddress().toString());
+                blockInfo.putAll(ServiceUtils.addressToJson(block.getFirstStartAddress(), program));
                 blockInfo.put("size", block.getNumAddresses());
 
                 // Count edges and detect loops
@@ -1010,24 +1028,29 @@ public class AnalysisService {
                 blockDetails.add(JsonHelper.mapOf("note", (blocks.size() - 100) + " additional blocks truncated"));
             }
 
-            return Response.ok(JsonHelper.mapOf(
-                "function_name", functionName,
-                "entry_point", func.getEntryPoint().toString(),
-                "size_bytes", func.getBody().getNumAddresses(),
-                "metrics", JsonHelper.mapOf(
-                    "cyclomatic_complexity", cyclomaticComplexity,
-                    "complexity_rating", complexityRating,
-                    "basic_blocks", basicBlockCount,
-                    "edges", edgeCount,
-                    "instructions", instructionCount,
-                    "conditional_branches", conditionalBranches,
-                    "unconditional_jumps", unconditionalJumps,
-                    "loops_detected", loops,
-                    "calls", callCount,
-                    "returns", returnCount
-                ),
-                "basic_block_details", blockDetails
+            Address ep = func.getEntryPoint();
+            Map<String, Object> cfResult = new LinkedHashMap<>();
+            cfResult.put("function_name", functionName);
+            cfResult.put("entry_point", ep.toString(false));
+            if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
+                cfResult.put("entry_point_full", ep.toString());
+                cfResult.put("entry_point_space", ep.getAddressSpace().getName());
+            }
+            cfResult.put("size_bytes", func.getBody().getNumAddresses());
+            cfResult.put("metrics", JsonHelper.mapOf(
+                "cyclomatic_complexity", cyclomaticComplexity,
+                "complexity_rating", complexityRating,
+                "basic_blocks", basicBlockCount,
+                "edges", edgeCount,
+                "instructions", instructionCount,
+                "conditional_branches", conditionalBranches,
+                "unconditional_jumps", unconditionalJumps,
+                "loops_detected", loops,
+                "calls", callCount,
+                "returns", returnCount
             ));
+            cfResult.put("basic_block_details", blockDetails);
+            return Response.ok(cfResult);
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
@@ -1081,14 +1104,23 @@ public class AnalysisService {
      * @param compact When true, returns only scores and issue counts (no arrays, no recommendations).
      *                Reduces response from ~20KB to ~300 bytes.
      */
-    @McpTool(path = "/analyze_function_completeness", description = "Check function documentation completeness", category = "analysis")
+    @McpTool(path = "/analyze_function_completeness", description = "Check function documentation completeness. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response analyzeFunctionCompleteness(
-            @Param(value = "function_address", description = "Function address") String functionAddress,
+            @Param(value = "function_address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "compact", defaultValue = "false", description = "Compact output") boolean compact,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
@@ -1096,12 +1128,6 @@ public class AnalysisService {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        errorMsg.set("Invalid address: " + functionAddress);
-                        return;
-                    }
-
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
                         errorMsg.set("No function at address: " + functionAddress);
@@ -1700,9 +1726,14 @@ public class AnalysisService {
     /**
      * v1.5.0: Find next undefined function needing analysis
      */
-    @McpTool(path = "/find_next_undefined_function", description = "Find next function needing analysis", category = "analysis")
+    @McpTool(path = "/find_next_undefined_function", description = "Find next function needing analysis. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response findNextUndefinedFunction(
-            @Param(value = "start_address", description = "Starting address") String startAddress,
+            @Param(value = "start_address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String startAddress,
             @Param(value = "criteria", description = "Search criteria") String criteria,
             @Param(value = "pattern", description = "Name pattern filter") String pattern,
             @Param(value = "direction", description = "Search direction") String direction,
@@ -1711,6 +1742,15 @@ public class AnalysisService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        // Resolve address before entering SwingUtilities lambda
+        final Address startAddr;
+        if (startAddress != null && !startAddress.isEmpty()) {
+            startAddr = ServiceUtils.parseAddress(program, startAddress);
+            if (startAddr == null) return Response.err(ServiceUtils.getLastParseError());
+        } else {
+            startAddr = program.getMinAddress();
+        }
+
         final AtomicReference<Response> responseRef = new AtomicReference<>(null);
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
 
@@ -1718,9 +1758,7 @@ public class AnalysisService {
             SwingUtilities.invokeAndWait(() -> {
                 try {
                     FunctionManager funcMgr = program.getFunctionManager();
-                    Address start = startAddress != null ?
-                        program.getAddressFactory().getAddress(startAddress) :
-                        program.getMinAddress();
+                    Address start = startAddr;
 
                     String searchPattern = pattern; // null means match all auto-generated names
                     boolean ascending = !"descending".equals(direction);
@@ -1775,9 +1813,9 @@ public class AnalysisService {
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
      */
-    @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis", category = "analysis")
+    @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Requires function name — if you only have an address, call get_function_by_address first.", category = "analysis")
     public Response analyzeFunctionComplete(
-            @Param(value = "name", description = "Function name") String name,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String name,
             @Param(value = "include_xrefs", defaultValue = "true") boolean includeXrefs,
             @Param(value = "include_callees", defaultValue = "true") boolean includeCallees,
             @Param(value = "include_callers", defaultValue = "true") boolean includeCallers,
@@ -1813,7 +1851,7 @@ public class AnalysisService {
                     // Build structured data for Gson serialization
                     Map<String, Object> data = new LinkedHashMap<>();
                     data.put("name", func.getName());
-                    data.put("address", func.getEntryPoint().toString());
+                    data.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
                     data.put("classification", classifyFunction(func, program));
                     data.put("signature", func.getSignature().toString());
 
@@ -1844,7 +1882,14 @@ public class AnalysisService {
                         int refCount = 0;
                         while (refs.hasNext() && refCount < 100) {
                             Reference ref = refs.next();
-                            xrefList.add(JsonHelper.mapOf("from", ref.getFromAddress().toString()));
+                            Address fromAddr = ref.getFromAddress();
+                            Map<String, Object> xrefItem = new LinkedHashMap<>();
+                            xrefItem.put("from", fromAddr.toString(false));
+                            if (ServiceUtils.getPhysicalSpaceCount(program) > 1) {
+                                xrefItem.put("from_full", fromAddr.toString());
+                                xrefItem.put("from_space", fromAddr.getAddressSpace().getName());
+                            }
+                            xrefList.add(xrefItem);
                             refCount++;
                         }
                         data.put("xrefs", xrefList);
@@ -1899,10 +1944,10 @@ public class AnalysisService {
                         int instrCount = 0;
                         while (instrIter.hasNext() && instrCount < 100) {
                             Instruction instr = instrIter.next();
-                            disasmList.add(JsonHelper.mapOf(
-                                "address", instr.getAddress().toString(),
-                                "mnemonic", instr.getMnemonicString()
-                            ));
+                            Map<String, Object> instrItem = new LinkedHashMap<>();
+                            instrItem.putAll(ServiceUtils.addressToJson(instr.getAddress(), program));
+                            instrItem.put("mnemonic", instr.getMnemonicString());
+                            disasmList.add(instrItem);
                             instrCount++;
                         }
                         data.put("disassembly", disasmList);
@@ -1996,11 +2041,11 @@ public class AnalysisService {
      */
     @McpTool(path = "/search_functions_enhanced", description = "Advanced function search with filtering", category = "analysis")
     public Response searchFunctionsEnhanced(
-            @Param(value = "name_pattern", description = "Name pattern") String namePattern,
-            @Param(value = "min_xrefs") Integer minXrefs,
-            @Param(value = "max_xrefs") Integer maxXrefs,
-            @Param(value = "calling_convention", description = "Calling convention filter") String callingConvention,
-            @Param(value = "has_custom_name") Boolean hasCustomName,
+            @Param(value = "name_pattern", description = "Name pattern (omit to match all)", defaultValue = "") String namePattern,
+            @Param(value = "min_xrefs", description = "Minimum xref count filter (omit for no minimum)", defaultValue = "") Integer minXrefs,
+            @Param(value = "max_xrefs", description = "Maximum xref count filter (omit for no maximum)", defaultValue = "") Integer maxXrefs,
+            @Param(value = "calling_convention", description = "Calling convention filter (omit for any)", defaultValue = "") String callingConvention,
+            @Param(value = "has_custom_name", description = "Filter by whether function has a user-defined name (omit for any)", defaultValue = "") Boolean hasCustomName,
             @Param(value = "regex", defaultValue = "false", description = "Use regex matching") boolean regex,
             @Param(value = "sort_by", defaultValue = "address", description = "Sort field") String sortBy,
             @Param(value = "offset", defaultValue = "0") int offset,
@@ -2065,7 +2110,7 @@ public class AnalysisService {
                         // Create match entry
                         Map<String, Object> match = new LinkedHashMap<>();
                         match.put("name", func.getName());
-                        match.put("address", func.getEntryPoint().toString());
+                        match.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
                         match.put("xref_count", xrefCount);
                         matches.add(match);
                     }
@@ -3495,13 +3540,22 @@ public class AnalysisService {
      * Returns decompiled code + classification + callees + variables with pre-analysis + compact completeness
      * in a single response, using only one decompilation.
      */
-    @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow", category = "analysis")
+    @McpTool(path = "/analyze_for_documentation", description = "Composite analysis for RE documentation workflow. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "analysis")
     public Response analyzeForDocumentation(
-            @Param(value = "function_address", description = "Function address") String functionAddress,
+            @Param(value = "function_address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>(null);
@@ -3510,11 +3564,6 @@ public class AnalysisService {
             SwingUtilities.invokeAndWait(() -> {
                 try {
                     // Resolve function by address
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        errorMsg.set("Invalid address: " + functionAddress);
-                        return;
-                    }
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
                         func = program.getFunctionManager().getFunctionContaining(addr);
@@ -3529,7 +3578,7 @@ public class AnalysisService {
 
                     // Basic info
                     data.put("name", func.getName());
-                    data.put("address", func.getEntryPoint().toString());
+                    data.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
                     data.put("signature", func.getSignature().toString());
 
                     // Classification

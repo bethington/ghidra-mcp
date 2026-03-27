@@ -1156,9 +1156,14 @@ public class DataTypeService {
     /**
      * Apply a specific data type at the given memory address
      */
-    @McpTool(path = "/apply_data_type", method = "POST", description = "Apply data type at address", category = "datatype")
+    @McpTool(path = "/apply_data_type", method = "POST", description = "Apply data type at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
     public Response applyDataType(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "type_name", source = ParamSource.BODY) String typeName,
             @Param(value = "clear_existing", source = ParamSource.BODY, defaultValue = "true") boolean clearExisting,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
@@ -1175,9 +1180,9 @@ public class DataTypeService {
         }
 
         try {
-            Address address = program.getAddressFactory().getAddress(addressStr);
+            Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
-                return Response.text("Invalid address: " + addressStr);
+                return Response.text(ServiceUtils.getLastParseError());
             }
 
             DataTypeManager dtm = program.getDataTypeManager();
@@ -1602,9 +1607,14 @@ public class DataTypeService {
     /**
      * Validate if a data type fits at a given address
      */
-    @McpTool(path = "/validate_data_type", description = "Validate data type applicability at address", category = "datatype")
+    @McpTool(path = "/validate_data_type", description = "Validate data type applicability at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
     public Response validateDataType(
-            @Param(value = "address", description = "Target address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "type_name", description = "Data type name") String typeName,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1614,7 +1624,8 @@ public class DataTypeService {
         if (typeName == null || typeName.isEmpty()) return Response.text("Type name is required");
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
+            if (addr == null) return Response.text(ServiceUtils.getLastParseError());
             DataTypeManager dtm = program.getDataTypeManager();
             DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, typeName);
 
@@ -1669,9 +1680,14 @@ public class DataTypeService {
     /**
      * NEW v1.6.0: Validate function prototype before applying
      */
-    @McpTool(path = "/validate_function_prototype", description = "Validate prototype before applying", category = "datatype")
+    @McpTool(path = "/validate_function_prototype", description = "Validate prototype before applying. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
     public Response validateFunctionPrototype(
-            @Param(value = "function_address", description = "Function address") String functionAddress,
+            @Param(value = "function_address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "prototype", description = "Function prototype") String prototype,
             @Param(value = "calling_convention", description = "Calling convention") String callingConvention,
             @Param(value = "program", description = "Target program name") String programName) {
@@ -1679,20 +1695,15 @@ public class DataTypeService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicReference<Response> responseRef = new AtomicReference<>(null);
 
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        responseRef.set(Response.ok(JsonHelper.mapOf(
-                            "valid", false,
-                            "error", "Invalid address: " + functionAddress
-                        )));
-                        return;
-                    }
-
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func == null) {
                         responseRef.set(Response.ok(JsonHelper.mapOf(
@@ -1879,9 +1890,14 @@ public class DataTypeService {
      * @param maxFunctionsToAnalyze Maximum number of referencing functions to analyze
      * @return Response with field usage analysis
      */
-    @McpTool(path = "/analyze_struct_field_usage", method = "POST", description = "Analyze structure field access patterns", category = "datatype")
+    @McpTool(path = "/analyze_struct_field_usage", method = "POST", description = "Analyze structure field access patterns. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
     public Response analyzeStructFieldUsage(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "struct_name", source = ParamSource.BODY) String structName,
             @Param(value = "max_functions", source = ParamSource.BODY, defaultValue = "10") int maxFunctionsToAnalyze,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
@@ -1895,19 +1911,16 @@ public class DataTypeService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicReference<Response> responseRef = new AtomicReference<>();
 
         // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-
-                    Address addr = program.getAddressFactory().getAddress(addressStr);
-                    if (addr == null) {
-                        responseRef.set(Response.err("Invalid address: " + addressStr));
-                        return;
-                    }
-
                     // Get data at address to determine structure
                     Data data = program.getListing().getDataAt(addr);
                     DataType dataType = (data != null) ? data.getDataType() : null;
@@ -2119,9 +2132,14 @@ public class DataTypeService {
      * @param structSize Size of the structure in bytes (0 for auto-detect)
      * @return Response with field name suggestions
      */
-    @McpTool(path = "/suggest_field_names", method = "POST", description = "AI-assisted field name suggestions", category = "datatype")
+    @McpTool(path = "/suggest_field_names", method = "POST", description = "AI-assisted field name suggestions. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
     public Response suggestFieldNames(
-            @Param(value = "struct_address", source = ParamSource.BODY) String structAddressStr,
+            @Param(value = "struct_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String structAddressStr,
             @Param(value = "struct_size", source = ParamSource.BODY, defaultValue = "0") int structSize,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         // Validate input parameters
@@ -2133,19 +2151,16 @@ public class DataTypeService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, structAddressStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicReference<Response> responseRef = new AtomicReference<>();
 
         // CRITICAL FIX #1: Thread safety - wrap in SwingUtilities.invokeAndWait
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-
-                    Address addr = program.getAddressFactory().getAddress(structAddressStr);
-                    if (addr == null) {
-                        responseRef.set(Response.err("Invalid address: " + structAddressStr));
-                        return;
-                    }
-
                     Msg.info(this, "Generating field name suggestions for structure at " + structAddressStr);
 
                     // Get data at address
@@ -2248,10 +2263,15 @@ public class DataTypeService {
     /**
      * 6. APPLY_DATA_CLASSIFICATION - Atomic type application
      */
-    @McpTool(path = "/apply_data_classification", method = "POST", description = "Atomic type application with classification", category = "datatype")
+    @McpTool(path = "/apply_data_classification", method = "POST", description = "Atomic type application with classification. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "datatype")
     @SuppressWarnings("unchecked")
     public Response applyDataClassification(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "classification", source = ParamSource.BODY) String classification,
             @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
@@ -2266,9 +2286,9 @@ public class DataTypeService {
         final List<String> operations = new ArrayList<>();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             // Parse type_definition from the object
