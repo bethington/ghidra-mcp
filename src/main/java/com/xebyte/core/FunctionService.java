@@ -2449,36 +2449,30 @@ public class FunctionService {
                     // If batch operation fails, try individual operations as fallback
                     Msg.warn(this, "Batch rename variables failed, attempting individual operations: " + e.getMessage());
                     try {
-                        program.endTransaction(eventTx, false);
-                        program.endTransaction(tx, false);
-
-                        // Try individual operations
+                        // Try individual operations (transactions will be closed in finally)
                         Response individualResult = batchRenameVariablesIndividual(functionAddress, variableRenames);
                         fallbackResult.set(individualResult.toJson());
-                        return;
                     } catch (Exception fallbackE) {
                         errorRef.set("Batch operation failed and fallback also failed: " + e.getMessage());
                         Msg.error(this, "Both batch and individual rename operations failed", e);
                     }
                 } finally {
-                    if (fallbackResult.get() == null && errorRef.get() == null) {
-                        // End event suppression transaction
-                        program.endTransaction(eventTx, success.get());
-                        program.flushEvents();
-                        program.endTransaction(tx, success.get());
+                    // ALWAYS close transactions — nested transactions must be closed inner-first
+                    program.endTransaction(eventTx, success.get());
+                    program.flushEvents();
+                    program.endTransaction(tx, success.get());
 
-                        // Invalidate decompiler cache after successful renames
-                        if (success.get() && variablesRenamed.get() > 0 && funcRef.get() != null) {
-                            try {
-                                DecompInterface tempDecomp = new DecompInterface();
-                                tempDecomp.openProgram(program);
-                                tempDecomp.flushCache();
-                                tempDecomp.decompileFunction(funcRef.get(), DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                                tempDecomp.dispose();
-                                Msg.info(this, "Invalidated decompiler cache after renaming " + variablesRenamed.get() + " variables");
-                            } catch (Exception cacheEx) {
-                                Msg.warn(this, "Failed to invalidate decompiler cache: " + cacheEx.getMessage());
-                            }
+                    // Invalidate decompiler cache after successful renames
+                    if (success.get() && variablesRenamed.get() > 0 && funcRef.get() != null) {
+                        try {
+                            DecompInterface tempDecomp = new DecompInterface();
+                            tempDecomp.openProgram(program);
+                            tempDecomp.flushCache();
+                            tempDecomp.decompileFunction(funcRef.get(), DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                            tempDecomp.dispose();
+                            Msg.info(this, "Invalidated decompiler cache after renaming " + variablesRenamed.get() + " variables");
+                        } catch (Exception cacheEx) {
+                            Msg.warn(this, "Failed to invalidate decompiler cache: " + cacheEx.getMessage());
                         }
                     }
                 }

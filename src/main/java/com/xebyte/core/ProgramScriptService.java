@@ -1238,6 +1238,7 @@ public class ProgramScriptService {
             final String finalComment = comment;
 
             int transactionId = program.startTransaction("Set bookmark at " + addressStr);
+            boolean txSuccess = false;
             try {
                 // Check if bookmark already exists at this address with this category
                 Bookmark existing = bookmarkManager.getBookmark(addr, BookmarkType.NOTE, finalCategory);
@@ -1248,7 +1249,7 @@ public class ProgramScriptService {
 
                 // Create new bookmark
                 bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
-                program.endTransaction(transactionId, true);
+                txSuccess = true;
 
                 Map<String, Object> bmResult = new LinkedHashMap<>();
                 bmResult.put("success", true);
@@ -1258,8 +1259,9 @@ public class ProgramScriptService {
                 return Response.ok(bmResult);
 
             } catch (Exception e) {
-                program.endTransaction(transactionId, false);
                 throw e;
+            } finally {
+                program.endTransaction(transactionId, txSuccess);
             }
 
         } catch (Exception e) {
@@ -1374,6 +1376,7 @@ public class ProgramScriptService {
             BookmarkManager bookmarkManager = program.getBookmarkManager();
 
             int transactionId = program.startTransaction("Delete bookmark at " + addressStr);
+            boolean txSuccess = false;
             try {
                 int deleted = 0;
                 Bookmark[] bms = bookmarkManager.getBookmarks(addr);
@@ -1385,7 +1388,7 @@ public class ProgramScriptService {
                     }
                 }
 
-                program.endTransaction(transactionId, true);
+                txSuccess = true;
                 Map<String, Object> delResult = new LinkedHashMap<>();
                 delResult.put("success", true);
                 delResult.put("deleted", deleted);
@@ -1393,8 +1396,9 @@ public class ProgramScriptService {
                 return Response.ok(delResult);
 
             } catch (Exception e) {
-                program.endTransaction(transactionId, false);
                 throw e;
+            } finally {
+                program.endTransaction(transactionId, txSuccess);
             }
 
         } catch (Exception e) {

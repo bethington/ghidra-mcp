@@ -638,6 +638,7 @@ public class DataTypeService {
 
             // Create the enumeration
             int txId = program.startTransaction("Create Enumeration: " + name);
+            boolean txSuccess = false;
             try {
                 ghidra.program.model.data.EnumDataType enumDt =
                     new ghidra.program.model.data.EnumDataType(name, size);
@@ -649,8 +650,7 @@ public class DataTypeService {
                 // Add the enumeration to the data type manager
                 dtm.addDataType(enumDt, null);
 
-                program.endTransaction(txId, true);
-
+                txSuccess = true;
                 return Response.ok(JsonHelper.mapOf(
                     "status", "success",
                     "message", "Successfully created enumeration '" + name + "' with " + values.size() +
@@ -658,8 +658,9 @@ public class DataTypeService {
                 ));
 
             } catch (Exception e) {
-                program.endTransaction(txId, false);
                 return Response.err("Error creating enumeration: " + e.getMessage());
+            } finally {
+                program.endTransaction(txId, txSuccess);
             }
 
         } catch (Exception e) {
@@ -1202,6 +1203,7 @@ public class DataTypeService {
             }
 
             int txId = program.startTransaction("Apply Data Type: " + typeName);
+            boolean txSuccess = false;
             try {
                 // Clear existing code/data if requested
                 if (clearExisting) {
@@ -1215,7 +1217,7 @@ public class DataTypeService {
                 // Apply the data type
                 Data data = listing.createData(address, dataType);
 
-                program.endTransaction(txId, true);
+                txSuccess = true;
 
                 // Validate size matches expectation
                 int expectedSize = dataType.getLength();
@@ -1237,8 +1239,9 @@ public class DataTypeService {
                 return Response.text(resultText);
 
             } catch (Exception e) {
-                program.endTransaction(txId, false);
                 return Response.err("Error applying data type: " + e.getMessage());
+            } finally {
+                program.endTransaction(txId, txSuccess);
             }
 
         } catch (Exception e) {

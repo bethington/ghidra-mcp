@@ -644,6 +644,7 @@ public class SymbolLabelService {
         }
 
         int txId = program.startTransaction("Rename Global Variable");
+        boolean success = false;
         try {
             SymbolTable symbolTable = program.getSymbolTable();
 
@@ -662,7 +663,6 @@ public class SymbolLabelService {
             }
 
             if (symbols.isEmpty()) {
-                program.endTransaction(txId, false);
                 return Response.err("Global variable '" + oldName + "' not found");
             }
 
@@ -670,14 +670,15 @@ public class SymbolLabelService {
             Address symbolAddr = symbol.getAddress();
             symbol.setName(newName, SourceType.USER_DEFINED);
 
-            program.endTransaction(txId, true);
+            success = true;
             return Response.ok(JsonHelper.mapOf("status", "success", "message",
                     "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr));
 
         } catch (Exception e) {
-            program.endTransaction(txId, false);
             Msg.error(this, "Error renaming global variable: " + e.getMessage());
             return Response.err(e.getMessage());
+        } finally {
+            program.endTransaction(txId, success);
         }
     }
 

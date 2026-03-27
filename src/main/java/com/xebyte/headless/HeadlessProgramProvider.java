@@ -829,16 +829,18 @@ public class HeadlessProgramProvider implements ProgramProvider {
                 return false;
             }
             int tx = program.startTransaction("Configure Analyzer");
+            boolean txSuccess = false;
             try {
                 if (enabled != null) {
                     opts.setBoolean(analyzerName, enabled);
                 }
-                program.endTransaction(tx, true);
+                txSuccess = true;
                 Msg.info(this, "Configured analyzer: " + analyzerName + " enabled=" + enabled);
                 return true;
             } catch (Exception e) {
-                program.endTransaction(tx, false);
                 throw e;
+            } finally {
+                program.endTransaction(tx, txSuccess);
             }
         } catch (Exception e) {
             Msg.error(this, "Error configuring analyzer: " + e.getMessage(), e);
