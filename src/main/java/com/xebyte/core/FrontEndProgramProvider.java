@@ -81,19 +81,24 @@ public class FrontEndProgramProvider implements ProgramProvider {
 
         String searchName = name.trim();
 
-        // 1. Check path-based cache first (handles multi-version same-name DLLs)
+        // 1. ALWAYS check CodeBrowser programs first — if the user has a program open
+        // in a CodeBrowser, we MUST use that instance so changes are visible immediately.
+        // This is critical: using our own cached instance would modify a different object
+        // in memory, and the CodeBrowser wouldn't see the changes until a reload.
+        List<Program> cbPrograms = collectCodeBrowserPrograms();
+
+        // Path-based match against CodeBrowser programs (e.g., "/Vanilla/1.13c/D2Client.dll")
         if (searchName.startsWith("/")) {
-            String cacheKey = pathToName.get(searchName);
-            if (cacheKey != null) {
-                Program cached = openPrograms.get(cacheKey);
-                if (cached != null) {
-                    return cached;
+            for (Program prog : cbPrograms) {
+                DomainFile df = prog.getDomainFile();
+                String dfPath = (df != null) ? df.getPathname() : "null";
+                if (df != null && df.getPathname().equals(searchName)) {
+                    return prog;
                 }
             }
         }
 
-        // 2. Check all running CodeBrowsers for this program
-        List<Program> cbPrograms = collectCodeBrowserPrograms();
+        // Name-based match against CodeBrowser programs
         for (Program prog : cbPrograms) {
             if (prog.getName().equalsIgnoreCase(searchName)) {
                 return prog;
@@ -103,6 +108,17 @@ public class FrontEndProgramProvider implements ProgramProvider {
         for (Program prog : cbPrograms) {
             if (prog.getName().toLowerCase().contains(searchName.toLowerCase())) {
                 return prog;
+            }
+        }
+
+        // 2. Check path-based cache (handles multi-version same-name DLLs not in CodeBrowser)
+        if (searchName.startsWith("/")) {
+            String cacheKey = pathToName.get(searchName);
+            if (cacheKey != null) {
+                Program cached = openPrograms.get(cacheKey);
+                if (cached != null) {
+                    return cached;
+                }
             }
         }
 
@@ -193,12 +209,18 @@ public class FrontEndProgramProvider implements ProgramProvider {
         return allPrograms;
     }
 
+    @Override
+    public Project getProject() {
+        return tool.getProject();
+    }
+
     /**
      * Open a program from the active project by name or path.
      *
      * @param nameOrPath Program name (e.g., "D2Common.dll") or project path (e.g., "/LoD/1.00/D2Common.dll")
      * @return The opened program, or null if not found
      */
+    @Override
     public Program openFromProject(String nameOrPath) {
         Project project = tool.getProject();
         if (project == null) {

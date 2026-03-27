@@ -16,8 +16,13 @@
 package com.xebyte.core;
 
 import ghidra.app.services.ProgramManager;
+import ghidra.framework.model.DomainFile;
+import ghidra.framework.model.Project;
+import ghidra.framework.model.ProjectData;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.listing.Program;
+import ghidra.util.Msg;
+import ghidra.util.task.TaskMonitor;
 
 /**
  * GUI mode implementation of ProgramProvider.
@@ -85,6 +90,41 @@ public class GuiProgramProvider implements ProgramProvider {
         ProgramManager pm = tool.getService(ProgramManager.class);
         if (pm != null && program != null) {
             pm.setCurrentProgram(program);
+        }
+    }
+
+    @Override
+    public Project getProject() {
+        return tool.getProject();
+    }
+
+    @Override
+    public Program openFromProject(String path) {
+        Project project = tool.getProject();
+        if (project == null) {
+            return null;
+        }
+
+        ProjectData projectData = project.getProjectData();
+        DomainFile domainFile = projectData.getFile(path);
+        if (domainFile == null) {
+            return null;
+        }
+
+        try {
+            Program program = (Program) domainFile.getDomainObject(
+                tool, false, false, TaskMonitor.DUMMY);
+            if (program != null) {
+                ProgramManager pm = tool.getService(ProgramManager.class);
+                if (pm != null) {
+                    pm.openProgram(program);
+                    pm.setCurrentProgram(program);
+                }
+            }
+            return program;
+        } catch (Exception e) {
+            Msg.error(this, "Failed to open program: " + path + " - " + e.getMessage());
+            return null;
         }
     }
 
