@@ -6,6 +6,7 @@ import ghidra.program.model.listing.*;
 import ghidra.util.Msg;
 
 import javax.swing.SwingUtilities;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -45,6 +46,10 @@ public class CommentService {
             return Response.err("Comment text is required");
         }
 
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
@@ -52,11 +57,6 @@ public class CommentService {
             SwingUtilities.invokeAndWait(() -> {
                 int tx = program.startTransaction(transactionName);
                 try {
-                    Address addr = program.getAddressFactory().getAddress(addressStr);
-                    if (addr == null) {
-                        errorMsg.set("Invalid address: " + addressStr);
-                        return;
-                    }
                     program.getListing().setComment(addr, commentType, comment);
                     success.set(true);
                 } catch (Exception e) {
@@ -80,9 +80,14 @@ public class CommentService {
         return setCommentAtAddress(addressStr, comment, commentType, transactionName, null);
     }
 
-    @McpTool(path = "/set_decompiler_comment", method = "POST", description = "Set decompiler PRE_COMMENT at address", category = "comment")
+    @McpTool(path = "/set_decompiler_comment", method = "POST", description = "Set decompiler PRE_COMMENT at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
     public Response setDecompilerComment(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment", programName);
@@ -92,9 +97,14 @@ public class CommentService {
         return setDecompilerComment(addressStr, comment, null);
     }
 
-    @McpTool(path = "/set_disassembly_comment", method = "POST", description = "Set disassembly EOL_COMMENT at address", category = "comment")
+    @McpTool(path = "/set_disassembly_comment", method = "POST", description = "Set disassembly EOL_COMMENT at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
     public Response setDisassemblyComment(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment", programName);
@@ -107,9 +117,14 @@ public class CommentService {
     /**
      * Get the plate (header) comment for a function.
      */
-    @McpTool(path = "/get_plate_comment", description = "Get function header/plate comment", category = "comment")
+    @McpTool(path = "/get_plate_comment", description = "Get function header/plate comment. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
     public Response getPlateComment(
-            @Param(value = "address", description = "Function address") String address,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String address,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -119,9 +134,9 @@ public class CommentService {
             return Response.err("address parameter is required");
         }
 
-        Address addr = program.getAddressFactory().getAddress(address);
+        Address addr = ServiceUtils.parseAddress(program, address);
         if (addr == null) {
-            return Response.err("Invalid address: " + address);
+            return Response.err(ServiceUtils.getLastParseError());
         }
 
         Function func = program.getFunctionManager().getFunctionAt(addr);
@@ -132,19 +147,24 @@ public class CommentService {
             return Response.err("No function at address: " + address);
         }
 
-        return Response.ok(JsonHelper.mapOf(
-                "address", func.getEntryPoint().toString(),
-                "function_name", func.getName(),
-                "comment", func.getComment()
-        ));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+        result.put("function_name", func.getName());
+        result.put("comment", func.getComment());
+        return Response.ok(result);
     }
 
     /**
      * Set function plate (header) comment.
      */
-    @McpTool(path = "/set_plate_comment", method = "POST", description = "Set function header/plate comment", category = "comment")
+    @McpTool(path = "/set_plate_comment", method = "POST", description = "Set function header/plate comment. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
     public Response setPlateComment(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -158,6 +178,10 @@ public class CommentService {
             return Response.err("Comment is required");
         }
 
+        // Resolve address before entering SwingUtilities lambda
+        Address resolvedAddr = ServiceUtils.parseAddress(program, functionAddress);
+        if (resolvedAddr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
@@ -165,13 +189,7 @@ public class CommentService {
             SwingUtilities.invokeAndWait(() -> {
                 int tx = program.startTransaction("Set Plate Comment");
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        errorMsg.set("Invalid address: " + functionAddress);
-                        return;
-                    }
-
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    Function func = program.getFunctionManager().getFunctionAt(resolvedAddr);
                     if (func == null) {
                         errorMsg.set("No function at address: " + functionAddress);
                         return;
@@ -210,9 +228,14 @@ public class CommentService {
     /**
      * Batch set multiple comments (decompiler, disassembly, and plate) in a single operation.
      */
-    @McpTool(path = "/batch_set_comments", method = "POST", description = "Set multiple comments in one operation", category = "comment")
+    @McpTool(path = "/batch_set_comments", method = "POST", description = "Set multiple comments in one operation. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
     public Response batchSetComments(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "decompiler_comments", source = ParamSource.BODY) List<Map<String, String>> decompilerComments,
             @Param(value = "disassembly_comments", source = ParamSource.BODY) List<Map<String, String>> disassemblyComments,
             @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "") String plateComment,
@@ -220,6 +243,15 @@ public class CommentService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // Resolve function address before entering SwingUtilities lambda
+        final Address funcAddr;
+        if (functionAddress != null && !functionAddress.isEmpty()) {
+            funcAddr = ServiceUtils.parseAddress(program, functionAddress);
+            if (funcAddr == null) return Response.err(ServiceUtils.getLastParseError());
+        } else {
+            funcAddr = null;
+        }
 
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
@@ -233,18 +265,15 @@ public class CommentService {
                 int tx = program.startTransaction("Batch Set Comments");
                 try {
                     // Set or clear plate comment (v3.0.1: null=skip, ""=clear, non-empty=set)
-                    if (plateComment != null && !plateComment.equals("null") && functionAddress != null) {
-                        Address funcAddr = program.getAddressFactory().getAddress(functionAddress);
-                        if (funcAddr != null) {
-                            Function func = program.getFunctionManager().getFunctionAt(funcAddr);
-                            if (func != null) {
-                                String existingPlate = func.getComment();
-                                if (existingPlate != null && !existingPlate.isEmpty()) {
-                                    overwrittenCount.incrementAndGet();
-                                }
-                                func.setComment(plateComment.isEmpty() ? null : plateComment);
-                                plateSet.set(true);
+                    if (plateComment != null && !plateComment.equals("null") && funcAddr != null) {
+                        Function func = program.getFunctionManager().getFunctionAt(funcAddr);
+                        if (func != null) {
+                            String existingPlate = func.getComment();
+                            if (existingPlate != null && !existingPlate.isEmpty()) {
+                                overwrittenCount.incrementAndGet();
                             }
+                            func.setComment(plateComment.isEmpty() ? null : plateComment);
+                            plateSet.set(true);
                         }
                     }
 
@@ -252,10 +281,10 @@ public class CommentService {
                     Listing listing = program.getListing();
                     if (decompilerComments != null) {
                         for (Map<String, String> commentEntry : decompilerComments) {
-                            String addr = commentEntry.get("address");
+                            String addrStr = commentEntry.get("address");
                             String cmt = commentEntry.get("comment");
-                            if (addr != null && cmt != null) {
-                                Address address = program.getAddressFactory().getAddress(addr);
+                            if (addrStr != null && cmt != null) {
+                                Address address = ServiceUtils.parseAddress(program, addrStr);
                                 if (address != null) {
                                     String existing = listing.getComment(CodeUnit.PRE_COMMENT, address);
                                     if (existing != null && !existing.isEmpty()) {
@@ -271,10 +300,10 @@ public class CommentService {
                     // Set disassembly comments (EOL_COMMENT)
                     if (disassemblyComments != null) {
                         for (Map<String, String> commentEntry : disassemblyComments) {
-                            String addr = commentEntry.get("address");
+                            String addrStr = commentEntry.get("address");
                             String cmt = commentEntry.get("comment");
-                            if (addr != null && cmt != null) {
-                                Address address = program.getAddressFactory().getAddress(addr);
+                            if (addrStr != null && cmt != null) {
+                                Address address = ServiceUtils.parseAddress(program, addrStr);
                                 if (address != null) {
                                     String existing = listing.getComment(CodeUnit.EOL_COMMENT, address);
                                     if (existing != null && !existing.isEmpty()) {
@@ -327,9 +356,14 @@ public class CommentService {
     /**
      * Clear all comments (plate, PRE, EOL) within a function's address range.
      */
-    @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function", category = "comment")
+    @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
     public Response clearFunctionComments(
-            @Param(value = "function_address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String functionAddress,
             @Param(value = "clear_plate", source = ParamSource.BODY, defaultValue = "true") boolean clearPlate,
             @Param(value = "clear_pre", source = ParamSource.BODY, defaultValue = "true") boolean clearPre,
             @Param(value = "clear_eol", source = ParamSource.BODY, defaultValue = "true") boolean clearEol,
@@ -342,6 +376,10 @@ public class CommentService {
             return Response.err("function_address parameter is required");
         }
 
+        // Resolve address before entering SwingUtilities lambda
+        Address resolvedAddr = ServiceUtils.parseAddress(program, functionAddress);
+        if (resolvedAddr == null) return Response.err(ServiceUtils.getLastParseError());
+
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
         final AtomicInteger preCleared = new AtomicInteger(0);
@@ -352,13 +390,7 @@ public class CommentService {
             SwingUtilities.invokeAndWait(() -> {
                 int tx = program.startTransaction("Clear Function Comments");
                 try {
-                    Address addr = program.getAddressFactory().getAddress(functionAddress);
-                    if (addr == null) {
-                        errorMsg.set("Invalid address: " + functionAddress);
-                        return;
-                    }
-
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    Function func = program.getFunctionManager().getFunctionAt(resolvedAddr);
                     if (func == null) {
                         errorMsg.set("No function at address: " + functionAddress);
                         return;

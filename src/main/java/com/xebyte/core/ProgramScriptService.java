@@ -3,6 +3,7 @@ package com.xebyte.core;
 import ghidra.app.services.ProgramManager;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
@@ -168,6 +169,7 @@ public class ProgramScriptService {
 
         List<Map<String, Object>> programList = new ArrayList<>();
         for (Program prog : programs) {
+            int physicalSpaceCount = ServiceUtils.getPhysicalSpaceCount(prog);
             programList.add(JsonHelper.mapOf(
                 "name", prog.getName(),
                 "path", prog.getDomainFile().getPathname(),
@@ -177,7 +179,8 @@ public class ProgramScriptService {
                 "compiler", prog.getCompilerSpec().getCompilerSpecID().getIdAsString(),
                 "image_base", prog.getImageBase().toString(),
                 "memory_size", prog.getMemory().getSize(),
-                "function_count", prog.getFunctionManager().getFunctionCount()
+                "function_count", prog.getFunctionManager().getFunctionCount(),
+                "has_multiple_address_spaces", physicalSpaceCount > 1
             ));
         }
 
@@ -186,6 +189,68 @@ public class ProgramScriptService {
             "count", programs.length,
             "current_program", currentProgram != null ? currentProgram.getName() : ""
         ));
+    }
+
+    public Response getAddressSpaces() {
+        return getAddressSpaces(null);
+    }
+
+    /**
+     * List all physical address spaces in the program.
+     * Returns only RAM and CODE spaces; excludes pseudo-spaces (EXTERNAL, STACK, etc.)
+     * and overlay spaces. Useful for embedded/microcontroller targets where multiple
+     * address spaces exist and plain hex addresses may be ambiguous.
+     */
+    @McpTool(path = "/get_address_spaces",
+             description = "List all physical address spaces in the program. On programs with multiple "
+                         + "address spaces (e.g., embedded targets), use the returned space names to "
+                         + "prefix addresses (e.g., mem:1000, code:ff00) for unambiguous resolution. "
+                         + "Also check addressable_unit_size: a value > 1 means the space is word-addressed "
+                         + "(e.g., AVR code space uses 2-byte words). MCP tools and Ghidra both use word "
+                         + "addresses natively for such spaces — code:001478 is word 0x1478, not byte 0x1478. "
+                         + "Do NOT multiply or divide addresses seen in Ghidra output; use them as-is.",
+             category = "program")
+    public Response getAddressSpaces(
+            @Param(value = "program", description = "Target program name") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        List<Map<String, Object>> spaces = buildAddressSpacesList(program);
+        return Response.ok(JsonHelper.mapOf("address_spaces", spaces, "count", spaces.size()));
+    }
+
+    private List<Map<String, Object>> buildAddressSpacesList(Program program) {
+        List<Map<String, Object>> spaces = new ArrayList<>();
+        AddressSpace defaultSpace = program.getAddressFactory().getDefaultAddressSpace();
+        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
+            if (space.isOverlaySpace()) continue;
+            int type = space.getType();
+            if (type != AddressSpace.TYPE_RAM && type != AddressSpace.TYPE_CODE) continue;
+            long maxOff = space.getMaxAddress().getOffset();
+            long minOff = space.getMinAddress().getOffset();
+            // Safe unsigned size: (maxOff - minOff + 1) overflows for full 64-bit spaces (maxOff == -1L)
+            long size = maxOff - minOff + 1;
+            if (size == 0 && Long.compareUnsigned(maxOff, minOff) > 0) {
+                size = Long.MAX_VALUE; // Full 64-bit space; clamp to avoid emitting 0
+            }
+            int unitSize = space.getAddressableUnitSize();
+            // size_bytes: guard against overflow when size is clamped or unitSize > 1
+            long sizeBytes = (size == Long.MAX_VALUE || unitSize <= 0)
+                    ? Long.MAX_VALUE
+                    : size * unitSize;
+            spaces.add(JsonHelper.mapOf(
+                "name",                  space.getName(),
+                "start",                 space.getMinAddress().toString(false),
+                "end",                   space.getMaxAddress().toString(false),
+                "size",                  size,
+                "addressable_unit_size", unitSize,
+                "size_bytes",            sizeBytes,
+                "address_size_bits",     space.getSize(),
+                "is_default",            space == defaultSpace
+            ));
+        }
+        return spaces;
     }
 
     /**
@@ -202,24 +267,35 @@ public class ProgramScriptService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        return Response.ok(JsonHelper.mapOf(
-            "name", program.getName(),
-            "path", program.getDomainFile().getPathname(),
-            "executable_path", program.getExecutablePath() != null ? program.getExecutablePath() : "",
-            "executable_format", program.getExecutableFormat(),
-            "language", program.getLanguageID().getIdAsString(),
-            "compiler", program.getCompilerSpec().getCompilerSpecID().getIdAsString(),
-            "address_size", program.getAddressFactory().getDefaultAddressSpace().getSize(),
-            "image_base", program.getImageBase().toString(),
-            "min_address", program.getMinAddress() != null ? program.getMinAddress().toString() : "null",
-            "max_address", program.getMaxAddress() != null ? program.getMaxAddress().toString() : "null",
-            "memory_size", program.getMemory().getSize(),
-            "function_count", program.getFunctionManager().getFunctionCount(),
-            "symbol_count", program.getSymbolTable().getNumSymbols(),
-            "data_type_count", program.getDataTypeManager().getDataTypeCount(true),
-            "creation_date", program.getCreationDate() != null ? program.getCreationDate().toString() : "unknown",
-            "memory_block_count", program.getMemory().getBlocks().length
-        ));
+        List<Map<String, Object>> addressSpaces = buildAddressSpacesList(program);
+        boolean multiSpace = addressSpaces.size() > 1;
+
+        Map<String, Object> info = new java.util.LinkedHashMap<>();
+        info.put("name", program.getName());
+        info.put("path", program.getDomainFile().getPathname());
+        info.put("executable_path", program.getExecutablePath() != null ? program.getExecutablePath() : "");
+        info.put("executable_format", program.getExecutableFormat());
+        info.put("language", program.getLanguageID().getIdAsString());
+        info.put("compiler", program.getCompilerSpec().getCompilerSpecID().getIdAsString());
+        info.put("address_size", program.getAddressFactory().getDefaultAddressSpace().getSize());
+        info.put("image_base", program.getImageBase().toString());
+        info.put("min_address", program.getMinAddress() != null ? program.getMinAddress().toString() : "null");
+        info.put("max_address", program.getMaxAddress() != null ? program.getMaxAddress().toString() : "null");
+        info.put("memory_size", program.getMemory().getSize());
+        info.put("function_count", program.getFunctionManager().getFunctionCount());
+        info.put("symbol_count", program.getSymbolTable().getNumSymbols());
+        info.put("data_type_count", program.getDataTypeManager().getDataTypeCount(true));
+        info.put("creation_date", program.getCreationDate() != null ? program.getCreationDate().toString() : "unknown");
+        info.put("memory_block_count", program.getMemory().getBlocks().length);
+        info.put("address_spaces", addressSpaces);
+        info.put("has_multiple_address_spaces", multiSpace);
+        if (multiSpace) {
+            info.put("address_space_warning",
+                "This program has multiple address spaces. Plain hex addresses will resolve to the "
+                + "default space and may be incorrect. Use <space>:<hex> format (e.g., mem:1000) "
+                + "or call get_address_spaces first.");
+        }
+        return Response.ok(info);
     }
 
     /**
@@ -919,7 +995,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/list_scripts", description = "List available Ghidra scripts", category = "program")
     public Response listGhidraScripts(
-            @Param(value = "filter", description = "Script name filter") String filter) {
+            @Param(value = "filter", description = "Script name filter", defaultValue = "") String filter) {
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
@@ -962,9 +1038,14 @@ public class ProgramScriptService {
     /**
      * Read memory at a specific address.
      */
-    @McpTool(path = "/read_memory", description = "Read raw memory bytes", category = "program")
+    @McpTool(path = "/read_memory", description = "Read raw memory bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response readMemory(
-            @Param(value = "address", description = "Start address") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "length", defaultValue = "16", description = "Number of bytes") int length,
             @Param(value = "program", description = "Target program name") String programName) {
         try {
@@ -972,9 +1053,9 @@ public class ProgramScriptService {
             if (pe.hasError()) return pe.error();
             Program program = pe.program();
 
-            Address address = program.getAddressFactory().getAddress(addressStr);
+            Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             Memory memory = program.getMemory();
@@ -989,12 +1070,12 @@ public class ProgramScriptService {
                 hexStr.append(String.format("%02x", bytes[i] & 0xFF));
             }
 
-            return Response.ok(JsonHelper.mapOf(
-                "address", address.toString(),
-                "length", bytesRead,
-                "data", dataList,
-                "hex", hexStr.toString()
-            ));
+            Map<String, Object> memResult = new LinkedHashMap<>();
+            memResult.putAll(ServiceUtils.addressToJson(address, program));
+            memResult.put("length", bytesRead);
+            memResult.put("data", dataList);
+            memResult.put("hex", hexStr.toString());
+            return Response.ok(memResult);
 
         } catch (Exception e) {
             return Response.err("Failed to read memory: " + e.getMessage());
@@ -1010,10 +1091,15 @@ public class ProgramScriptService {
         return createMemoryBlock(name, addressStr, size, read, write, execute, isVolatile, comment, null);
     }
 
-    @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block", category = "program")
+    @McpTool(path = "/create_memory_block", method = "POST", description = "Create a new memory block. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response createMemoryBlock(
             @Param(value = "name", source = ParamSource.BODY) String name,
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "size", source = ParamSource.BODY, defaultValue = "0") long size,
             @Param(value = "read", source = ParamSource.BODY, defaultValue = "true") boolean read,
             @Param(value = "write", source = ParamSource.BODY, defaultValue = "true") boolean write,
@@ -1035,6 +1121,12 @@ public class ProgramScriptService {
             return Response.err("size must be positive");
         }
 
+        // Resolve address before entering EDT lambda
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) {
+            return Response.err(ServiceUtils.getLastParseError());
+        }
+
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
 
@@ -1043,12 +1135,6 @@ public class ProgramScriptService {
                 int tx = program.startTransaction("Create memory block");
                 boolean txSuccess = false;
                 try {
-                    Address addr = program.getAddressFactory().getAddress(addressStr);
-                    if (addr == null) {
-                        errorMsg.set("Invalid address: " + addressStr);
-                        return;
-                    }
-
                     // Check for overlap with existing blocks
                     Address end = addr.add(size - 1);
                     for (MemoryBlock existing : program.getMemory().getBlocks()) {
@@ -1116,9 +1202,14 @@ public class ProgramScriptService {
         return setBookmark(addressStr, category, comment, null);
     }
 
-    @McpTool(path = "/set_bookmark", method = "POST", description = "Create or update a bookmark", category = "program")
+    @McpTool(path = "/set_bookmark", method = "POST", description = "Create or update a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response setBookmark(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
@@ -1137,9 +1228,9 @@ public class ProgramScriptService {
         }
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -1159,12 +1250,12 @@ public class ProgramScriptService {
                 bookmarkManager.setBookmark(addr, BookmarkType.NOTE, finalCategory, finalComment);
                 program.endTransaction(transactionId, true);
 
-                return Response.ok(JsonHelper.mapOf(
-                    "success", true,
-                    "address", addr.toString(),
-                    "category", finalCategory,
-                    "comment", finalComment
-                ));
+                Map<String, Object> bmResult = new LinkedHashMap<>();
+                bmResult.put("success", true);
+                bmResult.putAll(ServiceUtils.addressToJson(addr, program));
+                bmResult.put("category", finalCategory);
+                bmResult.put("comment", finalComment);
+                return Response.ok(bmResult);
 
             } catch (Exception e) {
                 program.endTransaction(transactionId, false);
@@ -1183,10 +1274,15 @@ public class ProgramScriptService {
         return listBookmarks(category, addressStr, null);
     }
 
-    @McpTool(path = "/list_bookmarks", description = "List bookmarks with optional filter", category = "program")
+    @McpTool(path = "/list_bookmarks", description = "List bookmarks with optional filter. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response listBookmarks(
-            @Param(value = "category", description = "Category filter") String category,
-            @Param(value = "address", description = "Address filter") String addressStr,
+            @Param(value = "category", description = "Category filter (omit to return all categories)", defaultValue = "") String category,
+            @Param(value = "address", paramType = "address", defaultValue = "",
+                   description = "Address filter (omit to return all addresses). Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "program", description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1198,20 +1294,20 @@ public class ProgramScriptService {
 
             // If specific address provided, get bookmarks at that address
             if (addressStr != null && !addressStr.isEmpty()) {
-                Address addr = program.getAddressFactory().getAddress(addressStr);
+                Address addr = ServiceUtils.parseAddress(program, addressStr);
                 if (addr == null) {
-                    return Response.err("Invalid address: " + addressStr);
+                    return Response.err(ServiceUtils.getLastParseError());
                 }
 
                 Bookmark[] bms = bookmarkManager.getBookmarks(addr);
                 for (Bookmark bm : bms) {
                     if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
-                        bookmarks.add(JsonHelper.mapOf(
-                            "address", bm.getAddress().toString(),
-                            "category", bm.getCategory(),
-                            "comment", bm.getComment(),
-                            "type", bm.getTypeString()
-                        ));
+                        Map<String, Object> bmItem = new LinkedHashMap<>();
+                        bmItem.putAll(ServiceUtils.addressToJson(bm.getAddress(), program));
+                        bmItem.put("category", bm.getCategory());
+                        bmItem.put("comment", bm.getComment());
+                        bmItem.put("type", bm.getTypeString());
+                        bookmarks.add(bmItem);
                     }
                 }
             } else {
@@ -1222,12 +1318,12 @@ public class ProgramScriptService {
                     while (iter.hasNext()) {
                         Bookmark bm = iter.next();
                         if (category == null || category.isEmpty() || bm.getCategory().equals(category)) {
-                            bookmarks.add(JsonHelper.mapOf(
-                                "address", bm.getAddress().toString(),
-                                "category", bm.getCategory(),
-                                "comment", bm.getComment(),
-                                "type", bm.getTypeString()
-                            ));
+                            Map<String, Object> bmItem = new LinkedHashMap<>();
+                            bmItem.putAll(ServiceUtils.addressToJson(bm.getAddress(), program));
+                            bmItem.put("category", bm.getCategory());
+                            bmItem.put("comment", bm.getComment());
+                            bmItem.put("type", bm.getTypeString());
+                            bookmarks.add(bmItem);
                         }
                     }
                 }
@@ -1251,9 +1347,14 @@ public class ProgramScriptService {
         return deleteBookmark(addressStr, category, null);
     }
 
-    @McpTool(path = "/delete_bookmark", method = "POST", description = "Delete a bookmark", category = "program")
+    @McpTool(path = "/delete_bookmark", method = "POST", description = "Delete a bookmark. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response deleteBookmark(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1265,9 +1366,9 @@ public class ProgramScriptService {
         }
 
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = ServiceUtils.parseAddress(program, addressStr);
             if (addr == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             BookmarkManager bookmarkManager = program.getBookmarkManager();
@@ -1285,11 +1386,11 @@ public class ProgramScriptService {
                 }
 
                 program.endTransaction(transactionId, true);
-                return Response.ok(JsonHelper.mapOf(
-                    "success", true,
-                    "deleted", deleted,
-                    "address", addr.toString()
-                ));
+                Map<String, Object> delResult = new LinkedHashMap<>();
+                delResult.put("success", true);
+                delResult.put("deleted", deleted);
+                delResult.putAll(ServiceUtils.addressToJson(addr, program));
+                return Response.ok(delResult);
 
             } catch (Exception e) {
                 program.endTransaction(transactionId, false);
@@ -1630,7 +1731,7 @@ public class ProgramScriptService {
                 boolean txSuccess = false;
                 try {
                     Address oldBase = program.getImageBase();
-                    Address newBase = program.getAddressFactory().getAddress(addressStr);
+                    Address newBase = ServiceUtils.parseAddress(program, addressStr);
                     if (newBase == null) {
                         errorMsg.set("Invalid address: " + addressStr);
                         return;

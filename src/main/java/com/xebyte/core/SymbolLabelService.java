@@ -37,9 +37,9 @@ public class SymbolLabelService {
         return getFunctionLabels(functionName, offset, limit, null);
     }
 
-    @McpTool(path = "/get_function_labels", description = "Get labels within a function body", category = "symbol")
+    @McpTool(path = "/get_function_labels", description = "Get labels within a function body. Requires the function name — if you only have an address, call get_function_by_address first to retrieve the name.", category = "symbol")
     public Response getFunctionLabels(
-            @Param(value = "name", description = "Function name") String functionName,
+            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "20") int limit,
             @Param(value = "program") String programName) {
@@ -100,9 +100,14 @@ public class SymbolLabelService {
         return renameLabel(addressStr, oldName, newName, null);
     }
 
-    @McpTool(path = "/rename_label", method = "POST", description = "Rename a label at address", category = "symbol")
+    @McpTool(path = "/rename_label", method = "POST", description = "Rename a label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
     public Response renameLabel(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "old_name", source = ParamSource.BODY) String oldName,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
             @Param(value = "program", source = ParamSource.BODY) String programName) {
@@ -111,9 +116,9 @@ public class SymbolLabelService {
         Program program = pe.program();
 
         try {
-            Address address = program.getAddressFactory().getAddress(addressStr);
+            Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             SymbolTable symbolTable = program.getSymbolTable();
@@ -157,9 +162,14 @@ public class SymbolLabelService {
         return createLabel(addressStr, labelName, null);
     }
 
-    @McpTool(path = "/create_label", method = "POST", description = "Create a label at address", category = "symbol")
+    @McpTool(path = "/create_label", method = "POST", description = "Create a label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
     public Response createLabel(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "name", source = ParamSource.BODY) String labelName,
             @Param(value = "program", source = ParamSource.BODY) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -174,9 +184,9 @@ public class SymbolLabelService {
         }
 
         try {
-            Address address = program.getAddressFactory().getAddress(addressStr);
+            Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             SymbolTable symbolTable = program.getSymbolTable();
@@ -260,9 +270,9 @@ public class SymbolLabelService {
                         }
 
                         try {
-                            Address address = program.getAddressFactory().getAddress(addressStr);
+                            Address address = ServiceUtils.parseAddress(program, addressStr);
                             if (address == null) {
-                                errors.add("Invalid address: " + addressStr);
+                                errors.add(ServiceUtils.getLastParseError());
                                 errorCount.incrementAndGet();
                                 continue;
                             }
@@ -323,9 +333,14 @@ public class SymbolLabelService {
         return renameOrLabel(addressStr, newName, null);
     }
 
-    @McpTool(path = "/rename_or_label", method = "POST", description = "Rename or create label at address", category = "symbol")
+    @McpTool(path = "/rename_or_label", method = "POST", description = "Rename or create label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
     public Response renameOrLabel(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "name", source = ParamSource.BODY) String newName,
             @Param(value = "program", source = ParamSource.BODY) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -340,9 +355,9 @@ public class SymbolLabelService {
         }
 
         try {
-            Address address = program.getAddressFactory().getAddress(addressStr);
+            Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             Listing listing = program.getListing();
@@ -363,9 +378,14 @@ public class SymbolLabelService {
         return deleteLabel(addressStr, labelName, null);
     }
 
-    @McpTool(path = "/delete_label", method = "POST", description = "Delete a label at address", category = "symbol")
+    @McpTool(path = "/delete_label", method = "POST", description = "Delete a label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
     public Response deleteLabel(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "name", source = ParamSource.BODY) String labelName,
             @Param(value = "program", source = ParamSource.BODY) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -377,9 +397,9 @@ public class SymbolLabelService {
         }
 
         try {
-            Address address = program.getAddressFactory().getAddress(addressStr);
+            Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
-                return Response.err("Invalid address: " + addressStr);
+                return Response.err(ServiceUtils.getLastParseError());
             }
 
             SymbolTable symbolTable = program.getSymbolTable();
@@ -476,9 +496,9 @@ public class SymbolLabelService {
                         }
 
                         try {
-                            Address address = program.getAddressFactory().getAddress(addressStr);
+                            Address address = ServiceUtils.parseAddress(program, addressStr);
                             if (address == null) {
-                                errors.add("Invalid address: " + addressStr);
+                                errors.add(ServiceUtils.getLastParseError());
                                 errorCount.incrementAndGet();
                                 continue;
                             }
@@ -542,14 +562,23 @@ public class SymbolLabelService {
         return renameDataAtAddress(addressStr, newName, null);
     }
 
-    @McpTool(path = "/rename_data", method = "POST", description = "Rename data at address", category = "symbol")
+    @McpTool(path = "/rename_data", method = "POST", description = "Rename data at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
     public Response renameDataAtAddress(
-            @Param(value = "address", source = ParamSource.BODY) String addressStr,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "newName", source = ParamSource.BODY) String newName,
             @Param(value = "program", source = ParamSource.BODY) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
@@ -559,12 +588,6 @@ public class SymbolLabelService {
             SwingUtilities.invokeAndWait(() -> {
                 int tx = program.startTransaction("Rename data");
                 try {
-                    Address addr = program.getAddressFactory().getAddress(addressStr);
-                    if (addr == null) {
-                        errorMsg.set("Invalid address: " + addressStr);
-                        return;
-                    }
-
                     Listing listing = program.getListing();
                     Data data = listing.getDefinedDataAt(addr);
 
@@ -666,9 +689,14 @@ public class SymbolLabelService {
         return renameExternalLocation(address, newName, null);
     }
 
-    @McpTool(path = "/rename_external_location", method = "POST", description = "Rename external location", category = "symbol")
+    @McpTool(path = "/rename_external_location", method = "POST", description = "Rename external location. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
     public Response renameExternalLocation(
-            @Param(value = "address", source = ParamSource.BODY) String address,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String address,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
             @Param(value = "program", source = ParamSource.BODY) String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -676,7 +704,8 @@ public class SymbolLabelService {
         Program program = pe.program();
 
         try {
-            Address addr = program.getAddressFactory().getAddress(address);
+            Address addr = ServiceUtils.parseAddress(program, address);
+            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
             ExternalManager extMgr = program.getExternalManager();
 
             String[] libNames = extMgr.getExternalLibraryNames();
@@ -740,13 +769,22 @@ public class SymbolLabelService {
         return canRenameAtAddress(addressStr, null);
     }
 
-    @McpTool(path = "/can_rename_at_address", description = "Check if address supports rename", category = "symbol")
+    @McpTool(path = "/can_rename_at_address", description = "Check if address supports rename. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
     public Response canRenameAtAddress(
-            @Param(value = "address", description = "Address to check") String addressStr,
+            @Param(value = "address", paramType = "address",
+                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
+                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
+                               + "embedded/microcontroller targets — are not address-space-agnostic; "
+                               + "use get_address_spaces to discover spaces before assuming a plain hex "
+                               + "address is unambiguous.") String addressStr,
             @Param(value = "program") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // Resolve address before entering SwingUtilities lambda
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>();
         final AtomicReference<String> errorMsg = new AtomicReference<>();
@@ -754,12 +792,6 @@ public class SymbolLabelService {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Address addr = program.getAddressFactory().getAddress(addressStr);
-                    if (addr == null) {
-                        resultData.set(JsonHelper.mapOf("can_rename", false, "error", "Invalid address"));
-                        return;
-                    }
-
                     Function func = program.getFunctionManager().getFunctionAt(addr);
                     if (func != null) {
                         resultData.set(JsonHelper.mapOf(

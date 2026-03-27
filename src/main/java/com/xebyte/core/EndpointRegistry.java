@@ -1097,6 +1097,10 @@ public class EndpointRegistry {
             params(),
             (q, b) -> programScriptService.listOpenPrograms());
 
+        get("/get_address_spaces", "List all physical address spaces in the program",
+            params(pProg()),
+            (q, b) -> programScriptService.getAddressSpaces(str(q, "program")));
+
         get("/get_current_program_info", "Get detailed info about the active program",
             params(pProg()),
             (q, b) -> programScriptService.getCurrentProgramInfo(str(q, "program")));
