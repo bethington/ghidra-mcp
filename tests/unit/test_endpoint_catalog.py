@@ -135,10 +135,10 @@ class TestBridgeIsDynamic(unittest.TestCase):
         self.assertIn("/mcp/schema", content)
 
     def test_bridge_size_reasonable(self):
-        """Thin bridge should be well under 1000 lines."""
+        """Thin bridge should stay manageable (address-space support added ~250 lines in v4.3.1)."""
         bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
         lines = len(bridge_path.read_text().splitlines())
-        self.assertLess(lines, 1100, f"Bridge is {lines} lines, expected <1100 for thin multiplexer")
+        self.assertLess(lines, 1200, f"Bridge is {lines} lines, expected <1200 for thin multiplexer")
 
 
 class TestAnnotationScannerExists(unittest.TestCase):
