@@ -311,18 +311,56 @@ def discover_instances() -> list[dict]:
         try:
             text, status = uds_request(str(sock_file), "GET", "/mcp/instance_info", timeout=5)
             if status == 200:
-                data = json.loads(text)
-                # instance_info response is wrapped in Response.ok() → {"data": {...}}
-                if "data" in data:
-                    info.update(data["data"])
-                else:
-                    info.update(data)
+                info.update(_unwrap_response_data(text))
         except Exception as e:
             logger.debug(f"Could not query {sock_file}: {e}")
 
         instances.append(info)
 
     return instances
+
+
+def _unwrap_response_data(text: str) -> dict:
+    """Unwrap Response.ok() payloads while preserving plain JSON responses."""
+    data = json.loads(text)
+    if isinstance(data, dict) and "data" in data:
+        return data["data"]
+    return data
+
+
+def discover_active_tcp_instance() -> dict | None:
+    """Return the active TCP fallback connection as an instance-like record."""
+    if _transport_mode != "tcp" or not _active_tcp:
+        return None
+
+    info: dict = {
+        "transport": "tcp",
+        "url": _active_tcp,
+        "discovery": "active-tcp",
+    }
+    if _connected_project:
+        info["project"] = _connected_project
+
+    try:
+        text, status = tcp_request(_active_tcp, "GET", "/mcp/instance_info", timeout=5)
+        if status == 200:
+            info.update(_unwrap_response_data(text))
+            return info
+    except Exception as e:
+        logger.debug(f"Could not query TCP instance info for {_active_tcp}: {e}")
+
+    try:
+        text, status = tcp_request(_active_tcp, "GET", "/list_open_programs", timeout=5)
+        if status == 200:
+            data = _unwrap_response_data(text)
+            if isinstance(data, dict):
+                for key in ("programs", "count", "current_program"):
+                    if key in data:
+                        info[key] = data[key]
+    except Exception as e:
+        logger.debug(f"Could not query open programs for active TCP instance {_active_tcp}: {e}")
+
+    return info
 
 
 # ==========================================================================
@@ -774,16 +812,25 @@ async def _notify_tools_changed(ctx: Context | None) -> None:
 @mcp.tool()
 def list_instances() -> str:
     """
-    List all running Ghidra instances discovered via Unix domain sockets.
+    List known Ghidra instances from UDS discovery and the active TCP fallback.
 
-    Returns JSON with each instance's project name, PID, open programs, and socket path.
-    Also shows which instance is currently connected.
+    Returns JSON with each instance's project name, PID, open programs, and
+    socket path or TCP URL. Also shows which instance is currently connected.
     """
     instances = discover_instances()
+    tcp_instance = discover_active_tcp_instance()
+    if tcp_instance:
+        instances.append(tcp_instance)
+
     if not instances:
         return json.dumps({"instances": [], "note": "No running Ghidra instances found."})
+
     for inst in instances:
-        inst["connected"] = inst["socket"] == _active_socket
+        if inst.get("transport") == "tcp":
+            inst["connected"] = _transport_mode == "tcp" and inst.get("url") == _active_tcp
+        else:
+            inst["connected"] = inst["socket"] == _active_socket
+
     return json.dumps({"instances": instances}, indent=2)
 
 
