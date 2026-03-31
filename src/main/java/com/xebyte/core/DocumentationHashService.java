@@ -469,7 +469,7 @@ public class DocumentationHashService {
     @McpTool(path = "/apply_function_documentation", method = "POST", description = "Import documentation to a target function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "documentation")
     public Response applyFunctionDocumentation(
             @Param(value = "json_body", source = ParamSource.BODY) String jsonBody,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
