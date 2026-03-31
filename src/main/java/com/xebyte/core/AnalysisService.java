@@ -718,7 +718,7 @@ public class AnalysisService {
     @McpTool(path = "/search_byte_patterns", description = "Search for byte patterns with masks", category = "analysis")
     public Response searchBytePatterns(
             @Param(value = "pattern", description = "Hex byte pattern") String pattern,
-            @Param(value = "mask", description = "Pattern mask") String mask,
+            @Param(value = "mask", description = "Pattern mask (omit or leave empty for exact match)", defaultValue = "") String mask,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
