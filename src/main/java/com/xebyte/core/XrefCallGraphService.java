@@ -135,19 +135,19 @@ public class XrefCallGraphService {
     /**
      * Get all references to a specific function by name
      */
-    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function by name. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
+    @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function. Accepts function name or address (pass address as 'address' param, or as 'name').", category = "xref")
     public Response getFunctionXrefs(
-            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
+            @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
+            @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (functionName == null || functionName.isEmpty()) return Response.err("Function name is required");
 
         try {
-            FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+            FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
             if (!resolved.isSuccess()) return Response.text("No references found to function: " + functionName);
             Function function = resolved.function();
 
@@ -185,12 +185,13 @@ public class XrefCallGraphService {
      * Get all jump target addresses from a function's disassembly
      */
     public Response getFunctionJumpTargets(String functionName, int offset, int limit) {
-        return getFunctionJumpTargets(functionName, offset, limit, null);
+        return getFunctionJumpTargets(functionName, null, offset, limit, null);
     }
 
-    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
+    @McpTool(path = "/get_function_jump_targets", description = "Get jump targets within a function. Accepts function name or address.", category = "xref")
     public Response getFunctionJumpTargets(
-            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
+            @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
+            @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -202,7 +203,7 @@ public class XrefCallGraphService {
         FunctionManager functionManager = program.getFunctionManager();
 
         // Find the function by name or address
-        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
         if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
@@ -289,9 +290,10 @@ public class XrefCallGraphService {
     /**
      * Get all functions called by the specified function (callees)
      */
-    @McpTool(path = "/get_function_callees", description = "Get functions called by a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
+    @McpTool(path = "/get_function_callees", description = "Get functions called by a function. Accepts function name or address.", category = "xref")
     public Response getFunctionCallees(
-            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
+            @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
+            @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -303,7 +305,7 @@ public class XrefCallGraphService {
         FunctionManager functionManager = program.getFunctionManager();
 
         // Find the function by name or address
-        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
         if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
@@ -368,9 +370,10 @@ public class XrefCallGraphService {
     /**
      * Get all functions that call the specified function (callers)
      */
-    @McpTool(path = "/get_function_callers", description = "Get functions calling a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
+    @McpTool(path = "/get_function_callers", description = "Get functions calling a function. Accepts function name or address.", category = "xref")
     public Response getFunctionCallers(
-            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
+            @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
+            @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -383,7 +386,7 @@ public class XrefCallGraphService {
 
         // Find the function by name or address
         Function targetFunction = null;
-        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
         if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }
@@ -442,9 +445,10 @@ public class XrefCallGraphService {
     /**
      * Get a call graph subgraph centered on the specified function
      */
-    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function. Requires function name — if you only have an address, call get_function_by_address first.", category = "xref")
+    @McpTool(path = "/get_function_call_graph", description = "Traverse call graph from a function. Accepts function name or address.", category = "xref")
     public Response getFunctionCallGraph(
-            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
+            @Param(value = "name", defaultValue = "", description = "Function name") String functionName,
+            @Param(value = "address", defaultValue = "", description = "Function entry-point address (hex) — alternative to name") String address,
             @Param(value = "depth", defaultValue = "2", description = "Traversal depth") int depth,
             @Param(value = "direction", defaultValue = "both", description = "Traversal direction (both/callers/callees)") String direction,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -457,7 +461,7 @@ public class XrefCallGraphService {
 
         // Find the function by name or address
         Function rootFunction = null;
-        FunctionRef.Result resolved = FunctionRef.of(functionName).tryResolve(program);
+        FunctionRef.Result resolved = FunctionRef.ofNameOrAddress(functionName, address).tryResolve(program);
         if (!resolved.isSuccess()) {
             return Response.text("Function not found: " + functionName);
         }

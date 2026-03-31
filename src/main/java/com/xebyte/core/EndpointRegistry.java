@@ -682,30 +682,31 @@ public class EndpointRegistry {
             (q, b) -> xrefCallGraphService.getXrefsFrom(str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
-        get("/get_function_xrefs", "Get cross-references to a function by name",
-            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> xrefCallGraphService.getFunctionXrefs(str(q, "name"), num(q, "offset", 0),
+        get("/get_function_xrefs", "Get cross-references to a function",
+            params(qStr("name", "Function name"), qStr("address", "Function address (alternative to name)"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionXrefs(str(q, "name"), str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
         get("/get_function_jump_targets", "Get jump targets within a function",
-            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> xrefCallGraphService.getFunctionJumpTargets(str(q, "name"), num(q, "offset", 0),
+            params(qStr("name", "Function name"), qStr("address", "Function address (alternative to name)"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionJumpTargets(str(q, "name"), str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
         get("/get_function_callees", "Get functions called by a function",
-            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> xrefCallGraphService.getFunctionCallees(str(q, "name"), num(q, "offset", 0),
+            params(qStr("name", "Function name"), qStr("address", "Function address (alternative to name)"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionCallees(str(q, "name"), str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
         get("/get_function_callers", "Get functions calling a function",
-            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> xrefCallGraphService.getFunctionCallers(str(q, "name"), num(q, "offset", 0),
+            params(qStr("name", "Function name"), qStr("address", "Function address (alternative to name)"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionCallers(str(q, "name"), str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
         get("/get_function_call_graph", "Traverse call graph from a function",
-            params(qStr("name", "Function name"), qInt("depth", 2, "Traversal depth"),
+            params(qStr("name", "Function name"), qStr("address", "Function address (alternative to name)"),
+                qInt("depth", 2, "Traversal depth"),
                 qStr("direction", "Traversal direction (both/callers/callees)"), pProg()),
-            (q, b) -> xrefCallGraphService.getFunctionCallGraph(str(q, "name"), num(q, "depth", 2),
+            (q, b) -> xrefCallGraphService.getFunctionCallGraph(str(q, "name"), str(q, "address"), num(q, "depth", 2),
                 str(q, "direction", "both"), str(q, "program")));
 
         get("/get_full_call_graph", "Get entire program call graph",
@@ -963,6 +964,11 @@ public class EndpointRegistry {
                 qStr("pattern", "Name pattern filter"), qStr("direction", "Search direction"), pProg()),
             (q, b) -> analysisService.findNextUndefinedFunction(str(q, "start_address"), str(q, "criteria"),
                 str(q, "pattern"), str(q, "direction"), str(q, "program")));
+
+        get("/find_code_gaps", "Find gaps of undefined bytes between functions in executable memory",
+            params(qInt("min_size", 1), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> analysisService.findCodeGaps(num(q, "min_size", 1), num(q, "offset", 0),
+                num(q, "limit", 100), str(q, "program")));
 
         get("/analyze_function_complete", "Comprehensive single-call function analysis",
             params(qStr("name", "Function name"), qBool("include_xrefs", true), qBool("include_callees", true),
