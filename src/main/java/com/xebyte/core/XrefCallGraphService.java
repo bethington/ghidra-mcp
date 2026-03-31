@@ -40,7 +40,7 @@ public class XrefCallGraphService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -89,7 +89,7 @@ public class XrefCallGraphService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -140,7 +140,7 @@ public class XrefCallGraphService {
             @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -193,7 +193,7 @@ public class XrefCallGraphService {
             @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -294,7 +294,7 @@ public class XrefCallGraphService {
             @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -373,7 +373,7 @@ public class XrefCallGraphService {
             @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -447,7 +447,7 @@ public class XrefCallGraphService {
             @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String functionName,
             @Param(value = "depth", defaultValue = "2", description = "Traversal depth") int depth,
             @Param(value = "direction", defaultValue = "both", description = "Traversal direction (both/callers/callees)") String direction,
-            @Param(value = "program") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -574,7 +574,7 @@ public class XrefCallGraphService {
     public Response getFullCallGraph(
             @Param(value = "format", defaultValue = "edges", description = "Output format (edges or adjacency)") String format,
             @Param(value = "limit", defaultValue = "1000") int limit,
-            @Param(value = "program") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -688,7 +688,7 @@ public class XrefCallGraphService {
             @Param(value = "start_function", description = "Start function name") String startFunction,
             @Param(value = "end_function", description = "End function name") String endFunction,
             @Param(value = "analysis_type", defaultValue = "summary", description = "Analysis type (summary/paths/cycles)") String analysisType,
-            @Param(value = "program") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

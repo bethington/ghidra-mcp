@@ -150,7 +150,7 @@ public class AnalysisService {
 
     @McpTool(path = "/list_analyzers", description = "List available analyzers", category = "analysis")
     public Response listAnalyzers(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -572,7 +572,7 @@ public class AnalysisService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "length", defaultValue = "64", description = "Bytes to read") int length,
             @Param(value = "detect_strings", defaultValue = "true", description = "Auto-detect strings") boolean detectStrings,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -690,7 +690,7 @@ public class AnalysisService {
 
     @McpTool(path = "/detect_crypto_constants", description = "Detect crypto algorithm constants", category = "malware")
     public Response detectCryptoConstants(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
 
@@ -719,7 +719,7 @@ public class AnalysisService {
     public Response searchBytePatterns(
             @Param(value = "pattern", description = "Hex byte pattern") String pattern,
             @Param(value = "mask", description = "Pattern mask") String mask,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -817,7 +817,7 @@ public class AnalysisService {
     public Response findSimilarFunctions(
             @Param(value = "target_function", description = "Function name") String targetFunction,
             @Param(value = "threshold", defaultValue = "0.8", description = "Similarity threshold") double threshold,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -899,7 +899,7 @@ public class AnalysisService {
     @McpTool(path = "/analyze_control_flow", description = "Analyze function control flow complexity", category = "analysis")
     public Response analyzeControlFlow(
             @Param(value = "function_name", description = "Function name") String functionName,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1066,7 +1066,7 @@ public class AnalysisService {
     @McpTool(path = "/find_dead_code", description = "Identify unreachable code blocks", category = "analysis")
     public Response findDeadCode(
             @Param(value = "function_name", description = "Function name") String functionName,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
 
@@ -1113,7 +1113,7 @@ public class AnalysisService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "compact", defaultValue = "false", description = "Compact output") boolean compact,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1737,7 +1737,7 @@ public class AnalysisService {
             @Param(value = "criteria", description = "Search criteria") String criteria,
             @Param(value = "pattern", description = "Name pattern filter") String pattern,
             @Param(value = "direction", description = "Search direction") String direction,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1821,7 +1821,7 @@ public class AnalysisService {
             @Param(value = "include_callers", defaultValue = "true") boolean includeCallers,
             @Param(value = "include_disasm", defaultValue = "true") boolean includeDisasm,
             @Param(value = "include_variables", defaultValue = "true") boolean includeVariables,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2050,7 +2050,7 @@ public class AnalysisService {
             @Param(value = "sort_by", defaultValue = "address", description = "Sort field") String sortBy,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3548,7 +3548,7 @@ public class AnalysisService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

@@ -66,7 +66,7 @@ public class ProgramScriptService {
 
     @McpTool(path = "/get_metadata", description = "Get program metadata", category = "program")
     public Response getMetadata(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -115,7 +115,7 @@ public class ProgramScriptService {
 
     @McpTool(path = "/save_program", description = "Save current program", category = "program")
     public Response saveCurrentProgram(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -211,7 +211,7 @@ public class ProgramScriptService {
                          + "Do NOT multiply or divide addresses seen in Ghidra output; use them as-is.",
              category = "program")
     public Response getAddressSpaces(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -262,7 +262,7 @@ public class ProgramScriptService {
 
     @McpTool(path = "/get_current_program_info", description = "Get detailed info about the active program", category = "program")
     public Response getCurrentProgramInfo(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -939,7 +939,7 @@ public class ProgramScriptService {
         return Response.text(resultMsg.toString());
     }
 
-    @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code", category = "program")
+    @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter.", category = "program")
     public Response runScriptInline(
             @Param(value = "code", source = ParamSource.BODY) String code,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String args) {
@@ -1047,7 +1047,7 @@ public class ProgramScriptService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "length", defaultValue = "16", description = "Number of bytes") int length,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         try {
             ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
             if (pe.hasError()) return pe.error();
@@ -1285,7 +1285,7 @@ public class ProgramScriptService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
