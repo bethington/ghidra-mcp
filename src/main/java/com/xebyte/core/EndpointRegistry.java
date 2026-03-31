@@ -596,19 +596,19 @@ public class EndpointRegistry {
             (q, b) -> commentService.getPlateComment(str(q, "address"), str(q, "program")));
 
         post("/set_plate_comment", "Set function header/plate comment",
-            params(bStr("function_address"), bStr("comment"), pProg()),
-            (q, b) -> commentService.setPlateComment(bodyStr(b, "function_address"), bodyStr(b, "comment"), str(q, "program")));
+            params(bStr("address"), bStr("comment"), pProg()),
+            (q, b) -> commentService.setPlateComment(bodyStr(b, "address"), bodyStr(b, "comment"), str(q, "program")));
 
         post("/batch_set_comments", "Set multiple comments in one operation",
-            params(bStr("function_address"), bArr("decompiler_comments"), bArr("disassembly_comments"),
+            params(bStr("address"), bArr("decompiler_comments"), bArr("disassembly_comments"),
                 bStrOpt("plate_comment"), pProg()),
-            (q, b) -> commentService.batchSetComments(bodyStr(b, "function_address"),
+            (q, b) -> commentService.batchSetComments(bodyStr(b, "address"),
                 bodyMapList(b, "decompiler_comments"), bodyMapList(b, "disassembly_comments"),
                 bodyStr(b, "plate_comment"), str(q, "program")));
 
         post("/clear_function_comments", "Clear all comments within a function",
-            params(bStr("function_address"), bBool("clear_plate"), bBool("clear_pre"), bBool("clear_eol"), pProg()),
-            (q, b) -> commentService.clearFunctionComments(bodyStr(b, "function_address"),
+            params(bStr("address"), bBool("clear_plate"), bBool("clear_pre"), bBool("clear_eol"), pProg()),
+            (q, b) -> commentService.clearFunctionComments(bodyStr(b, "address"),
                 bodyBool(b, "clear_plate", true), bodyBool(b, "clear_pre", true),
                 bodyBool(b, "clear_eol", true), str(q, "program")));
     }
