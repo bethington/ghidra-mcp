@@ -960,21 +960,44 @@ public class ProgramScriptService {
         File scriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
         scriptsDir.mkdirs();
 
-        // Delete orphaned McpInline_*.java files from previous crashed runs.
-        // Ghidra tracks build failures per directory; orphaned failed scripts
-        // contaminate the output of every subsequent run with their old errors.
-        // Only delete files older than 60 s so a concurrent parallel agent's
-        // freshly-written file is never removed before it executes.
+        // Pre-cleanup: remove stale McpInline_*.java files so Ghidra's per-directory
+        // build state doesn't contaminate this run's output with old failures.
+        //
+        // Three cases handled:
+        //  1. Oracle exists (McpInline_*.java_failed)  → confirmed failure from a
+        //     previous run; delete both the .java and the oracle immediately.
+        //  2. No oracle, file older than 60 s          → crash-orphaned (server died
+        //     before the oracle could be written); delete as a safe fallback.
+        //  3. No oracle, file is fresh                 → likely a concurrent parallel
+        //     agent; leave it alone.
+        // Also purge any orphaned oracles whose .java has already been deleted.
         long now = System.currentTimeMillis();
-        File[] staleFiles = scriptsDir.listFiles(
+        File[] staleJava = scriptsDir.listFiles(
             (d, n) -> n.startsWith("McpInline_") && n.endsWith(".java"));
-        if (staleFiles != null) {
-            for (File stale : staleFiles) {
-                if (now - stale.lastModified() > 60_000L) stale.delete();
+        if (staleJava != null) {
+            for (File stale : staleJava) {
+                File oracle = new File(scriptsDir, stale.getName() + "_failed");
+                if (oracle.exists()) {
+                    oracle.delete();
+                    stale.delete();
+                } else if (now - stale.lastModified() > 60_000L) {
+                    stale.delete();
+                }
+            }
+        }
+        File[] orphanOracles = scriptsDir.listFiles(
+            (d, n) -> n.startsWith("McpInline_") && n.endsWith(".java_failed"));
+        if (orphanOracles != null) {
+            for (File o : orphanOracles) {
+                String javaName = o.getName().substring(0, o.getName().length() - "_failed".length());
+                if (!new File(scriptsDir, javaName).exists()) o.delete();
             }
         }
 
         File tempScript = new File(scriptsDir, className + ".java");
+
+        // Capture response so the finally block can decide success vs failure.
+        Response[] responseHolder = {null};
 
         try {
             // If code doesn't contain a class definition, wrap it.
@@ -1001,13 +1024,34 @@ public class ProgramScriptService {
             }
 
             java.nio.file.Files.writeString(tempScript.toPath(), scriptCode);
-            return runGhidraScript(tempScript.getAbsolutePath(), args);
+            responseHolder[0] = runGhidraScript(tempScript.getAbsolutePath(), args);
+            return responseHolder[0];
         } catch (Exception e) {
             return Response.err("Failed to create inline script: " + e.getMessage());
         } finally {
-            if (tempScript.exists()) {
-                if (!tempScript.delete()) {
-                    tempScript.deleteOnExit();
+            if (!tempScript.exists()) {
+                // File was never written or was already cleaned up — nothing to do.
+            } else {
+                boolean succeeded = responseHolder[0] != null
+                    && responseHolder[0].toJson().contains("SCRIPT COMPLETED SUCCESSFULLY");
+                if (succeeded) {
+                    // Clean run: remove the source file immediately.
+                    if (!tempScript.delete()) tempScript.deleteOnExit();
+                } else {
+                    // Failed run: leave .java on disk for next run's pre-cleanup to remove
+                    // (which will clear Ghidra's build-state entry for it), and write an
+                    // oracle so that cleanup is instant rather than time-delayed.
+                    try {
+                        File oracle = new File(scriptsDir, className + ".java_failed");
+                        String failureInfo = responseHolder[0] != null
+                            ? responseHolder[0].toJson()
+                            : "exception before script execution";
+                        java.nio.file.Files.writeString(oracle.toPath(), failureInfo);
+                    } catch (Exception oracleEx) {
+                        // Oracle write failed; fall back to immediate deletion so the file
+                        // doesn't linger forever without a matching oracle.
+                        if (!tempScript.delete()) tempScript.deleteOnExit();
+                    }
                 }
             }
         }
