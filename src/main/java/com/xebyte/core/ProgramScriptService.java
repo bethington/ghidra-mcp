@@ -959,17 +959,38 @@ public class ProgramScriptService {
         // Write to ~/ghidra_scripts/ so OSGi classloader can find the source bundle
         File scriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
         scriptsDir.mkdirs();
+
+        // Delete any leftover McpInline_*.java files from previous runs before writing
+        // the new one. Ghidra tracks build failures per directory; stale failed scripts
+        // contaminate the output of every subsequent run with their old errors.
+        File[] staleFiles = scriptsDir.listFiles(
+            (d, n) -> n.startsWith("McpInline_") && n.endsWith(".java"));
+        if (staleFiles != null) {
+            for (File stale : staleFiles) stale.delete();
+        }
+
         File tempScript = new File(scriptsDir, className + ".java");
 
         try {
-            // If code doesn't contain a class definition, wrap it
+            // If code doesn't contain a class definition, wrap it.
+            // Hoist any import statements to file level so they don't land inside run().
             String scriptCode = code;
             if (!code.contains("extends GhidraScript")) {
-                scriptCode = "import ghidra.app.script.GhidraScript;\n"
+                StringBuilder topImports = new StringBuilder("import ghidra.app.script.GhidraScript;\n");
+                StringBuilder body = new StringBuilder();
+                for (String line : code.split("\n", -1)) {
+                    String stripped = line.stripLeading();
+                    if (stripped.startsWith("import ") && stripped.endsWith(";")) {
+                        topImports.append(stripped).append("\n");
+                    } else {
+                        body.append(line).append("\n");
+                    }
+                }
+                scriptCode = topImports
                     + "public class " + className + " extends GhidraScript {\n"
                     + "    @Override\n"
                     + "    public void run() throws Exception {\n"
-                    + code + "\n"
+                    + body
                     + "    }\n"
                     + "}\n";
             }
