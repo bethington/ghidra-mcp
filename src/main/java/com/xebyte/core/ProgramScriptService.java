@@ -960,13 +960,18 @@ public class ProgramScriptService {
         File scriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
         scriptsDir.mkdirs();
 
-        // Delete any leftover McpInline_*.java files from previous runs before writing
-        // the new one. Ghidra tracks build failures per directory; stale failed scripts
+        // Delete orphaned McpInline_*.java files from previous crashed runs.
+        // Ghidra tracks build failures per directory; orphaned failed scripts
         // contaminate the output of every subsequent run with their old errors.
+        // Only delete files older than 60 s so a concurrent parallel agent's
+        // freshly-written file is never removed before it executes.
+        long now = System.currentTimeMillis();
         File[] staleFiles = scriptsDir.listFiles(
             (d, n) -> n.startsWith("McpInline_") && n.endsWith(".java"));
         if (staleFiles != null) {
-            for (File stale : staleFiles) stale.delete();
+            for (File stale : staleFiles) {
+                if (now - stale.lastModified() > 60_000L) stale.delete();
+            }
         }
 
         File tempScript = new File(scriptsDir, className + ".java");
