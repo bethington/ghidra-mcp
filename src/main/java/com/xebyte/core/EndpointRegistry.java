@@ -424,8 +424,8 @@ public class EndpointRegistry {
             (q, b) -> listingService.getFunctionCount(str(q, "program")));
 
         get("/search_strings", "Search strings by regex pattern",
-            params(qStr("query", "Regex search pattern"), qInt("min_length", 4), qStr("encoding", "String encoding"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> listingService.searchStrings(str(q, "query"), num(q, "min_length", 4),
+            params(qStr("search_term", "Regex search pattern"), qInt("min_length", 4), qStr("encoding", "String encoding"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.searchStrings(str(q, "search_term"), num(q, "min_length", 4),
                 str(q, "encoding"), num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
         get("/list_external_locations", "List external symbol locations",
@@ -441,8 +441,8 @@ public class EndpointRegistry {
             (q, b) -> Response.text(ServiceUtils.convertNumber(str(q, "text"), num(q, "size", 4))));
 
         get("/search_functions", "Search functions by name pattern",
-            params(qStr("query", "Search pattern"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> listingService.searchFunctionsByName(str(q, "query"), num(q, "offset", 0),
+            params(qStr("name_pattern", "Search pattern"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.searchFunctionsByName(str(q, "name_pattern"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
     }
 

@@ -229,9 +229,9 @@ public class ListingService {
         }
     }
 
-    @McpTool(path = "/search_functions", description = "Search functions by name pattern. Use the 'query' parameter (not 'name_pattern') for the search string; omit to list all functions.", category = "listing")
+    @McpTool(path = "/search_functions", description = "Search functions by name pattern. Omit name_pattern to list all functions.", category = "listing")
     public Response searchFunctionsByName(
-            @Param(value = "query", description = "Substring to match against function names (omit or leave empty to return all functions)", defaultValue = "") String searchTerm,
+            @Param(value = "name_pattern", description = "Substring to match against function names (omit or leave empty to return all functions)", defaultValue = "") String searchTerm,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -386,9 +386,9 @@ public class ListingService {
         ));
     }
 
-    @McpTool(path = "/search_strings", description = "Search strings by regex pattern. Use the 'query' parameter for the regex (not 'pattern' or 'search').", category = "listing")
+    @McpTool(path = "/search_strings", description = "Search strings by regex pattern.", category = "listing")
     public Response searchStrings(
-            @Param(value = "query", description = "Regex search pattern") String query,
+            @Param(value = "search_term", description = "Regex search pattern") String query,
             @Param(value = "min_length", defaultValue = "4") int minLength,
             @Param(value = "encoding", description = "String encoding filter (omit for all encodings)", defaultValue = "") String encoding,
             @Param(value = "offset", defaultValue = "0") int offset,
@@ -398,7 +398,7 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        if (query == null || query.isEmpty()) return Response.err("query parameter is required");
+        if (query == null || query.isEmpty()) return Response.err("search_term parameter is required");
 
         Pattern pat;
         try {
