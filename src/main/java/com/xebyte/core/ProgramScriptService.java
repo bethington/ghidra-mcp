@@ -1108,7 +1108,7 @@ public class ProgramScriptService {
     /**
      * Read memory at a specific address.
      */
-    @McpTool(path = "/read_memory", description = "Read raw memory bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
+    @McpTool(path = "/read_memory", description = "Read raw memory bytes. Always pass the 'program' argument to target the correct binary — especially when multiple programs are open. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response readMemory(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
