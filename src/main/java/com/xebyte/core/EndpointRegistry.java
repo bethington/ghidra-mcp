@@ -1112,8 +1112,8 @@ public class EndpointRegistry {
             (q, b) -> programScriptService.getCurrentProgramInfo(str(q, "program")));
 
         get("/switch_program", "Switch MCP context to a different program",
-            params(qStr("name", "Program name to switch to")),
-            (q, b) -> programScriptService.switchProgram(str(q, "name")));
+            params(qStr("program", "Program name to switch to")),
+            (q, b) -> programScriptService.switchProgram(str(q, "program")));
 
         get("/list_project_files", "List files in the current project",
             params(qStr("folder", "Project folder path")),

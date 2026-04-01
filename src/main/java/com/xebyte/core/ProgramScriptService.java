@@ -303,7 +303,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/switch_program", description = "Switch MCP context to a different program", category = "program")
     public Response switchProgram(
-            @Param(value = "name", description = "Program name to switch to") String programName) {
+            @Param(value = "program", description = "Program name to switch to") String programName) {
         if (programName == null || programName.trim().isEmpty()) {
             return Response.err("Program name is required");
         }
