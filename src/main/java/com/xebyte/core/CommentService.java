@@ -89,7 +89,7 @@ public class CommentService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment", programName);
     }
 
@@ -106,7 +106,7 @@ public class CommentService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment", programName);
     }
 
@@ -125,7 +125,7 @@ public class CommentService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String address,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -159,14 +159,14 @@ public class CommentService {
      */
     @McpTool(path = "/set_plate_comment", method = "POST", description = "Set function header/plate comment. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
     public Response setPlateComment(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -230,7 +230,7 @@ public class CommentService {
      */
     @McpTool(path = "/batch_set_comments", method = "POST", description = "Set multiple comments in one operation. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
     public Response batchSetComments(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -239,7 +239,7 @@ public class CommentService {
             @Param(value = "decompiler_comments", source = ParamSource.BODY) List<Map<String, String>> decompilerComments,
             @Param(value = "disassembly_comments", source = ParamSource.BODY) List<Map<String, String>> disassemblyComments,
             @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "") String plateComment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -358,7 +358,7 @@ public class CommentService {
      */
     @McpTool(path = "/clear_function_comments", method = "POST", description = "Clear all comments within a function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "comment")
     public Response clearFunctionComments(
-            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
@@ -367,7 +367,7 @@ public class CommentService {
             @Param(value = "clear_plate", source = ParamSource.BODY, defaultValue = "true") boolean clearPlate,
             @Param(value = "clear_pre", source = ParamSource.BODY, defaultValue = "true") boolean clearPre,
             @Param(value = "clear_eol", source = ParamSource.BODY, defaultValue = "true") boolean clearEol,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

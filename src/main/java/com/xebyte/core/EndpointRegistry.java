@@ -424,8 +424,8 @@ public class EndpointRegistry {
             (q, b) -> listingService.getFunctionCount(str(q, "program")));
 
         get("/search_strings", "Search strings by regex pattern",
-            params(qStr("query", "Regex search pattern"), qInt("min_length", 4), qStr("encoding", "String encoding"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> listingService.searchStrings(str(q, "query"), num(q, "min_length", 4),
+            params(qStr("search_term", "Regex search pattern"), qInt("min_length", 4), qStr("encoding", "String encoding"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.searchStrings(str(q, "search_term"), num(q, "min_length", 4),
                 str(q, "encoding"), num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
         get("/list_external_locations", "List external symbol locations",
@@ -441,8 +441,8 @@ public class EndpointRegistry {
             (q, b) -> Response.text(ServiceUtils.convertNumber(str(q, "text"), num(q, "size", 4))));
 
         get("/search_functions", "Search functions by name pattern",
-            params(qStr("query", "Search pattern"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> listingService.searchFunctionsByName(str(q, "query"), num(q, "offset", 0),
+            params(qStr("name_pattern", "Search pattern"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> listingService.searchFunctionsByName(str(q, "name_pattern"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
     }
 
@@ -596,19 +596,19 @@ public class EndpointRegistry {
             (q, b) -> commentService.getPlateComment(str(q, "address"), str(q, "program")));
 
         post("/set_plate_comment", "Set function header/plate comment",
-            params(bStr("function_address"), bStr("comment"), pProg()),
-            (q, b) -> commentService.setPlateComment(bodyStr(b, "function_address"), bodyStr(b, "comment"), str(q, "program")));
+            params(bStr("address"), bStr("comment"), pProg()),
+            (q, b) -> commentService.setPlateComment(bodyStr(b, "address"), bodyStr(b, "comment"), str(q, "program")));
 
         post("/batch_set_comments", "Set multiple comments in one operation",
-            params(bStr("function_address"), bArr("decompiler_comments"), bArr("disassembly_comments"),
+            params(bStr("address"), bArr("decompiler_comments"), bArr("disassembly_comments"),
                 bStrOpt("plate_comment"), pProg()),
-            (q, b) -> commentService.batchSetComments(bodyStr(b, "function_address"),
+            (q, b) -> commentService.batchSetComments(bodyStr(b, "address"),
                 bodyMapList(b, "decompiler_comments"), bodyMapList(b, "disassembly_comments"),
                 bodyStr(b, "plate_comment"), str(q, "program")));
 
         post("/clear_function_comments", "Clear all comments within a function",
-            params(bStr("function_address"), bBool("clear_plate"), bBool("clear_pre"), bBool("clear_eol"), pProg()),
-            (q, b) -> commentService.clearFunctionComments(bodyStr(b, "function_address"),
+            params(bStr("address"), bBool("clear_plate"), bBool("clear_pre"), bBool("clear_eol"), pProg()),
+            (q, b) -> commentService.clearFunctionComments(bodyStr(b, "address"),
                 bodyBool(b, "clear_plate", true), bodyBool(b, "clear_pre", true),
                 bodyBool(b, "clear_eol", true), str(q, "program")));
     }
@@ -682,30 +682,31 @@ public class EndpointRegistry {
             (q, b) -> xrefCallGraphService.getXrefsFrom(str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
-        get("/get_function_xrefs", "Get cross-references to a function by name",
-            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> xrefCallGraphService.getFunctionXrefs(str(q, "name"), num(q, "offset", 0),
+        get("/get_function_xrefs", "Get cross-references to a function",
+            params(qStr("name", "Function name"), qStr("address", "Function address (alternative to name)"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionXrefs(str(q, "name"), str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
         get("/get_function_jump_targets", "Get jump targets within a function",
-            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> xrefCallGraphService.getFunctionJumpTargets(str(q, "name"), num(q, "offset", 0),
+            params(qStr("name", "Function name"), qStr("address", "Function address (alternative to name)"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionJumpTargets(str(q, "name"), str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
         get("/get_function_callees", "Get functions called by a function",
-            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> xrefCallGraphService.getFunctionCallees(str(q, "name"), num(q, "offset", 0),
+            params(qStr("name", "Function name"), qStr("address", "Function address (alternative to name)"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionCallees(str(q, "name"), str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
         get("/get_function_callers", "Get functions calling a function",
-            params(qStr("name", "Function name"), qInt("offset", 0), qInt("limit", 100), pProg()),
-            (q, b) -> xrefCallGraphService.getFunctionCallers(str(q, "name"), num(q, "offset", 0),
+            params(qStr("name", "Function name"), qStr("address", "Function address (alternative to name)"), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> xrefCallGraphService.getFunctionCallers(str(q, "name"), str(q, "address"), num(q, "offset", 0),
                 num(q, "limit", 100), str(q, "program")));
 
         get("/get_function_call_graph", "Traverse call graph from a function",
-            params(qStr("name", "Function name"), qInt("depth", 2, "Traversal depth"),
+            params(qStr("name", "Function name"), qStr("address", "Function address (alternative to name)"),
+                qInt("depth", 2, "Traversal depth"),
                 qStr("direction", "Traversal direction (both/callers/callees)"), pProg()),
-            (q, b) -> xrefCallGraphService.getFunctionCallGraph(str(q, "name"), num(q, "depth", 2),
+            (q, b) -> xrefCallGraphService.getFunctionCallGraph(str(q, "name"), str(q, "address"), num(q, "depth", 2),
                 str(q, "direction", "both"), str(q, "program")));
 
         get("/get_full_call_graph", "Get entire program call graph",
@@ -964,6 +965,11 @@ public class EndpointRegistry {
             (q, b) -> analysisService.findNextUndefinedFunction(str(q, "start_address"), str(q, "criteria"),
                 str(q, "pattern"), str(q, "direction"), str(q, "program")));
 
+        get("/find_code_gaps", "Find gaps of undefined bytes between functions in executable memory",
+            params(qInt("min_size", 1), qInt("offset", 0), qInt("limit", 100), pProg()),
+            (q, b) -> analysisService.findCodeGaps(num(q, "min_size", 1), num(q, "offset", 0),
+                num(q, "limit", 100), str(q, "program")));
+
         get("/analyze_function_complete", "Comprehensive single-call function analysis",
             params(qStr("name", "Function name"), qBool("include_xrefs", true), qBool("include_callees", true),
                 qBool("include_callers", true), qBool("include_disasm", true),
@@ -1106,8 +1112,8 @@ public class EndpointRegistry {
             (q, b) -> programScriptService.getCurrentProgramInfo(str(q, "program")));
 
         get("/switch_program", "Switch MCP context to a different program",
-            params(qStr("name", "Program name to switch to")),
-            (q, b) -> programScriptService.switchProgram(str(q, "name")));
+            params(qStr("program", "Program name to switch to")),
+            (q, b) -> programScriptService.switchProgram(str(q, "program")));
 
         get("/list_project_files", "List files in the current project",
             params(qStr("folder", "Project folder path")),

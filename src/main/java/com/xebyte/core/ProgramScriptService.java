@@ -66,7 +66,7 @@ public class ProgramScriptService {
 
     @McpTool(path = "/get_metadata", description = "Get program metadata", category = "program")
     public Response getMetadata(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -115,7 +115,7 @@ public class ProgramScriptService {
 
     @McpTool(path = "/save_program", description = "Save current program", category = "program")
     public Response saveCurrentProgram(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -158,7 +158,7 @@ public class ProgramScriptService {
     /**
      * List all currently open programs in Ghidra.
      */
-    @McpTool(path = "/list_open_programs", description = "List all open programs", category = "program")
+    @McpTool(path = "/list_open_programs", description = "List all open programs. If more than one program is listed, always pass the program name explicitly in subsequent tool calls — omitting it will silently target the active program, which may not be the intended one.", category = "program")
     public Response listOpenPrograms() {
         Program[] programs = programProvider.getAllOpenPrograms();
         if (programs == null || programs.length == 0) {
@@ -211,7 +211,7 @@ public class ProgramScriptService {
                          + "Do NOT multiply or divide addresses seen in Ghidra output; use them as-is.",
              category = "program")
     public Response getAddressSpaces(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -260,9 +260,9 @@ public class ProgramScriptService {
         return getCurrentProgramInfo(null);
     }
 
-    @McpTool(path = "/get_current_program_info", description = "Get detailed info about the active program", category = "program")
+    @McpTool(path = "/get_current_program_info", description = "Get detailed info about the active program. When multiple programs are open, call this first to confirm which program will receive tool calls that omit the program argument.", category = "program")
     public Response getCurrentProgramInfo(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -303,7 +303,7 @@ public class ProgramScriptService {
      */
     @McpTool(path = "/switch_program", description = "Switch MCP context to a different program", category = "program")
     public Response switchProgram(
-            @Param(value = "name", description = "Program name to switch to") String programName) {
+            @Param(value = "program", description = "Program name to switch to") String programName) {
         if (programName == null || programName.trim().isEmpty()) {
             return Response.err("Program name is required");
         }
@@ -760,7 +760,7 @@ public class ProgramScriptService {
     public Response runGhidraScript(
             @Param(value = "script_path", source = ParamSource.BODY) String scriptPath,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -939,7 +939,7 @@ public class ProgramScriptService {
         return Response.text(resultMsg.toString());
     }
 
-    @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code", category = "program")
+    @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter.", category = "program")
     public Response runScriptInline(
             @Param(value = "code", source = ParamSource.BODY) String code,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String args) {
@@ -959,29 +959,99 @@ public class ProgramScriptService {
         // Write to ~/ghidra_scripts/ so OSGi classloader can find the source bundle
         File scriptsDir = new File(System.getProperty("user.home"), "ghidra_scripts");
         scriptsDir.mkdirs();
+
+        // Pre-cleanup: remove stale McpInline_*.java files so Ghidra's per-directory
+        // build state doesn't contaminate this run's output with old failures.
+        //
+        // Three cases handled:
+        //  1. Oracle exists (McpInline_*.java_failed)  → confirmed failure from a
+        //     previous run; delete both the .java and the oracle immediately.
+        //  2. No oracle, file older than 60 s          → crash-orphaned (server died
+        //     before the oracle could be written); delete as a safe fallback.
+        //  3. No oracle, file is fresh                 → likely a concurrent parallel
+        //     agent; leave it alone.
+        // Also purge any orphaned oracles whose .java has already been deleted.
+        long now = System.currentTimeMillis();
+        File[] staleJava = scriptsDir.listFiles(
+            (d, n) -> n.startsWith("McpInline_") && n.endsWith(".java"));
+        if (staleJava != null) {
+            for (File stale : staleJava) {
+                File oracle = new File(scriptsDir, stale.getName() + "_failed");
+                if (oracle.exists()) {
+                    oracle.delete();
+                    stale.delete();
+                } else if (now - stale.lastModified() > 60_000L) {
+                    stale.delete();
+                }
+            }
+        }
+        File[] orphanOracles = scriptsDir.listFiles(
+            (d, n) -> n.startsWith("McpInline_") && n.endsWith(".java_failed"));
+        if (orphanOracles != null) {
+            for (File o : orphanOracles) {
+                String javaName = o.getName().substring(0, o.getName().length() - "_failed".length());
+                if (!new File(scriptsDir, javaName).exists()) o.delete();
+            }
+        }
+
         File tempScript = new File(scriptsDir, className + ".java");
 
+        // Capture response so the finally block can decide success vs failure.
+        Response[] responseHolder = {null};
+
         try {
-            // If code doesn't contain a class definition, wrap it
+            // If code doesn't contain a class definition, wrap it.
+            // Hoist any import statements to file level so they don't land inside run().
             String scriptCode = code;
             if (!code.contains("extends GhidraScript")) {
-                scriptCode = "import ghidra.app.script.GhidraScript;\n"
+                StringBuilder topImports = new StringBuilder("import ghidra.app.script.GhidraScript;\n");
+                StringBuilder body = new StringBuilder();
+                for (String line : code.split("\n", -1)) {
+                    String stripped = line.stripLeading();
+                    if (stripped.startsWith("import ") && stripped.endsWith(";")) {
+                        topImports.append(stripped).append("\n");
+                    } else {
+                        body.append(line).append("\n");
+                    }
+                }
+                scriptCode = topImports
                     + "public class " + className + " extends GhidraScript {\n"
                     + "    @Override\n"
                     + "    public void run() throws Exception {\n"
-                    + code + "\n"
+                    + body
                     + "    }\n"
                     + "}\n";
             }
 
             java.nio.file.Files.writeString(tempScript.toPath(), scriptCode);
-            return runGhidraScript(tempScript.getAbsolutePath(), args);
+            responseHolder[0] = runGhidraScript(tempScript.getAbsolutePath(), args);
+            return responseHolder[0];
         } catch (Exception e) {
             return Response.err("Failed to create inline script: " + e.getMessage());
         } finally {
-            if (tempScript.exists()) {
-                if (!tempScript.delete()) {
-                    tempScript.deleteOnExit();
+            if (!tempScript.exists()) {
+                // File was never written or was already cleaned up — nothing to do.
+            } else {
+                boolean succeeded = responseHolder[0] != null
+                    && responseHolder[0].toJson().contains("SCRIPT COMPLETED SUCCESSFULLY");
+                if (succeeded) {
+                    // Clean run: remove the source file immediately.
+                    if (!tempScript.delete()) tempScript.deleteOnExit();
+                } else {
+                    // Failed run: leave .java on disk for next run's pre-cleanup to remove
+                    // (which will clear Ghidra's build-state entry for it), and write an
+                    // oracle so that cleanup is instant rather than time-delayed.
+                    try {
+                        File oracle = new File(scriptsDir, className + ".java_failed");
+                        String failureInfo = responseHolder[0] != null
+                            ? responseHolder[0].toJson()
+                            : "exception before script execution";
+                        java.nio.file.Files.writeString(oracle.toPath(), failureInfo);
+                    } catch (Exception oracleEx) {
+                        // Oracle write failed; fall back to immediate deletion so the file
+                        // doesn't linger forever without a matching oracle.
+                        if (!tempScript.delete()) tempScript.deleteOnExit();
+                    }
                 }
             }
         }
@@ -1038,7 +1108,7 @@ public class ProgramScriptService {
     /**
      * Read memory at a specific address.
      */
-    @McpTool(path = "/read_memory", description = "Read raw memory bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
+    @McpTool(path = "/read_memory", description = "Read raw memory bytes. Always pass the 'program' argument to target the correct binary — especially when multiple programs are open. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "program")
     public Response readMemory(
             @Param(value = "address", paramType = "address",
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1047,7 +1117,7 @@ public class ProgramScriptService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "length", defaultValue = "16", description = "Number of bytes") int length,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         try {
             ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
             if (pe.hasError()) return pe.error();
@@ -1106,7 +1176,7 @@ public class ProgramScriptService {
             @Param(value = "execute", source = ParamSource.BODY, defaultValue = "false") boolean execute,
             @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "false") boolean isVolatile,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1212,7 +1282,7 @@ public class ProgramScriptService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1285,7 +1355,7 @@ public class ProgramScriptService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1358,7 +1428,7 @@ public class ProgramScriptService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1420,7 +1490,7 @@ public class ProgramScriptService {
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
             @Param(value = "timeout_seconds", source = ParamSource.BODY, defaultValue = "300") int timeoutSeconds,
             @Param(value = "capture_output", source = ParamSource.BODY, defaultValue = "true") boolean captureOutput,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         if (scriptName == null || scriptName.isEmpty()) {
             return Response.err("Script name is required");
         }

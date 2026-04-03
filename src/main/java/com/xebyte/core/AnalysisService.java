@@ -4,6 +4,9 @@ import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.framework.options.Options;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressRange;
+import ghidra.program.model.address.AddressRangeIterator;
+import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.block.BasicBlockModel;
 import ghidra.program.model.block.CodeBlock;
@@ -150,7 +153,7 @@ public class AnalysisService {
 
     @McpTool(path = "/list_analyzers", description = "List available analyzers", category = "analysis")
     public Response listAnalyzers(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -178,7 +181,7 @@ public class AnalysisService {
      */
     @McpTool(path = "/run_analysis", method = "POST", description = "Trigger auto-analysis on program", category = "analysis")
     public Response runAnalysis(
-            @Param(value = "program", source = ParamSource.BODY) String programName) {
+            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -231,7 +234,7 @@ public class AnalysisService {
             @Param(value = "include_xref_map", source = ParamSource.BODY, defaultValue = "true") boolean includeXrefMap,
             @Param(value = "include_assembly_patterns", source = ParamSource.BODY, defaultValue = "true") boolean includeAssemblyPatterns,
             @Param(value = "include_boundary_detection", source = ParamSource.BODY, defaultValue = "true") boolean includeBoundaryDetection,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -403,7 +406,7 @@ public class AnalysisService {
             @Param(value = "analyze_loop_bounds", source = ParamSource.BODY, defaultValue = "true") boolean analyzeLoopBounds,
             @Param(value = "analyze_indexing", source = ParamSource.BODY, defaultValue = "true") boolean analyzeIndexing,
             @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048") int maxScanRange,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -469,7 +472,7 @@ public class AnalysisService {
                                + "address is unambiguous.") String structAddressStr,
             @Param(value = "field_offset", source = ParamSource.BODY, defaultValue = "0") int fieldOffset,
             @Param(value = "num_examples", source = ParamSource.BODY, defaultValue = "5") int numExamples,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         // MAJOR FIX #7: Validate input parameters
         if (fieldOffset < 0 || fieldOffset > MAX_FIELD_OFFSET) {
             return Response.err("Field offset must be between 0 and " + MAX_FIELD_OFFSET);
@@ -572,7 +575,7 @@ public class AnalysisService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "length", defaultValue = "64", description = "Bytes to read") int length,
             @Param(value = "detect_strings", defaultValue = "true", description = "Auto-detect strings") boolean detectStrings,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -690,7 +693,7 @@ public class AnalysisService {
 
     @McpTool(path = "/detect_crypto_constants", description = "Detect crypto algorithm constants", category = "malware")
     public Response detectCryptoConstants(
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
 
@@ -718,8 +721,8 @@ public class AnalysisService {
     @McpTool(path = "/search_byte_patterns", description = "Search for byte patterns with masks", category = "analysis")
     public Response searchBytePatterns(
             @Param(value = "pattern", description = "Hex byte pattern") String pattern,
-            @Param(value = "mask", description = "Pattern mask") String mask,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "mask", description = "Pattern mask (omit or leave empty for exact match)", defaultValue = "") String mask,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -817,7 +820,7 @@ public class AnalysisService {
     public Response findSimilarFunctions(
             @Param(value = "target_function", description = "Function name") String targetFunction,
             @Param(value = "threshold", defaultValue = "0.8", description = "Similarity threshold") double threshold,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -899,7 +902,7 @@ public class AnalysisService {
     @McpTool(path = "/analyze_control_flow", description = "Analyze function control flow complexity", category = "analysis")
     public Response analyzeControlFlow(
             @Param(value = "function_name", description = "Function name") String functionName,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1066,7 +1069,7 @@ public class AnalysisService {
     @McpTool(path = "/find_dead_code", description = "Identify unreachable code blocks", category = "analysis")
     public Response findDeadCode(
             @Param(value = "function_name", description = "Function name") String functionName,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
 
@@ -1113,7 +1116,7 @@ public class AnalysisService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "compact", defaultValue = "false", description = "Compact output") boolean compact,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1695,7 +1698,7 @@ public class AnalysisService {
     @SuppressWarnings("unchecked")
     public Response batchAnalyzeCompleteness(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name") String programName) {
+            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         List<String> addresses;
         if (addressesObj instanceof List<?> list) {
             addresses = list.stream().map(String::valueOf).collect(java.util.stream.Collectors.toList());
@@ -1737,7 +1740,7 @@ public class AnalysisService {
             @Param(value = "criteria", description = "Search criteria") String criteria,
             @Param(value = "pattern", description = "Name pattern filter") String pattern,
             @Param(value = "direction", description = "Search direction") String direction,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1821,7 +1824,7 @@ public class AnalysisService {
             @Param(value = "include_callers", defaultValue = "true") boolean includeCallers,
             @Param(value = "include_disasm", defaultValue = "true") boolean includeDisasm,
             @Param(value = "include_variables", defaultValue = "true") boolean includeVariables,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2050,7 +2053,7 @@ public class AnalysisService {
             @Param(value = "sort_by", defaultValue = "address", description = "Sort field") String sortBy,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3548,7 +3551,7 @@ public class AnalysisService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "program", description = "Target program name") String programName) {
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3731,6 +3734,122 @@ public class AnalysisService {
         }
 
         return Response.ok(resultData.get());
+    }
+
+    /**
+     * Find gaps of undefined/unanalyzed bytes in executable memory not covered by any function body.
+     */
+    @McpTool(path = "/find_code_gaps",
+             description = "Find gaps of undefined/unanalyzed bytes in executable memory not covered by any "
+                         + "function body. Useful for discovering missed functions in firmware and embedded "
+                         + "binaries. Reports each contiguous uncovered range with its size, content type, "
+                         + "and the nearest functions on each side.",
+             category = "analysis")
+    public Response findCodeGaps(
+            @Param(value = "min_size", defaultValue = "1",
+                   description = "Minimum gap size in addressable units to report (increase to filter alignment padding)") int minSize,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "100") int limit,
+            @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        final AtomicReference<Response> responseRef = new AtomicReference<>(null);
+        final AtomicReference<String> errorMsg = new AtomicReference<>(null);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    FunctionManager funcMgr = program.getFunctionManager();
+                    Listing listing = program.getListing();
+                    Memory memory = program.getMemory();
+
+                    // Union of all function bodies
+                    AddressSet functionUnion = new AddressSet();
+                    for (Function f : funcMgr.getFunctions(true)) {
+                        functionUnion.add(f.getBody());
+                    }
+
+                    // Executable, non-external memory blocks
+                    AddressSet execMemory = new AddressSet();
+                    for (MemoryBlock block : memory.getBlocks()) {
+                        if (block.isExecute() && !block.isExternalBlock()) {
+                            execMemory.add(block.getStart(), block.getEnd());
+                        }
+                    }
+
+                    // Gaps = executable memory not covered by any function body
+                    AddressSet gapSet = execMemory.subtract(functionUnion);
+
+                    List<Map<String, Object>> gaps = new ArrayList<>();
+                    boolean multiSpace = ServiceUtils.getPhysicalSpaceCount(program) > 1;
+
+                    AddressRangeIterator rangeIter = gapSet.getAddressRanges();
+                    while (rangeIter.hasNext()) {
+                        AddressRange range = rangeIter.next();
+                        long size = range.getLength();
+                        if (size < minSize) continue;
+
+                        Address gapStart = range.getMinAddress();
+                        Address gapEnd   = range.getMaxAddress();
+
+                        AddressSet thisGap = new AddressSet(gapStart, gapEnd);
+                        boolean hasUndefined     = listing.getUndefinedDataAt(gapStart) != null;
+                        boolean hasInstructions  = listing.getInstructions(thisGap, true).hasNext();
+
+                        FunctionIterator bIter = funcMgr.getFunctions(gapStart, false);
+                        Function before = bIter.hasNext() ? bIter.next() : null;
+
+                        Address nextAddr = gapEnd.next();
+                        Function after = null;
+                        if (nextAddr != null) {
+                            FunctionIterator aIter = funcMgr.getFunctions(nextAddr, true);
+                            if (aIter.hasNext()) after = aIter.next();
+                        }
+
+                        Map<String, Object> gap = new java.util.LinkedHashMap<>();
+                        gap.put("start", gapStart.toString(false));
+                        gap.put("end",   gapEnd.toString(false));
+                        if (multiSpace) {
+                            gap.put("start_full",    gapStart.toString());
+                            gap.put("end_full",      gapEnd.toString());
+                            gap.put("address_space", gapStart.getAddressSpace().getName());
+                        }
+                        gap.put("size",                    size);
+                        gap.put("has_undefined_bytes",     hasUndefined);
+                        gap.put("has_orphaned_instructions", hasInstructions);
+                        gap.put("before_function",         before != null ? before.getName() : null);
+                        gap.put("before_function_address", before != null ? before.getEntryPoint().toString(false) : null);
+                        gap.put("after_function",          after != null ? after.getName() : null);
+                        gap.put("after_function_address",  after != null ? after.getEntryPoint().toString(false) : null);
+                        gaps.add(gap);
+                    }
+
+                    int total    = gaps.size();
+                    int endIndex = Math.min(offset + limit, total);
+                    List<Map<String, Object>> page = gaps.subList(Math.min(offset, total), endIndex);
+
+                    responseRef.set(Response.ok(JsonHelper.mapOf(
+                        "total",  total,
+                        "offset", offset,
+                        "limit",  limit,
+                        "gaps",   page
+                    )));
+
+                } catch (Exception e) {
+                    errorMsg.set(e.getMessage());
+                }
+            });
+
+            if (errorMsg.get() != null) {
+                return Response.err(errorMsg.get());
+            }
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+
+        return responseRef.get();
     }
 }
 

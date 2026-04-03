@@ -1,7 +1,7 @@
 {
   "version": "4.3.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 192,
+  "total_endpoints": 193,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -1853,6 +1853,18 @@
         "program"
       ],
       "description": "Run auto-analysis on the current program"
+    },
+    {
+      "path": "/find_code_gaps",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "min_size",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "Find gaps of undefined bytes between functions in executable memory"
     },
     {
       "path": "/server/connect",
