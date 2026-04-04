@@ -1264,7 +1264,7 @@ def main():
         "--transport",
         type=str,
         default="stdio",
-        choices=["stdio", "sse"],
+        choices=["stdio", "sse", "streamable-http"],
         help="MCP transport",
     )
     parser.add_argument(
@@ -1300,15 +1300,16 @@ def main():
         )
     _auto_connect()
 
+    mcp.settings.log_level = "INFO"
+    mcp.settings.host = args.mcp_host
+    if args.mcp_port:
+        mcp.settings.port = args.mcp_port
     if args.transport == "sse":
-        mcp.settings.log_level = "INFO"
-        mcp.settings.host = args.mcp_host
-        if args.mcp_port:
-            mcp.settings.port = args.mcp_port
         logger.info("Starting MCP bridge (SSE)")
         mcp.run(transport="sse")
     else:
-        mcp.run()
+        logger.info("Starting TCP bridge")
+        mcp.run(transport=args.transport)
 
 
 if __name__ == "__main__":
