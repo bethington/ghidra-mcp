@@ -40,6 +40,7 @@ REQUEST_TIMEOUT = 30
 
 # Per-endpoint timeout overrides for expensive operations
 ENDPOINT_TIMEOUTS = {
+    "rename_variables": 120,
     "batch_rename_variables": 120,
     "batch_set_comments": 120,
     "analyze_function_complete": 120,
@@ -79,9 +80,14 @@ mcp = FastMCP("ghidra-mcp")
 
 # Enable tools/list_changed notifications so clients re-fetch tools after dynamic registration
 _orig_init_options = mcp._mcp_server.create_initialization_options
+
+
 def _patched_init_options(**kwargs):
     return _orig_init_options(
-        notification_options=NotificationOptions(tools_changed=True), **kwargs)
+        notification_options=NotificationOptions(tools_changed=True), **kwargs
+    )
+
+
 mcp._mcp_server.create_initialization_options = _patched_init_options
 
 _active_socket: str | None = None  # UDS socket path
@@ -123,16 +129,19 @@ def get_socket_dir() -> Path:
 # Enhanced error classes
 class GhidraConnectionError(Exception):
     """Raised when connection to Ghidra server fails"""
+
     pass
 
 
 class GhidraAnalysisError(Exception):
     """Raised when Ghidra analysis operation fails"""
+
     pass
 
 
 class GhidraValidationError(Exception):
     """Raised when input validation fails"""
+
     pass
 
 
@@ -274,7 +283,9 @@ def do_request(
     elif _transport_mode == "tcp" and _active_tcp:
         return tcp_request(_active_tcp, method, endpoint, params, json_data, timeout)
     else:
-        raise ConnectionError("No Ghidra instance connected. Use connect_instance() first.")
+        raise ConnectionError(
+            "No Ghidra instance connected. Use connect_instance() first."
+        )
 
 
 # ==========================================================================
@@ -295,7 +306,7 @@ def discover_instances() -> list[dict]:
         if dash < 0:
             continue
         try:
-            pid = int(name[dash + 1:])
+            pid = int(name[dash + 1 :])
         except ValueError:
             continue
 
@@ -309,7 +320,9 @@ def discover_instances() -> list[dict]:
 
         info: dict = {"socket": str(sock_file), "pid": pid}
         try:
-            text, status = uds_request(str(sock_file), "GET", "/mcp/instance_info", timeout=5)
+            text, status = uds_request(
+                str(sock_file), "GET", "/mcp/instance_info", timeout=5
+            )
             if status == 200:
                 info.update(_unwrap_response_data(text))
         except Exception as e:
@@ -358,7 +371,9 @@ def discover_active_tcp_instance() -> dict | None:
                     if key in data:
                         info[key] = data[key]
     except Exception as e:
-        logger.debug(f"Could not query open programs for active TCP instance {_active_tcp}: {e}")
+        logger.debug(
+            f"Could not query open programs for active TCP instance {_active_tcp}: {e}"
+        )
 
     return info
 
@@ -376,7 +391,7 @@ def get_timeout(endpoint: str, payload: dict | None = None) -> int:
     if not payload:
         return base
 
-    if name == "batch_rename_variables":
+    if name in {"rename_variables", "batch_rename_variables"}:
         count = len(payload.get("variable_renames", {}))
         return min(base + count * 38, 600)
 
@@ -408,7 +423,9 @@ def _try_reconnect() -> bool:
             _transport_mode = "uds"
             try:
                 _fetch_and_register_schema()
-                logger.info(f"Reconnected to project '{_connected_project}' via {inst['socket']}")
+                logger.info(
+                    f"Reconnected to project '{_connected_project}' via {inst['socket']}"
+                )
                 return True
             except Exception as e:
                 logger.warning(f"Reconnect schema fetch failed: {e}")
@@ -422,7 +439,9 @@ def _try_reconnect() -> bool:
             _transport_mode = "uds"
             try:
                 _fetch_and_register_schema()
-                logger.info(f"Reconnected to project '{inst.get('project')}' via {inst['socket']}")
+                logger.info(
+                    f"Reconnected to project '{inst.get('project')}' via {inst['socket']}"
+                )
                 return True
             except Exception as e:
                 logger.warning(f"Reconnect schema fetch failed: {e}")
@@ -437,8 +456,10 @@ def _ensure_connected() -> str | None:
         if _connected_project:
             if _try_reconnect():
                 return None
-            return (f"Ghidra instance for project '{_connected_project}' is not running. "
-                    "Start Ghidra and open the project, then retry.")
+            return (
+                f"Ghidra instance for project '{_connected_project}' is not running. "
+                "Start Ghidra and open the project, then retry."
+            )
         return "No Ghidra instance connected. Use connect_instance() first."
     return None
 
@@ -579,19 +600,21 @@ def _parse_schema(raw: dict) -> list[dict]:
             if p.get("required", False):
                 required.append(p["name"])
 
-        tool_defs.append({
-            "name": name,
-            "endpoint": path,
-            "http_method": tool.get("method", "GET"),
-            "description": tool.get("description", ""),
-            "category": tool.get("category", "unknown"),
-            "category_description": tool.get("category_description", ""),
-            "input_schema": {
-                "type": "object",
-                "properties": properties,
-                "required": required,
-            },
-        })
+        tool_defs.append(
+            {
+                "name": name,
+                "endpoint": path,
+                "http_method": tool.get("method", "GET"),
+                "description": tool.get("description", ""),
+                "category": tool.get("category", "unknown"),
+                "category_description": tool.get("category_description", ""),
+                "input_schema": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            }
+        )
 
     return tool_defs
 
@@ -601,8 +624,15 @@ def _parse_schema(raw: dict) -> list[dict]:
 # ==========================================================================
 
 # Static tool names that should not be overwritten by dynamic registration
-STATIC_TOOL_NAMES = {"list_instances", "connect_instance", "list_tool_groups",
-                     "load_tool_group", "unload_tool_group", "import_file"}
+STATIC_TOOL_NAMES = {
+    "list_instances",
+    "connect_instance",
+    "list_tool_groups",
+    "load_tool_group",
+    "unload_tool_group",
+    "check_tools",
+    "import_file",
+}
 
 _dynamic_tool_names: list[str] = []
 _full_schema: list[dict] = []  # Complete parsed schema
@@ -624,7 +654,11 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     def handler(**kwargs):
         # Sanitize address parameters before dispatch
         for pname, pdef in properties.items():
-            if pdef.get("paramType") == "address" and pname in kwargs and kwargs[pname] is not None:
+            if (
+                pdef.get("paramType") == "address"
+                and pname in kwargs
+                and kwargs[pname] is not None
+            ):
                 kwargs[pname] = sanitize_address(str(kwargs[pname]))
         filtered = {k: v for k, v in kwargs.items() if v is not None}
         if http_method == "GET":
@@ -645,8 +679,9 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
             default = None
             py_type = py_type | None if py_type != str else str | None
 
-        param = inspect.Parameter(pname, inspect.Parameter.KEYWORD_ONLY,
-                                  default=default, annotation=py_type)
+        param = inspect.Parameter(
+            pname, inspect.Parameter.KEYWORD_ONLY, default=default, annotation=py_type
+        )
         if default is inspect.Parameter.empty:
             required_params.append(param)
         else:
@@ -679,7 +714,9 @@ def _register_tool_def(tool_def: dict) -> bool:
     return True
 
 
-def register_tools_from_schema(schema: list[dict], groups: set[str] | None = None) -> int:
+def register_tools_from_schema(
+    schema: list[dict], groups: set[str] | None = None
+) -> int:
     """Register MCP tools from parsed schema.
 
     Args:
@@ -714,9 +751,9 @@ def register_tools_from_schema(schema: list[dict], groups: set[str] | None = Non
     return count
 
 
-def _load_group(group_name: str) -> int:
-    """Load tools for a specific group from cached schema. Returns count."""
-    count = 0
+def _load_group(group_name: str) -> list[str]:
+    """Load tools for a specific group from cached schema. Returns list of newly loaded tool names."""
+    loaded_names: list[str] = []
     for tool_def in _full_schema:
         if tool_def.get("category") != group_name:
             continue
@@ -724,10 +761,10 @@ def _load_group(group_name: str) -> int:
         if name in _dynamic_tool_names:
             continue  # Already loaded
         _register_tool_def(tool_def)
-        count += 1
-    if count > 0:
+        loaded_names.append(name)
+    if loaded_names:
         _loaded_groups.add(group_name)
-    return count
+    return loaded_names
 
 
 def _unload_group(group_name: str) -> int:
@@ -823,11 +860,15 @@ def list_instances() -> str:
         instances.append(tcp_instance)
 
     if not instances:
-        return json.dumps({"instances": [], "note": "No running Ghidra instances found."})
+        return json.dumps(
+            {"instances": [], "note": "No running Ghidra instances found."}
+        )
 
     for inst in instances:
         if inst.get("transport") == "tcp":
-            inst["connected"] = _transport_mode == "tcp" and inst.get("url") == _active_tcp
+            inst["connected"] = (
+                _transport_mode == "tcp" and inst.get("url") == _active_tcp
+            )
         else:
             inst["connected"] = inst["socket"] == _active_socket
 
@@ -871,19 +912,23 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
                 count = _fetch_and_register_schema()
                 total = len(_full_schema)
                 await _notify_tools_changed(ctx)
-                return json.dumps({
-                    "connected": True,
-                    "transport": "uds",
-                    "project": _connected_project,
-                    "socket": match["socket"],
-                    "pid": match.get("pid"),
-                    "tools_registered": count,
-                    "tools_total": total,
-                    "loaded_groups": sorted(_loaded_groups),
-                    "note": f"Loaded {count}/{total} tools (core groups). Use load_tool_group() for more.",
-                })
+                return json.dumps(
+                    {
+                        "connected": True,
+                        "transport": "uds",
+                        "project": _connected_project,
+                        "socket": match["socket"],
+                        "pid": match.get("pid"),
+                        "tools_registered": count,
+                        "tools_total": total,
+                        "loaded_groups": sorted(_loaded_groups),
+                        "note": f"Loaded {count}/{total} tools (core groups). Use load_tool_group() for more.",
+                    }
+                )
             except Exception as e:
-                return json.dumps({"error": f"Schema fetch failed: {e}", "socket": _active_socket})
+                return json.dumps(
+                    {"error": f"Schema fetch failed: {e}", "socket": _active_socket}
+                )
 
     # Try TCP fallback
     tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
@@ -894,22 +939,26 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
         count = _fetch_and_register_schema()
         total = len(_full_schema)
         await _notify_tools_changed(ctx)
-        return json.dumps({
-            "connected": True,
-            "transport": "tcp",
-            "url": tcp_url,
-            "tools_registered": count,
-            "tools_total": total,
-            "loaded_groups": sorted(_loaded_groups),
-        })
+        return json.dumps(
+            {
+                "connected": True,
+                "transport": "tcp",
+                "url": tcp_url,
+                "tools_registered": count,
+                "tools_total": total,
+                "loaded_groups": sorted(_loaded_groups),
+            }
+        )
     except Exception as e:
         _transport_mode = "none"
         _active_tcp = None
         available = [inst.get("project", "unknown") for inst in instances]
-        return json.dumps({
-            "error": f"No instance matching '{project}' (UDS: {len(instances)} found, TCP {tcp_url}: {e})",
-            "available": available,
-        })
+        return json.dumps(
+            {
+                "error": f"No instance matching '{project}' (UDS: {len(instances)} found, TCP {tcp_url}: {e})",
+                "available": available,
+            }
+        )
 
 
 @mcp.tool()
@@ -921,7 +970,9 @@ def list_tool_groups() -> str:
     Use load_tool_group(group) to load a group's tools.
     """
     if not _full_schema:
-        return json.dumps({"error": "No instance connected. Use connect_instance() first."})
+        return json.dumps(
+            {"error": "No instance connected. Use connect_instance() first."}
+        )
     groups = _get_group_info()
     return json.dumps({"groups": groups, "total_tools": len(_full_schema)}, indent=2)
 
@@ -937,36 +988,59 @@ async def load_tool_group(group: str, ctx: Context | None = None) -> str:
         group: Category name (e.g. "function", "datatype") or "all"
     """
     if not _full_schema:
-        return json.dumps({"error": "No instance connected. Use connect_instance() first."})
+        return json.dumps(
+            {"error": "No instance connected. Use connect_instance() first."}
+        )
 
     if group == "all":
         # Load all unloaded groups
         all_groups = {td.get("category", "unknown") for td in _full_schema}
-        total = 0
-        for g in all_groups:
-            total += _load_group(g)
-        if total > 0:
+        all_loaded: list[str] = []
+        for g in sorted(all_groups):
+            all_loaded.extend(_load_group(g))
+        if all_loaded:
             await _notify_tools_changed(ctx)
-        return json.dumps({
-            "loaded": "all",
-            "new_tools": total,
-            "total_loaded": len(_dynamic_tool_names),
-        })
+        return json.dumps(
+            {
+                "loaded": "all",
+                "new_tools": len(all_loaded),
+                "new_tool_names": sorted(all_loaded),
+                "total_loaded": len(_dynamic_tool_names),
+            }
+        )
 
-    count = _load_group(group)
-    if count == 0:
+    loaded_names = _load_group(group)
+    if not loaded_names:
         available = sorted({td.get("category", "unknown") for td in _full_schema})
         if group in _loaded_groups:
-            return json.dumps({"message": f"Group '{group}' is already loaded.", "loaded_groups": sorted(_loaded_groups)})
-        return json.dumps({"error": f"No tools found for group '{group}'", "available": available})
+            # Already loaded — return the tool names so the agent knows what's callable
+            already = sorted(
+                td["name"] for td in _full_schema if td.get("category") == group
+            )
+            return json.dumps(
+                {
+                    "message": f"Group '{group}' is already loaded.",
+                    "tools": already,
+                    "loaded_groups": sorted(_loaded_groups),
+                }
+            )
+        return json.dumps(
+            {
+                "error": f"No tools found for group '{group}'",
+                "available_groups": available,
+            }
+        )
 
     await _notify_tools_changed(ctx)
-    return json.dumps({
-        "loaded": group,
-        "new_tools": count,
-        "total_loaded": len(_dynamic_tool_names),
-        "loaded_groups": sorted(_loaded_groups),
-    })
+    return json.dumps(
+        {
+            "loaded": group,
+            "new_tools": len(loaded_names),
+            "tools": sorted(loaded_names),
+            "total_loaded": len(_dynamic_tool_names),
+            "loaded_groups": sorted(_loaded_groups),
+        }
+    )
 
 
 @mcp.tool()
@@ -978,19 +1052,75 @@ async def unload_tool_group(group: str, ctx: Context | None = None) -> str:
         group: Category name to unload
     """
     if group in _default_groups:
-        return json.dumps({"error": f"Cannot unload default group '{group}'", "default_groups": sorted(_default_groups)})
+        return json.dumps(
+            {
+                "error": f"Cannot unload default group '{group}'",
+                "default_groups": sorted(_default_groups),
+            }
+        )
 
-    count = _unload_group(group)
-    if count == 0:
-        return json.dumps({"message": f"Group '{group}' is not loaded or has no tools."})
+    removed = _unload_group(group)
+    if removed == 0:
+        return json.dumps(
+            {"message": f"Group '{group}' is not loaded or has no tools."}
+        )
 
     await _notify_tools_changed(ctx)
-    return json.dumps({
-        "unloaded": group,
-        "removed_tools": count,
-        "total_loaded": len(_dynamic_tool_names),
-        "loaded_groups": sorted(_loaded_groups),
-    })
+    return json.dumps(
+        {
+            "unloaded": group,
+            "removed_tools": removed,
+            "total_loaded": len(_dynamic_tool_names),
+            "loaded_groups": sorted(_loaded_groups),
+        }
+    )
+
+
+@mcp.tool()
+async def check_tools(tools: str) -> str:
+    """
+    Check if specific tools are callable right now. Returns status for each tool:
+    "callable", "not_loaded" (exists but group not loaded), or "not_found" (doesn't exist).
+
+    Args:
+        tools: Comma-separated tool names, e.g. "rename_or_label,batch_set_comments,analyze_function_completeness"
+    """
+    tool_names = [t.strip() for t in tools.split(",") if t.strip()]
+    if not tool_names:
+        return json.dumps({"error": "Provide comma-separated tool names"})
+
+    # Build lookup of all known tools -> their group
+    all_known: dict[str, str] = {}
+    for td in _full_schema:
+        all_known[td["name"]] = td.get("category", "unknown")
+
+    # Check each tool
+    results: dict[str, dict] = {}
+    for name in tool_names:
+        if name in STATIC_TOOL_NAMES:
+            results[name] = {"status": "callable", "type": "static"}
+        elif name in _dynamic_tool_names:
+            results[name] = {
+                "status": "callable",
+                "group": all_known.get(name, "unknown"),
+            }
+        elif name in all_known:
+            group = all_known[name]
+            results[name] = {
+                "status": "not_loaded",
+                "group": group,
+                "fix": f'load_tool_group("{group}")',
+            }
+        else:
+            results[name] = {"status": "not_found"}
+
+    callable_count = sum(1 for r in results.values() if r["status"] == "callable")
+    return json.dumps(
+        {
+            "results": results,
+            "summary": f"{callable_count}/{len(tool_names)} callable",
+        }
+    )
 
 
 @mcp.tool()
@@ -1047,7 +1177,9 @@ async def import_file(
             await asyncio.sleep(5)  # Initial delay
             for _ in range(360):  # Up to 30 minutes
                 try:
-                    status_text = dispatch_get("/analysis_status", {"program": program_name})
+                    status_text = dispatch_get(
+                        "/analysis_status", {"program": program_name}
+                    )
                     status = json.loads(status_text)
                     status_data = status.get("data", status)
                     if not status_data.get("analyzing", True):
@@ -1084,14 +1216,18 @@ def _auto_connect():
         logger.info(f"Auto-connecting via UDS to {_connected_project or 'unknown'}")
         try:
             count = _fetch_and_register_schema()
-            logger.info(f"Auto-registered {count} tools from {_connected_project or 'unknown'}")
+            logger.info(
+                f"Auto-registered {count} tools from {_connected_project or 'unknown'}"
+            )
             return
         except Exception as e:
             logger.warning(f"UDS auto-connect schema fetch failed: {e}")
             _active_socket = None
             _transport_mode = "none"
     elif len(instances) > 1:
-        logger.info(f"Multiple UDS instances found ({len(instances)}). Use connect_instance() to choose.")
+        logger.info(
+            f"Multiple UDS instances found ({len(instances)}). Use connect_instance() to choose."
+        )
 
     # Try TCP fallback
     tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
@@ -1104,7 +1240,9 @@ def _auto_connect():
         _active_tcp = None
         _transport_mode = "none"
         if not instances:
-            logger.info("No Ghidra instances found. Tools will be registered on connect_instance().")
+            logger.info(
+                "No Ghidra instances found. Tools will be registered on connect_instance()."
+            )
 
 
 # ==========================================================================
@@ -1115,24 +1253,51 @@ def _auto_connect():
 def main():
     global _lazy_mode, _default_groups
 
-    parser = argparse.ArgumentParser(description="GhidraMCP Bridge — MCP↔HTTP multiplexer")
-    parser.add_argument("--mcp-host", type=str, default="127.0.0.1", help="Host for SSE transport")
+    parser = argparse.ArgumentParser(
+        description="GhidraMCP Bridge — MCP↔HTTP multiplexer"
+    )
+    parser.add_argument(
+        "--mcp-host", type=str, default="127.0.0.1", help="Host for SSE transport"
+    )
     parser.add_argument("--mcp-port", type=int, help="Port for SSE transport")
-    parser.add_argument("--transport", type=str, default="stdio", choices=["stdio", "sse"],
-                        help="MCP transport")
-    parser.add_argument("--lazy", action="store_true", default=True,
-                        help="Only load default tool groups on connect (default)")
-    parser.add_argument("--no-lazy", dest="lazy", action="store_false",
-                        help="Load all tool groups on connect")
-    parser.add_argument("--default-groups", type=str, default=None,
-                        help="Comma-separated list of default tool groups to load on connect "
-                             "(default: listing,function,program)")
+    parser.add_argument(
+        "--transport",
+        type=str,
+        default="stdio",
+        choices=["stdio", "sse"],
+        help="MCP transport",
+    )
+    parser.add_argument(
+        "--lazy",
+        action="store_true",
+        default=False,
+        help="Only load default tool groups on connect (not recommended for Claude Code)",
+    )
+    parser.add_argument(
+        "--no-lazy",
+        dest="lazy",
+        action="store_false",
+        help="Load all tool groups on connect (default)",
+    )
+    parser.add_argument(
+        "--default-groups",
+        type=str,
+        default=None,
+        help="Comma-separated list of default tool groups to load on connect "
+        "(default: listing,function,program)",
+    )
     args = parser.parse_args()
 
     _lazy_mode = args.lazy
     if args.default_groups is not None:
-        _default_groups = {g.strip() for g in args.default_groups.split(",") if g.strip()}
+        _default_groups = {
+            g.strip() for g in args.default_groups.split(",") if g.strip()
+        }
 
+    if not _lazy_mode:
+        logger.info(
+            "Loading all tool groups on startup (clients that don't support tools/list_changed need this)"
+        )
     _auto_connect()
 
     if args.transport == "sse":

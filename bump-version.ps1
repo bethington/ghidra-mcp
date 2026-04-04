@@ -76,6 +76,8 @@ $rules = @(
     @{ File = 'src\main\java\com\xebyte\headless\GhidraMCPHeadlessServer.java'; Pat = '"' + [regex]::Escape($Old) + '-headless"';               Rep = ('"' + $New + '-headless"') },
     # ghidra-mcp-setup.ps1 - $PluginVersion = "2.0.x"
     @{ File = 'ghidra-mcp-setup.ps1';                                          Pat = '\$PluginVersion\s*=\s*"' + [regex]::Escape($Old) + '"';  Rep = ('$PluginVersion = "' + $New + '"') },
+    # ghidra-mcp-setup.sh - PLUGIN_VERSION="X.Y.Z"
+    @{ File = 'ghidra-mcp-setup.sh';                                           Pat = 'PLUGIN_VERSION="' + [regex]::Escape($Old) + '"';          Rep = ('PLUGIN_VERSION="' + $New + '"') },
     # tests/endpoints.json - "version": "2.0.x"
     @{ File = 'tests\endpoints.json';                                          Pat = '"version":\s*"' + [regex]::Escape($Old) + '"';           Rep = ('"version": "' + $New + '"') },
     # CLAUDE.md - **Version**: 2.0.x

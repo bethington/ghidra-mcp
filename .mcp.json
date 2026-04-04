@@ -3,7 +3,8 @@
     "ghidra-mcp": {
       "command": "python",
       "args": [
-        "c:/Users/benam/source/mcp/ghidra-mcp/bridge_mcp_ghidra.py"
+        "c:/Users/benam/source/mcp/ghidra-mcp/bridge_mcp_ghidra.py",
+        "--no-lazy"
       ],
       "env": {
         "GHIDRA_SERVER_URL": "http://127.0.0.1:8089/"

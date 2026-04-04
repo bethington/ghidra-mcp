@@ -4,7 +4,18 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v4.3.0 (Latest)
+### v5.0.0 (Latest)
+
+- **Major Feature Release** - Completeness scoring redesign, naming convention enforcement, fun-doc automation engine
+- Log-scaled budget scoring system with tiered plate comment quality
+- NamingConventions.java: auto-fix Hungarian prefixes on struct fields, PascalCase validation, module prefix support
+- New tools: `set_variables` (atomic type+rename), `check_tools`, `rename_variables`
+- fun-doc automation: Codex SDK + Claude Code SDK integration, select mode with depth, multi-provider support
+- CodeBrowser detection fix, `batch_set_comments` optional arrays, `add_struct_field` overlay fix
+- 193 MCP tools, 175 GUI endpoints, 183 headless endpoints
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
+### v4.3.0
 
 - **Feature Release** - Knowledge database integration, BSim cross-version matching, enum fix
 - 5 new knowledge DB MCP tools (store/query function knowledge, ordinal mappings, export)

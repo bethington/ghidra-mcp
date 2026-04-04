@@ -215,8 +215,15 @@ public class CommentService {
         }
 
         if (success.get()) {
-            return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                    "Set plate comment for function at " + functionAddress));
+            List<String> plateWarnings = NamingConventions.validatePlateCommentStructure(comment);
+            if (plateWarnings.isEmpty()) {
+                return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                        "Set plate comment for function at " + functionAddress));
+            } else {
+                return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                        "Set plate comment for function at " + functionAddress,
+                        "warnings", plateWarnings));
+            }
         }
         return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
     }
@@ -236,9 +243,9 @@ public class CommentService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "decompiler_comments", source = ParamSource.BODY) List<Map<String, String>> decompilerComments,
-            @Param(value = "disassembly_comments", source = ParamSource.BODY) List<Map<String, String>> disassemblyComments,
-            @Param(value = "plate_comment", source = ParamSource.BODY, defaultValue = "") String plateComment,
+            @Param(value = "decompiler_comments", source = ParamSource.BODY, defaultValue = "[]") List<Map<String, String>> decompilerComments,
+            @Param(value = "disassembly_comments", source = ParamSource.BODY, defaultValue = "[]") List<Map<String, String>> disassemblyComments,
+            @Param(value = "plate_comment", source = ParamSource.BODY, description = "Plate comment text. Omit to leave existing plate untouched. Pass empty string to explicitly clear.") String plateComment,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -338,14 +345,22 @@ public class CommentService {
             return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
         }
 
-        return Response.ok(JsonHelper.mapOf(
-                "success", true,
-                "decompiler_comments_set", decompilerCount.get(),
-                "disassembly_comments_set", disassemblyCount.get(),
-                "plate_comment_set", plateSet.get(),
-                "plate_comment_cleared", plateSet.get() && plateComment != null && plateComment.isEmpty(),
-                "comments_overwritten", overwrittenCount.get()
-        ));
+        // Validate plate comment structure (apply + warn)
+        List<String> plateWarnings = (plateSet.get() && plateComment != null && !plateComment.isEmpty())
+                ? NamingConventions.validatePlateCommentStructure(plateComment)
+                : List.of();
+
+        Map<String, Object> resultMap = new LinkedHashMap<>();
+        resultMap.put("success", true);
+        resultMap.put("decompiler_comments_set", decompilerCount.get());
+        resultMap.put("disassembly_comments_set", disassemblyCount.get());
+        resultMap.put("plate_comment_set", plateSet.get());
+        resultMap.put("plate_comment_cleared", plateSet.get() && plateComment != null && plateComment.isEmpty());
+        resultMap.put("comments_overwritten", overwrittenCount.get());
+        if (!plateWarnings.isEmpty()) {
+            resultMap.put("warnings", plateWarnings);
+        }
+        return Response.ok(resultMap);
     }
 
     public Response batchSetComments(String functionAddress, List<Map<String, String>> decompilerComments,

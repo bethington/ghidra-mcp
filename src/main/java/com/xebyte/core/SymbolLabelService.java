@@ -145,8 +145,15 @@ public class SymbolLabelService {
             int transactionId = program.startTransaction("Rename Label");
             try {
                 targetSymbol.setName(newName, SourceType.USER_DEFINED);
-                return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                        "Renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr));
+                List<String> labelWarnings = NamingConventions.validateLabelName(newName);
+                if (labelWarnings.isEmpty()) {
+                    return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                            "Renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr));
+                } else {
+                    return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                            "Renamed label from '" + oldName + "' to '" + newName + "' at address " + addressStr,
+                            "warnings", labelWarnings));
+                }
             } catch (Exception e) {
                 return Response.err("Error renaming label: " + e.getMessage());
             } finally {
@@ -211,8 +218,15 @@ public class SymbolLabelService {
             try {
                 Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
                 if (newSymbol != null) {
-                    return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                            "Created label '" + labelName + "' at address " + addressStr));
+                    List<String> labelWarnings = NamingConventions.validateLabelName(labelName);
+                    if (labelWarnings.isEmpty()) {
+                        return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                                "Created label '" + labelName + "' at address " + addressStr));
+                    } else {
+                        return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                                "Created label '" + labelName + "' at address " + addressStr,
+                                "warnings", labelWarnings));
+                    }
                 } else {
                     return Response.err("Failed to create label '" + labelName + "' at address " + addressStr);
                 }
@@ -294,6 +308,9 @@ public class SymbolLabelService {
                             Symbol newSymbol = symbolTable.createLabel(address, labelName, SourceType.USER_DEFINED);
                             if (newSymbol != null) {
                                 successCount.incrementAndGet();
+                                // Validate label naming convention
+                                List<String> lw = NamingConventions.validateLabelName(labelName);
+                                if (!lw.isEmpty()) errors.addAll(lw);  // Surface as errors for visibility
                             } else {
                                 errors.add("Failed to create label '" + labelName + "' at " + addressStr);
                                 errorCount.incrementAndGet();
@@ -363,10 +380,31 @@ public class SymbolLabelService {
             Listing listing = program.getListing();
             Data data = listing.getDefinedDataAt(address);
 
+            List<String> conventions;
             if (data != null) {
-                return renameDataAtAddress(addressStr, newName, programName);
+                // This is defined data (global variable) — validate g_ prefix
+                conventions = NamingConventions.validateGlobalName(newName);
+                Response result = renameDataAtAddress(addressStr, newName, programName);
+                if (!conventions.isEmpty() && result instanceof Response.Ok okResp) {
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, Object> okData = okResp.data() instanceof java.util.Map
+                            ? (java.util.Map<String, Object>) okResp.data() : new java.util.LinkedHashMap<>();
+                    okData.put("warnings", conventions);
+                    return Response.ok(okData);
+                }
+                return result;
             } else {
-                return createLabel(addressStr, newName, programName);
+                // This is a label (code address) — validate snake_case
+                conventions = NamingConventions.validateLabelName(newName);
+                Response result = createLabel(addressStr, newName, programName);
+                if (!conventions.isEmpty() && result instanceof Response.Ok okResp) {
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, Object> okData = okResp.data() instanceof java.util.Map
+                            ? (java.util.Map<String, Object>) okResp.data() : new java.util.LinkedHashMap<>();
+                    okData.put("warnings", conventions);
+                    return Response.ok(okData);
+                }
+                return result;
             }
 
         } catch (Exception e) {
@@ -671,8 +709,15 @@ public class SymbolLabelService {
             symbol.setName(newName, SourceType.USER_DEFINED);
 
             success = true;
-            return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                    "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr));
+            List<String> globalWarnings = NamingConventions.validateGlobalName(newName);
+            if (globalWarnings.isEmpty()) {
+                return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                        "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr));
+            } else {
+                return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                        "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr,
+                        "warnings", globalWarnings));
+            }
 
         } catch (Exception e) {
             Msg.error(this, "Error renaming global variable: " + e.getMessage());

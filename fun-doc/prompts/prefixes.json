@@ -1,0 +1,32 @@
+{
+  "description": "Known module prefixes for function naming. The model should prefer these over inventing new ones.",
+  "prefixes": [
+    {"prefix": "DATATBLS_", "source": "DataTbls.cpp", "description": "Data table compilation and initialization"},
+    {"prefix": "TREASURE_", "source": "TreasureC.cpp", "description": "Loot generation and treasure class logic"},
+    {"prefix": "SKILLS_", "source": "Skills.cpp", "description": "Skill system, skill levels, skill data"},
+    {"prefix": "UNIT_", "source": "Units.cpp", "description": "Unit creation, state, properties"},
+    {"prefix": "ITEMS_", "source": "Items.cpp / ItemTbls.cpp", "description": "Item creation, properties, inventory"},
+    {"prefix": "DRLG_", "source": "Drlg*.cpp", "description": "Dungeon random level generation"},
+    {"prefix": "PRESET_", "source": "DrlgPreset.cpp", "description": "Preset map tile/object placement"},
+    {"prefix": "ARENA_", "source": "Arena.cpp", "description": "PvP arena logic"},
+    {"prefix": "QUEST_", "source": "Quests.cpp", "description": "Quest system and quest events"},
+    {"prefix": "ANIM_", "source": "AnimData.cpp / CelCmp.cpp", "description": "Animation data, COF files, cel sprites"},
+    {"prefix": "PATH_", "source": "Path*.cpp", "description": "Pathfinding and movement"},
+    {"prefix": "STAT_", "source": "StatList.cpp", "description": "Stat lists and stat operations"},
+    {"prefix": "INV_", "source": "Inventory.cpp", "description": "Inventory management"},
+    {"prefix": "MISSILE_", "source": "Missiles.cpp", "description": "Missile creation and behavior"},
+    {"prefix": "MONSTER_", "source": "MonsterAI.cpp / MonStats.cpp", "description": "Monster AI and stats"},
+    {"prefix": "NPC_", "source": "Npc.cpp", "description": "NPC interaction and trading"},
+    {"prefix": "OVERLAY_", "source": "Overlays.cpp", "description": "Visual overlays and effects"},
+    {"prefix": "ROOM_", "source": "DrlgRoom.cpp", "description": "Room management and tile access"},
+    {"prefix": "COLLISION_", "source": "Collision.cpp", "description": "Collision detection and flags"},
+    {"prefix": "WAYPOINT_", "source": "Waypoints.cpp", "description": "Waypoint system"},
+    {"prefix": "STRING_", "source": "StringTable.cpp", "description": "String table and localization"},
+    {"prefix": "PLAYER_", "source": "Player.cpp", "description": "Player-specific logic"},
+    {"prefix": "GAME_", "source": "Game.cpp", "description": "Game state and session management"},
+    {"prefix": "CLIENT_", "source": "D2Client", "description": "Client-side rendering and input"},
+    {"prefix": "NET_", "source": "Network.cpp", "description": "Network packets and multiplayer"},
+    {"prefix": "AI_", "source": "MonsterAI.cpp", "description": "AI behavior and targeting"},
+    {"prefix": "LEVEL_", "source": "Levels.cpp", "description": "Level data and level generation"}
+  ]
+}

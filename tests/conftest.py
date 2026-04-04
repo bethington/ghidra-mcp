@@ -4,6 +4,7 @@ GhidraMCP Test Configuration and Fixtures
 
 import json
 import os
+import re
 import pytest
 import requests
 from pathlib import Path
@@ -12,6 +13,7 @@ from pathlib import Path
 # =============================================================================
 # Configuration
 # =============================================================================
+
 
 def get_server_url():
     """Get the server URL from environment or use default."""
@@ -23,9 +25,48 @@ def get_test_timeout():
     return int(os.environ.get("GHIDRA_MCP_TIMEOUT", "30"))
 
 
+def extract_first_function(text):
+    """Extract the first function name and address from text or JSON responses."""
+    try:
+        data = json.loads(text)
+        if isinstance(data, list) and data:
+            item = data[0]
+            name = item.get("name")
+            address = item.get("address")
+            if name and address:
+                return name, (
+                    address if str(address).startswith("0x") else f"0x{address}"
+                )
+        if isinstance(data, dict):
+            items = data.get("functions") or data.get("results") or []
+            if items:
+                item = items[0]
+                name = item.get("name")
+                address = item.get("address")
+                if name and address:
+                    return name, (
+                        address if str(address).startswith("0x") else f"0x{address}"
+                    )
+    except json.JSONDecodeError:
+        pass
+
+    patterns = [
+        r"^([^\n]+?)\s+at\s+(?:0x)?([0-9a-fA-F]+)",
+        r"^([^\n]+?)\s+@\s+(?:0x)?([0-9a-fA-F]+)",
+        r'"name"\s*:\s*"([^"]+)".*?"address"\s*:\s*"?(?:0x)?([0-9a-fA-F]+)"?',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.MULTILINE | re.DOTALL)
+        if match:
+            return match.group(1).strip(), f"0x{match.group(2)}"
+
+    return None, None
+
+
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture(scope="session")
 def server_url():
@@ -67,6 +108,7 @@ def http_session():
 @pytest.fixture
 def http_client(http_session, server_url):
     """HTTP client configured for the server."""
+
     class HttpClient:
         def __init__(self, session, base_url):
             self.session = session
@@ -75,19 +117,12 @@ def http_client(http_session, server_url):
 
         def get(self, path, params=None, timeout=None):
             url = f"{self.base_url}{path}"
-            return self.session.get(
-                url,
-                params=params,
-                timeout=timeout or self.timeout
-            )
+            return self.session.get(url, params=params, timeout=timeout or self.timeout)
 
         def post(self, path, data=None, json_data=None, timeout=None):
             url = f"{self.base_url}{path}"
             return self.session.post(
-                url,
-                data=data,
-                json=json_data,
-                timeout=timeout or self.timeout
+                url, data=data, json=json_data, timeout=timeout or self.timeout
             )
 
     return HttpClient(http_session, server_url)
@@ -122,16 +157,19 @@ def program_loaded(server_url, server_available):
 
 @pytest.fixture
 def sample_function(http_client, program_loaded):
-    """Get a sample function address for testing."""
+    """Get a sample function name for testing."""
     if not program_loaded:
         pytest.skip("No program loaded")
 
-    response = http_client.get("/list_methods", params={"limit": 1})
+    response = http_client.get("/list_functions", params={"limit": 1})
     if response.status_code != 200 or not response.text.strip():
         pytest.skip("No functions available")
 
-    # Return first function name
-    return response.text.strip().split("\n")[0]
+    name, _ = extract_first_function(response.text)
+    if not name:
+        pytest.skip("Could not parse sample function")
+
+    return name
 
 
 @pytest.fixture
@@ -144,10 +182,9 @@ def sample_address(http_client, program_loaded):
     if response.status_code != 200 or not response.text.strip():
         pytest.skip("No functions available")
 
-    # Parse address from "name @ address" format
-    line = response.text.strip().split("\n")[0]
-    if " @ " in line:
-        return line.split(" @ ")[1]
+    _, address = extract_first_function(response.text)
+    if address:
+        return address
 
     pytest.skip("Could not get sample address")
 
@@ -155,6 +192,7 @@ def sample_address(http_client, program_loaded):
 # =============================================================================
 # Markers
 # =============================================================================
+
 
 def pytest_configure(config):
     """Configure custom pytest markers."""
@@ -164,9 +202,7 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "requires_server: mark test as requiring server connection"
     )
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
+    config.addinivalue_line("markers", "slow: mark test as slow running")
     config.addinivalue_line(
         "markers", "write: mark test as performing write operations"
     )
@@ -175,6 +211,7 @@ def pytest_configure(config):
 # =============================================================================
 # Utility Functions
 # =============================================================================
+
 
 def load_endpoints():
     """Load endpoints for parametrization."""

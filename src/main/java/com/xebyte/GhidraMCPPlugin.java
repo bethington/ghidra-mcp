@@ -96,12 +96,12 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "4.3.0"; // Default fallback
+    private static String VERSION = "5.0.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 178;
+    private static final int ENDPOINT_COUNT = 175;
 
     static {
         try (InputStream input = GhidraMCPPlugin.class
@@ -109,7 +109,7 @@ class VersionInfo {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "4.3.0");
+                VERSION = props.getProperty("app.version", "5.0.0");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
                 GHIDRA_VERSION = props.getProperty("ghidra.version", "unknown");
                 BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
@@ -904,33 +904,76 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * Get current address selected in Ghidra GUI
      */
     private String getCurrentAddress() {
-        CodeViewerService service = tool.getService(CodeViewerService.class);
+        CodeViewerService service = findCodeViewerService();
         if (service == null) return "Code viewer service not available";
 
         ProgramLocation location = service.getCurrentLocation();
-        return (location != null) ? location.getAddress().toString() : "No current location";
+        if (location == null) return "No current location";
+
+        Program program = location.getProgram();
+        String programPath = (program != null && program.getDomainFile() != null)
+                ? program.getDomainFile().getPathname() : null;
+        if (programPath != null) {
+            return JsonHelper.toJson(JsonHelper.mapOf(
+                    "address", location.getAddress().toString(),
+                    "program", programPath));
+        }
+        return location.getAddress().toString();
     }
 
     /**
      * Get current function selected in Ghidra GUI
      */
     private String getCurrentFunction() {
-        CodeViewerService service = tool.getService(CodeViewerService.class);
+        CodeViewerService service = findCodeViewerService();
         if (service == null) return "Code viewer service not available";
 
         ProgramLocation location = service.getCurrentLocation();
         if (location == null) return "No current location";
 
-        Program program = getCurrentProgram();
+        // Use the program from the location (not getCurrentProgram which may differ)
+        Program program = location.getProgram();
+        if (program == null) {
+            program = getCurrentProgram();
+        }
         if (program == null) return "No program loaded";
 
         Function func = program.getFunctionManager().getFunctionContaining(location.getAddress());
         if (func == null) return "No function at current location: " + location.getAddress();
 
-        return String.format("Function: %s at %s\nSignature: %s",
-            func.getName(),
-            func.getEntryPoint(),
-            func.getSignature());
+        // Return JSON with program path for reliable parsing
+        String programPath = program.getDomainFile() != null
+                ? program.getDomainFile().getPathname() : program.getName();
+        return JsonHelper.toJson(JsonHelper.mapOf(
+                "function_name", func.getName(),
+                "address", func.getEntryPoint().toString(),
+                "program", programPath,
+                "signature", func.getSignature().getPrototypeString()));
+    }
+
+    /**
+     * Find CodeViewerService from any running CodeBrowser instance.
+     * The FrontEnd tool doesn't have this service — only CodeBrowser does.
+     */
+    private CodeViewerService findCodeViewerService() {
+        // Try the plugin's own tool first (works if plugin is in CodeBrowser)
+        CodeViewerService service = tool.getService(CodeViewerService.class);
+        if (service != null) return service;
+
+        // Search running CodeBrowser instances via ToolManager
+        try {
+            Project project = tool.getProject();
+            if (project == null) return null;
+            ghidra.framework.model.ToolManager tm = project.getToolManager();
+            if (tm == null) return null;
+            for (ghidra.framework.plugintool.PluginTool runningTool : tm.getRunningTools()) {
+                service = runningTool.getService(CodeViewerService.class);
+                if (service != null) return service;
+            }
+        } catch (Exception e) {
+            // ToolManager may not be available in all contexts
+        }
+        return null;
     }
 
     /**
@@ -2402,7 +2445,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     @SuppressWarnings("deprecation")
     private String getFunctionVariables(String functionName, String programName) {
-        return functionService.getFunctionVariables(functionName, programName).toJson();
+        return functionService.getFunctionVariables(functionName, programName, null, null).toJson();
     }
 
     // Backward compatibility overload

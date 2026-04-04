@@ -651,11 +651,21 @@ public class DataTypeService {
                 dtm.addDataType(enumDt, null);
 
                 txSuccess = true;
-                return Response.ok(JsonHelper.mapOf(
-                    "status", "success",
-                    "message", "Successfully created enumeration '" + name + "' with " + values.size() +
-                               " values, size: " + size + " bytes"
-                ));
+
+                // Validate enum member naming (UPPERCASE_SNAKE_CASE)
+                List<String> enumWarnings = new ArrayList<>();
+                for (String memberName : values.keySet()) {
+                    enumWarnings.addAll(NamingConventions.validateEnumMemberName(memberName));
+                }
+
+                Map<String, Object> resultMap = new LinkedHashMap<>();
+                resultMap.put("status", "success");
+                resultMap.put("message", "Successfully created enumeration '" + name + "' with " + values.size() +
+                               " values, size: " + size + " bytes");
+                if (!enumWarnings.isEmpty()) {
+                    resultMap.put("warnings", enumWarnings);
+                }
+                return Response.ok(resultMap);
 
             } catch (Exception e) {
                 return Response.err("Error creating enumeration: " + e.getMessage());
@@ -1313,10 +1323,11 @@ public class DataTypeService {
     /**
      * Modify a field in an existing structure
      */
-    @McpTool(path = "/modify_struct_field", method = "POST", description = "Modify a field in a structure", category = "datatype")
+    @McpTool(path = "/modify_struct_field", method = "POST", description = "Modify a field in a structure. Fields can be identified by name or by offset (for unnamed fields).", category = "datatype")
     public Response modifyStructField(
             @Param(value = "struct_name", source = ParamSource.BODY) String structName,
-            @Param(value = "field_name", source = ParamSource.BODY) String fieldName,
+            @Param(value = "field_name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Field name to modify. For unnamed fields, use 'offset:N' (e.g., 'offset:16') to identify by byte offset.") String fieldName,
             @Param(value = "new_type", source = ParamSource.BODY, defaultValue = "") String newType,
             @Param(value = "new_name", source = ParamSource.BODY, defaultValue = "") String newName,
             @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
@@ -1324,7 +1335,9 @@ public class DataTypeService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
         if (structName == null || structName.isEmpty()) return Response.text("Structure name is required");
-        if (fieldName == null || fieldName.isEmpty()) return Response.text("Field name is required");
+        if ((fieldName == null || fieldName.isEmpty()) && (newName == null || newName.isEmpty())) {
+            return Response.text("Field name or offset is required");
+        }
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -1347,19 +1360,38 @@ public class DataTypeService {
                     }
 
                     Structure struct = (Structure) dataType;
-                    DataTypeComponent[] components = struct.getDefinedComponents();
                     DataTypeComponent targetComponent = null;
 
-                    // Find the field to modify
-                    for (DataTypeComponent component : components) {
-                        if (fieldName.equals(component.getFieldName())) {
-                            targetComponent = component;
-                            break;
+                    // Support offset-based lookup: "offset:16" or "offset:0x10"
+                    if (fieldName != null && fieldName.startsWith("offset:")) {
+                        try {
+                            String offsetStr = fieldName.substring(7).trim();
+                            int targetOffset = offsetStr.startsWith("0x") || offsetStr.startsWith("0X")
+                                    ? Integer.parseInt(offsetStr.substring(2), 16)
+                                    : Integer.parseInt(offsetStr);
+                            targetComponent = struct.getComponentAt(targetOffset);
+                            if (targetComponent == null) {
+                                result.append("No field at offset ").append(targetOffset).append(" in structure '").append(structName).append("'");
+                                return;
+                            }
+                        } catch (NumberFormatException e) {
+                            result.append("Invalid offset format: ").append(fieldName).append(". Use 'offset:16' or 'offset:0x10'");
+                            return;
+                        }
+                    } else {
+                        // Find by field name
+                        DataTypeComponent[] components = struct.getDefinedComponents();
+                        for (DataTypeComponent component : components) {
+                            if (fieldName != null && fieldName.equals(component.getFieldName())) {
+                                targetComponent = component;
+                                break;
+                            }
                         }
                     }
 
                     if (targetComponent == null) {
-                        result.append("Field '").append(fieldName).append("' not found in structure '").append(structName).append("'");
+                        result.append("Field '").append(fieldName).append("' not found in structure '").append(structName)
+                                .append("'. For unnamed fields, use 'offset:N' (e.g., 'offset:16' or 'offset:0x10')");
                         return;
                     }
 
@@ -1373,10 +1405,12 @@ public class DataTypeService {
                         struct.replace(targetComponent.getOrdinal(), newDataType, newDataType.getLength());
                     }
 
-                    // If new name is specified, change the field name
+                    // If new name is specified, auto-fix Hungarian prefix and change the field name
                     if (newName != null && !newName.isEmpty()) {
                         targetComponent = struct.getComponent(targetComponent.getOrdinal()); // Refresh component
-                        targetComponent.setFieldName(newName);
+                        String fieldTypeName = targetComponent.getDataType().getName();
+                        String fixedName = NamingConventions.autoFixFieldPrefix(newName, fieldTypeName);
+                        targetComponent.setFieldName(fixedName);
                     }
 
                     result.append("Successfully modified field '").append(fieldName).append("' in structure '").append(structName).append("'");
@@ -1417,8 +1451,12 @@ public class DataTypeService {
         if (fieldName == null || fieldName.isEmpty()) return Response.text("Field name is required");
         if (fieldType == null || fieldType.isEmpty()) return Response.text("Field type is required");
 
+        // Auto-fix Hungarian prefix
+        fieldName = NamingConventions.autoFixFieldPrefix(fieldName, fieldType);
+
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
+        final String finalFieldName = fieldName;
 
         try {
             SwingUtilities.invokeAndWait(() -> {
@@ -1445,14 +1483,23 @@ public class DataTypeService {
                     }
 
                     if (offset >= 0) {
-                        // Add at specific offset
-                        struct.insertAtOffset(offset, newFieldType, newFieldType.getLength(), fieldName, null);
+                        // Overlay at specific offset (replace undefined padding, do NOT shift fields)
+                        if (offset < struct.getLength()) {
+                            struct.replaceAtOffset(offset, newFieldType, newFieldType.getLength(), finalFieldName, null);
+                        } else {
+                            // At or beyond current struct size — grow to fit, then place
+                            int needed = offset + newFieldType.getLength() - struct.getLength();
+                            if (needed > 0) {
+                                struct.growStructure(needed);
+                            }
+                            struct.replaceAtOffset(offset, newFieldType, newFieldType.getLength(), finalFieldName, null);
+                        }
                     } else {
                         // Add at end
-                        struct.add(newFieldType, fieldName, null);
+                        struct.add(newFieldType, finalFieldName, null);
                     }
 
-                    result.append("Successfully added field '").append(fieldName).append("' to structure '").append(structName).append("'");
+                    result.append("Successfully added field '").append(finalFieldName).append("' to structure '").append(structName).append("'");
                     success.set(true);
 
                 } catch (Exception e) {
@@ -2652,15 +2699,13 @@ public class DataTypeService {
             // Parse key-value pairs while respecting quotes and escapes
             Map<String, String> keyValues = parseJsonKeyValues(objectJson);
 
-            if (keyValues.containsKey("name")) {
-                name = keyValues.get("name");
-            }
-            if (keyValues.containsKey("type")) {
-                type = keyValues.get("type");
-            }
-            if (keyValues.containsKey("offset")) {
+            // Accept common alternative key names for flexibility
+            name = firstOf(keyValues, "name", "field_name", "fieldName", "field");
+            type = firstOf(keyValues, "type", "field_type", "fieldType", "data_type", "dataType");
+            String offsetStr = firstOf(keyValues, "offset", "field_offset", "fieldOffset", "off");
+            if (offsetStr != null) {
                 try {
-                    offset = Integer.parseInt(keyValues.get("offset"));
+                    offset = Integer.parseInt(offsetStr);
                 } catch (NumberFormatException e) {
                     // Keep offset as -1
                 }
@@ -2670,7 +2715,21 @@ public class DataTypeService {
             Msg.error(this, "Error parsing JSON object: " + e.getMessage());
         }
 
+        // Auto-fix Hungarian prefix on field name
+        if (name != null && type != null) {
+            name = NamingConventions.autoFixFieldPrefix(name, type);
+        }
+
         return new FieldDefinition(name, type, offset);
+    }
+
+    /** Return the value for the first matching key, or null. */
+    private static String firstOf(Map<String, String> map, String... keys) {
+        for (String key : keys) {
+            String val = map.get(key);
+            if (val != null) return val;
+        }
+        return null;
     }
 
     /**

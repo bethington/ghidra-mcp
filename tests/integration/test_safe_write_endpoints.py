@@ -326,7 +326,7 @@ class TestSafeVariableOperations:
             "/rename_variables",
             json_data={
                 "function_address": address,
-                "renames": [{"old_name": var_name, "new_name": var_name}],
+                "variable_renames": {var_name: var_name},
             },
         )
 

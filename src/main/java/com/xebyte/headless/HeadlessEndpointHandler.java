@@ -42,7 +42,7 @@ import ghidra.app.cmd.disassemble.DisassembleCommand;
  */
 public class HeadlessEndpointHandler {
 
-    private static final String VERSION = "4.3.0-headless";
+    private static final String VERSION = "5.0.0-headless";
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
     private final TaskMonitor monitor;
@@ -140,16 +140,16 @@ public class HeadlessEndpointHandler {
         sb.append("{");
         sb.append("\"status\": \"healthy\",");
         sb.append("\"version\": \"").append(VERSION).append("\",");
-        
+
         // Check if any program is loaded
         Program program = getProgram(null);
         boolean programLoaded = (program != null);
         sb.append("\"program_loaded\": ").append(programLoaded);
-        
+
         if (programLoaded) {
             sb.append(",\"program_name\": \"").append(escapeJson(program.getName())).append("\"");
         }
-        
+
         sb.append("}");
         return sb.toString();
     }
@@ -567,7 +567,7 @@ public class HeadlessEndpointHandler {
      * Get all variables (parameters and locals) for a function.
      */
     public String getFunctionVariables(String functionName, String programName) {
-        return functionService.getFunctionVariables(functionName, programName).toJson();
+        return functionService.getFunctionVariables(functionName, programName, null, null).toJson();
     }
 
     /**

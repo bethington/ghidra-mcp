@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-12.0.3-green.svg)](https://ghidra-sre.org/)
-[![Version](https://img.shields.io/badge/Version-4.3.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-5.0.0-brightgreen.svg)](CHANGELOG.md)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
 
@@ -19,6 +19,25 @@ Most Ghidra MCP implementations give you a handful of read-only tools and call i
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
 - **Full Ghidra Server integration** — Connect to shared Ghidra servers, manage repositories, version control, checkout/checkin workflows, and multi-user collaboration.
 - **Headless and GUI modes** — Run with or without the Ghidra GUI. Docker-ready for CI/CD pipelines and automated analysis at scale.
+- **Opinionated by design** — v5.0 moves naming conventions, type safety, and documentation standards into the tool layer. AI agents and human engineers produce consistent output without style guides in every prompt.
+
+## Convention Enforcement
+
+You've been there: six months into a project you find `ProcessItem`, `process_items`, `handleItem`, and `ItemProc` in the same codebase — four functions doing the same thing, named by four different sessions or engineers with no shared contract. Fixing it takes longer than it should, and the problem will happen again.
+
+v5.0 moves conventions from "things to remember" into the tool layer, where they can actually be enforced.
+
+| Tier | Behavior | Example |
+|------|----------|---------|
+| **Auto-fix** | Applied silently | `count` field on a `uint32` → auto-prefixed `dwCount` on save |
+| **Warn** | Change goes through, warning returned | `processData` → "name should be PascalCase with a verb: `ProcessData`" |
+| **Reject** | Change blocked with explanation | `undefined → undefined` type change → "no-op rejected, type unchanged" |
+
+**For AI agents**, this means consistent output across every session, every model, every run — without pasting a style guide into every prompt. The tool knows the rules; the model just needs to make the call.
+
+**For teams**, it eliminates the entire class of review comment that says "that's not our naming convention." Convention arbitration stays in the tool, not in code review.
+
+**For solo work at scale**, `analyze_function_completeness` gives you a 0–100% score that measures honestly: structural deductions (unfixable compiler artifacts) are forgiven in your effective score, log-scaling prevents one bad category from burying everything else, and tiered plate comment quality means you know exactly what's missing and why.
 
 ## 🌟 Features
 
@@ -256,7 +275,7 @@ curl http://127.0.0.1:8089/get_version
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 184 tools fully implemented
+- **MCP Tools**: 193 tools fully implemented
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -506,8 +525,8 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 ### Components
 
 - **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (193 tools)
-- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (176 GUI endpoints)
-- **GhidraMCPHeadlessServer** — Standalone headless server — 184 endpoints, no GUI required
+- **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (175 GUI endpoints)
+- **GhidraMCPHeadlessServer** — Standalone headless server — 183 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
 
 ## 🔧 Development
@@ -573,13 +592,13 @@ ghidra-mcp/
 ├── bridge_mcp_ghidra.py     # MCP server (Python, 193 tools)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (176 endpoints)
-│       ├── headless/                    # Headless server (184 endpoints)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (175 endpoints)
+│       ├── headless/                    # Headless server (183 endpoints)
 │       └── core/                        # Shared service layer (12 services)
 ├── ghidra_scripts/          # Automation scripts
 ├── tests/                   # Python unit tests + endpoint catalog
 │   ├── unit/               # Catalog consistency, schema, tool function tests
-│   └── endpoints.json      # Endpoint specification (191 entries)
+│   └── endpoints.json      # Endpoint specification (193 entries)
 ├── docs/                    # Documentation
 │   ├── prompts/            # AI workflow prompts
 │   ├── releases/           # Version release notes
@@ -686,7 +705,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v4.3.0
+# Connection OK - GhidraMCP Headless Server v5.0.0
 ```
 
 ### Headless API Workflow
@@ -752,7 +771,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 4.3.0 |
+| **Version** | 5.0.0 |
 | **MCP Tools** | 193 fully implemented |
 | **GUI Endpoints** | 175 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 183 (GhidraMCPHeadlessServer) |

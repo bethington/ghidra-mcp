@@ -25,6 +25,7 @@ ENDPOINTS = load_endpoints()
 # Server Connection Tests
 # =============================================================================
 
+
 class TestServerConnection:
     """Test basic server connectivity."""
 
@@ -46,10 +47,11 @@ class TestServerConnection:
 # Endpoint Registration Tests
 # =============================================================================
 
+
 class TestEndpointRegistration:
     """Verify all endpoints are registered and respond (not 404)."""
 
-    @pytest.mark.parametrize("endpoint", ENDPOINTS, ids=[e['path'] for e in ENDPOINTS])
+    @pytest.mark.parametrize("endpoint", ENDPOINTS, ids=[e["path"] for e in ENDPOINTS])
     def test_endpoint_not_404(self, http_client, endpoint):
         """Each endpoint should respond (not 404)."""
         path = endpoint["path"]
@@ -74,6 +76,7 @@ class TestEndpointRegistration:
 # Listing Endpoint Tests
 # =============================================================================
 
+
 class TestListingEndpoints:
     """Test listing endpoints return valid data."""
 
@@ -88,12 +91,12 @@ class TestListingEndpoints:
         # Response may be empty if no program loaded, but should not error
 
     @pytest.mark.requires_server
-    def test_list_methods_pagination(self, http_client, server_available):
-        """list_methods should support pagination."""
+    def test_list_functions_pagination(self, http_client, server_available):
+        """list_functions should support pagination."""
         if not server_available:
             pytest.skip("Server not available")
 
-        response = http_client.get("/list_methods", params={"offset": 0, "limit": 10})
+        response = http_client.get("/list_functions", params={"offset": 0, "limit": 10})
         assert response.status_code == 200
 
     @pytest.mark.requires_program
@@ -135,13 +138,16 @@ class TestListingEndpoints:
 # Getter Endpoint Tests
 # =============================================================================
 
+
 class TestGetterEndpoints:
     """Test getter endpoints."""
 
     @pytest.mark.requires_program
     def test_get_function_by_address(self, http_client, sample_address):
         """get_function_by_address should return function info."""
-        response = http_client.get("/get_function_by_address", params={"address": sample_address})
+        response = http_client.get(
+            "/get_function_by_address", params={"address": sample_address}
+        )
         assert response.status_code == 200
 
         # Should return JSON or error message
@@ -164,6 +170,7 @@ class TestGetterEndpoints:
 # Decompilation Tests
 # =============================================================================
 
+
 class TestDecompilationEndpoints:
     """Test decompilation and disassembly endpoints."""
 
@@ -174,7 +181,7 @@ class TestDecompilationEndpoints:
         response = http_client.get(
             "/decompile_function",
             params={"address": sample_address},
-            timeout=120  # Decompilation can be slow
+            timeout=120,  # Decompilation can be slow
         )
         assert response.status_code == 200
 
@@ -189,9 +196,7 @@ class TestDecompilationEndpoints:
     def test_disassemble_function(self, http_client, sample_address):
         """disassemble_function should return assembly."""
         response = http_client.get(
-            "/disassemble_function",
-            params={"address": sample_address},
-            timeout=60
+            "/disassemble_function", params={"address": sample_address}, timeout=60
         )
         assert response.status_code == 200
 
@@ -208,6 +213,7 @@ class TestDecompilationEndpoints:
 # Cross-Reference Tests
 # =============================================================================
 
+
 class TestXrefEndpoints:
     """Test cross-reference endpoints."""
 
@@ -215,8 +221,7 @@ class TestXrefEndpoints:
     def test_get_xrefs_to(self, http_client, sample_address):
         """get_xrefs_to should return references."""
         response = http_client.get(
-            "/get_xrefs_to",
-            params={"address": sample_address, "limit": 10}
+            "/get_xrefs_to", params={"address": sample_address, "limit": 10}
         )
         assert response.status_code == 200
 
@@ -224,8 +229,7 @@ class TestXrefEndpoints:
     def test_get_xrefs_from(self, http_client, sample_address):
         """get_xrefs_from should return references."""
         response = http_client.get(
-            "/get_xrefs_from",
-            params={"address": sample_address, "limit": 10}
+            "/get_xrefs_from", params={"address": sample_address, "limit": 10}
         )
         assert response.status_code == 200
 
@@ -233,6 +237,7 @@ class TestXrefEndpoints:
 # =============================================================================
 # Search Tests
 # =============================================================================
+
 
 class TestSearchEndpoints:
     """Test search endpoints."""
@@ -244,8 +249,7 @@ class TestSearchEndpoints:
             pytest.skip("No program loaded")
 
         response = http_client.get(
-            "/search_functions",
-            params={"query": "main", "limit": 10}
+            "/search_functions", params={"query": "main", "limit": 10}
         )
         assert response.status_code == 200
 
@@ -263,6 +267,7 @@ class TestSearchEndpoints:
 # =============================================================================
 # Response Format Tests
 # =============================================================================
+
 
 class TestResponseFormats:
     """Verify response formats match expected patterns."""
@@ -302,6 +307,7 @@ class TestResponseFormats:
 # =============================================================================
 # Program Management Tests
 # =============================================================================
+
 
 class TestProgramManagement:
     """Test program management endpoints."""

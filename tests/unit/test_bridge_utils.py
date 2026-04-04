@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
@@ -22,6 +23,7 @@ class TestGetSocketDir(unittest.TestCase):
     @patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1000"}, clear=False)
     def test_xdg_runtime_dir(self):
         from bridge_mcp_ghidra import get_socket_dir
+
         result = get_socket_dir()
         self.assertEqual(result, Path("/run/user/1000/ghidra-mcp"))
 
@@ -31,6 +33,7 @@ class TestGetSocketDir(unittest.TestCase):
         env.pop("XDG_RUNTIME_DIR", None)
         with patch.dict(os.environ, env, clear=True):
             from bridge_mcp_ghidra import get_socket_dir
+
             result = get_socket_dir()
             self.assertEqual(result, Path("/custom/tmp/ghidra-mcp-testuser"))
 
@@ -40,10 +43,12 @@ class TestIsPidAlive(unittest.TestCase):
 
     def test_current_pid_alive(self):
         from bridge_mcp_ghidra import is_pid_alive
+
         self.assertTrue(is_pid_alive(os.getpid()))
 
     def test_nonexistent_pid(self):
         from bridge_mcp_ghidra import is_pid_alive
+
         self.assertFalse(is_pid_alive(4000000))
 
 
@@ -52,24 +57,29 @@ class TestGetTimeout(unittest.TestCase):
 
     def test_default_timeout(self):
         from bridge_mcp_ghidra import get_timeout
+
         self.assertEqual(get_timeout("/some_unknown_endpoint"), 30)
 
     def test_decompile_timeout(self):
         from bridge_mcp_ghidra import get_timeout
+
         self.assertEqual(get_timeout("/decompile_function"), 45)
 
     def test_script_timeout(self):
         from bridge_mcp_ghidra import get_timeout
+
         self.assertEqual(get_timeout("/run_ghidra_script"), 1800)
 
     def test_batch_rename_scaling(self):
         from bridge_mcp_ghidra import get_timeout
+
         payload = {"variable_renames": {f"var_{i}": f"new_{i}" for i in range(10)}}
-        timeout = get_timeout("/batch_rename_variables", payload)
+        timeout = get_timeout("/rename_variables", payload)
         self.assertGreater(timeout, 120)
 
     def test_batch_comments_scaling(self):
         from bridge_mcp_ghidra import get_timeout
+
         payload = {
             "decompiler_comments": [{"addr": "0x1000", "comment": "test"}] * 5,
             "disassembly_comments": [],
@@ -83,6 +93,7 @@ class TestBuildToolFunction(unittest.TestCase):
 
     def test_builds_callable(self):
         from bridge_mcp_ghidra import _build_tool_function
+
         schema = {
             "properties": {
                 "address": {"type": "string"},
@@ -95,6 +106,7 @@ class TestBuildToolFunction(unittest.TestCase):
 
     def test_signature_has_correct_params(self):
         from bridge_mcp_ghidra import _build_tool_function
+
         schema = {
             "properties": {
                 "address": {"type": "string"},
@@ -110,6 +122,7 @@ class TestBuildToolFunction(unittest.TestCase):
 
     def test_required_params_no_default(self):
         from bridge_mcp_ghidra import _build_tool_function
+
         schema = {
             "properties": {"name": {"type": "string"}},
             "required": ["name"],
@@ -120,6 +133,7 @@ class TestBuildToolFunction(unittest.TestCase):
 
     def test_optional_params_default_none(self):
         from bridge_mcp_ghidra import _build_tool_function
+
         schema = {
             "properties": {"name": {"type": "string"}},
             "required": [],
@@ -130,6 +144,7 @@ class TestBuildToolFunction(unittest.TestCase):
 
     def test_type_annotations(self):
         from bridge_mcp_ghidra import _build_tool_function
+
         schema = {
             "properties": {
                 "name": {"type": "string"},
@@ -148,6 +163,7 @@ class TestBuildToolFunction(unittest.TestCase):
 
     def test_empty_schema(self):
         from bridge_mcp_ghidra import _build_tool_function
+
         schema = {"type": "object", "properties": {}}
         fn = _build_tool_function("/test", "GET", schema)
         sig = inspect.signature(fn)
@@ -159,6 +175,7 @@ class TestRegisterToolsFromSchema(unittest.TestCase):
 
     def test_registers_tools(self):
         from bridge_mcp_ghidra import register_tools_from_schema, _dynamic_tool_names
+
         schema = [
             {
                 "name": "test_tool_reg_1",
@@ -186,10 +203,25 @@ class TestRegisterToolsFromSchema(unittest.TestCase):
 
     def test_clears_previous_tools(self):
         from bridge_mcp_ghidra import register_tools_from_schema, _dynamic_tool_names
-        schema1 = [{"name": "old_tool_clear", "description": "", "endpoint": "/old",
-                     "http_method": "GET", "input_schema": {"type": "object", "properties": {}}}]
-        schema2 = [{"name": "new_tool_clear", "description": "", "endpoint": "/new",
-                     "http_method": "GET", "input_schema": {"type": "object", "properties": {}}}]
+
+        schema1 = [
+            {
+                "name": "old_tool_clear",
+                "description": "",
+                "endpoint": "/old",
+                "http_method": "GET",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        ]
+        schema2 = [
+            {
+                "name": "new_tool_clear",
+                "description": "",
+                "endpoint": "/new",
+                "http_method": "GET",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        ]
         register_tools_from_schema(schema1)
         self.assertIn("old_tool_clear", _dynamic_tool_names)
         register_tools_from_schema(schema2)
@@ -202,6 +234,7 @@ class TestDispatchErrors(unittest.TestCase):
 
     def test_dispatch_get_no_connection(self):
         import bridge_mcp_ghidra as bridge
+
         old = bridge._transport_mode
         bridge._transport_mode = "none"
         try:
@@ -214,6 +247,7 @@ class TestDispatchErrors(unittest.TestCase):
 
     def test_dispatch_post_no_connection(self):
         import bridge_mcp_ghidra as bridge
+
         old = bridge._transport_mode
         bridge._transport_mode = "none"
         try:
@@ -229,6 +263,7 @@ class TestUnixHTTPConnection(unittest.TestCase):
 
     def test_sets_socket_path(self):
         from bridge_mcp_ghidra import UnixHTTPConnection
+
         conn = UnixHTTPConnection("/tmp/test.sock", timeout=10)
         self.assertEqual(conn.socket_path, "/tmp/test.sock")
         self.assertEqual(conn.timeout, 10)

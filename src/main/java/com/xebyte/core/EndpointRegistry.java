@@ -534,7 +534,7 @@ public class EndpointRegistry {
 
         get("/get_function_variables", "List all variables in a function",
             params(qStr("function_name", "Function name"), pProg()),
-            (q, b) -> functionService.getFunctionVariables(str(q, "function_name"), str(q, "program")));
+            (q, b) -> functionService.getFunctionVariables(str(q, "function_name"), str(q, "program"), null, null));
 
         post("/batch_rename_function_components", "Rename function and components atomically",
             params(bStr("function_address"), bStrOpt("function_name"), bObj("parameter_renames"),
@@ -551,7 +551,13 @@ public class EndpointRegistry {
                 parameterRenames, localRenames, bodyStr(b, "return_type"), str(q, "program"));
         });
 
-        post("/batch_rename_variables", "Rename multiple variables atomically",
+        post("/rename_variables", "Rename multiple variables atomically",
+            params(bStr("function_address"), bObj("variable_renames"), bBool("force_individual"), pProg()),
+            (q, b) -> functionService.batchRenameVariables(bodyStr(b, "function_address"),
+                bodyStringMap(b, "variable_renames"),
+                bodyBool(b, "force_individual"), str(q, "program")));
+
+        post("/batch_rename_variables", "Backward-compatible alias for /rename_variables",
             params(bStr("function_address"), bObj("variable_renames"), bBool("force_individual"), pProg()),
             (q, b) -> functionService.batchRenameVariables(bodyStr(b, "function_address"),
                 bodyStringMap(b, "variable_renames"),

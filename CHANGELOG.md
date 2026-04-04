@@ -4,6 +4,91 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.0.0 - 2026-04-03
+
+GhidraMCP v5.0 marks a deliberate shift: from a passive Ghidra mirror to an **active enforcement layer**. Tools that write annotations now enforce naming conventions, reject no-ops, and auto-correct struct fields. At the scale of thousands of functions, multiple binary versions, and parallel AI + human workflows, conventions can't be suggestions — they must be in the tool.
+
+This is a contract change. If you have scripts or prompts built against earlier versions, review the breaking changes below.
+
+### Breaking Changes
+
+| Tool / Behavior | Before | After (v5.0) |
+|-----------------|--------|--------------|
+| `batch_rename_variables` | endpoint name | **Renamed** to `rename_variables` — update all callers |
+| `add_struct_field` | `insertAtOffset` (shifts subsequent fields) | `replaceAtOffset` — same call, different field layout |
+| `set_local_variable_type` | accepted undefined→undefined silently | **Rejected with error** — type must actually change |
+| Struct field names | passed through as-is | **Auto-prefixed** with Hungarian notation based on data type |
+
+### Completeness Scoring Redesign
+- **Log-scaled budget system**: Every per-count deduction category now has a fixed point budget with log-scaled penalties. No single category can dominate the score. Monster functions (5,000+ variables) no longer score 0%.
+- **Tiered plate comment scoring**: Missing plate (-35pts), stub (-25pts), incomplete (-15pts), minor (-8pts), complete (0pts). Rewards quality, not just presence.
+- **Effective score only counts fixable deductions**: Structural (unfixable) deductions are fully forgiven. Functions with only structural deductions score 100% effective.
+- **Bulk stack-array heuristic**: Functions with 100+ undefined variables reclassify the excess as structural (impractical to fix via API).
+- **Address-suffix name detection**: Functions ending with hex address suffixes (e.g., `_6FD93C30`) flagged as 20pt fixable deduction.
+- **`__thiscall` ECX auto-param**: Correctly classified as structural/unfixable. `set_function_prototype` warns when `__thiscall` `this` type can't be changed.
+
+### Naming Convention Enforcement
+- **NamingConventions.java**: Centralized validation utility -- PascalCase function names, Hungarian variable prefixes, `g_` global prefixes, snake_case labels, plate comment structure.
+- **Auto-fix struct field prefixes**: `create_struct`, `add_struct_field`, `modify_struct_field` automatically apply correct Hungarian prefixes based on field type.
+- **Function name validation**: Warns on non-PascalCase, missing verb, too short. Module prefixes (`UPPERCASE_`) accepted and validated separately.
+- **`set_local_variable_type` rejects undefined-to-undefined**: No-op type changes rejected with helpful error.
+
+### New Tools
+- **`/set_variables`**: Atomic type + rename in a single transaction. Sets types first, decompiles, then renames with Hungarian validation. Eliminates SSA churn.
+- **`/check_tools`**: Verify if specific tools are callable. Returns `callable`, `not_loaded`, or `not_found` with fix suggestions.
+- **`/rename_variables`**: Renamed from `/batch_rename_variables` for conciseness.
+
+### Tool Improvements
+- **`batch_set_comments`**: `decompiler_comments` and `disassembly_comments` arrays now optional (default `[]`). Omitting `plate_comment` leaves existing plate untouched.
+- **`add_struct_field`**: Uses `replaceAtOffset` instead of `insertAtOffset` -- overlays undefined bytes without shifting subsequent fields. Off-by-one at struct boundary fixed.
+- **`modify_struct_field`**: Accepts `offset:N` syntax (e.g., `offset:16` or `offset:0x10`) for unnamed fields.
+- **`create_struct`**: Accepts flexible JSON key names (`field_name`, `fieldName`, `data_type`, etc.).
+- **`get_function_variables`**: `limit` and `filter` params now optional with defaults.
+- **`get_current_function` / `get_current_address`**: Now discovers CodeBrowser instances via ToolManager (was broken in FrontEnd mode). Returns JSON with program path.
+
+### Plate Comment Validation
+- **Summary line check**: First non-empty line must be >20 chars.
+- **Parameter count cross-validation**: Compares Parameters section entries against function signature.
+- **Returns/return-type match**: Catches void function with non-void docs and vice versa.
+- **Source file reference**: Checks for `Source:` line.
+- **Algorithm step substance**: Flags steps with <10 chars of content.
+- **Parameter entry quality**: Flags entries lacking type + description.
+
+### fun-doc Automation Engine
+- **Codex SDK integration**: `AI_PROVIDER = "codex"` routes to OpenAI Codex Python SDK with MCP tools. Claude Code SDK also integrated.
+- **Select mode (`-s`)**: Fetches current function from CodeBrowser, builds prompt. `--depth 2` recursively collects callers/callees.
+- **Manual mode (`-m -s`)**: Single-keypress flow -- copies prompt, press any key for next function, `q` to quit.
+- **State sync**: Pre-work and post-work sync points update `state.json` with live completeness data.
+- **Short-circuit**: Functions at 95%+ with 0 fixable deductions auto-skip in auto mode (not manual).
+- **Smart mode routing**: >= 100% VERIFY, >= 70% FIX, < 70% FULL. No smart promotion.
+
+### Prompt V6 Improvements
+- **Score removed from prompts**: Prevents models from coasting on high scores.
+- **Consistency checklist**: Step 5 requires function name vs plate comment alignment check.
+- **Module prefix decision**: 2-signal gate (Source file, behavior domain, callee family) before applying prefix.
+- **Naming confidence rules**: Require evidence for semantic names. Placeholders (`dwUnknown1D0`) for unproven fields.
+- **Struct creation gate**: Reuse-first, 3+ validated fields, 2+ code paths required. Otherwise comment-only.
+- **Verification removed**: `analyze_function_completeness` no longer called inside prompts. Scoring handled externally.
+- **Known module prefixes**: `prefixes.json` injected into every prompt.
+- **Opportunistic checks in FIX mode**: Function name, prototype, plate comment, variable names.
+- **`batch_set_comments` schema documented**: Exact JSON format in step-comments.md.
+- **Non-ASCII sanitized**: All em dashes and arrows replaced with ASCII equivalents.
+
+### Bridge Improvements
+- **All tools loaded at startup** (`--lazy` default changed to False): Fixes Claude Code/Codex not seeing dynamically loaded tools.
+- **`load_tool_group` returns tool names**: Response includes exact list of newly loaded tools.
+- **TCP fallback in `list_instances()`**: Windows environments now show the active TCP connection (PR #90).
+- **Program param optional on all tools**: Schema fixes from PR #92 -- omitting `program` uses active program.
+- **Xref tools accept address directly**: `get_function_callers`/`get_function_callees` no longer require name-only lookup.
+
+### Bug Fixes
+- **`effective_score > max_achievable_score`**: Fixed -- effective score capped at max achievable.
+- **`analyze_for_documentation` pre-fetch**: Was using `address` instead of `function_address` param. Fixed.
+- **CodeBrowser detection**: `get_current_function`/`get_current_address` now search running CodeBrowser instances via ToolManager.
+- **Callers/callees plain text parsing**: `fun_doc.py` now handles both JSON and text response formats from xref endpoints.
+
+---
+
 ## v4.3.0 - 2026-03-09
 
 ### Annotation-Based Endpoints & Dynamic Bridge Registration

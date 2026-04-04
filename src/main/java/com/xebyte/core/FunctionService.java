@@ -574,7 +574,12 @@ public class FunctionService {
 
         String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
         if (successFlag.get()) {
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+            List<String> nameWarnings = NamingConventions.validateFunctionName(newName, false);
+            if (nameWarnings.isEmpty()) {
+                return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+            } else {
+                return Response.ok(JsonHelper.mapOf("status", "success", "message", text, "warnings", nameWarnings));
+            }
         }
         return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
@@ -671,7 +676,15 @@ public class FunctionService {
             Msg.error(this, errorMsg, e);
             return Response.text(errorMsg);
         }
-        return Response.text(successFlag.get() ? "Variable renamed" : "Failed to rename variable");
+        if (successFlag.get()) {
+            String varType = finalHighSymbol.getDataType().getName();
+            String hungarianWarning = NamingConventions.validateHungarianPrefix(newVarName, varType);
+            if (hungarianWarning != null) {
+                return Response.ok(JsonHelper.mapOf("status", "success", "message", "Variable renamed", "warnings", List.of(hungarianWarning)));
+            }
+            return Response.text("Variable renamed");
+        }
+        return Response.text("Failed to rename variable");
     }
 
     public Response renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
@@ -764,7 +777,13 @@ public class FunctionService {
 
         String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
         if (success.get()) {
-            return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+            List<String> nameWarnings = NamingConventions.validateFunctionName(newName, false);
+            if (nameWarnings.isEmpty()) {
+                return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
+            } else {
+                return Response.ok(JsonHelper.mapOf("status", "success", "message", text,
+                        "warnings", nameWarnings));
+            }
         }
         return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
@@ -860,6 +879,14 @@ public class FunctionService {
             String msg = "Successfully set prototype for function at " + functionAddress;
             if (callingConvention != null && !callingConvention.isEmpty()) {
                 msg += " with " + callingConvention + " calling convention";
+            }
+            // Warn about __thiscall ECX auto-param limitation
+            String cc = callingConvention != null ? callingConvention : "";
+            boolean protoHasThiscall = prototype != null && (prototype.contains("__thiscall") || cc.contains("__thiscall"));
+            if (protoHasThiscall && prototype != null && !prototype.contains("void *this") && !prototype.contains("void * this")) {
+                msg += "\n\nWARNING: __thiscall ECX auto-parameter 'this' cannot be retyped via API. "
+                     + "Ghidra accepts the prototype but the decompiler will still show 'this' as void*. "
+                     + "Document the intended type in the plate comment Parameters section instead.";
             }
             if (!result.getErrorMessage().isEmpty()) {
                 msg += "\n\nWarnings/Debug Info:\n" + result.getErrorMessage();
@@ -1092,6 +1119,12 @@ public class FunctionService {
 
         if (newType == null || newType.isEmpty()) {
             return Response.err("New type is required");
+        }
+
+        // Reject undefined -> undefined (no improvement)
+        if (newType.startsWith("undefined")) {
+            return Response.err("Rejected: new type '" + newType + "' is still undefined. "
+                    + "Resolve to a concrete type: byte, ushort, int, uint, void *, etc.");
         }
 
         // Resolve address before entering threading lambda
@@ -1644,7 +1677,9 @@ public class FunctionService {
     @McpTool(path = "/get_function_variables", description = "List all variables in a function", category = "function")
     public Response getFunctionVariables(
             @Param(value = "function_name", description = "Function name") String functionName,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "limit", description = "Max local variables to return (default 200, 0 = unlimited)", defaultValue = "200") String limitStr,
+            @Param(value = "filter", description = "Filter locals: 'all' (default), 'needs_work' (only needs_type or needs_rename), 'named' (only non-generic names)", defaultValue = "all") String filter) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1652,6 +1687,9 @@ public class FunctionService {
         if (functionName == null || functionName.isEmpty()) {
             return Response.err("Function name is required");
         }
+
+        final int limit = (limitStr != null && !limitStr.isEmpty()) ? Integer.parseInt(limitStr) : 200;
+        final String filterMode = (filter != null && !filter.isEmpty()) ? filter : "all";
 
         final Program finalProgram = program;
         final AtomicReference<Map<String, Object>> resultData = new AtomicReference<>(null);
@@ -1724,14 +1762,37 @@ public class FunctionService {
                         }
                     }
 
+                    int totalLocals = locals.length;
+                    int filteredOut = 0;
+                    int truncated = 0;
+
                     for (Variable local : locals) {
-                        Map<String, Object> localMap = new LinkedHashMap<>();
                         boolean isPhantom = !decompVarNames.contains(local.getName());
                         String lTypeName = local.getDataType().getName();
                         boolean lNeedsType = lTypeName.startsWith("undefined");
                         boolean lNeedsRename = local.getName().startsWith("local_") ||
                             local.getName().matches(".*Var\\d+");
 
+                        // Apply filter
+                        if ("needs_work".equals(filterMode)) {
+                            if (isPhantom || (!lNeedsType && !lNeedsRename)) {
+                                filteredOut++;
+                                continue;
+                            }
+                        } else if ("named".equals(filterMode)) {
+                            if (isPhantom || lNeedsRename) {
+                                filteredOut++;
+                                continue;
+                            }
+                        }
+
+                        // Apply limit (0 = unlimited)
+                        if (limit > 0 && localsList.size() >= limit) {
+                            truncated++;
+                            continue;
+                        }
+
+                        Map<String, Object> localMap = new LinkedHashMap<>();
                         localMap.put("name", local.getName());
                         localMap.put("type", lTypeName);
                         localMap.put("storage", local.getVariableStorage().toString());
@@ -1747,6 +1808,9 @@ public class FunctionService {
                         localsList.add(localMap);
                     }
                     data.put("locals", localsList);
+                    data.put("total_locals", totalLocals);
+                    if (filteredOut > 0) data.put("filtered_out", filteredOut);
+                    if (truncated > 0) data.put("truncated", truncated);
 
                     resultData.set(data);
                 } catch (Exception e) {
@@ -1771,7 +1835,7 @@ public class FunctionService {
 
     // Backward compatibility overload
     public Response getFunctionVariables(String functionName) {
-        return getFunctionVariables(functionName, null);
+        return getFunctionVariables(functionName, null, null, null);
     }
 
     /** Suggest a concrete type for an undefined Ghidra type based on size. */
@@ -2097,7 +2161,15 @@ public class FunctionService {
         }
 
         if (resultData.get() != null) {
-            return Response.ok(resultData.get());
+            Map<String, Object> data = resultData.get();
+            // Validate function name if one was provided
+            if (name != null && !name.isEmpty()) {
+                List<String> nameWarnings = NamingConventions.validateFunctionName(name, false);
+                if (!nameWarnings.isEmpty()) {
+                    data.put("warnings", nameWarnings);
+                }
+            }
+            return Response.ok(data);
         }
         return Response.err("Unknown failure");
     }
@@ -2302,7 +2374,7 @@ public class FunctionService {
      * @param forceIndividual If true, skip batch mode and use individual renames
      * @return JSON result with rename status
      */
-    @McpTool(path = "/batch_rename_variables", method = "POST", description = "Rename multiple variables atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/rename_variables", method = "POST", description = "Rename multiple variables atomically. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response batchRenameVariables(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -2325,6 +2397,7 @@ public class FunctionService {
         final AtomicInteger variablesRenamed = new AtomicInteger(0);
         final AtomicInteger variablesFailed = new AtomicInteger(0);
         final List<String> errors = new ArrayList<>();
+        final List<String> warnings = new ArrayList<>();
         final AtomicReference<Function> funcRef = new AtomicReference<>(null);
         final AtomicReference<String> fallbackResult = new AtomicReference<>(null);
         final AtomicReference<String> errorRef = new AtomicReference<>(null);
@@ -2387,6 +2460,7 @@ public class FunctionService {
 
                                     // PATH 1: Rename SSA variables from LocalSymbolMap (decompiler variables)
                                     Set<String> renamedVars = new HashSet<>();
+                                    // hungarianWarnings collected into shared 'warnings' list
                                     Iterator<HighSymbol> renameSymbols = localSymbolMap.getSymbols();
                                     while (renameSymbols.hasNext()) {
                                         HighSymbol symbol = renameSymbols.next();
@@ -2403,6 +2477,10 @@ public class FunctionService {
                                                 );
                                                 variablesRenamed.incrementAndGet();
                                                 renamedVars.add(oldName);
+                                                // Validate Hungarian prefix against type
+                                                String varType = symbol.getDataType().getName();
+                                                String hw = NamingConventions.validateHungarianPrefix(newName, varType);
+                                                if (hw != null) warnings.add(hw);
                                             } catch (Exception e) {
                                                 variablesFailed.incrementAndGet();
                                                 errors.add("Failed to rename SSA variable " + oldName + " to " + newName + ": " + e.getMessage());
@@ -2496,6 +2574,9 @@ public class FunctionService {
                 if (!errors.isEmpty()) {
                     resultMap.put("errors", errors);
                 }
+                if (!warnings.isEmpty()) {
+                    resultMap.put("warnings", warnings);
+                }
                 return Response.ok(resultMap);
             }
         } catch (Exception e) {
@@ -2507,6 +2588,186 @@ public class FunctionService {
 
     public Response batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual) {
         return batchRenameVariables(functionAddress, variableRenames, forceIndividual, null);
+    }
+
+    @McpTool(path = "/set_variables", method = "POST",
+            description = "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. "
+                        + "Hungarian prefix validation is enforced: the new name's prefix must match the type. "
+                        + "On programs with multiple address spaces, prefix addresses with the space name.",
+            category = "function")
+    public Response setVariables(
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Function entry point address") String functionAddress,
+            @Param(value = "variables", source = ParamSource.BODY,
+                   description = "JSON object mapping old variable names to {name, type} objects. "
+                               + "Both fields optional: omit 'type' to rename only, omit 'name' to retype only. "
+                               + "Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, \"local_c\": {\"type\": \"int\"}}") String variablesJson,
+            @Param(value = "program") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        // Parse the variables JSON into a map of oldName -> {name?, type?}
+        Map<String, Map<String, String>> variables;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> raw = (Map<String, Object>) JsonHelper.parseJson(variablesJson);
+            variables = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> entry : raw.entrySet()) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> val = (Map<String, Object>) entry.getValue();
+                Map<String, String> spec = new LinkedHashMap<>();
+                if (val.containsKey("name")) spec.put("name", String.valueOf(val.get("name")));
+                if (val.containsKey("type")) spec.put("type", String.valueOf(val.get("type")));
+                variables.put(entry.getKey(), spec);
+            }
+        } catch (Exception e) {
+            return Response.err("Invalid variables JSON: " + e.getMessage()
+                    + ". Expected: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}}");
+        }
+
+        if (variables.isEmpty()) return Response.err("No variables specified");
+
+        final AtomicInteger typesSet = new AtomicInteger(0);
+        final AtomicInteger namesSet = new AtomicInteger(0);
+        final AtomicInteger failed = new AtomicInteger(0);
+        final List<String> warnings = new ArrayList<>();
+        final List<String> errors = new ArrayList<>();
+        final AtomicReference<String> errorRef = new AtomicReference<>(null);
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Set Variables");
+                try {
+                    Function func = program.getFunctionManager().getFunctionAt(addr);
+                    if (func == null) {
+                        errorRef.set("No function at address: " + functionAddress);
+                        return;
+                    }
+
+                    // Phase 1: Set types
+                    for (Map.Entry<String, Map<String, String>> entry : variables.entrySet()) {
+                        String oldName = entry.getKey();
+                        String newType = entry.getValue().get("type");
+                        if (newType == null) continue;
+
+                        // Find the variable
+                        Variable target = null;
+                        for (Variable v : func.getLocalVariables()) {
+                            if (v.getName().equals(oldName)) { target = v; break; }
+                        }
+                        if (target == null) {
+                            for (Parameter p : func.getParameters()) {
+                                if (p.getName().equals(oldName)) { target = p; break; }
+                            }
+                        }
+                        if (target == null) {
+                            errors.add("Variable not found: " + oldName);
+                            failed.incrementAndGet();
+                            continue;
+                        }
+
+                        // Reject undefined -> undefined
+                        String oldType = target.getDataType().getName();
+                        if (NamingConventions.isUndefinedToUndefined(oldType, newType)) {
+                            errors.add("Rejected: " + oldName + " type " + oldType + " -> " + newType + " (still undefined)");
+                            failed.incrementAndGet();
+                            continue;
+                        }
+
+                        try {
+                            DataType dt = ServiceUtils.resolveDataType(program.getDataTypeManager(), newType);
+                            if (dt == null) {
+                                errors.add("Unknown type '" + newType + "' for " + oldName);
+                                failed.incrementAndGet();
+                                continue;
+                            }
+                            target.setDataType(dt, SourceType.USER_DEFINED);
+                            typesSet.incrementAndGet();
+                        } catch (Exception e) {
+                            errors.add("Failed to set type on " + oldName + ": " + e.getMessage());
+                            failed.incrementAndGet();
+                        }
+                    }
+
+                    // Phase 2: Decompile to get fresh SSA variables for renaming
+                    DecompInterface decomp = new DecompInterface();
+                    decomp.openProgram(program);
+                    DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                    if (decompResult == null || !decompResult.decompileCompleted()) {
+                        errors.add("Decompilation failed after type changes; renames skipped");
+                        decomp.dispose();
+                        return;
+                    }
+                    HighFunction highFunction = decompResult.getHighFunction();
+                    if (highFunction == null) {
+                        errors.add("No HighFunction after decompile; renames skipped");
+                        decomp.dispose();
+                        return;
+                    }
+
+                    // Commit params if needed
+                    LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
+                    Iterator<HighSymbol> checkSymbols = localSymbolMap.getSymbols();
+                    if (checkSymbols.hasNext()) {
+                        HighSymbol first = checkSymbols.next();
+                        if (checkFullCommit(first, highFunction)) {
+                            HighFunctionDBUtil.commitParamsToDatabase(highFunction, false,
+                                    ReturnCommitOption.NO_COMMIT, func.getSignatureSource());
+                        }
+                    }
+
+                    // Phase 3: Rename with Hungarian validation
+                    Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
+                    while (symbols.hasNext()) {
+                        HighSymbol symbol = symbols.next();
+                        String currentName = symbol.getName();
+                        Map<String, String> spec = variables.get(currentName);
+                        if (spec == null || !spec.containsKey("name")) continue;
+
+                        String newName = spec.get("name");
+                        if (newName == null || newName.isEmpty() || newName.equals(currentName)) continue;
+
+                        // Validate Hungarian prefix against actual type
+                        String actualType = symbol.getDataType().getName();
+                        String hungarianWarning = NamingConventions.validateHungarianPrefix(newName, actualType);
+                        if (hungarianWarning != null) {
+                            warnings.add(hungarianWarning);
+                        }
+
+                        try {
+                            HighFunctionDBUtil.updateDBVariable(symbol, newName, null, SourceType.USER_DEFINED);
+                            namesSet.incrementAndGet();
+                        } catch (Exception e) {
+                            errors.add("Failed to rename " + currentName + " -> " + newName + ": " + e.getMessage());
+                            failed.incrementAndGet();
+                        }
+                    }
+
+                    decomp.dispose();
+                } catch (Exception e) {
+                    errorRef.set(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, errorRef.get() == null);
+                }
+            });
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+
+        if (errorRef.get() != null) return Response.err(errorRef.get());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("types_set", typesSet.get());
+        result.put("names_set", namesSet.get());
+        result.put("failed", failed.get());
+        if (!warnings.isEmpty()) result.put("warnings", warnings);
+        if (!errors.isEmpty()) result.put("errors", errors);
+        return Response.ok(result);
     }
 
     /**

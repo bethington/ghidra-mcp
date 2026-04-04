@@ -1,5 +1,5 @@
 {
-  "version": "4.3.0",
+  "version": "5.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
   "total_endpoints": 193,
   "categories": {
@@ -643,7 +643,7 @@
       "description": "Rename or create label"
     },
     {
-      "path": "/batch_rename_variables",
+      "path": "/rename_variables",
       "method": "POST",
       "category": "rename",
       "params": [

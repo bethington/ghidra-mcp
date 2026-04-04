@@ -559,3 +559,21 @@ ghidra_scripts/UnifyOrdinalNames*.java
 ghidra_scripts/AutoFixOrdinalLinkage.py
 ghidra_scripts/ExportDLLFunctionMappings*.java
 .worktrees/
+
+# D2/PD2S12 Project-specific todo tracking
+FunctionsTodo-*.txt
+pd2s12-*.txt
+
+# Temporary analysis state files
+completeness_tmp.json
+schema_tmp.json
+schema_dump.json
+*_tmp.json
+
+# One-off extraction/utility scripts
+extract_*.py
+apply_prefix_renames.py
+audit_*.py
+audit-*.json
+
+fun-doc/state.json
