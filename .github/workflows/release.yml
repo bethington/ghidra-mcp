@@ -135,9 +135,6 @@ jobs:
         # Copy requirements files
         cp requirements.txt release/
         
-        # Copy installation script
-        cp copy-ghidra-libs.bat release/ 2>/dev/null || echo "copy-ghidra-libs.bat not found, skipping"
-        
         # Copy README and LICENSE
         cp README.md release/
         cp LICENSE release/ 2>/dev/null || echo "LICENSE file not found, skipping"
@@ -272,11 +269,27 @@ jobs:
           release/requirements.txt
           release/README.md
           release/INSTALLATION.md
-          release/copy-ghidra-libs.bat
         draft: false
         prerelease: false
         generate_release_notes: false
-        fail_on_unmatched_files: false
+        fail_on_unmatched_files: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Verify release assets
+      run: |
+        TAG="${{ steps.version.outputs.TAG }}"
+        VERSION="${{ steps.version.outputs.VERSION }}"
+        echo "Verifying release assets for ${TAG}..."
+        ASSETS=$(gh release view "${TAG}" --json assets --jq '.assets[].name')
+        echo "Assets found:"
+        echo "$ASSETS"
+        if echo "$ASSETS" | grep -q "GhidraMCP-${VERSION}.zip"; then
+          echo "Ghidra extension ZIP confirmed in release assets"
+        else
+          echo "ERROR: GhidraMCP-${VERSION}.zip is NOT in the release assets!"
+          exit 1
+        fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
