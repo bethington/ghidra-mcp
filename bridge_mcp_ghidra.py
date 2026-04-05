@@ -1304,12 +1304,8 @@ def main():
     mcp.settings.host = args.mcp_host
     if args.mcp_port:
         mcp.settings.port = args.mcp_port
-    if args.transport == "sse":
-        logger.info("Starting MCP bridge (SSE)")
-        mcp.run(transport="sse")
-    else:
-        logger.info(f"Starting {args.transport} bridge")
-        mcp.run(transport=args.transport)
+    logger.info(f"Starting MCP bridge ({args.transport})")
+    mcp.run(transport=args.transport)
 
 
 if __name__ == "__main__":
