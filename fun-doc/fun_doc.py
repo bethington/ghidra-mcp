@@ -50,7 +50,7 @@ GHIDRA_URL = "http://127.0.0.1:8089"
 # Switch between "claude" and "codex" here.
 # Each provider maps mode -> model name.
 
-AI_PROVIDER = "claude"  # "claude" or "codex"
+AI_PROVIDER = "codex"  # "claude" or "codex"
 
 AI_MODELS = {
     "claude": {
@@ -223,7 +223,7 @@ def end_session(state):
     session = state.get("current_session")
     if session:
         session["ended"] = datetime.now().isoformat()
-        state["sessions"].append(session)
+        state.setdefault("sessions", []).append(session)
         state["current_session"] = None
 
 
@@ -1316,14 +1316,23 @@ def invoke_claude(prompt, model="sonnet", max_turns=25):
             print(f"  Copying to clipboard for manual paste...", flush=True)
             try:
                 import pyperclip
+
                 pyperclip.copy(prompt)
-                print(f"  Prompt copied to clipboard ({len(prompt)} chars). Paste into Claude Code or Codex manually.")
+                print(
+                    f"  Prompt copied to clipboard ({len(prompt)} chars). Paste into Claude Code or Codex manually."
+                )
             except ImportError:
                 try:
-                    subprocess.run(["clip.exe"], input=prompt.encode("utf-16-le"), check=True)
-                    print(f"  Prompt copied via clip.exe ({len(prompt)} chars). Paste into Claude Code or Codex manually.")
+                    subprocess.run(
+                        ["clip.exe"], input=prompt.encode("utf-16-le"), check=True
+                    )
+                    print(
+                        f"  Prompt copied via clip.exe ({len(prompt)} chars). Paste into Claude Code or Codex manually."
+                    )
                 except Exception:
-                    print(f"  Could not copy to clipboard. Prompt is {len(prompt)} chars.")
+                    print(
+                        f"  Could not copy to clipboard. Prompt is {len(prompt)} chars."
+                    )
             return None
 
     return _invoke_claude(prompt, model, max_turns)
@@ -1411,7 +1420,9 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
         return None
 
     async def run():
-        from claude_code_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
+        from claude_code_sdk._internal.transport.subprocess_cli import (
+            SubprocessCLITransport,
+        )
 
         options = ClaudeCodeOptions(
             model=model,
@@ -1423,7 +1434,11 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
 
         claude_path = _find_cli("claude")
 
-        transport = SubprocessCLITransport(prompt=prompt, options=options, cli_path=claude_path) if claude_path else None
+        transport = (
+            SubprocessCLITransport(prompt=prompt, options=options, cli_path=claude_path)
+            if claude_path
+            else None
+        )
 
         output_parts = []
         tool_id_to_name = {}  # Track tool_use_id -> tool name for result display
@@ -1887,8 +1902,8 @@ def main():
     parser.add_argument(
         "--depth",
         type=int,
-        default=1,
-        help="Call graph depth for select mode (default: 1)",
+        default=0,
+        help="Call graph depth for select mode (default: 0, just the selected function)",
     )
     parser.add_argument(
         "-m",
