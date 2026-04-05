@@ -1308,7 +1308,7 @@ def main():
         logger.info("Starting MCP bridge (SSE)")
         mcp.run(transport="sse")
     else:
-        logger.info("Starting TCP bridge")
+        logger.info(f"Starting {args.transport} bridge")
         mcp.run(transport=args.transport)
 
 
