@@ -1304,7 +1304,7 @@ def main():
     mcp.settings.host = args.mcp_host
     if args.mcp_port:
         mcp.settings.port = args.mcp_port
-    logger.info(f"Starting MCP bridge ({args.transport.upper()})")
+    logger.info(f"Starting MCP bridge ({args.transport})")
     mcp.run(transport=args.transport)
 
 
