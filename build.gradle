@@ -1,0 +1,117 @@
+import groovy.xml.XmlSlurper
+
+plugins {
+    id 'java'
+}
+
+def pom = new XmlSlurper().parse(file('pom.xml'))
+group = pom.groupId.text()
+version = pom.version.text()
+description = pom.description.text()
+
+def ghidraInstallDir = providers.gradleProperty('GHIDRA_INSTALL_DIR')
+    .orElse(providers.environmentVariable('GHIDRA_INSTALL_DIR'))
+    .orNull
+
+if (!ghidraInstallDir) {
+    throw new GradleException('GHIDRA_INSTALL_DIR is not defined')
+}
+
+def ghidraRoot = file(ghidraInstallDir)
+def ghidraDir = new File(ghidraRoot, 'Ghidra').exists() ? new File(ghidraRoot, 'Ghidra') : ghidraRoot
+def ghidraProperties = new Properties()
+def applicationProperties = new File(ghidraDir, 'application.properties')
+
+if (!applicationProperties.exists()) {
+    throw new GradleException("Unable to find application.properties under ${ghidraRoot}")
+}
+
+applicationProperties.withReader { reader ->
+    ghidraProperties.load(reader)
+}
+
+def ghidraVersion = ghidraProperties.getProperty('application.version')
+def buildTimestamp = new Date().format('yyyyMMdd-HHmmss')
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation fileTree(dir: new File(ghidraDir, 'Framework'), include: '**/*.jar')
+    implementation fileTree(dir: new File(ghidraDir, 'Features'), include: '**/*.jar')
+    implementation fileTree(dir: new File(ghidraDir, 'Debug'), include: '**/*.jar')
+    implementation fileTree(dir: new File(ghidraDir, 'Processors'), include: '**/*.jar')
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.mockito:mockito-core:5.8.0'
+}
+
+processResources {
+    filteringCharset = 'UTF-8'
+
+    filesMatching(['version.properties', 'extension.properties']) {
+        filter { line ->
+            line
+                .replace('${project.version}', project.version.toString())
+                .replace('${ghidra.version}', ghidraVersion)
+                .replace('${build.timestamp}', buildTimestamp)
+                .replace('${build.number}', buildTimestamp)
+        }
+    }
+}
+
+jar {
+    archiveBaseName = 'GhidraMCP'
+
+    manifest {
+        attributes(
+            'Manifest-Version': '1.0',
+            'Plugin-Class': 'com.xebyte.GhidraMCPPlugin',
+            'Plugin-Name': 'GhidraMCP',
+            'Plugin-Version': project.version.toString(),
+            'Plugin-Author': 'Ben Ethington',
+            'Plugin-Description': 'GhidraMCP - HTTP server plugin with 195+ MCP tools for reverse engineering automation',
+        )
+    }
+}
+
+tasks.register('buildExtension', Zip) {
+    group = 'build'
+    description = 'Builds the Ghidra extension ZIP.'
+
+    dependsOn(tasks.jar, tasks.processResources)
+
+    archiveBaseName = 'GhidraMCP'
+    archiveVersion = project.version.toString()
+    destinationDirectory = layout.buildDirectory.dir('dist')
+
+    from(layout.buildDirectory.dir('resources/main')) {
+        include 'extension.properties'
+        into 'GhidraMCP'
+    }
+
+    from('src/main/resources') {
+        include 'Module.manifest'
+        into 'GhidraMCP'
+    }
+
+    from(tasks.jar) {
+        into 'GhidraMCP/lib'
+    }
+
+    from(configurations.runtimeClasspath) {
+        exclude { element ->
+            element.file.canonicalPath.startsWith(ghidraDir.canonicalPath)
+        }
+        into 'GhidraMCP/lib'
+    }
+}
+
+assemble.dependsOn(tasks.named('buildExtension'))

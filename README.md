@@ -127,6 +127,11 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    mvn clean package assembly:single -DskipTests
    ```
 
+   ```bash
+   # Manual Gradle build (requires GHIDRA_INSTALL_DIR)
+   GHIDRA_INSTALL_DIR=/path/to/ghidra gradle buildExtension
+   ```
+
 ### Installation (Linux — Ubuntu/Debian)
 
 > Use `ghidra-mcp-setup.sh` as the primary entry point on Linux.
@@ -757,7 +762,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
 ### Quick Start
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Build and test your changes (`mvn clean package assembly:single -DskipTests`)
+3. Build and test your changes (`mvn clean package assembly:single -DskipTests` or `GHIDRA_INSTALL_DIR=/path/to/ghidra gradle buildExtension`)
 4. Update documentation as needed
 5. Commit your changes (`git commit -m 'Add amazing feature'`)
 6. Push to the branch (`git push origin feature/amazing-feature`)
