@@ -90,7 +90,7 @@ tasks.register('buildExtension', Zip) {
 
     archiveBaseName = 'GhidraMCP'
     archiveVersion = project.version.toString()
-    destinationDirectory = layout.buildDirectory.dir('dist')
+    destinationDirectory = layout.projectDirectory.dir('dist')
 
     from(layout.buildDirectory.dir('resources/main')) {
         include 'extension.properties'
