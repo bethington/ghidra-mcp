@@ -1807,7 +1807,11 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
             permission_mode="bypassPermissions",
             max_turns=max_turns,
             cwd=str(REPO_ROOT),
-            append_system_prompt="Use ToolSearch to load the ghidra-mcp MCP tools if they are not yet available, then call them directly by name.",
+            system_prompt={
+                "type": "preset",
+                "preset": "claude_code",
+                "append": "Use ToolSearch to load the ghidra-mcp MCP tools if they are not yet available, then call them directly by name.",
+            },
         )
 
         output_parts = []
