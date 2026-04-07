@@ -1101,10 +1101,15 @@ def build_fix_prompt(func_name, address, ghidra_data, program=None):
     sections.append("## Instructions")
     if program:
         sections.append(f"All tool calls should use `program` = `{program}`.")
-    sections.append("1. Apply the fixes from the recipes above.")
-    sections.append("2. Check the opportunistic items and fix anything clearly wrong.")
     sections.append(
-        "3. Report DONE with consistency status. Scoring is handled externally."
+        "1. **Types and structs first.** If `unresolved_struct_accesses`, `undefined_variables`, or `hungarian_notation_violations` "
+        "appear in the work items, resolve ALL of them BEFORE writing or updating any plate comment or inline comments. "
+        "Better types improve the decompilation for everyone — comments only help at the point they're written."
+    )
+    sections.append("2. Apply remaining fixes from the recipes above.")
+    sections.append("3. Check the opportunistic items and fix anything clearly wrong.")
+    sections.append(
+        "4. Report DONE with consistency status. Scoring is handled externally."
     )
 
     return "\n".join(sections)
@@ -1235,6 +1240,125 @@ def build_full_doc_prompt(func_name, address, ghidra_data, program=None):
     )
     sections.append("All analysis data is provided inline - do NOT re-fetch it.")
     sections.append("Report: DONE: FunctionName, Changes: [summary], Score: N%")
+    sections.append("")
+
+    return "\n".join(sections)
+
+
+def build_recovery_prompt(func_name, address, ghidra_data, program=None):
+    """Build pass-1 prompt for complex functions: type/struct recovery only, no comments.
+
+    This is the first half of a two-pass workflow for high-complexity functions.
+    It includes classify, prototype, and type-audit steps plus struct/type fix modules,
+    but explicitly excludes comment steps and plate comment modules.
+    """
+    sections = [read_module("core.md"), ""]
+
+    prefixes_block = _load_prefixes_block()
+    if prefixes_block:
+        sections.append(prefixes_block)
+
+    sections.append("## Target Function (Recovery Pass — types and structs only)")
+    if program:
+        sections.append(f"Program: {program}")
+    sections.append(f"Function: {func_name} at 0x{address}")
+    sections.append("")
+
+    # Full analysis
+    afd = ghidra_data.get("analyze_for_doc")
+    if afd and not _is_error_response(afd):
+        sections.append("## Full Analysis (pre-fetched, do NOT re-fetch)")
+        sections.append("```")
+        if isinstance(afd, dict):
+            afd_trimmed = {k: v for k, v in afd.items() if k != "remediation_actions"}
+            afd_str = json.dumps(afd_trimmed, indent=2)
+        else:
+            afd_str = str(afd)
+        sections.append(afd_str)
+        sections.append("```")
+    sections.append("")
+
+    # Decompiled source
+    sections.append(
+        f"## Decompiled Source ({program or 'unknown program'}, pre-fetched, do NOT re-fetch)"
+    )
+    sections.append("```")
+    decomp = ghidra_data.get("decompiled")
+    if decomp and not _is_error_response(decomp):
+        sections.append(str(decomp))
+    else:
+        sections.append(f"ERROR: decompilation failed: {decomp}")
+    sections.append("```")
+    sections.append("")
+
+    # Variables
+    variables = ghidra_data.get("variables")
+    if variables and not _is_error_response(variables):
+        sections.append("## Variables (pre-fetched)")
+        sections.append(
+            "*Variable types may already be resolved — check `needs_type` field before calling `set_local_variable_type`.*"
+        )
+        sections.append("```json")
+        var_str = (
+            json.dumps(variables, indent=None)
+            if isinstance(variables, (dict, list))
+            else str(variables)
+        )
+        sections.append(var_str)
+        sections.append("```")
+    sections.append("")
+
+    # Work items
+    completeness = ghidra_data.get("completeness")
+    if completeness and not _is_error_response(completeness):
+        work_items = _extract_work_items(completeness)
+        if work_items:
+            sections.append("## Exact Work Items (apply these specific corrections)")
+            sections.append("")
+            sections.append(work_items)
+            sections.append("")
+
+    # Only structural steps — no comment steps
+    for step in ["step-classify.md", "step-prototype.md", "step-type-audit.md"]:
+        sections.append(read_module(step))
+        sections.append("")
+
+    # Only type/struct fix modules
+    RECOVERY_CATEGORIES = {
+        "unresolved_struct_accesses", "undefined_variables", "hungarian_notation_violations",
+        "missing_prototype", "return_type_unresolved", "address_suffix_name",
+    }
+    fixable_categories = ghidra_data.get("fixable_categories", [])
+    included = set()
+    for cat in fixable_categories:
+        if cat in RECOVERY_CATEGORIES:
+            mod_file = CATEGORY_TO_MODULE.get(cat)
+            if mod_file and mod_file not in included:
+                included.add(mod_file)
+
+    if included:
+        sections.append("---")
+        sections.append("## Remediation Recipes (type/struct recovery only)")
+        sections.append("")
+        for mod_file in sorted(included):
+            sections.append(read_module(mod_file))
+            sections.append("")
+
+    sections.append("## Instructions — Recovery Pass")
+    if program:
+        sections.append(f"All tool calls should use `program` = `{program}`.")
+    sections.append(
+        "This is pass 1 of 2 for a complex function. Focus ONLY on:"
+    )
+    sections.append("1. Classify and verify function boundaries (Step 1)")
+    sections.append("2. Set correct function name and prototype with caller verification (Step 2)")
+    sections.append("3. Resolve ALL undefined types, Hungarian violations, and struct accesses (Step 3)")
+    sections.append("")
+    sections.append("Do NOT write plate comments, inline comments, or rename globals/labels in this pass.")
+    sections.append("A second pass will handle comments after types are stable.")
+    sections.append("")
+    sections.append("Report: DONE: FunctionName, Changes: [type/struct changes applied]")
+    sections.append("")
 
     return "\n".join(sections)
 
@@ -1309,12 +1433,19 @@ def find_claude_cli():
     return _find_cli("claude")
 
 
+def _wrap_result(result):
+    """Normalize AI provider return to (text, metadata) tuple."""
+    if isinstance(result, tuple):
+        return result
+    return (result, {"tool_calls": -1})  # -1 = unknown (provider doesn't track)
+
+
 def invoke_claude(prompt, model="sonnet", max_turns=25):
     """Invoke the configured AI provider. Falls back to clipboard for oversized Claude prompts."""
     if AI_PROVIDER == "minimax":
         return _invoke_minimax(prompt, model, max_turns)
     if AI_PROVIDER == "codex":
-        return _invoke_codex(prompt, model, max_turns)
+        return _wrap_result(_invoke_codex(prompt, model, max_turns))
 
     # Claude SDK has a 28K limit due to Windows CLI arg length
     if len(prompt) > 28000:
@@ -1325,7 +1456,7 @@ def invoke_claude(prompt, model="sonnet", max_turns=25):
             if codex_path:
                 print(f"  Falling back to Codex SDK...", flush=True)
                 codex_model = AI_MODELS.get("codex", {}).get("FULL", "gpt-5.3-codex")
-                return _invoke_codex(prompt, codex_model, max_turns)
+                return _wrap_result(_invoke_codex(prompt, codex_model, max_turns))
             # Otherwise fall back to clipboard (manual mode)
             print(f"  Copying to clipboard for manual paste...", flush=True)
             try:
@@ -1347,9 +1478,9 @@ def invoke_claude(prompt, model="sonnet", max_turns=25):
                     print(
                         f"  Could not copy to clipboard. Prompt is {len(prompt)} chars."
                     )
-            return None
+            return _wrap_result(None)
 
-    return _invoke_claude(prompt, model, max_turns)
+    return _wrap_result(_invoke_claude(prompt, model, max_turns))
 
 
 def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
@@ -1569,6 +1700,7 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
     output_parts = []
     total_input_tokens = 0
     total_output_tokens = 0
+    tool_call_count = 0
 
     for turn in range(max_turns):
         try:
@@ -1609,6 +1741,7 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
                 except json.JSONDecodeError:
                     fn_args = {}
 
+                tool_call_count += 1
                 print(f"  [mcp] {fn_name}: calling...", flush=True)
                 result_str = execute_tool_call(fn_name, fn_args)
 
@@ -1637,9 +1770,10 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
             break
 
     if total_input_tokens or total_output_tokens:
-        print(f"  [tokens: {total_input_tokens} in + {total_output_tokens} out]", flush=True)
+        print(f"  [tokens: {total_input_tokens} in + {total_output_tokens} out | tools: {tool_call_count}]", flush=True)
 
-    return "\n".join(output_parts) if output_parts else None
+    text = "\n".join(output_parts) if output_parts else None
+    return (text, {"tool_calls": tool_call_count, "input_tokens": total_input_tokens, "output_tokens": total_output_tokens})
 
 
 def _invoke_claude(prompt, model="sonnet", max_turns=25):
@@ -1918,6 +2052,43 @@ def _rescore_and_sync(func, address, program):
     return None
 
 
+def _inject_tool_block(prompt):
+    """Append available MCP tool list to a prompt."""
+    available_tools = fetch_available_tools()
+    if not available_tools:
+        return prompt
+    RELEVANT_TOOLS = {
+        "analyze_for_documentation",
+        "get_function_variables",
+        "set_variables",
+        "rename_function_by_address",
+        "set_function_prototype",
+        "set_local_variable_type",
+        "set_parameter_type",
+        "rename_variable",
+        "rename_variables",
+        "batch_set_comments",
+        "rename_or_label",
+        "apply_data_type",
+        "search_data_types",
+        "get_struct_layout",
+        "create_struct",
+        "modify_struct_field",
+        "add_struct_field",
+        "create_function",
+        "get_function_callers",
+        "decompile_function",
+    }
+    registered = [t for t in available_tools if t in RELEVANT_TOOLS]
+    missing = RELEVANT_TOOLS - set(available_tools)
+    tool_block = "\n## Available MCP Tools (verified registered)\n"
+    tool_block += ", ".join(f"`{t}`" for t in sorted(registered))
+    if missing:
+        tool_block += f"\n\n**NOT registered** (do NOT call): {', '.join(f'`{t}`' for t in sorted(missing))}"
+    tool_block += "\n"
+    return prompt + "\n" + tool_block
+
+
 def process_function(func_key, func, state, model=None, manual=False, dry_run=False):
     """Process a single function: fetch data, build prompt, invoke Claude."""
     address = func["address"]
@@ -1992,43 +2163,21 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
             print("done")
         prompt = build_full_doc_prompt(func_name, address, data, program=program)
 
-    # Fix #3: Pre-inject available tool list so the AI knows what's registered
-    available_tools = fetch_available_tools()
-    if available_tools:
-        # Filter to tools referenced in the prompt to keep it concise
-        RELEVANT_TOOLS = {
-            "analyze_for_documentation",
-            "get_function_variables",
-            "set_variables",
-            "rename_function_by_address",
-            "set_function_prototype",
-            "set_local_variable_type",
-            "set_parameter_type",
-            "rename_variable",
-            "rename_variables",
-            "batch_set_comments",
-            "rename_or_label",
-            "apply_data_type",
-            "search_data_types",
-            "get_struct_layout",
-            "create_struct",
-            "modify_struct_field",
-            "add_struct_field",
-            "create_function",
-        }
-        registered = [t for t in available_tools if t in RELEVANT_TOOLS]
-        missing = RELEVANT_TOOLS - set(available_tools)
-        tool_block = "\n## Available MCP Tools (verified registered)\n"
-        tool_block += ", ".join(f"`{t}`" for t in sorted(registered))
-        if missing:
-            tool_block += f"\n\n**NOT registered** (do NOT call): {', '.join(f'`{t}`' for t in sorted(missing))}"
-        tool_block += "\n"
-        prompt = prompt + "\n" + tool_block
+    prompt = _inject_tool_block(prompt)
+
+    # Two-pass workflow for complex FULL-mode functions
+    use_two_pass = (mode == "FULL" and len(prompt) > 35000 and not manual)
+    if use_two_pass:
+        recovery_prompt = build_recovery_prompt(func_name, address, data, program=program)
+        recovery_prompt = _inject_tool_block(recovery_prompt)
+        # Swap: run recovery prompt first, then re-fetch and build FIX prompt for pass 2
+        prompt = recovery_prompt
+        mode = "FULL:recovery"
 
     print(f"  {mode} | {selected_model} | {len(prompt):,} chars | score: {live_score}%")
 
     if dry_run:
-        print(f"  DRY RUN: Would invoke Claude")
+        print(f"  DRY RUN: Would invoke {'pass 1 (recovery)' if use_two_pass else 'Claude'}")
         return "dry_run"
 
     # Manual mode
@@ -2072,9 +2221,31 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
             return "quit"
         return "completed"
 
-    # Auto mode: invoke AI (Claude or Codex based on AI_PROVIDER)
+    # Auto mode: invoke AI (provider based on AI_PROVIDER)
     print()
-    output = invoke_claude(prompt, model=selected_model)
+    output, meta = invoke_claude(prompt, model=selected_model)
+    tool_calls_made = meta.get("tool_calls", -1)
+
+    # Two-pass: if recovery pass succeeded, run pass 2 (comments) with fresh data
+    if use_two_pass and output and "DONE:" in output:
+        print(f"\n  Pass 1 (recovery) complete. Re-fetching data for pass 2 (comments)...")
+        data2 = fetch_function_data(program, address, mode="FIX")
+        mid_score = data2.get("score")
+        func_name2 = (
+            data2["completeness"].get("function_name", func_name)
+            if data2.get("completeness")
+            else func_name
+        )
+        prompt2 = build_fix_prompt(func_name2, address, data2, program=program)
+        prompt2 = _inject_tool_block(prompt2)
+        mode = "FULL:comments"
+        print(f"  {mode} | {selected_model} | {len(prompt2):,} chars | score: {mid_score}%")
+        print()
+        output2, meta2 = invoke_claude(prompt2, model=selected_model)
+        # Merge results: use pass 2 output for final parsing, sum tool calls
+        if output2:
+            output = output2
+        tool_calls_made += meta2.get("tool_calls", 0)
 
     # Parse result
     result = "completed"
@@ -2090,6 +2261,11 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
     else:
         result = "failed"
 
+    # Guard #1: no tool actions = not a real completion
+    if result == "completed" and tool_calls_made == 0 and mode not in ("VERIFY", "FULL:comments"):
+        print(f"  WARNING: Model reported DONE but made 0 tool calls — downgrading to needs_redo")
+        result = "needs_redo"
+
     # Update state
     func["last_processed"] = datetime.now().isoformat()
     func["last_result"] = result
@@ -2101,7 +2277,14 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         if live_score is not None:
             diff = new_score - live_score
             delta = f" ({'+' if diff >= 0 else ''}{diff:.0f}%)"
-        print(f"\n  Score after: {new_score}%{delta} | Result: {result}")
+
+        # Guard #2: score didn't improve on FULL/FIX = needs redo
+        if result == "completed" and live_score is not None and diff <= 0 and mode in ("FULL", "FIX", "FULL:recovery", "FULL:comments"):
+            print(f"\n  Score after: {new_score}%{delta} | no improvement — downgrading to needs_redo")
+            result = "needs_redo"
+            func["last_result"] = result
+        else:
+            print(f"\n  Score after: {new_score}%{delta} | Result: {result}")
     else:
         print(f"\n  Result: {result} | Score: unavailable")
 
