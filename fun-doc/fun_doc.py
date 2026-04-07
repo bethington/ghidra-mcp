@@ -1789,12 +1789,7 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
 
 
 def _invoke_claude(prompt, model="sonnet", max_turns=25):
-    """Invoke Claude Code via the Python SDK with MCP tool support.
-
-    Uses a custom transport that pipes the prompt via stdin to bypass
-    the Windows ~32K CLI argument length limit while staying in --print mode
-    (so Claude handles MCP tool calls internally).
-    """
+    """Invoke Claude Code via the Python SDK with MCP tool support."""
     import asyncio
 
     try:
@@ -1821,64 +1816,8 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
 
         claude_path = _find_cli("claude")
 
-        # Monkey-patch SubprocessCLITransport to pipe the prompt via stdin
-        # instead of as a CLI argument, bypassing the Windows ~32K limit.
-        # We stay in --print mode (no --input-format stream-json) so Claude
-        # handles MCP tool calls internally.
-        class StdinPromptTransport(SubprocessCLITransport):
-            """Transport that sends the prompt via stdin instead of CLI args."""
-
-            def __init__(self, real_prompt, **kwargs):
-                self._real_prompt = real_prompt
-                # Pass a dummy 1-char prompt so the parent builds --print mode
-                super().__init__(prompt=".", **kwargs)
-
-            def _build_command(self):
-                cmd = super()._build_command()
-                # Remove the dummy prompt from the end: [..., "--print", "--", "."]
-                # Replace with just --print (no trailing prompt = read from stdin)
-                if cmd[-3:] == ["--print", "--", "."]:
-                    cmd = cmd[:-2]  # keep --print, remove -- and .
-                return cmd
-
-            async def connect(self):
-                """Start subprocess and write prompt to stdin."""
-                if self._process:
-                    return
-                cmd = self._build_command()
-                process_env = {
-                    **os.environ,
-                    **self._options.env,
-                    "CLAUDE_CODE_ENTRYPOINT": "sdk-py",
-                }
-                if self._cwd:
-                    process_env["PWD"] = self._cwd
-                import anyio
-                from subprocess import PIPE as SPIPE
-                from anyio.streams.text import TextReceiveStream
-
-                self._process = await anyio.open_process(
-                    cmd,
-                    stdin=SPIPE,
-                    stdout=SPIPE,
-                    stderr=None,
-                    cwd=self._cwd,
-                    env=process_env,
-                )
-                if self._process.stdout:
-                    self._stdout_stream = TextReceiveStream(self._process.stdout)
-                # Write prompt to stdin then close — Claude reads it as the prompt
-                if self._process.stdin:
-                    await self._process.stdin.send(
-                        self._real_prompt.encode("utf-8")
-                    )
-                    await self._process.stdin.aclose()
-                self._ready = True
-
         transport = (
-            StdinPromptTransport(
-                real_prompt=prompt, options=options, cli_path=claude_path
-            )
+            SubprocessCLITransport(prompt=prompt, options=options, cli_path=claude_path)
             if claude_path
             else None
         )
