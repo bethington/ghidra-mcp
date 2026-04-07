@@ -50,7 +50,7 @@ GHIDRA_URL = "http://127.0.0.1:8089"
 # Switch between "claude" and "codex" here.
 # Each provider maps mode -> model name.
 
-AI_PROVIDER = "codex"  # "claude" or "codex"
+AI_PROVIDER = "minimax"  # "claude", "codex", or "minimax"
 
 AI_MODELS = {
     "claude": {
@@ -62,6 +62,11 @@ AI_MODELS = {
         "FULL": "gpt-5.3-codex",
         "FIX": "gpt-5.3-codex",
         "VERIFY": "gpt-5.3-codex",
+    },
+    "minimax": {
+        "FULL": "MiniMax-M2.7",
+        "FIX": "MiniMax-M2.7",
+        "VERIFY": "MiniMax-M2.7-highspeed",
     },
 }
 
@@ -1299,6 +1304,8 @@ def find_claude_cli():
 
 def invoke_claude(prompt, model="sonnet", max_turns=25):
     """Invoke the configured AI provider. Falls back to clipboard for oversized Claude prompts."""
+    if AI_PROVIDER == "minimax":
+        return _invoke_minimax(prompt, model, max_turns)
     if AI_PROVIDER == "codex":
         return _invoke_codex(prompt, model, max_turns)
 
@@ -1404,6 +1411,223 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
     except Exception as e:
         print(f"ERROR: Codex SDK failed: {e}", file=sys.stderr)
         return None
+
+
+def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
+    """Invoke MiniMax via OpenAI-compatible API with tool-calling agent loop.
+
+    Fetches Ghidra MCP tool schemas, converts them to OpenAI function definitions,
+    and runs a multi-turn conversation loop where the model can call tools and
+    receive results until it produces a final text response.
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        print(
+            "ERROR: openai not installed. Run: pip install openai",
+            file=sys.stderr,
+        )
+        return None
+
+    api_key = os.environ.get("MINIMAX_API_KEY")
+    if not api_key:
+        print(
+            "ERROR: MINIMAX_API_KEY environment variable not set. "
+            "Get a key at https://platform.minimax.io",
+            file=sys.stderr,
+        )
+        return None
+
+    # --- Build OpenAI function schemas from Ghidra MCP schema ---
+    schema = ghidra_get("/mcp/schema", timeout=10)
+    tools_openai = []
+    tool_endpoint_map = {}  # tool_name -> {path, method, params}
+
+    if schema and isinstance(schema, dict):
+        endpoints = schema.get("tools", schema.get("endpoints", []))
+        for ep in endpoints:
+            if not isinstance(ep, dict):
+                continue
+            path = ep.get("path", "")
+            name = path.lstrip("/")
+            if not name:
+                continue
+            method = ep.get("method", "GET").upper()
+            description = ep.get("description", name)
+            params = ep.get("params", [])
+
+            # Build JSON schema for parameters
+            properties = {}
+            required = []
+            for p in params:
+                pname = p.get("name", "")
+                if not pname:
+                    continue
+                ptype = p.get("type", "string")
+                json_type = {
+                    "string": "string",
+                    "integer": "integer",
+                    "int": "integer",
+                    "boolean": "boolean",
+                    "bool": "boolean",
+                    "number": "number",
+                    "float": "number",
+                }.get(ptype, "string")
+                prop = {"type": json_type}
+                pdesc = p.get("description", "")
+                if pdesc:
+                    prop["description"] = pdesc
+                properties[pname] = prop
+                if p.get("required", False) and pname != "program":
+                    required.append(pname)
+
+            tool_def = {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                    },
+                },
+            }
+            if required:
+                tool_def["function"]["parameters"]["required"] = required
+
+            tools_openai.append(tool_def)
+            tool_endpoint_map[name] = {
+                "path": path,
+                "method": method,
+                "params": params,
+            }
+
+    if not tools_openai:
+        print("  WARNING: No tools from /mcp/schema, running without tools", flush=True)
+
+    # --- Execute tool calls against Ghidra HTTP API ---
+    def execute_tool_call(name, arguments):
+        """Execute a tool call against the Ghidra HTTP server."""
+        ep = tool_endpoint_map.get(name)
+        if not ep:
+            return json.dumps({"error": f"Unknown tool: {name}"})
+
+        path = ep["path"]
+        method = ep["method"]
+        params_spec = ep["params"]
+
+        # Split arguments into query params and body params based on schema
+        query_params = {}
+        body_params = {}
+        for p in params_spec:
+            pname = p.get("name", "")
+            source = p.get("source", "query")
+            if pname in arguments:
+                if source == "body" and method == "POST":
+                    body_params[pname] = arguments[pname]
+                else:
+                    query_params[pname] = arguments[pname]
+
+        # program param always goes as query param (CLAUDE.md convention)
+        if "program" in arguments and "program" not in query_params:
+            query_params["program"] = arguments["program"]
+            body_params.pop("program", None)
+
+        try:
+            if method == "POST":
+                result = ghidra_post(path, data=body_params or None, params=query_params or None)
+            else:
+                all_params = {**query_params, **body_params}
+                result = ghidra_get(path, params=all_params or None)
+
+            if result is None:
+                return json.dumps({"error": f"Ghidra {method} {path} returned no data"})
+            if isinstance(result, (dict, list)):
+                return json.dumps(result, default=str)
+            return str(result)
+        except Exception as e:
+            return json.dumps({"error": f"Tool execution failed: {str(e)}"})
+
+    # --- Conversation loop ---
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.minimax.io/v1",
+    )
+
+    messages = [
+        {"role": "system", "content": "You are a reverse engineering assistant with access to Ghidra MCP tools. Call tools to analyze and document functions. Be thorough and precise."},
+        {"role": "user", "content": prompt},
+    ]
+
+    output_parts = []
+    total_input_tokens = 0
+    total_output_tokens = 0
+
+    for turn in range(max_turns):
+        try:
+            kwargs = {
+                "model": model,
+                "messages": messages,
+                "temperature": 1.0,  # MiniMax recommends 1.0
+                "max_tokens": 16384,
+            }
+            if tools_openai:
+                kwargs["tools"] = tools_openai
+
+            response = client.chat.completions.create(**kwargs)
+        except Exception as e:
+            print(f"  [minimax] API error: {e}", file=sys.stderr)
+            break
+
+        choice = response.choices[0]
+        message = choice.message
+
+        # Track usage
+        if response.usage:
+            total_input_tokens += response.usage.prompt_tokens or 0
+            total_output_tokens += response.usage.completion_tokens or 0
+
+        # Append assistant message to conversation history
+        messages.append(message.model_dump())
+
+        # Check for tool calls
+        if message.tool_calls:
+            for tc in message.tool_calls:
+                fn_name = tc.function.name
+                try:
+                    fn_args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    fn_args = {}
+
+                print(f"  [mcp] {fn_name}: calling...", flush=True)
+                result_str = execute_tool_call(fn_name, fn_args)
+
+                # Truncate very large results to avoid blowing context
+                if len(result_str) > 50000:
+                    result_str = result_str[:50000] + "\n... (truncated)"
+
+                status = "failed" if '"error"' in result_str[:100] else "done"
+                print(f"  [mcp] {fn_name}: {status}", flush=True)
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result_str,
+                })
+            continue  # Next turn — model needs to process tool results
+
+        # No tool calls — this is the final text response
+        if message.content:
+            print(message.content)
+            output_parts.append(message.content)
+
+        if choice.finish_reason in ("stop", "end_turn", None):
+            break
+
+    if total_input_tokens or total_output_tokens:
+        print(f"  [tokens: {total_input_tokens} in + {total_output_tokens} out]", flush=True)
+
+    return "\n".join(output_parts) if output_parts else None
 
 
 def _invoke_claude(prompt, model="sonnet", max_turns=25):
@@ -1923,10 +2147,15 @@ def main():
         "--web-port", type=int, default=5000, help="Web dashboard port (default: 5000)"
     )
     parser.add_argument(
-        "--model",
-        choices=["haiku", "sonnet", "opus"],
+        "--provider",
+        choices=["claude", "codex", "minimax"],
         default=None,
-        help="Override model selection",
+        help="AI provider (default: use AI_PROVIDER constant in script)",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Override model selection (e.g., opus, sonnet, MiniMax-M2.7)",
     )
     parser.add_argument(
         "--max-turns", type=int, default=25, help="Max Claude turns (default: 25)"
@@ -1947,6 +2176,11 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Override AI provider if specified via CLI
+    global AI_PROVIDER
+    if args.provider:
+        AI_PROVIDER = args.provider
 
     state = load_state()
 
