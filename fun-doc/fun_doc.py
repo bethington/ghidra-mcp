@@ -45,6 +45,7 @@ STATE_FILE = SCRIPT_DIR / "state.json"
 # Load .env from repo root (API keys, server URLs, etc.)
 try:
     from dotenv import load_dotenv
+
     load_dotenv(REPO_ROOT / ".env")
 except ImportError:
     pass
@@ -57,7 +58,7 @@ GHIDRA_URL = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip
 # Switch between "claude" and "codex" here.
 # Each provider maps mode -> model name.
 
-AI_PROVIDER = "minimax"  # "claude", "codex", or "minimax"
+AI_PROVIDER = "claude"  # "claude", "codex", or "minimax"
 
 AI_MODELS = {
     "claude": {
@@ -1325,8 +1326,12 @@ def build_recovery_prompt(func_name, address, ghidra_data, program=None):
 
     # Only type/struct fix modules
     RECOVERY_CATEGORIES = {
-        "unresolved_struct_accesses", "undefined_variables", "hungarian_notation_violations",
-        "missing_prototype", "return_type_unresolved", "address_suffix_name",
+        "unresolved_struct_accesses",
+        "undefined_variables",
+        "hungarian_notation_violations",
+        "missing_prototype",
+        "return_type_unresolved",
+        "address_suffix_name",
     }
     fixable_categories = ghidra_data.get("fixable_categories", [])
     included = set()
@@ -1347,17 +1352,23 @@ def build_recovery_prompt(func_name, address, ghidra_data, program=None):
     sections.append("## Instructions — Recovery Pass")
     if program:
         sections.append(f"All tool calls should use `program` = `{program}`.")
-    sections.append(
-        "This is pass 1 of 2 for a complex function. Focus ONLY on:"
-    )
+    sections.append("This is pass 1 of 2 for a complex function. Focus ONLY on:")
     sections.append("1. Classify and verify function boundaries (Step 1)")
-    sections.append("2. Set correct function name and prototype with caller verification (Step 2)")
-    sections.append("3. Resolve ALL undefined types, Hungarian violations, and struct accesses (Step 3)")
+    sections.append(
+        "2. Set correct function name and prototype with caller verification (Step 2)"
+    )
+    sections.append(
+        "3. Resolve ALL undefined types, Hungarian violations, and struct accesses (Step 3)"
+    )
     sections.append("")
-    sections.append("Do NOT write plate comments, inline comments, or rename globals/labels in this pass.")
+    sections.append(
+        "Do NOT write plate comments, inline comments, or rename globals/labels in this pass."
+    )
     sections.append("A second pass will handle comments after types are stable.")
     sections.append("")
-    sections.append("Report: DONE: FunctionName, Changes: [type/struct changes applied]")
+    sections.append(
+        "Report: DONE: FunctionName, Changes: [type/struct changes applied]"
+    )
     sections.append("")
 
     return "\n".join(sections)
@@ -1673,7 +1684,9 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
 
         try:
             if method == "POST":
-                result = ghidra_post(path, data=body_params or None, params=query_params or None)
+                result = ghidra_post(
+                    path, data=body_params or None, params=query_params or None
+                )
             else:
                 all_params = {**query_params, **body_params}
                 result = ghidra_get(path, params=all_params or None)
@@ -1693,7 +1706,10 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
     )
 
     messages = [
-        {"role": "system", "content": "You are a reverse engineering assistant with access to Ghidra MCP tools. Call tools to analyze and document functions. Be thorough and precise."},
+        {
+            "role": "system",
+            "content": "You are a reverse engineering assistant with access to Ghidra MCP tools. Call tools to analyze and document functions. Be thorough and precise.",
+        },
         {"role": "user", "content": prompt},
     ]
 
@@ -1719,7 +1735,16 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
             break
 
         if not response.choices:
-            print(f"  [minimax] Empty response (no choices), ending", file=sys.stderr)
+            # Log the full response for debugging
+            print(
+                f"  [minimax] Empty response (no choices). Model: {response.model}, id: {response.id}",
+                file=sys.stderr,
+            )
+            if hasattr(response, "usage") and response.usage:
+                print(
+                    f"  [minimax] Usage before failure: {response.usage.prompt_tokens} prompt + {response.usage.completion_tokens} completion tokens",
+                    file=sys.stderr,
+                )
             break
         choice = response.choices[0]
         message = choice.message
@@ -1752,28 +1777,48 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
                 status = "failed" if '"error"' in result_str[:100] else "done"
                 print(f"  [mcp] {fn_name}: {status}", flush=True)
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result_str,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result_str,
+                    }
+                )
             continue  # Next turn — model needs to process tool results
 
         # No tool calls — this is the final text response
         if message.content:
-            # Sanitize for Windows console (cp1252 can't handle some Unicode)
-            safe_text = message.content.encode("ascii", errors="replace").decode("ascii")
-            print(safe_text)
-            output_parts.append(message.content)
+            # Strip <think>...</think> reasoning blocks — keep only user-facing text
+            import re
+            cleaned = re.sub(r"<think>[\s\S]*?</think>", "", message.content).strip()
+            if cleaned:
+                safe_text = cleaned.encode("ascii", errors="replace").decode("ascii")
+                print(safe_text)
+                output_parts.append(cleaned)
+            else:
+                # All content was think-tags — model reasoning only, no actionable output
+                print(f"  [minimax] (reasoning only, no output text)", flush=True)
+        else:
+            print(f"  [minimax] (empty content, finish_reason={choice.finish_reason})", flush=True)
 
         if choice.finish_reason in ("stop", "end_turn", None):
             break
 
     if total_input_tokens or total_output_tokens:
-        print(f"  [tokens: {total_input_tokens} in + {total_output_tokens} out | tools: {tool_call_count}]", flush=True)
+        print(
+            f"  [tokens: {total_input_tokens} in + {total_output_tokens} out | tools: {tool_call_count}]",
+            flush=True,
+        )
 
     text = "\n".join(output_parts) if output_parts else None
-    return (text, {"tool_calls": tool_call_count, "input_tokens": total_input_tokens, "output_tokens": total_output_tokens})
+    return (
+        text,
+        {
+            "tool_calls": tool_call_count,
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+        },
+    )
 
 
 def _invoke_claude(prompt, model="sonnet", max_turns=25):
@@ -2166,9 +2211,11 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
     prompt = _inject_tool_block(prompt)
 
     # Two-pass workflow for complex FULL-mode functions
-    use_two_pass = (mode == "FULL" and len(prompt) > 35000 and not manual)
+    use_two_pass = mode == "FULL" and len(prompt) > 35000 and not manual
     if use_two_pass:
-        recovery_prompt = build_recovery_prompt(func_name, address, data, program=program)
+        recovery_prompt = build_recovery_prompt(
+            func_name, address, data, program=program
+        )
         recovery_prompt = _inject_tool_block(recovery_prompt)
         # Swap: run recovery prompt first, then re-fetch and build FIX prompt for pass 2
         prompt = recovery_prompt
@@ -2177,7 +2224,9 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
     print(f"  {mode} | {selected_model} | {len(prompt):,} chars | score: {live_score}%")
 
     if dry_run:
-        print(f"  DRY RUN: Would invoke {'pass 1 (recovery)' if use_two_pass else 'Claude'}")
+        print(
+            f"  DRY RUN: Would invoke {'pass 1 (recovery)' if use_two_pass else 'Claude'}"
+        )
         return "dry_run"
 
     # Manual mode
@@ -2226,9 +2275,12 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
     output, meta = invoke_claude(prompt, model=selected_model)
     tool_calls_made = meta.get("tool_calls", -1)
 
-    # Two-pass: if recovery pass succeeded, run pass 2 (comments) with fresh data
-    if use_two_pass and output and "DONE:" in output:
-        print(f"\n  Pass 1 (recovery) complete. Re-fetching data for pass 2 (comments)...")
+    # Two-pass: if recovery pass made tool calls, run pass 2 (comments) with fresh data
+    # Don't gate on "DONE:" text — the model may produce think-only output or empty response
+    if use_two_pass and tool_calls_made > 0:
+        print(
+            f"\n  Pass 1 (recovery) complete. Re-fetching data for pass 2 (comments)..."
+        )
         data2 = fetch_function_data(program, address, mode="FIX")
         mid_score = data2.get("score")
         func_name2 = (
@@ -2239,7 +2291,9 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         prompt2 = build_fix_prompt(func_name2, address, data2, program=program)
         prompt2 = _inject_tool_block(prompt2)
         mode = "FULL:comments"
-        print(f"  {mode} | {selected_model} | {len(prompt2):,} chars | score: {mid_score}%")
+        print(
+            f"  {mode} | {selected_model} | {len(prompt2):,} chars | score: {mid_score}%"
+        )
         print()
         output2, meta2 = invoke_claude(prompt2, model=selected_model)
         # Merge results: use pass 2 output for final parsing, sum tool calls
@@ -2262,8 +2316,14 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         result = "failed"
 
     # Guard #1: no tool actions = not a real completion
-    if result == "completed" and tool_calls_made == 0 and mode not in ("VERIFY", "FULL:comments"):
-        print(f"  WARNING: Model reported DONE but made 0 tool calls — downgrading to needs_redo")
+    if (
+        result == "completed"
+        and tool_calls_made == 0
+        and mode not in ("VERIFY", "FULL:comments")
+    ):
+        print(
+            f"  WARNING: Model reported DONE but made 0 tool calls — downgrading to needs_redo"
+        )
         result = "needs_redo"
 
     # Update state
@@ -2279,8 +2339,15 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
             delta = f" ({'+' if diff >= 0 else ''}{diff:.0f}%)"
 
         # Guard #2: score didn't improve on FULL/FIX = needs redo
-        if result == "completed" and live_score is not None and diff <= 0 and mode in ("FULL", "FIX", "FULL:recovery", "FULL:comments"):
-            print(f"\n  Score after: {new_score}%{delta} | no improvement — downgrading to needs_redo")
+        if (
+            result == "completed"
+            and live_score is not None
+            and diff <= 0
+            and mode in ("FULL", "FIX", "FULL:recovery", "FULL:comments")
+        ):
+            print(
+                f"\n  Score after: {new_score}%{delta} | no improvement — downgrading to needs_redo"
+            )
             result = "needs_redo"
             func["last_result"] = result
         else:
