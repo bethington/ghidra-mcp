@@ -1791,7 +1791,9 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
 def _invoke_claude(prompt, model="sonnet", max_turns=25):
     """Invoke Claude Code via the Python SDK with MCP tool support.
 
-    Uses streaming mode (stdin) for prompts to avoid Windows CLI arg length limits.
+    Uses a custom transport that pipes the prompt via stdin to bypass
+    the Windows ~32K CLI argument length limit while staying in --print mode
+    (so Claude handles MCP tool calls internally).
     """
     import asyncio
 
@@ -1805,6 +1807,10 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
         return None
 
     async def run():
+        from claude_code_sdk._internal.transport.subprocess_cli import (
+            SubprocessCLITransport,
+        )
+
         options = ClaudeCodeOptions(
             model=model,
             permission_mode="bypassPermissions",
@@ -1813,61 +1819,84 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
             append_system_prompt="All MCP tools from ghidra-mcp are already loaded and callable. Do NOT use ToolSearch -- call the MCP tools directly by name.",
         )
 
-        # Use streaming mode (AsyncIterable prompt) to send via stdin
-        # This bypasses the Windows ~32K CLI argument length limit
-        import uuid
+        claude_path = _find_cli("claude")
 
-        session_id = str(uuid.uuid4())
+        # Write prompt to a temp file and pass via --input-file to bypass
+        # the Windows ~32K CLI argument length limit while staying in --print mode
+        import tempfile
 
-        async def stream_prompt():
-            yield {
-                "type": "user",
-                "message": {"role": "user", "content": prompt},
-                "parent_tool_use_id": None,
-                "session_id": session_id,
-            }
-
-        output_parts = []
-        tool_id_to_name = {}  # Track tool_use_id -> tool name for result display
+        prompt_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        )
         try:
-            async for msg in query(prompt=stream_prompt(), options=options):
-                msg_type = type(msg).__name__
-                if msg_type == "AssistantMessage":
-                    content = getattr(msg, "content", None)
-                    if content:
-                        for block in (
-                            content if isinstance(content, list) else [content]
-                        ):
-                            block_type = type(block).__name__
-                            if block_type == "TextBlock":
-                                text = getattr(block, "text", str(block))
-                                print(text)
-                                output_parts.append(text)
-                            elif block_type == "ToolUseBlock":
-                                tool_name = getattr(block, "name", "?")
-                                tool_id = getattr(block, "id", "")
-                                tool_id_to_name[tool_id] = tool_name
-                                print(f"  [mcp] {tool_name}: calling...", flush=True)
-                            elif block_type == "ToolResultBlock":
-                                is_error = getattr(block, "is_error", False)
-                                status = "failed" if is_error else "completed"
-                                tool_id = getattr(block, "tool_use_id", "")
-                                tool_name = tool_id_to_name.get(tool_id, tool_id[:12])
-                                print(f"  [mcp] {tool_name}: {status}", flush=True)
-                            elif block_type == "ThinkingBlock":
-                                pass  # Skip thinking blocks
-                elif msg_type == "ResultMessage":
-                    pass  # Final result handled via output_parts
-        except Exception as e:
-            err_str = str(e)
-            # Re-raise "not found" errors so the outer retry loop can handle them
-            if "not found" in err_str.lower():
-                raise
-            # Ignore rate_limit_event parse errors — the SDK doesn't handle them yet
-            if "rate_limit_event" not in err_str:
-                print(f"  [claude sdk] {err_str}", file=sys.stderr)
+            prompt_file.write(prompt)
+            prompt_file.close()
 
-        return "\n".join(output_parts) if output_parts else None
+            # Use a short placeholder as the CLI arg prompt — the real prompt is in the file
+            # We pass --input-file via extra_args to read the prompt from file
+            file_prompt = f"Read and follow all instructions from the file: {prompt_file.name}"
+            transport = (
+                SubprocessCLITransport(
+                    prompt=file_prompt, options=options, cli_path=claude_path
+                )
+                if claude_path
+                else None
+            )
+
+            output_parts = []
+            tool_id_to_name = {}
+            try:
+                async for msg in query(
+                    prompt=file_prompt, options=options, transport=transport
+                ):
+                    msg_type = type(msg).__name__
+                    if msg_type == "AssistantMessage":
+                        content = getattr(msg, "content", None)
+                        if content:
+                            for block in (
+                                content if isinstance(content, list) else [content]
+                            ):
+                                block_type = type(block).__name__
+                                if block_type == "TextBlock":
+                                    text = getattr(block, "text", str(block))
+                                    print(text)
+                                    output_parts.append(text)
+                                elif block_type == "ToolUseBlock":
+                                    tool_name = getattr(block, "name", "?")
+                                    tool_id = getattr(block, "id", "")
+                                    tool_id_to_name[tool_id] = tool_name
+                                    print(
+                                        f"  [mcp] {tool_name}: calling...",
+                                        flush=True,
+                                    )
+                                elif block_type == "ToolResultBlock":
+                                    is_error = getattr(block, "is_error", False)
+                                    status = "failed" if is_error else "completed"
+                                    tool_id = getattr(block, "tool_use_id", "")
+                                    tool_name = tool_id_to_name.get(
+                                        tool_id, tool_id[:12]
+                                    )
+                                    print(
+                                        f"  [mcp] {tool_name}: {status}", flush=True
+                                    )
+                                elif block_type == "ThinkingBlock":
+                                    pass  # Skip thinking blocks
+                    elif msg_type == "ResultMessage":
+                        pass  # Final result handled via output_parts
+            except Exception as e:
+                err_str = str(e)
+                if "not found" in err_str.lower():
+                    raise
+                if "rate_limit_event" not in err_str:
+                    print(f"  [claude sdk] {err_str}", file=sys.stderr)
+
+            return "\n".join(output_parts) if output_parts else None
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(prompt_file.name)
+            except OSError:
+                pass
 
     # Retry once on "not found" errors (intermittent when previous process is still exiting)
     for attempt in range(2):
