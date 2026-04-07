@@ -1452,44 +1452,11 @@ def _wrap_result(result):
 
 
 def invoke_claude(prompt, model="sonnet", max_turns=25):
-    """Invoke the configured AI provider. Falls back to clipboard for oversized Claude prompts."""
+    """Invoke the configured AI provider."""
     if AI_PROVIDER == "minimax":
         return _invoke_minimax(prompt, model, max_turns)
     if AI_PROVIDER == "codex":
         return _wrap_result(_invoke_codex(prompt, model, max_turns))
-
-    # Claude SDK has a 28K limit due to Windows CLI arg length
-    if len(prompt) > 28000:
-        print(f"  Prompt too large for Claude SDK ({len(prompt)} chars > 28K limit)")
-        if AI_PROVIDER == "claude":
-            # Try Codex as fallback if available
-            codex_path = _find_cli("codex")
-            if codex_path:
-                print(f"  Falling back to Codex SDK...", flush=True)
-                codex_model = AI_MODELS.get("codex", {}).get("FULL", "gpt-5.3-codex")
-                return _wrap_result(_invoke_codex(prompt, codex_model, max_turns))
-            # Otherwise fall back to clipboard (manual mode)
-            print(f"  Copying to clipboard for manual paste...", flush=True)
-            try:
-                import pyperclip
-
-                pyperclip.copy(prompt)
-                print(
-                    f"  Prompt copied to clipboard ({len(prompt)} chars). Paste into Claude Code or Codex manually."
-                )
-            except ImportError:
-                try:
-                    subprocess.run(
-                        ["clip.exe"], input=prompt.encode("utf-16-le"), check=True
-                    )
-                    print(
-                        f"  Prompt copied via clip.exe ({len(prompt)} chars). Paste into Claude Code or Codex manually."
-                    )
-                except Exception:
-                    print(
-                        f"  Could not copy to clipboard. Prompt is {len(prompt)} chars."
-                    )
-            return _wrap_result(None)
 
     return _wrap_result(_invoke_claude(prompt, model, max_turns))
 
@@ -1822,7 +1789,10 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
 
 
 def _invoke_claude(prompt, model="sonnet", max_turns=25):
-    """Invoke Claude Code via the Python SDK with MCP tool support."""
+    """Invoke Claude Code via the Python SDK with MCP tool support.
+
+    Uses streaming mode (stdin) for prompts to avoid Windows CLI arg length limits.
+    """
     import asyncio
 
     try:
@@ -1835,10 +1805,6 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
         return None
 
     async def run():
-        from claude_code_sdk._internal.transport.subprocess_cli import (
-            SubprocessCLITransport,
-        )
-
         options = ClaudeCodeOptions(
             model=model,
             permission_mode="bypassPermissions",
@@ -1847,18 +1813,24 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
             append_system_prompt="All MCP tools from ghidra-mcp are already loaded and callable. Do NOT use ToolSearch -- call the MCP tools directly by name.",
         )
 
-        claude_path = _find_cli("claude")
+        # Use streaming mode (AsyncIterable prompt) to send via stdin
+        # This bypasses the Windows ~32K CLI argument length limit
+        import uuid
 
-        transport = (
-            SubprocessCLITransport(prompt=prompt, options=options, cli_path=claude_path)
-            if claude_path
-            else None
-        )
+        session_id = str(uuid.uuid4())
+
+        async def stream_prompt():
+            yield {
+                "type": "user",
+                "message": {"role": "user", "content": prompt},
+                "parent_tool_use_id": None,
+                "session_id": session_id,
+            }
 
         output_parts = []
         tool_id_to_name = {}  # Track tool_use_id -> tool name for result display
         try:
-            async for msg in query(prompt=prompt, options=options, transport=transport):
+            async for msg in query(prompt=stream_prompt(), options=options):
                 msg_type = type(msg).__name__
                 if msg_type == "AssistantMessage":
                     content = getattr(msg, "content", None)
