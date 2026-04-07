@@ -592,6 +592,8 @@ public class ProgramScriptService {
                 if (program == null) {
                     return Response.err("Import failed: no primary program. Log: " + log);
                 }
+                // Save to project folder before releasing (prevents "Database is closed")
+                loadResults.save(project, ghidra.util.task.TaskMonitor.DUMMY);
                 loadResults.release(this);
             }
 
