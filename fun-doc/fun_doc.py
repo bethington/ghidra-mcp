@@ -1931,10 +1931,10 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
     mode = determine_mode(func.get("score"), func.get("deductions"), func)
 
     # Fetch live data from Ghidra
-    print(f"  Fetching data (mode={mode})...", end=" ", flush=True)
+    print(f"  Fetching data...", end=" ", flush=True)
     data = fetch_function_data(program, address, mode=mode)
     live_score = data.get("score")
-    print(f"score={live_score}%")
+    print(f"done")
 
     # Refine mode based on live score and completeness context
     mode = determine_mode(live_score, data.get("deductions"), data.get("completeness"))
@@ -2025,8 +2025,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         tool_block += "\n"
         prompt = prompt + "\n" + tool_block
 
-    print(f"  Mode: {mode} | Model: {selected_model} | Prompt: {len(prompt)} chars")
-    print(f"  Score before: {live_score}%")
+    print(f"  {mode} | {selected_model} | {len(prompt):,} chars | score: {live_score}%")
 
     if dry_run:
         print(f"  DRY RUN: Would invoke Claude")
