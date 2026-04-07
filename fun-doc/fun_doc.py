@@ -1821,82 +1821,107 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
 
         claude_path = _find_cli("claude")
 
-        # Write prompt to a temp file and pass via --input-file to bypass
-        # the Windows ~32K CLI argument length limit while staying in --print mode
-        import tempfile
+        # Monkey-patch SubprocessCLITransport to pipe the prompt via stdin
+        # instead of as a CLI argument, bypassing the Windows ~32K limit.
+        # We stay in --print mode (no --input-format stream-json) so Claude
+        # handles MCP tool calls internally.
+        class StdinPromptTransport(SubprocessCLITransport):
+            """Transport that sends the prompt via stdin instead of CLI args."""
 
-        prompt_file = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, encoding="utf-8"
-        )
-        try:
-            prompt_file.write(prompt)
-            prompt_file.close()
+            def __init__(self, real_prompt, **kwargs):
+                self._real_prompt = real_prompt
+                # Pass a dummy 1-char prompt so the parent builds --print mode
+                super().__init__(prompt=".", **kwargs)
 
-            # Use a short placeholder as the CLI arg prompt — the real prompt is in the file
-            # We pass --input-file via extra_args to read the prompt from file
-            file_prompt = f"Read and follow all instructions from the file: {prompt_file.name}"
-            transport = (
-                SubprocessCLITransport(
-                    prompt=file_prompt, options=options, cli_path=claude_path
+            def _build_command(self):
+                cmd = super()._build_command()
+                # Remove the dummy prompt from the end: [..., "--print", "--", "."]
+                # Replace with just --print (no trailing prompt = read from stdin)
+                if cmd[-3:] == ["--print", "--", "."]:
+                    cmd = cmd[:-2]  # keep --print, remove -- and .
+                return cmd
+
+            async def connect(self):
+                """Start subprocess and write prompt to stdin."""
+                if self._process:
+                    return
+                cmd = self._build_command()
+                process_env = {
+                    **os.environ,
+                    **self._options.env,
+                    "CLAUDE_CODE_ENTRYPOINT": "sdk-py",
+                }
+                if self._cwd:
+                    process_env["PWD"] = self._cwd
+                import anyio
+                from subprocess import PIPE as SPIPE
+                from anyio.streams.text import TextReceiveStream
+
+                self._process = await anyio.open_process(
+                    cmd,
+                    stdin=SPIPE,
+                    stdout=SPIPE,
+                    stderr=None,
+                    cwd=self._cwd,
+                    env=process_env,
                 )
-                if claude_path
-                else None
+                if self._process.stdout:
+                    self._stdout_stream = TextReceiveStream(self._process.stdout)
+                # Write prompt to stdin then close — Claude reads it as the prompt
+                if self._process.stdin:
+                    await self._process.stdin.send(
+                        self._real_prompt.encode("utf-8")
+                    )
+                    await self._process.stdin.aclose()
+                self._ready = True
+
+        transport = (
+            StdinPromptTransport(
+                real_prompt=prompt, options=options, cli_path=claude_path
             )
+            if claude_path
+            else None
+        )
 
-            output_parts = []
-            tool_id_to_name = {}
-            try:
-                async for msg in query(
-                    prompt=file_prompt, options=options, transport=transport
-                ):
-                    msg_type = type(msg).__name__
-                    if msg_type == "AssistantMessage":
-                        content = getattr(msg, "content", None)
-                        if content:
-                            for block in (
-                                content if isinstance(content, list) else [content]
-                            ):
-                                block_type = type(block).__name__
-                                if block_type == "TextBlock":
-                                    text = getattr(block, "text", str(block))
-                                    print(text)
-                                    output_parts.append(text)
-                                elif block_type == "ToolUseBlock":
-                                    tool_name = getattr(block, "name", "?")
-                                    tool_id = getattr(block, "id", "")
-                                    tool_id_to_name[tool_id] = tool_name
-                                    print(
-                                        f"  [mcp] {tool_name}: calling...",
-                                        flush=True,
-                                    )
-                                elif block_type == "ToolResultBlock":
-                                    is_error = getattr(block, "is_error", False)
-                                    status = "failed" if is_error else "completed"
-                                    tool_id = getattr(block, "tool_use_id", "")
-                                    tool_name = tool_id_to_name.get(
-                                        tool_id, tool_id[:12]
-                                    )
-                                    print(
-                                        f"  [mcp] {tool_name}: {status}", flush=True
-                                    )
-                                elif block_type == "ThinkingBlock":
-                                    pass  # Skip thinking blocks
-                    elif msg_type == "ResultMessage":
-                        pass  # Final result handled via output_parts
-            except Exception as e:
-                err_str = str(e)
-                if "not found" in err_str.lower():
-                    raise
-                if "rate_limit_event" not in err_str:
-                    print(f"  [claude sdk] {err_str}", file=sys.stderr)
+        output_parts = []
+        tool_id_to_name = {}
+        try:
+            async for msg in query(prompt=prompt, options=options, transport=transport):
+                msg_type = type(msg).__name__
+                if msg_type == "AssistantMessage":
+                    content = getattr(msg, "content", None)
+                    if content:
+                        for block in (
+                            content if isinstance(content, list) else [content]
+                        ):
+                            block_type = type(block).__name__
+                            if block_type == "TextBlock":
+                                text = getattr(block, "text", str(block))
+                                print(text)
+                                output_parts.append(text)
+                            elif block_type == "ToolUseBlock":
+                                tool_name = getattr(block, "name", "?")
+                                tool_id = getattr(block, "id", "")
+                                tool_id_to_name[tool_id] = tool_name
+                                print(f"  [mcp] {tool_name}: calling...", flush=True)
+                            elif block_type == "ToolResultBlock":
+                                is_error = getattr(block, "is_error", False)
+                                status = "failed" if is_error else "completed"
+                                tool_id = getattr(block, "tool_use_id", "")
+                                tool_name = tool_id_to_name.get(tool_id, tool_id[:12])
+                                print(f"  [mcp] {tool_name}: {status}", flush=True)
+                            elif block_type == "ThinkingBlock":
+                                pass  # Skip thinking blocks
+                elif msg_type == "ResultMessage":
+                    pass  # Final result handled via output_parts
+        except Exception as e:
+            err_str = str(e)
+            if "not found" in err_str.lower():
+                raise
+            if "rate_limit_event" not in err_str:
+                print(f"  [claude sdk] {err_str}", file=sys.stderr)
 
-            return "\n".join(output_parts) if output_parts else None
-        finally:
-            # Clean up temp file
-            try:
-                os.unlink(prompt_file.name)
-            except OSError:
-                pass
+        return "\n".join(output_parts) if output_parts else None
 
     # Retry once on "not found" errors (intermittent when previous process is still exiting)
     for attempt in range(2):
