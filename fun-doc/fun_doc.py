@@ -1793,20 +1793,16 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
     import asyncio
 
     try:
-        from claude_code_sdk import query, ClaudeCodeOptions
+        from claude_agent_sdk import query, ClaudeAgentOptions
     except ImportError:
         print(
-            "ERROR: claude-code-sdk not installed. Run: pip install claude-code-sdk",
-            file=sys.stderr,
+            "ERROR: claude-agent-sdk not installed. Run: pip install claude-agent-sdk",
+            flush=True,
         )
         return None
 
     async def run():
-        from claude_code_sdk._internal.transport.subprocess_cli import (
-            SubprocessCLITransport,
-        )
-
-        options = ClaudeCodeOptions(
+        options = ClaudeAgentOptions(
             model=model,
             permission_mode="bypassPermissions",
             max_turns=max_turns,
@@ -1814,18 +1810,10 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
             append_system_prompt="Use ToolSearch to load the ghidra-mcp MCP tools if they are not yet available, then call them directly by name.",
         )
 
-        claude_path = _find_cli("claude")
-
-        transport = (
-            SubprocessCLITransport(prompt=prompt, options=options, cli_path=claude_path)
-            if claude_path
-            else None
-        )
-
         output_parts = []
         tool_id_to_name = {}
         try:
-            async for msg in query(prompt=prompt, options=options, transport=transport):
+            async for msg in query(prompt=prompt, options=options):
                 msg_type = type(msg).__name__
                 if msg_type == "AssistantMessage":
                     content = getattr(msg, "content", None)
