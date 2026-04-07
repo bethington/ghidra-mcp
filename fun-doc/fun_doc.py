@@ -1579,6 +1579,9 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
             print(f"  [minimax] API error: {e}", file=sys.stderr)
             break
 
+        if not response.choices:
+            print(f"  [minimax] Empty response (no choices), ending", file=sys.stderr)
+            break
         choice = response.choices[0]
         message = choice.message
 
@@ -1618,7 +1621,9 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
 
         # No tool calls — this is the final text response
         if message.content:
-            print(message.content)
+            # Sanitize for Windows console (cp1252 can't handle some Unicode)
+            safe_text = message.content.encode("ascii", errors="replace").decode("ascii")
+            print(safe_text)
             output_parts.append(message.content)
 
         if choice.finish_reason in ("stop", "end_turn", None):
