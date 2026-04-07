@@ -1811,7 +1811,7 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
             permission_mode="bypassPermissions",
             max_turns=max_turns,
             cwd=str(REPO_ROOT),
-            append_system_prompt="All MCP tools from ghidra-mcp are already loaded and callable. Do NOT use ToolSearch -- call the MCP tools directly by name.",
+            append_system_prompt="Use ToolSearch to load the ghidra-mcp MCP tools if they are not yet available, then call them directly by name.",
         )
 
         claude_path = _find_cli("claude")
@@ -1857,8 +1857,8 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
             err_str = str(e)
             if "not found" in err_str.lower():
                 raise
-            if "rate_limit_event" not in err_str:
-                print(f"  [claude sdk] {err_str}", file=sys.stderr)
+            # Print all errors to stdout (stderr may not display in PowerShell)
+            print(f"  [claude sdk error] {err_str}", flush=True)
 
         return "\n".join(output_parts) if output_parts else None
 
