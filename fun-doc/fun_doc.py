@@ -42,7 +42,14 @@ REPO_ROOT = SCRIPT_DIR.parent
 MODULE_DIR = SCRIPT_DIR / "prompts"
 STATE_FILE = SCRIPT_DIR / "state.json"
 
-GHIDRA_URL = "http://127.0.0.1:8089"
+# Load .env from repo root (API keys, server URLs, etc.)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(REPO_ROOT / ".env")
+except ImportError:
+    pass
+
+GHIDRA_URL = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip("/")
 
 # ---------------------------------------------------------------------------
 # AI Provider Configuration
