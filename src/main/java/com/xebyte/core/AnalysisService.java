@@ -1729,7 +1729,7 @@ public class AnalysisService {
     @SuppressWarnings("unchecked")
     public Response batchAnalyzeCompleteness(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         List<String> addresses;
         if (addressesObj instanceof List<?> list) {
             addresses = list.stream().map(String::valueOf).collect(java.util.stream.Collectors.toList());
@@ -1751,7 +1751,7 @@ public class AnalysisService {
         sb.append("{\"results\": [");
         for (int i = 0; i < addresses.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append(analyzeFunctionCompleteness(addresses.get(i)).toJson());
+            sb.append(analyzeFunctionCompleteness(addresses.get(i), false, programName).toJson());
         }
         sb.append("], \"count\": ").append(addresses.size()).append("}");
         return Response.text(sb.toString());
