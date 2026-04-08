@@ -42,11 +42,6 @@ class WorkerManager:
             active = {wid: w for wid, w in self._workers.items() if w["status"] in ("starting", "running", "stopping")}
             if len(active) >= self.MAX_WORKERS:
                 raise ValueError(f"Maximum {self.MAX_WORKERS} concurrent workers")
-            # Prevent same-binary conflicts
-            if binary:
-                for w in active.values():
-                    if w["binary"] == binary:
-                        raise ValueError(f"Worker {w['id']} already targeting {binary}")
 
             worker_id = str(uuid.uuid4())[:8]
             stop_flag = threading.Event()
@@ -96,8 +91,9 @@ class WorkerManager:
             ]
 
     def _run_worker(self, worker_id):
+        """Worker loop — fetches one function at a time to avoid conflicts with other workers."""
         worker = self._workers[worker_id]
-        targets = []
+        current_key = None
         try:
             from fun_doc import (
                 load_state, save_state, get_next_functions,
@@ -115,32 +111,35 @@ class WorkerManager:
             if worker["binary"]:
                 state["active_binary"] = worker["binary"]
 
-            targets = get_next_functions(state, count=worker["count"])
-
-            # Filter out functions already being processed by other workers
-            with self._lock:
-                targets = [(k, f) for k, f in targets if k not in self._in_progress_keys]
-                for k, _ in targets:
-                    self._in_progress_keys.add(k)
-
-            if not targets:
-                worker["status"] = "finished"
-                worker["finished_at"] = datetime.now().isoformat()
-                self._bus.emit("worker_stopped", {"worker_id": worker_id, "reason": "no_targets"})
-                self._emit_status()
-                return
-
             session = start_session(state)
+            processed = 0
 
-            for key, func in targets:
-                if worker["stop_flag"].is_set():
-                    break
+            while processed < worker["count"] and not worker["stop_flag"].is_set():
+                # Reload state each iteration to get fresh scores/queue
+                state = load_state()
+                if worker["binary"]:
+                    state["active_binary"] = worker["binary"]
 
+                # Get next function, skipping ones already in progress
+                candidates = get_next_functions(state, count=10)
+                target = None
+                with self._lock:
+                    for k, f in candidates:
+                        if k not in self._in_progress_keys:
+                            self._in_progress_keys.add(k)
+                            target = (k, f)
+                            current_key = k
+                            break
+
+                if target is None:
+                    break  # No more work available
+
+                key, func = target
                 worker["progress"]["current"] = {"key": key, "name": func.get("name", "?"), "address": func.get("address", "?")}
                 self._emit_status()
                 self._bus.emit("worker_progress", {
                     "worker_id": worker_id, "current": worker["progress"]["current"],
-                    "completed": worker["progress"]["completed"], "total": len(targets),
+                    "completed": worker["progress"]["completed"], "total": worker["count"],
                 })
 
                 result = process_function(
@@ -148,6 +147,12 @@ class WorkerManager:
                     provider=worker["provider"], stop_flag=worker["stop_flag"],
                 )
 
+                # Release the key immediately after processing
+                with self._lock:
+                    self._in_progress_keys.discard(key)
+                    current_key = None
+
+                processed += 1
                 if result in ("quit", "stopped"):
                     break
                 elif result == "completed":
@@ -160,8 +165,6 @@ class WorkerManager:
                 elif result in ("failed", "blocked", "needs_redo"):
                     worker["progress"]["failed"] += 1
                     session["failed"] += 1
-                elif result == "manual_prompt_generated":
-                    pass
 
                 self._emit_status()
 
@@ -180,8 +183,8 @@ class WorkerManager:
             worker["finished_at"] = datetime.now().isoformat()
             worker["progress"]["current"] = None
             with self._lock:
-                for k, _ in targets:
-                    self._in_progress_keys.discard(k)
+                if current_key:
+                    self._in_progress_keys.discard(current_key)
             self._emit_status()
             self._bus.emit("worker_stopped", {
                 "worker_id": worker_id, "reason": worker["status"],
