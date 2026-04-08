@@ -2312,6 +2312,10 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
     else:
         print(f"\n  Result: {result} | Score: unavailable")
 
+    # Save program to persist changes in Ghidra
+    if result in ("completed", "needs_redo") and tool_calls_made > 0:
+        ghidra_post("/save_program", params={"program": program})
+
     save_state(state)
     return result
 
