@@ -412,7 +412,13 @@
         function hideBanner() { document.getElementById("statusBanner").classList.remove("active"); }
 
         // --- Scan controls ---
-        function requestRescan(refresh) { socket.emit("request_rescan", {refresh: refresh}); showBanner(refresh ? "Full rescan starting..." : "Incremental rescan starting..."); }
+        function requestRescan(refresh) {
+            // If a binary is selected in the dropdown, scope the rescan to that binary
+            const activeBinary = document.getElementById("binarySelect").value || null;
+            socket.emit("request_rescan", {refresh: refresh, program: activeBinary});
+            const scope = activeBinary || "all binaries";
+            showBanner(refresh ? `Full rescan (${scope})...` : `Rescan (${scope})...`);
+        }
         function requestRescanBinary(prog) { socket.emit("request_rescan", {program: prog}); showBanner(`Rescanning ${prog}...`); }
 
         // --- Queue controls (no page reload) ---

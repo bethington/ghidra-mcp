@@ -414,7 +414,10 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
                 elif cached.get("name", "") != f["name"]:
                     # Name changed — needs re-scoring
                     needs_scoring.append(f)
-                # else: name unchanged, keep cached score
+                elif cached.get("score", 0) == 0 and not cached.get("deductions"):
+                    # Never properly scored (added to state but scoring was skipped)
+                    needs_scoring.append(f)
+                # else: name unchanged and has valid score, keep cached
 
             needs_scoring_addrs = [f"0x{f['address']}" for f in needs_scoring]
             print(
