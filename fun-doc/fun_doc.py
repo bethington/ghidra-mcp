@@ -298,26 +298,70 @@ def _fetch_function_list(prog_path):
     return funcs_resp.get("functions")
 
 
+def _score_single(addr_hex, prog_path=None):
+    """Score a single function via analyze_function_completeness. Returns score_info dict or None."""
+    params = {"function_address": addr_hex}
+    if prog_path:
+        params["program"] = prog_path
+    result = ghidra_get("/analyze_function_completeness", params=params, timeout=30)
+    if not result or not isinstance(result, dict) or "error" in result:
+        return None
+    eff = result.get("effective_score", result.get("completeness_score", 0))
+    classification = result.get("classification", "unknown")
+    return {
+        "score": int(eff) if eff is not None else 0,
+        "fixable": float(result.get("fixable_deductions", 0)),
+        "has_custom_name": result.get("has_custom_name", False),
+        "has_plate_comment": result.get("has_plate_comment", False),
+        "is_leaf": classification == "leaf",
+        "classification": classification,
+        "deductions": result.get("deduction_breakdown", []),
+    }
+
+
 def _batch_score(addresses, prog_path=None):
-    """Score a list of addresses via batch_analyze_completeness. Returns {addr: score_info}."""
+    """Score addresses via batch endpoint, falling back to individual calls on failure."""
     score_map = {}
     BATCH_SIZE = 50
-    total_batches = (len(addresses) + BATCH_SIZE - 1) // BATCH_SIZE
 
     params = {}
     if prog_path:
         params["program"] = prog_path
 
+    # Try batch first
+    batch_works = None  # None = untested, True/False after first batch
     for i in range(0, len(addresses), BATCH_SIZE):
         batch = addresses[i : i + BATCH_SIZE]
-        batch_num = i // BATCH_SIZE + 1
 
-        resp = ghidra_post(
-            "/batch_analyze_completeness",
-            data={"addresses": batch},
-            params=params,
-            timeout=60,
-        )
+        if batch_works is not False:
+            resp = ghidra_post(
+                "/batch_analyze_completeness",
+                data={"addresses": batch},
+                params=params,
+                timeout=60,
+            )
+            if resp and isinstance(resp, dict) and "results" in resp:
+                results = resp["results"]
+                # Check if first result is an error (batch endpoint doesn't work for this program)
+                if results and isinstance(results[0], dict) and "error" in results[0]:
+                    if batch_works is None:
+                        batch_works = False
+                        print(f"    Batch scoring unavailable, falling back to individual scoring...", flush=True)
+                else:
+                    batch_works = True
+
+        if batch_works is False:
+            # Individual fallback
+            for addr_hex in batch:
+                addr = addr_hex.replace("0x", "")
+                info = _score_single(addr_hex, prog_path)
+                if info:
+                    score_map[addr] = info
+            # Progress
+            if (i + BATCH_SIZE) % 500 < BATCH_SIZE:
+                print(f"    Scored {min(i + BATCH_SIZE, len(addresses))}/{len(addresses)}", flush=True)
+            continue
+
         if resp and isinstance(resp, dict) and "results" in resp:
             for j, result in enumerate(resp["results"]):
                 if i + j < len(addresses):
