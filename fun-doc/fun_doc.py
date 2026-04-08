@@ -493,20 +493,31 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
     state["project_folder"] = project_folder
     save_state(state)
 
-    total = len(all_functions)
-    done = sum(1 for f in all_functions.values() if f["score"] >= 90)
-
-    if is_incremental:
-        removed = len(existing) - total_kept - total_rescored
-        print(f"\nIncremental scan complete: {total} functions, {done} done (>= 90%)")
-        print(
-            f"  {total_kept} cached, {total_rescored} re-scored, {total_new} new, {max(0, removed)} removed"
-        )
+    # Report stats for what was scanned
+    if binary_filter:
+        # When scanning one binary, report stats for that binary + total state
+        binary_total = len(all_functions)
+        binary_done = sum(1 for f in all_functions.values() if f["score"] >= 90)
+        state_total = len(state["functions"])
+        state_done = sum(1 for f in state["functions"].values() if f["score"] >= 90)
+        print(f"\nScan complete: {binary_filter} — {binary_total} functions, {binary_done} done (>= 90%)")
+        print(f"  {total_rescored} scored, {total_kept} thunk/external")
+        print(f"  State total: {state_total} functions across all binaries, {state_done} done")
+        bus_emit("scan_complete", {"total": state_total, "done": state_done, "mode": scan_mode, "binary": binary_filter})
     else:
-        print(
-            f"\nFull scan complete: {total} functions, {done} documented (>= 90%), {total - done} remaining"
-        )
-    bus_emit("scan_complete", {"total": total, "done": done, "mode": scan_mode})
+        total = len(all_functions)
+        done = sum(1 for f in all_functions.values() if f["score"] >= 90)
+        if is_incremental:
+            removed = len(existing) - total_kept - total_rescored - total_new
+            print(f"\nIncremental scan complete: {total} functions, {done} done (>= 90%)")
+            print(
+                f"  {total_kept} cached, {total_rescored} re-scored, {total_new} new, {max(0, removed)} removed"
+            )
+        else:
+            print(
+                f"\nFull scan complete: {total} functions, {done} documented (>= 90%), {total - done} remaining"
+            )
+        bus_emit("scan_complete", {"total": total, "done": done, "mode": scan_mode})
     return True
 
 
