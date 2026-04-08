@@ -16,6 +16,9 @@ everywhere with zero overhead.
 import threading
 from collections import defaultdict
 
+# Thread-local storage for worker context
+_thread_local = threading.local()
+
 
 class EventBus:
     """Thread-safe publish-subscribe event bus."""
@@ -60,7 +63,23 @@ def get_bus():
     return _bus
 
 
+def set_worker_id(worker_id):
+    """Set the current thread's worker_id (attached to all emitted events)."""
+    _thread_local.worker_id = worker_id
+
+
+def get_worker_id():
+    """Get the current thread's worker_id, or None."""
+    return getattr(_thread_local, "worker_id", None)
+
+
 def emit(event_type, data=None):
-    """Convenience: emit on the global bus. No-op if bus not initialized."""
+    """Convenience: emit on the global bus. Auto-attaches worker_id if set."""
     if _bus is not None:
+        # Attach worker_id from thread-local if present
+        worker_id = getattr(_thread_local, "worker_id", None)
+        if worker_id and isinstance(data, dict):
+            data = {**data, "worker_id": worker_id}
+        elif worker_id and data is None:
+            data = {"worker_id": worker_id}
         _bus.emit(event_type, data)

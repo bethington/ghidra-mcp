@@ -141,6 +141,15 @@
         .worker-card .wc-detail { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-secondary); }
         .worker-card .wc-current { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-primary); margin-top: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
         .worker-card .btn-stop { position: absolute; top: 0.4rem; right: 0.4rem; }
+        .worker-pane { background: var(--bg-dark); border: 1px solid var(--border-dark); border-radius: 6px; display: flex; flex-direction: column; min-height: 180px; max-height: 350px; }
+        .worker-pane.running { border-color: var(--color-set); }
+        .worker-pane.stopping { border-color: var(--color-rare); }
+        .worker-pane.finished { border-color: var(--text-muted); opacity: 0.85; }
+        .worker-pane-header { padding: 0.35rem 0.6rem; background: linear-gradient(180deg, var(--bg-light), var(--bg-medium)); border-bottom: 1px solid var(--border-dark); border-radius: 6px 6px 0 0; display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; }
+        .worker-pane-header .wp-title { font-family: var(--font-mono); color: var(--accent-gold); font-weight: 600; }
+        .worker-pane-header .wp-status { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.6rem; }
+        .worker-pane-header .wp-actions { margin-left: auto; display: flex; gap: 3px; }
+        .worker-pane-output { flex: 1; overflow-y: auto; padding: 0.3rem; font-family: var(--font-mono); font-size: 0.65rem; line-height: 1.35; background: var(--bg-darkest); }
         .footer { background: var(--bg-dark); border-top: 1px solid var(--border-dark); padding: 0.4rem; text-align: center; color: var(--text-muted); font-size: 0.65rem; }
     </style>
 </head>
@@ -185,14 +194,8 @@
             <span id="bannerText"></span>
         </div>
 
-        <!-- Worker status cards -->
-        <div id="workerPanel" style="display: none;">
-            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem;">
-                <span style="font-size: 0.65rem; color: var(--accent-gold); font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Active Workers</span>
-                <span class="mono" id="workerCountLabel" style="color: var(--text-muted);">0/3</span>
-            </div>
-            <div class="worker-cards" id="workerCards"></div>
-        </div>
+        <!-- Worker status cards (replaced by output panes, kept for status updates) -->
+        <div id="workerPanel" style="display: none;"></div>
 
         <!-- Stats cards -->
         <div class="stats-grid">
@@ -213,17 +216,9 @@
             </div>
         </div>
 
-        <!-- Activity Feed -->
-        <div class="panel">
-            <div class="panel-header">
-                <h2>Live Activity</h2>
-                <button class="btn" onclick="document.getElementById('activityFeed').innerHTML=''">Clear</button>
-            </div>
-            <div class="panel-content">
-                <div class="activity-feed" id="activityFeed">
-                    <div class="activity-entry activity-neutral">Waiting for events...</div>
-                </div>
-            </div>
+        <!-- Worker Output Panes (2x2 grid) -->
+        <div id="workerGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.75rem;">
+            <!-- Worker panes are dynamically created by JavaScript -->
         </div>
 
         <!-- Row: Score Distribution + Deduction Breakdown + Run Stats -->
@@ -420,35 +415,91 @@
             }).catch(() => {});
         }
 
-        // --- Activity feed ---
-        function addActivity(text, type) {
-            const feed = document.getElementById("activityFeed");
-            const el = document.createElement("div");
-            el.className = "activity-entry activity-" + type;
-            el.textContent = text;
-            feed.appendChild(el);
-            if (feed.children.length > 200) feed.removeChild(feed.firstChild);
-            feed.scrollTop = feed.scrollHeight;
+        // --- Worker output panes ---
+        const workerPanes = {};  // worker_id -> {element, output}
+
+        function getOrCreatePane(workerId, provider, binary) {
+            if (workerPanes[workerId]) return workerPanes[workerId];
+            const grid = document.getElementById('workerGrid');
+            const pane = document.createElement('div');
+            pane.className = 'worker-pane running';
+            pane.id = `wp-${workerId}`;
+            pane.innerHTML = `
+                <div class="worker-pane-header">
+                    <span class="wp-title">${provider || '?'} #${workerId}</span>
+                    <span class="wp-status" id="wp-status-${workerId}">${binary || ''}</span>
+                    <div class="wp-actions">
+                        <button class="btn btn-danger" onclick="stopWorker('${workerId}')" id="wp-stop-${workerId}">Stop</button>
+                        <button class="btn" onclick="dismissPane('${workerId}')" style="display:none" id="wp-dismiss-${workerId}">X</button>
+                    </div>
+                </div>
+                <div class="worker-pane-output" id="wp-out-${workerId}"></div>
+            `;
+            grid.appendChild(pane);
+            workerPanes[workerId] = {element: pane, output: pane.querySelector('.worker-pane-output')};
+            return workerPanes[workerId];
         }
 
-        // Scan events
-        socket.on("scan_started", d => { addActivity(`Scan started (${d.mode || 'unknown'}) in ${d.folder || '?'}`, "scan"); showBanner("Scanning..."); });
-        socket.on("scan_progress", d => { addActivity(`  Scanning ${d.program} (${(d.index||0)+1}/${d.total||'?'})`, "scan"); updateBanner(`Scanning ${d.program}...`); });
-        socket.on("scan_complete", d => { addActivity(`Scan complete: ${d.total} functions, ${d.done} done`, "success"); hideBanner(); refreshStats(); });
-        socket.on("scan_error", d => { addActivity(`Scan error: ${d.error}`, "error"); hideBanner(); });
+        function appendToPane(workerId, text, type) {
+            const pane = workerPanes[workerId];
+            if (!pane) return;
+            const el = document.createElement('div');
+            el.className = 'activity-entry activity-' + type;
+            el.textContent = text;
+            pane.output.appendChild(el);
+            if (pane.output.children.length > 500) pane.output.removeChild(pane.output.firstChild);
+            pane.output.scrollTop = pane.output.scrollHeight;
+        }
 
-        // Function processing events
-        socket.on("function_started", d => addActivity(`Processing ${d.name} @ 0x${d.address}`, "started"));
-        socket.on("function_mode", d => addActivity(`  ${d.mode} | ${d.model} | score: ${d.score}%`, "neutral"));
-        socket.on("tool_call", d => addActivity(`  [mcp] ${d.tool}: ${d.status}`, "tool"));
-        socket.on("tool_result", d => addActivity(`  [mcp] ${d.tool}: ${d.status}`, d.status === "failed" ? "error" : "tool"));
-        socket.on("model_text", d => { if (d.text && d.text.length > 0) addActivity(d.text.substring(0, 300), "text"); });
+        function dismissPane(workerId) {
+            const pane = workerPanes[workerId];
+            if (pane) { pane.element.remove(); delete workerPanes[workerId]; }
+        }
+
+        function markPaneFinished(workerId, reason) {
+            const pane = workerPanes[workerId];
+            if (!pane) return;
+            pane.element.className = 'worker-pane finished';
+            const status = document.getElementById(`wp-status-${workerId}`);
+            if (status) status.textContent = reason || 'finished';
+            const stopBtn = document.getElementById(`wp-stop-${workerId}`);
+            const dismissBtn = document.getElementById(`wp-dismiss-${workerId}`);
+            if (stopBtn) stopBtn.style.display = 'none';
+            if (dismissBtn) dismissBtn.style.display = '';
+        }
+
+        // Scan events (go to banner, not panes)
+        socket.on("scan_started", d => showBanner(`Scanning ${d.mode || ''}...`));
+        socket.on("scan_progress", d => updateBanner(`Scanning ${d.program} (${(d.index||0)+1}/${d.total||'?'})...`));
+        socket.on("scan_complete", d => { hideBanner(); refreshStats(); });
+        socket.on("scan_error", d => { showBanner(`Scan error: ${d.error}`); setTimeout(hideBanner, 5000); });
+
+        // Worker lifecycle events
+        socket.on("worker_started", d => {
+            getOrCreatePane(d.worker_id, d.provider, d.binary || '');
+            appendToPane(d.worker_id, `Worker started: ${d.provider} x${d.count}`, 'scan');
+        });
+        socket.on("worker_stopped", d => {
+            appendToPane(d.worker_id, `Worker ${d.reason}: ${d.progress?.completed || 0} completed`, d.reason === 'finished' ? 'success' : 'neutral');
+            markPaneFinished(d.worker_id, d.reason);
+            refreshStats();
+        });
+
+        // Per-function events — route to worker pane by worker_id
+        socket.on("function_started", d => {
+            if (d.worker_id) getOrCreatePane(d.worker_id, null, null);
+            appendToPane(d.worker_id, `\n${d.name} @ 0x${d.address}`, 'started');
+        });
+        socket.on("function_mode", d => appendToPane(d.worker_id, `  ${d.mode} | ${d.model} | score: ${d.score}%`, 'neutral'));
+        socket.on("tool_call", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, 'tool'));
+        socket.on("tool_result", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, d.status === 'failed' ? 'error' : 'tool'));
+        socket.on("model_text", d => { if (d.text) appendToPane(d.worker_id, d.text.substring(0, 300), 'text'); });
         socket.on("score_update", d => {
             const delta = (d.score_after||0) - (d.score_before||0);
-            const sign = delta >= 0 ? "+" : "";
-            addActivity(`  Score: ${d.score_before}% -> ${d.score_after}% (${sign}${delta}%) | ${d.result}`, delta > 0 ? "success" : "neutral");
+            const sign = delta >= 0 ? '+' : '';
+            appendToPane(d.worker_id, `  Score: ${d.score_before}% -> ${d.score_after}% (${sign}${delta}%) | ${d.result}`, delta > 0 ? 'success' : 'neutral');
         });
-        socket.on("function_complete", d => { addActivity(`  Complete: ${d.result}`, d.result === "completed" ? "success" : "neutral"); refreshStats(); });
+        socket.on("function_complete", d => { appendToPane(d.worker_id, `  Complete: ${d.result}\n`, d.result === 'completed' ? 'success' : 'neutral'); refreshStats(); });
 
         // --- Banner ---
         function showBanner(text) { const b = document.getElementById("statusBanner"); b.classList.add("active"); document.getElementById("bannerText").textContent = text; }
@@ -511,24 +562,20 @@
             refreshStats();
         });
         socket.on('worker_status', workers => {
-            const panel = document.getElementById('workerPanel');
-            const cards = document.getElementById('workerCards');
-            const label = document.getElementById('workerCountLabel');
-            const active = workers.filter(w => w.status !== 'finished' && w.status !== 'stopped');
-            if (active.length === 0) { panel.style.display = 'none'; return; }
-            panel.style.display = 'block';
-            label.textContent = `${active.length}/3`;
-            cards.innerHTML = active.map(w => {
-                const cls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : '';
-                const cur = w.progress.current ? `${w.progress.current.name}` : 'waiting...';
+            // Update pane borders and status text based on worker status
+            workers.forEach(w => {
+                const pane = workerPanes[w.id];
+                if (!pane) return;
+                const cls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : 'finished';
+                pane.element.className = `worker-pane ${cls}`;
                 const done = w.progress.completed + w.progress.skipped + w.progress.failed;
-                return `<div class="worker-card ${cls}">
-                    <button class="btn btn-danger btn-stop" onclick="stopWorker('${w.id}')">Stop</button>
-                    <div class="wc-title">${w.provider} #${w.id}${w.continuous ? ' [Auto]' : ''}</div>
-                    <div class="wc-detail">${done}${w.continuous ? '' : '/'+w.count} | ${w.progress.completed}ok ${w.progress.skipped}skip ${w.progress.failed}fail</div>
-                    <div class="wc-current">${cur}</div>
-                </div>`;
-            }).join('');
+                const status = document.getElementById(`wp-status-${w.id}`);
+                if (status) {
+                    const countStr = w.continuous ? 'auto' : `${done}/${w.count}`;
+                    const cur = w.progress.current ? w.progress.current.name : '';
+                    status.textContent = `${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${cur ? ' | ' + cur : ''}`;
+                }
+            });
         });
 
         // --- Filter ---

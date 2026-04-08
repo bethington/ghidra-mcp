@@ -94,6 +94,9 @@ class WorkerManager:
 
     def _run_worker(self, worker_id):
         """Worker loop — fetches one function at a time to avoid conflicts with other workers."""
+        from event_bus import set_worker_id
+        set_worker_id(worker_id)  # Tag all events from this thread
+
         worker = self._workers[worker_id]
         current_key = None
         try:
