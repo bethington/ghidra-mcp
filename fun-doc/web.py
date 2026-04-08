@@ -222,10 +222,30 @@ def create_app(state_file, event_bus=None):
 
     def load_state():
         sf = app.config["STATE_FILE"]
-        if sf.exists():
-            with open(sf, "r") as f:
-                return json.load(f)
+        if not sf.exists():
+            return {"functions": {}, "sessions": [], "project_folder": "unknown", "last_scan": None}
+        # Retry on partial read (race with concurrent save_state)
+        for attempt in range(3):
+            try:
+                with open(sf, "r") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, ValueError):
+                if attempt < 2:
+                    import time
+                    time.sleep(0.1)
         return {"functions": {}, "sessions": [], "project_folder": "unknown", "last_scan": None}
+
+    def _save_state_inline(state):
+        """Save state from web.py context — uses fun_doc's lock if available."""
+        sf = app.config["STATE_FILE"]
+        try:
+            from fun_doc import _state_lock
+            with _state_lock:
+                with open(sf, "w") as f:
+                    json.dump(state, f, indent=2, default=str)
+        except ImportError:
+            with open(sf, "w") as f:
+                json.dump(state, f, indent=2, default=str)
 
     def load_queue():
         qf = app.config["QUEUE_FILE"]
@@ -605,10 +625,7 @@ def create_app(state_file, event_bus=None):
             state["active_binary"] = binary
         else:
             state.pop("active_binary", None)
-        # Save inline (import from fun_doc)
-        sf = app.config["STATE_FILE"]
-        with open(sf, "w") as f:
-            json.dump(state, f, indent=2, default=str)
+        _save_state_inline(state)
         socketio.emit("state_changed")
         return jsonify({"ok": True, "active_binary": state.get("active_binary")})
 
@@ -620,9 +637,7 @@ def create_app(state_file, event_bus=None):
             return jsonify({"error": "folder required"}), 400
         state = load_state()
         state["project_folder"] = folder
-        sf = app.config["STATE_FILE"]
-        with open(sf, "w") as f:
-            json.dump(state, f, indent=2, default=str)
+        _save_state_inline(state)
         socketio.emit("state_changed")
         return jsonify({"ok": True, "project_folder": folder})
 
