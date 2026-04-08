@@ -2519,6 +2519,7 @@ def main():
     if dashboard_enabled:
         import threading
         import tempfile
+        import socket
 
         try:
             from web import create_app
@@ -2528,13 +2529,25 @@ def main():
             dashboard_url = f"http://127.0.0.1:{dash_port}"
 
             # Run Flask in a daemon thread (auto-exits when main process exits)
-            dash_thread = threading.Thread(
-                target=lambda: dash_app.run(
-                    host="127.0.0.1", port=dash_port, debug=False, use_reloader=False
-                ),
-                daemon=True,
-            )
+            def _run_dashboard():
+                try:
+                    dash_app.run(
+                        host="127.0.0.1", port=dash_port, debug=False, use_reloader=False
+                    )
+                except Exception as e:
+                    print(f"  Dashboard error: {e}", flush=True)
+
+            dash_thread = threading.Thread(target=_run_dashboard, daemon=True)
             dash_thread.start()
+
+            # Wait for Flask to actually bind the port (up to 3 seconds)
+            for _ in range(30):
+                time.sleep(0.1)
+                try:
+                    with socket.create_connection(("127.0.0.1", dash_port), timeout=0.5):
+                        break
+                except (ConnectionRefusedError, OSError):
+                    continue
 
             # Auto-open browser on first run (track via temp file to avoid repeat opens)
             sentinel = Path(tempfile.gettempdir()) / f"fundoc_dashboard_{dash_port}.lock"
@@ -2545,6 +2558,8 @@ def main():
                 print(f"  Dashboard opened: {dashboard_url}")
             else:
                 print(f"  Dashboard: {dashboard_url}")
+        except ImportError:
+            print(f"  Dashboard requires flask: pip install flask")
         except Exception as e:
             print(f"  Dashboard failed to start: {e}")
 
