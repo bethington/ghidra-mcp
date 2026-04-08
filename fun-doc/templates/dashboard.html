@@ -131,6 +131,16 @@
 
         .header-select { padding: 3px 6px; font-size: 0.7rem; border-radius: 3px; border: 1px solid var(--border-dark); background: var(--bg-darkest); color: var(--text-primary); font-family: var(--font-mono); cursor: pointer; }
         .header-select:focus { outline: none; border-color: var(--accent-gold); }
+        .header-sep { border-left: 1px solid var(--border-dark); height: 18px; margin: 0 3px; }
+        .worker-input { padding: 3px 6px; font-size: 0.7rem; border-radius: 3px; border: 1px solid var(--border-dark); background: var(--bg-darkest); color: var(--text-primary); font-family: var(--font-mono); width: 45px; text-align: center; }
+        .worker-cards { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+        .worker-card { background: var(--bg-medium); border: 1px solid var(--border-dark); border-radius: 6px; padding: 0.5rem 0.7rem; min-width: 200px; position: relative; }
+        .worker-card.running { border-color: var(--color-set); }
+        .worker-card.stopping { border-color: var(--color-rare); }
+        .worker-card .wc-title { font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-gold); margin-bottom: 0.15rem; }
+        .worker-card .wc-detail { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-secondary); }
+        .worker-card .wc-current { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-primary); margin-top: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+        .worker-card .btn-stop { position: absolute; top: 0.4rem; right: 0.4rem; }
         .footer { background: var(--bg-dark); border-top: 1px solid var(--border-dark); padding: 0.4rem; text-align: center; color: var(--text-muted); font-size: 0.65rem; }
     </style>
 </head>
@@ -146,6 +156,13 @@
             </select>
             <button class="btn btn-primary" onclick="requestRescan(false)">Rescan</button>
             <button class="btn" onclick="requestRescan(true)">Full Rescan</button>
+            <span class="header-sep"></span>
+            <select class="header-select" id="workerProvider">
+                <option value="claude">Claude</option>
+                <option value="minimax">MiniMax</option>
+            </select>
+            <input type="number" class="worker-input" id="workerCount" value="5" min="1" max="20" title="Functions to process">
+            <button class="btn btn-primary" id="btnRunWorker" onclick="startWorker()">Run Worker</button>
         </div>
         <span class="header-info">
             <span class="live-dot" id="liveDot"></span>
@@ -158,6 +175,15 @@
         <div class="status-banner" id="statusBanner">
             <div class="spinner"></div>
             <span id="bannerText"></span>
+        </div>
+
+        <!-- Worker status cards -->
+        <div id="workerPanel" style="display: none;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem;">
+                <span style="font-size: 0.65rem; color: var(--accent-gold); font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Active Workers</span>
+                <span class="mono" id="workerCountLabel" style="color: var(--text-muted);">0/3</span>
+            </div>
+            <div class="worker-cards" id="workerCards"></div>
         </div>
 
         <!-- Stats cards -->
@@ -346,6 +372,7 @@
         socket.on("connect", () => {
             document.getElementById("liveDot").className = "live-dot connected";
             document.getElementById("connStatus").textContent = "Live";
+            socket.emit('request_worker_status');
         });
         socket.on("disconnect", () => {
             document.getElementById("liveDot").className = "live-dot disconnected";
@@ -432,6 +459,50 @@
         async function pinFunc(key) { await fetch('/api/queue/pin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}); }
         async function unpinFunc(key) { await fetch('/api/queue/unpin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}); }
         async function skipFunc(key) { await fetch('/api/queue/skip', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}); }
+
+        // --- Worker controls ---
+        function startWorker() {
+            const provider = document.getElementById('workerProvider').value;
+            const count = parseInt(document.getElementById('workerCount').value) || 5;
+            const binary = document.getElementById('binarySelect').value || null;
+            socket.emit('request_start_worker', {provider, count, binary});
+            const btn = document.getElementById('btnRunWorker');
+            btn.disabled = true;
+            setTimeout(() => { btn.disabled = false; }, 2000);
+        }
+        function stopWorker(wid) { socket.emit('request_stop_worker', {worker_id: wid}); }
+
+        socket.on('worker_started_ack', d => addActivity(`Worker ${d.worker_id} started`, 'success'));
+        socket.on('worker_error', d => addActivity(`Worker error: ${d.error}`, 'error'));
+        socket.on('worker_stop_ack', d => addActivity(`Worker ${d.worker_id} stopping...`, 'neutral'));
+        socket.on('worker_started', d => addActivity(`Worker ${d.worker_id}: ${d.provider} x${d.count}`, 'scan'));
+        socket.on('worker_progress', d => {
+            if (d.current) addActivity(`Worker ${d.worker_id}: ${d.current.name} (${d.completed+1}/${d.total})`, 'scan');
+        });
+        socket.on('worker_stopped', d => {
+            addActivity(`Worker ${d.worker_id} ${d.reason}`, d.reason === 'finished' ? 'success' : 'neutral');
+            refreshStats();
+        });
+        socket.on('worker_status', workers => {
+            const panel = document.getElementById('workerPanel');
+            const cards = document.getElementById('workerCards');
+            const label = document.getElementById('workerCountLabel');
+            const active = workers.filter(w => w.status !== 'finished' && w.status !== 'stopped');
+            if (active.length === 0) { panel.style.display = 'none'; return; }
+            panel.style.display = 'block';
+            label.textContent = `${active.length}/3`;
+            cards.innerHTML = active.map(w => {
+                const cls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : '';
+                const cur = w.progress.current ? `${w.progress.current.name}` : 'waiting...';
+                const done = w.progress.completed + w.progress.skipped + w.progress.failed;
+                return `<div class="worker-card ${cls}">
+                    <button class="btn btn-danger btn-stop" onclick="stopWorker('${w.id}')">Stop</button>
+                    <div class="wc-title">${w.provider} #${w.id}</div>
+                    <div class="wc-detail">${done}/${w.count} | ${w.progress.completed}ok ${w.progress.skipped}skip ${w.progress.failed}fail</div>
+                    <div class="wc-current">${cur}</div>
+                </div>`;
+            }).join('');
+        });
 
         // --- Filter ---
         function filterFuncs(mode, btn) {

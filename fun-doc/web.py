@@ -21,6 +21,176 @@ from flask_socketio import SocketIO, emit as sio_emit
 
 from event_bus import get_bus
 
+import uuid
+
+
+class WorkerManager:
+    """Manages concurrent documentation worker threads (max 3)."""
+
+    MAX_WORKERS = 3
+
+    def __init__(self, state_file, bus, socketio):
+        self._workers = {}
+        self._lock = threading.Lock()
+        self._state_file = state_file
+        self._bus = bus
+        self._socketio = socketio
+        self._in_progress_keys = set()
+
+    def start_worker(self, provider="claude", count=5, model=None, binary=None):
+        with self._lock:
+            active = {wid: w for wid, w in self._workers.items() if w["status"] in ("starting", "running", "stopping")}
+            if len(active) >= self.MAX_WORKERS:
+                raise ValueError(f"Maximum {self.MAX_WORKERS} concurrent workers")
+            # Prevent same-binary conflicts
+            if binary:
+                for w in active.values():
+                    if w["binary"] == binary:
+                        raise ValueError(f"Worker {w['id']} already targeting {binary}")
+
+            worker_id = str(uuid.uuid4())[:8]
+            stop_flag = threading.Event()
+            worker = {
+                "id": worker_id, "provider": provider, "count": count,
+                "model": model, "binary": binary, "thread": None,
+                "stop_flag": stop_flag, "started_at": datetime.now().isoformat(),
+                "status": "starting",
+                "progress": {"completed": 0, "skipped": 0, "failed": 0, "current": None},
+            }
+            self._workers[worker_id] = worker
+
+        thread = threading.Thread(target=self._run_worker, args=(worker_id,), daemon=True)
+        worker["thread"] = thread
+        thread.start()
+        self._emit_status()
+        return worker_id
+
+    def stop_worker(self, worker_id):
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if not worker:
+                raise ValueError(f"Unknown worker: {worker_id}")
+            worker["stop_flag"].set()
+            worker["status"] = "stopping"
+        self._emit_status()
+
+    def get_status(self):
+        with self._lock:
+            # Prune workers finished > 5 minutes ago
+            now = datetime.now()
+            stale = [
+                wid for wid, w in self._workers.items()
+                if w["status"] in ("finished", "stopped")
+                and (now - datetime.fromisoformat(w.get("finished_at", w["started_at"]))).total_seconds() > 300
+            ]
+            for wid in stale:
+                del self._workers[wid]
+
+            return [
+                {
+                    "id": w["id"], "provider": w["provider"], "count": w["count"],
+                    "model": w["model"], "binary": w["binary"], "status": w["status"],
+                    "progress": dict(w["progress"]), "started_at": w["started_at"],
+                }
+                for w in self._workers.values()
+            ]
+
+    def _run_worker(self, worker_id):
+        worker = self._workers[worker_id]
+        targets = []
+        try:
+            from fun_doc import (
+                load_state, save_state, get_next_functions,
+                start_session, end_session, process_function,
+            )
+
+            worker["status"] = "running"
+            self._emit_status()
+            self._bus.emit("worker_started", {
+                "worker_id": worker_id, "provider": worker["provider"], "count": worker["count"],
+            })
+
+            state = load_state()
+            original_binary = state.get("active_binary")
+            if worker["binary"]:
+                state["active_binary"] = worker["binary"]
+
+            targets = get_next_functions(state, count=worker["count"])
+
+            # Filter out functions already being processed by other workers
+            with self._lock:
+                targets = [(k, f) for k, f in targets if k not in self._in_progress_keys]
+                for k, _ in targets:
+                    self._in_progress_keys.add(k)
+
+            if not targets:
+                worker["status"] = "finished"
+                worker["finished_at"] = datetime.now().isoformat()
+                self._bus.emit("worker_stopped", {"worker_id": worker_id, "reason": "no_targets"})
+                self._emit_status()
+                return
+
+            session = start_session(state)
+
+            for key, func in targets:
+                if worker["stop_flag"].is_set():
+                    break
+
+                worker["progress"]["current"] = {"key": key, "name": func.get("name", "?"), "address": func.get("address", "?")}
+                self._emit_status()
+                self._bus.emit("worker_progress", {
+                    "worker_id": worker_id, "current": worker["progress"]["current"],
+                    "completed": worker["progress"]["completed"], "total": len(targets),
+                })
+
+                result = process_function(
+                    key, func, state, model=worker["model"],
+                    provider=worker["provider"], stop_flag=worker["stop_flag"],
+                )
+
+                if result in ("quit", "stopped"):
+                    break
+                elif result == "completed":
+                    worker["progress"]["completed"] += 1
+                    session["completed"] += 1
+                    session["functions"].append(key)
+                elif result == "skipped":
+                    worker["progress"]["skipped"] += 1
+                    session["skipped"] += 1
+                elif result in ("failed", "blocked", "needs_redo"):
+                    worker["progress"]["failed"] += 1
+                    session["failed"] += 1
+                elif result == "manual_prompt_generated":
+                    pass
+
+                self._emit_status()
+
+            end_session(state)
+            if worker["binary"] and original_binary != worker["binary"]:
+                if original_binary:
+                    state["active_binary"] = original_binary
+                else:
+                    state.pop("active_binary", None)
+            save_state(state)
+
+        except Exception as e:
+            self._bus.emit("worker_stopped", {"worker_id": worker_id, "reason": f"error: {e}"})
+        finally:
+            worker["status"] = "finished" if not worker["stop_flag"].is_set() else "stopped"
+            worker["finished_at"] = datetime.now().isoformat()
+            worker["progress"]["current"] = None
+            with self._lock:
+                for k, _ in targets:
+                    self._in_progress_keys.discard(k)
+            self._emit_status()
+            self._bus.emit("worker_stopped", {
+                "worker_id": worker_id, "reason": worker["status"],
+                "progress": dict(worker["progress"]),
+            })
+
+    def _emit_status(self):
+        self._socketio.emit("worker_status", self.get_status())
+
 
 def create_app(state_file, event_bus=None):
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
@@ -44,6 +214,7 @@ def create_app(state_file, event_bus=None):
         "function_started", "function_mode", "function_complete",
         "tool_call", "tool_result", "model_text",
         "score_update", "state_changed", "run_logged",
+        "worker_started", "worker_progress", "worker_stopped",
     ]:
         bus.on(evt, bridge(evt))
 
@@ -282,6 +453,37 @@ def create_app(state_file, event_bus=None):
         _scan_thread = threading.Thread(target=run_scan, daemon=True)
         _scan_thread.start()
         sio_emit("scan_acknowledged", {"refresh": refresh, "program": program_filter})
+
+    # --- Worker management ---
+    worker_mgr = WorkerManager(app.config["STATE_FILE"], bus, socketio)
+
+    @socketio.on("request_start_worker")
+    def handle_start_worker(data):
+        try:
+            provider = (data or {}).get("provider", "claude")
+            count = max(1, min(20, int((data or {}).get("count", 5))))
+            model = (data or {}).get("model") or None
+            binary = (data or {}).get("binary") or None
+            worker_id = worker_mgr.start_worker(provider=provider, count=count, model=model, binary=binary)
+            sio_emit("worker_started_ack", {"worker_id": worker_id})
+        except ValueError as e:
+            sio_emit("worker_error", {"error": str(e)})
+
+    @socketio.on("request_stop_worker")
+    def handle_stop_worker(data):
+        try:
+            worker_id = (data or {}).get("worker_id")
+            if not worker_id:
+                sio_emit("worker_error", {"error": "worker_id required"})
+                return
+            worker_mgr.stop_worker(worker_id)
+            sio_emit("worker_stop_ack", {"worker_id": worker_id})
+        except ValueError as e:
+            sio_emit("worker_error", {"error": str(e)})
+
+    @socketio.on("request_worker_status")
+    def handle_worker_status(data=None):
+        sio_emit("worker_status", worker_mgr.get_status())
 
     # --- HTTP routes ---
 

@@ -21,12 +21,16 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from collections import defaultdict
 from datetime import datetime, date
 from pathlib import Path
 
 from event_bus import emit as bus_emit
+
+# Thread safety for state.json access across concurrent workers
+_state_lock = threading.Lock()
 
 # Force unbuffered output so redirected stdout shows progress
 (
@@ -202,10 +206,11 @@ def ghidra_post(path, data=None, params=None, timeout=60):
 
 
 def load_state():
-    """Load or create fresh state."""
-    if STATE_FILE.exists():
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
+    """Load or create fresh state. Thread-safe."""
+    with _state_lock:
+        if STATE_FILE.exists():
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
     return {
         "project_folder": "/Mods/PD2-S12",
         "last_scan": None,
@@ -216,9 +221,10 @@ def load_state():
 
 
 def save_state(state):
-    """Persist state to disk."""
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2, default=str)
+    """Persist state to disk. Thread-safe."""
+    with _state_lock:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2, default=str)
     bus_emit("state_changed")
 
 
@@ -949,11 +955,12 @@ def determine_mode(score, deductions=None, completeness=None):
     return "FULL"
 
 
-def select_model(mode, user_model=None):
+def select_model(mode, user_model=None, provider=None):
     """Auto-select model based on mode and provider, with user override."""
     if user_model:
         return user_model
-    provider_models = AI_MODELS.get(AI_PROVIDER, AI_MODELS["claude"])
+    effective_provider = provider or AI_PROVIDER
+    provider_models = AI_MODELS.get(effective_provider, AI_MODELS["claude"])
     return provider_models.get(mode, list(provider_models.values())[0])
 
 
@@ -1582,11 +1589,12 @@ def _wrap_result(result):
     return (result, {"tool_calls": -1})  # -1 = unknown (provider doesn't track)
 
 
-def invoke_claude(prompt, model="sonnet", max_turns=25):
+def invoke_claude(prompt, model="sonnet", max_turns=25, provider=None):
     """Invoke the configured AI provider."""
-    if AI_PROVIDER == "minimax":
+    effective_provider = provider or AI_PROVIDER
+    if effective_provider == "minimax":
         return _invoke_minimax(prompt, model, max_turns)
-    if AI_PROVIDER == "codex":
+    if effective_provider == "codex":
         return _wrap_result(_invoke_codex(prompt, model, max_turns))
 
     return _wrap_result(_invoke_claude(prompt, model, max_turns))
@@ -2192,11 +2200,12 @@ def _rescore_and_sync(func, address, program):
 
 
 def _append_run_log(entry):
-    """Append a single JSONL entry to the run log. Creates logs/ dir if needed."""
+    """Append a single JSONL entry to the run log. Thread-safe."""
     try:
         LOG_DIR.mkdir(exist_ok=True)
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, default=str) + "\n")
+        with _state_lock:
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
         bus_emit("run_logged", entry)
     except Exception as e:
         print(f"  WARNING: Failed to write run log: {e}", flush=True)
@@ -2239,8 +2248,11 @@ def _inject_tool_block(prompt):
     return prompt + "\n" + tool_block
 
 
-def process_function(func_key, func, state, model=None, manual=False, dry_run=False):
-    """Process a single function: fetch data, build prompt, invoke Claude."""
+def process_function(func_key, func, state, model=None, manual=False, dry_run=False, provider=None, stop_flag=None):
+    """Process a single function: fetch data, build prompt, invoke AI provider."""
+    if stop_flag and stop_flag.is_set():
+        return "stopped"
+
     address = func["address"]
     program = func["program"]
     name = func["name"]
@@ -2285,7 +2297,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
             return "skipped"
 
     # Select model
-    selected_model = select_model(mode, model)
+    selected_model = select_model(mode, model, provider=provider)
 
     # Build prompt
     func_name = (
@@ -2398,7 +2410,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
 
     # Auto mode: invoke AI (provider based on AI_PROVIDER)
     print()
-    output, meta = invoke_claude(prompt, model=selected_model)
+    output, meta = invoke_claude(prompt, model=selected_model, provider=provider)
     tool_calls_made = meta.get("tool_calls", -1)
 
     # Two-pass: if recovery pass made tool calls, run pass 2 (comments) with fresh data
@@ -2421,7 +2433,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
             f"  {mode} | {selected_model} | {len(prompt2):,} chars | score: {mid_score}%"
         )
         print()
-        output2, meta2 = invoke_claude(prompt2, model=selected_model)
+        output2, meta2 = invoke_claude(prompt2, model=selected_model, provider=provider)
         # Merge results: use pass 2 output for final parsing, sum tool calls
         if output2:
             output = output2
@@ -2492,7 +2504,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         "function": func_name,
         "mode": mode,
         "model": selected_model,
-        "provider": AI_PROVIDER,
+        "provider": provider or AI_PROVIDER,
         "score_before": live_score,
         "score_after": new_score,
         "result": result,
