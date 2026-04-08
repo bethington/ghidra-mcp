@@ -1,28 +1,53 @@
 """
-Fun-Doc Web Dashboard: Control panel for RE documentation progress.
+Fun-Doc Web Dashboard: Real-time control panel for RE documentation progress.
 
 Features:
-- Real-time progress monitoring (auto-refresh 5s)
+- WebSocket push updates via Flask-SocketIO (no page reloading)
+- Live activity feed: tool calls, model text, score updates streaming
 - Deduction breakdown: where are the points hiding?
-- ROI-ranked work queue: highest-impact functions first
+- ROI-ranked work queue with pin/skip controls
+- Scan triggers: rescan all or per-binary from the dashboard
 - Run log stats: model performance, stuck functions
-- Priority queue: reorder/pin/skip functions from the browser
-- Per-folder state switching
 """
 
 import json
+import threading
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, render_template, jsonify, request
+from flask_socketio import SocketIO, emit as sio_emit
+
+from event_bus import get_bus
 
 
-def create_app(state_file):
+def create_app(state_file, event_bus=None):
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
     app.config["STATE_FILE"] = Path(state_file)
     app.config["LOG_FILE"] = Path(__file__).parent / "logs" / "runs.jsonl"
     app.config["QUEUE_FILE"] = Path(__file__).parent / "priority_queue.json"
+
+    socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
+
+    # Wire EventBus -> SocketIO bridge
+    bus = event_bus or get_bus()
+
+    def bridge(event_type):
+        """Forward EventBus events to all WebSocket clients."""
+        def handler(data):
+            socketio.emit(event_type, data or {})
+        return handler
+
+    for evt in [
+        "scan_started", "scan_progress", "scan_complete",
+        "function_started", "function_mode", "function_complete",
+        "tool_call", "tool_result", "model_text",
+        "score_update", "state_changed", "run_logged",
+    ]:
+        bus.on(evt, bridge(evt))
+
+    # --- Data loading helpers ---
 
     def load_state():
         sf = app.config["STATE_FILE"]
@@ -61,31 +86,27 @@ def create_app(state_file):
         except Exception:
             return []
 
+    # --- Compute functions ---
+
     def compute_deduction_breakdown(funcs):
-        """Aggregate deduction categories across all functions."""
         cats = defaultdict(lambda: {"count": 0, "total_pts": 0.0, "functions": 0})
         for f in funcs.values():
             seen = set()
             for d in f.get("deductions", []):
                 cat = d.get("category", "unknown")
-                pts = d.get("points", 0)
-                fixable = d.get("fixable", False)
-                if not fixable:
+                if not d.get("fixable", False):
                     continue
                 cats[cat]["count"] += d.get("count", 1)
-                cats[cat]["total_pts"] += pts
+                cats[cat]["total_pts"] += d.get("points", 0)
                 if cat not in seen:
                     cats[cat]["functions"] += 1
                     seen.add(cat)
-        # Sort by total points descending
         return sorted(
             [{"category": k, **v} for k, v in cats.items()],
-            key=lambda x: x["total_pts"],
-            reverse=True,
+            key=lambda x: x["total_pts"], reverse=True,
         )
 
     def compute_roi_queue(funcs, queue):
-        """Rank functions by ROI: fixable_pts * (1 + caller_count/10)."""
         pinned = set(queue.get("pinned", []))
         skipped = set(queue.get("skipped", []))
         candidates = []
@@ -100,108 +121,72 @@ def create_app(state_file):
             callers = func.get("caller_count", 0)
             roi = fixable * (1 + callers / 10)
             candidates.append({
-                "key": key,
-                "name": func["name"],
-                "address": func["address"],
-                "program": func.get("program_name", ""),
-                "score": func.get("score", 0),
-                "fixable": round(fixable, 1),
-                "callers": callers,
-                "roi": round(roi, 1),
+                "key": key, "name": func["name"], "address": func["address"],
+                "program": func.get("program_name", ""), "score": func.get("score", 0),
+                "fixable": round(fixable, 1), "callers": callers, "roi": round(roi, 1),
                 "is_leaf": func.get("is_leaf", False),
                 "last_result": func.get("last_result"),
-                "last_processed": func.get("last_processed"),
                 "pinned": key in pinned,
                 "classification": func.get("classification", ""),
             })
-        # Pinned first, then by ROI
         candidates.sort(key=lambda x: (not x["pinned"], -x["roi"]))
         return candidates
 
     def compute_run_stats(logs):
-        """Compute stats from run logs."""
         if not logs:
-            return {
-                "total_runs": 0, "today_runs": 0, "avg_delta": 0,
-                "success_rate": 0, "by_provider": {}, "stuck_functions": [],
-            }
+            return {"total_runs": 0, "today_runs": 0, "avg_delta": 0, "success_rate": 0, "by_provider": {}, "stuck_functions": []}
         today = datetime.now().date().isoformat()
         today_logs = [l for l in logs if l.get("timestamp", "").startswith(today)]
-
         deltas = []
         success = 0
-        by_provider = defaultdict(lambda: {"runs": 0, "avg_delta": 0, "deltas": []})
-        func_results = defaultdict(lambda: {"fails": 0, "last_result": "", "name": "", "address": ""})
-
+        by_provider = defaultdict(lambda: {"runs": 0, "deltas": []})
+        func_results = defaultdict(lambda: {"fails": 0, "name": "", "address": ""})
         for l in logs:
-            before = l.get("score_before")
-            after = l.get("score_after")
-            result = l.get("result", "")
-            provider = l.get("provider", "unknown")
-
+            before, after = l.get("score_before"), l.get("score_after")
+            result, provider = l.get("result", ""), l.get("provider", "unknown")
             if before is not None and after is not None:
-                delta = after - before
-                deltas.append(delta)
-                by_provider[provider]["deltas"].append(delta)
-
+                deltas.append(after - before)
+                by_provider[provider]["deltas"].append(after - before)
             by_provider[provider]["runs"] += 1
             if result == "completed":
                 success += 1
-
             fkey = f"{l.get('program', '')}::{l.get('address', '')}"
             func_results[fkey]["name"] = l.get("function", "")
             func_results[fkey]["address"] = l.get("address", "")
-            func_results[fkey]["last_result"] = result
             if result in ("failed", "needs_redo"):
                 func_results[fkey]["fails"] += 1
-
-        # Provider averages
         provider_stats = {}
         for p, data in by_provider.items():
             d = data["deltas"]
-            provider_stats[p] = {
-                "runs": data["runs"],
-                "avg_delta": round(sum(d) / len(d), 1) if d else 0,
-            }
-
-        # Stuck functions (3+ failures)
+            provider_stats[p] = {"runs": data["runs"], "avg_delta": round(sum(d) / len(d), 1) if d else 0}
         stuck = sorted(
-            [{"name": v["name"], "address": v["address"], "fails": v["fails"]}
-             for v in func_results.values() if v["fails"] >= 3],
+            [{"name": v["name"], "address": v["address"], "fails": v["fails"]} for v in func_results.values() if v["fails"] >= 3],
             key=lambda x: x["fails"], reverse=True,
         )[:10]
-
         return {
-            "total_runs": len(logs),
-            "today_runs": len(today_logs),
+            "total_runs": len(logs), "today_runs": len(today_logs),
             "avg_delta": round(sum(deltas) / len(deltas), 1) if deltas else 0,
             "success_rate": round(success / len(logs) * 100, 1) if logs else 0,
-            "by_provider": provider_stats,
-            "stuck_functions": stuck,
+            "by_provider": provider_stats, "stuck_functions": stuck,
         }
 
     def compute_stats(state):
         funcs = state.get("functions", {})
         total = len(funcs)
         queue = load_queue()
-
         if total == 0:
             return {
-                "total": 0, "done": 0, "fixable": 0, "needs_work": 0,
-                "pct": 0, "buckets": {}, "by_program": {}, "sessions": [],
-                "next_targets": [], "all_functions": [],
-                "deduction_breakdown": [], "roi_queue": [],
+                "total": 0, "done": 0, "fixable": 0, "needs_work": 0, "pct": 0,
+                "buckets": {}, "by_program": {}, "sessions": [], "roi_queue": [],
+                "all_functions": [], "deduction_breakdown": [],
                 "run_stats": compute_run_stats([]),
                 "project_folder": state.get("project_folder", "unknown"),
                 "last_scan": state.get("last_scan"),
             }
-
         done = sum(1 for f in funcs.values() if f["score"] >= 90)
         fixable_count = sum(1 for f in funcs.values() if 70 <= f["score"] < 90)
         needs_work = sum(1 for f in funcs.values() if f["score"] < 70)
         pct = (done / total * 100) if total > 0 else 0
-
-        # Score buckets
         buckets = {"100": 0, "90-99": 0, "80-89": 0, "70-79": 0, "60-69": 0,
                    "50-59": 0, "40-49": 0, "30-39": 0, "20-29": 0, "10-19": 0, "0-9": 0}
         for f in funcs.values():
@@ -217,63 +202,71 @@ def create_app(state_file):
             elif s >= 20: buckets["20-29"] += 1
             elif s >= 10: buckets["10-19"] += 1
             else: buckets["0-9"] += 1
-
-        # Per program
         by_program = defaultdict(lambda: {"total": 0, "done": 0, "remaining": 0})
         for f in funcs.values():
             prog = f.get("program_name", "unknown")
             by_program[prog]["total"] += 1
-            if f["score"] >= 90:
-                by_program[prog]["done"] += 1
-            else:
-                by_program[prog]["remaining"] += 1
-
-        # Deduction breakdown
-        deduction_breakdown = compute_deduction_breakdown(funcs)
-
-        # ROI queue
-        roi_queue = compute_roi_queue(funcs, queue)
-
-        # Run log stats
-        logs = load_run_logs()
-        run_stats = compute_run_stats(logs)
-
-        # Function list for table (all functions, sorted by score asc)
+            if f["score"] >= 90: by_program[prog]["done"] += 1
+            else: by_program[prog]["remaining"] += 1
         func_list = []
         for key, func in funcs.items():
             if func.get("is_thunk") or func.get("is_external"):
                 continue
             func_list.append({
-                "key": key,
-                "name": func["name"],
-                "address": func["address"],
-                "program": func.get("program_name", ""),
-                "score": func["score"],
+                "key": key, "name": func["name"], "address": func["address"],
+                "program": func.get("program_name", ""), "score": func["score"],
                 "fixable": round(func.get("fixable", 0), 1),
                 "callers": func.get("caller_count", 0),
                 "is_leaf": func.get("is_leaf", False),
                 "last_result": func.get("last_result"),
-                "last_processed": func.get("last_processed"),
             })
         func_list.sort(key=lambda x: x["score"])
-
         return {
-            "total": total,
-            "done": done,
-            "fixable": fixable_count,
-            "needs_work": needs_work,
-            "pct": round(pct, 1),
-            "buckets": buckets,
-            "by_program": dict(by_program),
+            "total": total, "done": done, "fixable": fixable_count, "needs_work": needs_work,
+            "pct": round(pct, 1), "buckets": buckets, "by_program": dict(by_program),
             "sessions": state.get("sessions", [])[-10:],
-            "next_targets": roi_queue[:10],
-            "roi_queue": roi_queue[:50],
+            "roi_queue": compute_roi_queue(funcs, queue)[:50],
             "all_functions": func_list,
-            "deduction_breakdown": deduction_breakdown,
-            "run_stats": run_stats,
+            "deduction_breakdown": compute_deduction_breakdown(funcs),
+            "run_stats": compute_run_stats(load_run_logs()),
             "project_folder": state.get("project_folder", "unknown"),
             "last_scan": state.get("last_scan"),
         }
+
+    # --- SocketIO event handlers ---
+
+    @socketio.on("connect")
+    def handle_connect():
+        state = load_state()
+        stats = compute_stats(state)
+        sio_emit("initial_state", stats)
+
+    _scan_thread = None
+
+    @socketio.on("request_rescan")
+    def handle_rescan(data):
+        nonlocal _scan_thread
+        if _scan_thread and _scan_thread.is_alive():
+            sio_emit("scan_error", {"error": "Scan already in progress"})
+            return
+        refresh = data.get("refresh", False) if data else False
+        program_filter = data.get("program") if data else None
+
+        def run_scan():
+            try:
+                # Delayed import to avoid circular dependency
+                from fun_doc import scan_functions, load_state, save_state
+                state = load_state()
+                folder = state.get("project_folder", "/Mods/PD2-S12")
+                scan_functions(state, folder, refresh=refresh)
+            except Exception as e:
+                bus.emit("scan_error", {"error": str(e)})
+
+        _scan_thread = threading.Thread(target=run_scan, daemon=True)
+        _scan_thread.start()
+        sio_emit("scan_acknowledged", {"refresh": refresh, "program": program_filter})
+
+    # --- HTTP routes ---
 
     @app.route("/")
     def dashboard():
@@ -303,7 +296,8 @@ def create_app(state_file):
             queue["pinned"].append(key)
         queue["skipped"] = [k for k in queue["skipped"] if k != key]
         save_queue(queue)
-        return jsonify({"ok": True, "queue": queue})
+        socketio.emit("queue_changed", {"action": "pin", "key": key})
+        return jsonify({"ok": True})
 
     @app.route("/api/queue/unpin", methods=["POST"])
     def unpin_function():
@@ -314,7 +308,8 @@ def create_app(state_file):
         queue = load_queue()
         queue["pinned"] = [k for k in queue["pinned"] if k != key]
         save_queue(queue)
-        return jsonify({"ok": True, "queue": queue})
+        socketio.emit("queue_changed", {"action": "unpin", "key": key})
+        return jsonify({"ok": True})
 
     @app.route("/api/queue/skip", methods=["POST"])
     def skip_function():
@@ -327,7 +322,8 @@ def create_app(state_file):
             queue["skipped"].append(key)
         queue["pinned"] = [k for k in queue["pinned"] if k != key]
         save_queue(queue)
-        return jsonify({"ok": True, "queue": queue})
+        socketio.emit("queue_changed", {"action": "skip", "key": key})
+        return jsonify({"ok": True})
 
     @app.route("/api/queue/unskip", methods=["POST"])
     def unskip_function():
@@ -338,16 +334,7 @@ def create_app(state_file):
         queue = load_queue()
         queue["skipped"] = [k for k in queue["skipped"] if k != key]
         save_queue(queue)
-        return jsonify({"ok": True, "queue": queue})
+        socketio.emit("queue_changed", {"action": "unskip", "key": key})
+        return jsonify({"ok": True})
 
-    @app.route("/api/queue/reorder", methods=["POST"])
-    def reorder_queue():
-        """Set explicit ordering for the work queue."""
-        data = request.json
-        order = data.get("order", [])
-        queue = load_queue()
-        queue["order"] = order
-        save_queue(queue)
-        return jsonify({"ok": True, "queue": queue})
-
-    return app
+    return app, socketio

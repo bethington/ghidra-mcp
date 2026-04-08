@@ -26,6 +26,8 @@ from collections import defaultdict
 from datetime import datetime, date
 from pathlib import Path
 
+from event_bus import emit as bus_emit
+
 # Force unbuffered output so redirected stdout shows progress
 (
     sys.stdout.reconfigure(line_buffering=True)
@@ -217,6 +219,7 @@ def save_state(state):
     """Persist state to disk."""
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2, default=str)
+    bus_emit("state_changed")
 
 
 def start_session(state):
@@ -348,6 +351,8 @@ def scan_functions(state, project_folder, refresh=False):
     existing = state.get("functions", {})
     is_incremental = bool(existing) and not refresh
 
+    scan_mode = "incremental" if is_incremental else "full"
+    bus_emit("scan_started", {"mode": scan_mode, "folder": project_folder})
     if is_incremental:
         print(
             f"Incremental scan in {project_folder} (use --refresh for full rescan)...",
@@ -371,9 +376,10 @@ def scan_functions(state, project_folder, refresh=False):
     total_kept = 0
     total_new = 0
 
-    for prog in target_programs:
+    for prog_idx, prog in enumerate(target_programs):
         prog_path = prog["path"]
         prog_name = prog["name"]
+        bus_emit("scan_progress", {"program": prog_name, "index": prog_idx, "total": len(target_programs)})
         print(f"\n  {prog_name} ({prog_path})")
 
         func_list = _fetch_function_list(prog_path)
@@ -475,6 +481,7 @@ def scan_functions(state, project_folder, refresh=False):
         print(
             f"\nFull scan complete: {total} functions, {done} documented (>= 90%), {total - done} remaining"
         )
+    bus_emit("scan_complete", {"total": total, "done": done, "mode": scan_mode})
     return True
 
 
@@ -1768,6 +1775,7 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
 
                 tool_call_count += 1
                 print(f"  [mcp] {fn_name}: calling...", flush=True)
+                bus_emit("tool_call", {"tool": fn_name, "status": "calling"})
                 result_str = execute_tool_call(fn_name, fn_args)
 
                 # Truncate very large results to avoid blowing context
@@ -1776,6 +1784,7 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
 
                 status = "failed" if '"error"' in result_str[:100] else "done"
                 print(f"  [mcp] {fn_name}: {status}", flush=True)
+                bus_emit("tool_result", {"tool": fn_name, "status": status})
 
                 messages.append(
                     {
@@ -1795,6 +1804,7 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
                 safe_text = cleaned.encode("ascii", errors="replace").decode("ascii")
                 print(safe_text)
                 output_parts.append(cleaned)
+                bus_emit("model_text", {"text": cleaned[:500]})
             else:
                 # All content was think-tags — model reasoning only, no actionable output
                 print(f"  [minimax] (reasoning only, no output text)", flush=True)
@@ -1863,17 +1873,20 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                                 text = getattr(block, "text", str(block))
                                 print(text)
                                 output_parts.append(text)
+                                bus_emit("model_text", {"text": text})
                             elif block_type == "ToolUseBlock":
                                 tool_name = getattr(block, "name", "?")
                                 tool_id = getattr(block, "id", "")
                                 tool_id_to_name[tool_id] = tool_name
                                 print(f"  [mcp] {tool_name}: calling...", flush=True)
+                                bus_emit("tool_call", {"tool": tool_name, "status": "calling", "id": tool_id})
                             elif block_type == "ToolResultBlock":
                                 is_error = getattr(block, "is_error", False)
                                 status = "failed" if is_error else "completed"
                                 tool_id = getattr(block, "tool_use_id", "")
                                 tool_name = tool_id_to_name.get(tool_id, tool_id[:12])
                                 print(f"  [mcp] {tool_name}: {status}", flush=True)
+                                bus_emit("tool_result", {"tool": tool_name, "status": status, "id": tool_id})
                             elif block_type == "ThinkingBlock":
                                 pass  # Skip thinking blocks
                 elif msg_type == "ResultMessage":
@@ -2093,6 +2106,7 @@ def _append_run_log(entry):
         LOG_DIR.mkdir(exist_ok=True)
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, default=str) + "\n")
+        bus_emit("run_logged", entry)
     except Exception as e:
         print(f"  WARNING: Failed to write run log: {e}", flush=True)
 
@@ -2140,6 +2154,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
     program = func["program"]
     name = func["name"]
 
+    bus_emit("function_started", {"key": func_key, "name": name, "address": address, "program": func.get("program_name", "")})
     print(f"\n  {name} @ 0x{address} ({func['program_name']})")
     print(f"  {'-' * 50}")
 
@@ -2240,6 +2255,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         prompt = recovery_prompt
         mode = "FULL:recovery"
 
+    bus_emit("function_mode", {"key": func_key, "mode": mode, "model": selected_model, "score": live_score})
     print(f"  {mode} | {selected_model} | {len(prompt):,} chars | score: {live_score}%")
 
     if dry_run:
@@ -2393,6 +2409,9 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         "output": output[:5000] if output else None,
     })
 
+    bus_emit("score_update", {"key": func_key, "score_before": live_score, "score_after": new_score, "result": result})
+    bus_emit("function_complete", {"key": func_key, "result": result, "score": new_score})
+
     # Save program to persist changes in Ghidra
     if result in ("completed", "needs_redo") and tool_calls_made > 0:
         ghidra_post("/save_program", params={"program": program})
@@ -2502,13 +2521,15 @@ def main():
     # --web: start Flask dashboard (standalone, blocking)
     if args.web:
         from web import create_app
+        from event_bus import get_bus
 
-        app = create_app(STATE_FILE)
+        bus = get_bus()
+        app, socketio = create_app(STATE_FILE, event_bus=bus)
         dashboard_url = f"http://127.0.0.1:{args.web_port}"
         print(f"Starting web dashboard at {dashboard_url}")
         import webbrowser
         webbrowser.open(dashboard_url)
-        app.run(host="127.0.0.1", port=args.web_port, debug=False)
+        socketio.run(app, host="127.0.0.1", port=args.web_port, debug=False)
         return
 
     # Auto-start dashboard in background (unless disabled)
@@ -2523,16 +2544,19 @@ def main():
 
         try:
             from web import create_app
+            from event_bus import get_bus
 
-            dash_app = create_app(STATE_FILE)
+            bus = get_bus()
+            dash_app, dash_socketio = create_app(STATE_FILE, event_bus=bus)
             dash_port = args.web_port
             dashboard_url = f"http://127.0.0.1:{dash_port}"
 
-            # Run Flask in a daemon thread (auto-exits when main process exits)
+            # Run Flask-SocketIO in a daemon thread (auto-exits when main process exits)
             def _run_dashboard():
                 try:
-                    dash_app.run(
-                        host="127.0.0.1", port=dash_port, debug=False, use_reloader=False
+                    dash_socketio.run(
+                        dash_app, host="127.0.0.1", port=dash_port,
+                        debug=False, use_reloader=False, allow_unsafe_werkzeug=True,
                     )
                 except Exception as e:
                     print(f"  Dashboard error: {e}", flush=True)
