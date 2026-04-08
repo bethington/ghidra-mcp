@@ -390,9 +390,6 @@ def _batch_score(addresses, prog_path=None):
                         "deductions": result.get("deduction_breakdown", []),
                     }
 
-        if batch_num % 10 == 0 or batch_num == total_batches:
-            print(f"    Scored {min(i + BATCH_SIZE, len(addresses))}/{len(addresses)}")
-
     return score_map
 
 
