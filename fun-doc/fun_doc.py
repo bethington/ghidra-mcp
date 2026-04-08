@@ -251,33 +251,36 @@ def end_session(state):
 
 
 def _fetch_programs(project_folder):
-    """Get list of open programs matching project folder."""
-    programs_resp = ghidra_get("/list_open_programs")
-    if not programs_resp:
-        print("ERROR: Cannot list programs. Is Ghidra running?", file=sys.stderr)
+    """Get list of programs in a project folder via Ghidra project files API.
+
+    Uses /list_project_files to discover all binaries in the folder,
+    then returns them as a list of {name, path} dicts. Programs don't
+    need to be open — FrontEndProgramProvider opens them on demand.
+    """
+    resp = ghidra_get("/list_project_files", params={"folder": project_folder})
+    if not resp:
+        print("ERROR: Cannot list project files. Is Ghidra running?", file=sys.stderr)
         return None
 
-    if isinstance(programs_resp, str):
+    if isinstance(resp, str):
         try:
-            programs_resp = json.loads(programs_resp)
+            resp = json.loads(resp)
         except (json.JSONDecodeError, TypeError):
-            print(
-                f"ERROR: Unexpected response from list_open_programs: {programs_resp[:200]}",
-                file=sys.stderr,
-            )
+            print(f"ERROR: Unexpected response from list_project_files: {str(resp)[:200]}", file=sys.stderr)
             return None
 
-    programs = programs_resp.get("programs", [])
-    target_programs = [
-        p for p in programs if p.get("path", "").startswith(project_folder)
+    files = resp.get("files", [])
+    programs = [
+        {"name": f["name"], "path": f["path"]}
+        for f in files
+        if isinstance(f, dict) and f.get("content_type") == "Program"
     ]
 
-    if not target_programs:
-        print(f"ERROR: No open programs matching {project_folder}", file=sys.stderr)
-        print(f"  Open programs: {[p.get('path') for p in programs]}", file=sys.stderr)
+    if not programs:
+        print(f"ERROR: No programs found in {project_folder}", file=sys.stderr)
         return None
 
-    return target_programs
+    return programs
 
 
 def _fetch_function_list(prog_path):
@@ -339,7 +342,7 @@ def _batch_score(addresses, prog_path=None):
     return score_map
 
 
-def scan_functions(state, project_folder, refresh=False):
+def scan_functions(state, project_folder, refresh=False, binary_filter=None):
     """Scan functions from Ghidra with incremental or full scoring.
 
     Default (refresh=False): Only re-score functions whose name changed since
@@ -364,6 +367,13 @@ def scan_functions(state, project_folder, refresh=False):
     target_programs = _fetch_programs(project_folder)
     if target_programs is None:
         return False
+
+    # Filter to specific binary if requested
+    if binary_filter:
+        target_programs = [p for p in target_programs if p["name"] == binary_filter]
+        if not target_programs:
+            print(f"ERROR: Binary '{binary_filter}' not found in {project_folder}", file=sys.stderr)
+            return False
 
     # Build name lookup from existing state for incremental comparison
     cached_names = {}
@@ -463,7 +473,19 @@ def scan_functions(state, project_folder, refresh=False):
                 "last_result": existing.get(func_key, {}).get("last_result"),
             }
 
-    state["functions"] = all_functions
+    if binary_filter:
+        # Merge: update only the scanned binary's functions, keep everything else
+        for key, func in all_functions.items():
+            state["functions"][key] = func
+        # Remove functions from this binary that no longer exist
+        stale_keys = [
+            k for k, f in state["functions"].items()
+            if f.get("program_name") == binary_filter and k not in all_functions
+        ]
+        for k in stale_keys:
+            del state["functions"][k]
+    else:
+        state["functions"] = all_functions
     state["last_scan"] = datetime.now().isoformat()
     state["project_folder"] = project_folder
     save_state(state)
@@ -2609,7 +2631,7 @@ def main():
 
     # --scan: update state from Ghidra (incremental by default, --refresh for full)
     if args.scan:
-        scan_functions(state, project_folder, refresh=args.refresh)
+        scan_functions(state, project_folder, refresh=args.refresh, binary_filter=active_binary)
         print_status(state)
         return
 

@@ -275,7 +275,7 @@ def create_app(state_file, event_bus=None):
                 from fun_doc import scan_functions, load_state, save_state
                 state = load_state()
                 folder = state.get("project_folder", "/Mods/PD2-S12")
-                scan_functions(state, folder, refresh=refresh)
+                scan_functions(state, folder, refresh=refresh, binary_filter=program_filter)
             except Exception as e:
                 bus.emit("scan_error", {"error": str(e)})
 
