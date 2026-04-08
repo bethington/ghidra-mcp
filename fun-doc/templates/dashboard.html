@@ -550,9 +550,9 @@
         }
         function stopWorker(wid) { socket.emit('request_stop_worker', {worker_id: wid}); }
 
-        socket.on('worker_started_ack', d => addActivity(`Worker ${d.worker_id} started`, 'success'));
-        socket.on('worker_error', d => addActivity(`Worker error: ${d.error}`, 'error'));
-        socket.on('worker_stop_ack', d => addActivity(`Worker ${d.worker_id} stopping...`, 'neutral'));
+        socket.on('worker_started_ack', d => { /* pane created by worker_started event */ });
+        socket.on('worker_error', d => { showBanner(`Worker error: ${d.error}`); setTimeout(hideBanner, 5000); });
+        socket.on('worker_stop_ack', d => { /* stop handled by worker_status update */ });
         socket.on('worker_started', d => addActivity(`Worker ${d.worker_id}: ${d.provider} x${d.count}`, 'scan'));
         socket.on('worker_progress', d => {
             if (d.current) addActivity(`Worker ${d.worker_id}: ${d.current.name} (${d.completed+1}/${d.total})`, 'scan');

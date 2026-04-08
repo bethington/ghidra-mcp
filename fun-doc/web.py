@@ -27,7 +27,7 @@ import uuid
 class WorkerManager:
     """Manages concurrent documentation worker threads (max 3)."""
 
-    MAX_WORKERS = 3
+    MAX_WORKERS = 4
 
     def __init__(self, state_file, bus, socketio):
         self._workers = {}
@@ -41,7 +41,8 @@ class WorkerManager:
         with self._lock:
             active = {wid: w for wid, w in self._workers.items() if w["status"] in ("starting", "running", "stopping")}
             if len(active) >= self.MAX_WORKERS:
-                raise ValueError(f"Maximum {self.MAX_WORKERS} concurrent workers")
+                active_info = ", ".join(f"{w['provider']}#{wid}({w['status']})" for wid, w in active.items())
+                raise ValueError(f"Maximum {self.MAX_WORKERS} workers ({len(active)} active: {active_info})")
 
             worker_id = str(uuid.uuid4())[:8]
             stop_flag = threading.Event()
