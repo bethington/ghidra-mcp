@@ -2743,8 +2743,20 @@ def main():
         print_status(state)
         return
 
-    # No mode specified: show help
-    parser.print_help()
+    # No mode specified: show status dashboard (terminal + web)
+    if not state.get("functions"):
+        print("No functions in state. Running initial scan...")
+        if not scan_functions(state, project_folder):
+            return
+    print_status(state)
+    if dashboard_enabled:
+        print(f"\n  Dashboard running at http://127.0.0.1:{args.web_port}")
+        print(f"  Press Ctrl+C to exit.\n")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":
