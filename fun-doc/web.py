@@ -428,6 +428,8 @@ def create_app(state_file, event_bus=None):
                 "last_result": func.get("last_result"),
             })
         func_list.sort(key=lambda x: x["score"])
+        # Limit to 200 for initial page render (prevents 24MB pages with 61K functions)
+        func_list = func_list[:200]
         return {
             "total": total, "done": done, "fixable": fixable_count, "needs_work": needs_work,
             "pct": round(pct, 1), "buckets": buckets, "by_program": dict(by_program),
