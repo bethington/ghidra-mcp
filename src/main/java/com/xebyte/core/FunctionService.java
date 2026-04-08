@@ -2528,7 +2528,7 @@ public class FunctionService {
                     Msg.warn(this, "Batch rename variables failed, attempting individual operations: " + e.getMessage());
                     try {
                         // Try individual operations (transactions will be closed in finally)
-                        Response individualResult = batchRenameVariablesIndividual(functionAddress, variableRenames);
+                        Response individualResult = batchRenameVariablesIndividual(functionAddress, variableRenames, programName);
                         fallbackResult.set(individualResult.toJson());
                     } catch (Exception fallbackE) {
                         errorRef.set("Batch operation failed and fallback also failed: " + e.getMessage());
@@ -2812,7 +2812,7 @@ public class FunctionService {
             String newName = entry.getValue();
 
             try {
-                Response renameResult = renameVariableInFunction(functionName[0], oldName, newName);
+                Response renameResult = renameVariableInFunction(functionName[0], oldName, newName, programName);
                 String resultText = renameResult.toJson();
                 if (resultText.equals("Variable renamed")) {
                     variablesRenamed.incrementAndGet();
