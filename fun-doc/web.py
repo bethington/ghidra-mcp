@@ -173,10 +173,13 @@ def create_app(state_file, event_bus=None):
     def compute_stats(state):
         all_funcs = state.get("functions", {})
         active_binary = state.get("active_binary")
-        # Available binaries for dropdown
-        available_binaries = sorted(set(
+        # Available binaries: merge Ghidra project files + already-scanned
+        folder = state.get("project_folder", "/")
+        project_binaries = _fetch_project_binaries(folder)
+        scanned_binaries = sorted(set(
             f.get("program_name", "unknown") for f in all_funcs.values()
         ))
+        available_binaries = sorted(set(project_binaries + scanned_binaries))
         # Filter to active binary if set
         if active_binary:
             funcs = {k: v for k, v in all_funcs.items() if v.get("program_name") == active_binary}
@@ -353,17 +356,40 @@ def create_app(state_file, event_bus=None):
 
     # --- Folder / binary selection ---
 
+    def _fetch_project_binaries(folder):
+        """Fetch all binaries from Ghidra project via HTTP endpoint."""
+        import requests
+        try:
+            r = requests.get(
+                "http://127.0.0.1:8089/list_project_files",
+                params={"folder": folder},
+                timeout=5,
+            )
+            r.raise_for_status()
+            data = r.json()
+            files = data.get("files", [])
+            return sorted(
+                f["name"] for f in files
+                if isinstance(f, dict) and f.get("content_type") == "Program"
+            )
+        except Exception:
+            return []
+
     @app.route("/api/context", methods=["GET"])
     def get_context():
         state = load_state()
-        all_funcs = state.get("functions", {})
-        available_binaries = sorted(set(
-            f.get("program_name", "unknown") for f in all_funcs.values()
+        folder = state.get("project_folder", "/")
+        # Merge: project files from Ghidra + any binaries already scanned
+        project_binaries = _fetch_project_binaries(folder)
+        scanned_binaries = sorted(set(
+            f.get("program_name", "unknown")
+            for f in state.get("functions", {}).values()
         ))
+        all_binaries = sorted(set(project_binaries + scanned_binaries))
         return jsonify({
-            "project_folder": state.get("project_folder", "unknown"),
+            "project_folder": folder,
             "active_binary": state.get("active_binary"),
-            "available_binaries": available_binaries,
+            "available_binaries": all_binaries,
         })
 
     @app.route("/api/context/binary", methods=["POST"])
