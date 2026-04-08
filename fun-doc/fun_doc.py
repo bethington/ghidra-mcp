@@ -2326,15 +2326,18 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
             diff = new_score - live_score
             delta = f" ({'+' if diff >= 0 else ''}{diff:.0f}%)"
 
-        # Guard #2: score didn't improve on FULL/FIX = needs redo
+        # Guard #2: score didn't improve AND no write tools called = needs redo
+        # A +0% with actual write operations (batch_set_comments, rename, set_type)
+        # is valid — the scorer may round to the same integer after minor fixes.
         if (
             result == "completed"
             and live_score is not None
             and diff <= 0
+            and tool_calls_made <= 0
             and mode in ("FULL", "FIX", "FULL:recovery", "FULL:comments")
         ):
             print(
-                f"\n  Score after: {new_score}%{delta} | no improvement — downgrading to needs_redo"
+                f"\n  Score after: {new_score}%{delta} | no improvement and no tool calls — downgrading to needs_redo"
             )
             result = "needs_redo"
             func["last_result"] = result
