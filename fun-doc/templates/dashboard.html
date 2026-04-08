@@ -154,7 +154,7 @@
                 {% endfor %}
             </select>
             <select class="header-select" id="binarySelect" onchange="switchBinary(this.value)">
-                <option value="">All Binaries</option>
+                <option value="" disabled>Select Binary</option>
                 {% for bin in stats.available_binaries|default([]) %}
                 <option value="{{ bin }}" {% if bin == stats.active_binary %}selected{% endif %}>{{ bin }}</option>
                 {% endfor %}
