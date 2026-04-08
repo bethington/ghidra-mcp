@@ -577,3 +577,4 @@ audit_*.py
 audit-*.json
 
 fun-doc/state.json
+fun-doc/logs/

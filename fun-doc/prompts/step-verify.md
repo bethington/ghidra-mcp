@@ -18,6 +18,9 @@ If any mismatch is found: fix it via `batch_set_comments` (plate comment update)
 ```
 DONE: FunctionName
 Changes: [brief summary of what you changed]
+Proven: [changes backed by callers, constants, or typed APIs]
+Inferred: [names/types based on internal usage only -- not verified at call sites]
+Unresolved: [structural limitations, phantom variables, unfixable items]
 Consistency: [PASS or list of fixes applied]
 ```
 

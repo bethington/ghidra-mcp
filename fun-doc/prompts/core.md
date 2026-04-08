@@ -12,10 +12,11 @@ If a tool you need is not in the list, STOP and report BLOCKED. Do not substitut
 
 - Do NOT use `run_script_inline`, `run_ghidra_script`, or `run_script` -- no Ghidra scripts
 - Do NOT use `curl`, Bash HTTP calls, or direct endpoint access -- use only MCP tools
-- Do NOT call `decompile_function` or `force_decompile` -- decompiled source is provided inline below
+- Do NOT re-fetch the TARGET function's decompilation (provided inline). You MAY call `decompile_function` on callers or callees for verification.
+- Do NOT call `force_decompile` -- use `decompile_function` only for caller/callee verification
 - Do NOT retry a failed tool call with the same parameters -- diagnose and adapt
 - Do NOT substitute unrelated tools for missing required tools
-- You MAY inspect current symbols/comments/struct layout when directly required to apply a listed fix (e.g., `get_struct_layout` before `modify_struct_field`), but do NOT make broad exploratory calls (`search_data_types`, `list_classes`, `search_functions`)
+- You MAY inspect current symbols/comments/struct layout when directly required to apply a listed fix (e.g., `get_struct_layout` before `modify_struct_field`, `search_data_types` before `create_struct`), but do NOT make broad exploratory calls (`list_classes`, `search_functions`)
 
 ## Call Budget
 
@@ -88,4 +89,7 @@ Special Cases:
 ```
 DONE: FunctionName
 Changes: [brief summary of what was changed]
+Proven: [changes backed by callers, constants, or typed APIs]
+Inferred: [names/types based on internal usage only -- not verified at call sites]
+Unresolved: [structural limitations, unfixable items]
 ```

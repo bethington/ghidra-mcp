@@ -41,6 +41,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 MODULE_DIR = SCRIPT_DIR / "prompts"
 STATE_FILE = SCRIPT_DIR / "state.json"
+LOG_DIR = SCRIPT_DIR / "logs"
+LOG_FILE = LOG_DIR / "runs.jsonl"
 
 # Load .env from repo root (API keys, server URLs, etc.)
 try:
@@ -2054,6 +2056,16 @@ def _rescore_and_sync(func, address, program):
     return None
 
 
+def _append_run_log(entry):
+    """Append a single JSONL entry to the run log. Creates logs/ dir if needed."""
+    try:
+        LOG_DIR.mkdir(exist_ok=True)
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+    except Exception as e:
+        print(f"  WARNING: Failed to write run log: {e}", flush=True)
+
+
 def _inject_tool_block(prompt):
     """Append available MCP tool list to a prompt."""
     available_tools = fetch_available_tools()
@@ -2167,8 +2179,27 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
 
     prompt = _inject_tool_block(prompt)
 
-    # Two-pass workflow for complex FULL-mode functions
-    use_two_pass = mode == "FULL" and len(prompt) > 35000 and not manual
+    # Risk-based two-pass decision (replaces crude prompt-length heuristic)
+    use_two_pass = False
+    if mode == "FULL" and not manual:
+        completeness = data.get("completeness")
+        if completeness and isinstance(completeness, dict):
+            fixable_pts = float(completeness.get("fixable_deductions", 0))
+            _score = data.get("score", 100)
+            deduction_cats = {
+                d.get("category")
+                for d in completeness.get("deduction_breakdown", [])
+                if d.get("fixable", False)
+            }
+            has_struct_work = "unresolved_struct_accesses" in deduction_cats
+            has_plate_work = not completeness.get("has_plate_comment", True)
+            # Two-pass when: lots of fixable work, struct+comment combo, or very low score
+            if (
+                fixable_pts > 30
+                or (has_struct_work and has_plate_work)
+                or (_score is not None and _score < 30)
+            ):
+                use_two_pass = True
     if use_two_pass:
         recovery_prompt = build_recovery_prompt(
             func_name, address, data, program=program
@@ -2213,7 +2244,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         print(f"  Press any key to continue, [q] to quit...")
 
         key = _read_single_key()
-        func["last_result"] = "completed"
+        func["last_result"] = "manual_prompt_generated"
         func["last_processed"] = datetime.now().isoformat()
         new_score = _rescore_and_sync(func, address, program)
         if new_score is not None:
@@ -2225,7 +2256,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         save_state(state)
         if key == "q":
             return "quit"
-        return "completed"
+        return "manual_prompt_generated"
 
     # Auto mode: invoke AI (provider based on AI_PROVIDER)
     print()
@@ -2311,6 +2342,22 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
             print(f"\n  Score after: {new_score}%{delta} | Result: {result}")
     else:
         print(f"\n  Result: {result} | Score: unavailable")
+
+    # Log this run for audit trail
+    _append_run_log({
+        "timestamp": datetime.now().isoformat(),
+        "program": program,
+        "address": address,
+        "function": func_name,
+        "mode": mode,
+        "model": selected_model,
+        "provider": AI_PROVIDER,
+        "score_before": live_score,
+        "score_after": new_score,
+        "result": result,
+        "tool_calls": tool_calls_made,
+        "output": output[:5000] if output else None,
+    })
 
     # Save program to persist changes in Ghidra
     if result in ("completed", "needs_redo") and tool_calls_made > 0:
