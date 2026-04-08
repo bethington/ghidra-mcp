@@ -37,7 +37,7 @@ class WorkerManager:
         self._socketio = socketio
         self._in_progress_keys = set()
 
-    def start_worker(self, provider="claude", count=5, model=None, binary=None):
+    def start_worker(self, provider="claude", count=5, model=None, binary=None, continuous=False):
         with self._lock:
             active = {wid: w for wid, w in self._workers.items() if w["status"] in ("starting", "running", "stopping")}
             if len(active) >= self.MAX_WORKERS:
@@ -47,6 +47,7 @@ class WorkerManager:
             stop_flag = threading.Event()
             worker = {
                 "id": worker_id, "provider": provider, "count": count,
+                "continuous": continuous,
                 "model": model, "binary": binary, "thread": None,
                 "stop_flag": stop_flag, "started_at": datetime.now().isoformat(),
                 "status": "starting",
@@ -84,6 +85,7 @@ class WorkerManager:
             return [
                 {
                     "id": w["id"], "provider": w["provider"], "count": w["count"],
+                    "continuous": w.get("continuous", False),
                     "model": w["model"], "binary": w["binary"], "status": w["status"],
                     "progress": dict(w["progress"]), "started_at": w["started_at"],
                 }
@@ -114,7 +116,7 @@ class WorkerManager:
             session = start_session(state)
             processed = 0
 
-            while processed < worker["count"] and not worker["stop_flag"].is_set():
+            while not worker["stop_flag"].is_set() and (worker["continuous"] or processed < worker["count"]):
                 # Reload state each iteration to get fresh scores/queue
                 state = load_state()
                 if worker["binary"]:
@@ -488,10 +490,13 @@ def create_app(state_file, event_bus=None):
     def handle_start_worker(data):
         try:
             provider = (data or {}).get("provider", "claude")
-            count = max(1, min(20, int((data or {}).get("count", 5))))
+            continuous = bool((data or {}).get("continuous", False))
+            count = max(1, min(500, int((data or {}).get("count", 5))))
             model = (data or {}).get("model") or None
             binary = (data or {}).get("binary") or None
-            worker_id = worker_mgr.start_worker(provider=provider, count=count, model=model, binary=binary)
+            worker_id = worker_mgr.start_worker(
+                provider=provider, count=count, model=model, binary=binary, continuous=continuous,
+            )
             sio_emit("worker_started_ack", {"worker_id": worker_id})
         except ValueError as e:
             sio_emit("worker_error", {"error": str(e)})

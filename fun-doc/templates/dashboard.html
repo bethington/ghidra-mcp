@@ -166,7 +166,10 @@
                 <option value="claude">Claude</option>
                 <option value="minimax">MiniMax</option>
             </select>
-            <input type="number" class="worker-input" id="workerCount" value="5" min="1" max="20" title="Functions to process">
+            <input type="number" class="worker-input" id="workerCount" value="10" min="1" max="500" title="Functions to process">
+            <label style="font-size: 0.65rem; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 3px;" title="Run until stopped or queue empty">
+                <input type="checkbox" id="workerContinuous" style="margin: 0;"> <span style="line-height: 1;">Auto</span>
+            </label>
             <button class="btn btn-primary" id="btnRunWorker" onclick="startWorker()">Run Worker</button>
         </div>
         <span class="header-info">
@@ -486,9 +489,10 @@
         // --- Worker controls ---
         function startWorker() {
             const provider = document.getElementById('workerProvider').value;
-            const count = parseInt(document.getElementById('workerCount').value) || 5;
+            const count = parseInt(document.getElementById('workerCount').value) || 10;
+            const continuous = document.getElementById('workerContinuous').checked;
             const binary = document.getElementById('binarySelect').value || null;
-            socket.emit('request_start_worker', {provider, count, binary});
+            socket.emit('request_start_worker', {provider, count, binary, continuous});
             const btn = document.getElementById('btnRunWorker');
             btn.disabled = true;
             setTimeout(() => { btn.disabled = false; }, 2000);
@@ -520,8 +524,8 @@
                 const done = w.progress.completed + w.progress.skipped + w.progress.failed;
                 return `<div class="worker-card ${cls}">
                     <button class="btn btn-danger btn-stop" onclick="stopWorker('${w.id}')">Stop</button>
-                    <div class="wc-title">${w.provider} #${w.id}</div>
-                    <div class="wc-detail">${done}/${w.count} | ${w.progress.completed}ok ${w.progress.skipped}skip ${w.progress.failed}fail</div>
+                    <div class="wc-title">${w.provider} #${w.id}${w.continuous ? ' [Auto]' : ''}</div>
+                    <div class="wc-detail">${done}${w.continuous ? '' : '/'+w.count} | ${w.progress.completed}ok ${w.progress.skipped}skip ${w.progress.failed}fail</div>
                     <div class="wc-current">${cur}</div>
                 </div>`;
             }).join('');
