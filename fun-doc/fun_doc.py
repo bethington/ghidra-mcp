@@ -332,13 +332,16 @@ def _batch_score(addresses, prog_path=None):
     batch_works = None  # None = untested, True/False after first batch
     for i in range(0, len(addresses), BATCH_SIZE):
         batch = addresses[i : i + BATCH_SIZE]
+        scored_so_far = i + len(batch)
 
         if batch_works is not False:
+            # First batch gets longer timeout (Ghidra may need to open the program)
+            batch_timeout = 300 if i == 0 else 120
             resp = ghidra_post(
                 "/batch_analyze_completeness",
                 data={"addresses": batch},
                 params=params,
-                timeout=60,
+                timeout=batch_timeout,
             )
             if resp and isinstance(resp, dict) and "results" in resp:
                 results = resp["results"]
@@ -349,6 +352,10 @@ def _batch_score(addresses, prog_path=None):
                         print(f"    Batch scoring unavailable, falling back to individual scoring...", flush=True)
                 else:
                     batch_works = True
+            elif resp is None and batch_works is None:
+                # First batch timed out or failed — fall back to individual
+                batch_works = False
+                print(f"    Batch scoring timed out, falling back to individual scoring...", flush=True)
 
         if batch_works is False:
             # Individual fallback
@@ -357,10 +364,13 @@ def _batch_score(addresses, prog_path=None):
                 info = _score_single(addr_hex, prog_path)
                 if info:
                     score_map[addr] = info
-            # Progress
-            if (i + BATCH_SIZE) % 500 < BATCH_SIZE:
-                print(f"    Scored {min(i + BATCH_SIZE, len(addresses))}/{len(addresses)}", flush=True)
+            # Progress every batch
+            print(f"    Scored {scored_so_far}/{len(addresses)}", flush=True)
             continue
+
+        # Progress every 500 for batch mode
+        if scored_so_far % 500 < BATCH_SIZE or scored_so_far == len(addresses):
+            print(f"    Scored {scored_so_far}/{len(addresses)}", flush=True)
 
         if resp and isinstance(resp, dict) and "results" in resp:
             for j, result in enumerate(resp["results"]):
