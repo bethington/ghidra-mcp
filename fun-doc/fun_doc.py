@@ -622,15 +622,46 @@ def compute_priority(func):
     return base + impact + effort_bonus + fixable_bonus
 
 
+def _load_priority_queue():
+    """Load the priority queue file written by the web dashboard."""
+    qf = SCRIPT_DIR / "priority_queue.json"
+    if qf.exists():
+        try:
+            with open(qf, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"pinned": [], "skipped": [], "order": []}
+
+
 def get_next_functions(state, count=1):
-    """Get the next N functions to process, sorted by priority."""
+    """Get the next N functions to process, sorted by priority.
+
+    Respects the priority queue from the web dashboard:
+    - Pinned functions come first (in pin order)
+    - Skipped functions are excluded
+    - Remaining functions sorted by ROI: fixable * (1 + callers/10)
+    """
+    queue = _load_priority_queue()
+    pinned = set(queue.get("pinned", []))
+    skipped = set(queue.get("skipped", []))
+
     candidates = []
     for key, func in state["functions"].items():
         if func.get("is_thunk") or func.get("is_external"):
             continue
-        priority = compute_priority(func)
-        if priority > 0:
-            candidates.append((priority, key, func))
+        if key in skipped:
+            continue
+        if func.get("score", 0) >= 95 and func.get("fixable", 0) == 0:
+            continue
+
+        fixable = func.get("fixable", 0)
+        callers = func.get("caller_count", 0)
+        roi = fixable * (1 + callers / 10)
+
+        # Pinned functions get infinite priority
+        sort_key = (key in pinned, roi)
+        candidates.append((sort_key, key, func))
 
     candidates.sort(key=lambda x: x[0], reverse=True)
     return [(key, func) for _, key, func in candidates[:count]]

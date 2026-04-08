@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fun-Doc Dashboard</title>
+    <style>
+        :root {
+            --bg-darkest: #0a0a0c;
+            --bg-dark: #111114;
+            --bg-medium: #1a1a1f;
+            --bg-light: #222228;
+            --bg-hover: #2a2a32;
+            --border-dark: #2d2d35;
+            --border-light: #3d3d45;
+            --color-normal: #c0c0c0;
+            --color-magic: #6969FF;
+            --color-rare: #FFFF00;
+            --color-unique: #C7B377;
+            --color-set: #00FF00;
+            --color-crafted: #FF6600;
+            --text-primary: #d4d4d4;
+            --text-secondary: #8b8b8b;
+            --text-muted: #5a5a5a;
+            --accent-gold: #C7B377;
+            --accent-red: #8b2020;
+            --accent-red-light: #c93030;
+            --font-main: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-main);
+            background-color: var(--bg-darkest);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: linear-gradient(180deg, var(--bg-medium) 0%, var(--bg-dark) 100%);
+            border-bottom: 1px solid var(--accent-red);
+            padding: 0.6rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .header-logo {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--accent-gold);
+            letter-spacing: 0.5px;
+        }
+
+        .header-info {
+            margin-left: auto;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-family: var(--font-mono);
+        }
+
+        .header-info .live-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: var(--color-set);
+            border-radius: 50%;
+            margin-right: 4px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .main-container {
+            flex: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* Stats cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--bg-medium);
+            border: 1px solid var(--border-dark);
+            border-radius: 6px;
+            padding: 0.8rem;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--accent-gold);
+            font-family: var(--font-mono);
+        }
+
+        .stat-value.text-set { color: var(--color-set); }
+        .stat-value.text-rare { color: var(--color-rare); }
+        .stat-value.text-crafted { color: var(--color-crafted); }
+        .stat-value.text-magic { color: var(--color-magic); }
+
+        .stat-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 0.2rem;
+        }
+
+        /* Progress bar */
+        .progress-container { margin-bottom: 1.5rem; }
+
+        .progress-bar-outer {
+            width: 100%;
+            height: 24px;
+            background: var(--bg-dark);
+            border: 1px solid var(--border-dark);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar-inner {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-red) 0%, var(--color-crafted) 40%, var(--accent-gold) 70%, var(--color-set) 100%);
+            transition: width 0.5s ease;
+            border-radius: 3px;
+        }
+
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            text-shadow: 0 0 4px rgba(0,0,0,0.8);
+        }
+
+        /* Panels */
+        .panel {
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border-dark);
+            border-radius: 6px;
+            margin-bottom: 1rem;
+        }
+
+        .panel-header {
+            padding: 0.7rem 1rem;
+            background: linear-gradient(180deg, var(--bg-light) 0%, var(--bg-medium) 100%);
+            border-bottom: 1px solid var(--border-dark);
+            border-radius: 6px 6px 0 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-header h2 {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--accent-gold);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .panel-content { padding: 0.8rem; }
+
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .three-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1rem;
+        }
+
+        @media (max-width: 1100px) {
+            .three-col { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 800px) {
+            .two-col, .three-col { grid-template-columns: 1fr; }
+        }
+
+        /* Score distribution bars */
+        .score-bar-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 3px;
+            gap: 6px;
+        }
+
+        .score-bar-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            width: 45px;
+            text-align: right;
+        }
+
+        .score-bar-track {
+            flex: 1;
+            height: 16px;
+            background: var(--bg-darkest);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .score-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .score-bar-fill.s100 { background: var(--color-set); }
+        .score-bar-fill.s90 { background: #44cc44; }
+        .score-bar-fill.s80 { background: var(--accent-gold); }
+        .score-bar-fill.s70 { background: var(--color-rare); }
+        .score-bar-fill.s60 { background: var(--color-crafted); }
+        .score-bar-fill.s50 { background: #cc6600; }
+        .score-bar-fill.s40 { background: var(--accent-red-light); }
+        .score-bar-fill.s30 { background: var(--accent-red); }
+        .score-bar-fill.s20 { background: #661111; }
+        .score-bar-fill.s10 { background: #441111; }
+        .score-bar-fill.s0  { background: #330808; }
+
+        .score-bar-count {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            width: 35px;
+        }
+
+        /* Tables */
+        .data-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+
+        .data-table th, .data-table td {
+            padding: 0.4rem 0.6rem;
+            border-bottom: 1px solid var(--border-dark);
+            text-align: left;
+            font-size: 0.75rem;
+        }
+
+        .data-table th {
+            background-color: var(--bg-medium);
+            color: var(--text-muted);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 0.65rem;
+            position: sticky;
+            top: 0;
+        }
+
+        .data-table tbody tr:hover { background-color: var(--bg-hover); }
+
+        .data-table .mono {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+
+        .badge-leaf { background: rgba(105, 105, 255, 0.2); color: var(--color-magic); border: 1px solid rgba(105, 105, 255, 0.3); }
+        .badge-done { background: rgba(0, 255, 0, 0.15); color: var(--color-set); border: 1px solid rgba(0, 255, 0, 0.25); }
+        .badge-fix { background: rgba(255, 255, 0, 0.15); color: var(--color-rare); border: 1px solid rgba(255, 255, 0, 0.25); }
+        .badge-new { background: rgba(200, 32, 32, 0.15); color: var(--accent-red-light); border: 1px solid rgba(200, 32, 32, 0.25); }
+        .badge-pinned { background: rgba(199, 179, 119, 0.2); color: var(--accent-gold); border: 1px solid rgba(199, 179, 119, 0.3); }
+
+        .score-cell { font-family: var(--font-mono); font-weight: 600; }
+        .score-100 { color: var(--color-set); }
+        .score-90 { color: #44cc44; }
+        .score-70 { color: var(--color-rare); }
+        .score-50 { color: var(--color-crafted); }
+        .score-low { color: var(--accent-red-light); }
+
+        .func-list-scroll { max-height: 500px; overflow-y: auto; }
+
+        /* Action buttons */
+        .btn-sm {
+            padding: 2px 8px;
+            font-size: 0.65rem;
+            border-radius: 3px;
+            border: 1px solid var(--border-dark);
+            background: var(--bg-medium);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: var(--font-mono);
+            transition: all 0.15s;
+        }
+
+        .btn-sm:hover { border-color: var(--accent-gold); color: var(--accent-gold); }
+        .btn-sm.active { border-color: var(--accent-gold); color: var(--accent-gold); background: var(--bg-light); }
+        .btn-sm.btn-pin { border-color: var(--accent-gold); color: var(--accent-gold); }
+        .btn-sm.btn-skip { border-color: var(--accent-red-light); color: var(--accent-red-light); }
+
+        /* Deduction row */
+        .deduction-row {
+            display: flex;
+            align-items: center;
+            padding: 0.35rem 0;
+            border-bottom: 1px solid var(--border-dark);
+            gap: 0.5rem;
+            font-size: 0.8rem;
+        }
+
+        .deduction-cat {
+            flex: 1;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-primary);
+        }
+
+        .deduction-stat {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            width: 80px;
+            text-align: right;
+        }
+
+        .deduction-bar {
+            width: 100px;
+            height: 12px;
+            background: var(--bg-darkest);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .deduction-bar-fill {
+            height: 100%;
+            background: var(--color-crafted);
+            border-radius: 2px;
+        }
+
+        /* Provider stats */
+        .provider-card {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0;
+            border-bottom: 1px solid var(--border-dark);
+        }
+
+        .provider-name {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--accent-gold);
+            width: 80px;
+        }
+
+        .provider-stat {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        /* Session history */
+        .session-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.3rem 0;
+            border-bottom: 1px solid var(--border-dark);
+            font-size: 0.8rem;
+        }
+
+        .session-date { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem; width: 85px; }
+        .session-count { color: var(--color-set); font-family: var(--font-mono); font-weight: 600; }
+
+        /* Filter */
+        .filter-bar { display: flex; gap: 0.5rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+        .filter-btn { padding: 0.25rem 0.6rem; font-size: 0.7rem; border-radius: 4px; border: 1px solid var(--border-dark); background: var(--bg-medium); color: var(--text-secondary); cursor: pointer; font-family: inherit; transition: all 0.15s; }
+        .filter-btn:hover, .filter-btn.active { border-color: var(--accent-gold); color: var(--accent-gold); background: var(--bg-light); }
+        .filter-input { padding: 0.25rem 0.5rem; font-size: 0.7rem; border-radius: 4px; border: 1px solid var(--border-dark); background: var(--bg-darkest); color: var(--text-primary); font-family: var(--font-mono); width: 180px; }
+        .filter-input:focus { outline: none; border-color: var(--accent-gold); }
+
+        .footer {
+            background: var(--bg-dark);
+            border-top: 1px solid var(--border-dark);
+            padding: 0.5rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.7rem;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <span class="header-logo">Fun-Doc Command Center</span>
+        <span class="header-info">
+            <span class="live-dot"></span>
+            Auto-refresh 5s | {{ stats.project_folder }}
+        </span>
+    </header>
+
+    <main class="main-container">
+        <!-- Stats cards -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.total }}</div>
+                <div class="stat-label">Total</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value text-set">{{ stats.done }}</div>
+                <div class="stat-label">Done (&ge;90%)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value text-rare">{{ stats.fixable }}</div>
+                <div class="stat-label">Fixable (70-89)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value text-crafted">{{ stats.needs_work }}</div>
+                <div class="stat-label">Needs Work</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.pct }}%</div>
+                <div class="stat-label">Progress</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value text-magic">{{ stats.run_stats.today_runs }}</div>
+                <div class="stat-label">Runs Today</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value {% if stats.run_stats.avg_delta > 0 %}text-set{% else %}text-crafted{% endif %}">{{ stats.run_stats.avg_delta }}%</div>
+                <div class="stat-label">Avg Delta</div>
+            </div>
+        </div>
+
+        <!-- Progress bar -->
+        <div class="progress-container">
+            <div class="progress-bar-outer">
+                <div class="progress-bar-inner" style="width: {{ stats.pct }}%"></div>
+                <div class="progress-text">{{ stats.done }} / {{ stats.total }} ({{ stats.pct }}%)</div>
+            </div>
+        </div>
+
+        <!-- Row 1: Score Distribution + Deduction Breakdown + Run Stats -->
+        <div class="three-col">
+            <!-- Score Distribution -->
+            <div class="panel">
+                <div class="panel-header"><h2>Score Distribution</h2></div>
+                <div class="panel-content">
+                    {% set max_count = stats.buckets.values()|max if stats.buckets.values()|list else 1 %}
+                    {% for bucket, css in [("100","s100"),("90-99","s90"),("80-89","s80"),("70-79","s70"),("60-69","s60"),("50-59","s50"),("40-49","s40"),("30-39","s30"),("20-29","s20"),("10-19","s10"),("0-9","s0")] %}
+                    {% set count = stats.buckets.get(bucket, 0) %}
+                    {% if count > 0 %}
+                    <div class="score-bar-row">
+                        <span class="score-bar-label">{{ bucket }}</span>
+                        <div class="score-bar-track">
+                            <div class="score-bar-fill {{ css }}" style="width: {{ (count / max_count * 100)|round }}%"></div>
+                        </div>
+                        <span class="score-bar-count">{{ count }}</span>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- Deduction Breakdown (NEW) -->
+            <div class="panel">
+                <div class="panel-header"><h2>Where Points Are Lost</h2></div>
+                <div class="panel-content">
+                    {% if stats.deduction_breakdown %}
+                    {% set max_pts = stats.deduction_breakdown[0].total_pts if stats.deduction_breakdown else 1 %}
+                    {% for d in stats.deduction_breakdown[:10] %}
+                    <div class="deduction-row">
+                        <span class="deduction-cat">{{ d.category | replace("_", " ") }}</span>
+                        <span class="deduction-stat">{{ d.functions }} fns</span>
+                        <div class="deduction-bar">
+                            <div class="deduction-bar-fill" style="width: {{ (d.total_pts / max_pts * 100)|round }}%"></div>
+                        </div>
+                        <span class="deduction-stat">{{ d.total_pts|round(0)|int }} pts</span>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <div style="color: var(--text-muted);">No deduction data. Run --scan first.</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Run Stats + Provider Performance (NEW) -->
+            <div>
+                <div class="panel">
+                    <div class="panel-header"><h2>Model Performance</h2></div>
+                    <div class="panel-content">
+                        <div style="display: flex; gap: 1rem; margin-bottom: 0.5rem;">
+                            <div><span class="mono" style="color: var(--accent-gold);">{{ stats.run_stats.total_runs }}</span> <span style="color: var(--text-muted); font-size: 0.7rem;">total runs</span></div>
+                            <div><span class="mono" style="color: var(--color-set);">{{ stats.run_stats.success_rate }}%</span> <span style="color: var(--text-muted); font-size: 0.7rem;">success</span></div>
+                        </div>
+                        {% for provider, pstats in stats.run_stats.by_provider.items() %}
+                        <div class="provider-card">
+                            <span class="provider-name">{{ provider }}</span>
+                            <span class="provider-stat">{{ pstats.runs }} runs</span>
+                            <span class="provider-stat {% if pstats.avg_delta > 0 %}text-set{% endif %}">avg {{ pstats.avg_delta }}%</span>
+                        </div>
+                        {% endfor %}
+                        {% if stats.run_stats.stuck_functions %}
+                        <div style="margin-top: 0.5rem; color: var(--accent-red-light); font-size: 0.7rem;">
+                            <strong>Stuck functions:</strong>
+                            {% for s in stats.run_stats.stuck_functions[:5] %}
+                            <div style="color: var(--text-muted);">{{ s.name }} ({{ s.fails }}x failed)</div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Per Binary -->
+                <div class="panel">
+                    <div class="panel-header"><h2>Per Binary</h2></div>
+                    <div class="panel-content">
+                        <table class="data-table">
+                            <thead><tr><th>Binary</th><th>Done</th><th>Total</th><th>%</th></tr></thead>
+                            <tbody>
+                                {% for prog, info in stats.by_program.items()|sort %}
+                                <tr>
+                                    <td>{{ prog }}</td>
+                                    <td class="mono">{{ info.done }}</td>
+                                    <td class="mono">{{ info.total }}</td>
+                                    <td class="mono">{{ ((info.done / info.total * 100) if info.total > 0 else 0)|round(1) }}%</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Work Queue (ROI-ranked) (NEW) -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Work Queue (ROI-Ranked)</h2>
+                <span style="color: var(--text-muted); font-size: 0.7rem;">Pin/skip from here. CLI reads priority_queue.json on next --auto run.</span>
+            </div>
+            <div class="panel-content">
+                <div class="func-list-scroll" style="max-height: 350px;">
+                    <table class="data-table" id="queueTable">
+                        <thead>
+                            <tr>
+                                <th>Actions</th>
+                                <th>Function</th>
+                                <th>Address</th>
+                                <th>Score</th>
+                                <th>Fixable</th>
+                                <th>Callers</th>
+                                <th>ROI</th>
+                                <th>Type</th>
+                                <th>Last</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in stats.roi_queue[:30] %}
+                            <tr id="row-{{ loop.index }}">
+                                <td>
+                                    {% if t.pinned %}
+                                    <button class="btn-sm btn-pin" onclick="unpinFunc('{{ t.key }}')">Unpin</button>
+                                    {% else %}
+                                    <button class="btn-sm" onclick="pinFunc('{{ t.key }}')">Pin</button>
+                                    {% endif %}
+                                    <button class="btn-sm btn-skip" onclick="skipFunc('{{ t.key }}')">Skip</button>
+                                </td>
+                                <td>{% if t.pinned %}<span class="badge badge-pinned">PIN</span> {% endif %}{{ t.name }}</td>
+                                <td class="mono">0x{{ t.address }}</td>
+                                <td class="score-cell {% if t.score >= 90 %}score-90{% elif t.score >= 70 %}score-70{% elif t.score >= 50 %}score-50{% else %}score-low{% endif %}">{{ t.score }}%</td>
+                                <td class="mono">{{ t.fixable }}</td>
+                                <td class="mono">{{ t.callers }}</td>
+                                <td class="mono" style="color: var(--accent-gold);">{{ t.roi }}</td>
+                                <td>{% if t.is_leaf %}<span class="badge badge-leaf">LEAF</span>{% endif %}</td>
+                                <td style="color: var(--text-muted); font-size: 0.65rem;">{{ t.last_result or '' }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- All Functions -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>All Functions</h2>
+                <span style="color: var(--text-muted); font-size: 0.7rem;">{{ stats.all_functions|length }} functions</span>
+            </div>
+            <div class="panel-content">
+                <div class="filter-bar">
+                    <button class="filter-btn active" onclick="filterFuncs('all')">All</button>
+                    <button class="filter-btn" onclick="filterFuncs('needs_work')">Needs Work</button>
+                    <button class="filter-btn" onclick="filterFuncs('fixable')">Fixable</button>
+                    <button class="filter-btn" onclick="filterFuncs('done')">Done</button>
+                    <input class="filter-input" type="text" id="searchInput" placeholder="Search functions..." oninput="searchFuncs()">
+                </div>
+                <div class="func-list-scroll">
+                    <table class="data-table" id="funcTable">
+                        <thead>
+                            <tr>
+                                <th>Function</th>
+                                <th>Address</th>
+                                <th>Binary</th>
+                                <th>Score</th>
+                                <th>Fixable</th>
+                                <th>Callers</th>
+                                <th>Status</th>
+                                <th>Last Result</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for f in stats.all_functions %}
+                            <tr class="func-row" data-score="{{ f.score }}" data-name="{{ f.name|lower }}">
+                                <td>{{ f.name }}</td>
+                                <td class="mono">0x{{ f.address }}</td>
+                                <td>{{ f.program }}</td>
+                                <td class="score-cell {% if f.score >= 100 %}score-100{% elif f.score >= 90 %}score-90{% elif f.score >= 70 %}score-70{% elif f.score >= 50 %}score-50{% else %}score-low{% endif %}">{{ f.score }}%</td>
+                                <td class="mono">{{ f.fixable }}</td>
+                                <td class="mono">{{ f.callers }}</td>
+                                <td>
+                                    {% if f.score >= 90 %}<span class="badge badge-done">DONE</span>
+                                    {% elif f.score >= 70 %}<span class="badge badge-fix">FIX</span>
+                                    {% else %}<span class="badge badge-new">NEW</span>{% endif %}
+                                    {% if f.is_leaf %}<span class="badge badge-leaf">LEAF</span>{% endif %}
+                                </td>
+                                <td style="color: var(--text-muted); font-size: 0.65rem;">{{ f.last_result or '' }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Sessions -->
+        <div class="panel">
+            <div class="panel-header"><h2>Recent Sessions</h2></div>
+            <div class="panel-content">
+                {% if stats.sessions %}
+                {% for s in stats.sessions|reverse %}
+                <div class="session-item">
+                    <span class="session-date">{{ s.date }}</span>
+                    <span class="session-count">+{{ s.completed }}</span>
+                    <span style="color: var(--text-muted); font-size: 0.75rem;">
+                        completed{% if s.skipped %}, {{ s.skipped }} skipped{% endif %}{% if s.failed %}, {{ s.failed }} failed{% endif %}
+                    </span>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div style="color: var(--text-muted); font-size: 0.8rem;">No sessions yet</div>
+                {% endif %}
+            </div>
+        </div>
+    </main>
+
+    <footer class="footer">
+        Fun-Doc Command Center | Last scan: {{ stats.last_scan or 'never' }} | Auto-refreshes every 5 seconds
+    </footer>
+
+    <script>
+        // Auto-refresh every 5 seconds
+        setTimeout(function() { location.reload(); }, 5000);
+
+        // Filter functions
+        function filterFuncs(mode) {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            document.querySelectorAll('.func-row').forEach(row => {
+                const score = parseInt(row.dataset.score);
+                let show = true;
+                if (mode === 'needs_work') show = score < 70;
+                else if (mode === 'fixable') show = score >= 70 && score < 90;
+                else if (mode === 'done') show = score >= 90;
+                row.style.display = show ? '' : 'none';
+            });
+        }
+
+        // Search functions
+        function searchFuncs() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            document.querySelectorAll('.func-row').forEach(row => {
+                row.style.display = row.dataset.name.includes(query) ? '' : 'none';
+            });
+        }
+
+        // Queue controls
+        async function pinFunc(key) {
+            await fetch('/api/queue/pin', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key})});
+            location.reload();
+        }
+        async function unpinFunc(key) {
+            await fetch('/api/queue/unpin', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key})});
+            location.reload();
+        }
+        async function skipFunc(key) {
+            await fetch('/api/queue/skip', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key})});
+            location.reload();
+        }
+    </script>
+</body>
+</html>
