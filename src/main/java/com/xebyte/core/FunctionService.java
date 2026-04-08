@@ -522,7 +522,7 @@ public class FunctionService {
     public Response renameFunction(
             @Param(value = "oldName", source = ParamSource.BODY) String oldName,
             @Param(value = "newName", source = ParamSource.BODY) String newName,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -596,7 +596,7 @@ public class FunctionService {
             @Param(value = "functionName", source = ParamSource.BODY) String functionName,
             @Param(value = "oldName", source = ParamSource.BODY) String oldVarName,
             @Param(value = "newName", source = ParamSource.BODY) String newVarName,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -739,7 +739,7 @@ public class FunctionService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -873,7 +873,7 @@ public class FunctionService {
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "prototype", source = ParamSource.BODY) String prototype,
             @Param(value = "calling_convention", source = ParamSource.BODY, defaultValue = "") String callingConvention,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         PrototypeResult result = setFunctionPrototype(functionAddress, prototype, callingConvention, programName);
         if (result.isSuccess()) {
             String msg = "Successfully set prototype for function at " + functionAddress;
@@ -1103,7 +1103,7 @@ public class FunctionService {
                                + "address is unambiguous.") String functionAddrStr,
             @Param(value = "variable_name", source = ParamSource.BODY) String variableName,
             @Param(value = "new_type", source = ParamSource.BODY) String newType,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1289,7 +1289,7 @@ public class FunctionService {
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "parameter_name", source = ParamSource.BODY) String parameterName,
             @Param(value = "new_type", source = ParamSource.BODY) String newType,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         return setLocalVariableType(functionAddress, parameterName, newType, programName);
     }
 
@@ -1415,7 +1415,7 @@ public class FunctionService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
             @Param(value = "no_return", source = ParamSource.BODY) boolean noReturn,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1499,7 +1499,7 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String instructionAddrStr,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1581,7 +1581,7 @@ public class FunctionService {
                                + "address is unambiguous.") String functionAddrStr,
             @Param(value = "variable_name", source = ParamSource.BODY) String variableName,
             @Param(value = "storage", source = ParamSource.BODY) String storageSpec,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1903,7 +1903,7 @@ public class FunctionService {
             @Param(value = "parameter_renames", source = ParamSource.BODY) Map<String, String> parameterRenames,
             @Param(value = "local_renames", source = ParamSource.BODY) Map<String, String> localRenames,
             @Param(value = "return_type", source = ParamSource.BODY, defaultValue = "") String returnType,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2009,7 +2009,7 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2078,7 +2078,7 @@ public class FunctionService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "name", source = ParamSource.BODY, defaultValue = "") String name,
             @Param(value = "disassemble_first", source = ParamSource.BODY, defaultValue = "true") boolean disassembleFirst,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2208,7 +2208,7 @@ public class FunctionService {
                                + "address is unambiguous.") String endAddress,
             @Param(value = "length", source = ParamSource.BODY, defaultValue = "0") Integer length,
             @Param(value = "restrict_to_execute_memory", source = ParamSource.BODY, defaultValue = "true") boolean restrictToExecuteMemory,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -2384,7 +2384,7 @@ public class FunctionService {
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "variable_renames", source = ParamSource.BODY) Map<String, String> variableRenames,
             @Param(value = "force_individual", source = ParamSource.BODY, defaultValue = "false") boolean forceIndividual,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
