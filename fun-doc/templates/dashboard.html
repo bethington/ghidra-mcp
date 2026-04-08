@@ -129,6 +129,8 @@
         .filter-input { padding: 0.2rem 0.5rem; font-size: 0.65rem; border-radius: 4px; border: 1px solid var(--border-dark); background: var(--bg-darkest); color: var(--text-primary); font-family: var(--font-mono); width: 160px; }
         .filter-input:focus { outline: none; border-color: var(--accent-gold); }
 
+        .header-select { padding: 3px 6px; font-size: 0.7rem; border-radius: 3px; border: 1px solid var(--border-dark); background: var(--bg-darkest); color: var(--text-primary); font-family: var(--font-mono); cursor: pointer; }
+        .header-select:focus { outline: none; border-color: var(--accent-gold); }
         .footer { background: var(--bg-dark); border-top: 1px solid var(--border-dark); padding: 0.4rem; text-align: center; color: var(--text-muted); font-size: 0.65rem; }
     </style>
 </head>
@@ -136,6 +138,12 @@
     <header class="header">
         <span class="header-logo">Fun-Doc Command Center</span>
         <div class="header-controls">
+            <select class="header-select" id="binarySelect" onchange="switchBinary(this.value)">
+                <option value="">All Binaries</option>
+                {% for bin in stats.available_binaries|default([]) %}
+                <option value="{{ bin }}" {% if bin == stats.active_binary %}selected{% endif %}>{{ bin }}</option>
+                {% endfor %}
+            </select>
             <button class="btn btn-primary" onclick="requestRescan(false)">Rescan</button>
             <button class="btn" onclick="requestRescan(true)">Full Rescan</button>
         </div>
@@ -408,6 +416,13 @@
         function requestRescanBinary(prog) { socket.emit("request_rescan", {program: prog}); showBanner(`Rescanning ${prog}...`); }
 
         // --- Queue controls (no page reload) ---
+        // Binary selector
+        async function switchBinary(binary) {
+            await fetch('/api/context/binary', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({binary: binary || null})});
+            // Reload page to re-render with filtered data (server-side Jinja filter)
+            location.reload();
+        }
+
         async function pinFunc(key) { await fetch('/api/queue/pin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}); }
         async function unpinFunc(key) { await fetch('/api/queue/unpin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}); }
         async function skipFunc(key) { await fetch('/api/queue/skip', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}); }

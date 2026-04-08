@@ -171,7 +171,17 @@ def create_app(state_file, event_bus=None):
         }
 
     def compute_stats(state):
-        funcs = state.get("functions", {})
+        all_funcs = state.get("functions", {})
+        active_binary = state.get("active_binary")
+        # Available binaries for dropdown
+        available_binaries = sorted(set(
+            f.get("program_name", "unknown") for f in all_funcs.values()
+        ))
+        # Filter to active binary if set
+        if active_binary:
+            funcs = {k: v for k, v in all_funcs.items() if v.get("program_name") == active_binary}
+        else:
+            funcs = all_funcs
         total = len(funcs)
         queue = load_queue()
         if total == 0:
@@ -181,6 +191,8 @@ def create_app(state_file, event_bus=None):
                 "all_functions": [], "deduction_breakdown": [],
                 "run_stats": compute_run_stats([]),
                 "project_folder": state.get("project_folder", "unknown"),
+                "active_binary": active_binary,
+                "available_binaries": available_binaries,
                 "last_scan": state.get("last_scan"),
             }
         done = sum(1 for f in funcs.values() if f["score"] >= 90)
@@ -230,6 +242,8 @@ def create_app(state_file, event_bus=None):
             "deduction_breakdown": compute_deduction_breakdown(funcs),
             "run_stats": compute_run_stats(load_run_logs()),
             "project_folder": state.get("project_folder", "unknown"),
+            "active_binary": active_binary,
+            "available_binaries": available_binaries,
             "last_scan": state.get("last_scan"),
         }
 
@@ -336,5 +350,50 @@ def create_app(state_file, event_bus=None):
         save_queue(queue)
         socketio.emit("queue_changed", {"action": "unskip", "key": key})
         return jsonify({"ok": True})
+
+    # --- Folder / binary selection ---
+
+    @app.route("/api/context", methods=["GET"])
+    def get_context():
+        state = load_state()
+        all_funcs = state.get("functions", {})
+        available_binaries = sorted(set(
+            f.get("program_name", "unknown") for f in all_funcs.values()
+        ))
+        return jsonify({
+            "project_folder": state.get("project_folder", "unknown"),
+            "active_binary": state.get("active_binary"),
+            "available_binaries": available_binaries,
+        })
+
+    @app.route("/api/context/binary", methods=["POST"])
+    def set_active_binary():
+        data = request.json
+        binary = data.get("binary")  # None or "" to clear filter
+        state = load_state()
+        if binary:
+            state["active_binary"] = binary
+        else:
+            state.pop("active_binary", None)
+        # Save inline (import from fun_doc)
+        sf = app.config["STATE_FILE"]
+        with open(sf, "w") as f:
+            json.dump(state, f, indent=2, default=str)
+        socketio.emit("state_changed")
+        return jsonify({"ok": True, "active_binary": state.get("active_binary")})
+
+    @app.route("/api/context/folder", methods=["POST"])
+    def set_project_folder():
+        data = request.json
+        folder = data.get("folder")
+        if not folder:
+            return jsonify({"error": "folder required"}), 400
+        state = load_state()
+        state["project_folder"] = folder
+        sf = app.config["STATE_FILE"]
+        with open(sf, "w") as f:
+            json.dump(state, f, indent=2, default=str)
+        socketio.emit("state_changed")
+        return jsonify({"ok": True, "project_folder": folder})
 
     return app, socketio

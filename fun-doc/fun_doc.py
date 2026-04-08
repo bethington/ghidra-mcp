@@ -653,6 +653,8 @@ def get_next_functions(state, count=1):
     pinned = set(queue.get("pinned", []))
     skipped = set(queue.get("skipped", []))
 
+    active_binary = state.get("active_binary")
+
     candidates = []
     for key, func in state["functions"].items():
         if func.get("is_thunk") or func.get("is_external"):
@@ -660,6 +662,8 @@ def get_next_functions(state, count=1):
         if key in skipped:
             continue
         if func.get("score", 0) >= 95 and func.get("fixable", 0) == 0:
+            continue
+        if active_binary and func.get("program_name") != active_binary:
             continue
 
         fixable = func.get("fixable", 0)
@@ -2486,6 +2490,9 @@ def main():
         "--folder", default=None, help="Ghidra project folder (default: /Mods/PD2-S12)"
     )
     parser.add_argument(
+        "--binary", default=None, help="Focus on a specific binary (e.g., D2Common.dll). Persisted to state."
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would be done without invoking Claude",
@@ -2511,12 +2518,20 @@ def main():
 
     state = load_state()
 
-    # Override folder if specified
+    # Override folder/binary if specified
     if args.folder:
         state["project_folder"] = args.folder
         save_state(state)
+    if args.binary:
+        state["active_binary"] = args.binary
+        save_state(state)
+    elif args.binary == "":
+        # --binary "" clears the filter
+        state.pop("active_binary", None)
+        save_state(state)
 
     project_folder = state.get("project_folder", "/Mods/PD2-S12")
+    active_binary = state.get("active_binary")  # None = all binaries
 
     # --web: start Flask dashboard (standalone, blocking)
     if args.web:
