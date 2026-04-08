@@ -148,6 +148,11 @@
     <header class="header">
         <span class="header-logo">Fun-Doc Command Center</span>
         <div class="header-controls">
+            <select class="header-select" id="folderSelect" onchange="switchFolder(this.value)" title="Project folder">
+                {% for folder in stats.available_folders|default([]) %}
+                <option value="{{ folder }}" {% if folder == stats.project_folder %}selected{% endif %}>{{ folder }}</option>
+                {% endfor %}
+            </select>
             <select class="header-select" id="binarySelect" onchange="switchBinary(this.value)">
                 <option value="">All Binaries</option>
                 {% for bin in stats.available_binaries|default([]) %}
@@ -280,13 +285,22 @@
                     </div>
                 </div>
                 <div class="panel">
-                    <div class="panel-header"><h2>Per Binary</h2></div>
-                    <div class="panel-content" id="perBinaryPanel">
-                        <table class="data-table"><thead><tr><th>Binary</th><th>Done</th><th>Total</th><th>%</th><th></th></tr></thead><tbody>
+                    <div class="panel-header"><h2>Cross-Binary Progress</h2></div>
+                    <div class="panel-content" id="perBinaryPanel" style="max-height: 300px; overflow-y: auto;">
+                        <table class="data-table"><thead><tr><th>Binary</th><th>Progress</th><th>Done</th><th>Total</th><th>Avg</th><th>Fixable</th><th></th></tr></thead><tbody>
                         {% for prog, info in stats.by_program.items()|sort %}
+                        {% set pct = ((info.done / info.total * 100) if info.total > 0 else 0)|round(1) %}
                         <tr>
-                            <td>{{ prog }}</td><td class="mono">{{ info.done }}</td><td class="mono">{{ info.total }}</td>
-                            <td class="mono">{{ ((info.done / info.total * 100) if info.total > 0 else 0)|round(1) }}%</td>
+                            <td style="cursor: pointer; color: var(--accent-gold);" onclick="switchBinaryDirect('{{ prog }}')">{{ prog }}</td>
+                            <td style="width: 100px;">
+                                <div style="width: 100%; height: 10px; background: var(--bg-darkest); border-radius: 2px; overflow: hidden;">
+                                    <div style="height: 100%; width: {{ pct }}%; background: {% if pct >= 90 %}var(--color-set){% elif pct >= 50 %}var(--accent-gold){% else %}var(--color-crafted){% endif %}; border-radius: 2px;"></div>
+                                </div>
+                            </td>
+                            <td class="mono">{{ info.done }}</td>
+                            <td class="mono">{{ info.total }}</td>
+                            <td class="mono" style="color: {% if pct >= 90 %}var(--color-set){% elif pct >= 50 %}var(--accent-gold){% else %}var(--text-muted){% endif %};">{{ pct }}%</td>
+                            <td class="mono">{{ info.remaining }}</td>
                             <td><button class="btn" onclick="requestRescanBinary('{{ prog }}')">Rescan</button></td>
                         </tr>
                         {% endfor %}
@@ -452,8 +466,17 @@
         // Binary selector
         async function switchBinary(binary) {
             await fetch('/api/context/binary', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({binary: binary || null})});
-            // Reload page to re-render with filtered data (server-side Jinja filter)
             location.reload();
+        }
+        async function switchFolder(folder) {
+            await fetch('/api/context/folder', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({folder})});
+            // Clear binary filter when switching folders
+            await fetch('/api/context/binary', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({binary: null})});
+            location.reload();
+        }
+        function switchBinaryDirect(prog) {
+            document.getElementById('binarySelect').value = prog;
+            switchBinary(prog);
         }
 
         async function pinFunc(key) { await fetch('/api/queue/pin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}); }

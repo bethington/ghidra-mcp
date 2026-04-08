@@ -367,6 +367,7 @@ def create_app(state_file, event_bus=None):
                 "project_folder": state.get("project_folder", "unknown"),
                 "active_binary": active_binary,
                 "available_binaries": available_binaries,
+                "available_folders": _fetch_project_folders(),
                 "last_scan": state.get("last_scan"),
             }
         done = sum(1 for f in funcs.values() if f["score"] >= 90)
@@ -418,6 +419,7 @@ def create_app(state_file, event_bus=None):
             "project_folder": state.get("project_folder", "unknown"),
             "active_binary": active_binary,
             "available_binaries": available_binaries,
+            "available_folders": _fetch_project_folders(),
             "last_scan": state.get("last_scan"),
         }
 
@@ -623,5 +625,57 @@ def create_app(state_file, event_bus=None):
             json.dump(state, f, indent=2, default=str)
         socketio.emit("state_changed")
         return jsonify({"ok": True, "project_folder": folder})
+
+    def _fetch_project_folders():
+        """Recursively discover all folders with binaries in the Ghidra project."""
+        import requests
+        folders = []
+        def _walk(path):
+            try:
+                r = requests.get("http://127.0.0.1:8089/list_project_files", params={"folder": path}, timeout=5)
+                r.raise_for_status()
+                data = r.json()
+                subfolders = data.get("folders", [])
+                files = data.get("files", [])
+                has_programs = any(f.get("content_type") == "Program" for f in files if isinstance(f, dict))
+                if has_programs:
+                    folders.append(path)
+                for sf in subfolders:
+                    _walk(f"{path}/{sf}" if path != "/" else f"/{sf}")
+            except Exception:
+                pass
+        _walk("/")
+        return sorted(folders)
+
+    @app.route("/api/context/folders", methods=["GET"])
+    def get_available_folders():
+        return jsonify({"folders": _fetch_project_folders()})
+
+    @app.route("/api/cross_binary_progress", methods=["GET"])
+    def cross_binary_progress():
+        """Cross-binary progress summary — all binaries in the current folder."""
+        state = load_state()
+        all_funcs = state.get("functions", {})
+        by_binary = defaultdict(lambda: {"total": 0, "done": 0, "fixable": 0, "needs_work": 0, "avg_score": 0, "total_fixable_pts": 0})
+        for f in all_funcs.values():
+            prog = f.get("program_name", "unknown")
+            score = f.get("score", 0)
+            by_binary[prog]["total"] += 1
+            if score >= 90:
+                by_binary[prog]["done"] += 1
+            elif score >= 70:
+                by_binary[prog]["fixable"] += 1
+            else:
+                by_binary[prog]["needs_work"] += 1
+            by_binary[prog]["avg_score"] += score
+            by_binary[prog]["total_fixable_pts"] += f.get("fixable", 0)
+        result = []
+        for prog, info in sorted(by_binary.items()):
+            info["avg_score"] = round(info["avg_score"] / info["total"], 1) if info["total"] > 0 else 0
+            info["total_fixable_pts"] = round(info["total_fixable_pts"], 0)
+            info["pct_done"] = round(info["done"] / info["total"] * 100, 1) if info["total"] > 0 else 0
+            info["name"] = prog
+            result.append(info)
+        return jsonify({"binaries": result})
 
     return app, socketio
