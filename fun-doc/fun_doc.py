@@ -2477,6 +2477,11 @@ def main():
     parser.add_argument(
         "--program", default=None, help="Specific program path for select mode"
     )
+    parser.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help="Disable auto-start of web dashboard (default: dashboard starts in background)",
+    )
 
     args = parser.parse_args()
 
@@ -2494,14 +2499,54 @@ def main():
 
     project_folder = state.get("project_folder", "/Mods/PD2-S12")
 
-    # --web: start Flask dashboard
+    # --web: start Flask dashboard (standalone, blocking)
     if args.web:
         from web import create_app
 
         app = create_app(STATE_FILE)
-        print(f"Starting web dashboard at http://127.0.0.1:{args.web_port}")
+        dashboard_url = f"http://127.0.0.1:{args.web_port}"
+        print(f"Starting web dashboard at {dashboard_url}")
+        import webbrowser
+        webbrowser.open(dashboard_url)
         app.run(host="127.0.0.1", port=args.web_port, debug=False)
         return
+
+    # Auto-start dashboard in background (unless disabled)
+    dashboard_enabled = (
+        not args.no_dashboard
+        and os.environ.get("FUNDOC_DASHBOARD", "true").lower() != "false"
+    )
+    if dashboard_enabled:
+        import threading
+        import tempfile
+
+        try:
+            from web import create_app
+
+            dash_app = create_app(STATE_FILE)
+            dash_port = args.web_port
+            dashboard_url = f"http://127.0.0.1:{dash_port}"
+
+            # Run Flask in a daemon thread (auto-exits when main process exits)
+            dash_thread = threading.Thread(
+                target=lambda: dash_app.run(
+                    host="127.0.0.1", port=dash_port, debug=False, use_reloader=False
+                ),
+                daemon=True,
+            )
+            dash_thread.start()
+
+            # Auto-open browser on first run (track via temp file to avoid repeat opens)
+            sentinel = Path(tempfile.gettempdir()) / f"fundoc_dashboard_{dash_port}.lock"
+            if not sentinel.exists():
+                import webbrowser
+                webbrowser.open(dashboard_url)
+                sentinel.write_text(str(os.getpid()))
+                print(f"  Dashboard opened: {dashboard_url}")
+            else:
+                print(f"  Dashboard: {dashboard_url}")
+        except Exception as e:
+            print(f"  Dashboard failed to start: {e}")
 
     # --status: terminal dashboard
     if args.status:
