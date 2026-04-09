@@ -4,6 +4,20 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Streamable HTTP transport** — `--transport streamable-http` is now documented and recommended for web/HTTP clients. SSE transport is deprecated. Added `ghidra-mcp-http` config example to `mcp-config.json`.
+- **Engineering backlog** — Added `docs/project-management/BACKLOG.md` with prioritized roadmap items from competitive fork analysis (GitHub issues #109–#112).
+
+### Fixed
+
+- **read_memory OOM** (#107) — Capped read_memory allocation at 16 MB to prevent out-of-memory on malicious/large length values.
+- **SSRF in connect_instance** (#106) — Wired `validate_server_url()` into `connect_instance` and `_auto_connect` TCP paths.
+
+---
+
 ## v5.0.0 - 2026-04-03
 
 GhidraMCP v5.0 marks a deliberate shift: from a passive Ghidra mirror to an **active enforcement layer**. Tools that write annotations now enforce naming conventions, reject no-ops, and auto-correct struct fields. At the scale of thousands of functions, multiple binary versions, and parallel AI + human workflows, conventions can't be suggestions — they must be in the tool.

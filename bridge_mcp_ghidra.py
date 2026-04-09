@@ -934,7 +934,9 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
     if not validate_server_url(tcp_url):
         return json.dumps(
-            {"error": f"Refusing to connect to non-local URL: {tcp_url}. Only 127.0.0.1, localhost, and ::1 are allowed."}
+            {
+                "error": f"Refusing to connect to non-local URL: {tcp_url}. Only 127.0.0.1, localhost, and ::1 are allowed."
+            }
         )
     try:
         _active_tcp = tcp_url
@@ -1264,15 +1266,22 @@ def main():
         description="GhidraMCP Bridge — MCP↔HTTP multiplexer"
     )
     parser.add_argument(
-        "--mcp-host", type=str, default="127.0.0.1", help="Host for SSE transport"
+        "--mcp-host",
+        type=str,
+        default="127.0.0.1",
+        help="Host for HTTP transport (streamable-http or sse)",
     )
-    parser.add_argument("--mcp-port", type=int, help="Port for SSE transport")
+    parser.add_argument(
+        "--mcp-port", type=int, help="Port for HTTP transport (streamable-http or sse)"
+    )
     parser.add_argument(
         "--transport",
         type=str,
         default="stdio",
         choices=["stdio", "sse", "streamable-http"],
-        help="MCP transport",
+        help="MCP transport: stdio (default, recommended for AI tools), "
+        "streamable-http (recommended for web/HTTP clients), "
+        "sse (deprecated, use streamable-http instead)",
     )
     parser.add_argument(
         "--lazy",

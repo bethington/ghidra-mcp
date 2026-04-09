@@ -189,7 +189,12 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 python bridge_mcp_ghidra.py
 ```
 
-#### Option 2: SSE Transport (Web/HTTP clients)
+#### Option 2: Streamable HTTP Transport (Recommended for web/HTTP clients)
+```bash
+python bridge_mcp_ghidra.py --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 8081
+```
+
+#### Option 3: SSE Transport (Deprecated — use streamable-http instead)
 ```bash
 python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 ```
