@@ -236,6 +236,7 @@ def start_session(state):
         "completed": 0,
         "skipped": 0,
         "failed": 0,
+        "partial": 0,
         "functions": [],
     }
     state["current_session"] = session
@@ -272,7 +273,10 @@ def _fetch_programs(project_folder):
         try:
             resp = json.loads(resp)
         except (json.JSONDecodeError, TypeError):
-            print(f"ERROR: Unexpected response from list_project_files: {str(resp)[:200]}", file=sys.stderr)
+            print(
+                f"ERROR: Unexpected response from list_project_files: {str(resp)[:200]}",
+                file=sys.stderr,
+            )
             return None
 
     files = resp.get("files", [])
@@ -355,13 +359,19 @@ def _batch_score(addresses, prog_path=None):
                 if results and isinstance(results[0], dict) and "error" in results[0]:
                     if batch_works is None:
                         batch_works = False
-                        print(f"    Batch scoring unavailable, falling back to individual scoring...", flush=True)
+                        print(
+                            f"    Batch scoring unavailable, falling back to individual scoring...",
+                            flush=True,
+                        )
                 else:
                     batch_works = True
             elif resp is None and batch_works is None:
                 # First batch timed out or failed — fall back to individual
                 batch_works = False
-                print(f"    Batch scoring timed out, falling back to individual scoring...", flush=True)
+                print(
+                    f"    Batch scoring timed out, falling back to individual scoring...",
+                    flush=True,
+                )
 
         if batch_works is False:
             # Individual fallback
@@ -429,7 +439,10 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
     if binary_filter:
         target_programs = [p for p in target_programs if p["name"] == binary_filter]
         if not target_programs:
-            print(f"ERROR: Binary '{binary_filter}' not found in {project_folder}", file=sys.stderr)
+            print(
+                f"ERROR: Binary '{binary_filter}' not found in {project_folder}",
+                file=sys.stderr,
+            )
             return False
 
     # Build name lookup from existing state for incremental comparison
@@ -446,7 +459,10 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
     for prog_idx, prog in enumerate(target_programs):
         prog_path = prog["path"]
         prog_name = prog["name"]
-        bus_emit("scan_progress", {"program": prog_name, "index": prog_idx, "total": len(target_programs)})
+        bus_emit(
+            "scan_progress",
+            {"program": prog_name, "index": prog_idx, "total": len(target_programs)},
+        )
         print(f"\n  {prog_name} ({prog_path})")
 
         func_list = _fetch_function_list(prog_path)
@@ -539,7 +555,8 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
             state["functions"][key] = func
         # Remove functions from this binary that no longer exist
         stale_keys = [
-            k for k, f in state["functions"].items()
+            k
+            for k, f in state["functions"].items()
             if f.get("program_name") == binary_filter and k not in all_functions
         ]
         for k in stale_keys:
@@ -557,16 +574,30 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
         binary_done = sum(1 for f in all_functions.values() if f["score"] >= 90)
         state_total = len(state["functions"])
         state_done = sum(1 for f in state["functions"].values() if f["score"] >= 90)
-        print(f"\nScan complete: {binary_filter} — {binary_total} functions, {binary_done} done (>= 90%)")
+        print(
+            f"\nScan complete: {binary_filter} — {binary_total} functions, {binary_done} done (>= 90%)"
+        )
         print(f"  {total_rescored} scored, {total_kept} thunk/external")
-        print(f"  State total: {state_total} functions across all binaries, {state_done} done")
-        bus_emit("scan_complete", {"total": state_total, "done": state_done, "mode": scan_mode, "binary": binary_filter})
+        print(
+            f"  State total: {state_total} functions across all binaries, {state_done} done"
+        )
+        bus_emit(
+            "scan_complete",
+            {
+                "total": state_total,
+                "done": state_done,
+                "mode": scan_mode,
+                "binary": binary_filter,
+            },
+        )
     else:
         total = len(all_functions)
         done = sum(1 for f in all_functions.values() if f["score"] >= 90)
         if is_incremental:
             removed = len(existing) - total_kept - total_rescored - total_new
-            print(f"\nIncremental scan complete: {total} functions, {done} done (>= 90%)")
+            print(
+                f"\nIncremental scan complete: {total} functions, {done} done (>= 90%)"
+            )
             print(
                 f"  {total_kept} cached, {total_rescored} re-scored, {total_new} new, {max(0, removed)} removed"
             )
@@ -763,6 +794,11 @@ def get_next_functions(state, count=1):
         callers = func.get("caller_count", 0)
         roi = fixable * (1 + callers / 10)
 
+        # Deprioritize functions that have been partially processed too many times
+        partial_runs = func.get("partial_runs", 0)
+        if partial_runs >= 3 and key not in pinned:
+            roi *= 0.1  # 90% reduction — needs human attention or stronger model
+
         # Pinned functions get infinite priority
         sort_key = (key in pinned, roi)
         candidates.append((sort_key, key, func))
@@ -939,6 +975,36 @@ def read_module(name):
         print(f"WARNING: Module not found: {path}", file=sys.stderr)
         return f"# Module {name} not found\n"
     return path.read_text(encoding="utf-8")
+
+
+def _estimate_complexity(completeness):
+    """Estimate function complexity from completeness data.
+
+    Returns a tier: 'simple', 'medium', 'complex', or 'massive'.
+    Used to gate giant functions into recovery-only mode.
+    """
+    if not completeness or not isinstance(completeness, dict):
+        return "medium"
+
+    breakdown = completeness.get("deduction_breakdown", [])
+    fixable_pts = float(completeness.get("fixable_deductions", 0))
+
+    # Count items in key categories from deduction breakdown
+    cat_counts = {}
+    for d in breakdown:
+        cat = d.get("category", "")
+        cat_counts[cat] = d.get("count", 0) if isinstance(d.get("count"), (int, float)) else 0
+
+    undefined_vars = cat_counts.get("undefined_variables", 0)
+    magic_numbers = cat_counts.get("undocumented_magic_numbers", 0)
+
+    if undefined_vars > 100 or magic_numbers > 50 or fixable_pts > 50:
+        return "massive"
+    if undefined_vars > 50 or magic_numbers > 25 or fixable_pts > 30:
+        return "complex"
+    if fixable_pts < 10:
+        return "simple"
+    return "medium"
 
 
 def determine_mode(score, deductions=None, completeness=None):
@@ -1589,11 +1655,11 @@ def _wrap_result(result):
     return (result, {"tool_calls": -1})  # -1 = unknown (provider doesn't track)
 
 
-def invoke_claude(prompt, model="sonnet", max_turns=25, provider=None):
+def invoke_claude(prompt, model="sonnet", max_turns=25, provider=None, complexity_tier=None):
     """Invoke the configured AI provider."""
     effective_provider = provider or AI_PROVIDER
     if effective_provider == "minimax":
-        return _invoke_minimax(prompt, model, max_turns)
+        return _invoke_minimax(prompt, model, max_turns, complexity_tier=complexity_tier)
     if effective_provider == "codex":
         return _wrap_result(_invoke_codex(prompt, model, max_turns))
 
@@ -1668,7 +1734,7 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
         return None
 
 
-def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
+def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=None):
     """Invoke MiniMax via OpenAI-compatible API with tool-calling agent loop.
 
     Fetches Ghidra MCP tool schemas, converts them to OpenAI function definitions,
@@ -1824,13 +1890,19 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
     total_output_tokens = 0
     tool_call_count = 0
 
+    # Dynamic max_tokens: bump for complex/massive functions
+    if complexity_tier in ("complex", "massive"):
+        max_output_tokens = 32768
+    else:
+        max_output_tokens = 16384
+
     for turn in range(max_turns):
         try:
             kwargs = {
                 "model": model,
                 "messages": messages,
                 "temperature": 1.0,  # MiniMax recommends 1.0
-                "max_tokens": 16384,
+                "max_tokens": max_output_tokens,
             }
             if tools_openai:
                 kwargs["tools"] = tools_openai
@@ -1861,6 +1933,7 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
             total_output_tokens += response.usage.completion_tokens or 0
 
         # Append assistant message to conversation history
+        # Preserve full message including <think> blocks for reasoning continuity
         messages.append(message.model_dump())
 
         # Check for tool calls
@@ -1898,6 +1971,7 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
         if message.content:
             # Strip <think>...</think> reasoning blocks — keep only user-facing text
             import re
+
             cleaned = re.sub(r"<think>[\s\S]*?</think>", "", message.content).strip()
             if cleaned:
                 safe_text = cleaned.encode("ascii", errors="replace").decode("ascii")
@@ -1908,7 +1982,10 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25):
                 # All content was think-tags — model reasoning only, no actionable output
                 print(f"  [minimax] (reasoning only, no output text)", flush=True)
         else:
-            print(f"  [minimax] (empty content, finish_reason={choice.finish_reason})", flush=True)
+            print(
+                f"  [minimax] (empty content, finish_reason={choice.finish_reason})",
+                flush=True,
+            )
 
         if choice.finish_reason in ("stop", "end_turn", None):
             break
@@ -1978,14 +2055,28 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                                 tool_id = getattr(block, "id", "")
                                 tool_id_to_name[tool_id] = tool_name
                                 print(f"  [mcp] {tool_name}: calling...", flush=True)
-                                bus_emit("tool_call", {"tool": tool_name, "status": "calling", "id": tool_id})
+                                bus_emit(
+                                    "tool_call",
+                                    {
+                                        "tool": tool_name,
+                                        "status": "calling",
+                                        "id": tool_id,
+                                    },
+                                )
                             elif block_type == "ToolResultBlock":
                                 is_error = getattr(block, "is_error", False)
                                 status = "failed" if is_error else "completed"
                                 tool_id = getattr(block, "tool_use_id", "")
                                 tool_name = tool_id_to_name.get(tool_id, tool_id[:12])
                                 print(f"  [mcp] {tool_name}: {status}", flush=True)
-                                bus_emit("tool_result", {"tool": tool_name, "status": status, "id": tool_id})
+                                bus_emit(
+                                    "tool_result",
+                                    {
+                                        "tool": tool_name,
+                                        "status": status,
+                                        "id": tool_id,
+                                    },
+                                )
                             elif block_type == "ThinkingBlock":
                                 pass  # Skip thinking blocks
                 elif msg_type == "ResultMessage":
@@ -2135,8 +2226,9 @@ def print_status(state):
     if sessions:
         print("  Recent Sessions:")
         for s in sessions[-5:]:
+            partial_str = f", {s.get('partial', 0)} partial" if s.get('partial', 0) else ""
             print(
-                f"    {s.get('date', '?')}: +{s.get('completed', 0)} completed, {s.get('skipped', 0)} skipped"
+                f"    {s.get('date', '?')}: +{s.get('completed', 0)} completed, {s.get('skipped', 0)} skipped, {s.get('failed', 0)} failed{partial_str}"
             )
         print()
 
@@ -2176,15 +2268,157 @@ def _sync_func_state(func, completeness, score=None, deductions=None):
         func["fixable"] = float(
             completeness.get("fixable_deductions", func.get("fixable", 0))
         )
-        func["is_leaf"] = completeness.get("classification") == "leaf"
+        func["is_leaf"] = completeness.get(
+            "is_leaf", completeness.get("classification") == "leaf"
+        )
         # Update name if it changed in Ghidra
         new_name = completeness.get("function_name")
         if new_name and not new_name.startswith("FUN_"):
             func["name"] = new_name
 
 
+# ---------------------------------------------------------------------------
+# Post-pass Hungarian audit (Guard #4)
+# ---------------------------------------------------------------------------
+
+# Canonical prefix→type mapping for mechanical validation
+_HUNGARIAN_PREFIX_TO_TYPES = {
+    "p": {"void *", "char *", "wchar_t *"},  # Also any pointer type — checked specially
+    "pp": set(),  # pointer-to-pointer — checked specially
+    "dw": {"uint", "dword", "ulong", "unsigned int", "unsigned long"},
+    "n": {"int", "short", "long", "signed int"},
+    "i": {"int", "signed int"},
+    "b": {"byte", "uchar", "unsigned char", "bool"},
+    "by": {"byte", "uchar", "unsigned char"},
+    "f": {"bool", "BOOL"},
+    "w": {"ushort", "unsigned short", "word", "wchar_t"},
+    "sz": {"char *"},
+    "lpsz": {"char *"},
+    "wsz": {"wchar_t *"},
+    "ll": {"longlong", "long long", "int64_t", "__int64"},
+    "qw": {"ulonglong", "unsigned long long", "uint64_t"},
+    "fl": {"float"},
+    "d": {"double"},
+    "ab": set(),  # byte arrays — checked specially
+    "aw": set(),  # ushort arrays — checked specially
+    "ad": set(),  # uint arrays — checked specially
+    "c": {"char", "signed char"},
+    "ch": {"char", "signed char"},
+    "l": {"long", "signed long"},
+}
+
+
+def _extract_hungarian_prefix(name):
+    """Extract the Hungarian prefix from a variable name.
+
+    Returns (prefix, base_name) or (None, name) if no prefix found.
+    """
+    if not name or len(name) < 2:
+        return None, name
+    # Strip g_ for globals
+    work = name[2:] if name.startswith("g_") else name
+    if not work:
+        return None, name
+    # Try two-char prefixes first, then single-char
+    for plen in (4, 3, 2):
+        candidate = work[:plen]
+        if candidate in _HUNGARIAN_PREFIX_TO_TYPES:
+            # Prefix must be followed by an uppercase letter
+            rest = work[plen:]
+            if rest and rest[0].isupper():
+                return candidate, rest
+    # Single-char prefixes
+    if work[0] in _HUNGARIAN_PREFIX_TO_TYPES and len(work) > 1 and work[1].isupper():
+        return work[0], work[1:]
+    return None, name
+
+
+def _is_type_pointer(type_str):
+    """Check if a Ghidra type string represents a pointer."""
+    return type_str.rstrip().endswith("*")
+
+
+def _is_generic_varname(name):
+    """Check if a variable name is Ghidra's auto-generated default."""
+    import re
+    return bool(re.match(r'^(local_|[a-z]{1,2}Var\d+$|param_|in_|unaff_|extraout_)', name))
+
+
+def _audit_hungarian_compliance(address, program):
+    """Fetch variables and check for Hungarian prefix/type mismatches.
+
+    Returns a list of issue dicts:
+      [{"var": name, "type": type, "prefix": prefix, "issue": description}, ...]
+    Also returns count of remaining generic-named variables.
+    """
+    vars_data = ghidra_get(
+        "/get_function_variables",
+        params={"function_name": f"FUN_{address}", "program": program},
+    )
+    # Try address-based lookup if name-based fails
+    if not vars_data:
+        vars_data = ghidra_get(
+            "/get_function_variables",
+            params={"function_name": f"0x{address}", "program": program},
+        )
+    if not vars_data or not isinstance(vars_data, dict):
+        return [], 0
+
+    issues = []
+    generic_count = 0
+    all_vars = vars_data.get("parameters", []) + vars_data.get("locals", [])
+
+    for v in all_vars:
+        name = v.get("name", "")
+        vtype = v.get("type", "")
+        is_phantom = v.get("is_phantom", False)
+
+        # Skip phantoms — can't be fixed
+        if is_phantom:
+            continue
+
+        # Count generic names (variables the model didn't rename)
+        if _is_generic_varname(name):
+            generic_count += 1
+            continue
+
+        # Check Hungarian prefix consistency
+        prefix, _ = _extract_hungarian_prefix(name)
+        if not prefix:
+            continue  # No prefix to validate
+
+        # Special pointer checks
+        if prefix in ("p", "pp"):
+            if not _is_type_pointer(vtype):
+                issues.append({
+                    "var": name,
+                    "type": vtype,
+                    "prefix": prefix,
+                    "issue": f"'{prefix}' prefix requires pointer type, got '{vtype}'",
+                })
+            continue
+
+        # Standard prefix check
+        valid_types = _HUNGARIAN_PREFIX_TO_TYPES.get(prefix, set())
+        if valid_types and vtype.lower().strip() not in {t.lower() for t in valid_types}:
+            # Don't flag pointer types with 'p' prefix that are correctly typed
+            if _is_type_pointer(vtype) and prefix == "p":
+                continue
+            issues.append({
+                "var": name,
+                "type": vtype,
+                "prefix": prefix,
+                "issue": f"'{prefix}' prefix expects {valid_types}, got '{vtype}'",
+            })
+
+    return issues, generic_count
+
+
 def _rescore_and_sync(func, address, program):
-    """Re-fetch completeness from Ghidra and sync all fields. Returns new score or None."""
+    """Re-fetch completeness from Ghidra and sync all fields.
+
+    Returns (new_score, completeness_dict) or (None, None).
+    """
     fresh = ghidra_get(
         "/analyze_function_completeness",
         params={"function_address": f"0x{address}", "program": program},
@@ -2195,8 +2429,8 @@ def _rescore_and_sync(func, address, program):
         )
         deductions = fresh.get("deduction_breakdown", [])
         _sync_func_state(func, fresh, new_score, deductions)
-        return new_score
-    return None
+        return new_score, fresh
+    return None, None
 
 
 def _append_run_log(entry):
@@ -2248,7 +2482,16 @@ def _inject_tool_block(prompt):
     return prompt + "\n" + tool_block
 
 
-def process_function(func_key, func, state, model=None, manual=False, dry_run=False, provider=None, stop_flag=None):
+def process_function(
+    func_key,
+    func,
+    state,
+    model=None,
+    manual=False,
+    dry_run=False,
+    provider=None,
+    stop_flag=None,
+):
     """Process a single function: fetch data, build prompt, invoke AI provider."""
     if stop_flag and stop_flag.is_set():
         return "stopped"
@@ -2257,7 +2500,15 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
     program = func["program"]
     name = func["name"]
 
-    bus_emit("function_started", {"key": func_key, "name": name, "address": address, "program": func.get("program_name", "")})
+    bus_emit(
+        "function_started",
+        {
+            "key": func_key,
+            "name": name,
+            "address": address,
+            "program": func.get("program_name", ""),
+        },
+    )
     print(f"\n  {name} @ 0x{address} ({func['program_name']})")
     print(f"  {'-' * 50}")
 
@@ -2277,6 +2528,16 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
     _sync_func_state(func, data.get("completeness"), live_score, data.get("deductions"))
     save_state(state)
 
+    # Capture pre-work artifact snapshot for post-run validation
+    pre_completeness = data.get("completeness") or {}
+    pre_has_plate = pre_completeness.get("has_plate_comment", False)
+    pre_has_custom_name = pre_completeness.get("has_custom_name", False)
+    pre_fixable_cats = set(
+        d.get("category")
+        for d in pre_completeness.get("deduction_breakdown", [])
+        if d.get("fixable", False)
+    )
+
     # Short-circuit: skip well-documented functions in auto mode only
     # Manual mode always builds a prompt (for review/audit)
     if not manual:
@@ -2284,8 +2545,15 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         fixable_pts = (
             float(completeness.get("fixable_deductions", 999)) if completeness else 999
         )
-        if live_score is not None and live_score >= 95 and fixable_pts == 0:
-            print(f"  SKIP: {live_score}% effective, 0 fixable deductions")
+        if live_score is not None and live_score >= 95 and fixable_pts < 3:
+            print(f"  SKIP: {live_score}% effective, {fixable_pts:.1f} fixable pts (< 3)")
+            func["last_result"] = "skipped_complete"
+            save_state(state)
+            return "skipped"
+
+        # FIX mode only: skip if there's almost nothing fixable regardless of score
+        if mode == "FIX" and fixable_pts < 3:
+            print(f"  SKIP: FIX mode but only {fixable_pts:.1f} fixable pts remaining")
             func["last_result"] = "skipped_complete"
             save_state(state)
             return "skipped"
@@ -2328,6 +2596,10 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
 
     prompt = _inject_tool_block(prompt)
 
+    # Pre-flight complexity gate
+    complexity_tier = _estimate_complexity(data.get("completeness"))
+    complexity_forced_recovery = False
+
     # Risk-based two-pass decision (replaces crude prompt-length heuristic)
     use_two_pass = False
     if mode == "FULL" and not manual:
@@ -2349,6 +2621,12 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
                 or (_score is not None and _score < 30)
             ):
                 use_two_pass = True
+
+        # Massive functions: force recovery-only (skip pass 2)
+        if complexity_tier == "massive":
+            use_two_pass = True
+            complexity_forced_recovery = True
+            print(f"  COMPLEXITY: {complexity_tier} — forcing recovery-only mode")
     if use_two_pass:
         recovery_prompt = build_recovery_prompt(
             func_name, address, data, program=program
@@ -2358,7 +2636,10 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         prompt = recovery_prompt
         mode = "FULL:recovery"
 
-    bus_emit("function_mode", {"key": func_key, "mode": mode, "model": selected_model, "score": live_score})
+    bus_emit(
+        "function_mode",
+        {"key": func_key, "mode": mode, "model": selected_model, "score": live_score},
+    )
     print(f"  {mode} | {selected_model} | {len(prompt):,} chars | score: {live_score}%")
 
     if dry_run:
@@ -2396,7 +2677,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
         key = _read_single_key()
         func["last_result"] = "manual_prompt_generated"
         func["last_processed"] = datetime.now().isoformat()
-        new_score = _rescore_and_sync(func, address, program)
+        new_score, _ = _rescore_and_sync(func, address, program)
         if new_score is not None:
             delta = ""
             if live_score is not None:
@@ -2410,12 +2691,13 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
 
     # Auto mode: invoke AI (provider based on AI_PROVIDER)
     print()
-    output, meta = invoke_claude(prompt, model=selected_model, provider=provider)
+    output, meta = invoke_claude(prompt, model=selected_model, provider=provider, complexity_tier=complexity_tier)
     tool_calls_made = meta.get("tool_calls", -1)
 
     # Two-pass: if recovery pass made tool calls, run pass 2 (comments) with fresh data
     # Don't gate on "DONE:" text — the model may produce think-only output or empty response
-    if use_two_pass and tool_calls_made > 0:
+    # Skip pass 2 for massive functions — they need multiple sessions
+    if use_two_pass and tool_calls_made > 0 and not complexity_forced_recovery:
         print(
             f"\n  Pass 1 (recovery) complete. Re-fetching data for pass 2 (comments)..."
         )
@@ -2433,7 +2715,7 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
             f"  {mode} | {selected_model} | {len(prompt2):,} chars | score: {mid_score}%"
         )
         print()
-        output2, meta2 = invoke_claude(prompt2, model=selected_model, provider=provider)
+        output2, meta2 = invoke_claude(prompt2, model=selected_model, provider=provider, complexity_tier=complexity_tier)
         # Merge results: use pass 2 output for final parsing, sum tool calls
         if output2:
             output = output2
@@ -2469,7 +2751,8 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
     func["last_result"] = result
 
     # Sync point 2: re-score after auto-mode completion
-    new_score = _rescore_and_sync(func, address, program)
+    new_score, post_completeness = _rescore_and_sync(func, address, program)
+    missing_artifacts = []  # Track what the model failed to deliver
     if new_score is not None:
         delta = ""
         if live_score is not None:
@@ -2484,7 +2767,8 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
             result == "completed"
             and live_score is not None
             and diff <= 0
-            and tool_calls_made == 0  # Only downgrade when we KNOW zero tools were called
+            and tool_calls_made
+            == 0  # Only downgrade when we KNOW zero tools were called
             and mode in ("FULL", "FIX", "FULL:recovery", "FULL:comments")
         ):
             print(
@@ -2494,30 +2778,149 @@ def process_function(func_key, func, state, model=None, manual=False, dry_run=Fa
             func["last_result"] = result
         else:
             print(f"\n  Score after: {new_score}%{delta} | Result: {result}")
+
+        # Guard #2b: score regression detection
+        # If score dropped significantly and model claimed completion, downgrade
+        if (
+            result == "completed"
+            and live_score is not None
+            and diff < -5
+        ):
+            print(
+                f"  WARNING: Score regressed by {abs(diff):.0f}% — downgrading to partial"
+            )
+            missing_artifacts.append("score_regression")
+            result = "partial"
+            func["last_result"] = result
+
+        # Guard #3: artifact-based completion validation
+        # Check that high-value artifacts the model should have produced actually exist.
+        # This catches models that claim DONE but skip key deliverables (e.g. plate comment).
+        if (
+            result == "completed"
+            and post_completeness
+            and mode not in ("VERIFY", "FULL:recovery")
+        ):
+            post_has_plate = post_completeness.get("has_plate_comment", False)
+            post_has_custom_name = post_completeness.get("has_custom_name", False)
+            post_fixable_cats = set(
+                d.get("category")
+                for d in post_completeness.get("deduction_breakdown", [])
+                if d.get("fixable", False)
+            )
+
+            # Check: plate comment should exist after FULL or FIX with plate deduction
+            if not post_has_plate and (
+                mode == "FULL"
+                or mode == "FULL:comments"
+                or "missing_plate_comment" in pre_fixable_cats
+            ):
+                missing_artifacts.append("plate_comment")
+
+            # Check: function should have a custom name after FULL mode
+            if not post_has_custom_name and mode in ("FULL", "FULL:comments"):
+                missing_artifacts.append("custom_name")
+
+            # Identity check: warn if function name didn't change when it should have
+            post_func_name = post_completeness.get("function_name", "")
+            if (
+                post_func_name
+                and post_func_name == func_name
+                and not pre_has_custom_name
+                and mode in ("FULL", "FULL:comments")
+            ):
+                print(f"  WARNING: Function still has original name '{func_name}' after FULL mode")
+
+            # Check: fixable deductions that were present before but not resolved
+            # Only flag high-value categories that the prompt explicitly asked to fix
+            HIGH_VALUE_CATS = {
+                "missing_plate_comment",
+                "address_suffix_name",
+                "missing_prototype",
+                "return_type_unresolved",
+                "plate_comment_stub",
+                "plate_comment_incomplete",
+            }
+            still_present = pre_fixable_cats & post_fixable_cats & HIGH_VALUE_CATS
+            for cat in still_present:
+                if cat not in ("missing_plate_comment",):  # Already checked above
+                    missing_artifacts.append(cat)
+
+            if missing_artifacts:
+                print(
+                    f"  WARNING: Model claimed DONE but missing artifacts: {', '.join(missing_artifacts)}"
+                    f" — downgrading to partial"
+                )
+                result = "partial"
+                func["last_result"] = result
+
+        # Guard #4: post-pass Hungarian audit
+        # Mechanical check: verify renamed variables have correct prefix for their type.
+        # Also count leftover generic-named variables the model didn't rename.
+        if result in ("completed", "partial") and tool_calls_made > 0:
+            hungarian_issues, generic_remaining = _audit_hungarian_compliance(address, program)
+            if hungarian_issues:
+                issue_summary = "; ".join(
+                    f"{i['var']}({i['prefix']}→{i['type']})" for i in hungarian_issues[:5]
+                )
+                print(
+                    f"  HUNGARIAN AUDIT: {len(hungarian_issues)} prefix/type mismatch(es): {issue_summary}"
+                )
+                if result == "completed" and len(hungarian_issues) >= 2:
+                    missing_artifacts.append("hungarian_mismatches")
+                    result = "partial"
+                    func["last_result"] = result
+                    print(f"  — downgrading to partial ({len(hungarian_issues)} mismatches)")
+            if generic_remaining > 0:
+                print(f"  VARIABLE AUDIT: {generic_remaining} generic-named variable(s) remaining")
+                if result == "completed" and generic_remaining >= 3 and mode in ("FULL", "FULL:recovery", "FULL:comments"):
+                    missing_artifacts.append("generic_variables")
+                    result = "partial"
+                    func["last_result"] = result
+                    print(f"  — downgrading to partial ({generic_remaining} unrenamed variables)")
     else:
         print(f"\n  Result: {result} | Score: unavailable")
 
-    # Log this run for audit trail
-    _append_run_log({
-        "timestamp": datetime.now().isoformat(),
-        "program": program,
-        "address": address,
-        "function": func_name,
-        "mode": mode,
-        "model": selected_model,
-        "provider": provider or AI_PROVIDER,
-        "score_before": live_score,
-        "score_after": new_score,
-        "result": result,
-        "tool_calls": tool_calls_made,
-        "output": output[:5000] if output else None,
-    })
+    # Track partial_runs for requeue deprioritization
+    if result == "partial":
+        func["partial_runs"] = func.get("partial_runs", 0) + 1
 
-    bus_emit("score_update", {"key": func_key, "score_before": live_score, "score_after": new_score, "result": result})
-    bus_emit("function_complete", {"key": func_key, "result": result, "score": new_score})
+    # Log this run for audit trail
+    _append_run_log(
+        {
+            "timestamp": datetime.now().isoformat(),
+            "program": program,
+            "address": address,
+            "function": func_name,
+            "mode": mode,
+            "model": selected_model,
+            "provider": provider or AI_PROVIDER,
+            "score_before": live_score,
+            "score_after": new_score,
+            "score_delta": (new_score - live_score) if (new_score is not None and live_score is not None) else None,
+            "result": result,
+            "tool_calls": tool_calls_made,
+            "complexity_tier": complexity_tier,
+            "missing_artifacts": missing_artifacts if missing_artifacts else None,
+            "output": output[:5000] if output else None,
+        }
+    )
+
+    bus_emit(
+        "score_update",
+        {
+            "key": func_key,
+            "score_before": live_score,
+            "score_after": new_score,
+            "result": result,
+        },
+    )
+    bus_emit(
+        "function_complete", {"key": func_key, "result": result, "score": new_score}
+    )
 
     # Save program to persist changes in Ghidra
-    if result in ("completed", "needs_redo") and tool_calls_made > 0:
+    if result in ("completed", "needs_redo", "partial") and tool_calls_made > 0:
         ghidra_post("/save_program", params={"program": program})
 
     save_state(state)
@@ -2590,7 +2993,9 @@ def main():
         "--folder", default=None, help="Ghidra project folder (default: /Mods/PD2-S12)"
     )
     parser.add_argument(
-        "--binary", default=None, help="Focus on a specific binary (e.g., D2Common.dll). Persisted to state."
+        "--binary",
+        default=None,
+        help="Focus on a specific binary (e.g., D2Common.dll). Persisted to state.",
     )
     parser.add_argument(
         "--dry-run",
@@ -2643,6 +3048,7 @@ def main():
         dashboard_url = f"http://127.0.0.1:{args.web_port}"
         print(f"Starting web dashboard at {dashboard_url}")
         import webbrowser
+
         webbrowser.open(dashboard_url)
         socketio.run(app, host="127.0.0.1", port=args.web_port, debug=False)
         return
@@ -2670,8 +3076,12 @@ def main():
             def _run_dashboard():
                 try:
                     dash_socketio.run(
-                        dash_app, host="127.0.0.1", port=dash_port,
-                        debug=False, use_reloader=False, allow_unsafe_werkzeug=True,
+                        dash_app,
+                        host="127.0.0.1",
+                        port=dash_port,
+                        debug=False,
+                        use_reloader=False,
+                        allow_unsafe_werkzeug=True,
                     )
                 except Exception as e:
                     print(f"  Dashboard error: {e}", flush=True)
@@ -2683,15 +3093,20 @@ def main():
             for _ in range(30):
                 time.sleep(0.1)
                 try:
-                    with socket.create_connection(("127.0.0.1", dash_port), timeout=0.5):
+                    with socket.create_connection(
+                        ("127.0.0.1", dash_port), timeout=0.5
+                    ):
                         break
                 except (ConnectionRefusedError, OSError):
                     continue
 
             # Auto-open browser on first run (track via temp file to avoid repeat opens)
-            sentinel = Path(tempfile.gettempdir()) / f"fundoc_dashboard_{dash_port}.lock"
+            sentinel = (
+                Path(tempfile.gettempdir()) / f"fundoc_dashboard_{dash_port}.lock"
+            )
             if not sentinel.exists():
                 import webbrowser
+
                 webbrowser.open(dashboard_url)
                 sentinel.write_text(str(os.getpid()))
                 print(f"  Dashboard opened: {dashboard_url}")
@@ -2709,7 +3124,9 @@ def main():
 
     # --scan: update state from Ghidra (incremental by default, --refresh for full)
     if args.scan:
-        scan_functions(state, project_folder, refresh=args.refresh, binary_filter=active_binary)
+        scan_functions(
+            state, project_folder, refresh=args.refresh, binary_filter=active_binary
+        )
         print_status(state)
         return
 
@@ -2813,6 +3230,8 @@ def main():
                         session["skipped"] += 1
                     elif result == "failed" or result == "blocked":
                         session["failed"] += 1
+                    elif result == "partial":
+                        session["partial"] += 1
             else:
                 # Manual mode, depth 1: interactive loop re-fetching from CodeBrowser
                 while True:
@@ -2834,6 +3253,8 @@ def main():
                         session["skipped"] += 1
                     elif result == "failed" or result == "blocked":
                         session["failed"] += 1
+                    elif result == "partial":
+                        session["partial"] += 1
 
                     # Re-fetch current function from CodeBrowser for next iteration
                     current = ghidra_get("/get_current_function")
@@ -2891,6 +3312,8 @@ def main():
                 session["skipped"] += 1
             elif result == "failed" or result == "blocked":
                 session["failed"] += 1
+            elif result == "partial":
+                session["partial"] += 1
 
         end_session(state)
         save_state(state)
