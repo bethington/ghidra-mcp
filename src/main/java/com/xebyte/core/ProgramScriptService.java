@@ -1131,6 +1131,10 @@ public class ProgramScriptService {
             }
 
             Memory memory = program.getMemory();
+            int MAX_READ_BYTES = 16 * 1024 * 1024; // 16 MB safety limit
+            if (length <= 0 || length > MAX_READ_BYTES) {
+                return Response.err("length must be between 1 and " + MAX_READ_BYTES + " bytes");
+            }
             byte[] bytes = new byte[length];
 
             int bytesRead = memory.getBytes(address, bytes);

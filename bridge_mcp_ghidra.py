@@ -932,6 +932,10 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
 
     # Try TCP fallback
     tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
+    if not validate_server_url(tcp_url):
+        return json.dumps(
+            {"error": f"Refusing to connect to non-local URL: {tcp_url}. Only 127.0.0.1, localhost, and ::1 are allowed."}
+        )
     try:
         _active_tcp = tcp_url
         _active_socket = None
@@ -1231,6 +1235,9 @@ def _auto_connect():
 
     # Try TCP fallback
     tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
+    if not validate_server_url(tcp_url):
+        logger.warning(f"Refusing to auto-connect to non-local URL: {tcp_url}")
+        return
     try:
         _active_tcp = tcp_url
         _transport_mode = "tcp"
