@@ -593,7 +593,7 @@ public class ProgramScriptService {
                     return Response.err("Import failed: no primary program. Log: " + log);
                 }
                 // Save to project folder before releasing (prevents "Database is closed")
-                loadResults.save(project, ghidra.util.task.TaskMonitor.DUMMY);
+                loadResults.save(ghidra.util.task.TaskMonitor.DUMMY);
                 loadResults.release(this);
             }
 
@@ -646,7 +646,7 @@ public class ProgramScriptService {
 
     @McpTool(path = "/reanalyze", method = "POST", description = "Trigger full auto-analysis on a program", category = "program")
     public Response reanalyze(
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "", description = "Program name (default: current program)") String programName) {
+            @Param(value = "program", defaultValue = "", description = "Program name (default: current program)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -762,7 +762,7 @@ public class ProgramScriptService {
     public Response runGhidraScript(
             @Param(value = "script_path", source = ParamSource.BODY) String scriptPath,
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1178,7 +1178,7 @@ public class ProgramScriptService {
             @Param(value = "execute", source = ParamSource.BODY, defaultValue = "false") boolean execute,
             @Param(value = "volatile", source = ParamSource.BODY, defaultValue = "false") boolean isVolatile,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1284,7 +1284,7 @@ public class ProgramScriptService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
             @Param(value = "comment", source = ParamSource.BODY, defaultValue = "") String comment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1430,7 +1430,7 @@ public class ProgramScriptService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "category", source = ParamSource.BODY, defaultValue = "") String category,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1492,7 +1492,7 @@ public class ProgramScriptService {
             @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String scriptArgs,
             @Param(value = "timeout_seconds", source = ParamSource.BODY, defaultValue = "300") int timeoutSeconds,
             @Param(value = "capture_output", source = ParamSource.BODY, defaultValue = "true") boolean captureOutput,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         if (scriptName == null || scriptName.isEmpty()) {
             return Response.err("Script name is required");
         }
@@ -1789,7 +1789,7 @@ public class ProgramScriptService {
     @McpTool(path = "/set_image_base", method = "POST", description = "Set the base address of the program (rebases all addresses)", category = "program")
     public Response setImageBase(
             @Param(value = "address", source = ParamSource.BODY, description = "New base address (e.g. 0x08000000)") String addressStr,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

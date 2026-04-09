@@ -181,7 +181,7 @@ public class AnalysisService {
      */
     @McpTool(path = "/run_analysis", method = "POST", description = "Trigger auto-analysis on program", category = "analysis")
     public Response runAnalysis(
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -234,7 +234,7 @@ public class AnalysisService {
             @Param(value = "include_xref_map", source = ParamSource.BODY, defaultValue = "true") boolean includeXrefMap,
             @Param(value = "include_assembly_patterns", source = ParamSource.BODY, defaultValue = "true") boolean includeAssemblyPatterns,
             @Param(value = "include_boundary_detection", source = ParamSource.BODY, defaultValue = "true") boolean includeBoundaryDetection,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -406,7 +406,7 @@ public class AnalysisService {
             @Param(value = "analyze_loop_bounds", source = ParamSource.BODY, defaultValue = "true") boolean analyzeLoopBounds,
             @Param(value = "analyze_indexing", source = ParamSource.BODY, defaultValue = "true") boolean analyzeIndexing,
             @Param(value = "max_scan_range", source = ParamSource.BODY, defaultValue = "2048") int maxScanRange,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -472,7 +472,7 @@ public class AnalysisService {
                                + "address is unambiguous.") String structAddressStr,
             @Param(value = "field_offset", source = ParamSource.BODY, defaultValue = "0") int fieldOffset,
             @Param(value = "num_examples", source = ParamSource.BODY, defaultValue = "5") int numExamples,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         // MAJOR FIX #7: Validate input parameters
         if (fieldOffset < 0 || fieldOffset > MAX_FIELD_OFFSET) {
             return Response.err("Field offset must be between 0 and " + MAX_FIELD_OFFSET);
@@ -1729,7 +1729,7 @@ public class AnalysisService {
     @SuppressWarnings("unchecked")
     public Response batchAnalyzeCompleteness(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         List<String> addresses;
         if (addressesObj instanceof List<?> list) {
             addresses = list.stream().map(String::valueOf).collect(java.util.stream.Collectors.toList());
@@ -1751,7 +1751,7 @@ public class AnalysisService {
         sb.append("{\"results\": [");
         for (int i = 0; i < addresses.size(); i++) {
             if (i > 0) sb.append(", ");
-            sb.append(analyzeFunctionCompleteness(addresses.get(i)).toJson());
+            sb.append(analyzeFunctionCompleteness(addresses.get(i), false, programName).toJson());
         }
         sb.append("], \"count\": ").append(addresses.size()).append("}");
         return Response.text(sb.toString());

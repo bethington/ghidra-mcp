@@ -1091,7 +1091,7 @@ public class XrefCallGraphService {
     @McpTool(path = "/get_bulk_xrefs", method = "POST", description = "Batch cross-reference retrieval", category = "xref")
     public Response getBulkXrefs(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1164,7 +1164,7 @@ public class XrefCallGraphService {
             @Param(value = "xref_sources", source = ParamSource.BODY) Object xrefSourcesObj,
             @Param(value = "context_instructions", source = ParamSource.BODY, defaultValue = "5") int contextInstructions,
             @Param(value = "include_patterns", source = ParamSource.BODY) Object includePatternsObj,
-            @Param(value = "program", source = ParamSource.BODY, defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

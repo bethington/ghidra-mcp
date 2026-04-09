@@ -3,6 +3,8 @@
 ## Allowed Tools
 - `rename_function_by_address`
 - `set_function_prototype`
+- `get_function_callers`
+- `decompile_function`
 
 ## Rename Policy
 
@@ -47,3 +49,17 @@ Invalid patterns:
 - `__thiscall`: first param is `this` in ECX -- do NOT include a typed `this` in the prototype (see Step 3 known limitation)
 
 **Note**: Prototype changes trigger re-decompilation and may create new SSA variables. Step 3 will refresh the variable list.
+
+## Caller Verification (required for register params and enums)
+
+Before committing semantic names to these parameter types, you MUST verify against callers:
+
+1. **Register-passed parameters** (`in_EAX`, `in_EDX`, `in_ECX`): Call `get_function_callers` and `decompile_function` on 2-3 callers. Verify what value they pass in that register. Only assign a semantic name if callers confirm the role.
+2. **Enum-like parameters** (compared against small integer sets, used in switch/case): Check callers to see what constants they pass. Do not assign names like `nCostMode` or `nVendorId` based solely on how the function uses the value internally.
+3. **Flags/booleans**: If a parameter is compared to 0/1/true/false, check callers before naming it `bIsExclusive` vs `bCheckBoxType` -- the caller's context reveals intent.
+
+If callers are unavailable or ambiguous, use conservative names (`nParam1`, `dwParam2`) and note in the plate comment:
+```
+Parameters:
+  nParam3: int - Probable: cost mode (0/1/2 switch observed) -- not verified at call sites
+```

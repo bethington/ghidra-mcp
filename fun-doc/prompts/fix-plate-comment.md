@@ -36,6 +36,14 @@ Structure Layout: (only if function accesses structs)
 3. **Apply**: Single `batch_set_comments` call with `plate_comment` parameter. Can include PRE and EOL comments in the same call.
 4. Scoring is handled externally -- do not call `analyze_function_completeness`.
 
+## Inference Labeling
+
+In the Parameters and Returns sections, distinguish proven facts from inferences:
+- **Proven** (from callers, constants, typed APIs): state directly. Example: `nUnitType: int - unit type (0=player, 1=monster, 5=item) from UnitAny+0x00`
+- **Probable** (inferred from internal usage only, not verified at call sites): prefix with `Probable:`. Example: `nCostMode: int - Probable: cost calculation mode (0/1/2 switch observed) -- not verified at call sites`
+
+Do NOT present inferred parameter roles as settled facts. A readable plate comment with wrong semantics is worse than a conservative one.
+
 ## Important
 - `set_function_prototype` wipes plate comments. NEVER set prototype after writing the plate comment.
 - Use actual multi-line text in the plate_comment parameter. `\n` escape sequences create literal text, NOT newlines.

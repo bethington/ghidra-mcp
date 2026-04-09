@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fun-Doc Command Center</title>
+    <style>
+        :root {
+            --bg-darkest: #0a0a0c; --bg-dark: #111114; --bg-medium: #1a1a1f;
+            --bg-light: #222228; --bg-hover: #2a2a32;
+            --border-dark: #2d2d35; --border-light: #3d3d45;
+            --color-magic: #6969FF; --color-rare: #FFFF00; --color-set: #00FF00;
+            --color-crafted: #FF6600;
+            --text-primary: #d4d4d4; --text-secondary: #8b8b8b; --text-muted: #5a5a5a;
+            --accent-gold: #C7B377; --accent-red: #8b2020; --accent-red-light: #c93030;
+            --font-main: 'Segoe UI', -apple-system, sans-serif;
+            --font-mono: 'Consolas', 'Monaco', monospace;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: var(--font-main); background: var(--bg-darkest); color: var(--text-primary); min-height: 100vh; display: flex; flex-direction: column; }
+
+        /* Header */
+        .header { background: linear-gradient(180deg, var(--bg-medium), var(--bg-dark)); border-bottom: 1px solid var(--accent-red); padding: 0.5rem 1rem; display: flex; align-items: center; gap: 0.75rem; }
+        .header-logo { font-size: 1rem; font-weight: 600; color: var(--accent-gold); }
+        .header-controls { display: flex; gap: 0.5rem; margin-left: 0.5rem; }
+        .header-info { margin-left: auto; color: var(--text-muted); font-size: 0.75rem; font-family: var(--font-mono); }
+        .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; background: var(--text-muted); }
+        .live-dot.connected { background: var(--color-set); animation: pulse 2s infinite; }
+        .live-dot.disconnected { background: var(--accent-red-light); }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        .main-container { flex: 1; padding: 1rem; overflow-y: auto; max-width: 1400px; margin: 0 auto; width: 100%; }
+
+        /* Buttons */
+        .btn { padding: 4px 10px; font-size: 0.7rem; border-radius: 3px; border: 1px solid var(--border-dark); background: var(--bg-medium); color: var(--text-secondary); cursor: pointer; font-family: var(--font-mono); transition: all 0.15s; }
+        .btn:hover { border-color: var(--accent-gold); color: var(--accent-gold); }
+        .btn.btn-primary { border-color: var(--accent-gold); color: var(--accent-gold); }
+        .btn.btn-danger { border-color: var(--accent-red-light); color: var(--accent-red-light); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Stats cards */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; margin-bottom: 1rem; }
+        .stat-card { background: var(--bg-medium); border: 1px solid var(--border-dark); border-radius: 6px; padding: 0.6rem; text-align: center; }
+        .stat-value { font-size: 1.6rem; font-weight: 700; color: var(--accent-gold); font-family: var(--font-mono); }
+        .stat-value.text-set { color: var(--color-set); } .stat-value.text-rare { color: var(--color-rare); }
+        .stat-value.text-crafted { color: var(--color-crafted); } .stat-value.text-magic { color: var(--color-magic); }
+        .stat-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+
+        /* Progress bar */
+        .progress-container { margin-bottom: 1rem; }
+        .progress-bar-outer { width: 100%; height: 22px; background: var(--bg-dark); border: 1px solid var(--border-dark); border-radius: 4px; overflow: hidden; position: relative; }
+        .progress-bar-inner { height: 100%; background: linear-gradient(90deg, var(--accent-red) 0%, var(--color-crafted) 40%, var(--accent-gold) 70%, var(--color-set) 100%); transition: width 0.5s; border-radius: 3px; }
+        .progress-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; text-shadow: 0 0 4px rgba(0,0,0,0.8); }
+
+        /* Status banner */
+        .status-banner { display: none; background: var(--bg-light); border: 1px solid var(--border-dark); border-radius: 4px; padding: 0.4rem 0.8rem; margin-bottom: 0.75rem; font-size: 0.8rem; font-family: var(--font-mono); color: var(--text-secondary); }
+        .status-banner.active { display: flex; align-items: center; gap: 0.5rem; }
+        .status-banner .spinner { width: 14px; height: 14px; border: 2px solid var(--border-light); border-top-color: var(--accent-gold); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Activity feed */
+        .activity-feed { max-height: 200px; overflow-y: auto; background: var(--bg-darkest); border: 1px solid var(--border-dark); border-radius: 4px; padding: 0.4rem; font-family: var(--font-mono); font-size: 0.7rem; line-height: 1.4; }
+        .activity-entry { padding: 1px 4px; border-radius: 2px; white-space: pre-wrap; word-break: break-all; }
+        .activity-started { color: var(--accent-gold); }
+        .activity-tool { color: var(--text-secondary); }
+        .activity-text { color: var(--text-primary); }
+        .activity-success { color: var(--color-set); }
+        .activity-error { color: var(--accent-red-light); }
+        .activity-neutral { color: var(--text-muted); }
+        .activity-scan { color: var(--color-magic); }
+
+        /* Panels */
+        .panel { background: var(--bg-dark); border: 1px solid var(--border-dark); border-radius: 6px; margin-bottom: 0.75rem; }
+        .panel-header { padding: 0.5rem 0.8rem; background: linear-gradient(180deg, var(--bg-light), var(--bg-medium)); border-bottom: 1px solid var(--border-dark); border-radius: 6px 6px 0 0; display: flex; align-items: center; justify-content: space-between; }
+        .panel-header h2 { font-size: 0.75rem; font-weight: 600; color: var(--accent-gold); text-transform: uppercase; letter-spacing: 1px; }
+        .panel-content { padding: 0.6rem; }
+
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+        .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+        @media (max-width: 1100px) { .three-col { grid-template-columns: 1fr 1fr; } }
+        @media (max-width: 800px) { .two-col, .three-col { grid-template-columns: 1fr; } }
+
+        /* Score bars */
+        .score-bar-row { display: flex; align-items: center; margin-bottom: 2px; gap: 5px; }
+        .score-bar-label { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); width: 42px; text-align: right; }
+        .score-bar-track { flex: 1; height: 14px; background: var(--bg-darkest); border-radius: 3px; overflow: hidden; }
+        .score-bar-fill { height: 100%; border-radius: 3px; }
+        .score-bar-fill.s100 { background: var(--color-set); } .score-bar-fill.s90 { background: #44cc44; }
+        .score-bar-fill.s80 { background: var(--accent-gold); } .score-bar-fill.s70 { background: var(--color-rare); }
+        .score-bar-fill.s60 { background: var(--color-crafted); } .score-bar-fill.s50 { background: #cc6600; }
+        .score-bar-fill.s40 { background: var(--accent-red-light); } .score-bar-fill.s30 { background: var(--accent-red); }
+        .score-bar-fill.s20 { background: #661111; } .score-bar-fill.s10 { background: #441111; } .score-bar-fill.s0 { background: #330808; }
+        .score-bar-count { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); width: 32px; }
+
+        /* Tables */
+        .data-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        .data-table th, .data-table td { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border-dark); text-align: left; font-size: 0.7rem; }
+        .data-table th { background: var(--bg-medium); color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 0.6rem; position: sticky; top: 0; }
+        .data-table tbody tr:hover { background: var(--bg-hover); }
+        .mono { font-family: var(--font-mono); font-size: 0.65rem; }
+
+        .badge { display: inline-block; padding: 1px 4px; border-radius: 3px; font-size: 0.6rem; font-weight: 600; font-family: var(--font-mono); }
+        .badge-leaf { background: rgba(105,105,255,0.2); color: var(--color-magic); border: 1px solid rgba(105,105,255,0.3); }
+        .badge-done { background: rgba(0,255,0,0.15); color: var(--color-set); border: 1px solid rgba(0,255,0,0.25); }
+        .badge-fix { background: rgba(255,255,0,0.15); color: var(--color-rare); border: 1px solid rgba(255,255,0,0.25); }
+        .badge-new { background: rgba(200,32,32,0.15); color: var(--accent-red-light); border: 1px solid rgba(200,32,32,0.25); }
+        .badge-pinned { background: rgba(199,179,119,0.2); color: var(--accent-gold); border: 1px solid rgba(199,179,119,0.3); }
+
+        .score-cell { font-family: var(--font-mono); font-weight: 600; }
+        .score-100 { color: var(--color-set); } .score-90 { color: #44cc44; }
+        .score-70 { color: var(--color-rare); } .score-50 { color: var(--color-crafted); } .score-low { color: var(--accent-red-light); }
+
+        .func-list-scroll { max-height: 400px; overflow-y: auto; }
+
+        /* Deduction rows */
+        .deduction-row { display: flex; align-items: center; padding: 0.25rem 0; border-bottom: 1px solid var(--border-dark); gap: 0.4rem; }
+        .deduction-cat { flex: 1; font-family: var(--font-mono); font-size: 0.7rem; }
+        .deduction-stat { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); width: 70px; text-align: right; }
+        .deduction-bar { width: 80px; height: 10px; background: var(--bg-darkest); border-radius: 2px; overflow: hidden; }
+        .deduction-bar-fill { height: 100%; background: var(--color-crafted); border-radius: 2px; }
+
+        /* Provider cards */
+        .provider-card { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; border-bottom: 1px solid var(--border-dark); }
+        .provider-name { font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-gold); width: 70px; }
+        .provider-stat { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); }
+
+        /* Filter */
+        .filter-bar { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+        .filter-input { padding: 0.2rem 0.5rem; font-size: 0.65rem; border-radius: 4px; border: 1px solid var(--border-dark); background: var(--bg-darkest); color: var(--text-primary); font-family: var(--font-mono); width: 160px; }
+        .filter-input:focus { outline: none; border-color: var(--accent-gold); }
+
+        .header-select { padding: 3px 6px; font-size: 0.7rem; border-radius: 3px; border: 1px solid var(--border-dark); background: var(--bg-darkest); color: var(--text-primary); font-family: var(--font-mono); cursor: pointer; }
+        .header-select:focus { outline: none; border-color: var(--accent-gold); }
+        .header-sep { border-left: 1px solid var(--border-dark); height: 18px; margin: 0 3px; }
+        .worker-input { padding: 3px 6px; font-size: 0.7rem; border-radius: 3px; border: 1px solid var(--border-dark); background: var(--bg-darkest); color: var(--text-primary); font-family: var(--font-mono); width: 45px; text-align: center; }
+        .worker-cards { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+        .worker-card { background: var(--bg-medium); border: 1px solid var(--border-dark); border-radius: 6px; padding: 0.5rem 0.7rem; min-width: 200px; position: relative; }
+        .worker-card.running { border-color: var(--color-set); }
+        .worker-card.stopping { border-color: var(--color-rare); }
+        .worker-card .wc-title { font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent-gold); margin-bottom: 0.15rem; }
+        .worker-card .wc-detail { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-secondary); }
+        .worker-card .wc-current { font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-primary); margin-top: 0.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+        .worker-card .btn-stop { position: absolute; top: 0.4rem; right: 0.4rem; }
+        .worker-pane { background: var(--bg-dark); border: 1px solid var(--border-dark); border-radius: 6px; display: flex; flex-direction: column; min-height: 100px; max-height: 180px; }
+        .worker-pane.running { border-color: var(--color-set); }
+        .worker-pane.stopping { border-color: var(--color-rare); }
+        .worker-pane.finished { border-color: var(--text-muted); opacity: 0.85; }
+        .worker-pane-header { padding: 0.25rem 0.5rem; background: linear-gradient(180deg, var(--bg-light), var(--bg-medium)); border-bottom: 1px solid var(--border-dark); border-radius: 6px 6px 0 0; display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; }
+        .worker-pane-header .wp-title { font-family: var(--font-mono); color: var(--accent-gold); font-weight: 600; }
+        .worker-pane-header .wp-status { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.6rem; }
+        .worker-pane-header .wp-actions { margin-left: auto; display: flex; gap: 3px; }
+        .worker-pane-output { flex: 1; overflow-y: auto; padding: 0.2rem 0.3rem; font-family: var(--font-mono); font-size: 0.6rem; line-height: 1.25; background: var(--bg-darkest); }
+        .footer { background: var(--bg-dark); border-top: 1px solid var(--border-dark); padding: 0.4rem; text-align: center; color: var(--text-muted); font-size: 0.65rem; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <span class="header-logo">Fun-Doc Command Center</span>
+        <div class="header-controls">
+            <select class="header-select" id="folderSelect" onchange="switchFolder(this.value)" title="Project folder">
+                {% for folder in stats.available_folders|default([]) %}
+                <option value="{{ folder }}" {% if folder == stats.project_folder %}selected{% endif %}>{{ folder }}</option>
+                {% endfor %}
+            </select>
+            <select class="header-select" id="binarySelect" onchange="switchBinary(this.value)">
+                <option value="" disabled>Select Binary</option>
+                {% for bin in stats.available_binaries|default([]) %}
+                <option value="{{ bin }}" {% if bin == stats.active_binary %}selected{% endif %}>{{ bin }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-primary" onclick="requestRescan(false)">Rescan</button>
+            <button class="btn" onclick="requestRescan(true)">Full Rescan</button>
+            <span class="header-sep"></span>
+            <select class="header-select" id="workerProvider">
+                <option value="claude">Claude</option>
+                <option value="minimax">MiniMax</option>
+                <option value="codex">Codex</option>
+            </select>
+            <input type="number" class="worker-input" id="workerCount" value="10" min="1" max="500" title="Functions to process">
+            <label style="font-size: 0.65rem; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 3px;" title="Run until stopped or queue empty">
+                <input type="checkbox" id="workerContinuous" style="margin: 0;"> <span style="line-height: 1;">Auto</span>
+            </label>
+            <button class="btn btn-primary" id="btnRunWorker" onclick="startWorker()">Run Worker</button>
+        </div>
+        <span class="header-info">
+            <span class="live-dot" id="liveDot"></span>
+            <span id="connStatus">Connecting...</span> | {{ stats.project_folder }}
+        </span>
+    </header>
+
+    <main class="main-container">
+        <!-- Status banner -->
+        <div class="status-banner" id="statusBanner">
+            <div class="spinner"></div>
+            <span id="bannerText"></span>
+        </div>
+
+        <!-- Worker status cards (replaced by output panes, kept for status updates) -->
+        <div id="workerPanel" style="display: none;"></div>
+
+        <!-- Stats cards -->
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-value" id="stat-total">{{ stats.total }}</div><div class="stat-label">Total</div></div>
+            <div class="stat-card"><div class="stat-value text-set" id="stat-done">{{ stats.done }}</div><div class="stat-label">Done</div></div>
+            <div class="stat-card"><div class="stat-value text-rare" id="stat-fixable">{{ stats.fixable }}</div><div class="stat-label">Fixable</div></div>
+            <div class="stat-card"><div class="stat-value text-crafted" id="stat-needs-work">{{ stats.needs_work }}</div><div class="stat-label">Needs Work</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-pct">{{ stats.pct }}%</div><div class="stat-label">Progress</div></div>
+            <div class="stat-card"><div class="stat-value text-magic" id="stat-today">{{ stats.run_stats.today_runs }}</div><div class="stat-label">Runs Today</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-delta">{{ stats.run_stats.avg_delta }}%</div><div class="stat-label">Avg Delta</div></div>
+        </div>
+
+        <!-- Progress bar -->
+        <div class="progress-container">
+            <div class="progress-bar-outer">
+                <div class="progress-bar-inner" id="progressInner" style="width: {{ stats.pct }}%"></div>
+                <div class="progress-text" id="progressText">{{ stats.done }} / {{ stats.total }} ({{ stats.pct }}%)</div>
+            </div>
+        </div>
+
+        <!-- Worker Output Panes (2x2 grid) -->
+        <div id="workerGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem; margin-bottom: 0.5rem;">
+            <!-- Worker panes are dynamically created by JavaScript -->
+        </div>
+
+        <!-- Row: Score Distribution + Deduction Breakdown + Run Stats -->
+        <div class="three-col" id="analyticsRow">
+            <div class="panel">
+                <div class="panel-header"><h2>Score Distribution</h2></div>
+                <div class="panel-content" id="scoreDistPanel">
+                    {% set max_count = stats.buckets.values()|max if stats.buckets.values()|list else 1 %}
+                    {% for bucket, css in [("100","s100"),("90-99","s90"),("80-89","s80"),("70-79","s70"),("60-69","s60"),("50-59","s50"),("40-49","s40"),("30-39","s30"),("20-29","s20"),("10-19","s10"),("0-9","s0")] %}
+                    {% set count = stats.buckets.get(bucket, 0) %}
+                    {% if count > 0 %}
+                    <div class="score-bar-row">
+                        <span class="score-bar-label">{{ bucket }}</span>
+                        <div class="score-bar-track"><div class="score-bar-fill {{ css }}" style="width: {{ (count / max_count * 100)|round }}%"></div></div>
+                        <span class="score-bar-count">{{ count }}</span>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><h2>Where Points Are Lost</h2></div>
+                <div class="panel-content" id="deductionPanel">
+                    {% if stats.deduction_breakdown %}
+                    {% set max_pts = stats.deduction_breakdown[0].total_pts if stats.deduction_breakdown else 1 %}
+                    {% for d in stats.deduction_breakdown[:10] %}
+                    <div class="deduction-row">
+                        <span class="deduction-cat">{{ d.category | replace("_", " ") }}</span>
+                        <span class="deduction-stat">{{ d.functions }} fns</span>
+                        <div class="deduction-bar"><div class="deduction-bar-fill" style="width: {{ (d.total_pts / max_pts * 100)|round }}%"></div></div>
+                        <span class="deduction-stat">{{ d.total_pts|round(0)|int }} pts</span>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <div style="color: var(--text-muted);">No data. Run a scan first.</div>
+                    {% endif %}
+                </div>
+            </div>
+            <div>
+                <div class="panel">
+                    <div class="panel-header"><h2>Model Performance</h2></div>
+                    <div class="panel-content" id="runStatsPanel">
+                        <div style="display: flex; gap: 0.75rem; margin-bottom: 0.4rem;">
+                            <div><span class="mono" style="color: var(--accent-gold);">{{ stats.run_stats.total_runs }}</span> <span style="color: var(--text-muted); font-size: 0.65rem;">runs</span></div>
+                            <div><span class="mono" style="color: var(--color-set);">{{ stats.run_stats.success_rate }}%</span> <span style="color: var(--text-muted); font-size: 0.65rem;">success</span></div>
+                        </div>
+                        {% for provider, pstats in stats.run_stats.by_provider.items() %}
+                        <div class="provider-card">
+                            <span class="provider-name">{{ provider }}</span>
+                            <span class="provider-stat">{{ pstats.runs }} runs</span>
+                            <span class="provider-stat">avg {{ pstats.avg_delta }}%</span>
+                        </div>
+                        {% endfor %}
+                        {% if stats.run_stats.stuck_functions %}
+                        <div style="margin-top: 0.4rem; font-size: 0.65rem; color: var(--accent-red-light);">
+                            <strong>Stuck:</strong>
+                            {% for s in stats.run_stats.stuck_functions[:3] %}
+                            <div style="color: var(--text-muted);">{{ s.name }} ({{ s.fails }}x)</div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header"><h2>Cross-Binary Progress</h2></div>
+                    <div class="panel-content" id="perBinaryPanel" style="max-height: 300px; overflow-y: auto;">
+                        <table class="data-table"><thead><tr><th>Binary</th><th>Progress</th><th>Done</th><th>Total</th><th>Avg</th><th>Fixable</th><th></th></tr></thead><tbody>
+                        {% for prog, info in stats.by_program.items()|sort %}
+                        {% set pct = ((info.done / info.total * 100) if info.total > 0 else 0)|round(1) %}
+                        <tr>
+                            <td style="cursor: pointer; color: var(--accent-gold);" onclick="switchBinaryDirect('{{ prog }}')">{{ prog }}</td>
+                            <td style="width: 100px;">
+                                <div style="width: 100%; height: 10px; background: var(--bg-darkest); border-radius: 2px; overflow: hidden;">
+                                    <div style="height: 100%; width: {{ pct }}%; background: {% if pct >= 90 %}var(--color-set){% elif pct >= 50 %}var(--accent-gold){% else %}var(--color-crafted){% endif %}; border-radius: 2px;"></div>
+                                </div>
+                            </td>
+                            <td class="mono">{{ info.done }}</td>
+                            <td class="mono">{{ info.total }}</td>
+                            <td class="mono" style="color: {% if pct >= 90 %}var(--color-set){% elif pct >= 50 %}var(--accent-gold){% else %}var(--text-muted){% endif %};">{{ pct }}%</td>
+                            <td class="mono">{{ info.remaining }}</td>
+                            <td><button class="btn" onclick="requestRescanBinary('{{ prog }}')">Rescan</button></td>
+                        </tr>
+                        {% endfor %}
+                        </tbody></table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Work Queue -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Work Queue (ROI-Ranked)</h2>
+                <span style="color: var(--text-muted); font-size: 0.65rem;">Pin/skip here. CLI reads on next --auto.</span>
+            </div>
+            <div class="panel-content">
+                <div class="func-list-scroll" style="max-height: 300px;" id="queuePanel">
+                    <table class="data-table">
+                        <thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Fixable</th><th>Callers</th><th>ROI</th><th>Type</th><th>Last</th></tr></thead>
+                        <tbody id="queueBody">
+                        {% for t in stats.roi_queue[:30] %}
+                        <tr>
+                            <td>
+                                {% if t.pinned %}<button class="btn btn-primary" onclick="unpinFunc('{{ t.key }}')">Unpin</button>
+                                {% else %}<button class="btn" onclick="pinFunc('{{ t.key }}')">Pin</button>{% endif %}
+                                <button class="btn btn-danger" onclick="skipFunc('{{ t.key }}')">Skip</button>
+                            </td>
+                            <td>{% if t.pinned %}<span class="badge badge-pinned">PIN</span> {% endif %}{{ t.name }}</td>
+                            <td class="mono">0x{{ t.address }}</td>
+                            <td class="score-cell {% if t.score >= 90 %}score-90{% elif t.score >= 70 %}score-70{% elif t.score >= 50 %}score-50{% else %}score-low{% endif %}">{{ t.score }}%</td>
+                            <td class="mono">{{ t.fixable }}</td>
+                            <td class="mono">{{ t.callers }}</td>
+                            <td class="mono" style="color: var(--accent-gold);">{{ t.roi }}</td>
+                            <td>{% if t.is_leaf %}<span class="badge badge-leaf">LEAF</span>{% endif %}</td>
+                            <td style="color: var(--text-muted); font-size: 0.6rem;">{{ t.last_result or '' }}</td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- All Functions -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>All Functions</h2>
+                <span style="color: var(--text-muted); font-size: 0.65rem;">{{ stats.all_functions|length }}</span>
+            </div>
+            <div class="panel-content">
+                <div class="filter-bar">
+                    <button class="btn active" onclick="filterFuncs('all', this)">All</button>
+                    <button class="btn" onclick="filterFuncs('needs_work', this)">Needs Work</button>
+                    <button class="btn" onclick="filterFuncs('fixable', this)">Fixable</button>
+                    <button class="btn" onclick="filterFuncs('done', this)">Done</button>
+                    <input class="filter-input" type="text" id="searchInput" placeholder="Search..." oninput="searchFuncs()">
+                </div>
+                <div class="func-list-scroll">
+                    <table class="data-table"><thead><tr><th>Function</th><th>Addr</th><th>Binary</th><th>Score</th><th>Fixable</th><th>Callers</th><th>Status</th></tr></thead>
+                    <tbody>
+                    {% for f in stats.all_functions %}
+                    <tr class="func-row" data-score="{{ f.score }}" data-name="{{ f.name|lower }}">
+                        <td>{{ f.name }}</td><td class="mono">0x{{ f.address }}</td><td>{{ f.program }}</td>
+                        <td class="score-cell {% if f.score >= 100 %}score-100{% elif f.score >= 90 %}score-90{% elif f.score >= 70 %}score-70{% elif f.score >= 50 %}score-50{% else %}score-low{% endif %}">{{ f.score }}%</td>
+                        <td class="mono">{{ f.fixable }}</td><td class="mono">{{ f.callers }}</td>
+                        <td>{% if f.score >= 90 %}<span class="badge badge-done">DONE</span>{% elif f.score >= 70 %}<span class="badge badge-fix">FIX</span>{% else %}<span class="badge badge-new">NEW</span>{% endif %}{% if f.is_leaf %} <span class="badge badge-leaf">LEAF</span>{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody></table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="footer">Fun-Doc Command Center | Last scan: {{ stats.last_scan or 'never' }}</footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        let refreshTimer = null;
+
+        // --- Connection status ---
+        socket.on("connect", () => {
+            document.getElementById("liveDot").className = "live-dot connected";
+            document.getElementById("connStatus").textContent = "Live";
+            socket.emit('request_worker_status');
+        });
+        socket.on("disconnect", () => {
+            document.getElementById("liveDot").className = "live-dot disconnected";
+            document.getElementById("connStatus").textContent = "Disconnected";
+        });
+
+        // --- State changed: debounced refresh of stats ---
+        socket.on("state_changed", () => {
+            if (refreshTimer) clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(refreshStats, 500);
+        });
+        socket.on("queue_changed", () => {
+            if (refreshTimer) clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(refreshStats, 300);
+        });
+
+        function refreshStats() {
+            fetch("/api/stats").then(r => r.json()).then(stats => {
+                document.getElementById("stat-total").textContent = stats.total;
+                document.getElementById("stat-done").textContent = stats.done;
+                document.getElementById("stat-fixable").textContent = stats.fixable;
+                document.getElementById("stat-needs-work").textContent = stats.needs_work;
+                document.getElementById("stat-pct").textContent = stats.pct + "%";
+                document.getElementById("stat-today").textContent = stats.run_stats.today_runs;
+                document.getElementById("stat-delta").textContent = stats.run_stats.avg_delta + "%";
+                document.getElementById("progressInner").style.width = stats.pct + "%";
+                document.getElementById("progressText").textContent = `${stats.done} / ${stats.total} (${stats.pct}%)`;
+            }).catch(() => {});
+        }
+
+        // --- Worker output panes ---
+        const workerPanes = {};  // worker_id -> {element, output}
+
+        function getOrCreatePane(workerId, provider, binary) {
+            if (workerPanes[workerId]) return workerPanes[workerId];
+            const grid = document.getElementById('workerGrid');
+            const pane = document.createElement('div');
+            pane.className = 'worker-pane running';
+            pane.id = `wp-${workerId}`;
+            pane.innerHTML = `
+                <div class="worker-pane-header">
+                    <span class="wp-title">${provider || '?'} #${workerId}</span>
+                    <span class="wp-status" id="wp-status-${workerId}">${binary || ''}</span>
+                    <div class="wp-actions">
+                        <button class="btn btn-danger" onclick="stopWorker('${workerId}')" id="wp-stop-${workerId}">Stop</button>
+                        <button class="btn" onclick="dismissPane('${workerId}')" style="display:none" id="wp-dismiss-${workerId}">X</button>
+                    </div>
+                </div>
+                <div class="worker-pane-output" id="wp-out-${workerId}"></div>
+            `;
+            grid.appendChild(pane);
+            workerPanes[workerId] = {element: pane, output: pane.querySelector('.worker-pane-output')};
+            return workerPanes[workerId];
+        }
+
+        function appendToPane(workerId, text, type) {
+            const pane = workerPanes[workerId];
+            if (!pane) return;
+            const el = document.createElement('div');
+            el.className = 'activity-entry activity-' + type;
+            el.textContent = text;
+            pane.output.appendChild(el);
+            if (pane.output.children.length > 500) pane.output.removeChild(pane.output.firstChild);
+            pane.output.scrollTop = pane.output.scrollHeight;
+        }
+
+        function dismissPane(workerId) {
+            const pane = workerPanes[workerId];
+            if (pane) { pane.element.remove(); delete workerPanes[workerId]; }
+        }
+
+        function markPaneFinished(workerId, reason) {
+            const pane = workerPanes[workerId];
+            if (!pane) return;
+            pane.element.className = 'worker-pane finished';
+            const status = document.getElementById(`wp-status-${workerId}`);
+            if (status) status.textContent = reason || 'finished';
+            const stopBtn = document.getElementById(`wp-stop-${workerId}`);
+            const dismissBtn = document.getElementById(`wp-dismiss-${workerId}`);
+            if (stopBtn) stopBtn.style.display = 'none';
+            if (dismissBtn) dismissBtn.style.display = '';
+        }
+
+        // Scan events (go to banner, not panes)
+        socket.on("scan_started", d => showBanner(`Scanning ${d.mode || ''}...`));
+        socket.on("scan_progress", d => updateBanner(`Scanning ${d.program} (${(d.index||0)+1}/${d.total||'?'})...`));
+        socket.on("scan_complete", d => { hideBanner(); refreshStats(); });
+        socket.on("scan_error", d => { showBanner(`Scan error: ${d.error}`); setTimeout(hideBanner, 5000); });
+
+        // Worker lifecycle events
+        socket.on("worker_started", d => {
+            getOrCreatePane(d.worker_id, d.provider, d.binary || '');
+            appendToPane(d.worker_id, `Worker started: ${d.provider} x${d.count}`, 'scan');
+        });
+        socket.on("worker_stopped", d => {
+            appendToPane(d.worker_id, `Worker ${d.reason}: ${d.progress?.completed || 0} completed`, d.reason === 'finished' ? 'success' : 'neutral');
+            markPaneFinished(d.worker_id, d.reason);
+            refreshStats();
+        });
+
+        // Per-function events — route to worker pane by worker_id
+        socket.on("function_started", d => {
+            if (d.worker_id) getOrCreatePane(d.worker_id, null, null);
+            appendToPane(d.worker_id, `\n${d.name} @ 0x${d.address}`, 'started');
+        });
+        socket.on("function_mode", d => appendToPane(d.worker_id, `  ${d.mode} | ${d.model} | score: ${d.score}%`, 'neutral'));
+        socket.on("tool_call", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, 'tool'));
+        socket.on("tool_result", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, d.status === 'failed' ? 'error' : 'tool'));
+        socket.on("model_text", d => { if (d.text) appendToPane(d.worker_id, d.text.substring(0, 300), 'text'); });
+        socket.on("score_update", d => {
+            const delta = (d.score_after||0) - (d.score_before||0);
+            const sign = delta >= 0 ? '+' : '';
+            appendToPane(d.worker_id, `  Score: ${d.score_before}% -> ${d.score_after}% (${sign}${delta}%) | ${d.result}`, delta > 0 ? 'success' : 'neutral');
+        });
+        socket.on("function_complete", d => { appendToPane(d.worker_id, `  Complete: ${d.result}\n`, d.result === 'completed' ? 'success' : 'neutral'); refreshStats(); });
+
+        // --- Banner ---
+        function showBanner(text) { const b = document.getElementById("statusBanner"); b.classList.add("active"); document.getElementById("bannerText").textContent = text; }
+        function updateBanner(text) { document.getElementById("bannerText").textContent = text; }
+        function hideBanner() { document.getElementById("statusBanner").classList.remove("active"); }
+
+        // --- Scan controls ---
+        function requestRescan(refresh) {
+            // If a binary is selected in the dropdown, scope the rescan to that binary
+            const activeBinary = document.getElementById("binarySelect").value || null;
+            socket.emit("request_rescan", {refresh: refresh, program: activeBinary});
+            const scope = activeBinary || "all binaries";
+            showBanner(refresh ? `Full rescan (${scope})...` : `Rescan (${scope})...`);
+        }
+        function requestRescanBinary(prog) { socket.emit("request_rescan", {program: prog}); showBanner(`Rescanning ${prog}...`); }
+
+        // --- Queue controls (no page reload) ---
+        // Binary selector
+        async function switchBinary(binary) {
+            await fetch('/api/context/binary', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({binary: binary || null})});
+            location.reload();
+        }
+        async function switchFolder(folder) {
+            await fetch('/api/context/folder', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({folder})});
+            // Clear binary filter when switching folders
+            await fetch('/api/context/binary', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({binary: null})});
+            location.reload();
+        }
+        function switchBinaryDirect(prog) {
+            document.getElementById('binarySelect').value = prog;
+            switchBinary(prog);
+        }
+
+        async function pinFunc(key) { await fetch('/api/queue/pin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}); }
+        async function unpinFunc(key) { await fetch('/api/queue/unpin', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}); }
+        async function skipFunc(key) { await fetch('/api/queue/skip', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({key})}); }
+
+        // --- Worker controls ---
+        function startWorker() {
+            const provider = document.getElementById('workerProvider').value;
+            const count = parseInt(document.getElementById('workerCount').value) || 10;
+            const continuous = document.getElementById('workerContinuous').checked;
+            const binary = document.getElementById('binarySelect').value || null;
+            socket.emit('request_start_worker', {provider, count, binary, continuous});
+            const btn = document.getElementById('btnRunWorker');
+            btn.disabled = true;
+            setTimeout(() => { btn.disabled = false; }, 2000);
+        }
+        function stopWorker(wid) { socket.emit('request_stop_worker', {worker_id: wid}); }
+
+        socket.on('worker_started_ack', d => { /* pane created by worker_started event */ });
+        socket.on('worker_error', d => { showBanner(`Worker error: ${d.error}`); setTimeout(hideBanner, 5000); });
+        socket.on('worker_stop_ack', d => { /* stop handled by worker_status update */ });
+        socket.on('worker_started', d => addActivity(`Worker ${d.worker_id}: ${d.provider} x${d.count}`, 'scan'));
+        socket.on('worker_progress', d => {
+            if (d.current) addActivity(`Worker ${d.worker_id}: ${d.current.name} (${d.completed+1}/${d.total})`, 'scan');
+        });
+        socket.on('worker_stopped', d => {
+            addActivity(`Worker ${d.worker_id} ${d.reason}`, d.reason === 'finished' ? 'success' : 'neutral');
+            refreshStats();
+        });
+        socket.on('worker_status', workers => {
+            // Update pane borders and status text based on worker status
+            workers.forEach(w => {
+                const pane = workerPanes[w.id];
+                if (!pane) return;
+                const cls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : 'finished';
+                pane.element.className = `worker-pane ${cls}`;
+                const done = w.progress.completed + w.progress.skipped + w.progress.failed;
+                const status = document.getElementById(`wp-status-${w.id}`);
+                if (status) {
+                    const countStr = w.continuous ? 'auto' : `${done}/${w.count}`;
+                    const cur = w.progress.current ? w.progress.current.name : '';
+                    status.textContent = `${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${cur ? ' | ' + cur : ''}`;
+                }
+            });
+        });
+
+        // --- Filter ---
+        function filterFuncs(mode, btn) {
+            document.querySelectorAll('.filter-bar .btn').forEach(b => b.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+            document.querySelectorAll('.func-row').forEach(row => {
+                const score = parseInt(row.dataset.score);
+                let show = true;
+                if (mode === 'needs_work') show = score < 70;
+                else if (mode === 'fixable') show = score >= 70 && score < 90;
+                else if (mode === 'done') show = score >= 90;
+                row.style.display = show ? '' : 'none';
+            });
+        }
+        function searchFuncs() {
+            const q = document.getElementById('searchInput').value.toLowerCase();
+            document.querySelectorAll('.func-row').forEach(row => { row.style.display = row.dataset.name.includes(q) ? '' : 'none'; });
+        }
+    </script>
+</body>
+</html>

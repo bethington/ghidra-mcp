@@ -25,7 +25,9 @@
 - You have at least 3 validated fields (not just one offset), AND
 - The struct is accessed from 2+ code paths in the function
 
-**If only 1-2 offsets are accessed:** use EOL comments instead (`/* +0x5C: field */`). This is always the safer choice and satisfies the scorer.
+**If only 1-2 offsets are accessed AND the base pointer is a local variable used only in this function:** use EOL comments instead (`/* +0x5C: field */`).
+
+**If the base pointer comes from a parameter, a function return value, or a global** — prefer struct recovery even for 1-2 offsets. These pointers are shared across call sites, so applying a struct type propagates improvements everywhere, not just in this function.
 
 ## Recipe
 
@@ -58,7 +60,8 @@
 **Name collisions**: If a candidate struct name already exists with an incompatible layout, create a function-specific struct (e.g., `InitRoomTilesCtx`) rather than modifying the existing shared struct.
 
 ## Skip Conditions (prefer these over struct creation)
-- If only 1-2 offsets are accessed: use EOL comments (`/* +0x10: flags */`) instead of creating a struct
+- If only 1-2 offsets are accessed AND the base pointer is a local-only variable: use EOL comments (`/* +0x10: flags */`)
+- If the base pointer comes from a parameter or return value: prefer struct recovery even for few offsets (the type propagates to callers)
 - If the offset pattern doesn't match any known struct and creating one would be speculative: comment-only fallback
 - Prefer a correct EOL comment over a speculative struct with wrong field names
 - If a recipe step fails or doesn't apply (e.g., struct already exists, field already typed correctly), skip it

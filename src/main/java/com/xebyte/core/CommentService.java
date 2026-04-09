@@ -89,7 +89,7 @@ public class CommentService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.PRE_COMMENT, "Set decompiler comment", programName);
     }
 
@@ -106,7 +106,7 @@ public class CommentService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         return setCommentAtAddress(addressStr, comment, CodeUnit.EOL_COMMENT, "Set disassembly comment", programName);
     }
 
@@ -166,7 +166,7 @@ public class CommentService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
             @Param(value = "comment", source = ParamSource.BODY) String comment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -246,7 +246,7 @@ public class CommentService {
             @Param(value = "decompiler_comments", source = ParamSource.BODY, defaultValue = "[]") List<Map<String, String>> decompilerComments,
             @Param(value = "disassembly_comments", source = ParamSource.BODY, defaultValue = "[]") List<Map<String, String>> disassemblyComments,
             @Param(value = "plate_comment", source = ParamSource.BODY, description = "Plate comment text. Omit to leave existing plate untouched. Pass empty string to explicitly clear.") String plateComment,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -382,7 +382,7 @@ public class CommentService {
             @Param(value = "clear_plate", source = ParamSource.BODY, defaultValue = "true") boolean clearPlate,
             @Param(value = "clear_pre", source = ParamSource.BODY, defaultValue = "true") boolean clearPre,
             @Param(value = "clear_eol", source = ParamSource.BODY, defaultValue = "true") boolean clearEol,
-            @Param(value = "program", source = ParamSource.BODY, description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();

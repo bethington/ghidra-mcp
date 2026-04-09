@@ -13,11 +13,28 @@ Before finalizing, verify these alignments:
 
 If any mismatch is found: fix it via `batch_set_comments` (plate comment update) before reporting DONE.
 
+## Variable Reconciliation (required before reporting DONE)
+
+Call `get_function_variables()` one final time and check:
+
+1. **No generic names remaining**: Every variable still named `[a-z]Var[0-9]+` or `local_*` must be renamed via `rename_variables()` or listed in Unresolved with justification.
+2. **Prefix matches type**: Every renamed variable's Hungarian prefix must match its Ghidra type:
+   - `p` prefix → must be a pointer type (ends with `*`)
+   - `dw` prefix → must be `uint` or `ulong`
+   - `n` prefix → must be `int` or `short`
+   - `w` prefix → must be `ushort`
+   - `sz` prefix → must be `char *`
+   If a mismatch exists, fix the type with `set_local_variable_type()` OR fix the name with `rename_variables()`.
+3. **Plate comment references applied**: If your plate comment's Special Cases or Parameters section names a variable differently from what's in `get_function_variables()`, apply the rename. Do not document names you didn't actually set.
+
 ## Report Format
 
 ```
 DONE: FunctionName
 Changes: [brief summary of what you changed]
+Proven: [changes backed by callers, constants, or typed APIs]
+Inferred: [names/types based on internal usage only -- not verified at call sites]
+Unresolved: [structural limitations, phantom variables, unfixable items]
 Consistency: [PASS or list of fixes applied]
 ```
 
