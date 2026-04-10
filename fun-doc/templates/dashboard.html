@@ -404,6 +404,7 @@
 
         function refreshStats() {
             fetch("/api/stats").then(r => r.json()).then(stats => {
+                // Stat cards
                 document.getElementById("stat-total").textContent = stats.total;
                 document.getElementById("stat-done").textContent = stats.done;
                 document.getElementById("stat-fixable").textContent = stats.fixable;
@@ -413,6 +414,29 @@
                 document.getElementById("stat-delta").textContent = stats.run_stats.avg_delta + "%";
                 document.getElementById("progressInner").style.width = stats.pct + "%";
                 document.getElementById("progressText").textContent = `${stats.done} / ${stats.total} (${stats.pct}%)`;
+
+                // Score distribution
+                const distPanel = document.getElementById("scoreDistPanel");
+                if (distPanel && stats.buckets) {
+                    const bucketOrder = [["100","s100"],["90-99","s90"],["80-89","s80"],["70-79","s70"],["60-69","s60"],["50-59","s50"],["40-49","s40"],["30-39","s30"],["20-29","s20"],["10-19","s10"],["0-9","s0"]];
+                    const maxCount = Math.max(1, ...Object.values(stats.buckets));
+                    distPanel.innerHTML = bucketOrder.map(([bucket, css]) => {
+                        const count = stats.buckets[bucket] || 0;
+                        if (count === 0) return '';
+                        const pct = Math.round(count / maxCount * 100);
+                        return `<div class="score-bar-row"><span class="score-bar-label">${bucket}</span><div class="score-bar-track"><div class="score-bar-fill ${css}" style="width:${pct}%"></div></div><span class="score-bar-count">${count}</span></div>`;
+                    }).join('');
+                }
+
+                // Deduction breakdown
+                const dedPanel = document.getElementById("deductionPanel");
+                if (dedPanel && stats.deduction_breakdown && stats.deduction_breakdown.length > 0) {
+                    const maxPts = stats.deduction_breakdown[0].total_pts || 1;
+                    dedPanel.innerHTML = stats.deduction_breakdown.slice(0, 10).map(d => {
+                        const pct = Math.round(d.total_pts / maxPts * 100);
+                        return `<div class="deduction-row"><span class="deduction-cat">${d.category.replace(/_/g, ' ')}</span><span class="deduction-stat">${d.functions} fns</span><div class="deduction-bar"><div class="deduction-bar-fill" style="width:${pct}%"></div></div><span class="deduction-stat">${Math.round(d.total_pts)} pts</span></div>`;
+                    }).join('');
+                }
             }).catch(() => {});
         }
 
