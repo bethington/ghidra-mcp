@@ -27,7 +27,7 @@ import time
 import http.client
 import inspect
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.lowlevel.server import NotificationOptions
@@ -236,8 +236,6 @@ def tcp_request(
     timeout: int = 30,
 ) -> tuple[str, int]:
     """Make an HTTP request over TCP. Returns (body, status)."""
-    from urllib.parse import urlparse
-
     parsed = urlparse(base_url)
     conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=timeout)
 
