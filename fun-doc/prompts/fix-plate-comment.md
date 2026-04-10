@@ -33,6 +33,9 @@ Structure Layout: (only if function accesses structs)
   +0x00  | 4    | dwType    | uint  | ...
 ```
 
+**REQUIRED sections**: Summary (first line), Source, Parameters, Returns. These must ALWAYS be present.
+Derive Source from module prefix (e.g., ROOM_ → DrlgRoom.cpp, PATH_ → Path.cpp). If unknown, use `Source: Unknown`.
+
 3. **Apply**: Single `batch_set_comments` call with `plate_comment` parameter. Can include PRE and EOL comments in the same call.
 4. Scoring is handled externally -- do not call `analyze_function_completeness`.
 

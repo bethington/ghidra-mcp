@@ -57,6 +57,10 @@ Structure Layout: (if accessing structs)
   +0x00  | 4    | dwType    | uint  | ...
 ```
 
+**REQUIRED sections**: Summary (first line), Source, Parameters, Returns. These must ALWAYS be present.
+**Conditional sections**: Algorithm (if >3 steps), Special Cases (if any), Structure Layout (if struct accesses).
+**Source line**: Derive from module prefix (e.g., ROOM_ → DrlgRoom.cpp, PATH_ → Path.cpp). If unknown, use `Source: Unknown`.
+
 ### Inline Comments
 
 - **Decompiler PRE_COMMENTs**: At block-start addresses -- context, purpose, algorithm step references. Max ~60 chars.

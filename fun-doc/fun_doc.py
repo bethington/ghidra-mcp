@@ -1048,6 +1048,51 @@ def _is_error_response(resp):
     return False
 
 
+def _inject_classification_directives(sections, completeness):
+    """Inject classification-specific prompt directives to prevent over/under-documentation.
+
+    Addresses:
+    - Wrapper/stub over-documentation (MiniMax adding struct layouts to 9-line wrappers)
+    - Phantom variable hints (in_EAX etc. should attempt prototype fix)
+    """
+    classification = completeness.get("classification", "unknown")
+    code_lines = completeness.get("code_line_count", 999)
+    phantom_count = completeness.get("phantom_count", 0)
+
+    # Wrapper/stub: prevent over-documentation
+    if classification in ("wrapper", "stub") or code_lines <= 10:
+        sections.append("## ⚠ Classification: Wrapper/Stub Function")
+        sections.append("")
+        sections.append(
+            f"This function is classified as **{classification}** ({code_lines} code lines). "
+            "Apply minimal documentation:"
+        )
+        sections.append("- Plate comment: ≤8 lines — Summary, Parameters, Returns, Source. "
+                        "Do NOT add Algorithm, Structure Layout, or Special Cases sections.")
+        sections.append("- Do NOT add disassembly EOL comments or PRE comments.")
+        sections.append("- Do NOT create new structs for this function.")
+        sections.append("- Focus: correct name, correct prototype, correct types, minimal plate.")
+        sections.append("")
+
+    # Phantom variable hint
+    if phantom_count and phantom_count > 0:
+        phantom_names = []
+        for var in completeness.get("variables_detail", []):
+            if var.get("is_phantom"):
+                phantom_names.append(var.get("name", "?"))
+        # Also check the variables data if available
+        sections.append("## ⚠ Phantom Variables Detected")
+        sections.append("")
+        sections.append(
+            f"This function has **{phantom_count} phantom variable(s)** "
+            "(e.g., `in_EAX`, `in_EDX`, `extraout_*`). "
+            "Before documenting, attempt `set_function_prototype` to formally declare "
+            "them as parameters. If the calling convention doesn't support it, "
+            "document them in the plate comment's Special Cases section."
+        )
+        sections.append("")
+
+
 def _extract_work_items(completeness):
     """Extract concrete fix targets from completeness evidence into a concise work list."""
     items = []
@@ -1402,6 +1447,10 @@ def build_full_doc_prompt(func_name, address, ghidra_data, program=None):
             sections.append(work_items)
             sections.append("")
 
+    # Classification-based directives
+    if completeness and not _is_error_response(completeness):
+        _inject_classification_directives(sections, completeness)
+
     # Step modules
     for step in [
         "step-classify.md",
@@ -1522,6 +1571,10 @@ def build_recovery_prompt(func_name, address, ghidra_data, program=None):
             sections.append("")
             sections.append(work_items)
             sections.append("")
+
+    # Classification-based directives
+    if completeness and not _is_error_response(completeness):
+        _inject_classification_directives(sections, completeness)
 
     # Only structural steps — no comment steps
     for step in ["step-classify.md", "step-prototype.md", "step-type-audit.md"]:
@@ -2817,6 +2870,18 @@ def process_function(
             ):
                 missing_artifacts.append("plate_comment")
 
+            # Check: plate comment has Source section (non-wrapper/stub functions)
+            post_plate_issues = post_completeness.get("plate_issues", 0)
+            post_classification = post_completeness.get("classification", "unknown")
+            if (
+                post_has_plate
+                and post_plate_issues > 0
+                and post_classification not in ("stub", "thunk")
+                and mode in ("FULL", "FULL:comments", "FIX")
+            ):
+                print(f"  WARNING: Plate comment has {post_plate_issues} structural issue(s) (likely missing Source section)")
+                missing_artifacts.append("plate_incomplete")
+
             # Check: function should have a custom name after FULL mode
             if not post_has_custom_name and mode in ("FULL", "FULL:comments"):
                 missing_artifacts.append("custom_name")
@@ -2878,6 +2943,21 @@ def process_function(
                     result = "partial"
                     func["last_result"] = result
                     print(f"  — downgrading to partial ({generic_remaining} unrenamed variables)")
+
+        # Guard #5: magic number EOL comment reconciliation
+        # If the scorer reports undocumented magic numbers, the model skipped EOL comments.
+        # Flag for requeue rather than accepting incomplete documentation.
+        if result == "completed" and post_completeness and mode not in ("VERIFY", "FULL:recovery"):
+            magic_undoc = post_completeness.get("magic_numbers_undocumented", 0)
+            post_classification = post_completeness.get("classification", "unknown")
+            if magic_undoc >= 2 and post_classification not in ("wrapper", "stub"):
+                print(
+                    f"  MAGIC NUMBER AUDIT: {magic_undoc} undocumented magic number(s) — "
+                    "model wrote plate comment but skipped EOL comments at usage sites"
+                )
+                missing_artifacts.append("magic_numbers_undocumented")
+                result = "partial"
+                func["last_result"] = result
     else:
         print(f"\n  Result: {result} | Score: unavailable")
 

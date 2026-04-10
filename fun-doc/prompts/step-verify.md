@@ -10,8 +10,10 @@ Before finalizing, verify these alignments:
 2. **Function name vs plate comment Returns/Parameters**: Do the Returns and Parameters sections use terminology consistent with the new name?
 3. **Prototype vs plate comment Parameters**: Do the parameter names and types in the plate comment match the actual prototype?
 4. **Module prefix vs Source line**: If the function has a module prefix, does the Source: line reference a matching .cpp file?
+5. **Name vs behavior contradiction**: Does the function name describe the ACTUAL behavior? If the name says "Head" but the code inserts at "tail" (or vice versa), rename the function to match the real behavior.
+6. **Magic number coverage**: If the code contains hex constants (flags, type IDs, offsets), verify they have EOL comments at their instruction addresses via `batch_set_comments` with `disassembly_comments`.
 
-If any mismatch is found: fix it via `batch_set_comments` (plate comment update) before reporting DONE.
+If any mismatch is found: fix it via `batch_set_comments` (plate comment update) or `rename_function_by_address` before reporting DONE.
 
 ## Variable Reconciliation (required before reporting DONE)
 

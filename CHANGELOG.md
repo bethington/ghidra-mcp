@@ -17,7 +17,12 @@ The fun-doc automation engine was substantially rebuilt. It now ships a real-tim
 - **Continuous mode** — Workers fetch and document functions one-at-a-time in a continuous loop.
 - **MiniMax AI provider** — Added MiniMax-M2.7 as a low-cost first-pass documentation option with dedicated hardening: Hungarian notation audit (Guard #4), complexity gating, `<think>` tag stripping, partial tracking, dynamic max_tokens, reasoning preservation.
 - **Codex provider** — Added OpenAI Codex (gpt-5.3-codex) to the provider dropdown.
-- **Quality guards** — Evidence-based documentation workflow with Guards #1–4, score-delta validation, and variable reconciliation in step-verify prompt.
+- **Quality guards** — Evidence-based documentation workflow with Guards #1–5, score-delta validation, and variable reconciliation in step-verify prompt.
+- **Classification-aware prompting** — `_inject_classification_directives()` automatically limits wrapper/stub functions (≤10 code lines) to minimal plate comments (Summary, Parameters, Returns, Source only), preventing over-documentation with struct layouts and disassembly comments.
+- **Phantom variable hints** — Functions with phantom variables (`in_EAX`, `in_EDX`, `extraout_*`) get a pre-prompt directive to attempt `set_function_prototype` before documenting.
+- **Guard #5: magic number EOL reconciliation** — Catches models that document magic numbers in the plate comment but skip EOL comments at instruction addresses. Downgrades to partial for requeue when ≥2 undocumented magic numbers remain in non-wrapper functions.
+- **Source section enforcement** — Guard #3 now validates plate comment structural completeness (missing Source line, etc.) using the scorer's `plate_issues` field. Step-comments and fix-plate-comment prompts explicitly mark Summary, Source, Parameters, and Returns as required sections.
+- **Verify checklist expansion** — Step-verify prompt adds name-vs-behavior contradiction detection (rename if name contradicts actual code behavior) and magic number EOL coverage verification.
 - **Folder & binary selector** — Dashboard discovers all project binaries from Ghidra, supports per-binary scan with persistent state filtering.
 - **Cross-binary progress view** — Phase 3 folder switcher shows documentation progress across all binaries in a project.
 - **ROI queue** — Dashboard control panel with ROI-prioritized function queue and deduction breakdown.
