@@ -27,7 +27,7 @@ import uuid
 class WorkerManager:
     """Manages concurrent documentation worker threads (max 3)."""
 
-    MAX_WORKERS = 4
+    MAX_WORKERS = 8
 
     def __init__(self, state_file, bus, socketio):
         self._workers = {}
