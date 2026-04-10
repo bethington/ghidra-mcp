@@ -96,6 +96,40 @@ CI tests that don't require a running Ghidra instance.
 - Tests AnnotationScanner, response format, endpoint routing
 - Ships a small reference binary in `tests/fixtures/`
 
+## Priority: Architect
+
+### Native MCP Server (Eliminate Python Bridge)
+**Status:** Researched, scoped
+**Effort:** Medium-High (Phase 1: 2-3 days, Phase 2: 1 day, Phase 3: TBD)
+**GitHub Issue:** #114
+
+Replace the Python bridge with the official Java MCP SDK (`io.modelcontextprotocol.sdk:mcp` v1.1.1)
+in headless mode. The bridge converts MCP↔HTTP — exactly the glue code MCP was designed to eliminate.
+
+**Target architecture:**
+```
+AI Tool → MCP (stdio) → Ghidra Headless Server (Java, native MCP)
+```
+
+**Phase 1 — Headless stdio:**
+- Add `mcp-core` + `mcp-json-jackson2` Maven deps
+- `McpToolAdapter`: converts `AnnotationScanner` output → `SyncToolSpecification[]`
+- New entry point using `StdioServerTransportProvider`
+- Keep HTTP mode as fallback
+
+**Phase 2 — Streamable HTTP:**
+- Embedded servlet container (Jetty/Undertow) for `HttpServletStreamableServerTransportProvider`
+- Replaces Python bridge for remote use cases
+
+**Phase 3 — GUI plugin (future):**
+- Plugin can't own stdio; needs embedded servlet or IPC
+
+**Key decision:** Use Jackson 2 (`mcp-json-jackson2`) alongside existing Gson. No conflict —
+Jackson only used internally by MCP SDK.
+
+**SDK facts:** 3.4k stars, 100% server conformance (40/40), Java 17+ (we use 21),
+supports stdio + streamable-http + SSE transports natively.
+
 ## Evaluated and Skipped
 
 ### HATEOAS / Self-Describing API (starsong)

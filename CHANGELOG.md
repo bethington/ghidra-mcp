@@ -4,17 +4,51 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v5.1.0 - 2026-04-10
 
-### Added
+### fun-doc: Multi-Provider Dashboard & Worker System
+
+The fun-doc automation engine was substantially rebuilt. It now ships a real-time web dashboard, supports parallel workers across multiple AI providers, and includes quality guards that catch common AI documentation mistakes.
+
+#### Added
+
+- **Real-time WebSocket dashboard** — `python fun_doc.py` (no args) launches a web UI with live activity feed, progress charts, and control panel. EventBus architecture pushes updates via WebSocket.
+- **Multi-provider worker system** — Run up to 4 parallel workers across Claude, Codex, and MiniMax providers simultaneously. Per-worker output panes in a 2×2 grid.
+- **Continuous mode** — Workers fetch and document functions one-at-a-time in a continuous loop.
+- **MiniMax AI provider** — Added MiniMax-M2.7 as a low-cost first-pass documentation option with dedicated hardening: Hungarian notation audit (Guard #4), complexity gating, `<think>` tag stripping, partial tracking, dynamic max_tokens, reasoning preservation.
+- **Codex provider** — Added OpenAI Codex (gpt-5.3-codex) to the provider dropdown.
+- **Quality guards** — Evidence-based documentation workflow with Guards #1–4, score-delta validation, and variable reconciliation in step-verify prompt.
+- **Folder & binary selector** — Dashboard discovers all project binaries from Ghidra, supports per-binary scan with persistent state filtering.
+- **Cross-binary progress view** — Phase 3 folder switcher shows documentation progress across all binaries in a project.
+- **ROI queue** — Dashboard control panel with ROI-prioritized function queue and deduction breakdown.
+- **Claude agent-sdk migration** — Migrated from deprecated `claude-code-sdk` to `claude-agent-sdk`.
+
+#### Fixed
+
+- **Score-delta guard** — No longer falsely triggered for Claude when `tool_calls=-1`; relaxed to accept +0% when tools made changes.
+- **State file race condition** — Fixed concurrent write corruption of `state.json` during parallel worker operation.
+- **Page size limit** — All Functions table capped at 200 entries to prevent 24 MB pages.
+- **Per-binary scan stats** — Rescan now scores unscored functions and no longer reports other binaries as removed.
+- **Batch scoring** — Falls back to individual scoring when batch endpoint fails; increased timeout and added progress reporting.
+
+### Ghidra Plugin
+
+#### Added
 
 - **Streamable HTTP transport** — `--transport streamable-http` is now documented and recommended for web/HTTP clients. SSE transport is deprecated. Added `ghidra-mcp-http` config example to `mcp-config.json`.
-- **Engineering backlog** — Added `docs/project-management/BACKLOG.md` with prioritized roadmap items from competitive fork analysis (GitHub issues #109–#112).
+- **Engineering backlog** — Added `docs/project-management/BACKLOG.md` with prioritized roadmap from competitive fork analysis (GitHub issues #109–#114).
+- **Gradle build** — Added Gradle-based Ghidra extension build as an alternative to Maven (`build.gradle`, `settings.gradle`).
 
-### Fixed
+#### Fixed
 
-- **read_memory OOM** (#107) — Capped read_memory allocation at 16 MB to prevent out-of-memory on malicious/large length values.
+- **read_memory OOM** (#107) — Capped `read_memory` allocation at 16 MB to prevent out-of-memory on malicious/large length values.
 - **SSRF in connect_instance** (#106) — Wired `validate_server_url()` into `connect_instance` and `_auto_connect` TCP paths.
+- **urlparse import** (#113) — `validate_server_url()` used `urlparse` but it was only imported inside `tcp_request()`. The bare `except` silently swallowed the `NameError`, causing all connections to fail. Moved import to module scope.
+- **LoadResults.save() signature** — Corrected to match Ghidra 12.0.3 API (takes `TaskMonitor` only). Fixes Docker build and compilation errors (#103, #104).
+- **Program param standardization** — All `@Param("program")` annotations now use `QUERY` source consistently. Fixes batch operations that failed when `program` was sent in POST body.
+- **import_file "Database is closed"** — Fixed race condition in program import flow.
+- **Batch rename variables** — Fixed `programName` not passed through in fallback paths.
+- **batch_analyze_completeness** — Now passes program param to per-function calls correctly.
 
 ---
 

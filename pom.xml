@@ -6,9 +6,9 @@
     <groupId>com.xebyte</groupId>
     <artifactId>GhidraMCP</artifactId>
     <packaging>jar</packaging>
-    <version>5.0.0</version>
+    <version>5.1.0</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.0.0: 195+ MCP tools, completeness scoring with budgeted deductions, naming convention enforcement, atomic set_variables tool, CodeBrowser integration, fun-doc automation engine, and multi-provider AI support (Claude/Codex).</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.1.0: 195+ MCP tools, completeness scoring with budgeted deductions, naming convention enforcement, atomic set_variables tool, CodeBrowser integration, fun-doc automation engine, and multi-provider AI support (Claude/Codex).</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.release>21</maven.compiler.release>

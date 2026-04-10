@@ -4,6 +4,8 @@
 
 # Maven target directory and build artifacts
 /target/
+# Gradle build cache
+/.gradle/
 *.jar
 *.zip
 *.war
