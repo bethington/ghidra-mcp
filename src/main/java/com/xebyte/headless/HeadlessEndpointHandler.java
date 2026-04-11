@@ -42,7 +42,7 @@ import ghidra.app.cmd.disassemble.DisassembleCommand;
  */
 public class HeadlessEndpointHandler {
 
-    private static final String VERSION = "5.1.0-headless";
+    private static final String VERSION = "5.2.0-headless";
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
     private final TaskMonitor monitor;
@@ -92,6 +92,7 @@ public class HeadlessEndpointHandler {
     public com.xebyte.core.DocumentationHashService getDocumentationHashService() { return documentationHashService; }
     public com.xebyte.core.MalwareSecurityService getMalwareSecurityService() { return malwareSecurityService; }
     public com.xebyte.core.ProgramScriptService getProgramScriptService() { return programScriptService; }
+    public ProgramProvider getProgramProvider() { return programProvider; }
 
     // ==========================================================================
     // UTILITY METHODS

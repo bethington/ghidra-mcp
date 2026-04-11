@@ -59,7 +59,7 @@ public class ServerManager {
             MalwareSecurityService malwareSecurityService = new MalwareSecurityService(programProvider, ts);
             ProgramScriptService programScriptService = new ProgramScriptService(programProvider, ts);
 
-            AnnotationScanner scanner = new AnnotationScanner(
+            AnnotationScanner scanner = new AnnotationScanner(programProvider,
                 listingService, functionService, commentService, symbolLabelService,
                 xrefCallGraphService, dataTypeService, analysisService,
                 documentationHashService, malwareSecurityService, programScriptService);

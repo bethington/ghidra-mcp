@@ -24,6 +24,7 @@ import os
 import re
 import socket
 import time
+import threading
 import http.client
 import inspect
 from pathlib import Path
@@ -93,7 +94,15 @@ mcp._mcp_server.create_initialization_options = _patched_init_options
 _active_socket: str | None = None  # UDS socket path
 _active_tcp: str | None = None  # TCP base URL (e.g. "http://127.0.0.1:8089")
 _transport_mode: str = "none"  # "uds", "tcp", or "none"
+
+# Serialization lock for Ghidra HTTP calls — prevents stdout corruption when
+# multiple MCP tool calls arrive concurrently (see GitHub issue #91).
+_ghidra_lock = asyncio.Lock()
 _connected_project: str | None = None  # Project name for auto-reconnect
+
+# Serialization lock for Ghidra HTTP calls — prevents stdout corruption when
+# multiple MCP tool calls arrive concurrently (see GitHub issue #91).
+_ghidra_lock = threading.Lock()
 
 
 # ==========================================================================
@@ -275,15 +284,20 @@ def do_request(
     json_data: dict | None = None,
     timeout: int = 30,
 ) -> tuple[str, int]:
-    """Route request to the active transport (UDS or TCP)."""
-    if _transport_mode == "uds" and _active_socket:
-        return uds_request(_active_socket, method, endpoint, params, json_data, timeout)
-    elif _transport_mode == "tcp" and _active_tcp:
-        return tcp_request(_active_tcp, method, endpoint, params, json_data, timeout)
-    else:
-        raise ConnectionError(
-            "No Ghidra instance connected. Use connect_instance() first."
-        )
+    """Route request to the active transport (UDS or TCP).
+
+    All requests are serialized via _ghidra_lock to prevent concurrent
+    responses from corrupting JSON-RPC framing on stdio (GitHub #91).
+    """
+    with _ghidra_lock:
+        if _transport_mode == "uds" and _active_socket:
+            return uds_request(_active_socket, method, endpoint, params, json_data, timeout)
+        elif _transport_mode == "tcp" and _active_tcp:
+            return tcp_request(_active_tcp, method, endpoint, params, json_data, timeout)
+        else:
+            raise ConnectionError(
+                "No Ghidra instance connected. Use connect_instance() first."
+            )
 
 
 # ==========================================================================
@@ -523,7 +537,7 @@ def dispatch_get(endpoint: str, params: dict | None = None, retries: int = 3) ->
     return json.dumps({"error": "Max retries exceeded"})
 
 
-def dispatch_post(endpoint: str, data: dict, retries: int = 3) -> str:
+def dispatch_post(endpoint: str, data: dict, retries: int = 3, query_params: dict | None = None) -> str:
     """POST JSON request via active transport. Returns raw response text."""
     err = _ensure_connected()
     if err:
@@ -532,7 +546,7 @@ def dispatch_post(endpoint: str, data: dict, retries: int = 3) -> str:
     timeout = get_timeout(endpoint, data)
     for attempt in range(retries):
         try:
-            text, status = do_request("POST", endpoint, json_data=data, timeout=timeout)
+            text, status = do_request("POST", endpoint, params=query_params, json_data=data, timeout=timeout)
             if status == 200:
                 return text.strip()
             if status >= 500 and attempt < retries - 1:
@@ -658,12 +672,19 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
                 and kwargs[pname] is not None
             ):
                 kwargs[pname] = sanitize_address(str(kwargs[pname]))
+        # Extract dry_run before filtering — it goes as a query param, not in the body
+        dry_run = kwargs.pop("dry_run", None)
         filtered = {k: v for k, v in kwargs.items() if v is not None}
         if http_method == "GET":
             str_params = {k: str(v) for k, v in filtered.items()}
+            if dry_run:
+                str_params["dry_run"] = "true"
             return dispatch_get(endpoint, params=str_params if str_params else None)
         else:
-            return dispatch_post(endpoint, data=filtered)
+            query_params = None
+            if dry_run:
+                query_params = {"dry_run": "true"}
+            return dispatch_post(endpoint, data=filtered, query_params=query_params)
 
     # Build function signature with proper types and defaults
     # Params with defaults must come after params without defaults
@@ -686,6 +707,14 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
             optional_params.append(param)
 
     sig_params = required_params + optional_params
+    # Add dry_run parameter for POST (write) endpoints
+    if http_method == "POST":
+        sig_params.append(
+            inspect.Parameter(
+                "dry_run", inspect.Parameter.KEYWORD_ONLY,
+                default=False, annotation=bool
+            )
+        )
     handler.__signature__ = inspect.Signature(sig_params, return_annotation=str)
     handler.__annotations__ = {p.name: p.annotation for p in sig_params}
     handler.__annotations__["return"] = str

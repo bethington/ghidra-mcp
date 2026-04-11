@@ -48,7 +48,7 @@ Server-side, dispatches to existing service methods — no new business logic.
 - fun_doc's `fetch_function_data()` can switch to a single call
 
 ### Write Safety / Dry-Run Mode
-**Status:** Planning
+**Status:** Implemented (v5.1.0)
 **Effort:** Low (1 day)
 **Inspiration:** GhidraMCPd's `ENABLE_WRITES` and `dry_run` flags
 **GitHub Issue:** #110
@@ -56,12 +56,9 @@ Server-side, dispatches to existing service methods — no new business logic.
 Add a `dry_run` query parameter to all write endpoints that returns "would have
 done X" without committing to the Ghidra database.
 
-**Implementation notes:**
-- Add `DRY_RUN` flag to `ServiceUtils` or a new `WriteGuard` utility
-- Write endpoints check the flag before opening a transaction
-- Returns the same JSON shape but with `"dry_run": true` and no actual changes
-- Configurable via env var `GHIDRA_MCP_DRY_RUN=true` for global default
-- Individual calls can override with `?dry_run=true` or `?dry_run=false`
+**Implementation:** AnnotationScanner intercepts `dry_run=true` on POST endpoints,
+wraps the call in a nested transaction that always rolls back. Bridge auto-adds
+`dry_run` parameter to all POST tool signatures.
 
 ## Priority: Plan For
 

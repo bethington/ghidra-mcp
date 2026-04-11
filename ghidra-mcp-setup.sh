@@ -34,7 +34,7 @@ log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 # ============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_GHIDRA_VERSION="12.0.3"
-PLUGIN_VERSION="5.1.0"
+PLUGIN_VERSION="5.2.0"
 
 # Parameters (defaults)
 ACTION=""
