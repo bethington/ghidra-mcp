@@ -64,6 +64,7 @@ import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.EndpointDef;
 import com.xebyte.core.FrontEndProgramProvider;
 import com.xebyte.core.JsonHelper;
+import com.xebyte.core.SchemaCatalog;
 import com.xebyte.core.ServerManager;
 
 import ghidra.framework.main.ApplicationLevelPlugin;
@@ -484,7 +485,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // SCHEMA ENDPOINT — Serves machine-readable API metadata
         // ==========================================================================
 
-        String schemaJson = scanner.generateSchema();
+        String schemaJson = SchemaCatalog.generateSchema(scanner, SchemaCatalog.RuntimeMode.GUI);
         server.createContext("/mcp/schema", safeHandler(exchange -> {
             sendResponse(exchange, schemaJson);
         }));

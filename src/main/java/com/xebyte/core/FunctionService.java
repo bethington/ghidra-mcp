@@ -2591,6 +2591,7 @@ public class FunctionService {
     }
 
     @McpTool(path = "/set_variables", method = "POST",
+            documented = false,
             description = "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. "
                         + "Hungarian prefix validation is enforced: the new name's prefix must match the type. "
                         + "On programs with multiple address spaces, prefix addresses with the space name.",

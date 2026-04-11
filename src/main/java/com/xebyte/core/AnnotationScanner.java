@@ -96,7 +96,9 @@ public class AnnotationScanner {
                 // Use @McpTool.category if set, otherwise fall back to @McpToolGroup or class name
                 String category = (tool.category() != null && !tool.category().isEmpty())
                     ? tool.category() : groupCategory;
-                descriptors.add(buildDescriptor(tool, method, bindings, category, groupDescription));
+                if (tool.documented()) {
+                    descriptors.add(buildDescriptor(tool, method, bindings, category, groupDescription));
+                }
                 LOG.fine("Registered annotated endpoint: " + tool.method() + " " + tool.path());
             } catch (Exception e) {
                 LOG.log(Level.WARNING, "Failed to register " + tool.path() + ": " + e.getMessage(), e);

@@ -21,6 +21,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 JAVA_SRC = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte"
 CORE_SRC = JAVA_SRC / "core"
 ENDPOINTS_JSON = PROJECT_ROOT / "tests" / "endpoints.json"
+EXPECTED_TOTAL_ENDPOINTS = 193
+EXPECTED_GUI_ENDPOINTS = 175
+EXPECTED_HEADLESS_ENDPOINTS = 183
 
 
 def count_mcptool_annotations() -> int:
@@ -35,11 +38,28 @@ def count_mcptool_annotations() -> int:
 def extract_annotated_paths() -> set[str]:
     """Extract all HTTP paths from @McpTool annotations."""
     paths = set()
-    pattern = re.compile(r'@McpTool\(\s*(?:value\s*=\s*)?["\']([^"\']+)["\']')
+    pattern = re.compile(r'@McpTool\([^)]*path\s*=\s*["\']([^"\']+)["\']', re.S)
     for java_file in CORE_SRC.glob("*Service.java"):
         content = java_file.read_text()
         for match in pattern.finditer(content):
             paths.add(match.group(1))
+    return paths
+
+
+def extract_documented_annotated_paths() -> set[str]:
+    """Extract @McpTool paths that are part of the documented MCP schema."""
+    paths = set()
+    pattern = re.compile(r'@McpTool\((.*?)\)', re.S)
+    path_pattern = re.compile(r'path\s*=\s*["\']([^"\']+)["\']')
+    undocumented_pattern = re.compile(r'documented\s*=\s*false')
+    for java_file in CORE_SRC.glob("*Service.java"):
+        content = java_file.read_text()
+        for match in pattern.finditer(content):
+            annotation = match.group(1)
+            path_match = path_pattern.search(annotation)
+            if not path_match or undocumented_pattern.search(annotation):
+                continue
+            paths.add(path_match.group(1))
     return paths
 
 
@@ -72,7 +92,7 @@ class TestAnnotatedEndpoints(unittest.TestCase):
     def test_no_duplicate_paths(self):
         """No two @McpTool annotations should have the same path."""
         paths = []
-        pattern = re.compile(r'@McpTool\(\s*(?:value\s*=\s*)?["\']([^"\']+)["\']')
+        pattern = re.compile(r'@McpTool\([^)]*path\s*=\s*["\']([^"\']+)["\']', re.S)
         for java_file in CORE_SRC.glob("*Service.java"):
             content = java_file.read_text()
             for match in pattern.finditer(content):
@@ -109,6 +129,7 @@ class TestEndpointsJson(unittest.TestCase):
     def test_valid_json(self):
         data = json.loads(ENDPOINTS_JSON.read_text())
         self.assertIn("endpoints", data)
+        self.assertEqual(data.get("total_endpoints"), EXPECTED_TOTAL_ENDPOINTS)
 
     @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
     def test_no_duplicate_paths(self):
@@ -124,6 +145,30 @@ class TestEndpointsJson(unittest.TestCase):
         for ep in data.get("endpoints", []):
             self.assertIn("path", ep, f"Missing 'path' in endpoint: {ep}")
             self.assertIn("method", ep, f"Missing 'method' in endpoint: {ep}")
+            self.assertIn("modes", ep, f"Missing 'modes' in endpoint: {ep}")
+            self.assertIn(
+                tuple(ep["modes"]),
+                {("gui",), ("headless",), ("gui", "headless")},
+                f"Unexpected modes for endpoint {ep['path']}: {ep['modes']}",
+            )
+
+    @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
+    def test_mode_counts_match_documented_surface(self):
+        data = json.loads(ENDPOINTS_JSON.read_text())
+        endpoints = data.get("endpoints", [])
+        gui_count = sum("gui" in ep.get("modes", []) for ep in endpoints)
+        headless_count = sum("headless" in ep.get("modes", []) for ep in endpoints)
+        self.assertEqual(len(endpoints), EXPECTED_TOTAL_ENDPOINTS)
+        self.assertEqual(gui_count, EXPECTED_GUI_ENDPOINTS)
+        self.assertEqual(headless_count, EXPECTED_HEADLESS_ENDPOINTS)
+
+    def test_documented_annotated_count_matches_expected_base(self):
+        documented = extract_documented_annotated_paths()
+        self.assertEqual(
+            len(documented),
+            EXPECTED_TOTAL_ENDPOINTS - 46,
+            f"Expected 147 documented annotated tools, found {len(documented)}",
+        )
 
 
 class TestBridgeIsDynamic(unittest.TestCase):

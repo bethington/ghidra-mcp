@@ -513,6 +513,7 @@ public class ProgramScriptService {
     // Import & Analysis
 
     @McpTool(path = "/import_file", method = "POST",
+            documented = false,
             description = "Import a binary file from disk into the current Ghidra project and open it. "
                 + "For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default').",
             category = "program")
@@ -644,7 +645,8 @@ public class ProgramScriptService {
         }
     }
 
-    @McpTool(path = "/reanalyze", method = "POST", description = "Trigger full auto-analysis on a program", category = "program")
+    @McpTool(path = "/reanalyze", method = "POST", documented = false,
+            description = "Trigger full auto-analysis on a program", category = "program")
     public Response reanalyze(
             @Param(value = "program", defaultValue = "", description = "Program name (default: current program)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -666,7 +668,8 @@ public class ProgramScriptService {
         }
     }
 
-    @McpTool(path = "/analysis_status", description = "Get auto-analysis status for open programs", category = "program")
+    @McpTool(path = "/analysis_status", documented = false,
+            description = "Get auto-analysis status for open programs", category = "program")
     public Response analysisStatus(
             @Param(value = "program", description = "Program name (omit for all open programs)") String programName) {
 
@@ -1790,7 +1793,8 @@ public class ProgramScriptService {
     // Image Base Operations
     // ========================================================================
 
-    @McpTool(path = "/set_image_base", method = "POST", description = "Set the base address of the program (rebases all addresses)", category = "program")
+    @McpTool(path = "/set_image_base", method = "POST", documented = false,
+            description = "Set the base address of the program (rebases all addresses)", category = "program")
     public Response setImageBase(
             @Param(value = "address", source = ParamSource.BODY, description = "New base address (e.g. 0x08000000)") String addressStr,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -1857,4 +1861,3 @@ public class ProgramScriptService {
         return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 }
-

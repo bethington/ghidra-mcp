@@ -1,0 +1,1160 @@
+[
+  {
+    "path": "/batch_apply_documentation",
+    "method": "POST",
+    "description": "Apply all documentation to a function in one call",
+    "category": "analysis",
+    "categoryDescription": "Analysis control, completeness scoring, and analyzer operations",
+    "params": [
+      {
+        "name": "address",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "prototype",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "calling_convention",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "variable_types",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "variable_renames",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "plate_comment",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "decompiler_comments",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "disassembly_comments",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "goto",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "score",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "program",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui"
+    ]
+  },
+  {
+    "path": "/batch_set_variable_types",
+    "method": "POST",
+    "description": "Set multiple variable types",
+    "category": "datatype",
+    "categoryDescription": "Data type lookup, sizing, and structure management helpers",
+    "params": [
+      {
+        "name": "function_address",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "variable_types",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "program",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/check_connection",
+    "method": "GET",
+    "description": "Health check endpoint",
+    "category": "utility",
+    "categoryDescription": "Connectivity probes, schema discovery, and GUI/tooling helpers",
+    "params": [],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/close_program",
+    "method": "POST",
+    "description": "Close a loaded program (headless)",
+    "category": "program",
+    "categoryDescription": "Program lifecycle, metadata, save/exit, and load operations",
+    "params": [
+      {
+        "name": "program",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/close_project",
+    "method": "POST",
+    "description": "Close the currently open project",
+    "category": "project",
+    "categoryDescription": "Project creation, browsing, organization, and file management",
+    "params": [],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/configure_analyzer",
+    "method": "POST",
+    "description": "Configure an analysis plugin",
+    "category": "analysis",
+    "categoryDescription": "Analysis control, completeness scoring, and analyzer operations",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "enabled",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "program",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/create_folder",
+    "method": "POST",
+    "description": "Create a folder in the project",
+    "category": "project",
+    "categoryDescription": "Project creation, browsing, organization, and file management",
+    "params": [
+      {
+        "name": "path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "program",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/create_project",
+    "method": "POST",
+    "description": "Create a new Ghidra project",
+    "category": "project",
+    "categoryDescription": "Project creation, browsing, organization, and file management",
+    "params": [
+      {
+        "name": "parentDir",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/delete_file",
+    "method": "POST",
+    "description": "Delete a file from the project",
+    "category": "project",
+    "categoryDescription": "Project creation, browsing, organization, and file management",
+    "params": [
+      {
+        "name": "filePath",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/delete_project",
+    "method": "POST",
+    "description": "Delete a Ghidra project",
+    "category": "project",
+    "categoryDescription": "Project creation, browsing, organization, and file management",
+    "params": [
+      {
+        "name": "projectPath",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/exit_ghidra",
+    "method": "POST",
+    "description": "Save and exit Ghidra",
+    "category": "program",
+    "categoryDescription": "Program lifecycle, metadata, save/exit, and load operations",
+    "params": [],
+    "modes": [
+      "gui"
+    ]
+  },
+  {
+    "path": "/get_current_address",
+    "method": "GET",
+    "description": "Get cursor address (GUI only)",
+    "category": "getter",
+    "categoryDescription": "Current location helpers and targeted metadata lookups",
+    "params": [],
+    "modes": [
+      "gui"
+    ]
+  },
+  {
+    "path": "/get_current_function",
+    "method": "GET",
+    "description": "Get function at cursor (GUI only)",
+    "category": "getter",
+    "categoryDescription": "Current location helpers and targeted metadata lookups",
+    "params": [],
+    "modes": [
+      "gui"
+    ]
+  },
+  {
+    "path": "/get_data_type_size",
+    "method": "GET",
+    "description": "Get data type size in bytes",
+    "category": "datatype",
+    "categoryDescription": "Data type lookup, sizing, and structure management helpers",
+    "params": [
+      {
+        "name": "type_name",
+        "type": "string",
+        "source": "query",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "program",
+        "type": "string",
+        "source": "query",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/get_project_info",
+    "method": "GET",
+    "description": "Get project information (headless)",
+    "category": "program",
+    "categoryDescription": "Program lifecycle, metadata, save/exit, and load operations",
+    "params": [],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/get_version",
+    "method": "GET",
+    "description": "Get plugin version",
+    "category": "utility",
+    "categoryDescription": "Connectivity probes, schema discovery, and GUI/tooling helpers",
+    "params": [],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/health",
+    "method": "GET",
+    "description": "Health check endpoint for headless server",
+    "category": "utility",
+    "categoryDescription": "Connectivity probes, schema discovery, and GUI/tooling helpers",
+    "params": [],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/list_projects",
+    "method": "GET",
+    "description": "List available Ghidra projects",
+    "category": "project",
+    "categoryDescription": "Project creation, browsing, organization, and file management",
+    "params": [
+      {
+        "name": "searchDir",
+        "type": "string",
+        "source": "query",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/load_program",
+    "method": "POST",
+    "description": "Load program into headless server",
+    "category": "program",
+    "categoryDescription": "Program lifecycle, metadata, save/exit, and load operations",
+    "params": [
+      {
+        "name": "path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/load_program_from_project",
+    "method": "POST",
+    "description": "Load program from Ghidra project (headless)",
+    "category": "program",
+    "categoryDescription": "Program lifecycle, metadata, save/exit, and load operations",
+    "params": [
+      {
+        "name": "project_path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "program_path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/mcp/schema",
+    "method": "GET",
+    "description": "Machine-readable API schema with endpoint metadata",
+    "category": "utility",
+    "categoryDescription": "Connectivity probes, schema discovery, and GUI/tooling helpers",
+    "params": [],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/move_file",
+    "method": "POST",
+    "description": "Move a file to another project folder",
+    "category": "project",
+    "categoryDescription": "Project creation, browsing, organization, and file management",
+    "params": [
+      {
+        "name": "filePath",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "destFolder",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/move_folder",
+    "method": "POST",
+    "description": "Move a folder to another location",
+    "category": "project",
+    "categoryDescription": "Project creation, browsing, organization, and file management",
+    "params": [
+      {
+        "name": "sourcePath",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "destPath",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/open_project",
+    "method": "POST",
+    "description": "Open an existing Ghidra project",
+    "category": "project",
+    "categoryDescription": "Project creation, browsing, organization, and file management",
+    "params": [
+      {
+        "name": "path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/project/info",
+    "method": "GET",
+    "description": "Get detailed project info including running tools and open programs",
+    "category": "project",
+    "categoryDescription": "Project creation, browsing, organization, and file management",
+    "params": [],
+    "modes": [
+      "gui"
+    ]
+  },
+  {
+    "path": "/server/admin/set_permissions",
+    "method": "POST",
+    "description": "Set user permissions on a repository",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "repo",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "user",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "accessLevel",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/admin/terminate_all_checkouts",
+    "method": "POST",
+    "description": "Terminate all checkouts in a folder recursively",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui"
+    ]
+  },
+  {
+    "path": "/server/admin/terminate_checkout",
+    "method": "POST",
+    "description": "Terminate all checkouts on a single file",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/admin/users",
+    "method": "GET",
+    "description": "List all users on the server",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/authenticate",
+    "method": "POST",
+    "description": "Register server credentials for programmatic authentication",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "username",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "password",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui"
+    ]
+  },
+  {
+    "path": "/server/checkouts",
+    "method": "GET",
+    "description": "List all checked-out files in a folder, including server-side checkouts",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "path",
+        "type": "string",
+        "source": "query",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/connect",
+    "method": "POST",
+    "description": "Connect to a Ghidra server",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "host",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "port",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/disconnect",
+    "method": "POST",
+    "description": "Disconnect from the Ghidra server",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/repositories",
+    "method": "GET",
+    "description": "List repositories on the connected server",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/repository/create",
+    "method": "POST",
+    "description": "Create a new repository on the server",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "name",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/repository/file",
+    "method": "GET",
+    "description": "Get file info from a server repository",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "repo",
+        "type": "string",
+        "source": "query",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "path",
+        "type": "string",
+        "source": "query",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/repository/files",
+    "method": "GET",
+    "description": "List files in a server repository folder",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "repo",
+        "type": "string",
+        "source": "query",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "path",
+        "type": "string",
+        "source": "query",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/status",
+    "method": "GET",
+    "description": "Get server connection status",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/version_control/add",
+    "method": "POST",
+    "description": "Add a file to version control",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "repo",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "comment",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "keepCheckedOut",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/version_control/checkin",
+    "method": "POST",
+    "description": "Check in a version-controlled file",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "repo",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "comment",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "keepCheckedOut",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/version_control/checkout",
+    "method": "POST",
+    "description": "Check out a version-controlled file",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "repo",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/version_control/undo_checkout",
+    "method": "POST",
+    "description": "Undo a file checkout",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "repo",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/server/version_history",
+    "method": "GET",
+    "description": "Get version history for a file",
+    "category": "server",
+    "categoryDescription": "Ghidra Server connectivity, repository browsing, admin, and version control",
+    "params": [
+      {
+        "name": "repo",
+        "type": "string",
+        "source": "query",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      },
+      {
+        "name": "path",
+        "type": "string",
+        "source": "query",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui",
+      "headless"
+    ]
+  },
+  {
+    "path": "/tool/goto_address",
+    "method": "POST",
+    "description": "Navigate CodeBrowser listing and decompiler to a specific address",
+    "category": "utility",
+    "categoryDescription": "Connectivity probes, schema discovery, and GUI/tooling helpers",
+    "params": [
+      {
+        "name": "address",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui"
+    ]
+  },
+  {
+    "path": "/tool/launch_codebrowser",
+    "method": "POST",
+    "description": "Open a file in CodeBrowser, launching a new one if needed",
+    "category": "utility",
+    "categoryDescription": "Connectivity probes, schema discovery, and GUI/tooling helpers",
+    "params": [
+      {
+        "name": "path",
+        "type": "string",
+        "source": "body",
+        "required": false,
+        "defaultValue": null,
+        "description": "",
+        "paramType": ""
+      }
+    ],
+    "modes": [
+      "gui"
+    ]
+  },
+  {
+    "path": "/tool/running_tools",
+    "method": "GET",
+    "description": "List all running Ghidra tool windows",
+    "category": "utility",
+    "categoryDescription": "Connectivity probes, schema discovery, and GUI/tooling helpers",
+    "params": [],
+    "modes": [
+      "gui"
+    ]
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "id": "ghidra-mcp-parity-upgrade",
+    "name": "Ghidra MCP parity upgrade",
+    "status": "complete",
+    "acceptance_tests": [
+      "docker compose build/up against the worktree produces a new live ghidra-mcp container",
+      "/check_connection, /health, /get_version, and /mcp/schema reflect the rebuilt runtime",
+      "Headless /mcp/schema reports 183 tools with no missing or unexpected paths versus the documented headless catalog",
+      "Python unit tests covering the endpoint catalog and bridge schema handling pass"
+    ],
+    "notes": "Tracks the local reconciliation needed to align the documented 193 total / 175 GUI / 183 headless surface with the live runtime."
+  }
+]

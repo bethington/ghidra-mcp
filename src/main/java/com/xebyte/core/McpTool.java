@@ -35,4 +35,10 @@ public @interface McpTool {
 
     /** Tool category for grouping (e.g., "listing", "function", "analysis"). */
     String category() default "";
+
+    /**
+     * Whether this endpoint should be exposed via /mcp/schema as part of the
+     * documented MCP tool surface.
+     */
+    boolean documented() default true;
 }

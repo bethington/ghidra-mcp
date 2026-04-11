@@ -21,6 +21,7 @@ import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.EndpointDef;
 import com.xebyte.core.JsonHelper;
 import com.xebyte.core.ProgramProvider;
+import com.xebyte.core.SchemaCatalog;
 import com.xebyte.core.ThreadingStrategy;
 import ghidra.GhidraApplicationLayout;
 import ghidra.GhidraLaunchable;
@@ -63,9 +64,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     private String bindAddress = DEFAULT_BIND_ADDRESS;
     private boolean running = false;
 
-    // Endpoint handler registry
     private HeadlessEndpointHandler endpointHandler;
-    private int registeredEndpointCount;
 
     // Ghidra server connection manager
     private GhidraServerManager serverManager;
@@ -315,14 +314,11 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             });
         }
 
-        // Store scanner size for dynamic endpoint count reporting
-        registeredEndpointCount = scanner.getEndpoints().size();
-
         // ==========================================================================
         // SCHEMA ENDPOINT — Serves machine-readable API metadata
         // ==========================================================================
 
-        String schemaJson = scanner.generateSchema();
+        String schemaJson = SchemaCatalog.generateSchema(scanner, SchemaCatalog.RuntimeMode.HEADLESS);
         server.createContext("/mcp/schema", exchange -> {
             sendResponse(exchange, schemaJson);
         });
@@ -542,13 +538,11 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.exitServer());
         });
 
-        System.out.println("Registered " + countEndpoints() + " REST API endpoints");
+        System.out.println("Registered " + countEndpoints(scanner) + " documented MCP endpoints");
     }
 
-    private int countEndpoints() {
-        // registeredEndpointCount = shared endpoints from EndpointRegistry
-        // 39 = infrastructure + schema + headless-only endpoints registered via createContext
-        return registeredEndpointCount + 39;
+    private int countEndpoints(AnnotationScanner scanner) {
+        return SchemaCatalog.countTools(scanner, SchemaCatalog.RuntimeMode.HEADLESS);
     }
 
     public void stop() {

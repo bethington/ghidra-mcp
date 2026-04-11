@@ -124,7 +124,7 @@ public class ServerManager {
         }
 
         // Serve MCP tool schema
-        String schemaJson = scanner.generateSchema();
+        String schemaJson = SchemaCatalog.generateSchema(scanner, SchemaCatalog.RuntimeMode.GUI);
         server.createContext("/mcp/schema", exchange -> {
             try {
                 sendJsonResponse(exchange, schemaJson);

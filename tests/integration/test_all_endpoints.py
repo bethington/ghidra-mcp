@@ -4,20 +4,10 @@ Tests endpoint registration, response formats, and basic functionality.
 """
 
 import pytest
-import json
-from pathlib import Path
+from tests.conftest import load_endpoints
 
 
 # Load endpoints for parametrization
-def load_endpoints():
-    endpoints_file = Path(__file__).parent.parent / "endpoints.json"
-    if endpoints_file.exists():
-        with open(endpoints_file) as f:
-            data = json.load(f)
-            return data.get("endpoints", [])
-    return []
-
-
 ENDPOINTS = load_endpoints()
 
 

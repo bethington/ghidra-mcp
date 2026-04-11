@@ -25,6 +25,12 @@ def get_test_timeout():
     return int(os.environ.get("GHIDRA_MCP_TIMEOUT", "30"))
 
 
+def get_test_mode():
+    """Get the endpoint mode filter for catalog-backed tests."""
+    mode = os.environ.get("GHIDRA_MCP_TEST_MODE", "").strip().lower()
+    return mode if mode in {"gui", "headless"} else None
+
+
 def extract_first_function(text):
     """Extract the first function name and address from text or JSON responses."""
     try:
@@ -77,12 +83,7 @@ def server_url():
 @pytest.fixture(scope="session")
 def endpoints():
     """Load endpoint specifications from JSON."""
-    endpoints_file = Path(__file__).parent / "endpoints.json"
-    if endpoints_file.exists():
-        with open(endpoints_file) as f:
-            data = json.load(f)
-            return data.get("endpoints", [])
-    return []
+    return load_endpoints()
 
 
 @pytest.fixture(scope="session")
@@ -219,7 +220,15 @@ def load_endpoints():
     if endpoints_file.exists():
         with open(endpoints_file) as f:
             data = json.load(f)
-            return data.get("endpoints", [])
+            endpoints = data.get("endpoints", [])
+            mode = get_test_mode()
+            if mode:
+                endpoints = [
+                    endpoint
+                    for endpoint in endpoints
+                    if mode in endpoint.get("modes", ["gui", "headless"])
+                ]
+            return endpoints
     return []
 
 

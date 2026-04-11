@@ -24,21 +24,33 @@
       "method": "GET",
       "category": "utility",
       "params": [],
-      "description": "Health check endpoint"
+      "description": "Health check endpoint",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/mcp/schema",
       "method": "GET",
       "category": "utility",
       "params": [],
-      "description": "Machine-readable API schema with endpoint metadata"
+      "description": "Machine-readable API schema with endpoint metadata",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_version",
       "method": "GET",
       "category": "utility",
       "params": [],
-      "description": "Get plugin version"
+      "description": "Get plugin version",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_metadata",
@@ -47,7 +59,11 @@
       "params": [
         "program"
       ],
-      "description": "Get program metadata"
+      "description": "Get program metadata",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/convert_number",
@@ -58,7 +74,11 @@
         "from_base",
         "to_base"
       ],
-      "description": "Convert number between bases"
+      "description": "Convert number between bases",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_methods",
@@ -69,7 +89,11 @@
         "limit",
         "program"
       ],
-      "description": "List all function names"
+      "description": "List all function names",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_functions",
@@ -78,7 +102,11 @@
       "params": [
         "program"
       ],
-      "description": "List functions with addresses"
+      "description": "List functions with addresses",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_functions_enhanced",
@@ -89,7 +117,11 @@
         "limit",
         "program"
       ],
-      "description": "List functions with metadata"
+      "description": "List functions with metadata",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_classes",
@@ -100,7 +132,11 @@
         "limit",
         "program"
       ],
-      "description": "List namespace/class names"
+      "description": "List namespace/class names",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_segments",
@@ -111,7 +147,11 @@
         "limit",
         "program"
       ],
-      "description": "List memory segments"
+      "description": "List memory segments",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_imports",
@@ -122,7 +162,11 @@
         "limit",
         "program"
       ],
-      "description": "List imported symbols"
+      "description": "List imported symbols",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_exports",
@@ -133,7 +177,11 @@
         "limit",
         "program"
       ],
-      "description": "List exported symbols"
+      "description": "List exported symbols",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_namespaces",
@@ -144,7 +192,11 @@
         "limit",
         "program"
       ],
-      "description": "List all namespaces"
+      "description": "List all namespaces",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_data_items",
@@ -155,7 +207,11 @@
         "limit",
         "program"
       ],
-      "description": "List defined data"
+      "description": "List defined data",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_data_items_by_xrefs",
@@ -167,7 +223,11 @@
         "format",
         "program"
       ],
-      "description": "List data sorted by xref count"
+      "description": "List data sorted by xref count",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_strings",
@@ -179,7 +239,11 @@
         "filter",
         "program"
       ],
-      "description": "List defined strings"
+      "description": "List defined strings",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_globals",
@@ -191,14 +255,22 @@
         "filter",
         "program"
       ],
-      "description": "List global variables"
+      "description": "List global variables",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_calling_conventions",
       "method": "GET",
       "category": "listing",
       "params": [],
-      "description": "List available calling conventions"
+      "description": "List available calling conventions",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_external_locations",
@@ -209,7 +281,11 @@
         "limit",
         "program"
       ],
-      "description": "List external locations"
+      "description": "List external locations",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_scripts",
@@ -218,7 +294,11 @@
       "params": [
         "filter"
       ],
-      "description": "List available Ghidra scripts"
+      "description": "List available Ghidra scripts",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_bookmarks",
@@ -230,7 +310,11 @@
         "type",
         "program"
       ],
-      "description": "List bookmarks"
+      "description": "List bookmarks",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_function_by_address",
@@ -240,21 +324,31 @@
         "address",
         "program"
       ],
-      "description": "Get function at address"
+      "description": "Get function at address",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_current_address",
       "method": "GET",
       "category": "getter",
       "params": [],
-      "description": "Get cursor address (GUI only)"
+      "description": "Get cursor address (GUI only)",
+      "modes": [
+        "gui"
+      ]
     },
     {
       "path": "/get_current_function",
       "method": "GET",
       "category": "getter",
       "params": [],
-      "description": "Get function at cursor (GUI only)"
+      "description": "Get function at cursor (GUI only)",
+      "modes": [
+        "gui"
+      ]
     },
     {
       "path": "/get_function_variables",
@@ -264,7 +358,11 @@
         "function_name",
         "program"
       ],
-      "description": "Get function variables"
+      "description": "Get function variables",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_function_labels",
@@ -276,7 +374,11 @@
         "limit",
         "program"
       ],
-      "description": "Get labels in function"
+      "description": "Get labels in function",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_function_jump_targets",
@@ -288,7 +390,11 @@
         "limit",
         "program"
       ],
-      "description": "Get jump targets"
+      "description": "Get jump targets",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_function_callees",
@@ -300,7 +406,11 @@
         "limit",
         "program"
       ],
-      "description": "Get functions called"
+      "description": "Get functions called",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_function_callers",
@@ -312,7 +422,11 @@
         "limit",
         "program"
       ],
-      "description": "Get calling functions"
+      "description": "Get calling functions",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_function_call_graph",
@@ -324,7 +438,11 @@
         "direction",
         "program"
       ],
-      "description": "Get call graph"
+      "description": "Get call graph",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_full_call_graph",
@@ -335,14 +453,22 @@
         "limit",
         "program"
       ],
-      "description": "Get full call graph"
+      "description": "Get full call graph",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_entry_points",
       "method": "GET",
       "category": "getter",
       "params": [],
-      "description": "Get program entry points"
+      "description": "Get program entry points",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_external_location",
@@ -353,7 +479,11 @@
         "dll_name",
         "program"
       ],
-      "description": "Get external location details"
+      "description": "Get external location details",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_valid_data_types",
@@ -363,7 +493,11 @@
         "category",
         "program"
       ],
-      "description": "Get valid data type names"
+      "description": "Get valid data type names",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_type_size",
@@ -373,7 +507,11 @@
         "type_name",
         "program"
       ],
-      "description": "Get data type size"
+      "description": "Get data type size",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_struct_layout",
@@ -383,7 +521,11 @@
         "struct_name",
         "program"
       ],
-      "description": "Get structure layout"
+      "description": "Get structure layout",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_enum_values",
@@ -393,7 +535,11 @@
         "enum_name",
         "program"
       ],
-      "description": "Get enumeration values"
+      "description": "Get enumeration values",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/decompile_function",
@@ -406,7 +552,11 @@
         "timeout",
         "program"
       ],
-      "description": "Decompile function"
+      "description": "Decompile function",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/disassemble_function",
@@ -416,7 +566,11 @@
         "address",
         "program"
       ],
-      "description": "Disassemble function"
+      "description": "Disassemble function",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/force_decompile",
@@ -427,7 +581,11 @@
         "timeout",
         "program"
       ],
-      "description": "Force fresh decompilation"
+      "description": "Force fresh decompilation",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/disassemble_bytes",
@@ -439,7 +597,11 @@
         "length",
         "program"
       ],
-      "description": "Disassemble byte range"
+      "description": "Disassemble byte range",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_xrefs_to",
@@ -451,7 +613,11 @@
         "limit",
         "program"
       ],
-      "description": "Get references to address"
+      "description": "Get references to address",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_xrefs_from",
@@ -463,7 +629,11 @@
         "limit",
         "program"
       ],
-      "description": "Get references from address"
+      "description": "Get references from address",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_function_xrefs",
@@ -475,7 +645,11 @@
         "limit",
         "program"
       ],
-      "description": "Get function cross-references"
+      "description": "Get function cross-references",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_bulk_xrefs",
@@ -485,7 +659,11 @@
         "addresses",
         "program"
       ],
-      "description": "Get xrefs for multiple addresses"
+      "description": "Get xrefs for multiple addresses",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/search_functions",
@@ -497,7 +675,11 @@
         "limit",
         "program"
       ],
-      "description": "Search functions by name"
+      "description": "Search functions by name",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/search_functions_enhanced",
@@ -515,7 +697,11 @@
         "limit",
         "program"
       ],
-      "description": "Advanced function search"
+      "description": "Advanced function search",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/search_data_types",
@@ -527,7 +713,11 @@
         "limit",
         "program"
       ],
-      "description": "Search data types"
+      "description": "Search data types",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/search_byte_patterns",
@@ -538,7 +728,11 @@
         "mask",
         "program"
       ],
-      "description": "Search for byte patterns"
+      "description": "Search for byte patterns",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/find_similar_functions",
@@ -550,7 +744,11 @@
         "limit",
         "program"
       ],
-      "description": "Find similar functions"
+      "description": "Find similar functions",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/rename_function",
@@ -561,7 +759,11 @@
         "newName",
         "program"
       ],
-      "description": "Rename function by name"
+      "description": "Rename function by name",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/rename_function_by_address",
@@ -572,7 +774,11 @@
         "new_name",
         "program"
       ],
-      "description": "Rename function by address"
+      "description": "Rename function by address",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/rename_data",
@@ -583,7 +789,11 @@
         "newName",
         "program"
       ],
-      "description": "Rename data symbol"
+      "description": "Rename data symbol",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/rename_variable",
@@ -595,7 +805,11 @@
         "newName",
         "program"
       ],
-      "description": "Rename variable"
+      "description": "Rename variable",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/rename_label",
@@ -607,7 +821,11 @@
         "new_name",
         "program"
       ],
-      "description": "Rename label"
+      "description": "Rename label",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/rename_global_variable",
@@ -618,7 +836,11 @@
         "newName",
         "program"
       ],
-      "description": "Rename global variable"
+      "description": "Rename global variable",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/rename_external_location",
@@ -629,7 +851,11 @@
         "new_name",
         "program"
       ],
-      "description": "Rename external location"
+      "description": "Rename external location",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/rename_or_label",
@@ -640,7 +866,11 @@
         "name",
         "program"
       ],
-      "description": "Rename or create label"
+      "description": "Rename or create label",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/rename_variables",
@@ -651,7 +881,11 @@
         "renames",
         "program"
       ],
-      "description": "Batch rename variables"
+      "description": "Batch rename variables",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/batch_rename_function_components",
@@ -665,7 +899,11 @@
         "return_type",
         "program"
       ],
-      "description": "Batch rename function components"
+      "description": "Batch rename function components",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/set_decompiler_comment",
@@ -676,7 +914,11 @@
         "comment",
         "program"
       ],
-      "description": "Set PRE_COMMENT"
+      "description": "Set PRE_COMMENT",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/set_disassembly_comment",
@@ -687,7 +929,11 @@
         "comment",
         "program"
       ],
-      "description": "Set EOL_COMMENT"
+      "description": "Set EOL_COMMENT",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_plate_comment",
@@ -697,7 +943,11 @@
         "address",
         "program"
       ],
-      "description": "Get plate comment"
+      "description": "Get plate comment",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/set_plate_comment",
@@ -708,7 +958,11 @@
         "comment",
         "program"
       ],
-      "description": "Set plate comment"
+      "description": "Set plate comment",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/batch_set_comments",
@@ -721,7 +975,11 @@
         "plate_comment",
         "program"
       ],
-      "description": "Set multiple comments"
+      "description": "Set multiple comments",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/batch_apply_documentation",
@@ -741,7 +999,10 @@
         "score",
         "program"
       ],
-      "description": "Apply all documentation to a function in one call"
+      "description": "Apply all documentation to a function in one call",
+      "modes": [
+        "gui"
+      ]
     },
     {
       "path": "/clear_function_comments",
@@ -754,7 +1015,11 @@
         "clear_eol",
         "program"
       ],
-      "description": "Clear all comments for a function"
+      "description": "Clear all comments for a function",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/set_bookmark",
@@ -766,7 +1031,11 @@
         "comment",
         "program"
       ],
-      "description": "Set bookmark"
+      "description": "Set bookmark",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/delete_bookmark",
@@ -777,7 +1046,11 @@
         "category",
         "program"
       ],
-      "description": "Delete bookmark"
+      "description": "Delete bookmark",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/set_function_prototype",
@@ -789,7 +1062,11 @@
         "calling_convention",
         "program"
       ],
-      "description": "Set function prototype"
+      "description": "Set function prototype",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/set_local_variable_type",
@@ -801,7 +1078,11 @@
         "new_type",
         "program"
       ],
-      "description": "Set variable type"
+      "description": "Set variable type",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/set_parameter_type",
@@ -813,7 +1094,11 @@
         "new_type",
         "program"
       ],
-      "description": "Set parameter type"
+      "description": "Set parameter type",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/set_variable_storage",
@@ -825,7 +1110,11 @@
         "storage",
         "program"
       ],
-      "description": "Set variable storage"
+      "description": "Set variable storage",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/batch_set_variable_types",
@@ -836,7 +1125,11 @@
         "variable_types",
         "program"
       ],
-      "description": "Set multiple variable types"
+      "description": "Set multiple variable types",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/set_function_no_return",
@@ -847,7 +1140,11 @@
         "no_return",
         "program"
       ],
-      "description": "Set no-return attribute"
+      "description": "Set no-return attribute",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/clear_instruction_flow_override",
@@ -857,7 +1154,11 @@
         "address",
         "program"
       ],
-      "description": "Clear flow override"
+      "description": "Clear flow override",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_data_types",
@@ -869,7 +1170,11 @@
         "limit",
         "program"
       ],
-      "description": "List data types"
+      "description": "List data types",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_struct",
@@ -880,7 +1185,11 @@
         "fields",
         "program"
       ],
-      "description": "Create structure"
+      "description": "Create structure",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_enum",
@@ -892,7 +1201,11 @@
         "size",
         "program"
       ],
-      "description": "Create enumeration"
+      "description": "Create enumeration",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_union",
@@ -903,7 +1216,11 @@
         "fields",
         "program"
       ],
-      "description": "Create union"
+      "description": "Create union",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_typedef",
@@ -914,7 +1231,11 @@
         "base_type",
         "program"
       ],
-      "description": "Create typedef"
+      "description": "Create typedef",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_array_type",
@@ -926,7 +1247,11 @@
         "name",
         "program"
       ],
-      "description": "Create array type"
+      "description": "Create array type",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_pointer_type",
@@ -936,7 +1261,11 @@
         "base_type",
         "program"
       ],
-      "description": "Create pointer type"
+      "description": "Create pointer type",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/apply_data_type",
@@ -948,7 +1277,11 @@
         "clear_existing",
         "program"
       ],
-      "description": "Apply data type"
+      "description": "Apply data type",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/modify_struct_field",
@@ -961,7 +1294,11 @@
         "new_name",
         "program"
       ],
-      "description": "Modify struct field"
+      "description": "Modify struct field",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/add_struct_field",
@@ -974,7 +1311,11 @@
         "offset",
         "program"
       ],
-      "description": "Add struct field"
+      "description": "Add struct field",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/remove_struct_field",
@@ -985,7 +1326,11 @@
         "field_name",
         "program"
       ],
-      "description": "Remove struct field"
+      "description": "Remove struct field",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/delete_data_type",
@@ -995,7 +1340,11 @@
         "type_name",
         "program"
       ],
-      "description": "Delete data type"
+      "description": "Delete data type",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/clone_data_type",
@@ -1006,7 +1355,11 @@
         "new_name",
         "program"
       ],
-      "description": "Clone data type"
+      "description": "Clone data type",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/import_data_types",
@@ -1016,7 +1369,11 @@
         "gdt_file",
         "program"
       ],
-      "description": "Import data types from GDT"
+      "description": "Import data types from GDT",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_data_type_category",
@@ -1026,7 +1383,11 @@
         "category_path",
         "program"
       ],
-      "description": "Create data type category"
+      "description": "Create data type category",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/move_data_type_to_category",
@@ -1037,7 +1398,11 @@
         "category_path",
         "program"
       ],
-      "description": "Move data type to category"
+      "description": "Move data type to category",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_data_type_categories",
@@ -1047,7 +1412,11 @@
         "parent_category",
         "program"
       ],
-      "description": "List data type categories"
+      "description": "List data type categories",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_function_signature",
@@ -1060,7 +1429,11 @@
         "calling_convention",
         "program"
       ],
-      "description": "Create function signature type"
+      "description": "Create function signature type",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/validate_data_type",
@@ -1070,7 +1443,11 @@
         "type_string",
         "program"
       ],
-      "description": "Validate data type syntax"
+      "description": "Validate data type syntax",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/validate_data_type_exists",
@@ -1080,7 +1457,11 @@
         "type_name",
         "program"
       ],
-      "description": "Check if data type exists"
+      "description": "Check if data type exists",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/validate_function_prototype",
@@ -1090,7 +1471,11 @@
         "prototype",
         "program"
       ],
-      "description": "Validate function prototype"
+      "description": "Validate function prototype",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_label",
@@ -1101,7 +1486,11 @@
         "name",
         "program"
       ],
-      "description": "Create label"
+      "description": "Create label",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/batch_create_labels",
@@ -1111,7 +1500,11 @@
         "labels",
         "program"
       ],
-      "description": "Create multiple labels"
+      "description": "Create multiple labels",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/analyze_data_region",
@@ -1125,7 +1518,11 @@
         "include_boundary_detection",
         "program"
       ],
-      "description": "Analyze data region"
+      "description": "Analyze data region",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/detect_array_bounds",
@@ -1138,7 +1535,11 @@
         "max_scan_range",
         "program"
       ],
-      "description": "Detect array bounds"
+      "description": "Detect array bounds",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_assembly_context",
@@ -1150,7 +1551,11 @@
         "include_patterns",
         "program"
       ],
-      "description": "Get assembly context"
+      "description": "Get assembly context",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/apply_data_classification",
@@ -1163,7 +1568,11 @@
         "name",
         "program"
       ],
-      "description": "Apply data classification"
+      "description": "Apply data classification",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/analyze_struct_field_usage",
@@ -1175,7 +1584,11 @@
         "max_functions",
         "program"
       ],
-      "description": "Analyze struct field usage"
+      "description": "Analyze struct field usage",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_field_access_context",
@@ -1187,7 +1600,11 @@
         "num_examples",
         "program"
       ],
-      "description": "Get field access context"
+      "description": "Get field access context",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/suggest_field_names",
@@ -1198,7 +1615,11 @@
         "struct_name",
         "program"
       ],
-      "description": "Suggest field names"
+      "description": "Suggest field names",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/inspect_memory_content",
@@ -1210,7 +1631,11 @@
         "detect_strings",
         "program"
       ],
-      "description": "Inspect memory bytes"
+      "description": "Inspect memory bytes",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/read_memory",
@@ -1222,7 +1647,11 @@
         "format",
         "program"
       ],
-      "description": "Read raw memory"
+      "description": "Read raw memory",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/analyze_function_completeness",
@@ -1232,7 +1661,11 @@
         "function_address",
         "program"
       ],
-      "description": "Analyze documentation completeness"
+      "description": "Analyze documentation completeness",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/analyze_for_documentation",
@@ -1242,7 +1675,11 @@
         "function_address",
         "program"
       ],
-      "description": "Composite RE documentation analysis (decompile + classify + variables + completeness)"
+      "description": "Composite RE documentation analysis (decompile + classify + variables + completeness)",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/batch_analyze_completeness",
@@ -1252,7 +1689,11 @@
         "addresses",
         "program"
       ],
-      "description": "Batch analyze completeness for multiple functions"
+      "description": "Batch analyze completeness for multiple functions",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/analyze_function_complete",
@@ -1267,7 +1708,11 @@
         "include_variables",
         "program"
       ],
-      "description": "Complete function analysis"
+      "description": "Complete function analysis",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/find_next_undefined_function",
@@ -1280,7 +1725,11 @@
         "direction",
         "program"
       ],
-      "description": "Find next undefined function"
+      "description": "Find next undefined function",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/can_rename_at_address",
@@ -1290,7 +1739,11 @@
         "address",
         "program"
       ],
-      "description": "Check if address can be renamed"
+      "description": "Check if address can be renamed",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/detect_crypto_constants",
@@ -1299,7 +1752,11 @@
       "params": [
         "program"
       ],
-      "description": "Detect crypto constants"
+      "description": "Detect crypto constants",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/find_dead_code",
@@ -1311,7 +1768,11 @@
         "limit",
         "program"
       ],
-      "description": "Find dead code"
+      "description": "Find dead code",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/analyze_control_flow",
@@ -1322,7 +1783,11 @@
         "include_dominators",
         "program"
       ],
-      "description": "Analyze control flow"
+      "description": "Analyze control flow",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/find_anti_analysis_techniques",
@@ -1331,7 +1796,11 @@
       "params": [
         "program"
       ],
-      "description": "Find anti-analysis techniques"
+      "description": "Find anti-analysis techniques",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/batch_decompile",
@@ -1342,7 +1811,11 @@
         "format",
         "program"
       ],
-      "description": "Batch decompile functions"
+      "description": "Batch decompile functions",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/analyze_call_graph",
@@ -1353,7 +1826,11 @@
         "depth",
         "program"
       ],
-      "description": "Analyze function call graph patterns"
+      "description": "Analyze function call graph patterns",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/analyze_api_call_chains",
@@ -1362,7 +1839,11 @@
       "params": [
         "program"
       ],
-      "description": "Analyze API call chains"
+      "description": "Analyze API call chains",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/extract_iocs_with_context",
@@ -1371,7 +1852,11 @@
       "params": [
         "program"
       ],
-      "description": "Extract IOCs with context"
+      "description": "Extract IOCs with context",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/detect_malware_behaviors",
@@ -1381,7 +1866,11 @@
         "categories",
         "program"
       ],
-      "description": "Detect malware behaviors"
+      "description": "Detect malware behaviors",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/run_script",
@@ -1392,7 +1881,11 @@
         "args",
         "program"
       ],
-      "description": "Run Ghidra script"
+      "description": "Run Ghidra script",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/run_ghidra_script",
@@ -1404,7 +1897,11 @@
         "capture_output",
         "program"
       ],
-      "description": "Run script with output capture"
+      "description": "Run script with output capture",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/run_script_inline",
@@ -1415,27 +1912,43 @@
         "language",
         "program"
       ],
-      "description": "Run inline script code"
+      "description": "Run inline script code",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_open_programs",
       "method": "GET",
       "category": "program",
       "params": [],
-      "description": "List open programs"
+      "description": "List open programs",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_address_spaces",
       "method": "GET",
       "category": "program",
-      "description": "List all physical address spaces in the program"
+      "description": "List all physical address spaces in the program",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_current_program_info",
       "method": "GET",
       "category": "program",
       "params": [],
-      "description": "Get current program info"
+      "description": "Get current program info",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/switch_program",
@@ -1444,7 +1957,11 @@
       "params": [
         "name"
       ],
-      "description": "Switch current program"
+      "description": "Switch current program",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_project_files",
@@ -1453,7 +1970,11 @@
       "params": [
         "folder"
       ],
-      "description": "List project files"
+      "description": "List project files",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/open_program",
@@ -1462,7 +1983,11 @@
       "params": [
         "path"
       ],
-      "description": "Open program from project"
+      "description": "Open program from project",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/load_program",
@@ -1471,7 +1996,10 @@
       "params": [
         "path"
       ],
-      "description": "Load program into headless server"
+      "description": "Load program into headless server",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/load_program_from_project",
@@ -1481,7 +2009,10 @@
         "project_path",
         "program_path"
       ],
-      "description": "Load program from Ghidra project (headless)"
+      "description": "Load program from Ghidra project (headless)",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/close_program",
@@ -1490,21 +2021,30 @@
       "params": [
         "program"
       ],
-      "description": "Close a loaded program (headless)"
+      "description": "Close a loaded program (headless)",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/get_project_info",
       "method": "GET",
       "category": "program",
       "params": [],
-      "description": "Get project information (headless)"
+      "description": "Get project information (headless)",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/health",
       "method": "GET",
       "category": "utility",
       "params": [],
-      "description": "Health check endpoint for headless server"
+      "description": "Health check endpoint for headless server",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/get_function_hash",
@@ -1514,7 +2054,11 @@
         "address",
         "program"
       ],
-      "description": "Get function hash"
+      "description": "Get function hash",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_bulk_function_hashes",
@@ -1526,7 +2070,11 @@
         "filter",
         "program"
       ],
-      "description": "Get bulk function hashes"
+      "description": "Get bulk function hashes",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_function_documentation",
@@ -1536,7 +2084,11 @@
         "address",
         "program"
       ],
-      "description": "Export function documentation"
+      "description": "Export function documentation",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/apply_function_documentation",
@@ -1553,7 +2105,11 @@
         "labels",
         "program"
       ],
-      "description": "Apply function documentation"
+      "description": "Apply function documentation",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/delete_label",
@@ -1564,7 +2120,11 @@
         "name",
         "program"
       ],
-      "description": "Delete label at address"
+      "description": "Delete label at address",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/batch_delete_labels",
@@ -1574,7 +2134,11 @@
         "labels",
         "program"
       ],
-      "description": "Delete multiple labels"
+      "description": "Delete multiple labels",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/delete_function",
@@ -1584,7 +2148,11 @@
         "address",
         "program"
       ],
-      "description": "Delete function at address"
+      "description": "Delete function at address",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_function",
@@ -1596,7 +2164,11 @@
         "disassemble_first",
         "program"
       ],
-      "description": "Create function at address"
+      "description": "Create function at address",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_memory_block",
@@ -1611,7 +2183,11 @@
         "execute",
         "program"
       ],
-      "description": "Create memory block"
+      "description": "Create memory block",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/save_program",
@@ -1620,14 +2196,21 @@
       "params": [
         "program"
       ],
-      "description": "Save current program"
+      "description": "Save current program",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/exit_ghidra",
       "method": "POST",
       "category": "program",
       "params": [],
-      "description": "Save and exit Ghidra"
+      "description": "Save and exit Ghidra",
+      "modes": [
+        "gui"
+      ]
     },
     {
       "path": "/get_data_type_size",
@@ -1637,7 +2220,11 @@
         "type_name",
         "program"
       ],
-      "description": "Get data type size in bytes"
+      "description": "Get data type size in bytes",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/get_function_signature",
@@ -1647,7 +2234,11 @@
         "address",
         "program"
       ],
-      "description": "Get function feature signature"
+      "description": "Get function feature signature",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/find_similar_functions_fuzzy",
@@ -1661,7 +2252,11 @@
         "limit",
         "program"
       ],
-      "description": "Find similar functions via fuzzy matching"
+      "description": "Find similar functions via fuzzy matching",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/bulk_fuzzy_match",
@@ -1675,7 +2270,11 @@
         "limit",
         "program"
       ],
-      "description": "Bulk fuzzy match functions across programs"
+      "description": "Bulk fuzzy match functions across programs",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/diff_functions",
@@ -1688,7 +2287,11 @@
         "program_b",
         "program"
       ],
-      "description": "Diff two functions"
+      "description": "Diff two functions",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/compare_programs_documentation",
@@ -1697,7 +2300,11 @@
       "params": [
         "program"
       ],
-      "description": "Compare documentation across programs"
+      "description": "Compare documentation across programs",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/find_undocumented_by_string",
@@ -1707,7 +2314,11 @@
         "address",
         "program"
       ],
-      "description": "Find undocumented functions referencing string"
+      "description": "Find undocumented functions referencing string",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/batch_string_anchor_report",
@@ -1717,7 +2328,11 @@
         "pattern",
         "program"
       ],
-      "description": "Report strings and their undocumented functions"
+      "description": "Report strings and their undocumented functions",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/create_project",
@@ -1727,7 +2342,10 @@
         "parentDir",
         "name"
       ],
-      "description": "Create a new Ghidra project"
+      "description": "Create a new Ghidra project",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/delete_project",
@@ -1736,7 +2354,10 @@
       "params": [
         "projectPath"
       ],
-      "description": "Delete a Ghidra project"
+      "description": "Delete a Ghidra project",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/list_projects",
@@ -1745,7 +2366,10 @@
       "params": [
         "searchDir"
       ],
-      "description": "List available Ghidra projects"
+      "description": "List available Ghidra projects",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/open_project",
@@ -1754,14 +2378,20 @@
       "params": [
         "path"
       ],
-      "description": "Open an existing Ghidra project"
+      "description": "Open an existing Ghidra project",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/close_project",
       "method": "POST",
       "category": "project",
       "params": [],
-      "description": "Close the currently open project"
+      "description": "Close the currently open project",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/create_folder",
@@ -1771,7 +2401,10 @@
         "path",
         "program"
       ],
-      "description": "Create a folder in the project"
+      "description": "Create a folder in the project",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/move_file",
@@ -1781,7 +2414,10 @@
         "filePath",
         "destFolder"
       ],
-      "description": "Move a file to another project folder"
+      "description": "Move a file to another project folder",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/move_folder",
@@ -1791,7 +2427,10 @@
         "sourcePath",
         "destPath"
       ],
-      "description": "Move a folder to another location"
+      "description": "Move a folder to another location",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/delete_file",
@@ -1800,7 +2439,10 @@
       "params": [
         "filePath"
       ],
-      "description": "Delete a file from the project"
+      "description": "Delete a file from the project",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/get_function_count",
@@ -1809,7 +2451,11 @@
       "params": [
         "program"
       ],
-      "description": "Return the number of functions in the loaded program"
+      "description": "Return the number of functions in the loaded program",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/search_strings",
@@ -1823,7 +2469,11 @@
         "limit",
         "program"
       ],
-      "description": "Search defined strings by a regex/substring pattern"
+      "description": "Search defined strings by a regex/substring pattern",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/list_analyzers",
@@ -1832,7 +2482,11 @@
       "params": [
         "program"
       ],
-      "description": "List available analysis plugins"
+      "description": "List available analysis plugins",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/configure_analyzer",
@@ -1843,7 +2497,10 @@
         "enabled",
         "program"
       ],
-      "description": "Configure an analysis plugin"
+      "description": "Configure an analysis plugin",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/run_analysis",
@@ -1852,7 +2509,11 @@
       "params": [
         "program"
       ],
-      "description": "Run auto-analysis on the current program"
+      "description": "Run auto-analysis on the current program",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/find_code_gaps",
@@ -1864,7 +2525,11 @@
         "limit",
         "program"
       ],
-      "description": "Find gaps of undefined bytes between functions in executable memory"
+      "description": "Find gaps of undefined bytes between functions in executable memory",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/connect",
@@ -1874,28 +2539,44 @@
         "host",
         "port"
       ],
-      "description": "Connect to a Ghidra server"
+      "description": "Connect to a Ghidra server",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/disconnect",
       "method": "POST",
       "category": "server",
       "params": [],
-      "description": "Disconnect from the Ghidra server"
+      "description": "Disconnect from the Ghidra server",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/status",
       "method": "GET",
       "category": "server",
       "params": [],
-      "description": "Get server connection status"
+      "description": "Get server connection status",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/repositories",
       "method": "GET",
       "category": "server",
       "params": [],
-      "description": "List repositories on the connected server"
+      "description": "List repositories on the connected server",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/repository/create",
@@ -1904,7 +2585,10 @@
       "params": [
         "name"
       ],
-      "description": "Create a new repository on the server"
+      "description": "Create a new repository on the server",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/server/version_control/checkout",
@@ -1914,7 +2598,11 @@
         "repo",
         "path"
       ],
-      "description": "Check out a version-controlled file"
+      "description": "Check out a version-controlled file",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/version_control/checkin",
@@ -1926,7 +2614,11 @@
         "comment",
         "keepCheckedOut"
       ],
-      "description": "Check in a version-controlled file"
+      "description": "Check in a version-controlled file",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/version_control/undo_checkout",
@@ -1936,7 +2628,11 @@
         "repo",
         "path"
       ],
-      "description": "Undo a file checkout"
+      "description": "Undo a file checkout",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/version_control/add",
@@ -1948,7 +2644,11 @@
         "comment",
         "keepCheckedOut"
       ],
-      "description": "Add a file to version control"
+      "description": "Add a file to version control",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/version_history",
@@ -1958,7 +2658,11 @@
         "repo",
         "path"
       ],
-      "description": "Get version history for a file"
+      "description": "Get version history for a file",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/checkouts",
@@ -1967,14 +2671,21 @@
       "params": [
         "path"
       ],
-      "description": "List all checked-out files in a folder, including server-side checkouts"
+      "description": "List all checked-out files in a folder, including server-side checkouts",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/admin/users",
       "method": "GET",
       "category": "server",
       "params": [],
-      "description": "List all users on the server"
+      "description": "List all users on the server",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/server/admin/set_permissions",
@@ -1985,7 +2696,10 @@
         "user",
         "accessLevel"
       ],
-      "description": "Set user permissions on a repository"
+      "description": "Set user permissions on a repository",
+      "modes": [
+        "headless"
+      ]
     },
     {
       "path": "/server/admin/terminate_checkout",
@@ -1994,7 +2708,11 @@
       "params": [
         "path"
       ],
-      "description": "Terminate all checkouts on a single file"
+      "description": "Terminate all checkouts on a single file",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/admin/terminate_all_checkouts",
@@ -2003,7 +2721,10 @@
       "params": [
         "path"
       ],
-      "description": "Terminate all checkouts in a folder recursively"
+      "description": "Terminate all checkouts in a folder recursively",
+      "modes": [
+        "gui"
+      ]
     },
     {
       "path": "/server/repository/files",
@@ -2013,7 +2734,11 @@
         "repo",
         "path"
       ],
-      "description": "List files in a server repository folder"
+      "description": "List files in a server repository folder",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/server/repository/file",
@@ -2023,21 +2748,31 @@
         "repo",
         "path"
       ],
-      "description": "Get file info from a server repository"
+      "description": "Get file info from a server repository",
+      "modes": [
+        "gui",
+        "headless"
+      ]
     },
     {
       "path": "/project/info",
       "method": "GET",
       "category": "project",
       "params": [],
-      "description": "Get detailed project info including running tools and open programs"
+      "description": "Get detailed project info including running tools and open programs",
+      "modes": [
+        "gui"
+      ]
     },
     {
       "path": "/tool/running_tools",
       "method": "GET",
       "category": "utility",
       "params": [],
-      "description": "List all running Ghidra tool windows"
+      "description": "List all running Ghidra tool windows",
+      "modes": [
+        "gui"
+      ]
     },
     {
       "path": "/tool/launch_codebrowser",
@@ -2046,7 +2781,10 @@
       "params": [
         "path"
       ],
-      "description": "Open a file in CodeBrowser, launching a new one if needed"
+      "description": "Open a file in CodeBrowser, launching a new one if needed",
+      "modes": [
+        "gui"
+      ]
     },
     {
       "path": "/tool/goto_address",
@@ -2055,7 +2793,10 @@
       "params": [
         "address"
       ],
-      "description": "Navigate CodeBrowser listing and decompiler to a specific address"
+      "description": "Navigate CodeBrowser listing and decompiler to a specific address",
+      "modes": [
+        "gui"
+      ]
     },
     {
       "path": "/server/authenticate",
@@ -2065,7 +2806,10 @@
         "username",
         "password"
       ],
-      "description": "Register server credentials for programmatic authentication"
+      "description": "Register server credentials for programmatic authentication",
+      "modes": [
+        "gui"
+      ]
     }
   ]
 }
