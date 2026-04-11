@@ -2717,6 +2717,7 @@ def process_function(
                 print(f"  SKIP: Too complex for MiniMax (fixable={fixable_pts:.0f}, structs+{len(completeness.get('undefined_variables',[]))} undefined vars)")
                 print(f"  Route to Claude or Codex for this function")
                 func["last_result"] = "skipped_complexity"
+                func["consecutive_fails"] = func.get("consecutive_fails", 0) + 1
                 save_state(state)
                 return "skipped"
 
@@ -2843,7 +2844,7 @@ def process_function(
     # Reload the specific function entry to avoid stale overwrites from parallel workers
     fresh_state = load_state()
     fresh_func = fresh_state.get("functions", {}).get(func_key, func)
-    if result in ("failed", "needs_redo", "rate_limited"):
+    if result in ("failed", "needs_redo", "rate_limited", "blocked"):
         fresh_func["consecutive_fails"] = fresh_func.get("consecutive_fails", 0) + 1
         func["consecutive_fails"] = fresh_func["consecutive_fails"]
     elif result == "completed":
