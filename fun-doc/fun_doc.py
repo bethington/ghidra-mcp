@@ -2808,7 +2808,12 @@ def process_function(
     # Parse result
     result = "completed"
     if output:
-        if "BLOCKED:" in output:
+        # Detect rate limit errors (provider returns limit message as text)
+        rate_limit_phrases = ["hit your limit", "rate limit", "resets ", "usage limit", "try again at"]
+        if any(phrase in output.lower() for phrase in rate_limit_phrases):
+            print(f"  RATE LIMITED — stopping worker on this function", flush=True)
+            result = "rate_limited"
+        elif "BLOCKED:" in output:
             result = "blocked"
         elif "DONE:" in output:
             result = "completed"
@@ -2834,11 +2839,19 @@ def process_function(
     func["last_processed"] = datetime.now().isoformat()
     func["last_result"] = result
 
-    # Track consecutive failures for cooldown logic
-    if result in ("failed", "needs_redo"):
-        func["consecutive_fails"] = func.get("consecutive_fails", 0) + 1
+    # Track consecutive failures for cooldown logic (atomic read-modify-write)
+    # Reload the specific function entry to avoid stale overwrites from parallel workers
+    fresh_state = load_state()
+    fresh_func = fresh_state.get("functions", {}).get(func_key, func)
+    if result in ("failed", "needs_redo", "rate_limited"):
+        fresh_func["consecutive_fails"] = fresh_func.get("consecutive_fails", 0) + 1
+        func["consecutive_fails"] = fresh_func["consecutive_fails"]
     elif result == "completed":
+        fresh_func["consecutive_fails"] = 0
         func["consecutive_fails"] = 0
+    # Copy the updated counter back to our state dict
+    if func_key in state.get("functions", {}):
+        state["functions"][func_key]["consecutive_fails"] = func["consecutive_fails"]
 
     # Sync point 2: re-score after auto-mode completion
     new_score, post_completeness = _rescore_and_sync(func, address, program)

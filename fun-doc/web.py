@@ -161,6 +161,14 @@ class WorkerManager:
                 processed += 1
                 if result in ("quit", "stopped"):
                     break
+                elif result == "rate_limited":
+                    worker["progress"]["failed"] += 1
+                    session["failed"] += 1
+                    self._bus.emit("worker_stopped", {
+                        "worker_id": worker_id, "reason": "rate_limited",
+                        "progress": dict(worker["progress"]),
+                    })
+                    break  # Stop the worker — no point retrying until limit resets
                 elif result == "completed":
                     worker["progress"]["completed"] += 1
                     session["completed"] += 1
