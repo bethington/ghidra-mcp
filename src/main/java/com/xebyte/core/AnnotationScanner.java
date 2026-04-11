@@ -8,6 +8,8 @@ import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import ghidra.program.model.listing.Program;
+
 /**
  * Discovers {@link McpTool}-annotated methods on service instances via reflection
  * and generates {@link EndpointDef} records for HTTP registration plus JSON schemas
@@ -36,6 +38,7 @@ public class AnnotationScanner {
 
     private final List<EndpointDef> endpoints = new ArrayList<>();
     private final List<ToolDescriptor> descriptors = new ArrayList<>();
+    private final ProgramProvider programProvider;
 
     /**
      * Scan the given service instances for {@link McpTool}-annotated methods.
@@ -43,6 +46,17 @@ public class AnnotationScanner {
      * @param services service objects to scan (e.g., ListingService, FunctionService, ...)
      */
     public AnnotationScanner(Object... services) {
+        this(null, services);
+    }
+
+    /**
+     * Scan the given service instances for {@link McpTool}-annotated methods.
+     *
+     * @param programProvider provider for resolving programs (enables dry-run support)
+     * @param services        service objects to scan
+     */
+    public AnnotationScanner(ProgramProvider programProvider, Object... services) {
+        this.programProvider = programProvider;
         for (Object service : services) {
             scanService(service);
         }
@@ -131,6 +145,7 @@ public class AnnotationScanner {
 
     private EndpointDef.EndpointHandler createHandler(Object service, Method method,
             McpTool tool, ParamBinding[] bindings) {
+        boolean isWrite = "POST".equalsIgnoreCase(tool.method());
         return (query, body) -> {
             try {
                 Object[] args = new Object[bindings.length];
@@ -139,6 +154,21 @@ public class AnnotationScanner {
                         args[i] = resolveParam(bindings[i], query, body);
                     }
                 }
+
+                // Dry-run support: wrap POST endpoints in a transaction that always rolls back
+                if (isWrite && "true".equalsIgnoreCase(query.get("dry_run")) && programProvider != null) {
+                    Program program = resolveProgramForDryRun(bindings, query);
+                    if (program != null) {
+                        int tx = program.startTransaction("[DRY RUN] " + tool.path());
+                        try {
+                            Response result = (Response) method.invoke(service, args);
+                            return wrapDryRunResponse(result);
+                        } finally {
+                            program.endTransaction(tx, false); // Always rollback
+                        }
+                    }
+                }
+
                 return (Response) method.invoke(service, args);
             } catch (InvocationTargetException e) {
                 Throwable cause = e.getCause();
@@ -150,6 +180,36 @@ public class AnnotationScanner {
                 return Response.err("Error invoking " + tool.path() + ": " + e.getMessage());
             }
         };
+    }
+
+    /**
+     * Resolve the Program for dry-run wrapping by finding the "program" param binding.
+     */
+    private Program resolveProgramForDryRun(ParamBinding[] bindings, Map<String, String> query) {
+        // Look for a @Param(value = "program") binding
+        for (ParamBinding binding : bindings) {
+            if (binding != null && "program".equals(binding.param.value())) {
+                String programName = query.get("program");
+                if (programName != null && !programName.isEmpty()) {
+                    return programProvider.getProgram(programName);
+                }
+                break;
+            }
+        }
+        // Fall back to current program
+        return programProvider.getCurrentProgram();
+    }
+
+    /**
+     * Wrap a response to indicate it was a dry-run (no changes were committed).
+     */
+    private static Response wrapDryRunResponse(Response response) {
+        String json = response.toJson();
+        if (json.startsWith("{")) {
+            // Inject dry_run flag into the JSON object
+            return Response.text("{\"dry_run\":true," + json.substring(1));
+        }
+        return Response.text("{\"dry_run\":true,\"result\":" + json + "}");
     }
 
     // ==================================================================

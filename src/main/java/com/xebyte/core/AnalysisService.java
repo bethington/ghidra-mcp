@@ -1859,6 +1859,7 @@ public class AnalysisService {
             @Param(value = "include_callers", defaultValue = "true") boolean includeCallers,
             @Param(value = "include_disasm", defaultValue = "true") boolean includeDisasm,
             @Param(value = "include_variables", defaultValue = "true") boolean includeVariables,
+            @Param(value = "include_completeness", defaultValue = "false", description = "Include completeness scoring (undefined vars, naming violations, recommendations)") boolean includeCompleteness,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2052,6 +2053,15 @@ public class AnalysisService {
                         data.put("locals", localList);
                     }
 
+                    // Include completeness scoring (GitHub #109)
+                    if (includeCompleteness) {
+                        String addrStr = func.getEntryPoint().toString(false);
+                        Response completenessResp = analyzeFunctionCompleteness(addrStr, true, programName);
+                        if (completenessResp instanceof Response.Ok ok) {
+                            data.put("completeness", ok.data());
+                        }
+                    }
+
                     resultData.set(data);
                 } catch (Exception e) {
                     errorMsg.set(e.getMessage());
@@ -2068,10 +2078,16 @@ public class AnalysisService {
         return Response.ok(resultData.get());
     }
 
-    // Backward compatibility overload
+    // Backward compatibility overloads
     public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
                                           boolean includeCallers, boolean includeDisasm, boolean includeVariables) {
-        return analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, null);
+        return analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, false, null);
+    }
+
+    public Response analyzeFunctionComplete(String name, boolean includeXrefs, boolean includeCallees,
+                                          boolean includeCallers, boolean includeDisasm, boolean includeVariables,
+                                          String programName) {
+        return analyzeFunctionComplete(name, includeXrefs, includeCallees, includeCallers, includeDisasm, includeVariables, false, programName);
     }
 
     /**

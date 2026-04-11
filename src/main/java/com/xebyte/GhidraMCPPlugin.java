@@ -96,7 +96,7 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "5.1.0"; // Default fallback
+    private static String VERSION = "5.2.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
@@ -109,7 +109,7 @@ class VersionInfo {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "5.1.0");
+                VERSION = props.getProperty("app.version", "5.2.0");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
                 GHIDRA_VERSION = props.getProperty("ghidra.version", "unknown");
                 BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
@@ -460,7 +460,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // Discovers @McpTool-annotated methods on service instances via reflection
         // ==========================================================================
 
-        AnnotationScanner scanner = new AnnotationScanner(
+        AnnotationScanner scanner = new AnnotationScanner(programProvider,
             listingService, functionService, commentService, symbolLabelService,
             xrefCallGraphService, dataTypeService, analysisService,
             documentationHashService, malwareSecurityService, programScriptService);

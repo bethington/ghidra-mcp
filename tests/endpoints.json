@@ -1,5 +1,5 @@
 {
-  "version": "5.1.0",
+  "version": "5.2.0",
   "description": "GhidraMCP REST API Endpoint Specification",
   "total_endpoints": 193,
   "categories": {
@@ -1265,6 +1265,7 @@
         "include_callers",
         "include_disasm",
         "include_variables",
+        "include_completeness",
         "program"
       ],
       "description": "Complete function analysis"

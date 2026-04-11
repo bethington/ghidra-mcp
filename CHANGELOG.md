@@ -4,6 +4,18 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.2.0 - 2026-04-11
+
+### Ghidra Plugin
+
+#### Added
+
+- **Request serialization in MCP bridge** — Added `threading.Lock` around all Ghidra HTTP calls in `bridge_mcp_ghidra.py` to prevent JSON-RPC stdout corruption when multiple MCP tool calls arrive concurrently (#91).
+- **Dry-run mode for mutating endpoints** — Pass `dry_run=true` query parameter to any POST endpoint to preview changes without committing to the Ghidra database. Implemented via nested transaction rollback in `AnnotationScanner` — no service code changes needed. All dynamic MCP tools for POST endpoints now include an optional `dry_run` parameter (#110).
+- **Composable completeness scoring** — Added `include_completeness` flag to `analyze_function_complete` endpoint. When enabled, includes full completeness scoring in the same response, eliminating the need for a separate `analyze_function_completeness` call (#109).
+
+---
+
 ## v5.1.0 - 2026-04-10
 
 ### fun-doc: Multi-Provider Dashboard & Worker System

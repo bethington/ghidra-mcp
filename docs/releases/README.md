@@ -4,7 +4,7 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v5.1.0 (Latest)
+### v5.2.0 (Latest)
 
 - **Major Feature Release** - Completeness scoring redesign, naming convention enforcement, fun-doc automation engine
 - Log-scaled budget scoring system with tiered plate comment quality
