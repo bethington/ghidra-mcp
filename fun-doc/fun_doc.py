@@ -794,6 +794,11 @@ def get_next_functions(state, count=1):
         callers = func.get("caller_count", 0)
         roi = fixable * (1 + callers / 10)
 
+        # Skip functions stuck in failure loops (3+ consecutive fails)
+        consecutive_fails = func.get("consecutive_fails", 0)
+        if consecutive_fails >= 3 and key not in pinned:
+            continue  # Skip entirely — needs a different model or human attention
+
         # Deprioritize functions that have been partially processed too many times
         partial_runs = func.get("partial_runs", 0)
         if partial_runs >= 3 and key not in pinned:
@@ -1999,6 +2004,11 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
                     fn_args = {}
 
                 tool_call_count += 1
+                # Hard cap: stop runaway tool call loops (e.g., 90+ set_local_variable_type)
+                if tool_call_count > 50:
+                    print(f"  [minimax] Tool call cap reached ({tool_call_count}), stopping", flush=True)
+                    output_parts.append(f"BLOCKED: Tool call cap reached after {tool_call_count} calls")
+                    break
                 print(f"  [mcp] {fn_name}: calling...", flush=True)
                 bus_emit("tool_call", {"tool": fn_name, "status": "calling"})
                 result_str = execute_tool_call(fn_name, fn_args)
@@ -2689,6 +2699,27 @@ def process_function(
         prompt = recovery_prompt
         mode = "FULL:recovery"
 
+    # Complexity gate: skip functions too complex for MiniMax
+    effective_provider = provider or AI_PROVIDER
+    if effective_provider == "minimax" and mode in ("FULL", "FULL:recovery"):
+        completeness = data.get("completeness")
+        if completeness and isinstance(completeness, dict):
+            fixable_pts = float(completeness.get("fixable_deductions", 0))
+            deduction_cats = {
+                d.get("category")
+                for d in completeness.get("deduction_breakdown", [])
+                if d.get("fixable", False)
+            }
+            has_struct_work = "unresolved_struct_accesses" in deduction_cats
+            has_many_undefined = len(completeness.get("undefined_variables", [])) > 8
+            # MiniMax struggles with: high structural complexity + many undefined vars
+            if fixable_pts > 40 and (has_struct_work and has_many_undefined):
+                print(f"  SKIP: Too complex for MiniMax (fixable={fixable_pts:.0f}, structs+{len(completeness.get('undefined_variables',[]))} undefined vars)")
+                print(f"  Route to Claude or Codex for this function")
+                func["last_result"] = "skipped_complexity"
+                save_state(state)
+                return "skipped"
+
     bus_emit(
         "function_mode",
         {"key": func_key, "mode": mode, "model": selected_model, "score": live_score},
@@ -2802,6 +2833,12 @@ def process_function(
     # Update state
     func["last_processed"] = datetime.now().isoformat()
     func["last_result"] = result
+
+    # Track consecutive failures for cooldown logic
+    if result in ("failed", "needs_redo"):
+        func["consecutive_fails"] = func.get("consecutive_fails", 0) + 1
+    elif result == "completed":
+        func["consecutive_fails"] = 0
 
     # Sync point 2: re-score after auto-mode completion
     new_score, post_completeness = _rescore_and_sync(func, address, program)
