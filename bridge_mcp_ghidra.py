@@ -128,6 +128,16 @@ def get_socket_dir() -> Path:
     xdg = os.environ.get("XDG_RUNTIME_DIR")
     if xdg:
         return Path(xdg) / "ghidra-mcp"
+
+    getuid = getattr(os, "getuid", None)
+    if callable(getuid):
+        run_user_dir = Path(f"/run/user/{getuid()}")
+        try:
+            if run_user_dir.exists():
+                return run_user_dir / "ghidra-mcp"
+        except OSError:
+            logger.debug("Ignoring unusable runtime dir candidate: %s", run_user_dir)
+
     user = os.getenv("USER", "unknown")
     tmpdir = os.environ.get("TMPDIR")
     if tmpdir:
