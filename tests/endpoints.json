@@ -1,7 +1,7 @@
 {
   "version": "5.2.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 193,
+  "total_endpoints": 199,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -20,6 +20,290 @@
   },
   "endpoints": [
     {
+      "path": "/add_struct_field",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "struct_name",
+        "field_name",
+        "field_type",
+        "offset",
+        "program"
+      ],
+      "description": "Add struct field"
+    },
+    {
+      "path": "/analysis_status",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "program"
+      ],
+      "description": "Get auto-analysis status for open programs"
+    },
+    {
+      "path": "/analyze_api_call_chains",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "program"
+      ],
+      "description": "Analyze API call chains"
+    },
+    {
+      "path": "/analyze_call_graph",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "start_function",
+        "end_function",
+        "analysis_type",
+        "program"
+      ],
+      "description": "Analyze function call graph patterns"
+    },
+    {
+      "path": "/analyze_control_flow",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "function_name",
+        "program"
+      ],
+      "description": "Analyze control flow"
+    },
+    {
+      "path": "/analyze_data_region",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "address",
+        "max_scan_bytes",
+        "include_xref_map",
+        "include_assembly_patterns",
+        "include_boundary_detection",
+        "program"
+      ],
+      "description": "Analyze data region"
+    },
+    {
+      "path": "/analyze_for_documentation",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "function_address",
+        "program"
+      ],
+      "description": "Composite RE documentation analysis (decompile + classify + variables + completeness)"
+    },
+    {
+      "path": "/analyze_function_complete",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "name",
+        "include_xrefs",
+        "include_callees",
+        "include_callers",
+        "include_disasm",
+        "include_variables",
+        "include_completeness",
+        "program"
+      ],
+      "description": "Complete function analysis"
+    },
+    {
+      "path": "/analyze_function_completeness",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "function_address",
+        "compact",
+        "program"
+      ],
+      "description": "Analyze documentation completeness"
+    },
+    {
+      "path": "/analyze_struct_field_usage",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "address",
+        "struct_name",
+        "max_functions",
+        "program"
+      ],
+      "description": "Analyze struct field usage"
+    },
+    {
+      "path": "/apply_data_classification",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "address",
+        "classification",
+        "name",
+        "comment",
+        "type_definition",
+        "program"
+      ],
+      "description": "Apply data classification"
+    },
+    {
+      "path": "/apply_data_type",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "address",
+        "type_name",
+        "clear_existing",
+        "program"
+      ],
+      "description": "Apply data type"
+    },
+    {
+      "path": "/apply_function_documentation",
+      "method": "POST",
+      "category": "utility",
+      "params": [
+        "json_body",
+        "program"
+      ],
+      "description": "Apply function documentation"
+    },
+    {
+      "path": "/batch_analyze_completeness",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "addresses",
+        "program"
+      ],
+      "description": "Batch analyze completeness for multiple functions"
+    },
+    {
+      "path": "/batch_apply_documentation",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "address",
+        "name",
+        "prototype",
+        "calling_convention",
+        "variable_types",
+        "variable_renames",
+        "plate_comment",
+        "decompiler_comments",
+        "disassembly_comments",
+        "goto",
+        "score",
+        "program"
+      ],
+      "description": "Apply all documentation to a function in one call"
+    },
+    {
+      "path": "/batch_create_labels",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "labels",
+        "program"
+      ],
+      "description": "Create multiple labels"
+    },
+    {
+      "path": "/batch_decompile",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "functions",
+        "program"
+      ],
+      "description": "Batch decompile functions"
+    },
+    {
+      "path": "/batch_delete_labels",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "labels",
+        "program"
+      ],
+      "description": "Delete multiple labels"
+    },
+    {
+      "path": "/batch_rename_function_components",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "function_address",
+        "function_name",
+        "parameter_renames",
+        "local_renames",
+        "return_type",
+        "program"
+      ],
+      "description": "Batch rename function components"
+    },
+    {
+      "path": "/batch_set_comments",
+      "method": "POST",
+      "category": "comment",
+      "params": [
+        "address",
+        "decompiler_comments",
+        "disassembly_comments",
+        "plate_comment",
+        "program"
+      ],
+      "description": "Set multiple comments"
+    },
+    {
+      "path": "/batch_set_variable_types",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "function_address",
+        "variable_types",
+        "program"
+      ],
+      "description": "Set multiple variable types"
+    },
+    {
+      "path": "/batch_string_anchor_report",
+      "method": "GET",
+      "category": "utility",
+      "params": [
+        "pattern",
+        "program"
+      ],
+      "description": "Report strings and their undocumented functions"
+    },
+    {
+      "path": "/bulk_fuzzy_match",
+      "method": "GET",
+      "category": "utility",
+      "params": [
+        "source_program",
+        "target_program",
+        "threshold",
+        "offset",
+        "limit",
+        "filter"
+      ],
+      "description": "Bulk fuzzy match functions across programs"
+    },
+    {
+      "path": "/can_rename_at_address",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Check if address can be renamed"
+    },
+    {
       "path": "/check_connection",
       "method": "GET",
       "category": "utility",
@@ -27,18 +311,742 @@
       "description": "Health check endpoint"
     },
     {
-      "path": "/mcp/schema",
-      "method": "GET",
-      "category": "utility",
-      "params": [],
-      "description": "Machine-readable API schema with endpoint metadata"
+      "path": "/clear_function_comments",
+      "method": "POST",
+      "category": "comment",
+      "params": [
+        "address",
+        "clear_plate",
+        "clear_pre",
+        "clear_eol",
+        "program"
+      ],
+      "description": "Clear all comments for a function"
     },
     {
-      "path": "/get_version",
+      "path": "/clear_instruction_flow_override",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Clear flow override"
+    },
+    {
+      "path": "/clone_data_type",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "source_type",
+        "new_name",
+        "program"
+      ],
+      "description": "Clone data type"
+    },
+    {
+      "path": "/close_program",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "program"
+      ],
+      "description": "Close a loaded program (headless)"
+    },
+    {
+      "path": "/close_project",
+      "method": "POST",
+      "category": "project",
+      "params": [],
+      "description": "Close the currently open project"
+    },
+    {
+      "path": "/compare_programs_documentation",
       "method": "GET",
       "category": "utility",
+      "params": [
+        "program"
+      ],
+      "description": "Compare documentation across programs"
+    },
+    {
+      "path": "/configure_analyzer",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "name",
+        "enabled",
+        "program"
+      ],
+      "description": "Configure an analysis plugin"
+    },
+    {
+      "path": "/convert_number",
+      "method": "GET",
+      "category": "utility",
+      "params": [
+        "text",
+        "size"
+      ],
+      "description": "Convert number between bases"
+    },
+    {
+      "path": "/create_array_type",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "base_type",
+        "length",
+        "name",
+        "program"
+      ],
+      "description": "Create array type"
+    },
+    {
+      "path": "/create_data_type_category",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "category_path",
+        "program"
+      ],
+      "description": "Create data type category"
+    },
+    {
+      "path": "/create_enum",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "name",
+        "values",
+        "size",
+        "program"
+      ],
+      "description": "Create enumeration"
+    },
+    {
+      "path": "/create_folder",
+      "method": "POST",
+      "category": "project",
+      "params": [
+        "path",
+        "program"
+      ],
+      "description": "Create a folder in the project"
+    },
+    {
+      "path": "/create_function",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "address",
+        "name",
+        "disassemble_first",
+        "program"
+      ],
+      "description": "Create function at address"
+    },
+    {
+      "path": "/create_function_signature",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "name",
+        "return_type",
+        "parameters",
+        "program"
+      ],
+      "description": "Create function signature type"
+    },
+    {
+      "path": "/create_label",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "address",
+        "name",
+        "program"
+      ],
+      "description": "Create label"
+    },
+    {
+      "path": "/create_memory_block",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "name",
+        "address",
+        "size",
+        "read",
+        "write",
+        "execute",
+        "volatile",
+        "comment",
+        "program"
+      ],
+      "description": "Create memory block"
+    },
+    {
+      "path": "/create_pointer_type",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "base_type",
+        "name",
+        "program"
+      ],
+      "description": "Create pointer type"
+    },
+    {
+      "path": "/create_project",
+      "method": "POST",
+      "category": "project",
+      "params": [
+        "parentDir",
+        "name"
+      ],
+      "description": "Create a new Ghidra project"
+    },
+    {
+      "path": "/create_struct",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "name",
+        "fields",
+        "program"
+      ],
+      "description": "Create structure"
+    },
+    {
+      "path": "/create_typedef",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "name",
+        "base_type",
+        "program"
+      ],
+      "description": "Create typedef"
+    },
+    {
+      "path": "/create_union",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "name",
+        "fields",
+        "program"
+      ],
+      "description": "Create union"
+    },
+    {
+      "path": "/decompile_function",
+      "method": "GET",
+      "category": "decompile",
+      "params": [
+        "address",
+        "program",
+        "timeout"
+      ],
+      "description": "Decompile function"
+    },
+    {
+      "path": "/delete_bookmark",
+      "method": "POST",
+      "category": "comment",
+      "params": [
+        "address",
+        "category",
+        "program"
+      ],
+      "description": "Delete bookmark"
+    },
+    {
+      "path": "/delete_data_type",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "type_name",
+        "program"
+      ],
+      "description": "Delete data type"
+    },
+    {
+      "path": "/delete_file",
+      "method": "POST",
+      "category": "project",
+      "params": [
+        "filePath"
+      ],
+      "description": "Delete a file from the project"
+    },
+    {
+      "path": "/delete_function",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Delete function at address"
+    },
+    {
+      "path": "/delete_label",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "address",
+        "name",
+        "program"
+      ],
+      "description": "Delete label at address"
+    },
+    {
+      "path": "/delete_project",
+      "method": "POST",
+      "category": "project",
+      "params": [
+        "projectPath"
+      ],
+      "description": "Delete a Ghidra project"
+    },
+    {
+      "path": "/detect_array_bounds",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "address",
+        "analyze_loop_bounds",
+        "analyze_indexing",
+        "max_scan_range",
+        "program"
+      ],
+      "description": "Detect array bounds"
+    },
+    {
+      "path": "/detect_crypto_constants",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "program"
+      ],
+      "description": "Detect crypto constants"
+    },
+    {
+      "path": "/detect_malware_behaviors",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "program"
+      ],
+      "description": "Detect malware behaviors"
+    },
+    {
+      "path": "/diff_functions",
+      "method": "GET",
+      "category": "utility",
+      "params": [
+        "address_a",
+        "address_b",
+        "program_a",
+        "program_b"
+      ],
+      "description": "Diff two functions"
+    },
+    {
+      "path": "/disassemble_bytes",
+      "method": "POST",
+      "category": "decompile",
+      "params": [
+        "start_address",
+        "end_address",
+        "length",
+        "restrict_to_execute_memory",
+        "program"
+      ],
+      "description": "Disassemble byte range"
+    },
+    {
+      "path": "/disassemble_function",
+      "method": "GET",
+      "category": "decompile",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Disassemble function"
+    },
+    {
+      "path": "/exit_ghidra",
+      "method": "POST",
+      "category": "program",
       "params": [],
-      "description": "Get plugin version"
+      "description": "Save and exit Ghidra"
+    },
+    {
+      "path": "/extract_iocs_with_context",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "program"
+      ],
+      "description": "Extract IOCs with context"
+    },
+    {
+      "path": "/find_anti_analysis_techniques",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "program"
+      ],
+      "description": "Find anti-analysis techniques"
+    },
+    {
+      "path": "/find_code_gaps",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "min_size",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "Find gaps of undefined bytes between functions in executable memory"
+    },
+    {
+      "path": "/find_dead_code",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "function_name",
+        "program"
+      ],
+      "description": "Find dead code"
+    },
+    {
+      "path": "/find_next_undefined_function",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "start_address",
+        "criteria",
+        "pattern",
+        "direction",
+        "program"
+      ],
+      "description": "Find next undefined function"
+    },
+    {
+      "path": "/find_similar_functions",
+      "method": "GET",
+      "category": "search",
+      "params": [
+        "target_function",
+        "threshold",
+        "program"
+      ],
+      "description": "Find similar functions"
+    },
+    {
+      "path": "/find_similar_functions_fuzzy",
+      "method": "GET",
+      "category": "utility",
+      "params": [
+        "address",
+        "source_program",
+        "target_program",
+        "threshold",
+        "limit"
+      ],
+      "description": "Find similar functions via fuzzy matching"
+    },
+    {
+      "path": "/find_undocumented_by_string",
+      "method": "GET",
+      "category": "utility",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Find undocumented functions referencing string"
+    },
+    {
+      "path": "/force_decompile",
+      "method": "GET",
+      "category": "decompile",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Force fresh decompilation"
+    },
+    {
+      "path": "/get_address_spaces",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "program"
+      ],
+      "description": "List all physical address spaces in the program"
+    },
+    {
+      "path": "/get_assembly_context",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "xref_sources",
+        "context_instructions",
+        "include_patterns",
+        "program"
+      ],
+      "description": "Get assembly context"
+    },
+    {
+      "path": "/get_bulk_function_hashes",
+      "method": "GET",
+      "category": "utility",
+      "params": [
+        "offset",
+        "limit",
+        "filter",
+        "program"
+      ],
+      "description": "Get bulk function hashes"
+    },
+    {
+      "path": "/get_bulk_xrefs",
+      "method": "POST",
+      "category": "xref",
+      "params": [
+        "addresses",
+        "program"
+      ],
+      "description": "Get xrefs for multiple addresses"
+    },
+    {
+      "path": "/get_current_address",
+      "method": "GET",
+      "category": "getter",
+      "params": [],
+      "description": "Get cursor address (GUI only)"
+    },
+    {
+      "path": "/get_current_function",
+      "method": "GET",
+      "category": "getter",
+      "params": [],
+      "description": "Get function at cursor (GUI only)"
+    },
+    {
+      "path": "/get_current_program_info",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "program"
+      ],
+      "description": "Get current program info"
+    },
+    {
+      "path": "/get_data_type_size",
+      "method": "GET",
+      "category": "datatype",
+      "params": [
+        "type_name",
+        "program"
+      ],
+      "description": "Get data type size in bytes"
+    },
+    {
+      "path": "/get_entry_points",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "program"
+      ],
+      "description": "Get program entry points"
+    },
+    {
+      "path": "/get_enum_values",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "enum_name",
+        "program"
+      ],
+      "description": "Get enumeration values"
+    },
+    {
+      "path": "/get_external_location",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "address",
+        "dll_name",
+        "program"
+      ],
+      "description": "Get external location details"
+    },
+    {
+      "path": "/get_field_access_context",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "struct_address",
+        "field_offset",
+        "num_examples",
+        "program"
+      ],
+      "description": "Get field access context"
+    },
+    {
+      "path": "/get_full_call_graph",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "format",
+        "limit",
+        "program"
+      ],
+      "description": "Get full call graph"
+    },
+    {
+      "path": "/get_function_by_address",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Get function at address"
+    },
+    {
+      "path": "/get_function_call_graph",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "name",
+        "address",
+        "depth",
+        "direction",
+        "program"
+      ],
+      "description": "Get call graph"
+    },
+    {
+      "path": "/get_function_callees",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "name",
+        "address",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "Get functions called"
+    },
+    {
+      "path": "/get_function_callers",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "name",
+        "address",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "Get calling functions"
+    },
+    {
+      "path": "/get_function_count",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "program"
+      ],
+      "description": "Return the number of functions in the loaded program"
+    },
+    {
+      "path": "/get_function_documentation",
+      "method": "GET",
+      "category": "utility",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Export function documentation"
+    },
+    {
+      "path": "/get_function_hash",
+      "method": "GET",
+      "category": "utility",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Get function hash"
+    },
+    {
+      "path": "/get_function_jump_targets",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "name",
+        "address",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "Get jump targets"
+    },
+    {
+      "path": "/get_function_labels",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "name",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "Get labels in function"
+    },
+    {
+      "path": "/get_function_signature",
+      "method": "GET",
+      "category": "utility",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Get function feature signature"
+    },
+    {
+      "path": "/get_function_variables",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "function_name",
+        "program",
+        "limit",
+        "filter"
+      ],
+      "description": "Get function variables"
+    },
+    {
+      "path": "/get_function_xrefs",
+      "method": "GET",
+      "category": "xref",
+      "params": [
+        "name",
+        "address",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "Get function cross-references"
     },
     {
       "path": "/get_metadata",
@@ -50,46 +1058,153 @@
       "description": "Get program metadata"
     },
     {
-      "path": "/convert_number",
+      "path": "/get_plate_comment",
+      "method": "GET",
+      "category": "comment",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Get plate comment"
+    },
+    {
+      "path": "/get_project_info",
+      "method": "GET",
+      "category": "program",
+      "params": [],
+      "description": "Get project information (headless)"
+    },
+    {
+      "path": "/get_struct_layout",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "struct_name",
+        "program"
+      ],
+      "description": "Get structure layout"
+    },
+    {
+      "path": "/get_type_size",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "type_name",
+        "program"
+      ],
+      "description": "Get data type size"
+    },
+    {
+      "path": "/get_valid_data_types",
+      "method": "GET",
+      "category": "getter",
+      "params": [
+        "category",
+        "program"
+      ],
+      "description": "Get valid data type names"
+    },
+    {
+      "path": "/get_version",
       "method": "GET",
       "category": "utility",
-      "params": [
-        "value",
-        "from_base",
-        "to_base"
-      ],
-      "description": "Convert number between bases"
+      "params": [],
+      "description": "Get plugin version"
     },
     {
-      "path": "/list_methods",
+      "path": "/get_xrefs_from",
       "method": "GET",
-      "category": "listing",
+      "category": "xref",
       "params": [
+        "address",
         "offset",
         "limit",
         "program"
       ],
-      "description": "List all function names"
+      "description": "Get references from address"
     },
     {
-      "path": "/list_functions",
+      "path": "/get_xrefs_to",
       "method": "GET",
-      "category": "listing",
+      "category": "xref",
       "params": [
-        "program"
-      ],
-      "description": "List functions with addresses"
-    },
-    {
-      "path": "/list_functions_enhanced",
-      "method": "GET",
-      "category": "listing",
-      "params": [
+        "address",
         "offset",
         "limit",
         "program"
       ],
-      "description": "List functions with metadata"
+      "description": "Get references to address"
+    },
+    {
+      "path": "/health",
+      "method": "GET",
+      "category": "utility",
+      "params": [],
+      "description": "Health check endpoint for headless server"
+    },
+    {
+      "path": "/import_data_types",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "source",
+        "format"
+      ],
+      "description": "Import data types from GDT"
+    },
+    {
+      "path": "/import_file",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "file_path",
+        "project_folder",
+        "language",
+        "compiler_spec",
+        "auto_analyze"
+      ],
+      "description": "Import a binary file from disk into the current Ghidra project and open it. For raw firmware binaries, specify language (e.g. 'ARM:LE:32:Cortex') and optionally compiler_spec (e.g. 'default')."
+    },
+    {
+      "path": "/inspect_memory_content",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "address",
+        "length",
+        "detect_strings",
+        "program"
+      ],
+      "description": "Inspect memory bytes"
+    },
+    {
+      "path": "/list_analyzers",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "program"
+      ],
+      "description": "List available analysis plugins"
+    },
+    {
+      "path": "/list_bookmarks",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "category",
+        "address",
+        "program"
+      ],
+      "description": "List bookmarks"
+    },
+    {
+      "path": "/list_calling_conventions",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "program"
+      ],
+      "description": "List available calling conventions"
     },
     {
       "path": "/list_classes",
@@ -101,50 +1216,6 @@
         "program"
       ],
       "description": "List namespace/class names"
-    },
-    {
-      "path": "/list_segments",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "List memory segments"
-    },
-    {
-      "path": "/list_imports",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "List imported symbols"
-    },
-    {
-      "path": "/list_exports",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "List exported symbols"
-    },
-    {
-      "path": "/list_namespaces",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "List all namespaces"
     },
     {
       "path": "/list_data_items",
@@ -170,16 +1241,69 @@
       "description": "List data sorted by xref count"
     },
     {
-      "path": "/list_strings",
+      "path": "/list_data_type_categories",
+      "method": "GET",
+      "category": "datatype",
+      "params": [
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "List data type categories"
+    },
+    {
+      "path": "/list_data_types",
+      "method": "GET",
+      "category": "datatype",
+      "params": [
+        "category",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "List data types"
+    },
+    {
+      "path": "/list_exports",
       "method": "GET",
       "category": "listing",
       "params": [
         "offset",
         "limit",
-        "filter",
         "program"
       ],
-      "description": "List defined strings"
+      "description": "List exported symbols"
+    },
+    {
+      "path": "/list_external_locations",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "List external locations"
+    },
+    {
+      "path": "/list_functions",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "program"
+      ],
+      "description": "List functions with addresses"
+    },
+    {
+      "path": "/list_functions_enhanced",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "List functions with metadata"
     },
     {
       "path": "/list_globals",
@@ -194,14 +1318,7 @@
       "description": "List global variables"
     },
     {
-      "path": "/list_calling_conventions",
-      "method": "GET",
-      "category": "listing",
-      "params": [],
-      "description": "List available calling conventions"
-    },
-    {
-      "path": "/list_external_locations",
+      "path": "/list_imports",
       "method": "GET",
       "category": "listing",
       "params": [
@@ -209,7 +1326,54 @@
         "limit",
         "program"
       ],
-      "description": "List external locations"
+      "description": "List imported symbols"
+    },
+    {
+      "path": "/list_methods",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "List all function names"
+    },
+    {
+      "path": "/list_namespaces",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "List all namespaces"
+    },
+    {
+      "path": "/list_open_programs",
+      "method": "GET",
+      "category": "program",
+      "params": [],
+      "description": "List open programs"
+    },
+    {
+      "path": "/list_project_files",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "folder"
+      ],
+      "description": "List project files"
+    },
+    {
+      "path": "/list_projects",
+      "method": "GET",
+      "category": "project",
+      "params": [
+        "searchDir"
+      ],
+      "description": "List available Ghidra projects"
     },
     {
       "path": "/list_scripts",
@@ -221,278 +1385,345 @@
       "description": "List available Ghidra scripts"
     },
     {
-      "path": "/list_bookmarks",
+      "path": "/list_segments",
       "method": "GET",
       "category": "listing",
       "params": [
         "offset",
         "limit",
-        "type",
         "program"
       ],
-      "description": "List bookmarks"
+      "description": "List memory segments"
     },
     {
-      "path": "/get_function_by_address",
+      "path": "/list_strings",
       "method": "GET",
-      "category": "getter",
+      "category": "listing",
       "params": [
-        "address",
+        "offset",
+        "limit",
+        "filter",
         "program"
       ],
-      "description": "Get function at address"
+      "description": "List defined strings"
     },
     {
-      "path": "/get_current_address",
+      "path": "/load_program",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "path"
+      ],
+      "description": "Load program into headless server"
+    },
+    {
+      "path": "/load_program_from_project",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "project_path",
+        "program_path"
+      ],
+      "description": "Load program from Ghidra project (headless)"
+    },
+    {
+      "path": "/mcp/health",
       "method": "GET",
-      "category": "getter",
+      "category": "utility",
       "params": [],
-      "description": "Get cursor address (GUI only)"
+      "description": "HTTP server health: pool stats, uptime, memory, active request count"
     },
     {
-      "path": "/get_current_function",
+      "path": "/mcp/schema",
       "method": "GET",
-      "category": "getter",
+      "category": "utility",
       "params": [],
-      "description": "Get function at cursor (GUI only)"
+      "description": "Machine-readable API schema with endpoint metadata"
     },
     {
-      "path": "/get_function_variables",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "function_name",
-        "program"
-      ],
-      "description": "Get function variables"
-    },
-    {
-      "path": "/get_function_labels",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "name",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Get labels in function"
-    },
-    {
-      "path": "/get_function_jump_targets",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "name",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Get jump targets"
-    },
-    {
-      "path": "/get_function_callees",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "name",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Get functions called"
-    },
-    {
-      "path": "/get_function_callers",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "name",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Get calling functions"
-    },
-    {
-      "path": "/get_function_call_graph",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "name",
-        "depth",
-        "direction",
-        "program"
-      ],
-      "description": "Get call graph"
-    },
-    {
-      "path": "/get_full_call_graph",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "format",
-        "limit",
-        "program"
-      ],
-      "description": "Get full call graph"
-    },
-    {
-      "path": "/get_entry_points",
-      "method": "GET",
-      "category": "getter",
-      "params": [],
-      "description": "Get program entry points"
-    },
-    {
-      "path": "/get_external_location",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "address",
-        "dll_name",
-        "program"
-      ],
-      "description": "Get external location details"
-    },
-    {
-      "path": "/get_valid_data_types",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "category",
-        "program"
-      ],
-      "description": "Get valid data type names"
-    },
-    {
-      "path": "/get_type_size",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "type_name",
-        "program"
-      ],
-      "description": "Get data type size"
-    },
-    {
-      "path": "/get_struct_layout",
-      "method": "GET",
-      "category": "getter",
+      "path": "/modify_struct_field",
+      "method": "POST",
+      "category": "datatype",
       "params": [
         "struct_name",
+        "field_name",
+        "new_type",
+        "new_name",
         "program"
       ],
-      "description": "Get structure layout"
+      "description": "Modify struct field"
     },
     {
-      "path": "/get_enum_values",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "enum_name",
-        "program"
-      ],
-      "description": "Get enumeration values"
-    },
-    {
-      "path": "/decompile_function",
-      "method": "GET",
-      "category": "decompile",
-      "params": [
-        "address",
-        "name",
-        "force",
-        "timeout",
-        "program"
-      ],
-      "description": "Decompile function"
-    },
-    {
-      "path": "/disassemble_function",
-      "method": "GET",
-      "category": "decompile",
-      "params": [
-        "address",
-        "program"
-      ],
-      "description": "Disassemble function"
-    },
-    {
-      "path": "/force_decompile",
-      "method": "GET",
-      "category": "decompile",
-      "params": [
-        "address",
-        "timeout",
-        "program"
-      ],
-      "description": "Force fresh decompilation"
-    },
-    {
-      "path": "/disassemble_bytes",
+      "path": "/move_data_type_to_category",
       "method": "POST",
-      "category": "decompile",
+      "category": "datatype",
       "params": [
-        "start_address",
-        "end_address",
+        "type_name",
+        "category_path",
+        "program"
+      ],
+      "description": "Move data type to category"
+    },
+    {
+      "path": "/move_file",
+      "method": "POST",
+      "category": "project",
+      "params": [
+        "filePath",
+        "destFolder"
+      ],
+      "description": "Move a file to another project folder"
+    },
+    {
+      "path": "/move_folder",
+      "method": "POST",
+      "category": "project",
+      "params": [
+        "sourcePath",
+        "destPath"
+      ],
+      "description": "Move a folder to another location"
+    },
+    {
+      "path": "/open_program",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "path",
+        "auto_analyze"
+      ],
+      "description": "Open program from project"
+    },
+    {
+      "path": "/open_project",
+      "method": "POST",
+      "category": "project",
+      "params": [
+        "path"
+      ],
+      "description": "Open an existing Ghidra project"
+    },
+    {
+      "path": "/project/info",
+      "method": "GET",
+      "category": "project",
+      "params": [],
+      "description": "Get detailed project info including running tools and open programs"
+    },
+    {
+      "path": "/read_memory",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "address",
         "length",
         "program"
       ],
-      "description": "Disassemble byte range"
+      "description": "Read raw memory"
     },
     {
-      "path": "/get_xrefs_to",
-      "method": "GET",
-      "category": "xref",
-      "params": [
-        "address",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Get references to address"
-    },
-    {
-      "path": "/get_xrefs_from",
-      "method": "GET",
-      "category": "xref",
-      "params": [
-        "address",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Get references from address"
-    },
-    {
-      "path": "/get_function_xrefs",
-      "method": "GET",
-      "category": "xref",
-      "params": [
-        "name",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Get function cross-references"
-    },
-    {
-      "path": "/get_bulk_xrefs",
+      "path": "/reanalyze",
       "method": "POST",
-      "category": "xref",
+      "category": "program",
       "params": [
-        "addresses",
         "program"
       ],
-      "description": "Get xrefs for multiple addresses"
+      "description": "Trigger full auto-analysis on a program"
+    },
+    {
+      "path": "/remove_struct_field",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "struct_name",
+        "field_name",
+        "program"
+      ],
+      "description": "Remove struct field"
+    },
+    {
+      "path": "/rename_data",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "address",
+        "newName",
+        "program"
+      ],
+      "description": "Rename data symbol"
+    },
+    {
+      "path": "/rename_external_location",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "address",
+        "new_name",
+        "program"
+      ],
+      "description": "Rename external location"
+    },
+    {
+      "path": "/rename_function",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "oldName",
+        "newName",
+        "program"
+      ],
+      "description": "Rename function by name"
+    },
+    {
+      "path": "/rename_function_by_address",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "function_address",
+        "new_name",
+        "program"
+      ],
+      "description": "Rename function by address"
+    },
+    {
+      "path": "/rename_global_variable",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "old_name",
+        "new_name",
+        "program"
+      ],
+      "description": "Rename global variable"
+    },
+    {
+      "path": "/rename_label",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "address",
+        "old_name",
+        "new_name",
+        "program"
+      ],
+      "description": "Rename label"
+    },
+    {
+      "path": "/rename_or_label",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "address",
+        "name",
+        "program"
+      ],
+      "description": "Rename or create label"
+    },
+    {
+      "path": "/rename_variable",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "functionName",
+        "oldName",
+        "newName",
+        "program"
+      ],
+      "description": "Rename variable"
+    },
+    {
+      "path": "/rename_variables",
+      "method": "POST",
+      "category": "rename",
+      "params": [
+        "function_address",
+        "variable_renames",
+        "force_individual",
+        "program"
+      ],
+      "description": "Batch rename variables"
+    },
+    {
+      "path": "/run_analysis",
+      "method": "POST",
+      "category": "analysis",
+      "params": [
+        "program"
+      ],
+      "description": "Run auto-analysis on the current program"
+    },
+    {
+      "path": "/run_ghidra_script",
+      "method": "POST",
+      "category": "script",
+      "params": [
+        "script_name",
+        "args",
+        "timeout_seconds",
+        "capture_output",
+        "program"
+      ],
+      "description": "Run script with output capture"
+    },
+    {
+      "path": "/run_script",
+      "method": "POST",
+      "category": "script",
+      "params": [
+        "script_path",
+        "args",
+        "program"
+      ],
+      "description": "Run Ghidra script"
+    },
+    {
+      "path": "/run_script_inline",
+      "method": "POST",
+      "category": "script",
+      "params": [
+        "code",
+        "args"
+      ],
+      "description": "Run inline script code"
+    },
+    {
+      "path": "/save_program",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "program"
+      ],
+      "description": "Save current program"
+    },
+    {
+      "path": "/search_byte_patterns",
+      "method": "GET",
+      "category": "search",
+      "params": [
+        "pattern",
+        "mask",
+        "program"
+      ],
+      "description": "Search for byte patterns"
+    },
+    {
+      "path": "/search_data_types",
+      "method": "GET",
+      "category": "search",
+      "params": [
+        "pattern",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "Search data types"
     },
     {
       "path": "/search_functions",
       "method": "GET",
       "category": "search",
       "params": [
-        "query",
+        "name_pattern",
         "offset",
         "limit",
         "program"
@@ -518,154 +1749,199 @@
       "description": "Advanced function search"
     },
     {
-      "path": "/search_data_types",
+      "path": "/search_strings",
       "method": "GET",
       "category": "search",
       "params": [
-        "pattern",
+        "search_term",
+        "min_length",
+        "encoding",
         "offset",
         "limit",
         "program"
       ],
-      "description": "Search data types"
+      "description": "Search defined strings by a regex/substring pattern"
     },
     {
-      "path": "/search_byte_patterns",
+      "path": "/server/admin/set_permissions",
+      "method": "POST",
+      "category": "server",
+      "params": [
+        "repo",
+        "user",
+        "accessLevel"
+      ],
+      "description": "Set user permissions on a repository"
+    },
+    {
+      "path": "/server/admin/terminate_all_checkouts",
+      "method": "POST",
+      "category": "server",
+      "params": [
+        "path"
+      ],
+      "description": "Terminate all checkouts in a folder recursively"
+    },
+    {
+      "path": "/server/admin/terminate_checkout",
+      "method": "POST",
+      "category": "server",
+      "params": [
+        "path"
+      ],
+      "description": "Terminate all checkouts on a single file"
+    },
+    {
+      "path": "/server/admin/users",
       "method": "GET",
-      "category": "search",
-      "params": [
-        "pattern",
-        "mask",
-        "program"
-      ],
-      "description": "Search for byte patterns"
+      "category": "server",
+      "params": [],
+      "description": "List all users on the server"
     },
     {
-      "path": "/find_similar_functions",
+      "path": "/server/authenticate",
+      "method": "POST",
+      "category": "server",
+      "params": [
+        "username",
+        "password"
+      ],
+      "description": "Register server credentials for programmatic authentication"
+    },
+    {
+      "path": "/server/checkouts",
       "method": "GET",
-      "category": "search",
+      "category": "server",
+      "params": [
+        "path"
+      ],
+      "description": "List all checked-out files in a folder, including server-side checkouts"
+    },
+    {
+      "path": "/server/connect",
+      "method": "POST",
+      "category": "server",
+      "params": [
+        "host",
+        "port"
+      ],
+      "description": "Connect to a Ghidra server"
+    },
+    {
+      "path": "/server/disconnect",
+      "method": "POST",
+      "category": "server",
+      "params": [],
+      "description": "Disconnect from the Ghidra server"
+    },
+    {
+      "path": "/server/repositories",
+      "method": "GET",
+      "category": "server",
+      "params": [],
+      "description": "List repositories on the connected server"
+    },
+    {
+      "path": "/server/repository/create",
+      "method": "POST",
+      "category": "server",
+      "params": [
+        "name"
+      ],
+      "description": "Create a new repository on the server"
+    },
+    {
+      "path": "/server/repository/file",
+      "method": "GET",
+      "category": "server",
+      "params": [
+        "repo",
+        "path"
+      ],
+      "description": "Get file info from a server repository"
+    },
+    {
+      "path": "/server/repository/files",
+      "method": "GET",
+      "category": "server",
+      "params": [
+        "repo",
+        "path"
+      ],
+      "description": "List files in a server repository folder"
+    },
+    {
+      "path": "/server/status",
+      "method": "GET",
+      "category": "server",
+      "params": [],
+      "description": "Get server connection status"
+    },
+    {
+      "path": "/server/version_control/add",
+      "method": "POST",
+      "category": "server",
+      "params": [
+        "repo",
+        "path",
+        "comment",
+        "keepCheckedOut"
+      ],
+      "description": "Add a file to version control"
+    },
+    {
+      "path": "/server/version_control/checkin",
+      "method": "POST",
+      "category": "server",
+      "params": [
+        "repo",
+        "path",
+        "comment",
+        "keepCheckedOut"
+      ],
+      "description": "Check in a version-controlled file"
+    },
+    {
+      "path": "/server/version_control/checkout",
+      "method": "POST",
+      "category": "server",
+      "params": [
+        "repo",
+        "path"
+      ],
+      "description": "Check out a version-controlled file"
+    },
+    {
+      "path": "/server/version_control/undo_checkout",
+      "method": "POST",
+      "category": "server",
+      "params": [
+        "repo",
+        "path"
+      ],
+      "description": "Undo a file checkout"
+    },
+    {
+      "path": "/server/version_history",
+      "method": "GET",
+      "category": "server",
+      "params": [
+        "repo",
+        "path"
+      ],
+      "description": "Get version history for a file"
+    },
+    {
+      "path": "/set_bookmark",
+      "method": "POST",
+      "category": "comment",
       "params": [
         "address",
-        "threshold",
-        "limit",
+        "category",
+        "comment",
         "program"
       ],
-      "description": "Find similar functions"
-    },
-    {
-      "path": "/rename_function",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "oldName",
-        "newName",
-        "program"
-      ],
-      "description": "Rename function by name"
-    },
-    {
-      "path": "/rename_function_by_address",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "function_address",
-        "new_name",
-        "program"
-      ],
-      "description": "Rename function by address"
-    },
-    {
-      "path": "/rename_data",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "address",
-        "newName",
-        "program"
-      ],
-      "description": "Rename data symbol"
-    },
-    {
-      "path": "/rename_variable",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "functionName",
-        "oldName",
-        "newName",
-        "program"
-      ],
-      "description": "Rename variable"
-    },
-    {
-      "path": "/rename_label",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "address",
-        "old_name",
-        "new_name",
-        "program"
-      ],
-      "description": "Rename label"
-    },
-    {
-      "path": "/rename_global_variable",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "oldName",
-        "newName",
-        "program"
-      ],
-      "description": "Rename global variable"
-    },
-    {
-      "path": "/rename_external_location",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "address",
-        "new_name",
-        "program"
-      ],
-      "description": "Rename external location"
-    },
-    {
-      "path": "/rename_or_label",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "address",
-        "name",
-        "program"
-      ],
-      "description": "Rename or create label"
-    },
-    {
-      "path": "/rename_variables",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "function_address",
-        "renames",
-        "program"
-      ],
-      "description": "Batch rename variables"
-    },
-    {
-      "path": "/batch_rename_function_components",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "function_address",
-        "function_name",
-        "parameter_renames",
-        "local_renames",
-        "return_type",
-        "program"
-      ],
-      "description": "Batch rename function components"
+      "description": "Set bookmark"
     },
     {
       "path": "/set_decompiler_comment",
@@ -690,94 +1966,15 @@
       "description": "Set EOL_COMMENT"
     },
     {
-      "path": "/get_plate_comment",
-      "method": "GET",
-      "category": "comment",
-      "params": [
-        "address",
-        "program"
-      ],
-      "description": "Get plate comment"
-    },
-    {
-      "path": "/set_plate_comment",
+      "path": "/set_function_no_return",
       "method": "POST",
-      "category": "comment",
+      "category": "datatype",
       "params": [
         "function_address",
-        "comment",
+        "no_return",
         "program"
       ],
-      "description": "Set plate comment"
-    },
-    {
-      "path": "/batch_set_comments",
-      "method": "POST",
-      "category": "comment",
-      "params": [
-        "function_address",
-        "decompiler_comments",
-        "disassembly_comments",
-        "plate_comment",
-        "program"
-      ],
-      "description": "Set multiple comments"
-    },
-    {
-      "path": "/batch_apply_documentation",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "address",
-        "name",
-        "prototype",
-        "calling_convention",
-        "variable_types",
-        "variable_renames",
-        "plate_comment",
-        "decompiler_comments",
-        "disassembly_comments",
-        "goto",
-        "score",
-        "program"
-      ],
-      "description": "Apply all documentation to a function in one call"
-    },
-    {
-      "path": "/clear_function_comments",
-      "method": "POST",
-      "category": "comment",
-      "params": [
-        "function_address",
-        "clear_plate",
-        "clear_pre",
-        "clear_eol",
-        "program"
-      ],
-      "description": "Clear all comments for a function"
-    },
-    {
-      "path": "/set_bookmark",
-      "method": "POST",
-      "category": "comment",
-      "params": [
-        "address",
-        "category",
-        "comment",
-        "program"
-      ],
-      "description": "Set bookmark"
-    },
-    {
-      "path": "/delete_bookmark",
-      "method": "POST",
-      "category": "comment",
-      "params": [
-        "address",
-        "category",
-        "program"
-      ],
-      "description": "Delete bookmark"
+      "description": "Set no-return attribute"
     },
     {
       "path": "/set_function_prototype",
@@ -790,6 +1987,16 @@
         "program"
       ],
       "description": "Set function prototype"
+    },
+    {
+      "path": "/set_image_base",
+      "method": "POST",
+      "category": "program",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Set the base address of the program (rebases all addresses)"
     },
     {
       "path": "/set_local_variable_type",
@@ -816,6 +2023,17 @@
       "description": "Set parameter type"
     },
     {
+      "path": "/set_plate_comment",
+      "method": "POST",
+      "category": "comment",
+      "params": [
+        "address",
+        "comment",
+        "program"
+      ],
+      "description": "Set plate comment"
+    },
+    {
       "path": "/set_variable_storage",
       "method": "POST",
       "category": "datatype",
@@ -828,246 +2046,68 @@
       "description": "Set variable storage"
     },
     {
-      "path": "/batch_set_variable_types",
+      "path": "/set_variables",
       "method": "POST",
-      "category": "datatype",
+      "category": "function",
       "params": [
         "function_address",
-        "variable_types",
+        "variables",
         "program"
       ],
-      "description": "Set multiple variable types"
+      "description": "Set types and names for multiple variables atomically. Types are applied first, then renames, in a single transaction. Hungarian prefix validation is enforced: the new name's prefix must match the type. On programs with multiple address spaces, prefix addresses with the space name."
     },
     {
-      "path": "/set_function_no_return",
+      "path": "/suggest_field_names",
       "method": "POST",
-      "category": "datatype",
+      "category": "analysis",
       "params": [
-        "function_address",
-        "no_return",
+        "struct_address",
+        "struct_size",
         "program"
       ],
-      "description": "Set no-return attribute"
+      "description": "Suggest field names"
     },
     {
-      "path": "/clear_instruction_flow_override",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "address",
-        "program"
-      ],
-      "description": "Clear flow override"
-    },
-    {
-      "path": "/list_data_types",
+      "path": "/switch_program",
       "method": "GET",
-      "category": "datatype",
+      "category": "program",
       "params": [
-        "category",
-        "offset",
-        "limit",
         "program"
       ],
-      "description": "List data types"
+      "description": "Switch current program"
     },
     {
-      "path": "/create_struct",
+      "path": "/tool/goto_address",
       "method": "POST",
-      "category": "datatype",
+      "category": "utility",
       "params": [
-        "name",
-        "fields",
-        "program"
+        "address"
       ],
-      "description": "Create structure"
+      "description": "Navigate CodeBrowser listing and decompiler to a specific address"
     },
     {
-      "path": "/create_enum",
+      "path": "/tool/launch_codebrowser",
       "method": "POST",
-      "category": "datatype",
+      "category": "utility",
       "params": [
-        "name",
-        "values",
-        "size",
-        "program"
+        "path"
       ],
-      "description": "Create enumeration"
+      "description": "Open a file in CodeBrowser, launching a new one if needed"
     },
     {
-      "path": "/create_union",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "name",
-        "fields",
-        "program"
-      ],
-      "description": "Create union"
-    },
-    {
-      "path": "/create_typedef",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "name",
-        "base_type",
-        "program"
-      ],
-      "description": "Create typedef"
-    },
-    {
-      "path": "/create_array_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "base_type",
-        "length",
-        "name",
-        "program"
-      ],
-      "description": "Create array type"
-    },
-    {
-      "path": "/create_pointer_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "base_type",
-        "program"
-      ],
-      "description": "Create pointer type"
-    },
-    {
-      "path": "/apply_data_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "address",
-        "type_name",
-        "clear_existing",
-        "program"
-      ],
-      "description": "Apply data type"
-    },
-    {
-      "path": "/modify_struct_field",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "struct_name",
-        "field_name",
-        "new_type",
-        "new_name",
-        "program"
-      ],
-      "description": "Modify struct field"
-    },
-    {
-      "path": "/add_struct_field",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "struct_name",
-        "field_name",
-        "field_type",
-        "offset",
-        "program"
-      ],
-      "description": "Add struct field"
-    },
-    {
-      "path": "/remove_struct_field",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "struct_name",
-        "field_name",
-        "program"
-      ],
-      "description": "Remove struct field"
-    },
-    {
-      "path": "/delete_data_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "type_name",
-        "program"
-      ],
-      "description": "Delete data type"
-    },
-    {
-      "path": "/clone_data_type",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "source_type",
-        "new_name",
-        "program"
-      ],
-      "description": "Clone data type"
-    },
-    {
-      "path": "/import_data_types",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "gdt_file",
-        "program"
-      ],
-      "description": "Import data types from GDT"
-    },
-    {
-      "path": "/create_data_type_category",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "category_path",
-        "program"
-      ],
-      "description": "Create data type category"
-    },
-    {
-      "path": "/move_data_type_to_category",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "type_name",
-        "category_path",
-        "program"
-      ],
-      "description": "Move data type to category"
-    },
-    {
-      "path": "/list_data_type_categories",
+      "path": "/tool/running_tools",
       "method": "GET",
-      "category": "datatype",
-      "params": [
-        "parent_category",
-        "program"
-      ],
-      "description": "List data type categories"
-    },
-    {
-      "path": "/create_function_signature",
-      "method": "POST",
-      "category": "datatype",
-      "params": [
-        "name",
-        "return_type",
-        "parameters",
-        "calling_convention",
-        "program"
-      ],
-      "description": "Create function signature type"
+      "category": "utility",
+      "params": [],
+      "description": "List all running Ghidra tool windows"
     },
     {
       "path": "/validate_data_type",
       "method": "GET",
       "category": "datatype",
       "params": [
-        "type_string",
+        "address",
+        "type_name",
         "program"
       ],
       "description": "Validate data type syntax"
@@ -1087,986 +2127,12 @@
       "method": "GET",
       "category": "datatype",
       "params": [
+        "function_address",
         "prototype",
+        "calling_convention",
         "program"
       ],
       "description": "Validate function prototype"
-    },
-    {
-      "path": "/create_label",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "address",
-        "name",
-        "program"
-      ],
-      "description": "Create label"
-    },
-    {
-      "path": "/batch_create_labels",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "labels",
-        "program"
-      ],
-      "description": "Create multiple labels"
-    },
-    {
-      "path": "/analyze_data_region",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "address",
-        "max_scan_bytes",
-        "include_xref_map",
-        "include_assembly_patterns",
-        "include_boundary_detection",
-        "program"
-      ],
-      "description": "Analyze data region"
-    },
-    {
-      "path": "/detect_array_bounds",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "address",
-        "analyze_loop_bounds",
-        "analyze_indexing",
-        "max_scan_range",
-        "program"
-      ],
-      "description": "Detect array bounds"
-    },
-    {
-      "path": "/get_assembly_context",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "xref_sources",
-        "context_instructions",
-        "include_patterns",
-        "program"
-      ],
-      "description": "Get assembly context"
-    },
-    {
-      "path": "/apply_data_classification",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "address",
-        "classification",
-        "type_name",
-        "name",
-        "program"
-      ],
-      "description": "Apply data classification"
-    },
-    {
-      "path": "/analyze_struct_field_usage",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "address",
-        "struct_name",
-        "max_functions",
-        "program"
-      ],
-      "description": "Analyze struct field usage"
-    },
-    {
-      "path": "/get_field_access_context",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "struct_address",
-        "field_offset",
-        "num_examples",
-        "program"
-      ],
-      "description": "Get field access context"
-    },
-    {
-      "path": "/suggest_field_names",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "address",
-        "struct_name",
-        "program"
-      ],
-      "description": "Suggest field names"
-    },
-    {
-      "path": "/inspect_memory_content",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "address",
-        "length",
-        "detect_strings",
-        "program"
-      ],
-      "description": "Inspect memory bytes"
-    },
-    {
-      "path": "/read_memory",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "address",
-        "length",
-        "format",
-        "program"
-      ],
-      "description": "Read raw memory"
-    },
-    {
-      "path": "/analyze_function_completeness",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "function_address",
-        "program"
-      ],
-      "description": "Analyze documentation completeness"
-    },
-    {
-      "path": "/analyze_for_documentation",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "function_address",
-        "program"
-      ],
-      "description": "Composite RE documentation analysis (decompile + classify + variables + completeness)"
-    },
-    {
-      "path": "/batch_analyze_completeness",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "addresses",
-        "program"
-      ],
-      "description": "Batch analyze completeness for multiple functions"
-    },
-    {
-      "path": "/analyze_function_complete",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "name",
-        "include_xrefs",
-        "include_callees",
-        "include_callers",
-        "include_disasm",
-        "include_variables",
-        "include_completeness",
-        "program"
-      ],
-      "description": "Complete function analysis"
-    },
-    {
-      "path": "/find_next_undefined_function",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "start_address",
-        "criteria",
-        "pattern",
-        "direction",
-        "program"
-      ],
-      "description": "Find next undefined function"
-    },
-    {
-      "path": "/can_rename_at_address",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "address",
-        "program"
-      ],
-      "description": "Check if address can be renamed"
-    },
-    {
-      "path": "/detect_crypto_constants",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "program"
-      ],
-      "description": "Detect crypto constants"
-    },
-    {
-      "path": "/find_dead_code",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "address",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Find dead code"
-    },
-    {
-      "path": "/analyze_control_flow",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "address",
-        "include_dominators",
-        "program"
-      ],
-      "description": "Analyze control flow"
-    },
-    {
-      "path": "/find_anti_analysis_techniques",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "program"
-      ],
-      "description": "Find anti-analysis techniques"
-    },
-    {
-      "path": "/batch_decompile",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "addresses",
-        "format",
-        "program"
-      ],
-      "description": "Batch decompile functions"
-    },
-    {
-      "path": "/analyze_call_graph",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "name",
-        "depth",
-        "program"
-      ],
-      "description": "Analyze function call graph patterns"
-    },
-    {
-      "path": "/analyze_api_call_chains",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "program"
-      ],
-      "description": "Analyze API call chains"
-    },
-    {
-      "path": "/extract_iocs_with_context",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "program"
-      ],
-      "description": "Extract IOCs with context"
-    },
-    {
-      "path": "/detect_malware_behaviors",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "categories",
-        "program"
-      ],
-      "description": "Detect malware behaviors"
-    },
-    {
-      "path": "/run_script",
-      "method": "POST",
-      "category": "script",
-      "params": [
-        "script_path",
-        "args",
-        "program"
-      ],
-      "description": "Run Ghidra script"
-    },
-    {
-      "path": "/run_ghidra_script",
-      "method": "POST",
-      "category": "script",
-      "params": [
-        "script_name",
-        "timeout_seconds",
-        "capture_output",
-        "program"
-      ],
-      "description": "Run script with output capture"
-    },
-    {
-      "path": "/run_script_inline",
-      "method": "POST",
-      "category": "script",
-      "params": [
-        "script_code",
-        "language",
-        "program"
-      ],
-      "description": "Run inline script code"
-    },
-    {
-      "path": "/list_open_programs",
-      "method": "GET",
-      "category": "program",
-      "params": [],
-      "description": "List open programs"
-    },
-    {
-      "path": "/get_address_spaces",
-      "method": "GET",
-      "category": "program",
-      "description": "List all physical address spaces in the program"
-    },
-    {
-      "path": "/get_current_program_info",
-      "method": "GET",
-      "category": "program",
-      "params": [],
-      "description": "Get current program info"
-    },
-    {
-      "path": "/switch_program",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "name"
-      ],
-      "description": "Switch current program"
-    },
-    {
-      "path": "/list_project_files",
-      "method": "GET",
-      "category": "program",
-      "params": [
-        "folder"
-      ],
-      "description": "List project files"
-    },
-    {
-      "path": "/open_program",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "path"
-      ],
-      "description": "Open program from project"
-    },
-    {
-      "path": "/load_program",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "path"
-      ],
-      "description": "Load program into headless server"
-    },
-    {
-      "path": "/load_program_from_project",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "project_path",
-        "program_path"
-      ],
-      "description": "Load program from Ghidra project (headless)"
-    },
-    {
-      "path": "/close_program",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "program"
-      ],
-      "description": "Close a loaded program (headless)"
-    },
-    {
-      "path": "/get_project_info",
-      "method": "GET",
-      "category": "program",
-      "params": [],
-      "description": "Get project information (headless)"
-    },
-    {
-      "path": "/health",
-      "method": "GET",
-      "category": "utility",
-      "params": [],
-      "description": "Health check endpoint for headless server"
-    },
-    {
-      "path": "/get_function_hash",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "address",
-        "program"
-      ],
-      "description": "Get function hash"
-    },
-    {
-      "path": "/get_bulk_function_hashes",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "offset",
-        "limit",
-        "filter",
-        "program"
-      ],
-      "description": "Get bulk function hashes"
-    },
-    {
-      "path": "/get_function_documentation",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "address",
-        "program"
-      ],
-      "description": "Export function documentation"
-    },
-    {
-      "path": "/apply_function_documentation",
-      "method": "POST",
-      "category": "utility",
-      "params": [
-        "target_address",
-        "function_name",
-        "return_type",
-        "calling_convention",
-        "plate_comment",
-        "parameters",
-        "comments",
-        "labels",
-        "program"
-      ],
-      "description": "Apply function documentation"
-    },
-    {
-      "path": "/delete_label",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "address",
-        "name",
-        "program"
-      ],
-      "description": "Delete label at address"
-    },
-    {
-      "path": "/batch_delete_labels",
-      "method": "POST",
-      "category": "rename",
-      "params": [
-        "labels",
-        "program"
-      ],
-      "description": "Delete multiple labels"
-    },
-    {
-      "path": "/delete_function",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "address",
-        "program"
-      ],
-      "description": "Delete function at address"
-    },
-    {
-      "path": "/create_function",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "address",
-        "name",
-        "disassemble_first",
-        "program"
-      ],
-      "description": "Create function at address"
-    },
-    {
-      "path": "/create_memory_block",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "name",
-        "address",
-        "size",
-        "read",
-        "write",
-        "execute",
-        "program"
-      ],
-      "description": "Create memory block"
-    },
-    {
-      "path": "/save_program",
-      "method": "POST",
-      "category": "program",
-      "params": [
-        "program"
-      ],
-      "description": "Save current program"
-    },
-    {
-      "path": "/exit_ghidra",
-      "method": "POST",
-      "category": "program",
-      "params": [],
-      "description": "Save and exit Ghidra"
-    },
-    {
-      "path": "/get_data_type_size",
-      "method": "GET",
-      "category": "datatype",
-      "params": [
-        "type_name",
-        "program"
-      ],
-      "description": "Get data type size in bytes"
-    },
-    {
-      "path": "/get_function_signature",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "address",
-        "program"
-      ],
-      "description": "Get function feature signature"
-    },
-    {
-      "path": "/find_similar_functions_fuzzy",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "address",
-        "target_program",
-        "source_program",
-        "threshold",
-        "limit",
-        "program"
-      ],
-      "description": "Find similar functions via fuzzy matching"
-    },
-    {
-      "path": "/bulk_fuzzy_match",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "source_program",
-        "target_program",
-        "threshold",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Bulk fuzzy match functions across programs"
-    },
-    {
-      "path": "/diff_functions",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "address_a",
-        "address_b",
-        "program_a",
-        "program_b",
-        "program"
-      ],
-      "description": "Diff two functions"
-    },
-    {
-      "path": "/compare_programs_documentation",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "program"
-      ],
-      "description": "Compare documentation across programs"
-    },
-    {
-      "path": "/find_undocumented_by_string",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "address",
-        "program"
-      ],
-      "description": "Find undocumented functions referencing string"
-    },
-    {
-      "path": "/batch_string_anchor_report",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "pattern",
-        "program"
-      ],
-      "description": "Report strings and their undocumented functions"
-    },
-    {
-      "path": "/create_project",
-      "method": "POST",
-      "category": "project",
-      "params": [
-        "parentDir",
-        "name"
-      ],
-      "description": "Create a new Ghidra project"
-    },
-    {
-      "path": "/delete_project",
-      "method": "POST",
-      "category": "project",
-      "params": [
-        "projectPath"
-      ],
-      "description": "Delete a Ghidra project"
-    },
-    {
-      "path": "/list_projects",
-      "method": "GET",
-      "category": "project",
-      "params": [
-        "searchDir"
-      ],
-      "description": "List available Ghidra projects"
-    },
-    {
-      "path": "/open_project",
-      "method": "POST",
-      "category": "project",
-      "params": [
-        "path"
-      ],
-      "description": "Open an existing Ghidra project"
-    },
-    {
-      "path": "/close_project",
-      "method": "POST",
-      "category": "project",
-      "params": [],
-      "description": "Close the currently open project"
-    },
-    {
-      "path": "/create_folder",
-      "method": "POST",
-      "category": "project",
-      "params": [
-        "path",
-        "program"
-      ],
-      "description": "Create a folder in the project"
-    },
-    {
-      "path": "/move_file",
-      "method": "POST",
-      "category": "project",
-      "params": [
-        "filePath",
-        "destFolder"
-      ],
-      "description": "Move a file to another project folder"
-    },
-    {
-      "path": "/move_folder",
-      "method": "POST",
-      "category": "project",
-      "params": [
-        "sourcePath",
-        "destPath"
-      ],
-      "description": "Move a folder to another location"
-    },
-    {
-      "path": "/delete_file",
-      "method": "POST",
-      "category": "project",
-      "params": [
-        "filePath"
-      ],
-      "description": "Delete a file from the project"
-    },
-    {
-      "path": "/get_function_count",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "program"
-      ],
-      "description": "Return the number of functions in the loaded program"
-    },
-    {
-      "path": "/search_strings",
-      "method": "GET",
-      "category": "search",
-      "params": [
-        "query",
-        "min_length",
-        "encoding",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Search defined strings by a regex/substring pattern"
-    },
-    {
-      "path": "/list_analyzers",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "program"
-      ],
-      "description": "List available analysis plugins"
-    },
-    {
-      "path": "/configure_analyzer",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "name",
-        "enabled",
-        "program"
-      ],
-      "description": "Configure an analysis plugin"
-    },
-    {
-      "path": "/run_analysis",
-      "method": "POST",
-      "category": "analysis",
-      "params": [
-        "program"
-      ],
-      "description": "Run auto-analysis on the current program"
-    },
-    {
-      "path": "/find_code_gaps",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "min_size",
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "Find gaps of undefined bytes between functions in executable memory"
-    },
-    {
-      "path": "/server/connect",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "host",
-        "port"
-      ],
-      "description": "Connect to a Ghidra server"
-    },
-    {
-      "path": "/server/disconnect",
-      "method": "POST",
-      "category": "server",
-      "params": [],
-      "description": "Disconnect from the Ghidra server"
-    },
-    {
-      "path": "/server/status",
-      "method": "GET",
-      "category": "server",
-      "params": [],
-      "description": "Get server connection status"
-    },
-    {
-      "path": "/server/repositories",
-      "method": "GET",
-      "category": "server",
-      "params": [],
-      "description": "List repositories on the connected server"
-    },
-    {
-      "path": "/server/repository/create",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "name"
-      ],
-      "description": "Create a new repository on the server"
-    },
-    {
-      "path": "/server/version_control/checkout",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "repo",
-        "path"
-      ],
-      "description": "Check out a version-controlled file"
-    },
-    {
-      "path": "/server/version_control/checkin",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "repo",
-        "path",
-        "comment",
-        "keepCheckedOut"
-      ],
-      "description": "Check in a version-controlled file"
-    },
-    {
-      "path": "/server/version_control/undo_checkout",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "repo",
-        "path"
-      ],
-      "description": "Undo a file checkout"
-    },
-    {
-      "path": "/server/version_control/add",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "repo",
-        "path",
-        "comment",
-        "keepCheckedOut"
-      ],
-      "description": "Add a file to version control"
-    },
-    {
-      "path": "/server/version_history",
-      "method": "GET",
-      "category": "server",
-      "params": [
-        "repo",
-        "path"
-      ],
-      "description": "Get version history for a file"
-    },
-    {
-      "path": "/server/checkouts",
-      "method": "GET",
-      "category": "server",
-      "params": [
-        "path"
-      ],
-      "description": "List all checked-out files in a folder, including server-side checkouts"
-    },
-    {
-      "path": "/server/admin/users",
-      "method": "GET",
-      "category": "server",
-      "params": [],
-      "description": "List all users on the server"
-    },
-    {
-      "path": "/server/admin/set_permissions",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "repo",
-        "user",
-        "accessLevel"
-      ],
-      "description": "Set user permissions on a repository"
-    },
-    {
-      "path": "/server/admin/terminate_checkout",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "path"
-      ],
-      "description": "Terminate all checkouts on a single file"
-    },
-    {
-      "path": "/server/admin/terminate_all_checkouts",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "path"
-      ],
-      "description": "Terminate all checkouts in a folder recursively"
-    },
-    {
-      "path": "/server/repository/files",
-      "method": "GET",
-      "category": "server",
-      "params": [
-        "repo",
-        "path"
-      ],
-      "description": "List files in a server repository folder"
-    },
-    {
-      "path": "/server/repository/file",
-      "method": "GET",
-      "category": "server",
-      "params": [
-        "repo",
-        "path"
-      ],
-      "description": "Get file info from a server repository"
-    },
-    {
-      "path": "/project/info",
-      "method": "GET",
-      "category": "project",
-      "params": [],
-      "description": "Get detailed project info including running tools and open programs"
-    },
-    {
-      "path": "/tool/running_tools",
-      "method": "GET",
-      "category": "utility",
-      "params": [],
-      "description": "List all running Ghidra tool windows"
-    },
-    {
-      "path": "/tool/launch_codebrowser",
-      "method": "POST",
-      "category": "utility",
-      "params": [
-        "path"
-      ],
-      "description": "Open a file in CodeBrowser, launching a new one if needed"
-    },
-    {
-      "path": "/tool/goto_address",
-      "method": "POST",
-      "category": "utility",
-      "params": [
-        "address"
-      ],
-      "description": "Navigate CodeBrowser listing and decompiler to a specific address"
-    },
-    {
-      "path": "/server/authenticate",
-      "method": "POST",
-      "category": "server",
-      "params": [
-        "username",
-        "password"
-      ],
-      "description": "Register server credentials for programmatic authentication"
     }
   ]
 }

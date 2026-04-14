@@ -579,5 +579,8 @@ audit_*.py
 audit-*.json
 
 fun-doc/state.json
+fun-doc/state.json.bak
+fun-doc/state.json.corrupt-*
 fun-doc/logs/
 fun-doc/priority_queue.json
+fun-doc/debug/

@@ -16,8 +16,15 @@ from pathlib import Path
 
 
 def get_server_url():
-    """Get the server URL from environment or use default."""
-    return os.environ.get("GHIDRA_MCP_URL", "http://localhost:8089")
+    """Get the server URL from environment or use default.
+
+    Default uses 127.0.0.1 (not localhost) because on Windows the dual-stack
+    `localhost` resolution tries IPv6 first, and Ghidra's HTTP server only
+    listens on IPv4. The IPv6 attempt times out after exactly 2 seconds before
+    falling back to IPv4, adding ~2000 ms to every test request. Using the
+    IPv4 literal directly skips the resolution entirely.
+    """
+    return os.environ.get("GHIDRA_MCP_URL", "http://127.0.0.1:8089")
 
 
 def get_test_timeout():

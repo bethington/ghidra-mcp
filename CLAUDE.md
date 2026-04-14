@@ -2,9 +2,9 @@
 
 ## Overview
 
-MCP server bridging Ghidra reverse engineering with AI tools. 193 MCP tools for binary analysis.
+MCP server bridging Ghidra reverse engineering with AI tools. 199 MCP tools for binary analysis.
 
-- **Package**: `com.xebyte` | **Version**: 5.2.0 | **Java**: 21 LTS | **Ghidra**: 12.0.3
+- **Package**: `com.xebyte` | **Version**: 5.3.0 | **Java**: 21 LTS | **Ghidra**: 12.0.3
 
 ## Architecture
 
@@ -26,7 +26,7 @@ Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
 
 Do not try to keep the full tool list in this file.
 
-- **Authoritative repo snapshot**: `tests/endpoints.json` (193 endpoints, categories, descriptions)
+- **Authoritative repo snapshot**: `tests/endpoints.json` (199 endpoints, categories, descriptions)
 - **Authoritative runtime schema**: `/mcp/schema` from the running server
 - **Usage patterns / operator guide**: `docs/prompts/TOOL_USAGE_GUIDE.md`
 
@@ -86,9 +86,13 @@ When building new tools or modifying existing ones, wire validation through `Nam
 
 ## Testing
 
-- Java: `mvn test`
-- Python: `pytest tests/`
-- Integration tests require Ghidra running on port 8089
+- **Offline (no Ghidra required)**:
+  - Java: `mvn test -Dtest='com.xebyte.offline.*Test'` -- annotation scanner + `tests/endpoints.json` parity (~0.5s, 11 tests)
+  - Python: `pytest tests/performance/test_selector_invariants.py tests/performance/test_state_atomicity.py`
+- **Integration (Ghidra required on port 8089)**:
+  - Java: `mvn test` -- runs everything including endpoint registration tests
+  - Python: `pytest tests/`
+- **Catalog drift**: if `EndpointsJsonParityTest` fails after adding/modifying an `@McpTool`, run `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true` to rewrite `tests/endpoints.json` from the scanner (preserves hand-authored descriptions and hand-registered routes).
 
 ## Key Gotchas
 

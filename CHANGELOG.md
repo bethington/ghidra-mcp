@@ -4,6 +4,49 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.3.0 - 2026-04-14
+
+### Ghidra Plugin
+
+#### Added
+
+- **`/mcp/health` endpoint** — Returns HTTP server pool stats, uptime, memory, and active request count. Used by the fun-doc dashboard and by regression tests to observe server saturation.
+- **HTTP thread pool (pool size = 3)** — `GhidraMCPPlugin` now uses a fixed thread pool for HTTP request handling instead of the default single-threaded executor. Size 3 is a deliberate compromise: large enough that a slow write doesn't block every read, small enough to avoid saturating Ghidra's Event Dispatch Thread (sizes ≥ 8 triggered `Swing.runNow` deadlocks via `ToolTaskManager.taskCompleted`).
+- **Annotation scanner offline test suite** — `src/test/java/com/xebyte/offline/` adds 11 pure-reflection tests that run without Ghidra: schema generation shape, path uniqueness, HTTP method validity, `tests/endpoints.json` parity (scanner ⊆ catalog), param parity, and `total_endpoints` consistency. Partial implementation of #112.
+- **`RegenerateEndpointsJson` utility** — Opt-in test (`mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`) that rewrites `tests/endpoints.json` from the annotation scanner, preserving hand-authored descriptions and hand-registered routes like `/mcp/health` and `/check_connection`.
+
+#### Fixed
+
+- **`AnalysisService.batch_analyze_completeness` partial-results bug** — When one function's decompile timed out, the batch threw and discarded every successful result in the same request. Now inserts an error marker for the failed function and continues the loop. `PER_CHUNK_TIMEOUT_SEC` raised to 90 s to give the 60 s internal decompile cap a 30 s buffer.
+- **`FunctionService.decompileFunctionNoRetry`** — New single-attempt decompile helper used by the scoring path. The retry-wrapped `decompileFunction` escalated 60 → 120 → 180 s and leaked `DecompInterface` contexts when the scoring timeout fired mid-retry, eventually OOMing the JVM.
+- **`tests/endpoints.json` drift** — The annotation scanner catalog parity test found and fixed 5 missing endpoints (`/analysis_status`, `/import_file`, `/reanalyze`, `/set_image_base`, `/set_variables`), 10 HTTP method mismatches, ~50 missing `@Param` entries, and a missing `/mcp/health` row. `total_endpoints`: 193 → 199.
+
+### fun-doc
+
+#### Added
+
+- **Priority queue system** — Replaces the old pin-one-at-a-time model. `priority_queue.json` stores a FIFO work queue. Auto-dequeues functions when they hit `good_enough_score` (configurable per-binary, default 80). Dashboard surfaces the queue with scan progress, handoff counter, and stale-skip counter.
+- **Complexity handoff** — Workers can hand a function to a more capable provider when the current model's completeness plateaus. Default cascade: minimax → claude (disabled by default, set `complexity_handoff_max`).
+- **Debug mode** — Per-function JSONL tool-call logs under `fun-doc/debug/<function_key>.jsonl`. Captures every MCP call, its truncated args, and result. Ship with `fun-doc/analyze_debug.py` CLI for post-hoc pattern analysis (consecutive same-tool runs, failed retries, repeated args).
+- **Atomic state writes** — `_atomic_write_state()` uses temp + fsync + `os.replace` + `.bak` rotation. Fixes the lost-update race where multiple workers saving whole-state from their in-memory copies clobbered each other's per-function updates.
+- **`update_function_state(key, func)`** — Per-function atomic read-modify-write under `_state_lock`. Replaces every per-function `save_state(state)` call in the processing path.
+- **Pagination-aware function list fetch** — `_fetch_function_list` now pages through `list_functions_enhanced` in 10k chunks. Previously silently truncated binaries above 10,000 functions (`glide3x.dll`, `libcrypto-1_1.dll`).
+- **Regression test suite** under `tests/performance/` — 30 tests across selector invariants, state atomicity, HTTP concurrency contract, listing consistency, batch scoring consistency, and `/mcp/health` shape. Most skip gracefully without a live Ghidra server; `test_selector_invariants.py` and `test_state_atomicity.py` run fully offline.
+
+#### Fixed
+
+- **Cold-start lane infinite re-processing loop** — `_sync_func_state` didn't stamp `last_processed`, so the selector kept re-picking already-scored functions. Worst seen: SafeDelete stuck at 83% across hundreds of iterations.
+- **"Stale at X%" misleading message** — The cached score was captured after `_sync_func_state` had already overwritten it, so the log always showed the live value. Captures `original_cached_score` before sync now.
+- **`RETRY_SIZE` vs client timeout math** — Retry batch was 10 × 90 s = 900 s > 600 s client budget. Reduced to `RETRY_SIZE = 3` (270 s, fits with 330 s margin).
+- **`tests/conftest.py` IPv6 fallback** — Default base URL changed from `http://localhost:8089` to `http://127.0.0.1:8089`. Windows dual-stack `localhost` resolution tries IPv6 first, times out after exactly 2 s, then falls back to IPv4 — adding ~2000 ms to every test request.
+
+### Docs
+
+- `CLAUDE.md` Testing section now documents offline vs. integration test commands and the `RegenerateEndpointsJson` escape hatch.
+- Tool count updated: 193 → 199 (README, CLAUDE.md, endpoints.json).
+
+---
+
 ## v5.2.0 - 2026-04-11
 
 ### Ghidra Plugin

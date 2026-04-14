@@ -167,6 +167,29 @@ public class FunctionService {
     }
 
     /**
+     * Single-attempt decompile with no retry escalation. For scoring/analysis
+     * code paths where a clean miss is fine and we cannot afford the 60→120→180s
+     * escalation of the retry wrapper (which leaked DecompInterface contexts
+     * when abandoned by upstream timeouts). Worst case: 60s. No retry.
+     */
+    public DecompileResults decompileFunctionNoRetry(Function func, Program program) {
+        DecompInterface decomp = null;
+        try {
+            decomp = new DecompInterface();
+            decomp.openProgram(program);
+            decomp.setSimplificationStyle("decompile");
+            return decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+        } catch (Exception e) {
+            Msg.warn(this, "Single-attempt decompile failed for " + func.getName() + ": " + e.getMessage());
+            return null;
+        } finally {
+            if (decomp != null) {
+                try { decomp.dispose(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /**
      * Decompile function with retry logic for stability (FIX #3).
      * Complex functions with SEH + alloca may fail initially but succeed on retry.
      * @param func Function to decompile

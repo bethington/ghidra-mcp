@@ -4,7 +4,20 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v5.2.0 (Latest)
+### v5.3.0 (Latest)
+
+- **Stability + Observability Release** - HTTP thread pool fix, `/mcp/health`, offline test suite, fun-doc queue system
+- `/mcp/health` endpoint: pool stats, uptime, memory, active request count — used by dashboard and regression tests
+- HTTP thread pool (size 3): fixes EDT saturation deadlocks at pool >= 8, unblocks reads behind slow writes
+- Offline annotation-scanner test suite under `src/test/java/com/xebyte/offline/`: catches `@McpTool` / `endpoints.json` drift at `mvn test` time without needing Ghidra
+- `AnalysisService.batch_analyze_completeness` partial-results fix: one bad function no longer discards the whole batch
+- `FunctionService.decompileFunctionNoRetry`: single-attempt decompile used by scoring path (fixes `DecompInterface` leak on retry escalation)
+- fun-doc priority queue with auto-dequeue on `good_enough_score`, complexity handoff (minimax → claude), debug-mode JSONL traces
+- Atomic `state.json` writes via temp + fsync + os.replace + .bak rotation (fixes lost-update race across parallel workers)
+- 199 MCP tools (up from 193: added `/analysis_status`, `/import_file`, `/reanalyze`, `/set_image_base`, `/set_variables`, `/mcp/health`)
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
+### v5.2.0
 
 - **Major Feature Release** - Completeness scoring redesign, naming convention enforcement, fun-doc automation engine
 - Log-scaled budget scoring system with tiered plate comment quality

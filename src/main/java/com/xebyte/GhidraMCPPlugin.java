@@ -89,6 +89,9 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -96,7 +99,7 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "5.2.0"; // Default fallback
+    private static String VERSION = "5.3.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
@@ -109,7 +112,7 @@ class VersionInfo {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "5.2.0");
+                VERSION = props.getProperty("app.version", "5.3.0");
                 APP_NAME = props.getProperty("app.name", "GhidraMCP");
                 GHIDRA_VERSION = props.getProperty("ghidra.version", "unknown");
                 BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
@@ -166,6 +169,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
     // Static singleton: one HTTP server shared across all CodeBrowser windows (fixes #35)
     private static HttpServer server;
+    private static ExecutorService httpExecutorRef; // exposed for /mcp/health
+    private static final AtomicInteger activeRequests = new AtomicInteger(0);
+    private static final long serverStartMillis = System.currentTimeMillis();
     private static int instanceCount = 0;
     private boolean ownsServer = false; // true if this instance started the server
     private static final String OPTION_CATEGORY_NAME = "GhidraMCP HTTP Server";
@@ -490,6 +496,53 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }));
 
         // ==========================================================================
+        // HEALTH / METRICS ENDPOINT
+        // Exposes HTTP thread pool saturation, active request count, uptime,
+        // memory. Used by the dashboard to show a "server is struggling" badge
+        // and by regression tests to assert healthy baselines.
+        // ==========================================================================
+        server.createContext("/mcp/health", safeHandler(exchange -> {
+            int active = activeRequests.get();
+            long uptimeSec = (System.currentTimeMillis() - serverStartMillis) / 1000L;
+            Runtime rt = Runtime.getRuntime();
+            long usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024L * 1024L);
+            long totalMb = rt.totalMemory() / (1024L * 1024L);
+            long maxMb = rt.maxMemory() / (1024L * 1024L);
+
+            int poolSize = -1;
+            int largestPool = -1;
+            long completedTasks = -1;
+            int queueSize = -1;
+            if (httpExecutorRef instanceof java.util.concurrent.ThreadPoolExecutor) {
+                java.util.concurrent.ThreadPoolExecutor tpe = (java.util.concurrent.ThreadPoolExecutor) httpExecutorRef;
+                poolSize = tpe.getPoolSize();
+                largestPool = tpe.getLargestPoolSize();
+                completedTasks = tpe.getCompletedTaskCount();
+                queueSize = tpe.getQueue().size();
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("{");
+            sb.append("\"status\": \"ok\",");
+            sb.append("\"uptime_seconds\": ").append(uptimeSec).append(",");
+            sb.append("\"active_requests\": ").append(active).append(",");
+            sb.append("\"http_pool\": {");
+            sb.append("\"configured_size\": 3,");
+            sb.append("\"current_size\": ").append(poolSize).append(",");
+            sb.append("\"largest_size\": ").append(largestPool).append(",");
+            sb.append("\"queue_size\": ").append(queueSize).append(",");
+            sb.append("\"completed_tasks\": ").append(completedTasks);
+            sb.append("},");
+            sb.append("\"memory_mb\": {");
+            sb.append("\"used\": ").append(usedMb).append(",");
+            sb.append("\"total\": ").append(totalMb).append(",");
+            sb.append("\"max\": ").append(maxMb);
+            sb.append("}");
+            sb.append("}");
+            sendResponse(exchange, sb.toString());
+        }));
+
+        // ==========================================================================
         // INFRASTRUCTURE ENDPOINTS (not in service layer)
         // ==========================================================================
 
@@ -768,11 +821,44 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         }));
 
 
-        server.setExecutor(null);
+        // Use a fixed thread pool instead of the default single-thread handler.
+        //
+        // WHY (original problem): HttpServer.setExecutor(null) uses ONE thread
+        // for all requests, so any slow request (save_program,
+        // batch_analyze_completeness) blocks every subsequent request strictly
+        // FIFO — including cheap read-only ones like /mcp/schema which have no
+        // EDT dependency. Measured: /mcp/schema (15ms at idle) took 54,000ms
+        // while a batch call was in flight. See tests/performance/
+        // test_http_concurrency.py.
+        //
+        // WHY POOL SIZE = 3 (not 8): every write endpoint and most read
+        // endpoints call SwingUtilities.invokeAndWait, which acquires the EDT.
+        // The EDT is a single thread. With pool size 8, up to 8 concurrent
+        // invokeAndWait calls queued on the EDT. When each holds the EDT for
+        // several hundred ms (decompile, analyze), total queue depth exceeds
+        // the 20-second deadlock-detection timeout on Ghidra's internal
+        // Swing.runNow calls (auto-analysis, DomainObject flushEvents, etc.),
+        // causing them to fail with "Timed-out waiting to run a Swing task".
+        //
+        // Pool size 3 allows: 1 slow EDT-bound request in flight, 1 fast
+        // read-only in flight, 1 slot in reserve so Ghidra's internal tasks
+        // can always slot in. Still faster than single-threaded (read-only
+        // endpoints don't block) but safe for EDT saturation.
+        ExecutorService httpExecutor = Executors.newFixedThreadPool(3, new ThreadFactory() {
+            private final AtomicInteger n = new AtomicInteger(1);
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "GhidraMCP-HTTP-" + n.getAndIncrement());
+                t.setDaemon(true);
+                return t;
+            }
+        });
+        server.setExecutor(httpExecutor);
+        httpExecutorRef = httpExecutor;
         new Thread(() -> {
             try {
                 server.start();
-                Msg.info(this, "GhidraMCP HTTP server started on port " + port);
+                Msg.info(this, "GhidraMCP HTTP server started on port " + port + " (thread pool size 3)");
             } catch (Exception e) {
                 Msg.error(this, "Failed to start HTTP server on port " + port + ". Port might be in use.", e);
                 server = null; // Ensure server isn't considered running
@@ -1713,9 +1799,21 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     /**
      * Wraps an HttpHandler so that any Throwable is caught and returned as a JSON error response.
      * This prevents uncaught exceptions from crashing the HTTP server and dropping connections.
+     *
+     * Also measures handler wall time and logs a WARN for anything exceeding
+     * SLOW_HANDLER_WARN_MS. This surfaces slow endpoints (save_program,
+     * batch_analyze_completeness, anything that hits a cold decompiler cache)
+     * in the Ghidra log immediately, so you can correlate dashboard slowness
+     * with the actual offending endpoint instead of guessing. Tracks active
+     * handler count for /mcp/health.
      */
+    private static final long SLOW_HANDLER_WARN_MS = 2000;
+
     private com.sun.net.httpserver.HttpHandler safeHandler(com.sun.net.httpserver.HttpHandler handler) {
         return exchange -> {
+            long startNanos = System.nanoTime();
+            String path = exchange.getRequestURI().getPath();
+            activeRequests.incrementAndGet();
             try {
                 handler.handle(exchange);
             } catch (Throwable e) {
@@ -1727,6 +1825,21 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 } catch (Throwable ignored) {
                     // Last resort - response already sent or exchange broken
                     Msg.error(this, "Failed to send error response", ignored);
+                }
+            } finally {
+                activeRequests.decrementAndGet();
+                long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+                if (elapsedMs >= SLOW_HANDLER_WARN_MS) {
+                    String query = exchange.getRequestURI().getRawQuery();
+                    String suffix = (query != null && !query.isEmpty()) ? "?" + query : "";
+                    Msg.warn(
+                        this,
+                        String.format(
+                            "SLOW %s %s%s took %d ms (threshold %d ms)",
+                            exchange.getRequestMethod(), path, suffix,
+                            elapsedMs, SLOW_HANDLER_WARN_MS
+                        )
+                    );
                 }
             }
         };

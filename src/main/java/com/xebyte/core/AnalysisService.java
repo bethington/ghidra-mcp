@@ -1200,8 +1200,14 @@ public class AnalysisService {
                         localVarNames.add(local.getName());
                     }
 
-                    // Try to use decompilation-based detection (high-level API)
-                    DecompileResults decompResults = functionService.decompileFunction(func, program);
+                    // Try to use decompilation-based detection (high-level API).
+                    // Use the no-retry variant: in the scoring path, we cannot
+                    // afford the 60→120→180s retry escalation (total 360s per
+                    // function worst case) because abandoned retries leak
+                    // DecompInterface contexts on the EDT and eventually OOM
+                    // Ghidra. Single 60s attempt is sufficient for scoring;
+                    // a clean null return lets the caller record a miss.
+                    DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
                     if (decompResults != null && decompResults.decompileCompleted()) {
                         decompilationAvailable = true;
                         ghidra.program.model.pcode.HighFunction highFunction = decompResults.getHighFunction();
@@ -1734,28 +1740,167 @@ public class AnalysisService {
     public Response batchAnalyzeCompleteness(
             @Param(value = "addresses", source = ParamSource.BODY) Object addressesObj,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        List<String> addresses;
+        final List<String> addresses;
         if (addressesObj instanceof List<?> list) {
             addresses = list.stream().map(String::valueOf).collect(java.util.stream.Collectors.toList());
         } else if (addressesObj instanceof String s) {
-            addresses = new ArrayList<>();
+            List<String> parsed = new ArrayList<>();
             for (String part : s.split(",")) {
                 String trimmed = part.trim();
                 if (!trimmed.isEmpty()) {
-                    addresses.add(trimmed);
+                    parsed.add(trimmed);
                 }
             }
+            addresses = parsed;
         } else {
             return Response.err("Missing required parameter: addresses (JSON array of hex addresses)");
         }
         if (addresses.isEmpty()) {
             return Response.err("Missing required parameter: addresses (JSON array of hex addresses)");
         }
+
+        // Process one function per invokeAndWait so the EDT is never held for
+        // long stretches. Earlier attempts tried chunks of 5 to amortize the
+        // invokeAndWait overhead, but under concurrent HTTP load (thread pool
+        // allowing multiple callers simultaneously), chunks of 5 held the EDT
+        // 300-2000 ms per call. With 3+ concurrent callers, the EDT queue
+        // depth exceeded Ghidra's 20s Swing.runNow deadlock timeout and
+        // internal flushEvents / auto-analysis tasks started failing with
+        // "Timed-out waiting to run a Swing task--potential deadlock".
+        //
+        // Single-function chunks hold the EDT for ~50-200 ms each and yield
+        // between calls, so Ghidra's internal tasks can always slot in.
+        // Trade-off: slightly more invokeAndWait overhead per address, but
+        // GUI stays responsive and internal deadlocks don't happen.
+        final int CHUNK_SIZE = 1;
         StringBuilder sb = new StringBuilder();
         sb.append("{\"results\": [");
-        for (int i = 0; i < addresses.size(); i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(analyzeFunctionCompleteness(addresses.get(i), false, programName).toJson());
+        boolean first = true;
+
+        for (int chunkStart = 0; chunkStart < addresses.size(); chunkStart += CHUNK_SIZE) {
+            final int start = chunkStart;
+            final int end = Math.min(chunkStart + CHUNK_SIZE, addresses.size());
+            final StringBuilder chunkOut = new StringBuilder();
+            final AtomicReference<String> chunkErr = new AtomicReference<>(null);
+
+            Runnable chunkWork = () -> {
+                try {
+                    for (int i = start; i < end; i++) {
+                        if (i > start) chunkOut.append(", ");
+                        chunkOut.append(
+                            analyzeFunctionCompleteness(addresses.get(i), false, programName).toJson()
+                        );
+                    }
+                } catch (Exception e) {
+                    chunkErr.set(e.getMessage());
+                }
+            };
+
+            // Submit the chunk to the EDT non-blockingly and wait on a future
+            // with a hard timeout. If the decompile inside the chunk runs away
+            // (pathological function), we release the HTTP thread and continue
+            // processing the REMAINING addresses in the batch instead of
+            // aborting the whole batch. This is critical: a dense cluster of
+            // pathological functions (e.g. glide3x 0x101e_-0x101f3_) would
+            // otherwise discard every successful function in each batch.
+            //
+            // The runaway work STILL executes on the EDT in the background —
+            // we cannot cancel Swing tasks — but at least our HTTP thread is
+            // freed and the Python scan side records this function as failed
+            // and keeps processing the rest of the batch.
+            // 90s = 60s decompile (DECOMPILE_TIMEOUT_SECONDS, the hard cap
+            // inside DecompInterface.decompileFunction) + 30s buffer for the
+            // rest of analyzeFunctionCompleteness (classification, deduction
+            // analysis, Hungarian checks, etc.). Any function that takes more
+            // than 60s on the decompile itself has failed at the decompiler
+            // level and will return null cleanly — no need to wait longer.
+            final int PER_CHUNK_TIMEOUT_SEC = 90;
+            boolean chunkTimedOut = false;
+            if (SwingUtilities.isEventDispatchThread()) {
+                // Already on EDT (nested call) — run directly, no future needed
+                chunkWork.run();
+                if (chunkErr.get() != null) {
+                    // Inline the error as this chunk's placeholder result and
+                    // continue with the next chunk rather than aborting
+                    if (!first) sb.append(", ");
+                    sb.append(String.format(
+                        "{\"error\": \"chunk_error: %s\"}",
+                        chunkErr.get().replace("\\", "\\\\").replace("\"", "\\\"")
+                    ));
+                    first = false;
+                    continue;
+                }
+            } else {
+                java.util.concurrent.CompletableFuture<Void> chunkFuture =
+                    new java.util.concurrent.CompletableFuture<>();
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        chunkWork.run();
+                        chunkFuture.complete(null);
+                    } catch (Throwable t) {
+                        chunkFuture.completeExceptionally(t);
+                    }
+                });
+                try {
+                    chunkFuture.get(PER_CHUNK_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (java.util.concurrent.TimeoutException e) {
+                    chunkTimedOut = true;
+                } catch (Exception e) {
+                    // Other exception — inline as error and continue
+                    if (!first) sb.append(", ");
+                    sb.append(String.format(
+                        "{\"error\": \"chunk_exception: %s\"}",
+                        String.valueOf(e.getMessage()).replace("\\", "\\\\").replace("\"", "\\\"")
+                    ));
+                    first = false;
+                    continue;
+                }
+                if (chunkTimedOut) {
+                    // Pathological decompile — log the address, insert an
+                    // error placeholder for this ONE function, and continue
+                    // with the rest of the batch. The stuck decompile is
+                    // still running on the EDT but we're no longer waiting.
+                    String addr = addresses.get(start);
+                    Msg.warn(this, String.format(
+                        "batch_analyze_completeness: function %s (index %d) exceeded %ds — skipping to next",
+                        addr, start, PER_CHUNK_TIMEOUT_SEC
+                    ));
+                    if (!first) sb.append(", ");
+                    sb.append(String.format(
+                        "{\"error\": \"chunk_timeout: %s exceeded %ds on EDT\"}",
+                        addr, PER_CHUNK_TIMEOUT_SEC
+                    ));
+                    first = false;
+                    continue;
+                }
+                if (chunkErr.get() != null) {
+                    // Inner exception — inline as error and continue
+                    if (!first) sb.append(", ");
+                    sb.append(String.format(
+                        "{\"error\": \"chunk_error: %s\"}",
+                        chunkErr.get().replace("\\", "\\\\").replace("\"", "\\\"")
+                    ));
+                    first = false;
+                    continue;
+                }
+            }
+
+            if (!first) sb.append(", ");
+            sb.append(chunkOut);
+            first = false;
+
+            // Yield between chunks so the EDT can service queued GUI events
+            // (mouse clicks, keyboard input, paint events). Without this pause,
+            // back-to-back invokeLater calls never give the EDT a chance to
+            // process user input and Ghidra appears frozen.
+            if (end < addresses.size()) {
+                try {
+                    Thread.sleep(5);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
         }
         sb.append("], \"count\": ").append(addresses.size()).append("}");
         return Response.text(sb.toString());
