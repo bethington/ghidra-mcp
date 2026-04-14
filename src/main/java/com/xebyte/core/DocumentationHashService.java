@@ -352,7 +352,11 @@ public class DocumentationHashService {
             if (functionService == null) {
                 Msg.warn(this, "FunctionService not available, skipping local variable extraction for " + func.getName());
             }
-            DecompileResults decompResults = functionService != null ? functionService.decompileFunction(func, program) : null;
+            // HOTFIX v5.3.0: use no-retry variant. Retrying pathological
+            // functions at 60→120→180s wedges the HTTP thread pool. A clean
+            // miss on locals here just yields an empty localVarsList, which
+            // downstream hashing handles.
+            DecompileResults decompResults = functionService != null ? functionService.decompileFunctionNoRetry(func, program) : null;
             if (decompResults != null && decompResults.decompileCompleted()) {
                 ghidra.program.model.pcode.HighFunction highFunc = decompResults.getHighFunction();
                 if (highFunc != null) {

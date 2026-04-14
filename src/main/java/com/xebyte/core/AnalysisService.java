@@ -2050,7 +2050,12 @@ public class AnalysisService {
                     }
 
                     // v3.0.1: Include decompiled code (previously only in headless version)
-                    DecompileResults decompResults = functionService.decompileFunction(func, program);
+                    // HOTFIX v5.3.0: use no-retry variant. The retry wrapper's
+                    // 60→120→180s escalation saturates the HTTP thread pool on
+                    // pathological functions and gives MCP handlers no way to
+                    // fail fast. A clean miss here is preferable to a 6-minute
+                    // thread stall.
+                    DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
                     if (decompResults != null && decompResults.decompileCompleted() &&
                         decompResults.getDecompiledFunction() != null) {
                         String decompiledCode = decompResults.getDecompiledFunction().getC();
@@ -3594,8 +3599,12 @@ public class AnalysisService {
         try {
             ghidra.program.model.pcode.HighFunction highFunction = existingHighFunction;
             if (highFunction == null) {
-                // Fallback: decompile if caller didn't provide pre-decompiled result
-                DecompileResults decompResults = functionService.decompileFunction(func, program);
+                // Fallback: decompile if caller didn't provide pre-decompiled result.
+                // HOTFIX v5.3.0: use no-retry variant. If the primary decompile
+                // in the caller path already failed (which is why we're in this
+                // fallback), retrying with 60→120→180s escalation just doubles
+                // down on a lost cause and saturates the HTTP thread pool.
+                DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
                 if (decompResults != null && decompResults.decompileCompleted()) {
                     highFunction = decompResults.getHighFunction();
                 }
@@ -3937,7 +3946,11 @@ public class AnalysisService {
                     data.put("return_type_resolved", !retTypeName.startsWith("undefined"));
 
                     // Decompile (single decompilation reused for code + variables)
-                    DecompileResults decompResults = functionService.decompileFunction(func, program);
+                    // HOTFIX v5.3.0: use no-retry variant. See comment on the
+                    // matching change in analyze_function_complete above —
+                    // retrying pathological functions at 60→120→180s wedges
+                    // the HTTP thread pool for 6+ minutes per function.
+                    DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
                     if (decompResults != null && decompResults.decompileCompleted() &&
                         decompResults.getDecompiledFunction() != null) {
                         String decompiledCode = decompResults.getDecompiledFunction().getC();
