@@ -3095,81 +3095,107 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
 
         output_parts = []
         tool_id_to_name = {}
-        # Pending tool-use info awaiting its matching tool-result block (Claude
-        # SDK delivers them as separate messages keyed by tool_use_id).
+        # Pending tool-use info awaiting its matching tool-result block. Claude
+        # Agent SDK delivers ToolUseBlock in AssistantMessage.content and the
+        # corresponding ToolResultBlock in UserMessage.content (per the
+        # Anthropic API convention — the "user" sends tool results back).
+        # Correlation is by tool_use_id.
         pending_calls = {}  # tool_id -> {"name", "input", "start_time"}
         try:
             async for msg in query(prompt=prompt, options=options):
                 msg_type = type(msg).__name__
-                if msg_type == "AssistantMessage":
-                    content = getattr(msg, "content", None)
-                    if content:
-                        for block in (
-                            content if isinstance(content, list) else [content]
-                        ):
-                            block_type = type(block).__name__
-                            if block_type == "TextBlock":
-                                text = getattr(block, "text", str(block))
-                                print(text)
-                                output_parts.append(text)
-                                bus_emit("model_text", {"text": text})
-                            elif block_type == "ToolUseBlock":
-                                tool_name = getattr(block, "name", "?")
-                                tool_id = getattr(block, "id", "")
-                                tool_input = getattr(block, "input", None) or {}
-                                tool_id_to_name[tool_id] = tool_name
-                                pending_calls[tool_id] = {
-                                    "name": tool_name,
-                                    "input": tool_input,
-                                    "start_time": time.perf_counter(),
-                                }
-                                print(f"  [mcp] {tool_name}: calling...", flush=True)
-                                bus_emit(
-                                    "tool_call",
-                                    {
-                                        "tool": tool_name,
-                                        "status": "calling",
-                                        "id": tool_id,
-                                    },
-                                )
-                            elif block_type == "ToolResultBlock":
-                                is_error = getattr(block, "is_error", False)
-                                status = "failed" if is_error else "completed"
-                                tool_id = getattr(block, "tool_use_id", "")
-                                tool_name = tool_id_to_name.get(tool_id, tool_id[:12])
-                                # Extract result content (string or list of content blocks)
-                                result_content = getattr(block, "content", None)
-                                if isinstance(result_content, list):
-                                    parts = []
-                                    for c in result_content:
-                                        parts.append(getattr(c, "text", str(c)))
-                                    result_text = "".join(parts)
-                                else:
-                                    result_text = "" if result_content is None else str(result_content)
-                                # Correlate with pending call for args + duration
-                                call_info = pending_calls.pop(tool_id, None)
-                                args = call_info.get("input", {}) if call_info else {}
-                                duration_ms = (
-                                    int((time.perf_counter() - call_info["start_time"]) * 1000)
-                                    if call_info
-                                    else None
-                                )
-                                print(f"  [mcp] {tool_name}: {status}", flush=True)
-                                bus_emit(
-                                    "tool_result",
-                                    {
-                                        "tool": tool_name,
-                                        "status": status,
-                                        "id": tool_id,
-                                    },
-                                )
-                                _debug_log_tool_call(
-                                    tool_name, args, result_text, status, duration_ms,
-                                )
-                            elif block_type == "ThinkingBlock":
-                                pass  # Skip thinking blocks
-                elif msg_type == "ResultMessage":
-                    pass  # Final result handled via output_parts
+
+                # Both AssistantMessage and UserMessage carry content blocks.
+                # Per claude_agent_sdk._internal.message_parser:
+                #   AssistantMessage.content can contain: TextBlock,
+                #     ThinkingBlock, ToolUseBlock, ToolResultBlock
+                #   UserMessage.content can contain: TextBlock, ToolUseBlock,
+                #     ToolResultBlock
+                # ToolResultBlock specifically arrives in UserMessage in
+                # practice, so we must iterate UserMessage content too —
+                # otherwise _debug_log_tool_call is never invoked and claude's
+                # per-function debug JSONL files stay empty.
+                if msg_type not in ("AssistantMessage", "UserMessage"):
+                    # ResultMessage, SystemMessage, RateLimitEvent, etc. are
+                    # not structured content carriers — skip.
+                    continue
+
+                content = getattr(msg, "content", None)
+                if not content:
+                    continue
+
+                for block in (
+                    content if isinstance(content, list) else [content]
+                ):
+                    block_type = type(block).__name__
+
+                    if block_type == "TextBlock":
+                        # Only capture assistant text as "model output".
+                        # UserMessage TextBlock is the prompt we sent (or a
+                        # tool-result formatted as text), not model reasoning.
+                        if msg_type == "AssistantMessage":
+                            text = getattr(block, "text", str(block))
+                            print(text)
+                            output_parts.append(text)
+                            bus_emit("model_text", {"text": text})
+
+                    elif block_type == "ToolUseBlock":
+                        tool_name = getattr(block, "name", "?")
+                        tool_id = getattr(block, "id", "")
+                        tool_input = getattr(block, "input", None) or {}
+                        tool_id_to_name[tool_id] = tool_name
+                        pending_calls[tool_id] = {
+                            "name": tool_name,
+                            "input": tool_input,
+                            "start_time": time.perf_counter(),
+                        }
+                        print(f"  [mcp] {tool_name}: calling...", flush=True)
+                        bus_emit(
+                            "tool_call",
+                            {
+                                "tool": tool_name,
+                                "status": "calling",
+                                "id": tool_id,
+                            },
+                        )
+
+                    elif block_type == "ToolResultBlock":
+                        is_error = getattr(block, "is_error", False)
+                        status = "failed" if is_error else "completed"
+                        tool_id = getattr(block, "tool_use_id", "")
+                        tool_name = tool_id_to_name.get(tool_id, tool_id[:12])
+                        # Extract result content (string or list of content blocks)
+                        result_content = getattr(block, "content", None)
+                        if isinstance(result_content, list):
+                            parts = []
+                            for c in result_content:
+                                parts.append(getattr(c, "text", str(c)))
+                            result_text = "".join(parts)
+                        else:
+                            result_text = "" if result_content is None else str(result_content)
+                        # Correlate with pending call for args + duration
+                        call_info = pending_calls.pop(tool_id, None)
+                        args = call_info.get("input", {}) if call_info else {}
+                        duration_ms = (
+                            int((time.perf_counter() - call_info["start_time"]) * 1000)
+                            if call_info
+                            else None
+                        )
+                        print(f"  [mcp] {tool_name}: {status}", flush=True)
+                        bus_emit(
+                            "tool_result",
+                            {
+                                "tool": tool_name,
+                                "status": status,
+                                "id": tool_id,
+                            },
+                        )
+                        _debug_log_tool_call(
+                            tool_name, args, result_text, status, duration_ms,
+                        )
+
+                    elif block_type == "ThinkingBlock":
+                        pass  # Skip thinking blocks
         except Exception as e:
             err_str = str(e)
             if "not found" in err_str.lower():
