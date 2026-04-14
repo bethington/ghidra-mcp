@@ -23,6 +23,10 @@ from event_bus import get_bus
 
 import uuid
 
+# Shared across workers so adaptive-refresh trigger fires once per stale run
+# even with multiple concurrent workers hitting the threshold simultaneously.
+_adaptive_refresh_lock = threading.Lock()
+
 
 class WorkerManager:
     """Manages concurrent documentation worker threads (max 3)."""
@@ -37,7 +41,7 @@ class WorkerManager:
         self._socketio = socketio
         self._in_progress_keys = set()
 
-    def start_worker(self, provider="claude", count=5, model=None, binary=None, continuous=False):
+    def start_worker(self, provider="minimax", count=5, model=None, binary=None, continuous=False):
         with self._lock:
             active = {wid: w for wid, w in self._workers.items() if w["status"] in ("starting", "running", "stopping")}
             if len(active) >= self.MAX_WORKERS:
@@ -104,6 +108,8 @@ class WorkerManager:
             from fun_doc import (
                 load_state, save_state, get_next_functions,
                 start_session, end_session, process_function,
+                refresh_candidate_scores, load_priority_queue,
+                reset_handoff_counter,
             )
 
             worker["status"] = "running"
@@ -117,8 +123,80 @@ class WorkerManager:
             if worker["binary"]:
                 state["active_binary"] = worker["binary"]
 
+            # Reset the per-session handoff counter so the dashboard indicator
+            # reflects this run, not stale counts from a previous session.
+            try:
+                reset_handoff_counter()
+            except Exception:
+                pass
+
+            # Pre-refresh: batch-rescore the top 20 ROI candidates before the loop.
+            # Multiple gates prevent this from blocking worker startup under load:
+            #   1. Config flag (pre_refresh_on_start) can disable entirely
+            #   2. Freshness gate: skip if another worker refreshed < N minutes ago
+            #   3. Binary gate: require active_binary (avoid cross-binary cascade)
+            #   4. Short timeout (60s) + no individual fallback — fail fast
+            #   5. Count clamped to 20 (was 50)
+            try:
+                pre_queue = load_priority_queue()
+                pre_cfg = pre_queue.get("config") or {}
+                pre_meta = pre_queue.get("meta") or {}
+                pre_enabled = pre_cfg.get("pre_refresh_on_start", True)
+                freshness_min = int(pre_cfg.get("pre_refresh_freshness_min", 5) or 5)
+                worker_binary = worker.get("binary")
+
+                skip_reason = None
+                if not pre_enabled:
+                    skip_reason = "disabled in config"
+                elif not worker_binary:
+                    skip_reason = "no active_binary selected (would touch every binary)"
+                else:
+                    # Freshness gate
+                    last_refresh_at = pre_meta.get("last_refresh_at")
+                    if last_refresh_at:
+                        try:
+                            last_dt = datetime.fromisoformat(last_refresh_at)
+                            age_sec = (datetime.now() - last_dt).total_seconds()
+                            if age_sec < freshness_min * 60:
+                                skip_reason = (
+                                    f"last refresh was {int(age_sec)}s ago "
+                                    f"(freshness window {freshness_min}m)"
+                                )
+                        except (ValueError, TypeError):
+                            pass
+
+                if skip_reason:
+                    print(f"  Pre-refresh: skipped ({skip_reason})")
+                else:
+                    print(f"  Pre-refresh: scoring top 20 candidates for {worker_binary}...")
+                    result = refresh_candidate_scores(
+                        state,
+                        active_binary=worker_binary,
+                        count=20,
+                        fallback=False,              # don't amplify failure into 25min block
+                        first_batch_timeout=60,      # fail fast when Ghidra is unresponsive
+                    )
+                    print(
+                        f"  Pre-refresh: {result['refreshed']} scored, "
+                        f"{result['stale']} drifted >= 5pts"
+                    )
+                    self._bus.emit("queue_changed", {
+                        "action": "pre_refresh",
+                        "refreshed": result["refreshed"],
+                        "stale": result["stale"],
+                    })
+                    state = load_state()  # Pick up the saved refresh
+                    if worker_binary:
+                        state["active_binary"] = worker_binary
+            except Exception as e:
+                print(f"  Pre-refresh failed (continuing with stale state): {e}")
+
             session = start_session(state)
             processed = 0
+            # Threshold for adaptive refresh — this worker reads the shared
+            # counter in queue.meta.stale_skips_since_refresh (bumped from
+            # process_function) and triggers refresh when it crosses this.
+            STALE_STREAK_THRESHOLD = 3
 
             while not worker["stop_flag"].is_set() and (worker["continuous"] or processed < worker["count"]):
                 # Reload state each iteration to get fresh scores/queue
@@ -180,6 +258,41 @@ class WorkerManager:
                     worker["progress"]["failed"] += 1
                     session["failed"] += 1
 
+                # Adaptive refresh: check the SHARED stale-skip counter in
+                # queue.meta (bumped by process_function when it detects a
+                # truly-stale skip). Multiple workers share one counter, and
+                # the lock ensures only one worker actually runs the refresh
+                # even if several cross the threshold at the same instant.
+                # The 30s cooldown via last_refresh_at prevents rapid re-fires.
+                if result == "skipped" and func.get("last_result") == "skipped_above_threshold":
+                    if _adaptive_refresh_lock.acquire(blocking=False):
+                        try:
+                            q = load_priority_queue()
+                            meta = q.get("meta") or {}
+                            count = int(meta.get("stale_skips_since_refresh", 0) or 0)
+                            last_at = meta.get("last_refresh_at")
+                            cooldown_ok = True
+                            if last_at:
+                                try:
+                                    age = (datetime.now() - datetime.fromisoformat(last_at)).total_seconds()
+                                    if age < 30:
+                                        cooldown_ok = False
+                                except (ValueError, TypeError):
+                                    pass
+                            if count >= STALE_STREAK_THRESHOLD and cooldown_ok:
+                                print(f"  Detected {count} stale skips — batch refreshing...")
+                                try:
+                                    r = refresh_candidate_scores(state, active_binary=worker.get("binary"), count=50)
+                                    print(f"  Refresh: {r['refreshed']} scored, {r['stale']} drifted")
+                                    self._bus.emit("queue_changed", {
+                                        "action": "adaptive_refresh",
+                                        "refreshed": r["refreshed"], "stale": r["stale"],
+                                    })
+                                except Exception as e:
+                                    print(f"  Adaptive refresh failed: {e}")
+                        finally:
+                            _adaptive_refresh_lock.release()
+
                 self._emit_status()
 
             end_session(state)
@@ -230,7 +343,7 @@ def create_app(state_file, event_bus=None):
         "scan_started", "scan_progress", "scan_complete",
         "function_started", "function_mode", "function_complete",
         "tool_call", "tool_result", "model_text",
-        "score_update", "state_changed", "run_logged",
+        "score_update", "state_changed", "run_logged", "queue_changed",
         "worker_started", "worker_progress", "worker_stopped",
     ]:
         bus.on(evt, bridge(evt))
@@ -265,16 +378,12 @@ def create_app(state_file, event_bus=None):
                 json.dump(state, f, indent=2, default=str)
 
     def load_queue():
-        qf = app.config["QUEUE_FILE"]
-        if qf.exists():
-            with open(qf, "r") as f:
-                return json.load(f)
-        return {"pinned": [], "skipped": [], "order": []}
+        from fun_doc import load_priority_queue
+        return load_priority_queue()
 
     def save_queue(queue):
-        qf = app.config["QUEUE_FILE"]
-        with open(qf, "w") as f:
-            json.dump(queue, f, indent=2)
+        from fun_doc import save_priority_queue
+        save_priority_queue(queue)
 
     def load_run_logs(max_lines=500):
         lf = app.config["LOG_FILE"]
@@ -314,31 +423,27 @@ def create_app(state_file, event_bus=None):
             key=lambda x: x["total_pts"], reverse=True,
         )
 
-    def compute_roi_queue(funcs, queue):
-        pinned = set(queue.get("pinned", []))
-        skipped = set(queue.get("skipped", []))
-        candidates = []
-        for key, func in funcs.items():
-            if func.get("is_thunk") or func.get("is_external"):
-                continue
-            if func.get("score", 0) >= 95 and func.get("fixable", 0) == 0:
-                continue
-            if key in skipped:
-                continue
-            fixable = func.get("fixable", 0)
-            callers = func.get("caller_count", 0)
-            roi = fixable * (1 + callers / 10)
-            candidates.append({
-                "key": key, "name": func["name"], "address": func["address"],
-                "program": func.get("program_name", ""), "score": func.get("score", 0),
-                "fixable": round(fixable, 1), "callers": callers, "roi": round(roi, 1),
-                "is_leaf": func.get("is_leaf", False),
-                "last_result": func.get("last_result"),
-                "pinned": key in pinned,
-                "classification": func.get("classification", ""),
-            })
-        candidates.sort(key=lambda x: (not x["pinned"], -x["roi"]))
-        return candidates
+    def compute_roi_queue(funcs, queue, active_binary=None):
+        from fun_doc import select_candidates
+        candidates = select_candidates(funcs, queue, active_binary=active_binary)
+        return [
+            {
+                "key": c["key"],
+                "name": c["func"]["name"],
+                "address": c["func"]["address"],
+                "program": c["func"].get("program_name", ""),
+                "score": c["func"].get("score", 0),
+                "fixable": round(c["func"].get("fixable", 0), 1),
+                "callers": c["func"].get("caller_count", 0),
+                "roi": round(c["roi"], 1),
+                "is_leaf": c["func"].get("is_leaf", False),
+                "last_result": c["func"].get("last_result"),
+                "pinned": c["pinned"],
+                "needs_scoring": c["needs_scoring"],
+                "classification": c["func"].get("classification", ""),
+            }
+            for c in candidates
+        ]
 
     def compute_run_stats(logs):
         if not logs:
@@ -395,6 +500,9 @@ def create_app(state_file, event_bus=None):
             funcs = all_funcs
         total = len(funcs)
         queue = load_queue()
+        cfg = queue.get("config", {})
+        good_enough = cfg.get("good_enough_score", 80)
+        queue_meta = queue.get("meta") or {}
         if total == 0:
             return {
                 "total": 0, "done": 0, "fixable": 0, "needs_work": 0, "pct": 0,
@@ -406,10 +514,13 @@ def create_app(state_file, event_bus=None):
                 "available_binaries": available_binaries,
                 "available_folders": _fetch_project_folders(),
                 "last_scan": state.get("last_scan"),
+                "queue_config": cfg,
+                "queue_meta": queue_meta,
             }
-        done = sum(1 for f in funcs.values() if f["score"] >= 90)
-        fixable_count = sum(1 for f in funcs.values() if 70 <= f["score"] < 90)
-        needs_work = sum(1 for f in funcs.values() if f["score"] < 70)
+        fixable_lo = max(good_enough - 20, 0)
+        done = sum(1 for f in funcs.values() if f["score"] >= good_enough)
+        fixable_count = sum(1 for f in funcs.values() if fixable_lo <= f["score"] < good_enough)
+        needs_work = sum(1 for f in funcs.values() if f["score"] < fixable_lo)
         pct = (done / total * 100) if total > 0 else 0
         buckets = {"100": 0, "90-99": 0, "80-89": 0, "70-79": 0, "60-69": 0,
                    "50-59": 0, "40-49": 0, "30-39": 0, "20-29": 0, "10-19": 0, "0-9": 0}
@@ -430,8 +541,9 @@ def create_app(state_file, event_bus=None):
         for f in funcs.values():
             prog = f.get("program_name", "unknown")
             by_program[prog]["total"] += 1
-            if f["score"] >= 90: by_program[prog]["done"] += 1
+            if f["score"] >= good_enough: by_program[prog]["done"] += 1
             else: by_program[prog]["remaining"] += 1
+        pinned_keys = set(queue.get("pinned", []))
         func_list = []
         for key, func in funcs.items():
             if func.get("is_thunk") or func.get("is_external"):
@@ -443,16 +555,23 @@ def create_app(state_file, event_bus=None):
                 "callers": func.get("caller_count", 0),
                 "is_leaf": func.get("is_leaf", False),
                 "last_result": func.get("last_result"),
+                "pinned": key in pinned_keys,
+                # True when state.json has never had analyze_function_completeness
+                # run for this entry — score=0 here means "unknown", not "0% done"
+                "unscored": not func.get("last_processed"),
             })
         func_list.sort(key=lambda x: x["score"])
-        # Limit to 200 for initial page render (prevents 24MB pages with 61K functions)
-        func_list = func_list[:200]
+        # Initial render is capped to keep payload sane on 60k-function projects.
+        # Use /api/functions/search to find anything beyond the first page.
+        all_func_total = len(func_list)
+        func_list = func_list[:500]
         return {
             "total": total, "done": done, "fixable": fixable_count, "needs_work": needs_work,
             "pct": round(pct, 1), "buckets": buckets, "by_program": dict(by_program),
             "sessions": state.get("sessions", [])[-10:],
-            "roi_queue": compute_roi_queue(funcs, queue)[:50],
+            "roi_queue": compute_roi_queue(funcs, queue, active_binary=active_binary)[:50],
             "all_functions": func_list,
+            "all_functions_total": all_func_total,
             "deduction_breakdown": compute_deduction_breakdown(funcs),
             "run_stats": compute_run_stats(load_run_logs()),
             "project_folder": state.get("project_folder", "unknown"),
@@ -460,6 +579,8 @@ def create_app(state_file, event_bus=None):
             "available_binaries": available_binaries,
             "available_folders": _fetch_project_folders(),
             "last_scan": state.get("last_scan"),
+            "queue_config": cfg,
+            "queue_meta": queue_meta,
         }
 
     # --- SocketIO event handlers ---
@@ -501,7 +622,7 @@ def create_app(state_file, event_bus=None):
     @socketio.on("request_start_worker")
     def handle_start_worker(data):
         try:
-            provider = (data or {}).get("provider", "claude")
+            provider = (data or {}).get("provider", "minimax")
             continuous = bool((data or {}).get("continuous", False))
             count = max(1, min(500, int((data or {}).get("count", 5))))
             model = (data or {}).get("model") or None
@@ -557,10 +678,62 @@ def create_app(state_file, event_bus=None):
         queue = load_queue()
         if key not in queue["pinned"]:
             queue["pinned"].append(key)
-        queue["skipped"] = [k for k in queue["skipped"] if k != key]
         save_queue(queue)
-        socketio.emit("queue_changed", {"action": "pin", "key": key})
-        return jsonify({"ok": True})
+
+        # Score-on-queue: immediately fetch the live score for this function
+        # so the user doesn't queue something that's actually already done.
+        # The state.json entry might be stale ("score=0" really meaning unscored).
+        # If the live score is above good_enough, auto-dequeue right away and
+        # tell the frontend so it can show "already at X%" instead of "queued".
+        from fun_doc import (
+            save_state as fd_save_state, _score_single,
+            _sync_func_state, auto_dequeue_if_done,
+        )
+        try:
+            # Use the local load_state — it has retry-on-partial-read for the
+            # race against concurrent worker writes.
+            state = load_state()
+            func = state.get("functions", {}).get(key)
+            response = {"ok": True, "status": "queued"}
+            if func:
+                addr = func.get("address")
+                program = func.get("program")
+                if addr and program:
+                    # Capture pre-state BEFORE applying the fresh score, so we
+                    # can tell the frontend whether this was a true "score on
+                    # demand" hit vs. a refresh of an already-scored entry.
+                    old_score = func.get("score", 0)
+                    was_unscored_before = not func.get("last_processed")
+
+                    score_info = _score_single(addr, prog_path=program)
+                    if score_info:
+                        # Apply the fresh score back to the state entry
+                        func["score"] = score_info["score"]
+                        func["fixable"] = score_info["fixable"]
+                        func["has_custom_name"] = score_info["has_custom_name"]
+                        func["has_plate_comment"] = score_info["has_plate_comment"]
+                        func["is_leaf"] = score_info["is_leaf"]
+                        func["classification"] = score_info["classification"]
+                        func["deductions"] = score_info["deductions"]
+                        func["last_processed"] = func.get("last_processed") or "scored_on_queue"
+                        fd_save_state(state)
+
+                        new_score = score_info["score"]
+                        response["score"] = new_score
+                        response["was_unscored"] = was_unscored_before
+
+                        # Check if it's already above good_enough
+                        cfg = load_queue().get("config") or {}
+                        good_enough = cfg.get("good_enough_score", 80)
+                        if new_score >= good_enough:
+                            if auto_dequeue_if_done(key, new_score, source="pin_check"):
+                                response["status"] = "already_done"
+                                response["good_enough"] = good_enough
+        except Exception as e:
+            response = {"ok": True, "status": "queued", "score_error": str(e)}
+
+        socketio.emit("queue_changed", {"action": "pin", "key": key, "status": response.get("status")})
+        return jsonify(response)
 
     @app.route("/api/queue/unpin", methods=["POST"])
     def unpin_function():
@@ -574,31 +747,127 @@ def create_app(state_file, event_bus=None):
         socketio.emit("queue_changed", {"action": "unpin", "key": key})
         return jsonify({"ok": True})
 
-    @app.route("/api/queue/skip", methods=["POST"])
-    def skip_function():
-        data = request.json
-        key = data.get("key")
-        if not key:
-            return jsonify({"error": "key required"}), 400
-        queue = load_queue()
-        if key not in queue["skipped"]:
-            queue["skipped"].append(key)
-        queue["pinned"] = [k for k in queue["pinned"] if k != key]
-        save_queue(queue)
-        socketio.emit("queue_changed", {"action": "skip", "key": key})
-        return jsonify({"ok": True})
+    @app.route("/api/queue/drain_done", methods=["POST"])
+    def drain_done():
+        """Batch-score every pinned function and auto-dequeue any that are
+        already at or above good_enough_score. Useful for cleaning up stuck
+        pins from before score-on-queue / auto-dequeue-on-skip existed."""
+        from fun_doc import drain_done_pinned
+        try:
+            state = load_state()
+            result = drain_done_pinned(state)
+            socketio.emit("queue_changed", {"action": "drain_done", **result})
+            return jsonify({"ok": True, **result})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
-    @app.route("/api/queue/unskip", methods=["POST"])
-    def unskip_function():
-        data = request.json
-        key = data.get("key")
-        if not key:
-            return jsonify({"error": "key required"}), 400
+    @app.route("/api/queue/refresh", methods=["POST"])
+    def refresh_candidates():
+        """Manually trigger a batch refresh of the top N ROI candidates."""
+        from fun_doc import refresh_candidate_scores
+        data = request.json or {}
+        try:
+            count = max(1, min(200, int(data.get("count", 50))))
+        except (TypeError, ValueError):
+            count = 50
+        state = load_state()
+        active_binary = data.get("binary") or state.get("active_binary")
+
+        def run_refresh():
+            try:
+                result = refresh_candidate_scores(state, active_binary=active_binary, count=count)
+                socketio.emit("queue_changed", {
+                    "action": "manual_refresh",
+                    "refreshed": result["refreshed"], "stale": result["stale"],
+                })
+            except Exception as e:
+                socketio.emit("scan_error", {"error": f"refresh failed: {e}"})
+
+        threading.Thread(target=run_refresh, daemon=True).start()
+        return jsonify({"ok": True, "scheduled": True, "count": count})
+
+    @app.route("/api/queue/config", methods=["GET", "POST"])
+    def queue_config():
+        from fun_doc import DEFAULT_QUEUE_CONFIG
         queue = load_queue()
-        queue["skipped"] = [k for k in queue["skipped"] if k != key]
-        save_queue(queue)
-        socketio.emit("queue_changed", {"action": "unskip", "key": key})
-        return jsonify({"ok": True})
+        if request.method == "POST":
+            data = request.json or {}
+            cfg = dict(queue.get("config") or DEFAULT_QUEUE_CONFIG)
+            if "good_enough_score" in data:
+                try:
+                    cfg["good_enough_score"] = max(0, min(100, int(data["good_enough_score"])))
+                except (TypeError, ValueError):
+                    return jsonify({"error": "good_enough_score must be int 0-100"}), 400
+            if "require_scored" in data:
+                cfg["require_scored"] = bool(data["require_scored"])
+            if "complexity_handoff_provider" in data:
+                v = data["complexity_handoff_provider"]
+                if v in (None, "", "none", "off"):
+                    cfg["complexity_handoff_provider"] = None
+                elif v in ("claude", "codex", "minimax"):
+                    cfg["complexity_handoff_provider"] = v
+                else:
+                    return jsonify({"error": "complexity_handoff_provider must be claude/codex/minimax/null"}), 400
+            if "complexity_handoff_max" in data:
+                try:
+                    cfg["complexity_handoff_max"] = max(0, int(data["complexity_handoff_max"]))
+                except (TypeError, ValueError):
+                    return jsonify({"error": "complexity_handoff_max must be int >= 0"}), 400
+            if "debug_mode" in data:
+                cfg["debug_mode"] = bool(data["debug_mode"])
+            queue["config"] = cfg
+            save_queue(queue)
+            socketio.emit("queue_changed", {"action": "config", "config": cfg})
+            return jsonify({"ok": True, "config": cfg})
+        return jsonify({"config": queue.get("config", dict(DEFAULT_QUEUE_CONFIG))})
+
+    @app.route("/api/functions/search", methods=["GET"])
+    def search_functions():
+        """Search across the full state.functions map without the 500-row dashboard cap."""
+        q = (request.args.get("q") or "").strip().lower()
+        program = request.args.get("program") or None
+        try:
+            limit = max(1, min(2000, int(request.args.get("limit", 200))))
+        except ValueError:
+            limit = 200
+        sort = request.args.get("sort", "score")  # score|name|callers|fixable
+        state = load_state()
+        queue = load_queue()
+        pinned = set(queue.get("pinned", []))
+        results = []
+        for key, func in state.get("functions", {}).items():
+            if func.get("is_thunk") or func.get("is_external"):
+                continue
+            if program and func.get("program_name") != program:
+                continue
+            if q:
+                name = func.get("name", "").lower()
+                addr = str(func.get("address", "")).lower()
+                if q not in name and q not in addr:
+                    continue
+            results.append({
+                "key": key,
+                "name": func.get("name", ""),
+                "address": func.get("address", ""),
+                "program": func.get("program_name", ""),
+                "score": func.get("score", 0),
+                "fixable": round(func.get("fixable", 0), 1),
+                "callers": func.get("caller_count", 0),
+                "is_leaf": func.get("is_leaf", False),
+                "last_result": func.get("last_result"),
+                "pinned": key in pinned,
+                "unscored": not func.get("last_processed"),
+            })
+        if sort == "name":
+            results.sort(key=lambda r: r["name"].lower())
+        elif sort == "callers":
+            results.sort(key=lambda r: -r["callers"])
+        elif sort == "fixable":
+            results.sort(key=lambda r: -r["fixable"])
+        else:
+            results.sort(key=lambda r: r["score"])
+        total_match = len(results)
+        return jsonify({"total": total_match, "results": results[:limit], "limit": limit})
 
     # --- Folder / binary selection ---
 

@@ -1,19 +1,53 @@
 """
 fun-doc: Intelligent function documentation engine for Ghidra MCP.
 
-Prioritizes functions by call graph impact (bottom-up, leaf-first),
-assembles modular V6 prompts, invokes Claude CLI, and tracks state.
+Scores every function in a Ghidra project for "documentation completeness",
+ranks them by ROI (fixable points × xref impact), and drives an LLM to fix
+the best candidates. State is persisted in state.json; a live web dashboard
+lets you start/stop workers, queue specific functions, and watch progress.
+
+Primary interface: the web dashboard at http://127.0.0.1:5000 (auto-started
+on launch). CLI modes below are kept for scripting and one-shot operations.
+
+Architecture:
+    * state.json              — per-function score/classification cache
+    * priority_queue.json     — user-queued functions + config + refresh meta
+    * logs/runs.jsonl         — JSONL audit trail of every worker run
+    * logs/debug/{date}/      — per-function tool-call traces (when debug_mode on)
+    * select_candidates()     — single source of truth for worker pick order
+    * update_function_state() — atomic per-function RMW (no lost-update races)
+    * Providers: minimax (default, cheap), claude (auto-handoff on complexity),
+                 codex (optional). Set via --provider or AI_PROVIDER constant.
 
 Usage:
+    python fun_doc.py                         # Dashboard + idle (primary entry point)
+    python fun_doc.py --web                   # Standalone blocking dashboard
     python fun_doc.py --auto                  # Auto-mode: document next best function
     python fun_doc.py --auto --count 10       # Document 10 functions
+    python fun_doc.py --auto --provider claude    # Override provider per-run
     python fun_doc.py -s                      # Select mode: current function + neighbors
     python fun_doc.py -s --depth 2            # Select mode with depth 2
-    python fun_doc.py -m                      # Manual mode: pick/copy prompts
-    python fun_doc.py --status                # Show progress dashboard in terminal
-    python fun_doc.py --web                   # Start web dashboard (Flask)
+    python fun_doc.py -m                      # Manual mode: copy prompts to clipboard
+    python fun_doc.py --status                # Terminal progress snapshot
     python fun_doc.py --scan                  # Incremental scan (only re-score changed)
-    python fun_doc.py --scan --refresh        # Full rescan (re-score everything)
+    python fun_doc.py --scan --refresh        # Full rescan (re-score every function)
+    python fun_doc.py --scan --refresh --binary D2Common.dll  # One-binary rescan
+    python fun_doc.py --dry-run --auto        # Show what would run without invoking
+
+Dashboard config (edit via header controls or priority_queue.json):
+    good_enough_score           — functions at/above this are considered done (80)
+    require_scored              — surface unscored entries to cold-start lane (false)
+    complexity_handoff_provider — "claude" | "codex" | null. Swap provider mid-flight
+                                  when minimax's complexity gate fires.
+    complexity_handoff_max      — cap handoffs per worker session (0 = unlimited)
+    debug_mode                  — write per-tool-call JSONL to logs/debug/
+    pre_refresh_on_start        — batch-rescore top 20 before worker loop begins
+
+Offline analysis:
+    python analyze_debug.py                   # Today's tool-call traces
+    python analyze_debug.py 2026-04-13        # Specific date
+    python analyze_debug.py --summary-only    # Cross-function stats
+    python analyze_debug.py --tool create_struct  # Filter to one tool
 """
 
 import argparse
@@ -66,7 +100,7 @@ GHIDRA_URL = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip
 # Switch between "claude" and "codex" here.
 # Each provider maps mode -> model name.
 
-AI_PROVIDER = "claude"  # "claude", "codex", or "minimax"
+AI_PROVIDER = "minimax"  # "claude", "codex", or "minimax" — minimax is the cheapest default; complex functions auto-handoff to claude when complexity_handoff_provider is set
 
 AI_MODELS = {
     "claude": {
@@ -205,12 +239,7 @@ def ghidra_post(path, data=None, params=None, timeout=60):
 # ---------------------------------------------------------------------------
 
 
-def load_state():
-    """Load or create fresh state. Thread-safe."""
-    with _state_lock:
-        if STATE_FILE.exists():
-            with open(STATE_FILE, "r") as f:
-                return json.load(f)
+def _default_state():
     return {
         "project_folder": "/Mods/PD2-S12",
         "last_scan": None,
@@ -220,11 +249,122 @@ def load_state():
     }
 
 
+def load_state():
+    """Load or create fresh state. Retries on partial-read JSONDecodeError so
+    concurrent callers (CLI, web server worker threads, external scripts) don't
+    explode when another writer is mid-flush. Falls back to state.json.bak if
+    the main file is unrecoverably corrupt."""
+    if not STATE_FILE.exists():
+        return _default_state()
+
+    # Retry up to 5 times with a short sleep — covers the common case of
+    # another worker mid-write (now atomic via os.replace, so this is rare).
+    last_err = None
+    for attempt in range(5):
+        try:
+            with _state_lock:
+                with open(STATE_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except (json.JSONDecodeError, ValueError) as e:
+            last_err = e
+            if attempt < 4:
+                time.sleep(0.2)
+
+    # Main file is unrecoverably bad — try the backup
+    bak = STATE_FILE.with_suffix(".json.bak")
+    if bak.exists():
+        try:
+            with open(bak, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            print(
+                f"WARNING: state.json was corrupt ({last_err}); loaded from {bak.name}",
+                flush=True,
+            )
+            return data
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Both files are corrupt. Don't silently start fresh — raise so the operator
+    # can run the recovery script. Starting fresh would silently lose all scoring.
+    raise RuntimeError(
+        f"state.json is corrupt and backup is missing or corrupt: {last_err}. "
+        f"Run the recovery logic in fun_doc.py to truncate at the last clean "
+        f"function entry, or delete state.json to start fresh."
+    )
+
+
+def _atomic_write_state(state):
+    """Write the given state dict to STATE_FILE atomically. Caller must hold
+    `_state_lock`. Used by save_state() and update_function_state()."""
+    tmp_path = STATE_FILE.with_suffix(".json.tmp")
+    bak_path = STATE_FILE.with_suffix(".json.bak")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, default=str)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except (OSError, AttributeError):
+            pass  # fsync not supported on this platform or FD
+
+    # Rotate current → .bak, then atomically replace with new
+    if STATE_FILE.exists():
+        try:
+            os.replace(STATE_FILE, bak_path)
+        except OSError:
+            pass  # best-effort backup rotation
+
+    os.replace(tmp_path, STATE_FILE)
+
+
 def save_state(state):
-    """Persist state to disk. Thread-safe."""
+    """Persist state to disk atomically.
+
+    Writes to state.json.tmp, fsyncs it, renames atomically over state.json,
+    and keeps state.json.bak as a rolling one-generation backup. This prevents
+    the 'truncated mid-write' corruption that happens when a process is killed
+    or crashes during a direct-write save.
+
+    For per-function updates during worker iteration, prefer
+    update_function_state() — it re-reads from disk before writing, avoiding
+    the lost-update race where one worker's save clobbers another's.
+    """
     with _state_lock:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f, indent=2, default=str)
+        _atomic_write_state(state)
+    bus_emit("state_changed")
+
+
+def update_function_state(func_key, updated_func):
+    """Atomically update a single function's state entry.
+
+    Read-modify-write within `_state_lock`: re-reads state.json from disk to
+    pick up any concurrent updates, overwrites only `state["functions"][func_key]`,
+    writes atomically. Prevents the lost-update race where two workers each
+    load state, modify different functions, and their full-state saves clobber
+    each other's unrelated changes.
+
+    Use this in per-function code paths (skip handlers, completion handlers,
+    _sync_func_state calls) instead of save_state(state).
+    """
+    with _state_lock:
+        # Re-read latest state from disk. Retry on mid-write partial reads.
+        latest = None
+        for _ in range(5):
+            try:
+                if STATE_FILE.exists():
+                    with open(STATE_FILE, "r", encoding="utf-8") as f:
+                        latest = json.load(f)
+                    break
+            except (json.JSONDecodeError, ValueError):
+                time.sleep(0.1)
+        if latest is None:
+            # Nothing readable — fall back to a fresh state scaffold
+            latest = _default_state()
+
+        funcs = latest.setdefault("functions", {})
+        # Write a shallow copy so later in-memory mutation doesn't leak through
+        funcs[func_key] = dict(updated_func)
+
+        _atomic_write_state(latest)
     bus_emit("state_changed")
 
 
@@ -294,18 +434,41 @@ def _fetch_programs(project_folder):
 
 
 def _fetch_function_list(prog_path):
-    """Fetch enhanced function list for a program. Returns list or None."""
-    funcs_resp = ghidra_get(
-        "/list_functions_enhanced", params={"program": prog_path}, timeout=60
-    )
-    if not funcs_resp:
-        return None
-    if isinstance(funcs_resp, str):
-        try:
-            funcs_resp = json.loads(funcs_resp)
-        except (json.JSONDecodeError, TypeError):
-            return None
-    return funcs_resp.get("functions")
+    """Fetch enhanced function list for a program. Returns list or None.
+
+    Pages through /list_functions_enhanced in 10k chunks. The endpoint's
+    default limit is 10,000 — without paging we silently lose everything
+    past the first 10k, which is how libcrypto-1_1.dll and glide3x.dll
+    ended up with exactly 10,000 functions in state.
+    """
+    PAGE_SIZE = 10000
+    all_funcs = []
+    offset = 0
+    while True:
+        funcs_resp = ghidra_get(
+            "/list_functions_enhanced",
+            params={"program": prog_path, "offset": offset, "limit": PAGE_SIZE},
+            timeout=60,
+        )
+        if not funcs_resp:
+            return None if not all_funcs else all_funcs
+        if isinstance(funcs_resp, str):
+            try:
+                funcs_resp = json.loads(funcs_resp)
+            except (json.JSONDecodeError, TypeError):
+                return None if not all_funcs else all_funcs
+        page = funcs_resp.get("functions") or []
+        if not page:
+            break
+        all_funcs.extend(page)
+        if len(page) < PAGE_SIZE:
+            break  # Short page = end of data
+        offset += PAGE_SIZE
+        # Safety cap: don't spin forever on a hypothetical Ghidra bug
+        if offset > 1_000_000:
+            print(f"    WARNING: pagination exceeded 1M functions for {prog_path}; stopping", flush=True)
+            break
+    return all_funcs
 
 
 def _score_single(addr_hex, prog_path=None):
@@ -329,82 +492,252 @@ def _score_single(addr_hex, prog_path=None):
     }
 
 
-def _batch_score(addresses, prog_path=None):
-    """Score addresses via batch endpoint, falling back to individual calls on failure."""
+def _parse_batch_results(addresses, offset, resp):
+    """Parse a `/batch_analyze_completeness` response into (score_map, count).
+
+    Returns (dict of address -> score_info, number of valid entries extracted).
+    The offset is the starting index into `addresses` for this batch.
+    """
+    out = {}
+    if not resp or not isinstance(resp, dict) or "results" not in resp:
+        return out, 0
+    results = resp["results"]
+    for j, result in enumerate(results):
+        idx = offset + j
+        if idx >= len(addresses):
+            break
+        if not isinstance(result, dict) or "error" in result:
+            continue
+        addr = addresses[idx].replace("0x", "")
+        eff = result.get("effective_score", result.get("completeness_score", 0))
+        classification = result.get("classification", "unknown")
+        out[addr] = {
+            "score": int(eff) if eff is not None else 0,
+            "fixable": float(result.get("fixable_deductions", 0)),
+            "has_custom_name": result.get("has_custom_name", False),
+            "has_plate_comment": result.get("has_plate_comment", False),
+            "is_leaf": classification == "leaf",
+            "classification": classification,
+            "deductions": result.get("deduction_breakdown", []),
+        }
+    return out, len(out)
+
+
+def _batch_score(addresses, prog_path=None, fallback=True, first_batch_timeout=300,
+                 progress_callback=None):
+    """Score addresses via batch endpoint with honest progress and retry pass.
+
+    Counts are tracked two ways:
+      - loop_progress: how far through the address list we've iterated
+      - scored: how many addresses actually got a valid result in score_map
+    Old behavior claimed "Scored N/M" based on loop position even when batches
+    failed. New behavior reports both.
+
+    After the first pass, any batches that failed (ghidra_post returned None)
+    are retried with a smaller batch size — slow Ghidra can usually handle
+    10-function batches even when 25-function batches time out.
+
+    Parameters:
+        fallback: When True (default), fall back to per-address scoring if the
+            batch endpoint returns errors. When False, return whatever the
+            batch call produced and skip individual retries.
+        first_batch_timeout: Override the first-batch HTTP timeout (default 300s).
+            Pre-refresh paths pass 60 to fail fast.
+        progress_callback: Optional callable invoked after each batch with
+            (scored, total, failed_batches). Used by scan_functions to emit
+            scan_progress events to the dashboard.
+    """
     score_map = {}
-    BATCH_SIZE = 50
+    # BATCH_SIZE is sized to fit under PER_BATCH_TIMEOUT even when every
+    # function in the batch is at the Java-side 90s per-chunk cap.
+    # 6 × 90s = 540s fully-pathological worst case, under the 600s client
+    # budget with 60s headroom for HTTP overhead. With the new no-retry
+    # decompile path (caps decompile at 60s, no 360s escalation), this
+    # headroom is realistic, not a guess.
+    BATCH_SIZE = 6
+    PER_BATCH_TIMEOUT = 600
 
     params = {}
     if prog_path:
         params["program"] = prog_path
 
-    # Try batch first
+    failed_ranges = []  # list of (start, end) slices of `addresses` that failed
     batch_works = None  # None = untested, True/False after first batch
+    first_failure_logged = False
+
+    def _notify(scored_count, failed_count):
+        print(
+            f"    Scored {scored_count}/{len(addresses)}"
+            + (f" ({failed_count} failed batches so far)" if failed_count else ""),
+            flush=True,
+        )
+        if progress_callback:
+            try:
+                progress_callback(scored_count, len(addresses), failed_count)
+            except Exception:
+                pass
+
     for i in range(0, len(addresses), BATCH_SIZE):
         batch = addresses[i : i + BATCH_SIZE]
-        scored_so_far = i + len(batch)
+        batch_end = i + len(batch)
 
         if batch_works is not False:
-            # First batch gets longer timeout (Ghidra may need to open the program)
-            batch_timeout = 300 if i == 0 else 120
+            timeout = first_batch_timeout if i == 0 else PER_BATCH_TIMEOUT
             resp = ghidra_post(
                 "/batch_analyze_completeness",
                 data={"addresses": batch},
                 params=params,
-                timeout=batch_timeout,
+                timeout=timeout,
             )
-            if resp and isinstance(resp, dict) and "results" in resp:
-                results = resp["results"]
-                # Check if first result is an error (batch endpoint doesn't work for this program)
-                if results and isinstance(results[0], dict) and "error" in results[0]:
-                    if batch_works is None:
-                        batch_works = False
-                        print(
-                            f"    Batch scoring unavailable, falling back to individual scoring...",
-                            flush=True,
-                        )
-                else:
-                    batch_works = True
-            elif resp is None and batch_works is None:
-                # First batch timed out or failed — fall back to individual
-                batch_works = False
+
+            # Detect a server-side timeout: Java returns {"error": "chunk_timeout: ..."}
+            # when a single chunk's decompile runs past its 30s EDT deadline.
+            # Treat this as a failed batch, NOT a reason to fall back to
+            # individual scoring (individual calls would also hang on the same
+            # pathological function). Just record the range and move on —
+            # the retry pass at the end will try with smaller chunks, and the
+            # final summary reports what's missing.
+            server_side_error = (
+                resp and isinstance(resp, dict)
+                and "error" in resp and "results" not in resp
+            )
+            if server_side_error:
+                err_msg = str(resp.get("error", ""))[:120]
                 print(
-                    f"    Batch scoring timed out, falling back to individual scoring...",
+                    f"    Ghidra chunk timeout: {err_msg}",
                     flush=True,
                 )
+                failed_ranges.append((i, batch_end))
+                _notify(len(score_map), len(failed_ranges))
+                continue
+
+            if resp and isinstance(resp, dict) and "results" in resp:
+                results = resp["results"]
+                # Detect "batch endpoint unsupported for this program":
+                # triggered when ALL entries in the first batch are errors
+                # (meaning the endpoint itself is broken for this program).
+                # A single error entry mid-batch just means one pathological
+                # function — we should NOT fall back to individual scoring,
+                # because individual calls would hit the same wall.
+                all_errors = (
+                    results
+                    and all(
+                        isinstance(r, dict) and "error" in r
+                        for r in results
+                    )
+                )
+                if all_errors and batch_works is None:
+                    batch_works = False
+                    msg = ("Batch scoring unavailable, falling back to "
+                           "individual scoring...") if fallback else \
+                          ("Batch scoring unavailable, fallback disabled — skipping")
+                    print(f"    {msg}", flush=True)
+                else:
+                    batch_works = True
+                    parsed, parsed_count = _parse_batch_results(addresses, i, resp)
+                    score_map.update(parsed)
+                    # If the batch had mixed success/error (some functions
+                    # timed out on the Ghidra side), record the failure but
+                    # keep the successful results.
+                    failed_in_batch = len(results) - parsed_count
+                    if failed_in_batch > 0:
+                        failed_ranges.append((i, batch_end))
+                        err_samples = [
+                            r.get("error", "")[:80]
+                            for r in results
+                            if isinstance(r, dict) and "error" in r
+                        ][:3]
+                        print(
+                            f"    Partial batch: {parsed_count}/{len(results)} scored, "
+                            f"{failed_in_batch} per-function errors: {err_samples}",
+                            flush=True,
+                        )
+                    _notify(len(score_map), len(failed_ranges))
+                    continue  # success path done (possibly partial)
+            elif resp is None:
+                # Timeout or HTTP error. Record the failure and keep going.
+                if batch_works is None and not first_failure_logged:
+                    # First batch failed — decide whether to fall back or skip
+                    batch_works = False
+                    msg = ("Batch scoring timed out, falling back to "
+                           "individual scoring...") if fallback else \
+                          ("Batch scoring timed out, fallback disabled — skipping")
+                    print(f"    {msg}", flush=True)
+                    first_failure_logged = True
+                else:
+                    failed_ranges.append((i, batch_end))
+                    _notify(len(score_map), len(failed_ranges))
+                    continue
 
         if batch_works is False:
-            # Individual fallback
+            if not fallback:
+                break
+            # Individual fallback for this batch
             for addr_hex in batch:
                 addr = addr_hex.replace("0x", "")
                 info = _score_single(addr_hex, prog_path)
                 if info:
                     score_map[addr] = info
-            # Progress every batch
-            print(f"    Scored {scored_so_far}/{len(addresses)}", flush=True)
+            _notify(len(score_map), len(failed_ranges))
             continue
 
-        # Progress every 500 for batch mode
-        if scored_so_far % 500 < BATCH_SIZE or scored_so_far == len(addresses):
-            print(f"    Scored {scored_so_far}/{len(addresses)}", flush=True)
+    # Retry pass: any batches that failed during the main loop get a second
+    # shot with a smaller batch size to isolate the pathological functions.
+    # RETRY_SIZE must fit in PER_BATCH_TIMEOUT even when every function in a
+    # retry chunk hits the Java-side 90s per-chunk cap. 3 × 90 = 270s, well
+    # under the 600s client budget. Smaller than the main BATCH_SIZE=6 so
+    # more retries get a chance to isolate good functions between bad ones.
+    # The old RETRY_SIZE=10 was a bug: 10 × 90 = 900s > 600s client timeout,
+    # which caused the retry pass to fail entirely on any cluster that
+    # was already pathological enough to time out at 6-function batches.
+    if failed_ranges and fallback and batch_works is not False:
+        retry_addrs = []
+        for start, end in failed_ranges:
+            retry_addrs.extend(addresses[start:end])
+        print(
+            f"    Retrying {len(failed_ranges)} failed batches "
+            f"({len(retry_addrs)} functions) with smaller batch size...",
+            flush=True,
+        )
+        RETRY_SIZE = 3
+        retry_recovered = 0
+        still_failed = 0
+        for j in range(0, len(retry_addrs), RETRY_SIZE):
+            chunk = retry_addrs[j : j + RETRY_SIZE]
+            resp = ghidra_post(
+                "/batch_analyze_completeness",
+                data={"addresses": chunk},
+                params=params,
+                timeout=PER_BATCH_TIMEOUT,
+            )
+            if resp and isinstance(resp, dict) and "results" in resp:
+                # Build a temporary index for this chunk so _parse_batch_results
+                # can align offsets correctly
+                parsed, count = _parse_batch_results(chunk, 0, resp)
+                score_map.update(parsed)
+                retry_recovered += count
+            else:
+                still_failed += len(chunk)
+            if (j // RETRY_SIZE) % 5 == 0 or j + RETRY_SIZE >= len(retry_addrs):
+                print(
+                    f"    Retry progress: {min(j + RETRY_SIZE, len(retry_addrs))}"
+                    f"/{len(retry_addrs)} (recovered {retry_recovered}, still failing {still_failed})",
+                    flush=True,
+                )
+        print(
+            f"    Retry complete: recovered {retry_recovered}, still failing {still_failed}",
+            flush=True,
+        )
 
-        if resp and isinstance(resp, dict) and "results" in resp:
-            for j, result in enumerate(resp["results"]):
-                if i + j < len(addresses):
-                    addr = addresses[i + j].replace("0x", "")
-                    eff = result.get(
-                        "effective_score", result.get("completeness_score", 0)
-                    )
-                    classification = result.get("classification", "unknown")
-                    score_map[addr] = {
-                        "score": int(eff) if eff is not None else 0,
-                        "fixable": float(result.get("fixable_deductions", 0)),
-                        "has_custom_name": result.get("has_custom_name", False),
-                        "has_plate_comment": result.get("has_plate_comment", False),
-                        "is_leaf": classification == "leaf",
-                        "classification": classification,
-                        "deductions": result.get("deduction_breakdown", []),
-                    }
+    # Final honest summary line
+    final_scored = len(score_map)
+    missing = len(addresses) - final_scored
+    if missing > 0:
+        print(
+            f"    Batch score done: {final_scored}/{len(addresses)} scored, "
+            f"{missing} missing (may be stale in state)",
+            flush=True,
+        )
 
     return score_map
 
@@ -431,9 +764,12 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
     else:
         print(f"Full scan in {project_folder}...", flush=True)
 
+    print(f"  Fetching project file list from Ghidra...", flush=True)
     target_programs = _fetch_programs(project_folder)
     if target_programs is None:
+        print(f"  ERROR: Could not list project files. Is Ghidra running?", flush=True)
         return False
+    print(f"  Found {len(target_programs)} program(s) in {project_folder}", flush=True)
 
     # Filter to specific binary if requested
     if binary_filter:
@@ -461,19 +797,27 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
         prog_name = prog["name"]
         bus_emit(
             "scan_progress",
-            {"program": prog_name, "index": prog_idx, "total": len(target_programs)},
+            {
+                "program": prog_name,
+                "index": prog_idx,
+                "total": len(target_programs),
+                "phase": "starting",
+                "scored": 0,
+                "program_total": 0,
+            },
         )
-        print(f"\n  {prog_name} ({prog_path})")
+        print(f"\n  [{prog_idx + 1}/{len(target_programs)}] {prog_name} ({prog_path})", flush=True)
+        print(f"    listing functions...", flush=True)
 
         func_list = _fetch_function_list(prog_path)
         if func_list is None:
-            print(f"    WARNING: Could not list functions for {prog_path}")
+            print(f"    WARNING: Could not list functions for {prog_path}", flush=True)
             continue
 
         non_thunk = [
             f for f in func_list if not f.get("isThunk") and not f.get("isExternal")
         ]
-        print(f"    {len(func_list)} functions ({len(non_thunk)} non-thunk)")
+        print(f"    {len(func_list)} functions ({len(non_thunk)} non-thunk)", flush=True)
 
         # Determine which addresses need scoring
         if is_incremental:
@@ -494,7 +838,8 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
 
             needs_scoring_addrs = [f"0x{f['address']}" for f in needs_scoring]
             print(
-                f"    {len(needs_scoring)} changed/new, {len(non_thunk) - len(needs_scoring)} cached"
+                f"    {len(needs_scoring)} changed/new, {len(non_thunk) - len(needs_scoring)} cached",
+                flush=True,
             )
         else:
             needs_scoring_addrs = [f"0x{f['address']}" for f in non_thunk]
@@ -502,8 +847,29 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
         # Score only what's needed
         score_map = {}
         if needs_scoring_addrs:
-            print(f"    Scoring {len(needs_scoring_addrs)} functions...")
-            score_map = _batch_score(needs_scoring_addrs, prog_path)
+            print(f"    Scoring {len(needs_scoring_addrs)} functions...", flush=True)
+            # Bridge per-batch progress to the bus so the dashboard banner
+            # can show a live progress bar within each binary's scan. The
+            # callback receives (scored_count, total, failed_batch_count);
+            # failed_batch_count is surfaced on the bus so the UI can warn
+            # when Ghidra is struggling.
+            _p_idx = prog_idx
+            _p_name = prog_name
+            _p_total_progs = len(target_programs)
+            def _batch_progress_cb(scored_count, batch_total, failed_count,
+                                    _idx=_p_idx, _name=_p_name, _tp=_p_total_progs):
+                bus_emit("scan_progress", {
+                    "program": _name,
+                    "index": _idx,
+                    "total": _tp,
+                    "phase": "scoring",
+                    "scored": scored_count,
+                    "program_total": batch_total,
+                    "failed_batches": failed_count,
+                })
+            score_map = _batch_score(
+                needs_scoring_addrs, prog_path, progress_callback=_batch_progress_cb
+            )
 
         # Build function entries
         for func in func_list:
@@ -514,8 +880,10 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
             func_key = f"{prog_path}::{addr}"
 
             # Check if we have a fresh score or should use cached
+            scored_this_run = False
             if addr in score_map:
                 score_info = score_map[addr]
+                scored_this_run = True
                 if func_key in cached_names:
                     total_rescored += 1
                 else:
@@ -529,6 +897,18 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
                 continue
             else:
                 score_info = {}
+
+            # Stamp last_processed when we just got a fresh score from scoring.
+            # Previously this carried forward whatever `existing.last_processed`
+            # was, which left functions stuck as "unscored" on the dashboard
+            # even after --scan --refresh successfully scored them, because
+            # their old entry had last_processed=None and we never overwrote it.
+            if scored_this_run:
+                last_processed_val = datetime.now().isoformat()
+                last_result_val = "scanned"
+            else:
+                last_processed_val = existing.get(func_key, {}).get("last_processed")
+                last_result_val = existing.get(func_key, {}).get("last_result")
 
             all_functions[func_key] = {
                 "program": prog_path,
@@ -545,8 +925,8 @@ def scan_functions(state, project_folder, refresh=False, binary_filter=None):
                 "classification": score_info.get("classification", "unknown"),
                 "is_thunk": is_thunk,
                 "is_external": is_external,
-                "last_processed": existing.get(func_key, {}).get("last_processed"),
-                "last_result": existing.get(func_key, {}).get("last_result"),
+                "last_processed": last_processed_val,
+                "last_result": last_result_val,
             }
 
     if binary_filter:
@@ -753,63 +1133,528 @@ def compute_priority(func):
     return base + impact + effort_bonus + fixable_bonus
 
 
-def _load_priority_queue():
-    """Load the priority queue file written by the web dashboard."""
-    qf = SCRIPT_DIR / "priority_queue.json"
-    if qf.exists():
-        try:
-            with open(qf, "r") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {"pinned": [], "skipped": [], "order": []}
+DEFAULT_QUEUE_CONFIG = {
+    "good_enough_score": 80,
+    "require_scored": False,
+    # Auto-handoff: when the active provider's complexity gate fires, swap to
+    # this provider for the current function instead of skipping. Set to None
+    # (or empty string) to disable and preserve the original skip-and-warn.
+    "complexity_handoff_provider": "claude",
+    # 0 = unlimited handoffs per worker session. Set higher to cap cost.
+    "complexity_handoff_max": 0,
+    # Detailed tool-call logging: writes per-function JSONL files under
+    # logs/debug/{date}/ and prints verbose console lines. Use analyze_debug.py
+    # to spot inefficiencies (consecutive same-tool runs, retries, etc).
+    "debug_mode": False,
+    # Pre-refresh top candidates' scores when a worker starts. Skipped when:
+    # - This flag is False
+    # - No active_binary is set (would touch every binary Ghidra has)
+    # - Last refresh was < freshness window ago (default 5 minutes)
+    "pre_refresh_on_start": True,
+    # Minutes of freshness to honor: if the last refresh is newer than this,
+    # skip pre-refresh entirely. Multiple workers starting together share one.
+    "pre_refresh_freshness_min": 5,
+}
+
+PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"
 
 
-def get_next_functions(state, count=1):
-    """Get the next N functions to process, sorted by priority.
+def load_priority_queue():
+    """Load the priority queue file. Always returns a dict with pinned/config.
 
-    Respects the priority queue from the web dashboard:
-    - Pinned functions come first (in pin order)
-    - Skipped functions are excluded
-    - Remaining functions sorted by ROI: fixable * (1 + callers/10)
+    The legacy `skipped` list is no longer honored — auto-dequeue on completion
+    plus the consecutive_fails / good_enough_score filters cover every case the
+    skip list used to. Old `skipped` data is loaded but ignored by the selector.
     """
-    queue = _load_priority_queue()
-    pinned = set(queue.get("pinned", []))
-    skipped = set(queue.get("skipped", []))
+    if PRIORITY_QUEUE_FILE.exists():
+        try:
+            with open(PRIORITY_QUEUE_FILE, "r") as f:
+                queue = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            queue = {}
+    else:
+        queue = {}
+    queue.setdefault("pinned", [])
+    cfg = dict(DEFAULT_QUEUE_CONFIG)
+    cfg.update(queue.get("config") or {})
+    queue["config"] = cfg
+    return queue
 
-    active_binary = state.get("active_binary")
 
+# Backwards-compat alias for any external callers
+_load_priority_queue = load_priority_queue
+
+
+def save_priority_queue(queue):
+    with open(PRIORITY_QUEUE_FILE, "w") as f:
+        json.dump(queue, f, indent=2)
+
+
+def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=None):
+    """Canonical work-queue selector. Used by both fun_doc CLI and web dashboard.
+
+    Returns a list of dicts sorted by descending priority. Each dict contains:
+        key, func (raw state entry), roi, pinned, needs_scoring
+
+    Selection rules:
+    - Skip thunks / externals
+    - Skip funcs at/above good_enough_score (unless pinned or needs cold scoring)
+    - Skip funcs from other binaries when active_binary is set
+    - Skip funcs with >=3 consecutive_fails (unless pinned)
+    - When require_scored is on, treat unscored funcs as top priority so the
+      worker scores them on first contact instead of leaving them stranded
+    - Pinned (explicitly queued) funcs always sort to the top in pin order
+    """
+    if queue is None:
+        queue = load_priority_queue()
+    pinned_list = list(queue.get("pinned", []))
+    pinned = set(pinned_list)
+    cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
+    good_enough = cfg.get("good_enough_score", 80)
+    require_scored = cfg.get("require_scored", False) if with_scoring_lane is None else with_scoring_lane
+
+    pin_order = {k: i for i, k in enumerate(pinned_list)}
     candidates = []
-    for key, func in state["functions"].items():
+    for key, func in funcs.items():
         if func.get("is_thunk") or func.get("is_external"):
             continue
-        if key in skipped:
-            continue
-        if func.get("score", 0) >= 95 and func.get("fixable", 0) == 0:
-            continue
+        is_pinned = key in pinned
         if active_binary and func.get("program_name") != active_binary:
             continue
 
+        score = func.get("score", 0)
         fixable = func.get("fixable", 0)
         callers = func.get("caller_count", 0)
-        roi = fixable * (1 + callers / 10)
+        last_processed = func.get("last_processed")
+        needs_scoring = require_scored and last_processed is None
 
-        # Skip functions stuck in failure loops (3+ consecutive fails)
+        if score >= good_enough and not is_pinned and not needs_scoring:
+            continue
+
         consecutive_fails = func.get("consecutive_fails", 0)
-        if consecutive_fails >= 3 and key not in pinned:
-            continue  # Skip entirely — needs a different model or human attention
+        if consecutive_fails >= 3 and not is_pinned:
+            continue
 
-        # Deprioritize functions that have been partially processed too many times
+        if needs_scoring:
+            roi = 1_000_000  # Cold-start lane: surface unscored funcs first
+        else:
+            if fixable <= 0 and not is_pinned:
+                # Already scored, nothing concrete to fix — leave it alone
+                continue
+            roi = fixable * (1 + callers / 10)
+            if score < good_enough and fixable > 0:
+                # Boost low-completeness so they out-rank polished-but-fixable funcs
+                roi += (good_enough - score) * 2
+
         partial_runs = func.get("partial_runs", 0)
-        if partial_runs >= 3 and key not in pinned:
-            roi *= 0.1  # 90% reduction — needs human attention or stronger model
+        if partial_runs >= 3 and not is_pinned:
+            roi *= 0.1
 
-        # Pinned functions get infinite priority
-        sort_key = (key in pinned, roi)
-        candidates.append((sort_key, key, func))
+        candidates.append({
+            "key": key,
+            "func": func,
+            "roi": roi,
+            "pinned": is_pinned,
+            "pin_order": pin_order.get(key, 10**9),
+            "needs_scoring": needs_scoring,
+        })
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return [(key, func) for _, key, func in candidates[:count]]
+    candidates.sort(key=lambda c: (
+        not c["pinned"],
+        c["pin_order"],
+        not c["needs_scoring"],
+        -c["roi"],
+    ))
+    return candidates
+
+
+def get_next_functions(state, count=1):
+    """Return up to N (key, func) tuples for the worker to process."""
+    queue = load_priority_queue()
+    active_binary = state.get("active_binary")
+    candidates = select_candidates(state["functions"], queue, active_binary)
+    return [(c["key"], c["func"]) for c in candidates[:count]]
+
+
+def refresh_candidate_scores(state, active_binary=None, count=50, save=True,
+                              fallback=True, first_batch_timeout=300):
+    """Batch-refresh the live completeness scores of the top-N ROI candidates.
+
+    Avoids the "walk through 6 stale candidates fetching one at a time" problem
+    by doing a single `/batch_analyze_completeness` call per program. Updates
+    state.json in place so the next selector pass sees fresh data.
+
+    Parameters:
+        fallback: passed to _batch_score. False = skip individual retries on
+            batch failure (used by pre-refresh on worker start).
+        first_batch_timeout: passed to _batch_score. Default 300s; pre-refresh
+            uses 60s so it fails fast when Ghidra is unresponsive.
+
+    Returns: {"refreshed": int, "stale": int, "by_program": {prog: count}}
+             where "stale" counts candidates whose score drifted >=5 points.
+    """
+    funcs = state.get("functions", {})
+    queue = load_priority_queue()
+    candidates = select_candidates(funcs, queue, active_binary=active_binary)[:count]
+    if not candidates:
+        return {"refreshed": 0, "stale": 0, "by_program": {}}
+
+    by_prog = defaultdict(list)
+    for c in candidates:
+        by_prog[c["func"]["program"]].append(c)
+
+    refreshed = 0
+    stale = 0
+    by_program_stats = {}
+    for prog, items in by_prog.items():
+        addresses = [c["func"]["address"] for c in items]
+        try:
+            score_map = _batch_score(
+                addresses,
+                prog_path=prog,
+                fallback=fallback,
+                first_batch_timeout=first_batch_timeout,
+            )
+        except Exception as e:
+            print(f"  Refresh failed for {prog}: {e}")
+            continue
+        prog_refreshed = 0
+        prog_stale = 0
+        for c in items:
+            addr = c["func"]["address"]
+            if addr not in score_map:
+                continue
+            info = score_map[addr]
+            func = c["func"]
+            old_score = func.get("score", 0)
+            func["score"] = info["score"]
+            func["fixable"] = info["fixable"]
+            func["has_custom_name"] = info["has_custom_name"]
+            func["has_plate_comment"] = info["has_plate_comment"]
+            func["is_leaf"] = info["is_leaf"]
+            func["classification"] = info["classification"]
+            func["deductions"] = info["deductions"]
+            prog_refreshed += 1
+            if abs(info["score"] - old_score) >= 5:
+                prog_stale += 1
+        refreshed += prog_refreshed
+        stale += prog_stale
+        if prog_refreshed > 0:
+            by_program_stats[prog] = {"refreshed": prog_refreshed, "stale": prog_stale}
+
+    if save and refreshed > 0:
+        save_state(state)
+
+    # Record refresh metadata on the queue so the dashboard can display it
+    queue = load_priority_queue()
+    meta = queue.get("meta") or {}
+    meta["last_refresh_at"] = datetime.now().isoformat()
+    meta["last_refresh_count"] = refreshed
+    meta["last_refresh_stale"] = stale
+    meta["stale_skips_since_refresh"] = 0
+    queue["meta"] = meta
+    save_priority_queue(queue)
+
+    return {"refreshed": refreshed, "stale": stale, "by_program": by_program_stats}
+
+
+def _emit_skip(func_key, skip_type, reason, live_score=None):
+    """Emit function_complete events for a skipped function so the dashboard
+    worker pane shows what happened instead of leaving the entry hanging.
+
+    Sends both `function_mode` (so the pane shows "SKIP" in place of FIX/FULL)
+    and `function_complete` with a reason field the JS handler renders.
+    """
+    bus_emit("function_mode", {
+        "key": func_key,
+        "mode": f"SKIP:{skip_type}",
+        "model": "—",
+        "score": live_score,
+    })
+    bus_emit("score_update", {
+        "key": func_key,
+        "score_before": live_score,
+        "score_after": live_score,
+        "result": "skipped",
+    })
+    bus_emit("function_complete", {
+        "key": func_key,
+        "result": "skipped",
+        "score": live_score,
+        "reason": reason,
+        "skip_type": skip_type,
+    })
+
+
+def _increment_stale_skip_counter():
+    """Bump the stale-skip counter in priority_queue.meta. Called when a worker
+    skips a function whose live score was already at good_enough — indicates
+    state.json was stale for that entry."""
+    try:
+        queue = load_priority_queue()
+        meta = queue.get("meta") or {}
+        meta["stale_skips_since_refresh"] = meta.get("stale_skips_since_refresh", 0) + 1
+        queue["meta"] = meta
+        save_priority_queue(queue)
+    except Exception:
+        pass
+
+
+def _bump_handoff_counter():
+    """Bump the per-session complexity-handoff counter and return the new value."""
+    try:
+        queue = load_priority_queue()
+        meta = queue.get("meta") or {}
+        meta["handoffs_this_session"] = meta.get("handoffs_this_session", 0) + 1
+        queue["meta"] = meta
+        save_priority_queue(queue)
+        return meta["handoffs_this_session"]
+    except Exception:
+        return 0
+
+
+def reset_handoff_counter():
+    """Reset the per-session handoff counter. Called when a worker starts."""
+    try:
+        queue = load_priority_queue()
+        meta = queue.get("meta") or {}
+        meta["handoffs_this_session"] = 0
+        queue["meta"] = meta
+        save_priority_queue(queue)
+    except Exception:
+        pass
+
+
+def drain_done_pinned(state):
+    """Batch-score every currently pinned function and auto-dequeue any that
+    are already at or above good_enough_score. Used to drain stuck queue items
+    that were pinned based on stale state.json scores ("0%" really meaning
+    "unscored") and turned out to be already documented.
+
+    Returns: {"checked": int, "dequeued": int, "still_queued": int, "errors": int}
+    """
+    queue = load_priority_queue()
+    pinned = list(queue.get("pinned", []))
+    if not pinned:
+        return {"checked": 0, "dequeued": 0, "still_queued": 0, "errors": 0}
+
+    cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
+    good_enough = cfg.get("good_enough_score", 80)
+
+    funcs = state.get("functions", {})
+    by_prog = defaultdict(list)
+    missing = []
+    for key in pinned:
+        func = funcs.get(key)
+        if not func:
+            missing.append(key)
+            continue
+        prog = func.get("program")
+        addr = func.get("address")
+        if not prog or not addr:
+            missing.append(key)
+            continue
+        by_prog[prog].append((key, func, addr))
+
+    checked = 0
+    dequeued = 0
+    errors = len(missing)
+    for prog, items in by_prog.items():
+        addresses = [addr for (_, _, addr) in items]
+        try:
+            score_map = _batch_score(addresses, prog_path=prog)
+        except Exception as e:
+            print(f"  drain: batch score failed for {prog}: {e}")
+            errors += len(items)
+            continue
+        for key, func, addr in items:
+            checked += 1
+            info = score_map.get(addr)
+            if not info:
+                errors += 1
+                continue
+            # Apply fresh score back into state
+            func["score"] = info["score"]
+            func["fixable"] = info["fixable"]
+            func["has_custom_name"] = info["has_custom_name"]
+            func["has_plate_comment"] = info["has_plate_comment"]
+            func["is_leaf"] = info["is_leaf"]
+            func["classification"] = info["classification"]
+            func["deductions"] = info["deductions"]
+            func["last_processed"] = func.get("last_processed") or "drained_check"
+            if info["score"] >= good_enough:
+                if auto_dequeue_if_done(key, info["score"], source="drain_done"):
+                    dequeued += 1
+
+    save_state(state)
+
+    queue_after = load_priority_queue()
+    still_queued = len(queue_after.get("pinned", []))
+    return {
+        "checked": checked,
+        "dequeued": dequeued,
+        "still_queued": still_queued,
+        "errors": errors,
+    }
+
+
+def auto_dequeue_if_done(func_key, score, source="completed"):
+    """If func_key is currently pinned and score >= good_enough_score, remove
+    it from the queue and emit queue_changed. Returns True if dequeued.
+
+    Used by:
+    - process_function on successful completion (`source="completed"`)
+    - process_function on skip-because-already-done (`source="skipped"`)
+    - /api/queue/pin when an immediate score check shows the function is
+      already above good_enough (`source="pin_check"`)
+    """
+    if score is None:
+        return False
+    try:
+        queue = load_priority_queue()
+        cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
+        good_enough = cfg.get("good_enough_score", 80)
+        if func_key not in queue.get("pinned", []):
+            return False
+        if score < good_enough:
+            return False
+        queue["pinned"] = [k for k in queue["pinned"] if k != func_key]
+        save_priority_queue(queue)
+        print(f"  Auto-dequeued (score {score}% >= {good_enough}%, via {source})")
+        bus_emit("queue_changed", {
+            "action": "auto_dequeue", "key": func_key, "score": score, "source": source,
+        })
+        return True
+    except Exception as e:
+        print(f"  WARNING: auto-dequeue failed: {e}")
+        return False
+
+
+def _emit_handoff(func_key, from_provider, to_provider, reason, count):
+    """Emit a function_mode event so the dashboard pane shows the handoff."""
+    bus_emit("function_mode", {
+        "key": func_key,
+        "mode": f"HANDOFF:{from_provider}->{to_provider}",
+        "model": to_provider,
+        "score": None,
+    })
+    bus_emit("queue_changed", {
+        "action": "handoff",
+        "key": func_key,
+        "from": from_provider,
+        "to": to_provider,
+        "reason": reason,
+        "count": count,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Debug logging — per-tool-call JSONL traces for offline analysis
+# ---------------------------------------------------------------------------
+
+_debug_local = threading.local()
+_debug_log_lock = threading.Lock()
+
+
+def _debug_set_context(func_key, func_name, program, address, provider):
+    """Set the current function context for debug logging. Called once per
+    function at the start of process_function so all tool calls in subsequent
+    provider invocations get tagged with the same metadata. Re-reads queue
+    config once (avoids per-tool-call disk hits)."""
+    _debug_local.func_key = func_key
+    _debug_local.func_name = func_name
+    _debug_local.program = program
+    _debug_local.address = address
+    _debug_local.provider = provider
+    _debug_local.iteration = 0
+    _debug_local.log_path = None
+    try:
+        queue = load_priority_queue()
+        cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
+        _debug_local.enabled = bool(cfg.get("debug_mode", False))
+    except Exception:
+        _debug_local.enabled = False
+
+
+def _debug_get_log_path():
+    """Lazy-create the per-function debug log path on first call."""
+    existing = getattr(_debug_local, "log_path", None)
+    if existing:
+        return existing
+    try:
+        date_dir = LOG_DIR / "debug" / date.today().isoformat()
+        date_dir.mkdir(parents=True, exist_ok=True)
+        prog = (getattr(_debug_local, "program", "") or "unknown")
+        prog = prog.replace("/", "_").replace("\\", "_").strip("_") or "unknown"
+        addr = getattr(_debug_local, "address", "unknown") or "unknown"
+        path = date_dir / f"{prog}__{addr}.jsonl"
+        _debug_local.log_path = path
+        return path
+    except Exception:
+        return None
+
+
+def _debug_summarize_args(args):
+    """Compact one-line arg summary for verbose console output."""
+    if not isinstance(args, dict):
+        s = str(args)
+        return s[:80] + ("..." if len(s) > 80 else "")
+    parts = []
+    for k, v in list(args.items())[:3]:
+        try:
+            v_str = json.dumps(v, default=str) if not isinstance(v, str) else f'"{v}"'
+        except Exception:
+            v_str = repr(v)
+        if len(v_str) > 30:
+            v_str = v_str[:27] + "..."
+        parts.append(f"{k}={v_str}")
+    if len(args) > 3:
+        parts.append(f"+{len(args) - 3} more")
+    return ", ".join(parts)
+
+
+def _debug_log_tool_call(tool, args, result, status, duration_ms=None):
+    """Log a single tool call to the per-function JSONL file and verbose console.
+    No-op when debug_mode is off. Safe to call from any provider."""
+    if not getattr(_debug_local, "enabled", False):
+        return
+    iteration = getattr(_debug_local, "iteration", 0) + 1
+    _debug_local.iteration = iteration
+
+    result_str = "" if result is None else str(result)
+    result_full_size = len(result_str)
+    result_preview = result_str[:500]
+
+    entry = {
+        "ts": datetime.now().isoformat(),
+        "function_key": getattr(_debug_local, "func_key", None),
+        "function_name": getattr(_debug_local, "func_name", None),
+        "provider": getattr(_debug_local, "provider", None),
+        "iteration": iteration,
+        "tool": tool,
+        "args": args,
+        "result_preview": result_preview,
+        "result_full_size": result_full_size,
+        "status": status,
+        "duration_ms": duration_ms,
+    }
+
+    log_path = _debug_get_log_path()
+    if log_path is not None:
+        try:
+            with _debug_log_lock:
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, default=str) + "\n")
+        except Exception as e:
+            print(f"  [debug log error] {e}", flush=True)
+
+    args_summary = _debug_summarize_args(args)
+    duration_str = f", {duration_ms}ms" if duration_ms is not None else ""
+    print(
+        f"  [debug] #{iteration} {tool}({args_summary}) -> {status} "
+        f"({result_full_size}b{duration_str})",
+        flush=True,
+    )
 
 
 def get_select_functions(state, program, address, depth=1):
@@ -1777,6 +2622,31 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
                     server = getattr(item, "server", "")
                     status = getattr(item, "status", "?")
                     print(f"  [mcp] {tool}: {status}", flush=True)
+                    bus_emit("tool_call", {"tool": tool, "status": "calling"})
+                    bus_emit("tool_result", {"tool": tool, "status": status})
+
+                    # Best-effort args/result extraction. Codex SDK item shapes
+                    # vary by version, so try a few common attribute names.
+                    args = (
+                        getattr(item, "arguments", None)
+                        or getattr(item, "args", None)
+                        or getattr(item, "input", None)
+                        or {}
+                    )
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                    result_obj = (
+                        getattr(item, "result", None)
+                        or getattr(item, "output", None)
+                        or getattr(item, "response", None)
+                    )
+                    if result_obj is not None and hasattr(result_obj, "content"):
+                        result_obj = result_obj.content
+                    # Codex doesn't expose start/end times on the item, leave duration None
+                    _debug_log_tool_call(tool, args, result_obj, status, None)
             elif event_type == "turn.completed":
                 usage = getattr(event, "usage", None)
                 if usage:
@@ -2011,7 +2881,9 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
                     break
                 print(f"  [mcp] {fn_name}: calling...", flush=True)
                 bus_emit("tool_call", {"tool": fn_name, "status": "calling"})
+                _t0 = time.perf_counter()
                 result_str = execute_tool_call(fn_name, fn_args)
+                duration_ms = int((time.perf_counter() - _t0) * 1000)
 
                 # Truncate very large results to avoid blowing context
                 if len(result_str) > 50000:
@@ -2020,6 +2892,7 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
                 status = "failed" if '"error"' in result_str[:100] else "done"
                 print(f"  [mcp] {fn_name}: {status}", flush=True)
                 bus_emit("tool_result", {"tool": fn_name, "status": status})
+                _debug_log_tool_call(fn_name, fn_args, result_str, status, duration_ms)
 
                 messages.append(
                     {
@@ -2098,6 +2971,9 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
 
         output_parts = []
         tool_id_to_name = {}
+        # Pending tool-use info awaiting its matching tool-result block (Claude
+        # SDK delivers them as separate messages keyed by tool_use_id).
+        pending_calls = {}  # tool_id -> {"name", "input", "start_time"}
         try:
             async for msg in query(prompt=prompt, options=options):
                 msg_type = type(msg).__name__
@@ -2116,7 +2992,13 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                             elif block_type == "ToolUseBlock":
                                 tool_name = getattr(block, "name", "?")
                                 tool_id = getattr(block, "id", "")
+                                tool_input = getattr(block, "input", None) or {}
                                 tool_id_to_name[tool_id] = tool_name
+                                pending_calls[tool_id] = {
+                                    "name": tool_name,
+                                    "input": tool_input,
+                                    "start_time": time.perf_counter(),
+                                }
                                 print(f"  [mcp] {tool_name}: calling...", flush=True)
                                 bus_emit(
                                     "tool_call",
@@ -2131,6 +3013,23 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                                 status = "failed" if is_error else "completed"
                                 tool_id = getattr(block, "tool_use_id", "")
                                 tool_name = tool_id_to_name.get(tool_id, tool_id[:12])
+                                # Extract result content (string or list of content blocks)
+                                result_content = getattr(block, "content", None)
+                                if isinstance(result_content, list):
+                                    parts = []
+                                    for c in result_content:
+                                        parts.append(getattr(c, "text", str(c)))
+                                    result_text = "".join(parts)
+                                else:
+                                    result_text = "" if result_content is None else str(result_content)
+                                # Correlate with pending call for args + duration
+                                call_info = pending_calls.pop(tool_id, None)
+                                args = call_info.get("input", {}) if call_info else {}
+                                duration_ms = (
+                                    int((time.perf_counter() - call_info["start_time"]) * 1000)
+                                    if call_info
+                                    else None
+                                )
                                 print(f"  [mcp] {tool_name}: {status}", flush=True)
                                 bus_emit(
                                     "tool_result",
@@ -2139,6 +3038,9 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                                         "status": status,
                                         "id": tool_id,
                                     },
+                                )
+                                _debug_log_tool_call(
+                                    tool_name, args, result_text, status, duration_ms,
                                 )
                             elif block_type == "ThinkingBlock":
                                 pass  # Skip thinking blocks
@@ -2313,12 +3215,20 @@ def print_status(state):
 
 
 def _sync_func_state(func, completeness, score=None, deductions=None):
-    """Sync all completeness fields from live data into the function state dict."""
+    """Sync all completeness fields from live data into the function state dict.
+
+    Always sets last_processed to the current time when a valid score or
+    completeness is applied — the cold-start lane treats last_processed=None
+    as "never analyzed," so leaving it unset causes infinite re-picking of
+    functions that were successfully scored but only went through a skip path.
+    """
     if score is not None:
         func["score"] = score
+        func["last_processed"] = datetime.now().isoformat()
     if deductions is not None:
         func["deductions"] = deductions
     if completeness and isinstance(completeness, dict) and "error" not in completeness:
+        func["last_processed"] = datetime.now().isoformat()
         func["has_custom_name"] = completeness.get(
             "has_custom_name", func.get("has_custom_name", False)
         )
@@ -2563,6 +3473,10 @@ def process_function(
     program = func["program"]
     name = func["name"]
 
+    # Set debug-logging context for any tool calls in this function's processing.
+    # No-op when debug_mode is off; otherwise tool calls go to logs/debug/...
+    _debug_set_context(func_key, name, program, address, provider or AI_PROVIDER)
+
     bus_emit(
         "function_started",
         {
@@ -2587,9 +3501,16 @@ def process_function(
     # Refine mode based on live score and completeness context
     mode = determine_mode(live_score, data.get("deductions"), data.get("completeness"))
 
-    # Sync point 1: update state.json with live data from Ghidra (pre-work)
+    # Capture the PRE-sync cached score so the skip message and stale-skip
+    # counter can compare against the real stale value instead of the live
+    # value (_sync_func_state overwrites func["score"] with live_score below).
+    original_cached_score = func.get("score")
+
+    # Sync point 1: update state.json with live data from Ghidra (pre-work).
+    # Uses update_function_state() so concurrent workers don't clobber each
+    # other's unrelated function updates via whole-state save.
     _sync_func_state(func, data.get("completeness"), live_score, data.get("deductions"))
-    save_state(state)
+    update_function_state(func_key, func)
 
     # Capture pre-work artifact snapshot for post-run validation
     pre_completeness = data.get("completeness") or {}
@@ -2608,23 +3529,61 @@ def process_function(
         fixable_pts = (
             float(completeness.get("fixable_deductions", 999)) if completeness else 999
         )
-        if live_score is not None and live_score >= 95 and fixable_pts < 3:
-            print(f"  SKIP: {live_score}% effective, {fixable_pts:.1f} fixable pts (< 3)")
-            func["last_result"] = "skipped_complete"
-            save_state(state)
+
+        # Re-check the "good enough" threshold against the freshly fetched live
+        # score. State.json scores can drift stale; without this gate, a function
+        # the selector picked at (cached) 76% but is live 93% still burns tokens.
+        # Pinned functions bypass the gate (user explicitly queued them).
+        queue = load_priority_queue()
+        cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
+        good_enough = cfg.get("good_enough_score", 80)
+        is_pinned = func_key in set(queue.get("pinned", []))
+
+        # Pinned functions used to bypass this gate so the user could force
+        # processing. New behavior: still run the gate for pinned items, but
+        # auto-dequeue them when they hit it. That way "I queued this once" no
+        # longer means "polish this forever after it's already done."
+        if live_score is not None and live_score >= good_enough:
+            if original_cached_score is None or original_cached_score == 0:
+                cached_label = "unscored"
+            else:
+                cached_label = f"{original_cached_score}%"
+            reason = (
+                f"live score {live_score}% >= good_enough {good_enough}% "
+                f"(cached was {cached_label})"
+            )
+            print(f"  SKIP: {reason}")
+            func["last_result"] = "skipped_above_threshold"
+            func["last_processed"] = datetime.now().isoformat()
+            update_function_state(func_key, func)
+            if (
+                isinstance(original_cached_score, (int, float))
+                and abs(live_score - original_cached_score) >= 5
+            ):
+                _increment_stale_skip_counter()
+            auto_dequeue_if_done(func_key, live_score, source="skipped_above_threshold")
+            _emit_skip(func_key, "above_threshold", reason, live_score)
             return "skipped"
 
         # FIX mode only: skip if there's almost nothing fixable regardless of score
         if mode == "FIX" and fixable_pts < 3:
-            print(f"  SKIP: FIX mode but only {fixable_pts:.1f} fixable pts remaining")
+            reason = f"FIX mode but only {fixable_pts:.1f} fixable pts remaining"
+            print(f"  SKIP: {reason}")
             func["last_result"] = "skipped_complete"
-            save_state(state)
+            func["last_processed"] = datetime.now().isoformat()
+            update_function_state(func_key, func)
+            auto_dequeue_if_done(func_key, live_score, source="skipped_no_fixable")
+            _emit_skip(func_key, "no_fixable", reason, live_score)
             return "skipped"
 
         if mode == "VERIFY":
-            print(f"  SKIP: 100% complete")
+            reason = "100% complete"
+            print(f"  SKIP: {reason}")
             func["last_result"] = "skipped_complete"
-            save_state(state)
+            func["last_processed"] = datetime.now().isoformat()
+            update_function_state(func_key, func)
+            auto_dequeue_if_done(func_key, live_score, source="skipped_verify")
+            _emit_skip(func_key, "verify_complete", reason, live_score)
             return "skipped"
 
     # Select model
@@ -2714,12 +3673,54 @@ def process_function(
             has_many_undefined = len(completeness.get("undefined_variables", [])) > 8
             # MiniMax struggles with: high structural complexity + many undefined vars
             if fixable_pts > 40 and (has_struct_work and has_many_undefined):
-                print(f"  SKIP: Too complex for MiniMax (fixable={fixable_pts:.0f}, structs+{len(completeness.get('undefined_variables',[]))} undefined vars)")
-                print(f"  Route to Claude or Codex for this function")
-                func["last_result"] = "skipped_complexity"
-                func["consecutive_fails"] = func.get("consecutive_fails", 0) + 1
-                save_state(state)
-                return "skipped"
+                undef_count = len(completeness.get('undefined_variables', []))
+                detail = (
+                    f"fixable={fixable_pts:.0f}, structs+{undef_count} undef vars"
+                )
+
+                # Check whether auto-handoff is enabled
+                queue_now = load_priority_queue()
+                cfg_now = queue_now.get("config") or DEFAULT_QUEUE_CONFIG
+                handoff_provider = cfg_now.get("complexity_handoff_provider") or None
+                handoff_max = int(cfg_now.get("complexity_handoff_max", 0) or 0)
+                handoff_count = int((queue_now.get("meta") or {}).get("handoffs_this_session", 0))
+                cap_reached = handoff_max > 0 and handoff_count >= handoff_max
+
+                can_handoff = (
+                    handoff_provider
+                    and handoff_provider != effective_provider
+                    and not cap_reached
+                )
+
+                if can_handoff:
+                    new_count = _bump_handoff_counter()
+                    handoff_reason = f"{detail} — handoff #{new_count}"
+                    print(
+                        f"  HANDOFF: {effective_provider} -> {handoff_provider} "
+                        f"({handoff_reason})"
+                    )
+                    _emit_handoff(
+                        func_key, effective_provider, handoff_provider,
+                        handoff_reason, new_count,
+                    )
+                    # Swap provider for the rest of this function's processing
+                    provider = handoff_provider
+                    effective_provider = handoff_provider
+                    # Re-select the model for the new provider (mode hasn't changed)
+                    selected_model = select_model(mode, model, provider=provider)
+                    # Fall through to invoke_claude — do NOT return
+                else:
+                    reason = f"Too complex for MiniMax ({detail})"
+                    if handoff_provider and cap_reached:
+                        reason += f" — handoff cap of {handoff_max} reached"
+                    elif not handoff_provider:
+                        reason += " — handoff disabled, set complexity_handoff_provider to enable"
+                    print(f"  SKIP: {reason}")
+                    func["last_result"] = "skipped_complexity"
+                    func["consecutive_fails"] = func.get("consecutive_fails", 0) + 1
+                    update_function_state(func_key, func)
+                    _emit_skip(func_key, "complexity", reason, live_score)
+                    return "skipped"
 
     bus_emit(
         "function_mode",
@@ -2769,7 +3770,7 @@ def process_function(
                 diff = new_score - live_score
                 delta = f" ({'+' if diff >= 0 else ''}{diff:.0f}%)"
             print(f"  Score after: {new_score}%{delta}")
-        save_state(state)
+        update_function_state(func_key, func)
         if key == "q":
             return "quit"
         return "manual_prompt_generated"
@@ -3054,7 +4055,15 @@ def process_function(
     if result in ("completed", "needs_redo", "partial") and tool_calls_made > 0:
         ghidra_post("/save_program", params={"program": program})
 
-    save_state(state)
+    # Auto-dequeue on successful completion if the user explicitly queued this
+    # function and it reached the good-enough threshold.
+    if result == "completed":
+        auto_dequeue_if_done(func_key, new_score, source="completed")
+
+    # Atomic per-function save: only write THIS function's entry, re-reading
+    # disk state inside the lock so other workers' concurrent updates to
+    # different functions are preserved instead of clobbered.
+    update_function_state(func_key, func)
     return result
 
 
