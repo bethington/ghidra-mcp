@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
 [![Ghidra Version](https://img.shields.io/badge/Ghidra-12.0.3-green.svg)](https://ghidra-sre.org/)
-[![Version](https://img.shields.io/badge/Version-5.3.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-5.3.1-brightgreen.svg)](CHANGELOG.md)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
 
@@ -715,7 +715,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v5.3.0
+# Connection OK - GhidraMCP Headless Server v5.3.1
 ```
 
 ### Headless API Workflow
@@ -781,7 +781,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 5.3.0 |
+| **Version** | 5.3.1 |
 | **MCP Tools** | 199 fully implemented |
 | **GUI Endpoints** | 175 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 183 (GhidraMCPHeadlessServer) |

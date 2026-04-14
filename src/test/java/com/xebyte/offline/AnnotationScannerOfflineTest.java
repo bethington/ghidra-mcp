@@ -43,7 +43,7 @@ public class AnnotationScannerOfflineTest extends TestCase {
         assertFalse("Scanner discovered zero endpoints — all services may have lost their @McpTool annotations",
             endpoints.isEmpty());
 
-        // Sanity floor: v5.3.0 ships ~150+ annotation-scanned tools. Anything
+        // Sanity floor: v5.3.1 ships ~150+ annotation-scanned tools. Anything
         // well below that indicates an entire service class was dropped.
         assertTrue(
             "Expected at least 100 annotation-scanned endpoints, got " + endpoints.size()

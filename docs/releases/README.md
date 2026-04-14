@@ -4,7 +4,18 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v5.3.0 (Latest)
+### v5.3.1 (Latest) — hotfix
+
+- **Stability hotfix** for v5.3.0 after live multi-worker testing session
+- `NO_RETRY_DECOMPILE_TIMEOUT = 12s` on all MCP scoring handler paths — eliminates EDT saturation deadlocks on pathological functions (was 60s with retry escalation 60→120→180)
+- 4 additional MCP handler call sites routed through `decompileFunctionNoRetry` (AnalysisService.java:2058, 3607, 3953 and DocumentationHashService.java:359)
+- **fun-doc**: opus empty-output parser trust, recovery-pass one-shot blacklist, decompile-timeout one-shot blacklist, ContextVar debug logging, claude `ToolResultBlock` capture via `UserMessage` handling, dashboard worker pane reconnect fix
+- **bridge**: empty-string schema-default filter (codex hygiene)
+- 6 new selector invariant tests
+- Live-verified: 63 runs × 3 providers × 6 parallel workers with zero failures, zero retries, zero deadlocks over 125 min
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details
+
+### v5.3.0
 
 - **Stability + Observability Release** - HTTP thread pool fix, `/mcp/health`, offline test suite, fun-doc queue system
 - `/mcp/health` endpoint: pool stats, uptime, memory, active request count — used by dashboard and regression tests

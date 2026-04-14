@@ -352,7 +352,7 @@ public class DocumentationHashService {
             if (functionService == null) {
                 Msg.warn(this, "FunctionService not available, skipping local variable extraction for " + func.getName());
             }
-            // HOTFIX v5.3.0: use no-retry variant. Retrying pathological
+            // HOTFIX v5.3.1: use no-retry variant. Retrying pathological
             // functions at 60→120→180s wedges the HTTP thread pool. A clean
             // miss on locals here just yields an empty localVarsList, which
             // downstream hashing handles.
