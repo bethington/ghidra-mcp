@@ -39,9 +39,21 @@ Dashboard config (edit via header controls or priority_queue.json):
     require_scored              — surface unscored entries to cold-start lane (false)
     complexity_handoff_provider — "claude" | "codex" | null. Swap provider mid-flight
                                   when minimax's complexity gate fires.
-    complexity_handoff_max      — cap handoffs per worker session (0 = unlimited)
+    complexity_handoff_max      — cap handoffs per worker session (default 5,
+                                  0 = unlimited). After the cap is hit, massive
+                                  functions stay with the primary provider.
     debug_mode                  — write per-tool-call JSONL to logs/debug/
     pre_refresh_on_start        — batch-rescore top 20 before worker loop begins
+
+Recovery-pass one-shot (automatic, no config):
+    Functions that finish a complexity-forced recovery pass ("COMPLEXITY: massive
+    — forcing recovery-only mode") get flagged with recovery_pass_done and are
+    excluded from future selector picks. This prevents the "re-queue forever
+    below good_enough" loop that burns tokens for marginal improvement on
+    legitimately-massive functions. Clear the flag by:
+      * Pinning the function (pinned funcs bypass the flag)
+      * `--scan --refresh` (full rescan rebuilds entries from scratch)
+      * Dashboard "Refresh Top N" button (clears the flag on refreshed funcs)
 
 Offline analysis:
     python analyze_debug.py                   # Today's tool-call traces
@@ -51,6 +63,7 @@ Offline analysis:
 """
 
 import argparse
+import contextvars
 import json
 import os
 import subprocess
@@ -65,6 +78,26 @@ from event_bus import emit as bus_emit
 
 # Thread safety for state.json access across concurrent workers
 _state_lock = threading.Lock()
+
+# Per-thread tracker for the last Ghidra HTTP call's error kind. Used by
+# fetch_function_data to detect when a decompile-heavy endpoint hit a read
+# timeout (the hallmark of a pathological function) so the caller can mark
+# the function with a one-strike `decompile_timeout` flag instead of burning
+# three consecutive_fails cycles on it. Reset at the start of every
+# ghidra_get/ghidra_post call; only meaningful immediately after a call.
+_ghidra_call_state = threading.local()
+
+def _reset_ghidra_call_state():
+    _ghidra_call_state.last_was_timeout = False
+
+def _mark_ghidra_call_timeout():
+    _ghidra_call_state.last_was_timeout = True
+
+def ghidra_last_call_timed_out():
+    """True if the most recent ghidra_get/ghidra_post call on this thread
+    raised a requests read timeout. Caller must inspect immediately — the
+    flag resets on the next call."""
+    return getattr(_ghidra_call_state, "last_was_timeout", False)
 
 # Force unbuffered output so redirected stdout shows progress
 (
@@ -212,10 +245,15 @@ def _parse_response(r):
 
 def ghidra_get(path, params=None, timeout=60):
     """GET request to Ghidra HTTP server."""
+    _reset_ghidra_call_state()
     try:
         r = requests.get(f"{GHIDRA_URL}{path}", params=params, timeout=timeout)
         r.raise_for_status()
         return _parse_response(r)
+    except requests.exceptions.ReadTimeout:
+        _mark_ghidra_call_timeout()
+        print(f"  WARNING: Ghidra GET {path} failed: read timeout after {timeout}s", file=sys.stderr)
+        return None
     except requests.RequestException as e:
         print(f"  WARNING: Ghidra GET {path} failed: {e}", file=sys.stderr)
         return None
@@ -223,12 +261,17 @@ def ghidra_get(path, params=None, timeout=60):
 
 def ghidra_post(path, data=None, params=None, timeout=60):
     """POST request to Ghidra HTTP server."""
+    _reset_ghidra_call_state()
     try:
         r = requests.post(
             f"{GHIDRA_URL}{path}", json=data, params=params, timeout=timeout
         )
         r.raise_for_status()
         return _parse_response(r)
+    except requests.exceptions.ReadTimeout:
+        _mark_ghidra_call_timeout()
+        print(f"  WARNING: Ghidra POST {path} failed: read timeout after {timeout}s", file=sys.stderr)
+        return None
     except requests.RequestException as e:
         print(f"  WARNING: Ghidra POST {path} failed: {e}", file=sys.stderr)
         return None
@@ -1006,7 +1049,14 @@ def fetch_available_tools():
 
 
 def fetch_function_data(program, address, mode="FIX"):
-    """Pre-fetch all Ghidra data needed for prompt assembly."""
+    """Pre-fetch all Ghidra data needed for prompt assembly.
+
+    If any decompile-heavy endpoint hits a read timeout, bail out early and
+    set `data["decompile_timeout"] = True`. The caller inspects that flag
+    and marks the function with a one-strike `decompile_timeout` blacklist
+    so the selector stops re-picking it. This turns each pathological
+    function from ~3 × 60s = 180s of wasted worker time into one 60s miss.
+    """
     data = {
         "decompiled": None,
         "completeness": None,
@@ -1015,6 +1065,7 @@ def fetch_function_data(program, address, mode="FIX"):
         "score": None,
         "deductions": [],
         "fixable_categories": [],
+        "decompile_timeout": False,
     }
 
     # Navigate
@@ -1024,12 +1075,18 @@ def fetch_function_data(program, address, mode="FIX"):
     data["decompiled"] = ghidra_get(
         "/decompile_function", params={"address": f"0x{address}", "program": program}
     )
+    if ghidra_last_call_timed_out():
+        data["decompile_timeout"] = True
+        return data
 
     # Completeness
     raw = ghidra_get(
         "/analyze_function_completeness",
         params={"function_address": f"0x{address}", "program": program},
     )
+    if ghidra_last_call_timed_out():
+        data["decompile_timeout"] = True
+        return data
     if raw and isinstance(raw, dict):
         data["completeness"] = raw
         data["score"] = int(
@@ -1065,6 +1122,9 @@ def fetch_function_data(program, address, mode="FIX"):
         "/get_function_variables",
         params={"function_name": func_name, "program": program},
     )
+    if ghidra_last_call_timed_out():
+        data["decompile_timeout"] = True
+        return data
 
     # Full analysis for FULL mode (retry once on failure)
     if mode == "FULL":
@@ -1073,6 +1133,9 @@ def fetch_function_data(program, address, mode="FIX"):
             params={"function_address": f"0x{address}", "program": program},
             timeout=60,
         )
+        if ghidra_last_call_timed_out():
+            data["decompile_timeout"] = True
+            return data
         if _is_error_response(afd):
             # Retry once — the first call sometimes fails on cold decompiler cache
             afd = ghidra_get(
@@ -1080,6 +1143,9 @@ def fetch_function_data(program, address, mode="FIX"):
                 params={"function_address": f"0x{address}", "program": program},
                 timeout=90,
             )
+            if ghidra_last_call_timed_out():
+                data["decompile_timeout"] = True
+                return data
         data["analyze_for_doc"] = afd
 
     return data
@@ -1140,8 +1206,12 @@ DEFAULT_QUEUE_CONFIG = {
     # this provider for the current function instead of skipping. Set to None
     # (or empty string) to disable and preserve the original skip-and-warn.
     "complexity_handoff_provider": "claude",
-    # 0 = unlimited handoffs per worker session. Set higher to cap cost.
-    "complexity_handoff_max": 0,
+    # Cap handoffs per worker session to limit opus/claude spend. 0 = unlimited.
+    # Default 5: after five handoffs, massive functions stay with the primary
+    # provider (typically minimax) and accept lower per-function quality.
+    # Reset via the dashboard's Reset Handoffs button or by restarting the
+    # worker. Raise if you're willing to pay for more opus coverage.
+    "complexity_handoff_max": 5,
     # Detailed tool-call logging: writes per-function JSONL files under
     # logs/debug/{date}/ and prints verbose console lines. Use analyze_debug.py
     # to spot inefficiencies (consecutive same-tool runs, retries, etc).
@@ -1201,6 +1271,8 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
     - Skip funcs at/above good_enough_score (unless pinned or needs cold scoring)
     - Skip funcs from other binaries when active_binary is set
     - Skip funcs with >=3 consecutive_fails (unless pinned)
+    - Skip funcs with recovery_pass_done (complexity-forced recovery already ran)
+    - Skip funcs with decompile_timeout (pathological, one-shot blacklist)
     - When require_scored is on, treat unscored funcs as top priority so the
       worker scores them on first contact instead of leaving them stranded
     - Pinned (explicitly queued) funcs always sort to the top in pin order
@@ -1233,6 +1305,24 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
 
         consecutive_fails = func.get("consecutive_fails", 0)
         if consecutive_fails >= 3 and not is_pinned:
+            continue
+
+        # Recovery-pass one-shot: massive functions get exactly one
+        # complexity-forced recovery pass; after that they stay out of the
+        # selector until the user explicitly refreshes or pins them. This
+        # stops the "re-queue forever below good_enough" loop that burns
+        # opus/minimax tokens for marginal score improvement. Cleared by
+        # --scan --refresh (full rescan) or the dashboard's Refresh Top N.
+        if func.get("recovery_pass_done") and not is_pinned:
+            continue
+
+        # Decompile-timeout one-shot: pathological functions whose decompile
+        # exceeds the Ghidra scoring-path timeout (~12s per call) get flagged
+        # by fetch_function_data. Skip them until explicit refresh — the cost
+        # of retrying is 60s+ of HTTP thread time per attempt for a function
+        # we already know can't be scored. Cleared by the same refresh paths
+        # as recovery_pass_done.
+        if func.get("decompile_timeout") and not is_pinned:
             continue
 
         if needs_scoring:
@@ -1334,6 +1424,16 @@ def refresh_candidate_scores(state, active_binary=None, count=50, save=True,
             func["is_leaf"] = info["is_leaf"]
             func["classification"] = info["classification"]
             func["deductions"] = info["deductions"]
+            # Clear recovery-pass one-shot flag so the user can re-run these
+            # functions after a refresh — the refresh gesture is an explicit
+            # "look at everything fresh" signal.
+            func.pop("recovery_pass_done", None)
+            func.pop("recovery_pass_score", None)
+            func.pop("recovery_pass_at", None)
+            # Same for decompile-timeout: refresh clears the blacklist so the
+            # user can retry after e.g. Ghidra analysis improvements.
+            func.pop("decompile_timeout", None)
+            func.pop("decompile_timeout_at", None)
             prog_refreshed += 1
             if abs(info["score"] - old_score) >= 5:
                 prog_stale += 1
@@ -1551,8 +1651,18 @@ def _emit_handoff(func_key, from_provider, to_provider, reason, count):
 # ---------------------------------------------------------------------------
 # Debug logging — per-tool-call JSONL traces for offline analysis
 # ---------------------------------------------------------------------------
+#
+# Uses a contextvars.ContextVar so the per-function context is propagated
+# correctly across asyncio task boundaries and thread-pool executor calls.
+# Previously used threading.local(), which broke for the Claude Agent SDK
+# path: claude_agent_sdk.query() delivers ToolResultBlock messages to
+# callbacks that may execute in executor threads, where a thread-local
+# set in the worker's main thread is invisible. ContextVar is the Python-
+# blessed fix for this exact pattern and works for all provider paths.
 
-_debug_local = threading.local()
+_debug_ctx: "contextvars.ContextVar[dict]" = contextvars.ContextVar(
+    "_debug_ctx", default={}
+)
 _debug_log_lock = threading.Lock()
 
 
@@ -1561,34 +1671,43 @@ def _debug_set_context(func_key, func_name, program, address, provider):
     function at the start of process_function so all tool calls in subsequent
     provider invocations get tagged with the same metadata. Re-reads queue
     config once (avoids per-tool-call disk hits)."""
-    _debug_local.func_key = func_key
-    _debug_local.func_name = func_name
-    _debug_local.program = program
-    _debug_local.address = address
-    _debug_local.provider = provider
-    _debug_local.iteration = 0
-    _debug_local.log_path = None
+    ctx = {
+        "func_key": func_key,
+        "func_name": func_name,
+        "program": program,
+        "address": address,
+        "provider": provider,
+        "iteration": 0,
+        "log_path": None,
+    }
     try:
         queue = load_priority_queue()
         cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
-        _debug_local.enabled = bool(cfg.get("debug_mode", False))
+        ctx["enabled"] = bool(cfg.get("debug_mode", False))
     except Exception:
-        _debug_local.enabled = False
+        ctx["enabled"] = False
+    _debug_ctx.set(ctx)
 
 
 def _debug_get_log_path():
     """Lazy-create the per-function debug log path on first call."""
-    existing = getattr(_debug_local, "log_path", None)
+    ctx = _debug_ctx.get()
+    existing = ctx.get("log_path")
     if existing:
         return existing
     try:
         date_dir = LOG_DIR / "debug" / date.today().isoformat()
         date_dir.mkdir(parents=True, exist_ok=True)
-        prog = (getattr(_debug_local, "program", "") or "unknown")
+        prog = (ctx.get("program") or "unknown")
         prog = prog.replace("/", "_").replace("\\", "_").strip("_") or "unknown"
-        addr = getattr(_debug_local, "address", "unknown") or "unknown"
+        addr = ctx.get("address") or "unknown"
         path = date_dir / f"{prog}__{addr}.jsonl"
-        _debug_local.log_path = path
+        # ContextVar values are shallow-immutable by convention — rebuild the
+        # dict with the cached path so subsequent calls in this context skip
+        # the mkdir overhead.
+        new_ctx = dict(ctx)
+        new_ctx["log_path"] = path
+        _debug_ctx.set(new_ctx)
         return path
     except Exception:
         return None
@@ -1616,10 +1735,15 @@ def _debug_summarize_args(args):
 def _debug_log_tool_call(tool, args, result, status, duration_ms=None):
     """Log a single tool call to the per-function JSONL file and verbose console.
     No-op when debug_mode is off. Safe to call from any provider."""
-    if not getattr(_debug_local, "enabled", False):
+    ctx = _debug_ctx.get()
+    if not ctx.get("enabled", False):
         return
-    iteration = getattr(_debug_local, "iteration", 0) + 1
-    _debug_local.iteration = iteration
+    iteration = ctx.get("iteration", 0) + 1
+    # Update the iteration counter in-place. ContextVar stores a dict by
+    # reference, so mutating it here is visible to subsequent reads in the
+    # same context — matches the old threading.local() semantics without
+    # the overhead of rebuilding the dict on every tool call.
+    ctx["iteration"] = iteration
 
     result_str = "" if result is None else str(result)
     result_full_size = len(result_str)
@@ -1627,9 +1751,9 @@ def _debug_log_tool_call(tool, args, result, status, duration_ms=None):
 
     entry = {
         "ts": datetime.now().isoformat(),
-        "function_key": getattr(_debug_local, "func_key", None),
-        "function_name": getattr(_debug_local, "func_name", None),
-        "provider": getattr(_debug_local, "provider", None),
+        "function_key": ctx.get("func_key"),
+        "function_name": ctx.get("func_name"),
+        "provider": ctx.get("provider"),
         "iteration": iteration,
         "tool": tool,
         "args": args,
@@ -3498,6 +3622,30 @@ def process_function(
     live_score = data.get("score")
     print(f"done")
 
+    # Defensive one-shot blacklist: if any decompile-heavy endpoint hit a
+    # read timeout while fetching, the function is pathological (decompile
+    # takes longer than the scoring path allows). Mark it and bail so the
+    # selector stops re-picking it. Cleared by explicit refresh, same as
+    # recovery_pass_done.
+    if data.get("decompile_timeout"):
+        func["decompile_timeout"] = True
+        func["decompile_timeout_at"] = datetime.now().isoformat()
+        func["last_processed"] = datetime.now().isoformat()
+        func["last_result"] = "decompile_timeout"
+        print(
+            f"  DECOMPILE TIMEOUT — marking pathological and skipping. "
+            f"Will be excluded from selector until next refresh. "
+            f"(Pin the function to force a retry.)",
+            flush=True,
+        )
+        update_function_state(func_key, func)
+        bus_emit("function_complete", {
+            "key": func_key,
+            "result": "decompile_timeout",
+            "score": live_score,
+        })
+        return "decompile_timeout"
+
     # Refine mode based on live score and completeness context
     mode = determine_mode(live_score, data.get("deductions"), data.get("completeness"))
 
@@ -3823,6 +3971,19 @@ def process_function(
             result = "completed"
         elif "NEEDS REDO:" in output:
             result = "needs_redo"
+    elif tool_calls_made >= 5:
+        # Empty output (no final text block) but the model made substantial
+        # tool calls — the writes already hit Ghidra. This happens when opus
+        # burns its output budget on tool_use blocks and never emits a
+        # trailing text block with a DONE: marker. Trust the work; Guard #2
+        # below (score didn't improve + 0 tools) can't trigger since tools>0,
+        # and Guard #2b (score regression) will still catch real regressions.
+        print(
+            f"  NOTE: empty output with {tool_calls_made} tool calls — "
+            f"trusting work, score delta will verify",
+            flush=True,
+        )
+        result = "completed"
     else:
         result = "failed"
 
@@ -4059,6 +4220,21 @@ def process_function(
     # function and it reached the good-enough threshold.
     if result == "completed":
         auto_dequeue_if_done(func_key, new_score, source="completed")
+
+    # Recovery-pass one-shot: mark functions that finished a complexity-forced
+    # recovery pass so the selector doesn't re-pick them on every cycle. These
+    # massive functions legitimately can't reach good_enough_score in one pass
+    # — re-queuing burns opus/minimax tokens for marginal improvement. The
+    # flag clears on `--scan --refresh` or `refresh_candidate_scores`, or can
+    # be bypassed by pinning the function explicitly.
+    if (
+        complexity_forced_recovery
+        and mode == "FULL:recovery"
+        and result in ("completed", "partial")
+    ):
+        func["recovery_pass_done"] = True
+        func["recovery_pass_score"] = new_score
+        func["recovery_pass_at"] = datetime.now().isoformat()
 
     # Atomic per-function save: only write THIS function's entry, re-reading
     # disk state inside the lock so other workers' concurrent updates to

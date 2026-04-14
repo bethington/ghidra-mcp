@@ -684,7 +684,18 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
                 kwargs[pname] = sanitize_address(str(kwargs[pname]))
         # Extract dry_run before filtering — it goes as a query param, not in the body
         dry_run = kwargs.pop("dry_run", None)
-        filtered = {k: v for k, v in kwargs.items() if v is not None}
+        # Filter out None AND empty strings. Codex's MCP client passes schema
+        # default values (including "") to every call, which the Ghidra
+        # handler treats as "present but empty" and fails on params that
+        # require a real value (e.g. /get_function_callers rejects empty
+        # name/address). minimax avoids this by only sending params the LLM
+        # explicitly provided, but the bridge is schema-driven and doesn't
+        # know which were defaults. Empty string is not a meaningful value
+        # for any current Ghidra endpoint — safe to filter.
+        filtered = {
+            k: v for k, v in kwargs.items()
+            if v is not None and not (isinstance(v, str) and v == "")
+        }
         if http_method == "GET":
             str_params = {k: str(v) for k, v in filtered.items()}
             if dry_run:

@@ -16,6 +16,12 @@ Rules the selector must maintain (from the docstring + hard-won experience):
   8. low-completeness boost: (good_enough - score) * 2 added to ROI when
      score < good_enough AND fixable > 0
   9. partial_runs >= 3 deprioritizes by 0.1x multiplier (not pinned)
+ 10. recovery_pass_done=True and not pinned → excluded (one-shot recovery
+     pass — stops re-queue-forever loop on massive functions that cost
+     opus tokens without reaching good_enough_score)
+ 11. decompile_timeout=True and not pinned → excluded (one-shot pathological
+     function blacklist — decompile exceeds the 12s scoring-path cap, so
+     re-picking just wastes HTTP thread time)
 
 These tests exercise each rule independently with synthetic state. Fast, pure
 Python, no network, no Ghidra.
@@ -243,3 +249,114 @@ def test_selector_never_returns_duplicates():
     result = select_candidates(state, _queue(pinned=["a::5", "a::10"]))
     keys = _keys(result)
     assert len(keys) == len(set(keys))
+
+
+def test_recovery_pass_done_excluded_when_not_pinned():
+    """Functions flagged with recovery_pass_done (one-shot recovery pass
+    completed) must be excluded from selection unless pinned. This stops the
+    re-queue-forever loop on complexity-forced recovery passes where massive
+    functions legitimately can't reach good_enough_score in one pass."""
+    state = _state(
+        **{
+            "a::done": {
+                "score": 55,
+                "fixable": 20,  # still has fixable points
+                "recovery_pass_done": True,  # but recovery pass already ran
+            },
+            "a::fresh": {"score": 55, "fixable": 20},
+        }
+    )
+    result = select_candidates(state, _queue())
+    # The flagged function is skipped, fresh one remains
+    assert _keys(result) == ["a::fresh"]
+
+
+def test_recovery_pass_done_bypassed_by_pin():
+    """Pinning a recovery-done function should restore it to the queue —
+    the user has explicitly asked for it back."""
+    state = _state(
+        **{
+            "a::done": {
+                "score": 55,
+                "fixable": 20,
+                "recovery_pass_done": True,
+            },
+        }
+    )
+    # Not pinned: excluded
+    assert _keys(select_candidates(state, _queue())) == []
+    # Pinned: included (despite the flag)
+    result = select_candidates(state, _queue(pinned=["a::done"]))
+    assert _keys(result) == ["a::done"]
+
+
+def test_decompile_timeout_excluded_when_not_pinned():
+    """Functions flagged with decompile_timeout (pathological — Ghidra
+    decompile exceeds the 12s scoring-path cap) must be excluded from
+    selection unless pinned. This stops the selector from re-picking
+    pathological functions that would just wedge the HTTP thread pool
+    on every attempt."""
+    state = _state(
+        **{
+            "a::timeout": {
+                "score": 31,
+                "fixable": 20,
+                "decompile_timeout": True,
+            },
+            "a::fresh": {"score": 31, "fixable": 20},
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert _keys(result) == ["a::fresh"]
+
+
+def test_decompile_timeout_bypassed_by_pin():
+    """Pinning a decompile-timeout function should restore it to the queue."""
+    state = _state(
+        **{
+            "a::timeout": {
+                "score": 31,
+                "fixable": 20,
+                "decompile_timeout": True,
+            },
+        }
+    )
+    # Not pinned: excluded
+    assert _keys(select_candidates(state, _queue())) == []
+    # Pinned: included (user wants to retry)
+    result = select_candidates(state, _queue(pinned=["a::timeout"]))
+    assert _keys(result) == ["a::timeout"]
+
+
+def test_decompile_timeout_does_not_affect_unflagged():
+    """Sanity: the check only fires when the flag is truthy."""
+    state = _state(
+        **{
+            "a::normal": {"score": 31, "fixable": 20},
+            "a::explicit_false": {
+                "score": 31,
+                "fixable": 20,
+                "decompile_timeout": False,
+            },
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert set(_keys(result)) == {"a::normal", "a::explicit_false"}
+
+
+def test_recovery_pass_done_does_not_affect_unflagged_functions():
+    """Sanity: the new check only fires when the flag is truthy. A function
+    without the field should behave exactly as before."""
+    state = _state(
+        **{
+            "a::normal": {"score": 55, "fixable": 20},
+            # Explicit False should also be treated as "not done"
+            "a::explicit_false": {
+                "score": 55,
+                "fixable": 20,
+                "recovery_pass_done": False,
+            },
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert set(_keys(result)) == {"a::normal", "a::explicit_false"}

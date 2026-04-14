@@ -1055,10 +1055,33 @@
             refreshStats();
         });
         socket.on('worker_status', workers => {
-            // Update pane borders and status text based on worker status
+            // Update pane borders and status text based on worker status.
+            // On page refresh the local workerPanes map starts empty but the
+            // server still knows about the running workers — use its
+            // authoritative provider/model/binary info to rebuild panes with
+            // the correct title (e.g. "codex #abc123" instead of "? #abc123"
+            // that we'd otherwise get from the function_started fallback).
             workers.forEach(w => {
-                const pane = workerPanes[w.id];
-                if (!pane) return;
+                let pane = workerPanes[w.id];
+                if (!pane) {
+                    pane = getOrCreatePane(w.id, w.provider, w.binary || '');
+                    // If the worker has already finished/stopped by the time
+                    // we reconnect, restore the finished-state styling so the
+                    // user can dismiss it.
+                    if (w.status === 'finished' || w.status === 'stopped') {
+                        markPaneFinished(w.id, w.status);
+                    }
+                }
+                // Keep title in sync in case provider/model were still
+                // unknown when the pane was first created (e.g. created
+                // from a function_started fallback with null provider).
+                const titleEl = pane.element.querySelector('.wp-title');
+                if (titleEl && w.provider) {
+                    const titleText = `${w.provider} #${w.id}`;
+                    if (titleEl.textContent !== titleText) {
+                        titleEl.textContent = titleText;
+                    }
+                }
                 const cls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : 'finished';
                 pane.element.className = `worker-pane ${cls}`;
                 const done = w.progress.completed + w.progress.skipped + w.progress.failed;
