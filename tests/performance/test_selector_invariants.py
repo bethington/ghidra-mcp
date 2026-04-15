@@ -22,6 +22,10 @@ Rules the selector must maintain (from the docstring + hard-won experience):
  11. decompile_timeout=True and not pinned → excluded (one-shot pathological
      function blacklist — decompile exceeds the 12s scoring-path cap, so
      re-picking just wastes HTTP thread time)
+ 12. stagnation_runs >= 3 and not pinned → excluded (general safety net for
+     infinite re-pick loops where the function completes but makes no
+     meaningful progress — catches the codex-tool_calls=-1 loop, regression
+     oscillations, and "all fixes applied but scorer floor is dominating")
 
 These tests exercise each rule independently with synthetic state. Fast, pure
 Python, no network, no Ghidra.
@@ -326,6 +330,75 @@ def test_decompile_timeout_bypassed_by_pin():
     # Pinned: included (user wants to retry)
     result = select_candidates(state, _queue(pinned=["a::timeout"]))
     assert _keys(result) == ["a::timeout"]
+
+
+def test_stagnation_runs_excluded_at_threshold():
+    """Functions with stagnation_runs >= 3 must be excluded from selection
+    unless pinned. This is the general safety net for any re-pick loop
+    where the function completes but makes no meaningful progress — the
+    observed real-world case was codex on GetUnitSoundId making 7 runs in
+    2 hours with score oscillating between 57-61% (never reaching
+    good_enough_score of 80)."""
+    state = _state(
+        **{
+            "a::at_threshold": {
+                "score": 60,
+                "fixable": 30,
+                "stagnation_runs": 3,  # hit the threshold
+            },
+            "a::over_threshold": {
+                "score": 60,
+                "fixable": 30,
+                "stagnation_runs": 5,  # well over
+            },
+            "a::under_threshold": {
+                "score": 60,
+                "fixable": 30,
+                "stagnation_runs": 2,  # still eligible
+            },
+            "a::fresh": {"score": 60, "fixable": 30},
+        }
+    )
+    result = select_candidates(state, _queue())
+    keys = _keys(result)
+    # Both at-threshold and over-threshold are excluded
+    assert "a::at_threshold" not in keys
+    assert "a::over_threshold" not in keys
+    # Under-threshold and fresh are still eligible
+    assert "a::under_threshold" in keys
+    assert "a::fresh" in keys
+
+
+def test_stagnation_runs_bypassed_by_pin():
+    """Pinning a stagnation-blacklisted function should restore it."""
+    state = _state(
+        **{
+            "a::stuck": {
+                "score": 60,
+                "fixable": 30,
+                "stagnation_runs": 5,
+            },
+        }
+    )
+    # Not pinned: excluded
+    assert _keys(select_candidates(state, _queue())) == []
+    # Pinned: included (user is asking to retry it despite stagnation)
+    result = select_candidates(state, _queue(pinned=["a::stuck"]))
+    assert _keys(result) == ["a::stuck"]
+
+
+def test_stagnation_runs_does_not_affect_unflagged():
+    """Sanity: the check only fires when stagnation_runs >= 3."""
+    state = _state(
+        **{
+            "a::zero": {"score": 60, "fixable": 30, "stagnation_runs": 0},
+            "a::one": {"score": 60, "fixable": 30, "stagnation_runs": 1},
+            "a::two": {"score": 60, "fixable": 30, "stagnation_runs": 2},
+            "a::none": {"score": 60, "fixable": 30},  # field missing
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert set(_keys(result)) == {"a::zero", "a::one", "a::two", "a::none"}
 
 
 def test_decompile_timeout_does_not_affect_unflagged():

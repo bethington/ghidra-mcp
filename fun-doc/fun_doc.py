@@ -1273,6 +1273,7 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
     - Skip funcs with >=3 consecutive_fails (unless pinned)
     - Skip funcs with recovery_pass_done (complexity-forced recovery already ran)
     - Skip funcs with decompile_timeout (pathological, one-shot blacklist)
+    - Skip funcs with >=3 stagnation_runs (no-progress / regression safety net)
     - When require_scored is on, treat unscored funcs as top priority so the
       worker scores them on first contact instead of leaving them stranded
     - Pinned (explicitly queued) funcs always sort to the top in pin order
@@ -1323,6 +1324,15 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         # we already know can't be scored. Cleared by the same refresh paths
         # as recovery_pass_done.
         if func.get("decompile_timeout") and not is_pinned:
+            continue
+
+        # Stagnation safety net: blacklist functions that have completed 3+
+        # runs in a row with no meaningful progress (delta <= 1%) OR with
+        # regression. This catches infinite re-pick loops for any provider
+        # where the other guards miss (notably codex, which returns
+        # tool_calls_made = -1 so the "no tools, no progress" downgrade never
+        # fires). Cleared by refresh — same as the other one-shot flags.
+        if func.get("stagnation_runs", 0) >= 3 and not is_pinned:
             continue
 
         if needs_scoring:
@@ -1434,6 +1444,9 @@ def refresh_candidate_scores(state, active_binary=None, count=50, save=True,
             # user can retry after e.g. Ghidra analysis improvements.
             func.pop("decompile_timeout", None)
             func.pop("decompile_timeout_at", None)
+            # And the stagnation counter: a refresh is the user saying
+            # "re-score this from scratch, I'm willing to try again."
+            func.pop("stagnation_runs", None)
             prog_refreshed += 1
             if abs(info["score"] - old_score) >= 5:
                 prog_stale += 1
@@ -3957,7 +3970,19 @@ def process_function(
     # Two-pass: if recovery pass made tool calls, run pass 2 (comments) with fresh data
     # Don't gate on "DONE:" text — the model may produce think-only output or empty response
     # Skip pass 2 for massive functions — they need multiple sessions
-    if use_two_pass and tool_calls_made > 0 and not complexity_forced_recovery:
+    #
+    # tool_calls_made can be:
+    #   > 0: provider reported N tool calls (minimax)
+    #   == 0: provider reported zero tool calls (model made none)
+    #   == -1: provider doesn't report tool counts (codex, claude) — treat as "trust the run"
+    #
+    # Using `!= 0` (instead of `> 0`) lets codex/claude runs proceed to Pass 2.
+    # Without this, codex runs on functions that trigger use_two_pass (fixable_pts > 30)
+    # stall at Pass 1 score forever because Pass 2 (comments) is what typically pushes
+    # the score past good_enough_score. Observed as an infinite re-pick loop on
+    # GetUnitSoundId @ 0x6fad2430: 7 runs in 2 hours, never reaching Pass 2, score
+    # oscillating 57-61% below the 80% threshold.
+    if use_two_pass and tool_calls_made != 0 and not complexity_forced_recovery:
         print(
             f"\n  Pass 1 (recovery) complete. Re-fetching data for pass 2 (comments)..."
         )
@@ -4261,6 +4286,35 @@ def process_function(
         func["recovery_pass_done"] = True
         func["recovery_pass_score"] = new_score
         func["recovery_pass_at"] = datetime.now().isoformat()
+
+    # Stagnation tracking: count consecutive runs that made no meaningful
+    # progress. This is a general safety net that catches infinite re-pick
+    # loops for any provider/function combination the other guards miss.
+    #
+    # Real-world trigger: codex runs on use_two_pass-eligible functions where
+    # Pass 2 was previously gated out (fixed separately), producing score
+    # deltas of +0% across many runs. Without this guard nothing would blacklist
+    # the function and the worker would re-pick it forever.
+    #
+    # Semantics:
+    #   - Increment on any completed/partial run with delta <= 1 (no progress
+    #     OR regression). -1% dropped via Guard #2b to "partial" still counts.
+    #   - Reset to 0 on meaningful positive progress (delta >= 5).
+    #   - Not touched by failed/needs_redo/rate_limited (consecutive_fails
+    #     already covers those).
+    #   - Selector skips funcs with stagnation_runs >= 3 (see select_candidates).
+    #   - Cleared by refresh_candidate_scores and full --scan --refresh, same
+    #     as the other one-shot flags.
+    if (
+        result in ("completed", "partial")
+        and new_score is not None
+        and live_score is not None
+    ):
+        _diff = new_score - live_score
+        if _diff <= 1:
+            func["stagnation_runs"] = func.get("stagnation_runs", 0) + 1
+        elif _diff >= 5:
+            func["stagnation_runs"] = 0
 
     # Atomic per-function save: only write THIS function's entry, re-reading
     # disk state inside the lock so other workers' concurrent updates to
