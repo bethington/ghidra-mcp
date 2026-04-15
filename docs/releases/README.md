@@ -4,7 +4,17 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v5.3.1 (Latest) — hotfix
+### v5.3.2 (Latest) — hotfix
+
+- **Second v5.3.x hotfix** shipped after overnight 2026-04-15 test session exposed three bugs v5.3.1 missed
+- **Pass 2 (`FULL:comments`) now runs for codex and claude** — gate changed from `tool_calls_made > 0` to `!= 0` so the `-1` (unknown) sentinel returned by SDKs that don't report per-turn tool counts no longer silently skips the comments pass. This was why codex/claude score deltas plateaued at ~60% — Pass 2 is what adds the plate comment + EOL markers that push scores above `good_enough_score`.
+- **`stagnation_runs` one-shot blacklist** — new selector flag that catches any function completing with `delta <= 1` three runs in a row. Stops infinite re-pick loops regardless of provider. Observed stopping 200+ stuck-loop runs in the first session after deployment.
+- **Claude `BLOCKED:` false-positive fix** — system prompt now tells claude to call `mcp__ghidra-mcp__<tool>` directly instead of using `ToolSearch` (which returned empty because ghidra tools are statically-registered, not deferred). Eliminates the ~5% false-blocked rate observed in v5.3.1.
+- Live-verified across 5 codex + claude runs: average score delta **+36.4%**, 5/5 reached good_enough_score on first attempt (was +13-25% average in v5.3.1).
+- 27 Python + 25 Java offline tests green.
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.3.1 — hotfix
 
 - **Stability hotfix** for v5.3.0 after live multi-worker testing session
 - `NO_RETRY_DECOMPILE_TIMEOUT = 12s` on all MCP scoring handler paths — eliminates EDT saturation deadlocks on pathological functions (was 60s with retry escalation 60→120→180)

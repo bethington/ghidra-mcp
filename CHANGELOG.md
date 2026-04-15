@@ -4,6 +4,109 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.3.2 - 2026-04-15 (hotfix)
+
+Second hotfix on the v5.3.x line, shipped after a multi-hour overnight
+test session exposed three bugs that v5.3.1 didn't catch. Each was
+reproducible and live-verified fixed. No new features, no breaking
+changes. Semver PATCH bump.
+
+### fun-doc
+
+#### Fixed
+
+- **Pass 2 (`FULL:comments`) never ran for codex or claude** — [fun_doc.py:3960](fun-doc/fun_doc.py#L3960)
+  gated the two-pass flow on `tool_calls_made > 0`. Both providers use
+  `_wrap_result` which sets `tool_calls: -1` ("unknown, trust run") since
+  neither the codex nor the claude SDKs report per-turn tool counts.
+  `-1 > 0` was False, so Pass 2 was skipped on every codex/claude run.
+  Pass 2 is the phase that adds plate comments and EOL markers, which is
+  typically what pushes a function from ~55-65% to 80%+. Without it,
+  both providers plateaued and re-entered the selector forever.
+  Changed the gate to `!= 0`.
+
+  Live verification (2026-04-15 14:18–14:23, 5 runs across both providers):
+  ```
+  InitializeVideoState            codex   59→100  (+41)  FULL:comments  completed
+  ResetNpcMenuState               claude  59→100  (+41)  FULL:comments  completed
+  CreateMissileCheckingSkillFlags codex   61→100  (+39)  FULL:comments  completed
+  InitializeExpansionAudio        claude  61→ 92  (+31)  FULL:comments  completed
+  ReinitializeExpansionAudio      codex   61→ 91  (+30)  FULL:comments  completed
+  ```
+  Average delta: **+36.4%** vs. yesterday's +13-25%. Five for five reached
+  the `good_enough_score` (80) on the first attempt.
+
+- **Infinite re-pick loops on no-progress runs** — Selector had no
+  mechanism to blacklist a function that keeps completing with zero
+  progress. Observed pattern on 2026-04-15:
+  ```
+  RenderResourceBarProgress       codex  ×46 runs, all +0%
+  CLIENT_UpdateUnitDisplayEffects codex  ×68 + claude ×18, all +0%
+  IsPathTargetMonsterBoss         codex  ×24 runs, 23 at +0% then +10
+  UpdateRoomLevelTracker          claude ×28 runs, pattern [+0,-7,+7,+0×25]
+  CheckNetworkSessionTimeout      claude ×27 runs, pattern [-8,+8,+0×25]
+  CLIENT_UpdateUnitDisplayEffects claude ×18 runs, all +0%
+  ```
+  Guard #2 (no-progress downgrade) requires `tool_calls_made == 0`, so
+  `-1` from codex/claude never triggered it. `consecutive_fails` only
+  tracks hard failures, not stagnant completions. `partial_runs >= 3`
+  only deprioritizes 10× — still pickable when nothing else is available.
+  `recovery_pass_done` only fires for `complexity_tier == "massive"`.
+
+  Fix: new `stagnation_runs` counter in [fun_doc.py:4256](fun-doc/fun_doc.py#L4256),
+  incremented on `(completed|partial) and delta <= 1` (covers +0%, +1%,
+  and all regressions). Reset on `delta >= 5`. Selector excludes funcs
+  with `stagnation_runs >= 3` unless pinned. Cleared by `scan --refresh`,
+  `refresh_candidate_scores` (dashboard "Refresh Top N"), or pinning.
+
+- **Claude false `BLOCKED:` false-positive from ToolSearch confusion** —
+  The `_invoke_claude` system prompt at [fun_doc.py:3105](fun-doc/fun_doc.py#L3105)
+  instructed the agent to "Use ToolSearch to load the ghidra-mcp MCP
+  tools if they are not yet available". But `ToolSearch` is for *deferred*
+  tools (ones listed in `<system-reminder>` but not loaded). ghidra-mcp
+  tools are statically registered via `~/.claude.json` → `mcpServers.ghidra`
+  and are **immediately callable** under `mcp__ghidra-mcp__<name>`. They
+  never appear as deferred.
+
+  Following the old prompt, claude would burn 5-12 turns trying
+  `ToolSearch` with various queries, get empty results each time, then
+  declare "BLOCKED: the required MCP tools are not available in this
+  runtime". Observed 11 false-positive `BLOCKED:` results out of 213
+  claude runs (≈5%) on 2026-04-15. Score deltas on those runs were
+  typically 0% or negative (because a rename had landed but the follow-up
+  type/prototype work gave up).
+
+  Fix: new system-prompt append tells claude the tools are already
+  registered and to call them directly by the short or fully-qualified
+  name, and explicitly says *do not* use ToolSearch for ghidra-mcp tools.
+  Prevents the whole class of false-BLOCKED outcomes.
+
+### Test coverage
+
+- **3 new selector invariant tests** for `stagnation_runs`:
+  - `test_stagnation_runs_excluded_at_threshold` (checks `== 3` and `> 3`)
+  - `test_stagnation_runs_bypassed_by_pin`
+  - `test_stagnation_runs_does_not_affect_unflagged` (0, 1, 2, missing)
+- **Total offline test count**: 27 Python + 25 Java (was 24 + 25 in v5.3.1)
+
+### Why this release exists
+
+The v5.3.1 release was shipped in the afternoon with confidence that it
+covered all the observed issues. It didn't. The codex Pass-2 bug was
+live during v5.3.1 and triggered the multi-hour loops on codex workers
+that same evening. v5.3.2 is the real "stable multi-provider workloads
+finish successfully" release.
+
+**Provider parity**: before v5.3.2, only minimax could reliably reach
+`good_enough_score` on `use_two_pass`-eligible functions because only
+minimax reported tool counts truthfully. After v5.3.2, all three
+providers (minimax, codex, claude) reach good_enough_score on the first
+attempt for the same class of function. Live-measured average score
+delta parity: minimax ≈ +20%, codex ≈ +36%, claude ≈ +36% in the post-fix
+session.
+
+---
+
 ## v5.3.1 - 2026-04-14 (hotfix)
 
 Stability and observability hotfix on top of v5.3.0. Ships after a multi-hour live test session that uncovered several issues the v5.3.0 release didn't fully address. All three AI providers (minimax, codex, claude) verified under concurrent 6-worker load; zero failures across 63 runs in the final test session.

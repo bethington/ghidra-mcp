@@ -3102,7 +3102,23 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
             system_prompt={
                 "type": "preset",
                 "preset": "claude_code",
-                "append": "Use ToolSearch to load the ghidra-mcp MCP tools if they are not yet available, then call them directly by name.",
+                # ghidra-mcp tools are statically registered via ~/.claude.json
+                # mcpServers.ghidra and are immediately callable — they are NOT
+                # deferred tools, so ToolSearch cannot find them and returns
+                # empty results. Previously this append told claude to use
+                # ToolSearch first, which produced a false "BLOCKED: tools
+                # not available" rate of ~5% (observed 11 runs out of 213
+                # on 2026-04-15). Now we tell claude to call them directly.
+                "append": (
+                    "The ghidra-mcp MCP tools are already registered and "
+                    "immediately callable. Invoke them directly by either "
+                    "the short name (e.g. `set_local_variable_type`, "
+                    "`rename_variables`, `batch_set_comments`, "
+                    "`get_function_variables`, `set_function_prototype`, "
+                    "`decompile_function`) or the fully-qualified form "
+                    "`mcp__ghidra-mcp__<tool_name>`. Do NOT use ToolSearch "
+                    "to look them up — they are not deferred tools."
+                ),
             },
         )
 

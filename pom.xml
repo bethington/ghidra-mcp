@@ -6,9 +6,9 @@
     <groupId>com.xebyte</groupId>
     <artifactId>GhidraMCP</artifactId>
     <packaging>jar</packaging>
-    <version>5.3.1</version>
+    <version>5.3.2</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.3.1 (hotfix): NoRetry decompile capped at 12s in all MCP handler paths (eliminates EDT saturation deadlocks on pathological functions), opus empty-output parser trust, recovery-pass and decompile-timeout one-shot blacklists, ContextVar debug logging, claude ToolResultBlock capture, codex bridge empty-string filter, worker pane reconnect fix.</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.3.2 (hotfix): Pass 2 gate accepts tool_calls_made==-1 so codex/claude runs actually execute the comments pass (fixes score plateau at ~60% for massive-complexity functions), stagnation_runs one-shot blacklist for any no-progress loop, claude system prompt tells it to call MCP tools directly instead of using ToolSearch (eliminates false BLOCKED reports).</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
