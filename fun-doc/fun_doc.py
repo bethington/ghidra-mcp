@@ -1485,16 +1485,18 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
             if fixable <= 0 and not is_pinned:
                 # Already scored, nothing concrete to fix — leave it alone
                 continue
-            # Bottom-up call-graph traversal: functions whose callees are
-            # all documented (readiness=1.0) get full ROI. Functions with
-            # undocumented callees are deprioritized (min 20% ROI) so the
-            # worker documents dependencies first. Leaf functions (no
-            # callees) always have readiness=1.0 — they sort to the top.
+            # Bottom-up call-graph traversal: readiness is used as a
+            # PRIMARY sort key (not a ROI multiplier) so that:
+            #   1. Leaves (readiness=1.0, 0 callees) sort first
+            #   2. Ready callers (readiness=1.0, callees>0) sort next
+            #   3. Partially-ready functions sort after
+            #   4. Trunk functions (readiness~0) sort last
+            # Within each tier, ROI determines which function to pick.
             readiness = _callee_readiness(func, funcs, good_enough)
+            is_leaf = not func.get("callees")
             roi = fixable * (1 + callers / 10)
             if score < good_enough and fixable > 0:
                 roi += (good_enough - score) * 2
-            roi *= (0.2 + 0.8 * readiness)
 
         partial_runs = func.get("partial_runs", 0)
         if partial_runs >= 3 and not is_pinned:
@@ -1506,18 +1508,23 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
                 "func": func,
                 "roi": roi,
                 "readiness": readiness,
+                "is_leaf": not func.get("callees"),
                 "pinned": is_pinned,
                 "pin_order": pin_order.get(key, 10**9),
                 "needs_scoring": needs_scoring,
             }
         )
 
+    # Sort: pinned first → cold-start → strict bottom-up (readiness desc,
+    # leaves before non-leaves within same readiness) → highest ROI.
     candidates.sort(
         key=lambda c: (
             not c["pinned"],
             c["pin_order"],
             not c["needs_scoring"],
-            -c["roi"],
+            -c["readiness"],       # higher readiness first (1.0 before 0.5)
+            not c["is_leaf"],      # within same readiness, leaves before callers
+            -c["roi"],             # within same tier, highest ROI first
         )
     )
     return candidates
