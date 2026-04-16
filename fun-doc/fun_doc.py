@@ -4412,13 +4412,18 @@ def process_function(
             result = "completed"
         elif "NEEDS REDO:" in output:
             result = "needs_redo"
-    elif tool_calls_made >= 5:
-        # Empty output (no final text block) but the model made substantial
-        # tool calls — the writes already hit Ghidra. This happens when opus
-        # burns its output budget on tool_use blocks and never emits a
-        # trailing text block with a DONE: marker. Trust the work; Guard #2
-        # below (score didn't improve + 0 tools) can't trigger since tools>0,
-        # and Guard #2b (score regression) will still catch real regressions.
+    elif tool_calls_made >= 1 or tool_calls_made == -1:
+        # Empty output (no final text block) but the model made tool calls
+        # (or the provider doesn't report tool counts, i.e. -1). The writes
+        # already hit Ghidra. Trust the work initially; downstream guards
+        # catch real problems:
+        #   Guard #2b: score regression → downgrade to partial
+        #   stagnation_runs: 3+ no-progress completions → selector excludion
+        #
+        # Previously required >= 5 tools, which missed minimax Pass-2 runs
+        # that typically make 2-5 tool calls (set_function_prototype,
+        # batch_set_comments, rename_variables). The _fseek case had 3
+        # successful Ghidra writes but was marked failed at the old threshold.
         print(
             f"  NOTE: empty output with {tool_calls_made} tool calls — "
             f"trusting work, score delta will verify",
