@@ -576,12 +576,15 @@ public class XrefCallGraphService {
      */
     @McpTool(path = "/get_full_call_graph", description = "Get entire program call graph", category = "xref")
     public Response getFullCallGraph(
-            @Param(value = "format", defaultValue = "edges", description = "Output format (edges or adjacency)") String format,
-            @Param(value = "limit", defaultValue = "1000") int limit,
+            @Param(value = "format", defaultValue = "edges", description = "Output format: edges (text), adjacency, dot, mermaid, json_edges (address-based JSON for automation)") String format,
+            @Param(value = "limit", defaultValue = "1000", description = "Max edges to return. 0 = unlimited.") int limit,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+
+        // limit=0 means unlimited
+        int effectiveLimit = (limit <= 0) ? Integer.MAX_VALUE : limit;
 
         StringBuilder sb = new StringBuilder();
         FunctionManager functionManager = program.getFunctionManager();
@@ -589,22 +592,26 @@ public class XrefCallGraphService {
         Listing listing = program.getListing();
 
         Map<String, Set<String>> callGraph = new HashMap<>();
+        // Address-based edge list for the json_edges format — built alongside
+        // the name-based graph so we iterate instructions only once.
+        List<Map<String, String>> addressEdges = "json_edges".equals(format) ? new ArrayList<>() : null;
         int relationshipCount = 0;
 
         // Build complete call graph
         for (Function function : functionManager.getFunctions(true)) {
-            if (relationshipCount >= limit) {
+            if (relationshipCount >= effectiveLimit) {
                 break;
             }
 
             String functionName = function.getName();
+            String callerAddr = function.getEntryPoint().toString();
             Set<String> callees = new HashSet<>();
 
             // Find all functions called by this function
             AddressSetView functionBody = function.getBody();
             InstructionIterator instructions = listing.getInstructions(functionBody, true);
 
-            while (instructions.hasNext() && relationshipCount < limit) {
+            while (instructions.hasNext() && relationshipCount < effectiveLimit) {
                 Instruction instr = instructions.next();
 
                 if (instr.getFlowType().isCall()) {
@@ -614,10 +621,21 @@ public class XrefCallGraphService {
                             Address targetAddr = ref.getToAddress();
                             Function targetFunc = functionManager.getFunctionAt(targetAddr);
                             if (targetFunc != null) {
-                                callees.add(targetFunc.getName());
-                                relationshipCount++;
-                                if (relationshipCount >= limit) {
-                                    break;
+                                String calleeName = targetFunc.getName();
+                                // Deduplicate: only count each caller→callee pair once
+                                if (callees.add(calleeName)) {
+                                    relationshipCount++;
+                                    if (addressEdges != null) {
+                                        addressEdges.add(Map.of(
+                                            "caller_addr", callerAddr,
+                                            "callee_addr", targetFunc.getEntryPoint().toString(),
+                                            "caller_name", functionName,
+                                            "callee_name", calleeName
+                                        ));
+                                    }
+                                    if (relationshipCount >= effectiveLimit) {
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -631,7 +649,15 @@ public class XrefCallGraphService {
         }
 
         // Format output based on requested format
-        if ("dot".equals(format)) {
+        if ("json_edges".equals(format)) {
+            // Address-based JSON edge list — designed for automation tools
+            // (fun-doc call-graph traversal) that need stable identifiers.
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("edge_count", addressEdges != null ? addressEdges.size() : 0);
+            result.put("caller_count", callGraph.size());
+            result.put("edges", addressEdges != null ? addressEdges : List.of());
+            return Response.ok(result);
+        } else if ("dot".equals(format)) {
             sb.append("digraph CallGraph {\n");
             sb.append("  rankdir=TB;\n");
             sb.append("  node [shape=box];\n");

@@ -182,6 +182,7 @@
                 <option value="minimax" selected>MiniMax</option>
                 <option value="claude">Claude</option>
                 <option value="codex">Codex</option>
+                <option value="gemini">Gemini</option>
             </select>
             <input type="number" class="worker-input" id="workerCount" value="10" min="1" max="500" title="Functions to process">
             <label style="font-size: 0.65rem; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 3px;" title="Run until stopped or queue empty">
@@ -203,6 +204,7 @@
                     <option value="off" {% if not stats.queue_config.complexity_handoff_provider %}selected{% endif %}>Off</option>
                     <option value="claude" {% if stats.queue_config.complexity_handoff_provider == 'claude' %}selected{% endif %}>Claude</option>
                     <option value="codex" {% if stats.queue_config.complexity_handoff_provider == 'codex' %}selected{% endif %}>Codex</option>
+                    <option value="gemini" {% if stats.queue_config.complexity_handoff_provider == 'gemini' %}selected{% endif %}>Gemini</option>
                 </select>
             </label>
             <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="Maximum handoffs per worker session. 0 = unlimited.">
@@ -391,7 +393,7 @@
             <div class="panel-content">
                 <div class="func-list-scroll" style="max-height: 240px;" id="queuePanel">
                     <table class="data-table">
-                        <thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Fixable</th><th>Callers</th><th>ROI</th><th>Type</th><th>Last</th></tr></thead>
+                        <thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Ready</th><th>Fixable</th><th>ROI</th><th>Type</th><th>Last</th></tr></thead>
                         <tbody id="queueBody">
                         {% if queued %}
                         {% for t in queued %}
@@ -400,8 +402,8 @@
                             <td><span class="badge badge-pinned">QUEUED</span> {{ t.name }}</td>
                             <td class="mono">0x{{ t.address }}</td>
                             <td class="score-cell {% if t.score >= 90 %}score-90{% elif t.score >= 70 %}score-70{% elif t.score >= 50 %}score-50{% else %}score-low{% endif %}">{{ t.score }}%</td>
+                            <td class="mono" style="color: {% if t.readiness >= 1.0 %}var(--color-set){% elif t.readiness >= 0.5 %}var(--color-rare){% else %}var(--text-muted){% endif %};">{{ (t.readiness * 100)|round|int }}%</td>
                             <td class="mono">{{ t.fixable }}</td>
-                            <td class="mono">{{ t.callers }}</td>
                             <td class="mono" style="color: var(--accent-gold);">{{ t.roi }}</td>
                             <td>{% if t.is_leaf %}<span class="badge badge-leaf">LEAF</span>{% endif %}</td>
                             <td style="color: var(--text-muted); font-size: 0.6rem;">{{ t.last_result or '' }}</td>
@@ -421,13 +423,13 @@
             <div class="panel-header">
                 <h2>Auto-Pick Preview <span style="color: var(--text-muted); font-weight: normal;">(top {{ [autopicks|length, 30]|min }})</span></h2>
                 <span style="color: var(--text-muted); font-size: 0.65rem;">
-                    What the worker pulls when the Work Queue is empty. Ranked by ROI = fixable*(1+callers/10) + (good@-score)*2. Click Queue to promote.
+                    Bottom-up order: leaves first, then callers whose callees are documented. Ready% = fraction of callees at &ge;80%.
                 </span>
             </div>
             <div class="panel-content">
                 <div class="func-list-scroll" style="max-height: 300px;" id="autoPickPanel">
                     <table class="data-table">
-                        <thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Fixable</th><th>Callers</th><th>ROI</th><th>Type</th><th>Last</th></tr></thead>
+                        <thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Ready</th><th>Fixable</th><th>ROI</th><th>Type</th><th>Last</th></tr></thead>
                         <tbody id="autoPickBody">
                         {% for t in autopicks[:30] %}
                         <tr>
@@ -435,8 +437,8 @@
                             <td>{% if t.needs_scoring %}<span class="badge badge-new">COLD</span> {% endif %}{{ t.name }}</td>
                             <td class="mono">0x{{ t.address }}</td>
                             <td class="score-cell {% if t.score >= 90 %}score-90{% elif t.score >= 70 %}score-70{% elif t.score >= 50 %}score-50{% else %}score-low{% endif %}">{{ t.score }}%</td>
+                            <td class="mono" style="color: {% if t.readiness >= 1.0 %}var(--color-set){% elif t.readiness >= 0.5 %}var(--color-rare){% else %}var(--text-muted){% endif %};">{{ (t.readiness * 100)|round|int }}%</td>
                             <td class="mono">{{ t.fixable }}</td>
-                            <td class="mono">{{ t.callers }}</td>
                             <td class="mono" style="color: var(--accent-gold);">{{ t.roi }}</td>
                             <td>{% if t.is_leaf %}<span class="badge badge-leaf">LEAF</span>{% endif %}</td>
                             <td style="color: var(--text-muted); font-size: 0.6rem;">{{ t.last_result or '' }}</td>
@@ -448,8 +450,27 @@
             </div>
         </div>
 
+        <!-- View tabs: List View / Call Graph Layers -->
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <button class="btn active" id="tab-list" onclick="switchView('list')">List View</button>
+            <button class="btn" id="tab-graph" onclick="switchView('graph')">Call Graph Layers</button>
+        </div>
+
+        <!-- Call Graph Layers panel (hidden by default, shown when tab-graph is active) -->
+        <div class="panel" id="callGraphPanel" style="display: none;">
+            <div class="panel-header">
+                <h2>Call Graph Layers</h2>
+                <span style="color: var(--text-muted); font-size: 0.65rem;">
+                    Bottom-up: Layer 0 = leaves (no callees). Higher layers = callers of previous layers. Green = complete, gold = ready to process.
+                </span>
+            </div>
+            <div class="panel-content" id="callGraphContent">
+                <div style="text-align: center; color: var(--text-muted); padding: 1rem;">Loading call graph layers...</div>
+            </div>
+        </div>
+
         <!-- All Functions -->
-        <div class="panel">
+        <div class="panel" id="allFuncsPanel">
             <div class="panel-header">
                 <h2>All Functions</h2>
                 <span style="color: var(--text-muted); font-size: 0.65rem;" id="allFuncsCount">
@@ -550,13 +571,15 @@
             const queuedBadge = queued ? '<span class="badge badge-pinned">QUEUED</span> ' : '';
             const coldBadge = t.needs_scoring ? '<span class="badge badge-new">COLD</span> ' : '';
             const leaf = t.is_leaf ? '<span class="badge badge-leaf">LEAF</span>' : '';
+            const readyPct = Math.round((t.readiness != null ? t.readiness : 1) * 100);
+            const readyColor = readyPct >= 100 ? 'var(--color-set)' : readyPct >= 50 ? 'var(--color-rare)' : 'var(--text-muted)';
             return `<tr>
                 <td>${actionBtn}</td>
                 <td>${queuedBadge}${coldBadge}${escapeHtml(t.name)}</td>
                 <td class="mono">0x${escapeHtml(t.address)}</td>
                 <td class="score-cell ${scoreCellClass(t.score)}">${t.score}%</td>
+                <td class="mono" style="color: ${readyColor};">${readyPct}%</td>
                 <td class="mono">${t.fixable}</td>
-                <td class="mono">${t.callers}</td>
                 <td class="mono" style="color: var(--accent-gold);">${t.roi}</td>
                 <td>${leaf}</td>
                 <td style="color: var(--text-muted); font-size: 0.6rem;">${escapeHtml(t.last_result || '')}</td>
@@ -1100,6 +1123,52 @@
             if (btn) btn.classList.add('active');
             _currentFilter = mode;
             runServerSearch();
+        }
+
+        // --- Call Graph Layers tab ---
+        function switchView(view) {
+            document.getElementById('tab-list').classList.toggle('active', view === 'list');
+            document.getElementById('tab-graph').classList.toggle('active', view === 'graph');
+            const allFuncsPanel = document.getElementById('allFuncsPanel');
+            const graphPanel = document.getElementById('callGraphPanel');
+            if (allFuncsPanel) allFuncsPanel.style.display = view === 'list' ? '' : 'none';
+            if (graphPanel) graphPanel.style.display = view === 'graph' ? '' : 'none';
+            if (view === 'graph') loadCallGraphLayers();
+        }
+
+        async function loadCallGraphLayers() {
+            const el = document.getElementById('callGraphContent');
+            if (!el) return;
+            try {
+                const resp = await fetch('/api/call_graph_layers');
+                const data = await resp.json();
+                if (!data.layers || data.layers.length === 0) {
+                    el.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 1rem;">No call graph data. Run a scan with --refresh to populate callee data.</div>';
+                    return;
+                }
+                const summary = `<div style="font-size: 0.65rem; color: var(--text-muted); margin-bottom: 0.5rem; font-family: var(--font-mono);">`
+                    + `${data.total_functions} functions &middot; ${data.assigned} in clean layers &middot; ${data.cyclic} in call cycles &middot; max depth ${data.max_depth}`
+                    + `</div>`;
+                const bars = data.layers.map(layer => {
+                    const pct = layer.total > 0 ? Math.round(layer.done / layer.total * 100) : 0;
+                    const barClass = pct >= 100 ? 's100' : pct >= 80 ? 's80' : pct >= 50 ? 's50' : pct >= 20 ? 's20' : 's0';
+                    const remaining = layer.total - layer.done;
+                    const readyStyle = layer.ready > 0 ? 'color: var(--color-set); font-weight: 600;' : 'color: var(--text-muted);';
+                    return `<div class="score-bar-row" style="margin-bottom: 4px;">
+                        <span class="score-bar-label" style="min-width: 70px; font-size: 0.7rem;">${layer.label}</span>
+                        <div class="score-bar-track" style="flex: 1;">
+                            <div class="score-bar-fill ${barClass}" style="width: ${pct}%;"></div>
+                        </div>
+                        <span style="min-width: 180px; font-family: var(--font-mono); font-size: 0.65rem; text-align: right; padding-left: 8px;">
+                            ${layer.done}/${layer.total} (${pct}%)
+                            <span style="${readyStyle}">&nbsp;&bull; ${layer.ready} ready</span>
+                        </span>
+                    </div>`;
+                }).join('');
+                el.innerHTML = summary + bars;
+            } catch (e) {
+                el.innerHTML = `<div style="color: var(--accent-red-light); padding: 0.5rem;">Error loading call graph: ${e.message}</div>`;
+            }
         }
     </script>
 </body>
