@@ -3130,6 +3130,7 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
         # Anthropic API convention — the "user" sends tool results back).
         # Correlation is by tool_use_id.
         pending_calls = {}  # tool_id -> {"name", "input", "start_time"}
+        mcp_init_failed = False  # Tracks if ghidra-mcp tools failed to register
         try:
             async for msg in query(prompt=prompt, options=options):
                 msg_type = type(msg).__name__
@@ -3223,8 +3224,29 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                             tool_name, args, result_text, status, duration_ms,
                         )
 
+                        # Detect MCP init failure: the claude_agent_sdk sometimes
+                        # starts a session before the ghidra-mcp MCP subprocess
+                        # has finished registering its tools. When this happens,
+                        # EVERY ghidra-mcp tool call returns "No such tool
+                        # available" — the error is per-session, not per-call.
+                        # Abort early and retry the whole session (outer loop).
+                        if (
+                            is_error
+                            and result_text
+                            and "No such tool available" in result_text
+                            and ("ghidra" in result_text.lower() or "ghidra" in (tool_name or "").lower())
+                        ):
+                            mcp_init_failed = True
+                            print(
+                                f"  [claude sdk] MCP init failure — ghidra-mcp tools "
+                                f"not registered in this session. Aborting for retry.",
+                                flush=True,
+                            )
+                            break  # Exit the block loop
                     elif block_type == "ThinkingBlock":
                         pass  # Skip thinking blocks
+                if mcp_init_failed:
+                    break  # Exit the message loop
         except Exception as e:
             err_str = str(e)
             if "not found" in err_str.lower():
@@ -3232,15 +3254,39 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
             # Print all errors to stdout (stderr may not display in PowerShell)
             print(f"  [claude sdk error] {err_str}", flush=True)
 
+        if mcp_init_failed:
+            return "__MCP_INIT_FAILED__"
+
         return "\n".join(output_parts) if output_parts else None
 
-    # Retry once on "not found" errors (intermittent when previous process is still exiting)
-    for attempt in range(2):
+    # Retry on transient errors:
+    #   - "not found": intermittent when previous Claude Code process is still exiting
+    #   - "__MCP_INIT_FAILED__": the ghidra-mcp MCP subprocess didn't finish
+    #     registering tools before the session started. Observed as ~5-17% of
+    #     sessions in the v5.3.2 test run (2026-04-15). A 5s delay between
+    #     retries gives the subprocess time to finish init. Up to 3 attempts.
+    for attempt in range(3):
         try:
-            return asyncio.run(run())
+            result = asyncio.run(run())
+            if result == "__MCP_INIT_FAILED__":
+                if attempt < 2:
+                    print(
+                        f"  [claude sdk] MCP init failed — retrying in 5s "
+                        f"(attempt {attempt + 2}/3)...",
+                        flush=True,
+                    )
+                    time.sleep(5)
+                    continue
+                print(
+                    f"  [claude sdk] MCP init failed after 3 attempts — "
+                    f"ghidra-mcp tools never registered.",
+                    flush=True,
+                )
+                return None
+            return result
         except Exception as e:
             err_str = str(e)
-            if "not found" in err_str and attempt == 0:
+            if "not found" in err_str and attempt < 2:
                 print(f"  [claude sdk] Retrying in 3s ({err_str})...", flush=True)
                 time.sleep(3)
                 continue
