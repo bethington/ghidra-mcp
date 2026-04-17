@@ -530,12 +530,12 @@
                     <table class="data-table"><thead><tr>
                         <th>Actions</th>
                         <th class="sortable-header" onclick="toggleSort('name')">Function <span id="sort-ind-name"></span></th>
-                        <th>Addr</th>
+                        <th class="sortable-header" onclick="toggleSort('address')">Addr <span id="sort-ind-address"></span></th>
                         <th class="sortable-header" onclick="toggleSort('score')">Score <span id="sort-ind-score"></span></th>
                         <th class="sortable-header" onclick="toggleSort('deps')">Deps <span id="sort-ind-deps"></span></th>
                         <th class="sortable-header" onclick="toggleSort('fixable')">Fixable <span id="sort-ind-fixable"></span></th>
                         <th class="sortable-header" onclick="toggleSort('layer')">Layer <span id="sort-ind-layer"></span></th>
-                        <th>Status</th>
+                        <th class="sortable-header" onclick="toggleSort('status')">Status <span id="sort-ind-status"></span></th>
                     </tr></thead>
                     <tbody id="allFuncsBody">
                     {% for f in stats.all_functions %}
@@ -1242,10 +1242,12 @@
         // Maps column names to their API sort values for asc/desc
         const _sortColumns = {
             name:    { asc: 'name',      desc: 'name_desc'  },
+            address: { asc: 'address',   desc: 'address_desc' },
             score:   { asc: 'score',     desc: 'score_desc' },
             deps:    { asc: 'deps_asc',  desc: 'deps_desc'  },
             fixable: { asc: 'fixable',   desc: 'fixable_desc' },
             layer:   { asc: 'layer',     desc: 'layer_desc' },
+            status:  { asc: 'status',    desc: 'status_desc' },
         };
         let _currentSortCol = null;   // which column is active
         let _currentSortDir = null;   // 'asc' or 'desc'

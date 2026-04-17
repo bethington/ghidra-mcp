@@ -1314,6 +1314,27 @@ def create_app(state_file, event_bus=None):
             results.sort(key=lambda r: r["name"].lower())
         elif sort == "name_desc":
             results.sort(key=lambda r: r["name"].lower(), reverse=True)
+        elif sort == "address":
+            results.sort(key=lambda r: r.get("address", ""))
+        elif sort == "address_desc":
+            results.sort(key=lambda r: r.get("address", ""), reverse=True)
+        elif sort == "status":
+            # Sort by score bucket: unscored first, then NEW (<70), FIX (70-79), DONE (80+)
+            def _status_key(r):
+                if r.get("unscored"): return 0
+                s = r.get("score", 0)
+                if s >= 80: return 3
+                if s >= 70: return 2
+                return 1
+            results.sort(key=_status_key)
+        elif sort == "status_desc":
+            def _status_key_desc(r):
+                if r.get("unscored"): return 0
+                s = r.get("score", 0)
+                if s >= 80: return 3
+                if s >= 70: return 2
+                return 1
+            results.sort(key=_status_key_desc, reverse=True)
         elif sort == "score_desc":
             results.sort(key=lambda r: -r["score"])
         elif sort == "fixable":
