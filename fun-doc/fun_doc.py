@@ -4916,10 +4916,17 @@ def process_function(
     # — re-queuing burns opus/minimax tokens for marginal improvement. The
     # flag clears on `--scan --refresh` or `refresh_candidate_scores`, or can
     # be bypassed by pinning the function explicitly.
+    # Don't flag leaf functions — they're self-contained and should always
+    # get another chance via the normal stagnation guard. The "massive"
+    # classifier triggers on fixable_pts > 50 regardless of function size,
+    # so a 10-line leaf with many undefined variables gets incorrectly
+    # forced into recovery-only mode and stuck forever.
+    is_leaf_func = not func.get("callees")
     if (
         complexity_forced_recovery
         and mode == "FULL:recovery"
         and result in ("completed", "partial")
+        and not is_leaf_func
     ):
         func["recovery_pass_done"] = True
         func["recovery_pass_score"] = new_score
