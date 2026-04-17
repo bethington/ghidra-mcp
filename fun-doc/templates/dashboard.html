@@ -512,7 +512,7 @@
             <div class="panel-header">
                 <h2>All Functions</h2>
                 <span style="color: var(--text-muted); font-size: 0.65rem;" id="allFuncsCount">
-                    showing {{ stats.all_functions|length }} of {{ stats.all_functions_total|default(stats.all_functions|length) }} (search loads more)
+                    {{ stats.all_functions|length }} functions
                 </span>
             </div>
             <div class="panel-content">
@@ -1081,7 +1081,7 @@
             if (q) params.set('q', q);
             if (program) params.set('program', program);
             params.set('sort', sort);
-            params.set('limit', '500');
+            params.set('limit', '5000');
             // Layer filter from Call Graph Layers click
             if (_currentLayerFilter !== null) {
                 params.set('layer', _currentLayerFilter);

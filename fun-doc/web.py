@@ -864,10 +864,7 @@ def create_app(state_file, event_bus=None):
                 }
             )
         func_list.sort(key=lambda x: x["score"])
-        # Initial render is capped to keep payload sane on 60k-function projects.
-        # Use /api/functions/search to find anything beyond the first page.
         all_func_total = len(func_list)
-        func_list = func_list[:500]
         return {
             "total": total,
             "done": done,
@@ -1204,10 +1201,10 @@ def create_app(state_file, event_bus=None):
         program = request.args.get("program") or None
         layer_filter = request.args.get("layer")  # "0", "1", ..., "cyclic", or None
         try:
-            limit = max(1, min(2000, int(request.args.get("limit", 200))))
+            limit = max(1, min(10000, int(request.args.get("limit", 5000))))
         except ValueError:
-            limit = 200
-        sort = request.args.get("sort", "score")  # score|name|callers|fixable
+            limit = 5000
+        sort = request.args.get("sort", "score")
         state = load_state()
         all_funcs = state.get("functions", {})
         queue = load_queue()
