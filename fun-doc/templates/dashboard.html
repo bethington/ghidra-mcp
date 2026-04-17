@@ -431,7 +431,7 @@
             <div class="panel-content">
                 <div class="func-list-scroll" style="max-height: 240px;" id="queuePanel">
                     <table class="data-table">
-                        <thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Ready</th><th>Fixable</th><th>ROI</th><th>Type</th><th>Last</th></tr></thead>
+                        <thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Deps</th><th>Fixable</th><th>ROI</th><th>Type</th><th>Last</th></tr></thead>
                         <tbody id="queueBody">
                         {% if queued %}
                         {% for t in queued %}
@@ -440,7 +440,7 @@
                             <td><span class="badge badge-pinned">QUEUED</span> {{ t.name }}</td>
                             <td class="mono">0x{{ t.address }}</td>
                             <td class="score-cell {% if t.score >= 90 %}score-90{% elif t.score >= 70 %}score-70{% elif t.score >= 50 %}score-50{% else %}score-low{% endif %}">{{ t.score }}%</td>
-                            <td class="mono" style="color: {% if t.readiness >= 1.0 %}var(--color-set){% elif t.readiness >= 0.5 %}var(--color-rare){% else %}var(--text-muted){% endif %};">{{ (t.readiness * 100)|round|int }}%</td>
+                            <td class="mono">{% if t.deps_remaining is defined and t.deps_remaining == 0 and not t.is_leaf %}<span style="color: var(--color-set);">Ready</span>{% elif t.is_leaf %}<span class="badge badge-leaf">Leaf</span>{% elif t.deps_remaining is defined and t.deps_remaining > 0 %}<span style="color: var(--color-rare);">{{ t.deps_remaining }} dep{{ 's' if t.deps_remaining > 1 }}</span>{% else %}—{% endif %}</td>
                             <td class="mono">{{ t.fixable }}</td>
                             <td class="mono" style="color: var(--accent-gold);">{{ t.roi }}</td>
                             <td>{% if t.is_leaf %}<span class="badge badge-leaf">Leaf</span>{% elif t.call_graph_layer is not none %}<span style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.65rem;">L{{ t.call_graph_layer }}</span>{% elif t.call_graph_layer is none and not t.is_leaf %}<span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.65rem;">Cyc</span>{% endif %}</td>
@@ -467,7 +467,7 @@
             <div class="panel-content">
                 <div class="func-list-scroll" style="max-height: 300px;" id="autoPickPanel">
                     <table class="data-table">
-                        <thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Ready</th><th>Fixable</th><th>ROI</th><th>Type</th><th>Last</th></tr></thead>
+                        <thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Deps</th><th>Fixable</th><th>ROI</th><th>Type</th><th>Last</th></tr></thead>
                         <tbody id="autoPickBody">
                         {% for t in autopicks[:30] %}
                         <tr>
@@ -475,7 +475,7 @@
                             <td>{% if t.needs_scoring %}<span class="badge badge-new">COLD</span> {% endif %}{{ t.name }}</td>
                             <td class="mono">0x{{ t.address }}</td>
                             <td class="score-cell {% if t.score >= 90 %}score-90{% elif t.score >= 70 %}score-70{% elif t.score >= 50 %}score-50{% else %}score-low{% endif %}">{{ t.score }}%</td>
-                            <td class="mono" style="color: {% if t.readiness >= 1.0 %}var(--color-set){% elif t.readiness >= 0.5 %}var(--color-rare){% else %}var(--text-muted){% endif %};">{{ (t.readiness * 100)|round|int }}%</td>
+                            <td class="mono">{% if t.deps_remaining is defined and t.deps_remaining == 0 and not t.is_leaf %}<span style="color: var(--color-set);">Ready</span>{% elif t.is_leaf %}<span class="badge badge-leaf">Leaf</span>{% elif t.deps_remaining is defined and t.deps_remaining > 0 %}<span style="color: var(--color-rare);">{{ t.deps_remaining }} dep{{ 's' if t.deps_remaining > 1 }}</span>{% else %}—{% endif %}</td>
                             <td class="mono">{{ t.fixable }}</td>
                             <td class="mono" style="color: var(--accent-gold);">{{ t.roi }}</td>
                             <td>{% if t.is_leaf %}<span class="badge badge-leaf">Leaf</span>{% elif t.call_graph_layer is not none %}<span style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.65rem;">L{{ t.call_graph_layer }}</span>{% elif t.call_graph_layer is none and not t.is_leaf %}<span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.65rem;">Cyc</span>{% endif %}</td>
@@ -616,14 +616,22 @@
             } else if (!t.is_leaf) {
                 layerLabel = '<span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.65rem;">Cyc</span>';
             }
-            const readyPct = Math.round((t.readiness != null ? t.readiness : 1) * 100);
-            const readyColor = readyPct >= 100 ? 'var(--color-set)' : readyPct >= 50 ? 'var(--color-rare)' : 'var(--text-muted)';
+            let depsCell;
+            if (t.is_leaf) {
+                depsCell = '<span class="badge badge-leaf">Leaf</span>';
+            } else if (t.deps_remaining === 0) {
+                depsCell = '<span style="color: var(--color-set);">Ready</span>';
+            } else if (t.deps_remaining != null && t.deps_remaining > 0) {
+                depsCell = `<span style="color: var(--color-rare);">${t.deps_remaining} dep${t.deps_remaining > 1 ? 's' : ''}</span>`;
+            } else {
+                depsCell = '—';
+            }
             return `<tr>
                 <td>${actionBtn}</td>
                 <td>${queuedBadge}${coldBadge}${escapeHtml(t.name)}</td>
                 <td class="mono">0x${escapeHtml(t.address)}</td>
                 <td class="score-cell ${scoreCellClass(t.score)}">${t.score}%</td>
-                <td class="mono" style="color: ${readyColor};">${readyPct}%</td>
+                <td class="mono">${depsCell}</td>
                 <td class="mono">${t.fixable}</td>
                 <td class="mono" style="color: var(--accent-gold);">${t.roi}</td>
                 <td>${layerLabel}</td>
@@ -1053,6 +1061,7 @@
         let _searchTimer = null;
         let _currentFilter = 'all';
         function onSearchInput() {
+            _currentLayerFilter = null;  // clear layer filter on manual search
             if (_searchTimer) clearTimeout(_searchTimer);
             _searchTimer = setTimeout(runServerSearch, 250);
         }
@@ -1069,9 +1078,15 @@
             if (program) params.set('program', program);
             params.set('sort', sort);
             params.set('limit', '500');
+            // Layer filter from Call Graph Layers click
+            if (_currentLayerFilter !== null) {
+                params.set('layer', _currentLayerFilter);
+            }
             fetch('/api/functions/search?' + params.toString())
                 .then(r => r.json())
                 .then(data => repaintAllFunctions(data.results || [], data.total || 0));
+            // Clear the layer filter after use so normal searches work
+            // (it persists until the user types a new search or clicks a filter button)
         }
         function repaintAllFunctions(rows, totalMatch) {
             const tbody = document.getElementById('allFuncsBody');
@@ -1101,15 +1116,24 @@
                     else if (f.score >= 70) statusBadge = '<span class="badge badge-fix">FIX</span>';
                     else statusBadge = '<span class="badge badge-new">NEW</span>';
                 }
-                if (f.is_leaf) statusBadge += ' <span class="badge badge-leaf">LEAF</span>';
+                // Deps remaining column
+                let depsLabel;
+                if (f.is_leaf) {
+                    depsLabel = '<span class="badge badge-leaf">Leaf</span>';
+                } else if (f.deps_remaining === 0) {
+                    depsLabel = '<span style="color: var(--color-set); font-family: var(--font-mono); font-size: 0.65rem;">Ready</span>';
+                } else if (f.deps_remaining != null) {
+                    depsLabel = `<span style="color: var(--color-rare); font-family: var(--font-mono); font-size: 0.65rem;">${f.deps_remaining} dep${f.deps_remaining > 1 ? 's' : ''}</span>`;
+                } else {
+                    depsLabel = '';
+                }
                 return `<tr class="func-row" data-score="${f.score}" data-name="${escapeHtml((f.name||'').toLowerCase())}" data-key="${escapeHtml(f.key)}">
                     <td>${queueBtn}</td>
                     <td>${queuedBadge}${escapeHtml(f.name)}</td>
                     <td class="mono">0x${escapeHtml(f.address)}</td>
-                    <td>${escapeHtml(f.program)}</td>
                     ${scoreCell}
+                    <td>${depsLabel}</td>
                     <td class="mono">${f.fixable}</td>
-                    <td class="mono">${f.callers}</td>
                     <td>${statusBadge}</td>
                 </tr>`;
             }).join('');
@@ -1196,6 +1220,22 @@
             if (stopAllBtn) stopAllBtn.style.display = activeCount > 0 ? '' : 'none';
             if (gridCount) gridCount.textContent = activeCount > 0 ? `${activeCount} active worker${activeCount > 1 ? 's' : ''}` : '';
         });
+
+        // --- Layer filter (click from Call Graph Layers → List View) ---
+        function filterByLayer(layerId, layerLabel) {
+            // Switch to list view
+            switchView('list');
+            // Set search input to trigger server-side layer filter
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) searchInput.value = '';
+            // Store the layer filter and re-run search
+            _currentLayerFilter = layerId;
+            // Update a visual indicator
+            const countEl = document.getElementById('allFuncsCount');
+            if (countEl) countEl.textContent = `filtering by ${layerLabel}...`;
+            runServerSearch();
+        }
+        let _currentLayerFilter = null;
 
         // --- Worker Focus ---
         let _focusedWorkerId = null;
@@ -1286,6 +1326,7 @@
             document.querySelectorAll('.filter-bar .btn').forEach(b => b.classList.remove('active'));
             if (btn) btn.classList.add('active');
             _currentFilter = mode;
+            _currentLayerFilter = null;  // clear layer filter on manual filter click
             runServerSearch();
         }
 
@@ -1316,9 +1357,10 @@
                 const bars = data.layers.map(layer => {
                     const pct = layer.total > 0 ? Math.round(layer.done / layer.total * 100) : 0;
                     const barClass = pct >= 100 ? 's100' : pct >= 80 ? 's80' : pct >= 50 ? 's50' : pct >= 20 ? 's20' : 's0';
-                    const remaining = layer.total - layer.done;
                     const readyStyle = layer.ready > 0 ? 'color: var(--color-set); font-weight: 600;' : 'color: var(--text-muted);';
-                    return `<div class="score-bar-row" style="margin-bottom: 4px;">
+                    // Layer ID for filtering: "0" for leaves, "1"-"14" for layers, "cyclic" for cyclic
+                    const layerId = layer.label === 'Leaves' ? '0' : layer.label === 'Cyclic' ? 'cyclic' : String(layer.depth);
+                    return `<div class="score-bar-row" style="margin-bottom: 4px; cursor: pointer;" onclick="filterByLayer('${layerId}', '${layer.label}')" title="Click to view ${layer.label} functions in List View">
                         <span class="score-bar-label" style="min-width: 70px; font-size: 0.7rem;">${layer.label}</span>
                         <div class="score-bar-track" style="flex: 1;">
                             <div class="score-bar-fill ${barClass}" style="width: ${pct}%;"></div>

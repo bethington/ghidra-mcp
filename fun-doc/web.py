@@ -644,26 +644,41 @@ def create_app(state_file, event_bus=None):
         from fun_doc import select_candidates
 
         candidates = select_candidates(funcs, queue, active_binary=active_binary)
-        return [
-            {
+        good_enough = queue.get("config", {}).get("good_enough_score", 80)
+        result = []
+        for c in candidates:
+            f = c["func"]
+            # Count undocumented callees (deps remaining)
+            callees = f.get("callees", [])
+            if not callees:
+                deps_remaining = 0
+            else:
+                prog = f.get("program")
+                deps_remaining = 0
+                for ca in callees:
+                    ck = f"{prog}::{ca}"
+                    cf = funcs.get(ck)
+                    if cf and cf.get("score", 0) < good_enough:
+                        deps_remaining += 1
+            result.append({
                 "key": c["key"],
-                "name": c["func"]["name"],
-                "address": c["func"]["address"],
-                "program": c["func"].get("program_name", ""),
-                "score": c["func"].get("score", 0),
-                "fixable": round(c["func"].get("fixable", 0), 1),
-                "callers": c["func"].get("caller_count", 0),
+                "name": f["name"],
+                "address": f["address"],
+                "program": f.get("program_name", ""),
+                "score": f.get("score", 0),
+                "fixable": round(f.get("fixable", 0), 1),
+                "callers": f.get("caller_count", 0),
                 "roi": round(c["roi"], 1),
                 "readiness": round(c.get("readiness", 1.0), 2),
-                "is_leaf": c["func"].get("is_leaf", False),
+                "deps_remaining": deps_remaining,
+                "is_leaf": f.get("is_leaf", False),
                 "call_graph_layer": c.get("call_graph_layer"),
-                "last_result": c["func"].get("last_result"),
+                "last_result": f.get("last_result"),
                 "pinned": c["pinned"],
                 "needs_scoring": c["needs_scoring"],
-                "classification": c["func"].get("classification", ""),
-            }
-            for c in candidates
-        ]
+                "classification": f.get("classification", ""),
+            })
+        return result
 
     def compute_run_stats(logs, total_override=None, today_override=None):
         if not logs:
@@ -1187,25 +1202,100 @@ def create_app(state_file, event_bus=None):
         """Search across the full state.functions map without the 500-row dashboard cap."""
         q = (request.args.get("q") or "").strip().lower()
         program = request.args.get("program") or None
+        layer_filter = request.args.get("layer")  # "0", "1", ..., "cyclic", or None
         try:
             limit = max(1, min(2000, int(request.args.get("limit", 200))))
         except ValueError:
             limit = 200
         sort = request.args.get("sort", "score")  # score|name|callers|fixable
         state = load_state()
+        all_funcs = state.get("functions", {})
         queue = load_queue()
+        good_enough = queue.get("config", {}).get("good_enough_score", 80)
         pinned = set(queue.get("pinned", []))
+
+        # For layer filtering, compute BFS layers dynamically (same as
+        # /api/call_graph_layers) so they match the dashboard visualization.
+        layer_map = {}  # addr -> layer (int or None for cyclic)
+        if layer_filter is not None:
+            active_bin = program or state.get("active_binary")
+            bin_funcs = {k: v for k, v in all_funcs.items()
+                         if v.get("program_name") == active_bin
+                         and not v.get("is_thunk") and not v.get("is_external")}
+            all_addrs = set()
+            callees_of_map = {}
+            callers_of_map = defaultdict(set)
+            for k, v in bin_funcs.items():
+                addr = v.get("address", "")
+                all_addrs.add(addr)
+                ic = set(v.get("callees", [])) & all_addrs
+                callees_of_map[addr] = ic
+                for c in ic:
+                    callers_of_map[c].add(addr)
+            # Second pass for internal callees (needs all addrs known)
+            for addr in all_addrs:
+                callees_of_map[addr] = set(
+                    next((v.get("callees", []) for k, v in bin_funcs.items()
+                          if v.get("address") == addr), [])
+                ) & all_addrs
+                for c in callees_of_map[addr]:
+                    callers_of_map[c].add(addr)
+            depth = {}
+            current = set()
+            for addr in all_addrs:
+                if not callees_of_map.get(addr):
+                    depth[addr] = 0
+                    current.add(addr)
+            ln = 0
+            while current:
+                nxt = set()
+                for addr in current:
+                    for caller in callers_of_map.get(addr, set()):
+                        if caller in depth: continue
+                        if all(c in depth for c in callees_of_map.get(caller, set())):
+                            depth[caller] = ln + 1
+                            nxt.add(caller)
+                current = nxt
+                ln += 1
+                if ln > 200: break
+            for addr in all_addrs:
+                layer_map[addr] = depth.get(addr)  # None = cyclic
+
         results = []
-        for key, func in state.get("functions", {}).items():
+        for key, func in all_funcs.items():
             if func.get("is_thunk") or func.get("is_external"):
                 continue
             if program and func.get("program_name") != program:
                 continue
+            # Layer filter
+            if layer_filter is not None:
+                addr = func.get("address", "")
+                func_layer = layer_map.get(addr)
+                if layer_filter == "cyclic":
+                    if func_layer is not None:
+                        continue
+                else:
+                    try:
+                        target_layer = int(layer_filter)
+                    except ValueError:
+                        target_layer = -1
+                    if func_layer != target_layer:
+                        continue
             if q:
                 name = func.get("name", "").lower()
                 addr = str(func.get("address", "")).lower()
                 if q not in name and q not in addr:
                     continue
+            # Compute deps remaining
+            callees = func.get("callees", [])
+            if not callees:
+                deps_remaining = 0
+            else:
+                prog = func.get("program")
+                deps_remaining = sum(
+                    1 for ca in callees
+                    if (cf := all_funcs.get(f"{prog}::{ca}")) and cf.get("score", 0) < good_enough
+                )
             results.append(
                 {
                     "key": key,
@@ -1215,7 +1305,9 @@ def create_app(state_file, event_bus=None):
                     "score": func.get("score", 0),
                     "fixable": round(func.get("fixable", 0), 1),
                     "callers": func.get("caller_count", 0),
-                    "is_leaf": func.get("is_leaf", False),
+                    "is_leaf": not callees,
+                    "call_graph_layer": func.get("call_graph_layer"),
+                    "deps_remaining": deps_remaining,
                     "last_result": func.get("last_result"),
                     "pinned": key in pinned,
                     "unscored": not func.get("last_processed"),
