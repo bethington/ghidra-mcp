@@ -1246,18 +1246,65 @@ def populate_call_graph(state, prog_path):
 
     # Stamp each function's state entry with its callee list
     funcs = state.get("functions", {})
+    # Collect all addresses for this program to compute BFS layers
+    prog_addrs = set()
+    addr_to_key = {}
     stamped = 0
     for key, func in funcs.items():
         if func.get("program") != prog_path:
             continue
         addr = func.get("address", "")
         func["callees"] = sorted(adjacency.get(addr, set()))
+        prog_addrs.add(addr)
+        addr_to_key[addr] = key
         stamped += 1
 
+    # BFS layer assignment: leaf = layer 0, callers of leaves = layer 1, etc.
+    # Internal callees only (filter to addresses within this program).
+    internal_callees = {}
+    callers_of = defaultdict(set)
+    for addr in prog_addrs:
+        ic = adjacency.get(addr, set()) & prog_addrs
+        internal_callees[addr] = ic
+        for c in ic:
+            callers_of[c].add(addr)
+
+    depth = {}
+    current = set()
+    for addr in prog_addrs:
+        if not internal_callees.get(addr):
+            depth[addr] = 0
+            current.add(addr)
+    layer_num = 0
+    while current:
+        nxt = set()
+        for addr in current:
+            for caller in callers_of.get(addr, set()):
+                if caller in depth:
+                    continue
+                if all(c in depth for c in internal_callees.get(caller, set())):
+                    depth[caller] = layer_num + 1
+                    nxt.add(caller)
+        current = nxt
+        layer_num += 1
+        if layer_num > 200:
+            break
+
+    # Stamp layer on each function
+    for addr, d in depth.items():
+        if addr in addr_to_key:
+            funcs[addr_to_key[addr]]["call_graph_layer"] = d
+    # Cyclic functions get no layer (None)
+    for addr in prog_addrs - set(depth.keys()):
+        if addr in addr_to_key:
+            funcs[addr_to_key[addr]]["call_graph_layer"] = None
+
     edge_count = resp.get("edge_count", len(edges))
+    assigned = len(depth)
+    cyclic = len(prog_addrs) - assigned
     print(
         f"  Call graph: {edge_count} edges, {len(adjacency)} callers, "
-        f"{stamped} functions stamped",
+        f"{stamped} stamped, {assigned} layered, {cyclic} cyclic",
         flush=True,
     )
     return stamped
@@ -1533,6 +1580,7 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
                 "roi": roi,
                 "readiness": readiness,
                 "is_leaf": not func.get("callees"),
+                "call_graph_layer": func.get("call_graph_layer"),
                 "pinned": is_pinned,
                 "pin_order": pin_order.get(key, 10**9),
                 "needs_scoring": needs_scoring,

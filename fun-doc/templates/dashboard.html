@@ -420,7 +420,7 @@
                             <td class="mono" style="color: {% if t.readiness >= 1.0 %}var(--color-set){% elif t.readiness >= 0.5 %}var(--color-rare){% else %}var(--text-muted){% endif %};">{{ (t.readiness * 100)|round|int }}%</td>
                             <td class="mono">{{ t.fixable }}</td>
                             <td class="mono" style="color: var(--accent-gold);">{{ t.roi }}</td>
-                            <td>{% if t.is_leaf %}<span class="badge badge-leaf">LEAF</span>{% endif %}</td>
+                            <td>{% if t.is_leaf %}<span class="badge badge-leaf">Leaf</span>{% elif t.call_graph_layer is not none %}<span style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.65rem;">L{{ t.call_graph_layer }}</span>{% elif t.call_graph_layer is none and not t.is_leaf %}<span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.65rem;">Cyc</span>{% endif %}</td>
                             <td style="color: var(--text-muted); font-size: 0.6rem;">{{ t.last_result or '' }}</td>
                         </tr>
                         {% endfor %}
@@ -455,7 +455,7 @@
                             <td class="mono" style="color: {% if t.readiness >= 1.0 %}var(--color-set){% elif t.readiness >= 0.5 %}var(--color-rare){% else %}var(--text-muted){% endif %};">{{ (t.readiness * 100)|round|int }}%</td>
                             <td class="mono">{{ t.fixable }}</td>
                             <td class="mono" style="color: var(--accent-gold);">{{ t.roi }}</td>
-                            <td>{% if t.is_leaf %}<span class="badge badge-leaf">LEAF</span>{% endif %}</td>
+                            <td>{% if t.is_leaf %}<span class="badge badge-leaf">Leaf</span>{% elif t.call_graph_layer is not none %}<span style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.65rem;">L{{ t.call_graph_layer }}</span>{% elif t.call_graph_layer is none and not t.is_leaf %}<span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.65rem;">Cyc</span>{% endif %}</td>
                             <td style="color: var(--text-muted); font-size: 0.6rem;">{{ t.last_result or '' }}</td>
                         </tr>
                         {% endfor %}
@@ -585,7 +585,14 @@
                 : `<button class="btn" onclick="queueFunc('${escapeHtml(t.key)}')">Queue</button>`;
             const queuedBadge = queued ? '<span class="badge badge-pinned">QUEUED</span> ' : '';
             const coldBadge = t.needs_scoring ? '<span class="badge badge-new">COLD</span> ' : '';
-            const leaf = t.is_leaf ? '<span class="badge badge-leaf">LEAF</span>' : '';
+            let layerLabel = '';
+            if (t.is_leaf) {
+                layerLabel = '<span class="badge badge-leaf">Leaf</span>';
+            } else if (t.call_graph_layer != null) {
+                layerLabel = `<span style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.65rem;">L${t.call_graph_layer}</span>`;
+            } else if (!t.is_leaf) {
+                layerLabel = '<span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.65rem;">Cyc</span>';
+            }
             const readyPct = Math.round((t.readiness != null ? t.readiness : 1) * 100);
             const readyColor = readyPct >= 100 ? 'var(--color-set)' : readyPct >= 50 ? 'var(--color-rare)' : 'var(--text-muted)';
             return `<tr>
@@ -596,7 +603,7 @@
                 <td class="mono" style="color: ${readyColor};">${readyPct}%</td>
                 <td class="mono">${t.fixable}</td>
                 <td class="mono" style="color: var(--accent-gold);">${t.roi}</td>
-                <td>${leaf}</td>
+                <td>${layerLabel}</td>
                 <td style="color: var(--text-muted); font-size: 0.6rem;">${escapeHtml(t.last_result || '')}</td>
             </tr>`;
         }

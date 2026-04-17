@@ -559,6 +559,7 @@ def create_app(state_file, event_bus=None):
                 "roi": round(c["roi"], 1),
                 "readiness": round(c.get("readiness", 1.0), 2),
                 "is_leaf": c["func"].get("is_leaf", False),
+                "call_graph_layer": c.get("call_graph_layer"),
                 "last_result": c["func"].get("last_result"),
                 "pinned": c["pinned"],
                 "needs_scoring": c["needs_scoring"],
