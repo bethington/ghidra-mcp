@@ -390,6 +390,10 @@ class WorkerManager:
                     worker["progress"]["failed"] += 1
                     session["failed"] += 1
 
+                # Push updated progress to dashboard so the ok/fail
+                # counters in the worker pane header update in real time
+                self._emit_status()
+
                 # Adaptive refresh: check the SHARED stale-skip counter in
                 # queue.meta (bumped by process_function when it detects a
                 # truly-stale skip). Multiple workers share one counter, and
