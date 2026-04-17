@@ -1225,6 +1225,18 @@ def create_app(state_file, event_bus=None):
         except Exception:
             return []
 
+    @app.route("/api/navigate", methods=["POST"])
+    def navigate_ghidra():
+        """Navigate Ghidra to a specific address."""
+        from fun_doc import ghidra_post
+
+        data = request.get_json() or {}
+        address = data.get("address", "")
+        if not address:
+            return jsonify({"error": "address required"}), 400
+        ghidra_post("/tool/goto_address", data={"address": f"0x{address}"})
+        return jsonify({"ok": True, "address": address})
+
     @app.route("/api/context", methods=["GET"])
     def get_context():
         state = load_state()

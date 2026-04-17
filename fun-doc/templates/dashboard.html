@@ -150,8 +150,13 @@
         .worker-card .btn-stop { position: absolute; top: 0.4rem; right: 0.4rem; }
         .worker-pane { background: var(--bg-dark); border: 1px solid var(--border-dark); border-radius: 6px; display: flex; flex-direction: column; min-height: 100px; max-height: 180px; }
         .worker-pane.running { border-color: var(--color-set); }
+        .worker-pane.focused { border-color: var(--accent-gold); border-width: 2px; box-shadow: 0 0 8px rgba(199, 179, 119, 0.3); }
         .worker-pane.stopping { border-color: var(--color-rare); }
         .worker-pane.finished { border-color: var(--text-muted); opacity: 0.85; }
+        .focus-banner { display: none; background: var(--bg-medium); border: 1px solid var(--accent-gold); border-radius: 4px; padding: 0.3rem 0.8rem; margin-bottom: 0.75rem; font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent-gold); align-items: center; gap: 0.5rem; }
+        .focus-banner.active { display: flex; }
+        .focus-banner .focus-func { color: var(--text-primary); font-weight: 600; }
+        .focus-banner .focus-addr { color: var(--text-secondary); }
         .worker-pane-header { padding: 0.25rem 0.5rem; background: linear-gradient(180deg, var(--bg-light), var(--bg-medium)); border-bottom: 1px solid var(--border-dark); border-radius: 6px 6px 0 0; display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; }
         .worker-pane-header .wp-title { font-family: var(--font-mono); color: var(--accent-gold); font-weight: 600; }
         .worker-pane-header .wp-status { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.6rem; }
@@ -264,6 +269,20 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- Focus banner — shows which worker/function you're tracking -->
+        <div class="focus-banner" id="focusBanner">
+            <span>Focused:</span>
+            <span class="focus-func" id="focusWorkerName">—</span>
+            <span>→</span>
+            <span class="focus-func" id="focusFuncName">—</span>
+            <span class="focus-addr" id="focusFuncAddr"></span>
+            <button class="btn" onclick="navigateToFocusedFunction()" title="Navigate Ghidra to this function">Go to Ghidra</button>
+            <label style="margin-left: auto; font-size: 0.6rem; color: var(--text-secondary); cursor: pointer;">
+                <input type="checkbox" id="autoFollowCheckbox" onchange="onAutoFollowChanged()"> Auto-follow
+            </label>
+            <button class="btn" onclick="unfocusWorker()" title="Release focus">Unfocus</button>
         </div>
 
         <!-- Worker status cards (replaced by output panes, kept for status updates) -->
@@ -783,6 +802,7 @@
                     <span class="wp-title">${provider || '?'} #${workerId}</span>
                     <span class="wp-status" id="wp-status-${workerId}">${binary || ''}</span>
                     <div class="wp-actions">
+                        <button class="btn" onclick="focusWorker('${workerId}')" id="wp-focus-${workerId}">Focus</button>
                         <button class="btn btn-danger" onclick="stopWorker('${workerId}')" id="wp-stop-${workerId}">Stop</button>
                         <button class="btn" onclick="dismissPane('${workerId}')" style="display:none" id="wp-dismiss-${workerId}">X</button>
                     </div>
@@ -871,6 +891,7 @@
         socket.on("worker_stopped", d => {
             appendToPane(d.worker_id, `Worker ${d.reason}: ${d.progress?.completed || 0} completed`, d.reason === 'finished' ? 'success' : 'neutral');
             markPaneFinished(d.worker_id, d.reason);
+            if (_focusedWorkerId === d.worker_id) unfocusWorker();
             refreshStats();
         });
 
@@ -878,6 +899,8 @@
         socket.on("function_started", d => {
             if (d.worker_id) getOrCreatePane(d.worker_id, null, null);
             appendToPane(d.worker_id, `\n${d.name} @ 0x${d.address}`, 'started');
+            // Update focus tracking if this worker is focused
+            updateFocusedFunction(d.worker_id, d.name, d.address);
         });
         socket.on("function_mode", d => appendToPane(d.worker_id, `  ${d.mode} | ${d.model} | score: ${d.score}%`, 'neutral'));
         socket.on("tool_call", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, 'tool'));
@@ -1144,6 +1167,83 @@
                 }
             });
         });
+
+        // --- Worker Focus ---
+        let _focusedWorkerId = null;
+        let _focusedFuncAddr = null;
+        let _focusedFuncName = null;
+        let _focusedWorkerName = null;
+
+        function focusWorker(workerId) {
+            // Toggle off if already focused
+            if (_focusedWorkerId === workerId) {
+                unfocusWorker();
+                return;
+            }
+            // Clear previous focus
+            if (_focusedWorkerId) {
+                const prevPane = workerPanes[_focusedWorkerId];
+                if (prevPane) prevPane.element.classList.remove('focused');
+                const prevBtn = document.getElementById(`wp-focus-${_focusedWorkerId}`);
+                if (prevBtn) { prevBtn.textContent = 'Focus'; prevBtn.classList.remove('btn-primary'); }
+            }
+            _focusedWorkerId = workerId;
+            // Highlight the pane
+            const pane = workerPanes[workerId];
+            if (pane) pane.element.classList.add('focused');
+            const btn = document.getElementById(`wp-focus-${workerId}`);
+            if (btn) { btn.textContent = 'Focused'; btn.classList.add('btn-primary'); }
+            // Update banner with worker name
+            const titleEl = pane?.element.querySelector('.wp-title');
+            _focusedWorkerName = titleEl ? titleEl.textContent : workerId;
+            document.getElementById('focusWorkerName').textContent = _focusedWorkerName;
+            // Show the banner
+            document.getElementById('focusBanner').classList.add('active');
+            // Navigate to whatever function this worker is currently on
+            navigateToFocusedFunction();
+        }
+
+        function unfocusWorker() {
+            if (_focusedWorkerId) {
+                const pane = workerPanes[_focusedWorkerId];
+                if (pane) pane.element.classList.remove('focused');
+                const btn = document.getElementById(`wp-focus-${_focusedWorkerId}`);
+                if (btn) { btn.textContent = 'Focus'; btn.classList.remove('btn-primary'); }
+            }
+            _focusedWorkerId = null;
+            _focusedFuncAddr = null;
+            _focusedFuncName = null;
+            document.getElementById('focusBanner').classList.remove('active');
+            document.getElementById('autoFollowCheckbox').checked = false;
+        }
+
+        function updateFocusedFunction(workerId, name, address) {
+            if (workerId !== _focusedWorkerId) return;
+            _focusedFuncName = name;
+            _focusedFuncAddr = address;
+            document.getElementById('focusFuncName').textContent = name || '—';
+            document.getElementById('focusFuncAddr').textContent = address ? `@ 0x${address}` : '';
+            // Auto-follow: navigate Ghidra if checkbox is on
+            if (document.getElementById('autoFollowCheckbox').checked) {
+                navigateToFocusedFunction();
+            }
+        }
+
+        function navigateToFocusedFunction() {
+            if (!_focusedFuncAddr) return;
+            fetch('/api/navigate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address: _focusedFuncAddr })
+            }).catch(() => {});
+        }
+
+        function onAutoFollowChanged() {
+            // If just turned on, navigate immediately
+            if (document.getElementById('autoFollowCheckbox').checked && _focusedFuncAddr) {
+                navigateToFocusedFunction();
+            }
+        }
 
         // --- Filter ---
         function filterFuncs(mode, btn) {
