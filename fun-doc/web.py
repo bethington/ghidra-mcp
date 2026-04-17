@@ -246,6 +246,11 @@ class WorkerManager:
             # process_function) and triggers refresh when it crosses this.
             STALE_STREAK_THRESHOLD = 3
 
+            # Load good_enough threshold for auto-escalation decisions
+            good_enough = load_priority_queue().get("config", {}).get(
+                "good_enough_score", 80
+            )
+
             while not worker["stop_flag"].is_set() and (
                 worker["continuous"] or processed < worker["count"]
             ):
@@ -293,6 +298,50 @@ class WorkerManager:
                     provider=worker["provider"],
                     stop_flag=worker["stop_flag"],
                 )
+
+                # Auto-escalation: if the function made progress but didn't
+                # reach good_enough, immediately retry with a stronger model
+                # before releasing the key. This catches cases where minimax
+                # can handle Pass 1 (types/names) but a stronger model is
+                # needed for Pass 2 (comments, complex analysis). The
+                # escalation order is: minimax → claude → codex → (give up).
+                ESCALATION_ORDER = {
+                    "minimax": "claude",
+                    "claude": "codex",
+                    "codex": None,  # no further escalation
+                    "gemini": "claude",
+                }
+                if (
+                    result in ("completed", "partial")
+                    and not worker["stop_flag"].is_set()
+                ):
+                    # Re-read the function's current score from state
+                    fresh = load_state()
+                    fresh_func = fresh.get("functions", {}).get(key)
+                    if fresh_func:
+                        current_score = fresh_func.get("score", 0)
+                        escalate_to = ESCALATION_ORDER.get(worker["provider"])
+                        if (
+                            current_score < good_enough
+                            and current_score > 0
+                            and escalate_to
+                        ):
+                            print(
+                                f"\n  AUTO-ESCALATE: {worker['provider']} → {escalate_to} "
+                                f"(score {current_score}% < {good_enough}%)",
+                                flush=True,
+                            )
+                            escalate_result = process_function(
+                                key,
+                                fresh_func,
+                                fresh,
+                                model=None,  # auto-select for the escalation provider
+                                provider=escalate_to,
+                                stop_flag=worker["stop_flag"],
+                            )
+                            # Use the escalation result for stats
+                            if escalate_result in ("completed", "partial"):
+                                result = escalate_result
 
                 # Release the key immediately after processing
                 with self._lock:
