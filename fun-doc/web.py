@@ -658,7 +658,15 @@ def create_app(state_file, event_bus=None):
             }
         else:
             funcs = all_funcs
-        total = len(funcs)
+        total_all = len(funcs)
+        # Exclude thunks/externals from all statistics — they're IAT stubs
+        # that can't be documented and inflate the score distribution chart
+        # with a misleading 0-9% block.
+        scoreable = {
+            k: v for k, v in funcs.items()
+            if not v.get("is_thunk") and not v.get("is_external")
+        }
+        total = len(scoreable)
         queue = load_queue()
         cfg = queue.get("config", {})
         good_enough = cfg.get("good_enough_score", 80)
@@ -686,11 +694,11 @@ def create_app(state_file, event_bus=None):
                 "queue_meta": queue_meta,
             }
         fixable_lo = max(good_enough - 20, 0)
-        done = sum(1 for f in funcs.values() if f["score"] >= good_enough)
+        done = sum(1 for f in scoreable.values() if f["score"] >= good_enough)
         fixable_count = sum(
-            1 for f in funcs.values() if fixable_lo <= f["score"] < good_enough
+            1 for f in scoreable.values() if fixable_lo <= f["score"] < good_enough
         )
-        needs_work = sum(1 for f in funcs.values() if f["score"] < fixable_lo)
+        needs_work = sum(1 for f in scoreable.values() if f["score"] < fixable_lo)
         pct = (done / total * 100) if total > 0 else 0
         buckets = {
             "100": 0,
@@ -705,7 +713,7 @@ def create_app(state_file, event_bus=None):
             "10-19": 0,
             "0-9": 0,
         }
-        for f in funcs.values():
+        for f in scoreable.values():
             s = f["score"]
             if s >= 100:
                 buckets["100"] += 1
@@ -730,7 +738,7 @@ def create_app(state_file, event_bus=None):
             else:
                 buckets["0-9"] += 1
         by_program = defaultdict(lambda: {"total": 0, "done": 0, "remaining": 0})
-        for f in funcs.values():
+        for f in scoreable.values():
             prog = f.get("program_name", "unknown")
             by_program[prog]["total"] += 1
             if f["score"] >= good_enough:
