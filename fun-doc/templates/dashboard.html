@@ -524,13 +524,16 @@
                     <input class="filter-input" type="text" id="searchInput" placeholder="Search name or address (server-side)..." oninput="onSearchInput()">
                     <select class="header-select" id="searchSort" onchange="runServerSearch()" title="Sort search results">
                         <option value="score">Lowest score</option>
-                        <option value="callers">Most callers</option>
+                        <option value="score_desc">Highest score</option>
                         <option value="fixable">Most fixable</option>
+                        <option value="deps_asc">Fewest deps (ready first)</option>
+                        <option value="deps_desc">Most deps (blocked first)</option>
+                        <option value="layer">Layer (bottom-up)</option>
                         <option value="name">Name</option>
                     </select>
                 </div>
                 <div class="func-list-scroll">
-                    <table class="data-table"><thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Binary</th><th>Score</th><th>Fixable</th><th>Callers</th><th>Status</th></tr></thead>
+                    <table class="data-table"><thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Deps</th><th>Fixable</th><th>Layer</th><th>Status</th></tr></thead>
                     <tbody id="allFuncsBody">
                     {% for f in stats.all_functions %}
                     <tr class="func-row" data-score="{{ f.score }}" data-name="{{ f.name|lower }}" data-key="{{ f.key }}">
@@ -539,19 +542,20 @@
                             {% else %}<button class="btn" onclick="queueFunc('{{ f.key }}')">Queue</button>{% endif %}
                         </td>
                         <td>{% if f.pinned %}<span class="badge badge-pinned">QUEUED</span> {% endif %}{{ f.name }}</td>
-                        <td class="mono">0x{{ f.address }}</td><td>{{ f.program }}</td>
+                        <td class="mono">0x{{ f.address }}</td>
                         {% if f.unscored %}
                         <td class="score-cell" style="color: var(--text-muted);">&mdash;</td>
                         {% else %}
                         <td class="score-cell {% if f.score >= 100 %}score-100{% elif f.score >= 90 %}score-90{% elif f.score >= 70 %}score-70{% elif f.score >= 50 %}score-50{% else %}score-low{% endif %}">{{ f.score }}%</td>
                         {% endif %}
-                        <td class="mono">{{ f.fixable }}</td><td class="mono">{{ f.callers }}</td>
+                        <td class="mono">{% if f.is_leaf %}<span class="badge badge-leaf">Leaf</span>{% elif f.callers == 0 %}<span style="color: var(--color-set);">Ready</span>{% else %}<span style="color: var(--color-rare);">{{ f.callers }} dep{{ 's' if f.callers > 1 }}</span>{% endif %}</td>
+                        <td class="mono">{{ f.fixable }}</td>
+                        <td class="mono" style="font-size: 0.6rem; color: var(--text-secondary);">{% if f.is_leaf %}Leaf{% else %}—{% endif %}</td>
                         <td>
                         {% if f.unscored %}<span class="badge badge-new" title="Never scored — click Queue to score on demand">UNSCORED</span>
                         {% elif f.score >= (stats.queue_config.good_enough_score|default(80)) %}<span class="badge badge-done">DONE</span>
                         {% elif f.score >= 70 %}<span class="badge badge-fix">FIX</span>
                         {% else %}<span class="badge badge-new">NEW</span>{% endif %}
-                        {% if f.is_leaf %} <span class="badge badge-leaf">LEAF</span>{% endif %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -1127,6 +1131,15 @@
                 } else {
                     depsLabel = '';
                 }
+                // Layer column
+                let layerLabel;
+                if (f.is_leaf) {
+                    layerLabel = 'Leaf';
+                } else if (f.call_graph_layer != null) {
+                    layerLabel = `L${f.call_graph_layer}`;
+                } else {
+                    layerLabel = 'Cyc';
+                }
                 return `<tr class="func-row" data-score="${f.score}" data-name="${escapeHtml((f.name||'').toLowerCase())}" data-key="${escapeHtml(f.key)}">
                     <td>${queueBtn}</td>
                     <td>${queuedBadge}${escapeHtml(f.name)}</td>
@@ -1134,6 +1147,7 @@
                     ${scoreCell}
                     <td>${depsLabel}</td>
                     <td class="mono">${f.fixable}</td>
+                    <td class="mono" style="font-size: 0.6rem; color: var(--text-secondary);">${layerLabel}</td>
                     <td>${statusBadge}</td>
                 </tr>`;
             }).join('');
