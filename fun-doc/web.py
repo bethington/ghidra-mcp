@@ -305,19 +305,35 @@ class WorkerManager:
                 elif result == "rate_limited":
                     worker["progress"]["failed"] += 1
                     session["failed"] += 1
-                    self._bus.emit(
-                        "worker_stopped",
-                        {
-                            "worker_id": worker_id,
-                            "reason": "rate_limited",
-                            "progress": dict(worker["progress"]),
-                        },
+                    # Exponential backoff: 30s, 60s, 120s. After 3 consecutive
+                    # rate-limited results, stop the worker.
+                    rate_limit_streak = worker.get("_rate_limit_streak", 0) + 1
+                    worker["_rate_limit_streak"] = rate_limit_streak
+                    if rate_limit_streak >= 3:
+                        self._bus.emit(
+                            "worker_stopped",
+                            {
+                                "worker_id": worker_id,
+                                "reason": "rate_limited (3 consecutive)",
+                                "progress": dict(worker["progress"]),
+                            },
+                        )
+                        break
+                    backoff = 30 * (2 ** (rate_limit_streak - 1))  # 30s, 60s
+                    print(
+                        f"  Rate limited — backing off {backoff}s before retry "
+                        f"(attempt {rate_limit_streak}/3)...",
+                        flush=True,
                     )
-                    break  # Stop the worker — no point retrying until limit resets
+                    worker["stop_flag"].wait(backoff)
+                    if worker["stop_flag"].is_set():
+                        break
+                    continue  # retry with next function
                 elif result == "completed":
                     worker["progress"]["completed"] += 1
                     session["completed"] += 1
                     session["functions"].append(key)
+                    worker["_rate_limit_streak"] = 0  # reset on success
                 elif result == "skipped":
                     worker["progress"]["skipped"] += 1
                     session["skipped"] += 1
