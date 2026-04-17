@@ -906,6 +906,12 @@
         socket.on("function_started", d => {
             if (d.worker_id) getOrCreatePane(d.worker_id, null, null);
             appendToPane(d.worker_id, `\n${d.name} @ 0x${d.address}`, 'started');
+            // Track current function on the pane so Focus can read it
+            const pane = workerPanes[d.worker_id];
+            if (pane) {
+                pane.currentFuncName = d.name;
+                pane.currentFuncAddr = d.address;
+            }
             // Update focus tracking if this worker is focused
             updateFocusedFunction(d.worker_id, d.name, d.address);
         });
@@ -1215,10 +1221,17 @@
             if (pane) pane.element.classList.add('focused');
             const btn = document.getElementById(`wp-focus-${workerId}`);
             if (btn) { btn.textContent = 'Focused'; btn.classList.add('btn-primary'); }
-            // Update banner with worker name
+            // Update banner with worker name + current function
             const titleEl = pane?.element.querySelector('.wp-title');
             _focusedWorkerName = titleEl ? titleEl.textContent : workerId;
             document.getElementById('focusWorkerName').textContent = _focusedWorkerName;
+            // Read the current function from the pane (set by function_started events)
+            if (pane && pane.currentFuncAddr) {
+                _focusedFuncAddr = pane.currentFuncAddr;
+                _focusedFuncName = pane.currentFuncName || '—';
+                document.getElementById('focusFuncName').textContent = _focusedFuncName;
+                document.getElementById('focusFuncAddr').textContent = `@ 0x${_focusedFuncAddr}`;
+            }
             // Show the banner
             document.getElementById('focusBanner').classList.add('active');
             // Navigate to whatever function this worker is currently on

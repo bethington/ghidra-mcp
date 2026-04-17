@@ -1128,8 +1128,9 @@ def fetch_function_data(program, address, mode="FIX"):
         "decompile_timeout": False,
     }
 
-    # Navigate
-    ghidra_post("/tool/goto_address", data={"address": f"0x{address}"})
+    # Navigation removed — was calling /tool/goto_address on every function,
+    # stealing Ghidra focus from the user. Navigation is now controlled by the
+    # dashboard's Focus button (auto-follow checkbox) via /api/navigate.
 
     # Decompile
     data["decompiled"] = ghidra_get(
