@@ -1312,10 +1312,14 @@ def create_app(state_file, event_bus=None):
             )
         if sort == "name":
             results.sort(key=lambda r: r["name"].lower())
+        elif sort == "name_desc":
+            results.sort(key=lambda r: r["name"].lower(), reverse=True)
         elif sort == "score_desc":
             results.sort(key=lambda r: -r["score"])
         elif sort == "fixable":
             results.sort(key=lambda r: -r["fixable"])
+        elif sort == "fixable_desc":
+            results.sort(key=lambda r: r["fixable"])
         elif sort == "deps_asc":
             results.sort(key=lambda r: (r.get("deps_remaining", 0), r["score"]))
         elif sort == "deps_desc":
@@ -1324,6 +1328,11 @@ def create_app(state_file, event_bus=None):
             results.sort(key=lambda r: (
                 r.get("call_graph_layer") if r.get("call_graph_layer") is not None else 999,
                 r["score"],
+            ))
+        elif sort == "layer_desc":
+            results.sort(key=lambda r: (
+                -(r.get("call_graph_layer") if r.get("call_graph_layer") is not None else -1),
+                -r["score"],
             ))
         else:  # "score" (default — lowest first)
             results.sort(key=lambda r: r["score"])

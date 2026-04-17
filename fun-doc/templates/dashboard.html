@@ -153,6 +153,9 @@
         .worker-pane.focused { border-color: var(--accent-gold); border-width: 2px; box-shadow: 0 0 8px rgba(199, 179, 119, 0.3); }
         .worker-pane.stopping { border-color: var(--color-rare); }
         .worker-pane.finished { border-color: var(--text-muted); opacity: 0.85; }
+        .sortable-header { cursor: pointer; user-select: none; white-space: nowrap; }
+        .sortable-header:hover { color: var(--accent-gold); }
+        .sortable-header span { font-size: 0.6rem; color: var(--accent-gold); }
         .focus-banner { display: none; background: var(--bg-medium); border: 1px solid var(--accent-gold); border-radius: 4px; padding: 0.3rem 0.8rem; margin-bottom: 0.75rem; font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent-gold); align-items: center; gap: 0.5rem; }
         .focus-banner.active { display: flex; }
         .focus-banner .focus-func { color: var(--text-primary); font-weight: 600; }
@@ -521,19 +524,19 @@
                     <button class="btn" id="filter-needs_work" onclick="filterFuncs('needs_work', this)">Needs Work</button>
                     <button class="btn" id="filter-fixable" onclick="filterFuncs('fixable', this)">Fixable</button>
                     <button class="btn" id="filter-done" onclick="filterFuncs('done', this)">Done</button>
-                    <input class="filter-input" type="text" id="searchInput" placeholder="Search name or address (server-side)..." oninput="onSearchInput()">
-                    <select class="header-select" id="searchSort" onchange="runServerSearch()" title="Sort search results">
-                        <option value="score">Lowest score</option>
-                        <option value="score_desc">Highest score</option>
-                        <option value="fixable">Most fixable</option>
-                        <option value="deps_asc">Fewest deps (ready first)</option>
-                        <option value="deps_desc">Most deps (blocked first)</option>
-                        <option value="layer">Layer (bottom-up)</option>
-                        <option value="name">Name</option>
-                    </select>
+                    <input class="filter-input" type="text" id="searchInput" placeholder="Search name or address..." oninput="onSearchInput()">
                 </div>
                 <div class="func-list-scroll">
-                    <table class="data-table"><thead><tr><th>Actions</th><th>Function</th><th>Addr</th><th>Score</th><th>Deps</th><th>Fixable</th><th>Layer</th><th>Status</th></tr></thead>
+                    <table class="data-table"><thead><tr>
+                        <th>Actions</th>
+                        <th class="sortable-header" onclick="toggleSort('name')">Function <span id="sort-ind-name"></span></th>
+                        <th>Addr</th>
+                        <th class="sortable-header" onclick="toggleSort('score')">Score <span id="sort-ind-score"></span></th>
+                        <th class="sortable-header" onclick="toggleSort('deps')">Deps <span id="sort-ind-deps"></span></th>
+                        <th class="sortable-header" onclick="toggleSort('fixable')">Fixable <span id="sort-ind-fixable"></span></th>
+                        <th class="sortable-header" onclick="toggleSort('layer')">Layer <span id="sort-ind-layer"></span></th>
+                        <th>Status</th>
+                    </tr></thead>
                     <tbody id="allFuncsBody">
                     {% for f in stats.all_functions %}
                     <tr class="func-row" data-score="{{ f.score }}" data-name="{{ f.name|lower }}" data-key="{{ f.key }}">
@@ -1075,7 +1078,7 @@
         }
         function runServerSearch() {
             const q = document.getElementById('searchInput').value.trim();
-            const sort = document.getElementById('searchSort').value;
+            const sort = _getSortValue();
             const program = document.getElementById('binarySelect').value || '';
             const params = new URLSearchParams();
             if (q) params.set('q', q);
@@ -1234,6 +1237,54 @@
             if (stopAllBtn) stopAllBtn.style.display = activeCount > 0 ? '' : 'none';
             if (gridCount) gridCount.textContent = activeCount > 0 ? `${activeCount} active worker${activeCount > 1 ? 's' : ''}` : '';
         });
+
+        // --- Column header sort ---
+        // Maps column names to their API sort values for asc/desc
+        const _sortColumns = {
+            name:    { asc: 'name',      desc: 'name_desc'  },
+            score:   { asc: 'score',     desc: 'score_desc' },
+            deps:    { asc: 'deps_asc',  desc: 'deps_desc'  },
+            fixable: { asc: 'fixable',   desc: 'fixable_desc' },
+            layer:   { asc: 'layer',     desc: 'layer_desc' },
+        };
+        let _currentSortCol = null;   // which column is active
+        let _currentSortDir = null;   // 'asc' or 'desc'
+
+        function toggleSort(col) {
+            if (_currentSortCol === col) {
+                // Same column: asc → desc → off
+                if (_currentSortDir === 'asc') {
+                    _currentSortDir = 'desc';
+                } else {
+                    // Was desc (or anything else) → clear
+                    _currentSortCol = null;
+                    _currentSortDir = null;
+                }
+            } else {
+                // New column: start with asc
+                _currentSortCol = col;
+                _currentSortDir = 'asc';
+            }
+            // Update indicators
+            for (const c of Object.keys(_sortColumns)) {
+                const ind = document.getElementById(`sort-ind-${c}`);
+                if (!ind) continue;
+                if (c === _currentSortCol && _currentSortDir === 'asc') {
+                    ind.textContent = '▲';
+                } else if (c === _currentSortCol && _currentSortDir === 'desc') {
+                    ind.textContent = '▼';
+                } else {
+                    ind.textContent = '';
+                }
+            }
+            runServerSearch();
+        }
+
+        function _getSortValue() {
+            if (!_currentSortCol || !_currentSortDir) return 'score'; // default
+            const col = _sortColumns[_currentSortCol];
+            return col ? (col[_currentSortDir] || 'score') : 'score';
+        }
 
         // --- Layer filter (click from Call Graph Layers → List View) ---
         function filterByLayer(layerId, layerLabel) {
