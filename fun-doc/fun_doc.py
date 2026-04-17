@@ -1485,6 +1485,23 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         if func.get("stagnation_runs", 0) >= 3 and not is_pinned:
             continue
 
+        # Plate-comment-only skip: functions where the ONLY remaining fixable
+        # deduction is a missing/stub plate comment (score typically 65-75%).
+        # Writing a plate comment on a 3-instruction setter or a well-named
+        # wrapper is busywork — the assembly IS the documentation. Spending
+        # an LLM pass on these has near-zero RE value. Skip them so workers
+        # focus on functions with real type/name/struct work to do.
+        if not is_pinned and not needs_scoring and score >= 50:
+            deductions = func.get("deductions", [])
+            fixable_cats = [
+                d.get("category") for d in deductions if d.get("fixable")
+            ]
+            if fixable_cats and all(
+                c in ("missing_plate_comment", "plate_comment_stub", "plate_comment_incomplete")
+                for c in fixable_cats
+            ):
+                continue
+
         if needs_scoring:
             roi = 1_000_000  # Cold-start lane: surface unscored funcs first
             readiness = 1.0
