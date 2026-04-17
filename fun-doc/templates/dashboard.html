@@ -215,6 +215,21 @@
                 <input type="checkbox" id="debugModeInput" {% if stats.queue_config.debug_mode %}checked{% endif %} onchange="saveQueueConfig()" style="margin: 0;">
                 <span style="line-height: 1;">Debug Logs</span>
             </label>
+            <span class="header-sep"></span>
+            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="After the worker finishes, a second provider reviews and fixes gaps. Off = no audit pass.">
+                <span>Audit→</span>
+                <select class="header-select" id="auditProviderInput" onchange="saveQueueConfig()">
+                    <option value="off" {% if not stats.queue_config.audit_provider %}selected{% endif %}>Off</option>
+                    <option value="claude" {% if stats.queue_config.audit_provider == 'claude' %}selected{% endif %}>Claude</option>
+                    <option value="codex" {% if stats.queue_config.audit_provider == 'codex' %}selected{% endif %}>Codex</option>
+                    <option value="minimax" {% if stats.queue_config.audit_provider == 'minimax' %}selected{% endif %}>MiniMax</option>
+                    <option value="gemini" {% if stats.queue_config.audit_provider == 'gemini' %}selected{% endif %}>Gemini</option>
+                </select>
+            </label>
+            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="Skip audit if worker's score gain >= this value. Lower = more audits.">
+                <span>MinΔ</span>
+                <input type="number" class="worker-input" id="auditMinDeltaInput" value="{{ stats.queue_config.audit_min_delta|default(5) }}" min="0" max="100" onchange="saveQueueConfig()" style="width: 38px;">
+            </label>
         </div>
         <span class="header-info">
             <span class="live-dot" id="liveDot"></span>
@@ -844,7 +859,7 @@
         // Worker lifecycle events
         socket.on("worker_started", d => {
             getOrCreatePane(d.worker_id, d.provider, d.binary || '');
-            appendToPane(d.worker_id, `Worker started: ${d.provider} x${d.count}`, 'scan');
+            appendToPane(d.worker_id, `Worker started: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`, 'scan');
         });
         socket.on("worker_stopped", d => {
             appendToPane(d.worker_id, `Worker ${d.reason}: ${d.progress?.completed || 0} completed`, d.reason === 'finished' ? 'success' : 'neutral');
@@ -971,6 +986,10 @@
             const handoffMax = handoffMaxEl ? (parseInt(handoffMaxEl.value) || 0) : 0;
             const debugEl = document.getElementById('debugModeInput');
             const debug = debugEl ? debugEl.checked : false;
+            const auditSel = document.getElementById('auditProviderInput');
+            const audit = auditSel ? auditSel.value : 'off';
+            const auditDeltaEl = document.getElementById('auditMinDeltaInput');
+            const auditDelta = auditDeltaEl ? (parseInt(auditDeltaEl.value) || 5) : 5;
             await fetch('/api/queue/config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -980,6 +999,8 @@
                     complexity_handoff_provider: handoff === 'off' ? null : handoff,
                     complexity_handoff_max: handoffMax,
                     debug_mode: debug,
+                    audit_provider: audit === 'off' ? null : audit,
+                    audit_min_delta: auditDelta,
                 }),
             });
             // queue_changed event will trigger a refreshStats which repaints the queue
@@ -1069,7 +1090,7 @@
         socket.on('worker_started_ack', d => { /* pane created by worker_started event */ });
         socket.on('worker_error', d => { showBanner(`Worker error: ${d.error}`); setTimeout(hideBanner, 5000); });
         socket.on('worker_stop_ack', d => { /* stop handled by worker_status update */ });
-        socket.on('worker_started', d => addActivity(`Worker ${d.worker_id}: ${d.provider} x${d.count}`, 'scan'));
+        socket.on('worker_started', d => addActivity(`Worker ${d.worker_id}: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`, 'scan'));
         socket.on('worker_progress', d => {
             if (d.current) addActivity(`Worker ${d.worker_id}: ${d.current.name} (${d.completed+1}/${d.total})`, 'scan');
         });

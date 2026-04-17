@@ -157,6 +157,7 @@ class WorkerManager:
                     "worker_id": worker_id,
                     "provider": worker["provider"],
                     "count": worker["count"],
+                    "continuous": worker.get("continuous", False),
                 },
             )
 
@@ -1044,6 +1045,31 @@ def create_app(state_file, event_bus=None):
                     )
             if "debug_mode" in data:
                 cfg["debug_mode"] = bool(data["debug_mode"])
+            if "audit_provider" in data:
+                v = data["audit_provider"]
+                if v in (None, "", "none", "off"):
+                    cfg["audit_provider"] = None
+                elif v in ("claude", "codex", "minimax", "gemini"):
+                    cfg["audit_provider"] = v
+                else:
+                    return (
+                        jsonify(
+                            {
+                                "error": "audit_provider must be claude/codex/minimax/gemini/null"
+                            }
+                        ),
+                        400,
+                    )
+            if "audit_min_delta" in data:
+                try:
+                    cfg["audit_min_delta"] = max(
+                        0, min(100, int(data["audit_min_delta"]))
+                    )
+                except (TypeError, ValueError):
+                    return (
+                        jsonify({"error": "audit_min_delta must be int 0-100"}),
+                        400,
+                    )
             queue["config"] = cfg
             save_queue(queue)
             socketio.emit("queue_changed", {"action": "config", "config": cfg})
@@ -1226,12 +1252,19 @@ def create_app(state_file, event_bus=None):
 
         # Filter to active binary, non-thunk only
         if active_binary:
-            funcs = {k: v for k, v in all_funcs.items()
-                     if v.get("program_name") == active_binary
-                     and not v.get("is_thunk") and not v.get("is_external")}
+            funcs = {
+                k: v
+                for k, v in all_funcs.items()
+                if v.get("program_name") == active_binary
+                and not v.get("is_thunk")
+                and not v.get("is_external")
+            }
         else:
-            funcs = {k: v for k, v in all_funcs.items()
-                     if not v.get("is_thunk") and not v.get("is_external")}
+            funcs = {
+                k: v
+                for k, v in all_funcs.items()
+                if not v.get("is_thunk") and not v.get("is_external")
+            }
 
         # Build adjacency: address → [callee addresses]
         addr_to_key = {}
@@ -1280,8 +1313,12 @@ def create_app(state_file, event_bus=None):
         for d in range(max_depth + 1):
             layer_addrs = [a for a, dep in depth.items() if dep == d]
             total = len(layer_addrs)
-            done = sum(1 for a in layer_addrs
-                       if a in addr_to_key and funcs[addr_to_key[a]].get("score", 0) >= good_enough)
+            done = sum(
+                1
+                for a in layer_addrs
+                if a in addr_to_key
+                and funcs[addr_to_key[a]].get("score", 0) >= good_enough
+            )
             # "Ready" = callees all documented AND not yet done itself
             ready = 0
             for a in layer_addrs:
@@ -1293,20 +1330,26 @@ def create_app(state_file, event_bus=None):
                 readiness = _callee_readiness(func, all_funcs, good_enough)
                 if readiness >= 1.0:
                     ready += 1
-            layers.append({
-                "depth": d,
-                "label": "Leaves" if d == 0 else f"Layer {d}",
-                "total": total,
-                "done": done,
-                "pct": round(100 * done / total, 1) if total > 0 else 0,
-                "ready": ready,
-            })
+            layers.append(
+                {
+                    "depth": d,
+                    "label": "Leaves" if d == 0 else f"Layer {d}",
+                    "total": total,
+                    "done": done,
+                    "pct": round(100 * done / total, 1) if total > 0 else 0,
+                    "ready": ready,
+                }
+            )
 
         # Cyclic bucket: everything not assigned a depth
         cyclic_addrs = [a for a in all_addrs if a not in depth]
         if cyclic_addrs:
-            done = sum(1 for a in cyclic_addrs
-                       if a in addr_to_key and funcs[addr_to_key[a]].get("score", 0) >= good_enough)
+            done = sum(
+                1
+                for a in cyclic_addrs
+                if a in addr_to_key
+                and funcs[addr_to_key[a]].get("score", 0) >= good_enough
+            )
             ready = 0
             for a in cyclic_addrs:
                 if a not in addr_to_key:
@@ -1317,22 +1360,28 @@ def create_app(state_file, event_bus=None):
                 readiness = _callee_readiness(func, all_funcs, good_enough)
                 if readiness >= 0.8:
                     ready += 1
-            layers.append({
-                "depth": max_depth + 1,
-                "label": "Cyclic",
-                "total": len(cyclic_addrs),
-                "done": done,
-                "pct": round(100 * done / len(cyclic_addrs), 1) if cyclic_addrs else 0,
-                "ready": ready,
-            })
+            layers.append(
+                {
+                    "depth": max_depth + 1,
+                    "label": "Cyclic",
+                    "total": len(cyclic_addrs),
+                    "done": done,
+                    "pct": (
+                        round(100 * done / len(cyclic_addrs), 1) if cyclic_addrs else 0
+                    ),
+                    "ready": ready,
+                }
+            )
 
-        return jsonify({
-            "layers": layers,
-            "total_functions": len(funcs),
-            "assigned": len(depth),
-            "cyclic": len(all_addrs) - len(depth),
-            "max_depth": max_depth,
-        })
+        return jsonify(
+            {
+                "layers": layers,
+                "total_functions": len(funcs),
+                "assigned": len(depth),
+                "cyclic": len(all_addrs) - len(depth),
+                "max_depth": max_depth,
+            }
+        )
 
     @app.route("/api/cross_binary_progress", methods=["GET"])
     def cross_binary_progress():
