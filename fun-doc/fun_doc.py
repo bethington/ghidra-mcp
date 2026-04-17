@@ -4537,7 +4537,9 @@ def process_function(
     # Parse result
     result = "completed"
     if output:
-        # Detect rate limit errors (provider returns limit message as text)
+        # Check success markers FIRST — models sometimes mention rate limits,
+        # blocked states, etc. in their reasoning text while ultimately
+        # succeeding. DONE/VERIFIED OK take absolute priority.
         rate_limit_phrases = [
             "hit your limit",
             "rate limit",
@@ -4545,13 +4547,15 @@ def process_function(
             "usage limit",
             "try again at",
         ]
-        if any(phrase in output.lower() for phrase in rate_limit_phrases):
-            print(f"  RATE LIMITED — stopping worker on this function", flush=True)
-            result = "rate_limited"
-        elif "DONE:" in output:
+        if "DONE:" in output:
             result = "completed"
         elif "VERIFIED OK:" in output or "QUICK FIX:" in output:
             result = "completed"
+        elif any(phrase in output.lower() for phrase in rate_limit_phrases):
+            # Only fire when no DONE marker — this is a real API rate limit,
+            # not the model discussing "rate limiting" in game code analysis.
+            print(f"  RATE LIMITED on this function", flush=True)
+            result = "rate_limited"
         elif "BLOCKED:" in output:
             # Check BLOCKED after DONE — models sometimes mention a previous
             # BLOCKED attempt in their reasoning text before ultimately
