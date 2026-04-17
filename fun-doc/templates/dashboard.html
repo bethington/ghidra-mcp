@@ -307,7 +307,11 @@
             </div>
         </div>
 
-        <!-- Worker Output Panes (2x2 grid) -->
+        <!-- Worker Output Panes -->
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;" id="workerGridHeader">
+            <span style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);" id="workerGridCount"></span>
+            <button class="btn btn-danger" onclick="stopAllWorkers()" id="btnStopAll" style="display: none; margin-left: auto;">Stop All Workers</button>
+        </div>
         <div id="workerGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem; margin-bottom: 0.5rem;">
             <!-- Worker panes are dynamically created by JavaScript -->
         </div>
@@ -887,6 +891,9 @@
         socket.on("worker_started", d => {
             getOrCreatePane(d.worker_id, d.provider, d.binary || '');
             appendToPane(d.worker_id, `Worker started: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`, 'scan');
+            // Show Stop All button when any worker is running
+            const stopAllBtn = document.getElementById('btnStopAll');
+            if (stopAllBtn) stopAllBtn.style.display = '';
         });
         socket.on("worker_stopped", d => {
             appendToPane(d.worker_id, `Worker ${d.reason}: ${d.progress?.completed || 0} completed`, d.reason === 'finished' ? 'success' : 'neutral');
@@ -1116,6 +1123,15 @@
             setTimeout(() => { btn.disabled = false; }, 2000);
         }
         function stopWorker(wid) { socket.emit('request_stop_worker', {worker_id: wid}); }
+        function stopAllWorkers() {
+            // Stop every worker that has a visible pane
+            Object.keys(workerPanes).forEach(wid => {
+                const pane = workerPanes[wid];
+                if (pane && !pane.element.classList.contains('finished')) {
+                    socket.emit('request_stop_worker', {worker_id: wid});
+                }
+            });
+        }
 
         socket.on('worker_started_ack', d => { /* pane created by worker_started event */ });
         socket.on('worker_error', d => { showBanner(`Worker error: ${d.error}`); setTimeout(hideBanner, 5000); });
@@ -1166,6 +1182,12 @@
                     status.textContent = `${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${cur ? ' | ' + cur : ''}`;
                 }
             });
+            // Show/hide Stop All button based on active workers
+            const activeCount = workers.filter(w => w.status === 'running' || w.status === 'stopping').length;
+            const stopAllBtn = document.getElementById('btnStopAll');
+            const gridCount = document.getElementById('workerGridCount');
+            if (stopAllBtn) stopAllBtn.style.display = activeCount > 0 ? '' : 'none';
+            if (gridCount) gridCount.textContent = activeCount > 0 ? `${activeCount} active worker${activeCount > 1 ? 's' : ''}` : '';
         });
 
         // --- Worker Focus ---
