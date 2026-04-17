@@ -378,17 +378,21 @@ class WorkerManager:
                     if worker["stop_flag"].is_set():
                         break
                     continue  # retry with next function
-                elif result == "completed":
+                elif result in ("completed", "partial"):
                     worker["progress"]["completed"] += 1
                     session["completed"] += 1
                     session["functions"].append(key)
                     worker["_rate_limit_streak"] = 0  # reset on success
-                elif result == "skipped":
+                elif result in ("skipped", "decompile_timeout"):
                     worker["progress"]["skipped"] += 1
                     session["skipped"] += 1
                 elif result in ("failed", "blocked", "needs_redo"):
                     worker["progress"]["failed"] += 1
                     session["failed"] += 1
+                else:
+                    # Catch-all for any unhandled result type
+                    worker["progress"]["completed"] += 1
+                    session["completed"] += 1
 
                 # Push updated progress to dashboard so the ok/fail
                 # counters in the worker pane header update in real time

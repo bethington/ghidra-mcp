@@ -1185,7 +1185,8 @@
                 if (status) {
                     const countStr = w.continuous ? 'auto' : `${done}/${w.count}`;
                     const cur = w.progress.current ? w.progress.current.name : '';
-                    status.textContent = `${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${cur ? ' | ' + cur : ''}`;
+                    const skipStr = w.progress.skipped > 0 ? ` ${w.progress.skipped}skip` : '';
+                    status.textContent = `${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${cur ? ' | ' + cur : ''}`;
                 }
             });
             // Show/hide Stop All button based on active workers
