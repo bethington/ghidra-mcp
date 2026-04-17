@@ -1355,6 +1355,13 @@ DEFAULT_QUEUE_CONFIG = {
     # logs/debug/{date}/ and prints verbose console lines. Use analyze_debug.py
     # to spot inefficiencies (consecutive same-tool runs, retries, etc).
     "debug_mode": False,
+    # Audit stage: after the worker finishes, a second provider reviews the
+    # result and fixes gaps (missing plate sections, unrenamed variables, etc.).
+    # Set to None / "off" to disable. Only fires when score gain < audit_min_delta.
+    "audit_provider": None,
+    # Minimum score delta to skip audit. If the worker gained >= this many
+    # points, audit is skipped (the worker did well enough). Lower = more audits.
+    "audit_min_delta": 5,
     # Pre-refresh top candidates' scores when a worker starts. Skipped when:
     # - This flag is False
     # - No active_binary is set (would touch every binary Ghidra has)
@@ -1522,9 +1529,9 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
             not c["pinned"],
             c["pin_order"],
             not c["needs_scoring"],
-            -c["readiness"],       # higher readiness first (1.0 before 0.5)
-            not c["is_leaf"],      # within same readiness, leaves before callers
-            -c["roi"],             # within same tier, highest ROI first
+            -c["readiness"],  # higher readiness first (1.0 before 0.5)
+            not c["is_leaf"],  # within same readiness, leaves before callers
+            -c["roi"],  # within same tier, highest ROI first
         )
     )
     return candidates
@@ -2995,11 +3002,26 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
 
         return "\n".join(output_parts) if output_parts else None
 
-    try:
-        return asyncio.run(run())
-    except Exception as e:
-        print(f"ERROR: Codex SDK failed: {e}", file=sys.stderr)
-        return None
+    # Retry transient Codex CLI crashes (exit code 1 with "Reading prompt from stdin")
+    last_err = None
+    for _attempt in range(3):
+        try:
+            return asyncio.run(run())
+        except Exception as e:
+            last_err = e
+            err_str = str(e)
+            if "exited with code" in err_str and _attempt < 2:
+                wait = (2**_attempt) * 5  # 5s, 10s
+                print(
+                    f"  [codex] transient failure (attempt {_attempt + 1}/3), "
+                    f"retrying in {wait}s: {err_str[:120]}",
+                    flush=True,
+                )
+                time.sleep(wait)
+            else:
+                break
+    print(f"ERROR: Codex SDK failed: {last_err}", file=sys.stderr)
+    return None
 
 
 def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
@@ -3081,11 +3103,33 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
         text = "\n".join(output_parts) if output_parts else None
         return text
 
-    try:
-        return asyncio.run(run())
-    except Exception as e:
-        print(f"ERROR: Gemini CLI failed: {e}", file=sys.stderr)
-        return None
+    # Retry on transient Gemini capacity/rate-limit errors.
+    # The Gemini CLI has its own internal retries but uses short backoffs that
+    # aren't enough when the model is fully saturated (429 / RESOURCE_EXHAUSTED).
+    # We add longer waits between whole-session retries.
+    last_err = None
+    for _attempt in range(3):
+        try:
+            return asyncio.run(run())
+        except Exception as e:
+            last_err = e
+            err_str = str(e)
+            is_transient = any(
+                k in err_str
+                for k in ("429", "RESOURCE_EXHAUSTED", "capacity", "rateLimitExceeded")
+            )
+            if is_transient and _attempt < 2:
+                wait = (2**_attempt) * 30  # 30s, 60s — longer than CLI's own backoff
+                print(
+                    f"  [gemini] capacity exhausted (attempt {_attempt + 1}/3), "
+                    f"retrying in {wait}s...",
+                    flush=True,
+                )
+                time.sleep(wait)
+            else:
+                break
+    print(f"ERROR: Gemini CLI failed: {last_err}", file=sys.stderr)
+    return None
 
 
 def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=None):
@@ -3261,7 +3305,29 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
             if tools_openai:
                 kwargs["tools"] = tools_openai
 
-            response = client.chat.completions.create(**kwargs)
+            # Retry transient errors (429 rate limit, 529 overloaded, 5xx server)
+            response = None
+            for _attempt in range(4):
+                try:
+                    response = client.chat.completions.create(**kwargs)
+                    break
+                except Exception as api_err:
+                    err_str = str(api_err)
+                    retryable = any(
+                        code in err_str for code in ("429", "529", "500", "502", "503")
+                    )
+                    if retryable and _attempt < 3:
+                        wait = (2**_attempt) * 5  # 5s, 10s, 20s
+                        print(
+                            f"  [minimax] transient error (attempt {_attempt + 1}/4), "
+                            f"retrying in {wait}s: {err_str[:120]}",
+                            flush=True,
+                        )
+                        time.sleep(wait)
+                    else:
+                        raise
+            if response is None:
+                break
         except Exception as e:
             print(f"  [minimax] API error: {e}", file=sys.stderr)
             break
@@ -3471,7 +3537,10 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                             "input": tool_input,
                             "start_time": time.perf_counter(),
                         }
-                        print(f"  [mcp] {tool_name}: calling", flush=True)
+                        print(
+                            f"  [mcp] {tool_name.removeprefix('mcp__ghidra-mcp__')}: calling",
+                            flush=True,
+                        )
                         bus_emit(
                             "tool_call",
                             {
@@ -3505,7 +3574,10 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                             if call_info
                             else None
                         )
-                        print(f"  [mcp] {tool_name}: {status}", flush=True)
+                        print(
+                            f"  [mcp] {tool_name.removeprefix('mcp__ghidra-mcp__')}: {status}",
+                            flush=True,
+                        )
                         bus_emit(
                             "tool_result",
                             {
@@ -4411,12 +4483,15 @@ def process_function(
         if any(phrase in output.lower() for phrase in rate_limit_phrases):
             print(f"  RATE LIMITED — stopping worker on this function", flush=True)
             result = "rate_limited"
-        elif "BLOCKED:" in output:
-            result = "blocked"
         elif "DONE:" in output:
             result = "completed"
         elif "VERIFIED OK:" in output or "QUICK FIX:" in output:
             result = "completed"
+        elif "BLOCKED:" in output:
+            # Check BLOCKED after DONE — models sometimes mention a previous
+            # BLOCKED attempt in their reasoning text before ultimately
+            # succeeding with a DONE marker. DONE takes priority.
+            result = "blocked"
         elif "NEEDS REDO:" in output:
             result = "needs_redo"
     elif tool_calls_made >= 1 or tool_calls_made == -1:
@@ -4644,6 +4719,121 @@ def process_function(
     else:
         print(f"\n  Result: {result} | Score: unavailable")
 
+    # ── Audit stage ─────────────────────────────────────────────────────
+    # If configured, run a second provider to review and fix gaps.
+    # Only fires when: audit_provider is set, worker result was usable,
+    # score gain was below the min-delta threshold, and the function isn't
+    # already at the good-enough score.
+    audit_score_before = None
+    audit_score_after = None
+    audit_outcome = None  # "skipped_good_enough", "skipped_delta", "ran", or None
+    audit_cfg = (
+        cfg
+        if "audit_provider" in cfg
+        else ((load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG))
+    )
+    audit_provider = audit_cfg.get("audit_provider")
+    audit_min_delta = audit_cfg.get("audit_min_delta", 5)
+
+    if (
+        audit_provider
+        and result in ("completed", "partial")
+        and new_score is not None
+        and live_score is not None
+        and mode not in ("VERIFY", "FULL:recovery")
+    ):
+        worker_diff = new_score - live_score
+        good_enough = audit_cfg.get("good_enough_score", 80)
+
+        if new_score >= good_enough:
+            audit_outcome = "skipped_good_enough"
+            print(
+                f"  [audit] skipped — score {new_score}% already >= good_enough {good_enough}%"
+            )
+        elif worker_diff >= audit_min_delta:
+            audit_outcome = "skipped_delta"
+            print(
+                f"  [audit] skipped — worker gained {worker_diff:.0f}% (>= minΔ {audit_min_delta})"
+            )
+        else:
+            print(
+                f"\n  [audit] {audit_provider}: reviewing (worker Δ{worker_diff:.0f}% < minΔ {audit_min_delta})"
+            )
+            bus_emit(
+                "audit_start",
+                {
+                    "key": func_key,
+                    "provider": audit_provider,
+                    "worker_delta": worker_diff,
+                },
+            )
+
+            # Fetch fresh data for the FIX-mode audit pass
+            audit_data = fetch_function_data(program, address, mode="FIX")
+            audit_func_name = (
+                audit_data["completeness"].get("function_name", func_name)
+                if audit_data.get("completeness")
+                else func_name
+            )
+            audit_prompt = build_fix_prompt(
+                audit_func_name, address, audit_data, program=program
+            )
+            # Inject tool block for non-Gemini providers
+            if audit_provider != "gemini":
+                audit_prompt = _inject_tool_block(audit_prompt)
+
+            audit_outcome = "ran"
+            audit_score_before = new_score
+            print(
+                f"  [audit] FIX | {audit_provider} | {len(audit_prompt):,} chars | score: {new_score}%"
+            )
+            print()
+            audit_output, audit_meta = invoke_claude(
+                audit_prompt,
+                model="sonnet",
+                provider=audit_provider,
+                max_turns=15,
+            )
+            audit_tool_calls = audit_meta.get("tool_calls", -1)
+
+            # Rescore after audit
+            audit_new_score, audit_completeness = _rescore_and_sync(
+                func, address, program
+            )
+            if audit_new_score is not None:
+                audit_score_after = audit_new_score
+                audit_diff = audit_new_score - audit_score_before
+                print(
+                    f"\n  [audit] {audit_provider}: done — "
+                    f"{audit_score_before}% -> {audit_new_score}% "
+                    f"({'+' if audit_diff >= 0 else ''}{audit_diff:.0f}%), "
+                    f"{audit_tool_calls} tool calls"
+                )
+                # Update tracked values for downstream logging
+                new_score = audit_new_score
+                post_completeness = audit_completeness
+                tool_calls_made += audit_tool_calls if audit_tool_calls > 0 else 0
+                # Upgrade partial to completed if audit pushed past issues
+                if result == "partial" and audit_diff > 0:
+                    result = "completed"
+                    func["last_result"] = result
+            else:
+                print(f"\n  [audit] {audit_provider}: done — score unavailable")
+
+            bus_emit(
+                "audit_complete",
+                {
+                    "key": func_key,
+                    "provider": audit_provider,
+                    "score_before": audit_score_before,
+                    "score_after": audit_new_score,
+                },
+            )
+
+            # Save program after audit writes
+            if audit_tool_calls != 0:
+                ghidra_post("/save_program", params={"program": program})
+
     # Track partial_runs for requeue deprioritization
     if result == "partial":
         func["partial_runs"] = func.get("partial_runs", 0) + 1
@@ -4669,6 +4859,14 @@ def process_function(
             "tool_calls": tool_calls_made,
             "complexity_tier": complexity_tier,
             "missing_artifacts": missing_artifacts if missing_artifacts else None,
+            "audit_provider": (
+                audit_provider
+                if (audit_provider and result in ("completed", "partial"))
+                else None
+            ),
+            "audit_outcome": audit_outcome,
+            "audit_score_before": audit_score_before,
+            "audit_score_after": audit_score_after,
             "output": output[:5000] if output else None,
         }
     )
@@ -4720,8 +4918,10 @@ def process_function(
     # the function and the worker would re-pick it forever.
     #
     # Semantics:
-    #   - Increment on any completed/partial run with delta <= 1 (no progress
+    #   - Increment on any completed/partial/blocked run with delta <= 1 (no progress
     #     OR regression). -1% dropped via Guard #2b to "partial" still counts.
+    #     Blocked runs always count (delta is always 0 when the model narrates
+    #     instead of calling tools).
     #   - Reset to 0 on meaningful positive progress (delta >= 5).
     #   - Not touched by failed/needs_redo/rate_limited (consecutive_fails
     #     already covers those).
@@ -4729,7 +4929,7 @@ def process_function(
     #   - Cleared by refresh_candidate_scores and full --scan --refresh, same
     #     as the other one-shot flags.
     if (
-        result in ("completed", "partial")
+        result in ("completed", "partial", "blocked")
         and new_score is not None
         and live_score is not None
     ):
