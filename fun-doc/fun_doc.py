@@ -4348,11 +4348,15 @@ def process_function(
             ):
                 use_two_pass = True
 
-        # Massive functions: force recovery-only (skip pass 2)
+        # Massive functions: still use two-pass but NO LONGER force recovery-only.
+        # The original reason for skipping Pass 2 on massive functions was EDT
+        # saturation from long-running decompiles — that's been fixed by the 12s
+        # decompile timeout (v5.3.1). With Pass 2 running, massive functions can
+        # now reach good_enough_score in one attempt (Pass 1 types/names + Pass 2
+        # comments). Without this change, recovery_pass_done blocked them forever.
         if complexity_tier == "massive":
             use_two_pass = True
-            complexity_forced_recovery = True
-            print(f"  COMPLEXITY: {complexity_tier} — forcing recovery-only mode")
+            print(f"  COMPLEXITY: {complexity_tier} — two-pass mode")
     if use_two_pass:
         recovery_prompt = build_recovery_prompt(
             func_name, address, data, program=program
