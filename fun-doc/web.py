@@ -587,6 +587,30 @@ def create_app(state_file, event_bus=None):
         except Exception:
             return []
 
+    def count_run_totals():
+        """Fast line-counting for today_runs and total_runs without parsing
+        every JSON entry. Only parses enough to check the date prefix."""
+        lf = app.config["LOG_FILE"]
+        if not lf.exists():
+            return 0, 0
+        today = datetime.now().date().isoformat()
+        total = 0
+        today_count = 0
+        try:
+            with open(lf, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    total += 1
+                    # Fast date check: timestamp is always the first field
+                    # in the JSON: {"timestamp": "2026-04-17T...
+                    if f'"timestamp": "{today}' in line:
+                        today_count += 1
+        except Exception:
+            pass
+        return total, today_count
+
     # --- Compute functions ---
 
     def compute_deduction_breakdown(funcs):
@@ -633,11 +657,11 @@ def create_app(state_file, event_bus=None):
             for c in candidates
         ]
 
-    def compute_run_stats(logs):
+    def compute_run_stats(logs, total_override=None, today_override=None):
         if not logs:
             return {
-                "total_runs": 0,
-                "today_runs": 0,
+                "total_runs": total_override or 0,
+                "today_runs": today_override or 0,
                 "avg_delta": 0,
                 "success_rate": 0,
                 "by_provider": {},
@@ -680,8 +704,8 @@ def create_app(state_file, event_bus=None):
             reverse=True,
         )[:10]
         return {
-            "total_runs": len(logs),
-            "today_runs": len(today_logs),
+            "total_runs": total_override if total_override is not None else len(logs),
+            "today_runs": today_override if today_override is not None else len(today_logs),
             "avg_delta": round(sum(deltas) / len(deltas), 1) if deltas else 0,
             "success_rate": round(success / len(logs) * 100, 1) if logs else 0,
             "by_provider": provider_stats,
@@ -836,7 +860,7 @@ def create_app(state_file, event_bus=None):
             "all_functions": func_list,
             "all_functions_total": all_func_total,
             "deduction_breakdown": compute_deduction_breakdown(funcs),
-            "run_stats": compute_run_stats(load_run_logs()),
+            "run_stats": compute_run_stats(load_run_logs(), *count_run_totals()),
             "project_folder": state.get("project_folder", "unknown"),
             "active_binary": active_binary,
             "available_binaries": available_binaries,
