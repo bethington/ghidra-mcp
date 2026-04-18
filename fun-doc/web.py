@@ -148,6 +148,7 @@ class WorkerManager:
                 load_priority_queue,
                 reset_handoff_counter,
                 _bump_handoff_counter,
+                update_function_state,
             )
 
             worker["status"] = "running"
@@ -328,13 +329,27 @@ class WorkerManager:
                             and current_score > 0
                             and escalate_to
                         ):
-                            reason = "failed" if result in ("failed", "needs_redo") else f"score {current_score}%"
+                            reason = (
+                                "failed"
+                                if result in ("failed", "needs_redo")
+                                else f"score {current_score}%"
+                            )
                             escalation_count = _bump_handoff_counter()
                             print(
                                 f"\n  AUTO-ESCALATE #{escalation_count}: {worker['provider']} → {escalate_to} "
                                 f"({reason}, below {good_enough}%)",
                                 flush=True,
                             )
+                            # Stamp per-function escalation tracking
+                            from datetime import datetime as _dt
+
+                            fresh_func["escalation_count"] = (
+                                fresh_func.get("escalation_count", 0) + 1
+                            )
+                            fresh_func["last_escalated"] = _dt.now().isoformat()
+                            fresh_func["last_escalation_from"] = worker["provider"]
+                            fresh_func["last_escalation_to"] = escalate_to
+                            update_function_state(key, fresh_func)
                             escalate_result = process_function(
                                 key,
                                 fresh_func,
@@ -697,7 +712,18 @@ def create_app(state_file, event_bus=None):
             "failure_modes": {},
             "regressions": 0,
             "zero_delta": 0,
-            "audit": {"ran": 0, "improved": 0, "regressed": 0, "no_change": 0, "skipped_good": 0, "skipped_delta": 0, "today_ran": 0, "today_improved": 0, "today_skipped_good": 0, "today_skipped_delta": 0},
+            "audit": {
+                "ran": 0,
+                "improved": 0,
+                "regressed": 0,
+                "no_change": 0,
+                "skipped_good": 0,
+                "skipped_delta": 0,
+                "today_ran": 0,
+                "today_improved": 0,
+                "today_skipped_good": 0,
+                "today_skipped_delta": 0,
+            },
             "today": {"runs": 0, "success_rate": 0, "avg_delta": 0, "by_provider": {}},
         }
         if not logs:
@@ -926,6 +952,8 @@ def create_app(state_file, event_bus=None):
                 "fixable": 0,
                 "needs_work": 0,
                 "pct": 0,
+                "audited": 0,
+                "escalated": 0,
                 "buckets": {},
                 "by_program": {},
                 "sessions": [],
@@ -948,6 +976,10 @@ def create_app(state_file, event_bus=None):
         )
         needs_work = sum(1 for f in scoreable.values() if f["score"] < fixable_lo)
         pct = (done / total * 100) if total > 0 else 0
+        audited = sum(1 for f in scoreable.values() if f.get("audit_count", 0) > 0)
+        escalated = sum(
+            1 for f in scoreable.values() if f.get("escalation_count", 0) > 0
+        )
         buckets = {
             "100": 0,
             "90-99": 0,
@@ -1023,6 +1055,8 @@ def create_app(state_file, event_bus=None):
             "fixable": fixable_count,
             "needs_work": needs_work,
             "pct": round(pct, 1),
+            "audited": audited,
+            "escalated": escalated,
             "buckets": buckets,
             "by_program": dict(by_program),
             "sessions": state.get("sessions", [])[-10:],
