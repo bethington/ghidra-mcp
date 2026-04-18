@@ -24,7 +24,7 @@ docs/
 │   ├── v1.7.0/           # Release 1.7.0 documentation
 │   ├── v1.7.2/           # Release 1.7.2 documentation
 │   ├── v1.7.3/           # Release 1.7.3 documentation
-│   └── v1.9.2/           # Release 1.9.2 documentation
+│   └── v1.9.3/           # Release 1.9.2 documentation
 │
 ├── GHIDRA_VARIABLE_APIS_EXPLAINED.md  # Ghidra variable API documentation
 ├── MARKDOWN_NAMING.md                 # Markdown naming conventions

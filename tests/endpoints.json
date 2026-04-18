@@ -1,7 +1,7 @@
 {
   "version": "5.4.1",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 216,
+  "total_endpoints": 222,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -111,6 +111,33 @@
       "description": "Composite RE documentation analysis (decompile + classify + variables + completeness)"
     },
     {
+      "path": "/analyze_function_complete",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "name",
+        "include_xrefs",
+        "include_callees",
+        "include_callers",
+        "include_disasm",
+        "include_variables",
+        "include_completeness",
+        "program"
+      ],
+      "description": "Comprehensive single-call function analysis. Requires function name — if you only have an address, call get_function_by_address first."
+    },
+    {
+      "path": "/analyze_function_completeness",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "function_address",
+        "compact",
+        "program"
+      ],
+      "description": "Analyze documentation completeness"
+    },
+    {
       "path": "/analyze_function_full",
       "method": "GET",
       "category": "analysis",
@@ -125,17 +152,6 @@
         "program"
       ],
       "description": "Complete function analysis"
-    },
-    {
-      "path": "/analyze_function_completeness",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "function_address",
-        "compact",
-        "program"
-      ],
-      "description": "Analyze documentation completeness"
     },
     {
       "path": "/analyze_struct_field_usage",
@@ -284,14 +300,28 @@
       "description": "Set multiple variable types"
     },
     {
-      "path": "/find_undocumented_functions_by_strings",
+      "path": "/batch_string_anchor_report",
       "method": "GET",
       "category": "documentation",
       "params": [
         "pattern",
         "program"
       ],
-      "description": "Report strings and their undocumented functions"
+      "description": "Report of source file strings and their FUN_* functions"
+    },
+    {
+      "path": "/bulk_fuzzy_match",
+      "method": "GET",
+      "category": "documentation",
+      "params": [
+        "source_program",
+        "target_program",
+        "threshold",
+        "offset",
+        "limit",
+        "filter"
+      ],
+      "description": "Bulk cross-binary function matching"
     },
     {
       "path": "/bulk_fuzzy_match_functions",
@@ -941,6 +971,19 @@
       "description": "Find similar functions via fuzzy matching"
     },
     {
+      "path": "/find_similar_functions_fuzzy",
+      "method": "GET",
+      "category": "documentation",
+      "params": [
+        "address",
+        "source_program",
+        "target_program",
+        "threshold",
+        "limit"
+      ],
+      "description": "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution."
+    },
+    {
       "path": "/find_undocumented_by_string",
       "method": "GET",
       "category": "utility",
@@ -949,6 +992,16 @@
         "program"
       ],
       "description": "Find undocumented functions referencing string"
+    },
+    {
+      "path": "/find_undocumented_functions_by_strings",
+      "method": "GET",
+      "category": "documentation",
+      "params": [
+        "pattern",
+        "program"
+      ],
+      "description": "Report strings and their undocumented functions"
     },
     {
       "path": "/force_decompile",
@@ -1264,6 +1317,16 @@
       "description": "Get structure layout"
     },
     {
+      "path": "/get_type_size",
+      "method": "GET",
+      "category": "datatype",
+      "params": [
+        "type_name",
+        "program"
+      ],
+      "description": "Get data type size and info"
+    },
+    {
       "path": "/get_valid_data_types",
       "method": "GET",
       "category": "getter",
@@ -1496,6 +1559,17 @@
         "program"
       ],
       "description": "List imported symbols"
+    },
+    {
+      "path": "/list_methods",
+      "method": "GET",
+      "category": "listing",
+      "params": [
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "List all function names with pagination"
     },
     {
       "path": "/list_namespaces",

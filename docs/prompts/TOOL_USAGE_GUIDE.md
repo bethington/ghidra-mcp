@@ -276,3 +276,80 @@ The hash algorithm normalizes position-dependent values so identical functions a
 | Small immediates (<0x10000) | `IMM:value` | Preserved (constants) |
 | Large immediates | `IMM_LARGE` | May be addresses |
 | Registers | Preserved | Part of algorithm logic |
+
+## Dynamic Analysis Tools (v5.4.0+)
+
+When static decompilation is ambiguous, three endpoint families run code or trace data flow directly. Use them as cross-checks, not replacements.
+
+### `analyze_dataflow(address, variable, direction, max_steps=20, program="")`
+
+Traces how a value propagates through a function using the decompiler's PCode graph.
+
+- `direction="backward"` — walk producers via `Varnode.getDef()`. Shows where a return value or sink argument *came from*.
+- `direction="forward"` — walk consumers via `Varnode.getDescendants()`. Shows every place a parameter or early-computed value *flows to*.
+- `variable` — register name (`EAX`), HighVariable name (`param_1`, `local_14`, `iVar1`), or empty string for the output of the first PcodeOp at the address. Empty-string errors list candidate names from the address.
+- Terminates at constants, function inputs, call boundaries, or `max_steps` (capped at 200).
+- Phi (`MULTIEQUAL`) nodes summarized as single steps rather than recursed.
+
+When to reach for it:
+
+- A function returns a value and you need to name producers concretely (did it come from a syscall return? a table lookup? a masked parameter?).
+- Forward-tracing a parameter to confirm every use is consistent with your PURPOSE claim (no hidden sink you missed).
+- Reconstructing a candidate string list for `emulate_hash_batch` — the forward trace from the hash function's string parameter shows every call site that feeds it.
+
+### `emulate_function(address, registers, memory, max_steps=10000, return_registers="", program="")`
+
+Emulates a function through Ghidra's `EmulatorHelper`. No process, no syscalls, pure P-code execution.
+
+- `registers` — JSON string: `{"ECX": "0x7FFE0000", "EDX": "0x10"}`
+- `memory` — JSON string with `regions` wrapper: `{"regions": [{"address": "0x7FFE0004", "hex": "DEC0ADDE"}]}`. Regions accept `data` (base64), `hex`, or `string`.
+- `return_registers` — comma-separated names to include in output (empty = all general-purpose)
+- Returns `{success, function, entry_address, hit_return, final_pc, registers: {...}}`
+
+Stack is auto-initialized at `0x7FFF0000` with a `0xDEADBEEF` return sentinel. `hit_return: true` means the function executed to RET without hitting `max_steps`.
+
+Use for: hash functions, CRC/checksum leaves, bit-packing routines, anything that's pure computation with known inputs.
+
+### `emulate_hash_batch(hash_function_address, string_register, result_register, target_hash, candidates, initial_registers="", wide_string=false, program="")`
+
+Brute-force API-hash resolution. Iterates a candidate list through a hash function and returns all matches.
+
+- `candidates` — JSON string array of candidate strings: `["CreateProcessW", "VirtualAlloc", ...]`
+- Returns `{function, target_hash, total_candidates, tested, matches: [{api_name, computed_hash, iteration}], resolved, best_match}`
+- `matches` lists **all** collisions. When two or more names hash to the target, check the full array; `best_match` is only the first in iteration order.
+
+Workflow: locate the hash function (`search_byte_patterns`, `detect_crypto_constants`, or `search_functions`), identify input/output registers (`get_function_variables` or `analyze_dataflow`), supply a candidate list per suspected source DLL, feed the target hash from the call site.
+
+### `debugger_*` family (22 tools, GUI-only)
+
+Proxied to a standalone Python debugger server via `GHIDRA_DEBUGGER_URL` (default `http://127.0.0.1:8099`). Wraps Ghidra's `DebuggerTraceManagerService`, `DebuggerLogicalBreakpointService`, and `TraceRmiLauncherService`. Backend depends on the TraceRmi launcher chosen at attach time:
+
+- Windows PE targets: `dbgeng` (WinDbg engine)
+- Linux ELF: `gdb`
+- macOS Mach-O: `lldb`
+
+Covers: `debugger_attach`, `debugger_status`, `debugger_step_{into,over,out}`, `debugger_{set,remove,list}_breakpoints`, `debugger_registers`, `debugger_read_memory`, `debugger_stack_trace`, `debugger_modules`, `debugger_trace_{function,start,stop,log,list}`, `debugger_watch_{memory,stop,log}`, `debugger_resolve_ordinal`, `debugger_read_args`, `debugger_continue`, `debugger_detach`.
+
+Use for: ground-truth validation after static analysis. After emulation resolves a hash, set a breakpoint on the resolved API and confirm the process actually calls it.
+
+## Security Environment Variables (v5.4.1+)
+
+GhidraMCP defaults to localhost-unauthenticated — safe on a single-user dev box. Configure these before binding beyond loopback:
+
+| Env var | Effect |
+|---|---|
+| `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health`, `/health`, `/check_connection` are always exempt. |
+| `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** (breaking change — these endpoints execute arbitrary Java against the Ghidra process). |
+| `GHIDRA_MCP_FILE_ROOT` | When set, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. |
+
+The headless server refuses to start on a non-loopback bind address (`0.0.0.0`, explicit external IP) unless `GHIDRA_MCP_AUTH_TOKEN` is set.
+
+### Worked example — exposing to a private LAN with auth
+
+```bash
+export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
+export GHIDRA_MCP_ALLOW_SCRIPTS=1     # only if your workflow needs it
+export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
+
+java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
+```

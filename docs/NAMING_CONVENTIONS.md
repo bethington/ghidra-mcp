@@ -28,7 +28,7 @@ SECURITY.md                  — Security guidelines and reporting (future)
 Organized reference documentation also uses **UPPERCASE**:
 
 ```
-docs/TOOL_REFERENCE.md           — Complete documentation of all 109 MCP tools
+docs/TOOL_REFERENCE.md           — Authoritative endpoint catalog (222 tools)
 docs/ERROR_CODES.md              — Error catalog and troubleshooting guide
 docs/PERFORMANCE_BASELINES.md    — Performance metrics and optimization
 docs/ARCHITECTURE.md             — System architecture and design
