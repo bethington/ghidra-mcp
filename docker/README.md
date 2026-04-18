@@ -133,7 +133,7 @@ pytest tests/integration/test_all_endpoints.py -v
 │  │              GhidraMCPHeadlessServer                    │ │
 │  │  ┌──────────────────┐  ┌─────────────────────────────┐ │ │
 │  │  │ HeadlessProgram  │  │ HeadlessEndpointHandler     │ │ │
-│  │  │    Provider      │  │   (127 REST endpoints)      │ │ │
+│  │  │    Provider      │  │   (~200 REST endpoints)      │ │ │
 │  │  └──────────────────┘  └─────────────────────────────┘ │ │
 │  │  ┌──────────────────┐  ┌─────────────────────────────┐ │ │
 │  │  │ DirectThreading  │  │     Ghidra Headless         │ │ │

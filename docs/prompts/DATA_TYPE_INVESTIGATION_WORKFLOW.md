@@ -623,6 +623,15 @@ When documenting structure investigation results:
    ApplyDamage: [pUnit + 0xC] = wHealth ✓
    ```
 
+## Tracing Field Semantics with `analyze_dataflow` (v5.4.0+)
+
+When a field's role is unclear from its access patterns alone, pick one of its write sites (or read sites) and trace the data flow:
+
+- **Backward from a write**: `analyze_dataflow(address=<write_site>, variable="<source_reg_or_var>", direction="backward")` — surfaces the producer chain. If the chain terminates at a function input parameter, the field stores a caller-supplied value (count, handle, pointer). If it terminates at a table lookup, the field stores a derived/computed value. If it terminates at a constant, the field has a fixed initialization semantic.
+- **Forward from a read**: `analyze_dataflow(address=<read_site>, variable="<loaded_reg>", direction="forward")` — surfaces every consumer. A field read whose forward trace feeds a loop counter is a count. One that feeds `memcpy`/`strcpy` size is a byte length. One that feeds a comparison against 0 is a flag.
+
+Pair with `get_field_access_context` (which lists xref addresses but not their semantics) to turn raw access addresses into concrete field roles. Phi-node merges in the trace indicate a field that's set in multiple code paths — often a sign of union-like usage worth documenting in the struct comment.
+
 ## Related Workflows
 
 - **FUNCTION_DOC_WORKFLOW_V5.md**: For complete function documentation using proper types

@@ -7,7 +7,7 @@ Thank you for your interest in contributing to Ghidra MCP! This guide explains h
 - **Issues**: [GitHub Issues](https://github.com/bethington/ghidra-mcp/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/bethington/ghidra-mcp/discussions)
 - **Documentation**: [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)
-- **Tools Reference**: [docs/TOOL_REFERENCE.md](docs/TOOL_REFERENCE.md)
+- **Tools Reference**: [tests/endpoints.json](tests/endpoints.json)
 
 ---
 
@@ -159,7 +159,7 @@ Priority: Medium - helpful for malware analysis
    }
    ```
 
-3. Document in `docs/TOOL_REFERENCE.md`:
+3. Document in `tests/endpoints.json`:
    ```markdown
    ### my_new_tool()
    
@@ -204,10 +204,10 @@ Priority: Medium - helpful for malware analysis
 **How**:
 ```bash
 # 1. Edit documentation
-vim docs/TOOL_REFERENCE.md
+vim tests/endpoints.json
 
 # 2. Preview if possible
-cat docs/TOOL_REFERENCE.md | grep "my_section"
+cat tests/endpoints.json | grep "my_section"
 
 # 3. Commit
 git commit -m "docs: Clarify batch operation performance benefits"
@@ -414,7 +414,7 @@ pytest tests/ -v
 # Manually update docs/ folder
 
 # Preview markdown
-cat docs/TOOL_REFERENCE.md | more
+cat tests/endpoints.json | more
 
 # Check for linting errors (optional)
 markdownlint docs/
@@ -460,7 +460,7 @@ Closes #123
 - **Issues**: Check existing issues first
 - **Documentation**: See DOCUMENTATION_INDEX.md
 - **Examples**: See examples/ directory
-- **API**: See docs/TOOL_REFERENCE.md
+- **API**: See tests/endpoints.json
 
 ---
 

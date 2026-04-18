@@ -2,7 +2,7 @@
 
 ## Overview
 
-MCP server bridging Ghidra reverse engineering with AI tools. 219 MCP tools for binary analysis.
+MCP server bridging Ghidra reverse engineering with AI tools. 222 MCP tools for binary analysis.
 
 - **Package**: `com.xebyte` | **Version**: 5.4.1 | **Java**: 21 LTS | **Ghidra**: 12.0.3
 
@@ -31,7 +31,7 @@ Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
 
 Do not try to keep the full tool list in this file.
 
-- **Authoritative repo snapshot**: `tests/endpoints.json` (219 endpoints, categories, descriptions)
+- **Authoritative repo snapshot**: `tests/endpoints.json` (222 endpoints, categories, descriptions)
 - **Authoritative runtime schema**: `/mcp/schema` from the running server
 - **Usage patterns / operator guide**: `docs/prompts/TOOL_USAGE_GUIDE.md`
 

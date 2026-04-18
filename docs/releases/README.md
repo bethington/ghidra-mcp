@@ -4,7 +4,28 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ## Available Releases
 
-### v5.3.2 (Latest) — hotfix
+### v5.4.1 (Latest) — security release
+
+- **Bearer-token auth** — when `GHIDRA_MCP_AUTH_TOKEN` is set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health`, `/health`, `/check_connection` are auth-exempt.
+- **Bind hardening** — headless server refuses to start on non-loopback `--bind` unless a token is configured.
+- **Script gate (breaking change)** — `/run_script_inline` and `/run_ghidra_script` default to 403 unless `GHIDRA_MCP_ALLOW_SCRIPTS=1` is set. These endpoints execute arbitrary Java against the Ghidra process; the pre-v5.4.1 default was unauthenticated RCE when exposed beyond loopback.
+- **`GHIDRA_MCP_FILE_ROOT` mechanism** — path-root canonicalization helper for file-handling endpoints. Per-endpoint wire-up scheduled for v5.4.2.
+- **CI / ops** — Debugger JARs installed across all 4 GitHub Actions workflows (builds were red on main since the v5.4.0 debugger merge); offline Java tests (11, ~3s) now gate every push/PR; deprecated Ghidra API warnings suppressed; `requests` floor raised to 2.32.0 per CVE-2024-35195.
+- **Docs refresh** — `README.md` Security section, `CLAUDE.md`, `CHANGELOG.md` (v5.4.0 entry backfilled), operator prompt docs now cover emulation / debugger / data-flow.
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.4.0 — feature release
+
+- **P-code emulation** — `EmulationService` adds `/emulate_function` (run a function with controlled register/memory inputs) and `/emulate_hash_batch` (brute-force API hash resolution, collision-safe). Live-verified against D2Common.dll.
+- **Live debugger integration** — new `DebuggerService` (17 `/debugger/*` Java endpoints) wrapping Ghidra's `DebuggerTraceManagerService` / `DebuggerLogicalBreakpointService` / `TraceRmiLauncherService`. Standalone Python `debugger/` package on port 8099 with 22 bridge proxy tools. GUI-only (requires `PluginTool`). Backend is whatever the TraceRmi launcher provides: `dbgeng` on Windows PE, `gdb`/`lldb` elsewhere.
+- **Data flow analysis** — `/analyze_dataflow` traces PCode-graph value propagation (forward = consumers, backward = producers). Closes [#111](https://github.com/bethington/ghidra-mcp/issues/111). Live-verified reproducing decompiler chains step-for-step.
+- **Headless program/project management** — `HeadlessManagementService` moves the 8 previously-hand-registered headless endpoints (`/load_program`, `/create_project`, `/open_project`, `/close_project`, `/load_program_from_project`, `/get_project_info`, `/close_program`, `/server/status`) into the annotation scanner so they appear in `/mcp/schema` and `list_tool_groups`.
+- **Tool count 199 → 222** after catalog regeneration.
+- **fun-doc UI polish** — layer filter dropdown, 7 sortable column headers replacing the dropdown sort, Layer column replacing Callers, 500-row cap removed, Focus button + Stop All Workers, runs-today counter, auto-escalate to stronger provider, per-function escalation/audit tracking with dashboard stats.
+- **`--use-venv` flag** for Linux `ghidra-mcp-setup.sh` (Ubuntu 24.04+ externally-managed Python).
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.3.2 — hotfix
 
 - **Second v5.3.x hotfix** shipped after overnight 2026-04-15 test session exposed three bugs v5.3.1 missed
 - **Pass 2 (`FULL:comments`) now runs for codex and claude** — gate changed from `tool_calls_made > 0` to `!= 0` so the `-1` (unknown) sentinel returned by SDKs that don't report per-turn tool counts no longer silently skips the comments pass. This was why codex/claude score deltas plateaued at ~60% — Pass 2 is what adds the plate comment + EOL markers that push scores above `good_enough_score`.
@@ -179,6 +200,6 @@ Each release directory should contain:
 
 ## Navigation
 
-- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v4.3.0)
+- For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v5.4.1)
 - For specific versions: Browse the version directories above
 - For overall project changes: See [CHANGELOG.md](../CHANGELOG.md) in the project root

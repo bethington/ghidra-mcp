@@ -3,4 +3,4 @@ Plugin-Class: com.xebyte.GhidraMCPPlugin
 Plugin-Name: GhidraMCP
 Plugin-Version: 5.4.1
 Plugin-Author: Ben Ethington
-Plugin-Description: GhidraMCP - HTTP server plugin with 219 MCP tools for reverse engineering automation
+Plugin-Description: GhidraMCP - HTTP server plugin with 222 MCP tools for reverse engineering automation

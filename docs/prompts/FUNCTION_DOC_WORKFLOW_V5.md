@@ -109,6 +109,17 @@ Call `analyze_function_completeness` once. Acceptable unfixable deductions — d
 
 If fixable deductions > 10 points, address them (usually undocumented magic numbers, undefined variable types, or missing plate comment) and verify again before reporting DONE.
 
+## Optional: Dynamic Cross-Check (v5.4.0+)
+
+For leaf functions with ambiguous semantics (hash algorithms, CRC/checksum variants, bit-packing routines), cross-check the static documentation before marking DONE:
+
+- `analyze_dataflow(address, variable="<return or param>", direction="backward")` — confirm the producers you named in PURPOSE are the only ones the decompiler sees. If the chain surfaces an unnamed constant or call you didn't account for, your plate comment is incomplete.
+- `emulate_function(address, registers={...}, memory={"regions": [...]})` — feed known inputs, read the output register, compare to the expected behavior. Cheapest way to falsify a wrong algorithm claim.
+
+Skip for non-leaf functions, anything with heap/syscall side effects, or anything that already scores above `good_enough`.
+
+**Note**: As of v5.4.1, `/run_script_inline` and `/run_ghidra_script` are gated behind `GHIDRA_MCP_ALLOW_SCRIPTS=1` and return 403 by default — one more reason to stick to native MCP tools rather than ad-hoc script injection.
+
 ## Output
 
 ```
