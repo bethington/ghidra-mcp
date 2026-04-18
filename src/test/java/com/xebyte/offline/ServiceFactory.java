@@ -13,6 +13,9 @@ import com.xebyte.core.ProgramScriptService;
 import com.xebyte.core.SymbolLabelService;
 import com.xebyte.core.ThreadingStrategy;
 import com.xebyte.core.XrefCallGraphService;
+import com.xebyte.headless.GhidraServerManager;
+import com.xebyte.headless.HeadlessManagementService;
+import com.xebyte.headless.HeadlessProgramProvider;
 
 /**
  * Builds the full set of service instances that {@link com.xebyte.core.ServerManager}
@@ -45,6 +48,9 @@ public final class ServiceFactory {
         MalwareSecurityService malwareSecurityService = new MalwareSecurityService(provider, ts);
         ProgramScriptService programScriptService = new ProgramScriptService(provider, ts);
 
+        HeadlessManagementService headlessManagementService =
+            new HeadlessManagementService(new HeadlessProgramProvider(), new GhidraServerManager());
+
         return new Object[] {
             listingService,
             functionService,
@@ -56,6 +62,7 @@ public final class ServiceFactory {
             documentationHashService,
             malwareSecurityService,
             programScriptService,
+            headlessManagementService,
         };
     }
 
