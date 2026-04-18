@@ -6,9 +6,9 @@
     <groupId>com.xebyte</groupId>
     <artifactId>GhidraMCP</artifactId>
     <packaging>jar</packaging>
-    <version>5.3.2</version>
+    <version>5.4.0</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.3.2 (hotfix): Pass 2 gate accepts tool_calls_made==-1 so codex/claude runs actually execute the comments pass (fixes score plateau at ~60% for massive-complexity functions), stagnation_runs one-shot blacklist for any no-progress loop, claude system prompt tells it to call MCP tools directly instead of using ToolSearch (eliminates false BLOCKED reports).</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.4.0: P-code emulation (EmulationService — /emulate_function and /emulate_hash_batch for brute-force API hash resolution), live debugger integration (DebuggerService + Python debugger/ package with ASLR-aware address translation, breakpoints, stepping, register/memory reads, non-breaking function tracing), and /analyze_dataflow endpoint for PCode-graph-based value propagation analysis.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
