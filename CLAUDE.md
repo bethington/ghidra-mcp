@@ -2,9 +2,9 @@
 
 ## Overview
 
-MCP server bridging Ghidra reverse engineering with AI tools. 199 MCP tools for binary analysis.
+MCP server bridging Ghidra reverse engineering with AI tools. 219 MCP tools for binary analysis.
 
-- **Package**: `com.xebyte` | **Version**: 5.3.2 | **Java**: 21 LTS | **Ghidra**: 12.0.3
+- **Package**: `com.xebyte` | **Version**: 5.4.0 | **Java**: 21 LTS | **Ghidra**: 12.0.3
 
 ## Boil the ocean
 
@@ -17,9 +17,10 @@ AI Tools <-> MCP Bridge (bridge_mcp_ghidra.py) <-> Ghidra Plugin (GhidraMCPPlugi
 ```
 
 - **Plugin**: `src/main/java/com/xebyte/GhidraMCPPlugin.java` -- HTTP server, delegates to services
-- **Bridge**: `bridge_mcp_ghidra.py` (~1,100 lines) -- dynamic tool registration from `/mcp/schema` + 7 static tools
-- **Service Layer**: `src/main/java/com/xebyte/core/` -- 12 service classes (~18K lines), `@McpTool`/`@Param` annotated
-- **Headless**: `src/main/java/com/xebyte/headless/` -- standalone server without GUI
+- **Bridge**: `bridge_mcp_ghidra.py` (~1,500 lines) -- dynamic tool registration from `/mcp/schema` + static tools (~7 knowledge DB + 22 debugger proxy via `GHIDRA_DEBUGGER_URL`)
+- **Service Layer**: `src/main/java/com/xebyte/core/` -- 14 service classes (~20K lines), `@McpTool`/`@Param` annotated. v5.4.0 adds `EmulationService` (P-code emulation), `DebuggerService` (TraceRmi wrapping — GUI-only)
+- **Debugger (Python)**: `debugger/` -- standalone HTTP server on port 8099 (engine, protocol, tracing, address_map, d2/ conventions). Bridge proxies via `GHIDRA_DEBUGGER_URL` env var.
+- **Headless**: `src/main/java/com/xebyte/headless/` -- standalone server without GUI. Includes `HeadlessManagementService` for program/project lifecycle.
 - **Annotation Scanner**: `AnnotationScanner.java` discovers `@McpTool` methods, generates `/mcp/schema`
 
 Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
@@ -30,7 +31,7 @@ Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
 
 Do not try to keep the full tool list in this file.
 
-- **Authoritative repo snapshot**: `tests/endpoints.json` (199 endpoints, categories, descriptions)
+- **Authoritative repo snapshot**: `tests/endpoints.json` (219 endpoints, categories, descriptions)
 - **Authoritative runtime schema**: `/mcp/schema` from the running server
 - **Usage patterns / operator guide**: `docs/prompts/TOOL_USAGE_GUIDE.md`
 
