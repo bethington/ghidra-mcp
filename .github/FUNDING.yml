@@ -1,0 +1,8 @@
+# GitHub Sponsors Configuration
+# https://github.com/sponsors/bethington
+
+github:
+  - bethington
+
+custom:
+  - url: https://github.com/sponsors/bethington
