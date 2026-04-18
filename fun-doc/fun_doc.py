@@ -1247,8 +1247,12 @@ def populate_call_graph(state, prog_path):
 
     # Stamp each function's state entry with its callee list
     funcs = state.get("functions", {})
-    # Collect all addresses for this program to compute BFS layers
-    prog_addrs = set()
+    # Collect addresses — separate scoreable (non-thunk) from all for BFS.
+    # BFS layers are computed on non-thunk functions only so they match the
+    # dashboard's Call Graph Layers visualization. Thunks participate in
+    # callee lists (so readiness can track them) but don't get layer numbers.
+    prog_addrs = set()       # all addresses (including thunks)
+    scoreable_addrs = set()  # non-thunk only (for BFS)
     addr_to_key = {}
     stamped = 0
     for key, func in funcs.items():
@@ -1258,21 +1262,23 @@ def populate_call_graph(state, prog_path):
         func["callees"] = sorted(adjacency.get(addr, set()))
         prog_addrs.add(addr)
         addr_to_key[addr] = key
+        if not func.get("is_thunk") and not func.get("is_external"):
+            scoreable_addrs.add(addr)
         stamped += 1
 
     # BFS layer assignment: leaf = layer 0, callers of leaves = layer 1, etc.
-    # Internal callees only (filter to addresses within this program).
+    # Uses scoreable (non-thunk) addresses only so layers match the dashboard.
     internal_callees = {}
     callers_of = defaultdict(set)
-    for addr in prog_addrs:
-        ic = adjacency.get(addr, set()) & prog_addrs
+    for addr in scoreable_addrs:
+        ic = adjacency.get(addr, set()) & scoreable_addrs
         internal_callees[addr] = ic
         for c in ic:
             callers_of[c].add(addr)
 
     depth = {}
     current = set()
-    for addr in prog_addrs:
+    for addr in scoreable_addrs:
         if not internal_callees.get(addr):
             depth[addr] = 0
             current.add(addr)
@@ -1291,12 +1297,12 @@ def populate_call_graph(state, prog_path):
         if layer_num > 200:
             break
 
-    # Stamp layer on each function
+    # Stamp layer on each scoreable function
     for addr, d in depth.items():
         if addr in addr_to_key:
             funcs[addr_to_key[addr]]["call_graph_layer"] = d
-    # Cyclic functions get no layer (None)
-    for addr in prog_addrs - set(depth.keys()):
+    # Cyclic functions get no layer (None); thunks keep whatever they had
+    for addr in scoreable_addrs - set(depth.keys()):
         if addr in addr_to_key:
             funcs[addr_to_key[addr]]["call_graph_layer"] = None
 

@@ -1217,13 +1217,54 @@ def create_app(state_file, event_bus=None):
                 continue
             if program and func.get("program_name") != program:
                 continue
-            # Layer filter — uses pre-computed call_graph_layer from state.json
-            # (stamped by populate_call_graph during scan). Layer 0 includes
-            # true leaves (no callees) AND functions whose callees are all
-            # external (outside the program) — both are "leaves" in the
-            # internal call graph.
+            # Layer filter — computed dynamically using the same BFS as
+            # /api/call_graph_layers so results match the dashboard exactly.
+            # The pre-computed call_graph_layer in state.json can diverge
+            # because populate_call_graph includes thunks in the adjacency
+            # set while the dashboard excludes them.
             if layer_filter is not None:
-                func_layer = func.get("call_graph_layer")
+                if not hasattr(search_functions, '_layer_cache'):
+                    search_functions._layer_cache = {}
+                cache_key = (program or state.get("active_binary"), layer_filter)
+                if cache_key not in search_functions._layer_cache:
+                    # Build layer map matching the dashboard's BFS
+                    active_bin = program or state.get("active_binary")
+                    bf = {k: v for k, v in all_funcs.items()
+                          if v.get("program_name") == active_bin
+                          and not v.get("is_thunk") and not v.get("is_external")}
+                    sa = set()
+                    for v in bf.values():
+                        sa.add(v.get("address", ""))
+                    co = {}
+                    cr = defaultdict(set)
+                    for v in bf.values():
+                        a = v.get("address", "")
+                        ic = set(v.get("callees", [])) & sa
+                        co[a] = ic
+                        for c in ic:
+                            cr[c].add(a)
+                    dp = {}
+                    cur = {a for a in sa if not co.get(a)}
+                    for a in cur:
+                        dp[a] = 0
+                    ln = 0
+                    while cur:
+                        nx = set()
+                        for a in cur:
+                            for ca in cr.get(a, set()):
+                                if ca in dp: continue
+                                if all(c in dp for c in co.get(ca, set())):
+                                    dp[ca] = ln + 1
+                                    nx.add(ca)
+                        cur = nx
+                        ln += 1
+                        if ln > 200: break
+                    lm = {}
+                    for a in sa:
+                        lm[a] = dp.get(a)  # None = cyclic
+                    search_functions._layer_cache[cache_key] = lm
+                lm = search_functions._layer_cache[cache_key]
+                func_layer = lm.get(func.get("address", ""))
                 if layer_filter == "cyclic":
                     if func_layer is not None:
                         continue
