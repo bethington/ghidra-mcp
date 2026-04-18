@@ -4568,15 +4568,24 @@ public class AnalysisService {
         return "vn:" + vn.getAddress() + ":" + vn.getSize();
     }
 
-    /** Extract HighVariable/HighSymbol name from a Varnode, or null. */
+    /**
+     * Extract HighVariable/HighSymbol name from a Varnode, or null.
+     * Filters out Ghidra's "UNNAMED" placeholder — that's the default name for
+     * anonymous intermediate HighVariables and is less informative than a
+     * unique/mem/register label.
+     */
     private static String highName(Varnode vn) {
         if (vn == null) return null;
         HighVariable hv = vn.getHigh();
         if (hv == null) return null;
         HighSymbol sym = hv.getSymbol();
-        if (sym != null && sym.getName() != null && !sym.getName().isEmpty()) return sym.getName();
+        if (sym != null) {
+            String symName = sym.getName();
+            if (symName != null && !symName.isEmpty() && !"UNNAMED".equals(symName)) return symName;
+        }
         String n = hv.getName();
-        return (n != null && !n.isEmpty()) ? n : null;
+        if (n != null && !n.isEmpty() && !"UNNAMED".equals(n)) return n;
+        return null;
     }
 
     private static boolean sameRegister(Varnode vn, Register target, Program program) {
