@@ -524,6 +524,9 @@
                     <button class="btn" id="filter-needs_work" onclick="filterFuncs('needs_work', this)">Needs Work</button>
                     <button class="btn" id="filter-fixable" onclick="filterFuncs('fixable', this)">Fixable</button>
                     <button class="btn" id="filter-done" onclick="filterFuncs('done', this)">Done</button>
+                    <select class="header-select" id="layerFilterSelect" onchange="onLayerDropdownChanged()" title="Filter by call-graph layer">
+                        <option value="">All Layers</option>
+                    </select>
                     <input class="filter-input" type="text" id="searchInput" placeholder="Search name or address..." oninput="onSearchInput()">
                 </div>
                 <div class="func-list-scroll">
@@ -804,6 +807,8 @@
                         return `<div class="deduction-row"><span class="deduction-cat">${d.category.replace(/_/g, ' ')}</span><span class="deduction-stat">${d.functions} fns</span><div class="deduction-bar"><div class="deduction-bar-fill" style="width:${pct}%"></div></div><span class="deduction-stat">${Math.round(d.total_pts)} pts</span></div>`;
                     }).join('');
                 }
+                // Refresh layer dropdown counts
+                populateLayerDropdown();
             }).catch(() => {});
         }
 
@@ -1288,21 +1293,60 @@
             return col ? (col[_currentSortDir] || 'score') : 'score';
         }
 
-        // --- Layer filter (click from Call Graph Layers → List View) ---
+        // --- Layer filter ---
+        let _currentLayerFilter = null;
+
         function filterByLayer(layerId, layerLabel) {
             // Switch to list view
             switchView('list');
-            // Set search input to trigger server-side layer filter
-            const searchInput = document.getElementById('searchInput');
-            if (searchInput) searchInput.value = '';
+            // Set the dropdown to match
+            const sel = document.getElementById('layerFilterSelect');
+            if (sel) sel.value = layerId;
             // Store the layer filter and re-run search
-            _currentLayerFilter = layerId;
-            // Update a visual indicator
-            const countEl = document.getElementById('allFuncsCount');
-            if (countEl) countEl.textContent = `filtering by ${layerLabel}...`;
+            _currentLayerFilter = layerId || null;
             runServerSearch();
         }
-        let _currentLayerFilter = null;
+
+        function onLayerDropdownChanged() {
+            const sel = document.getElementById('layerFilterSelect');
+            const val = sel ? sel.value : '';
+            _currentLayerFilter = val || null;
+            // Switch to list view if on graph tab
+            const graphPanel = document.getElementById('callGraphPanel');
+            if (graphPanel && graphPanel.style.display !== 'none') {
+                switchView('list');
+            }
+            runServerSearch();
+        }
+
+        async function populateLayerDropdown() {
+            const sel = document.getElementById('layerFilterSelect');
+            if (!sel) return;
+            try {
+                const resp = await fetch('/api/call_graph_layers');
+                const data = await resp.json();
+                if (!data.layers) return;
+                // Preserve current selection
+                const current = sel.value;
+                // Clear all options except the first ("All Layers")
+                while (sel.options.length > 1) sel.remove(1);
+                // Add layer options
+                for (const layer of data.layers) {
+                    const opt = document.createElement('option');
+                    opt.value = layer.label === 'Leaves' ? '0' : layer.label === 'Cyclic' ? 'cyclic' : String(layer.depth);
+                    const remaining = layer.total - layer.done;
+                    opt.textContent = `${layer.label} (${remaining} remaining)`;
+                    sel.appendChild(opt);
+                }
+                // Restore selection
+                if (current) sel.value = current;
+            } catch (e) {
+                // silently fail — dropdown just won't have options
+            }
+        }
+
+        // Populate on page load
+        populateLayerDropdown();
 
         // --- Worker Focus ---
         let _focusedWorkerId = null;
