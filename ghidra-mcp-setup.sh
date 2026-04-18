@@ -47,6 +47,7 @@ SKIP_RESTART=false
 DRY_RUN=false
 FORCE=false
 VERBOSE=false
+USE_VENV=false
 
 # ============================================================================
 # Usage / Help
@@ -72,10 +73,12 @@ show_usage() {
     echo "  --force               Reinstall dependencies even if already present"
     echo "  --dry-run             Print actions without executing commands"
     echo "  --verbose             Verbose logging"
+    echo "  --use-venv            Install Python dependencies into a local .venv instead of system Python"
     echo "  --help, -h            Show this help text"
     echo ""
     echo "Examples:"
     echo "  ./ghidra-mcp-setup.sh --deploy --ghidra-path /opt/ghidra_12.0.3_PUBLIC"
+    echo "  ./ghidra-mcp-setup.sh --deploy --ghidra-path /opt/ghidra_12.0.3_PUBLIC --use-venv"
     echo "  ./ghidra-mcp-setup.sh --setup-deps --ghidra-path /opt/ghidra_12.0.3_PUBLIC"
     echo "  ./ghidra-mcp-setup.sh --preflight --ghidra-path /opt/ghidra_12.0.3_PUBLIC"
     echo "  ./ghidra-mcp-setup.sh --build-only"
@@ -102,6 +105,7 @@ while [[ $# -gt 0 ]]; do
         --force)            FORCE=true; shift ;;
         --dry-run)          DRY_RUN=true; shift ;;
         --verbose)          VERBOSE=true; shift ;;
+        --use-venv)         USE_VENV=true; shift ;;
         --help|-h)          show_usage; exit 0 ;;
         *)
             log_error "Unknown option: $1"
@@ -452,14 +456,40 @@ install_python_packages() {
         return 1
     fi
 
-    local -a pip_args=("-m" "pip" "install")
-    if ! $VERBOSE; then
-        pip_args+=("-q" "--disable-pip-version-check")
-    fi
-    pip_args+=("-r" "$requirements_path")
+    if $USE_VENV; then
+        local venv_dir="${SCRIPT_DIR}/.venv"
 
-    run_cmd "Ensuring Python dependencies" "$python_cmd" "${pip_args[@]}"
-    log_success "Python dependencies are ready."
+        if [[ ! -d "$venv_dir" ]]; then
+            log_info "Creating Python virtual environment at: $venv_dir"
+            run_cmd "Creating venv" "$python_cmd" -m venv "$venv_dir"
+        else
+            verbose_log "Using existing venv at: $venv_dir"
+        fi
+
+        local venv_pip="${venv_dir}/bin/pip"
+        if [[ ! -x "$venv_pip" ]]; then
+            log_error "venv pip not found at: $venv_pip"
+            return 1
+        fi
+
+        local -a pip_args=("install")
+        if ! $VERBOSE; then
+            pip_args+=("-q" "--disable-pip-version-check")
+        fi
+        pip_args+=("-r" "$requirements_path")
+
+        run_cmd "Installing Python dependencies into venv" "$venv_pip" "${pip_args[@]}"
+        log_success "Python dependencies installed into venv: $venv_dir"
+    else
+        local -a pip_args=("-m" "pip" "install")
+        if ! $VERBOSE; then
+            pip_args+=("-q" "--disable-pip-version-check")
+        fi
+        pip_args+=("-r" "$requirements_path")
+
+        run_cmd "Ensuring Python dependencies" "$python_cmd" "${pip_args[@]}"
+        log_success "Python dependencies are ready."
+    fi
 }
 
 invoke_preflight_checks() {
@@ -486,10 +516,18 @@ invoke_preflight_checks() {
         issues+=("Python executable not found on PATH. Install with: sudo apt install python3 python3-pip")
     else
         log_success "Python found: $python_cmd"
-        if ! "$python_cmd" -m pip --version &>/dev/null; then
-            issues+=("pip is not available. Install with: sudo apt install python3-pip")
+        if $USE_VENV; then
+            if ! "$python_cmd" -m venv --help &>/dev/null; then
+                issues+=("Python venv module not available. Install with: sudo apt install python3-venv")
+            else
+                log_success "Python venv module is available."
+            fi
         else
-            log_success "pip is available."
+            if ! "$python_cmd" -m pip --version &>/dev/null; then
+                issues+=("pip is not available. Install with: sudo apt install python3-pip")
+            else
+                log_success "pip is available."
+            fi
         fi
     fi
 
@@ -984,9 +1022,17 @@ fi
 echo ""
 log_info "Next Steps:"
 if $NO_AUTO_PREREQS; then
-    echo "1. If needed (first time only), install Python dependencies: pip install -r requirements.txt"
+    echo "1. If needed (first time only), install Python dependencies:"
+    if $USE_VENV; then
+        echo "      python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+    else
+        echo "      pip install -r requirements.txt"
+    fi
 else
     echo "1. Python dependencies were auto-checked/installed."
+    if $USE_VENV; then
+        echo "   Run the bridge with: .venv/bin/python bridge_mcp_ghidra.py"
+    fi
 fi
 echo "2. Start Ghidra"
 echo "3. If plugin isn't automatically enabled:"
@@ -998,7 +1044,11 @@ echo "      - In CodeBrowser: Edit > Tool Options > GhidraMCP HTTP Server"
 echo ""
 log_info "Usage:"
 echo "   Ghidra: Tools > GhidraMCP > Start MCP Server"
-echo "   Python: python3 bridge_mcp_ghidra.py (from project root or Ghidra directory)"
+if $USE_VENV; then
+    echo "   Python: .venv/bin/python bridge_mcp_ghidra.py (from project root)"
+else
+    echo "   Python: python3 bridge_mcp_ghidra.py (from project root or Ghidra directory)"
+fi
 echo ""
 log_info "Default Server: http://127.0.0.1:8089/"
 echo ""
