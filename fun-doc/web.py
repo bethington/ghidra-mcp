@@ -31,7 +31,7 @@ _adaptive_refresh_lock = threading.Lock()
 class WorkerManager:
     """Manages concurrent documentation worker threads (max 3)."""
 
-    MAX_WORKERS = 8
+    MAX_WORKERS = 12
 
     def __init__(self, state_file, bus, socketio):
         self._workers = {}
@@ -147,6 +147,7 @@ class WorkerManager:
                 refresh_candidate_scores,
                 load_priority_queue,
                 reset_handoff_counter,
+                _bump_handoff_counter,
             )
 
             worker["status"] = "running"
@@ -247,8 +248,8 @@ class WorkerManager:
             STALE_STREAK_THRESHOLD = 3
 
             # Load good_enough threshold for auto-escalation decisions
-            good_enough = load_priority_queue().get("config", {}).get(
-                "good_enough_score", 80
+            good_enough = (
+                load_priority_queue().get("config", {}).get("good_enough_score", 80)
             )
 
             while not worker["stop_flag"].is_set() and (
@@ -259,8 +260,10 @@ class WorkerManager:
                 if worker["binary"]:
                     state["active_binary"] = worker["binary"]
 
-                # Get next function, skipping ones already in progress
-                candidates = get_next_functions(state, count=10)
+                # Get next function, skipping ones already in progress.
+                # Fetch more candidates than needed so concurrent workers
+                # don't all contend over the same small set.
+                candidates = get_next_functions(state, count=50)
                 target = None
                 with self._lock:
                     for k, f in candidates:
@@ -299,12 +302,11 @@ class WorkerManager:
                     stop_flag=worker["stop_flag"],
                 )
 
-                # Auto-escalation: if the function made progress but didn't
-                # reach good_enough, immediately retry with a stronger model
-                # before releasing the key. This catches cases where minimax
-                # can handle Pass 1 (types/names) but a stronger model is
-                # needed for Pass 2 (comments, complex analysis). The
-                # escalation order is: minimax → claude → codex → (give up).
+                # Auto-escalation: if the function didn't reach good_enough
+                # (either it made progress but not enough, or it failed
+                # outright), immediately retry with a stronger model before
+                # releasing the key. The escalation order is:
+                # minimax → claude → codex → (give up).
                 ESCALATION_ORDER = {
                     "minimax": "claude",
                     "claude": "codex",
@@ -312,7 +314,7 @@ class WorkerManager:
                     "gemini": "claude",
                 }
                 if (
-                    result in ("completed", "partial")
+                    result in ("completed", "partial", "failed", "needs_redo")
                     and not worker["stop_flag"].is_set()
                 ):
                     # Re-read the function's current score from state
@@ -326,9 +328,11 @@ class WorkerManager:
                             and current_score > 0
                             and escalate_to
                         ):
+                            reason = "failed" if result in ("failed", "needs_redo") else f"score {current_score}%"
+                            escalation_count = _bump_handoff_counter()
                             print(
-                                f"\n  AUTO-ESCALATE: {worker['provider']} → {escalate_to} "
-                                f"(score {current_score}% < {good_enough}%)",
+                                f"\n  AUTO-ESCALATE #{escalation_count}: {worker['provider']} → {escalate_to} "
+                                f"({reason}, below {good_enough}%)",
                                 flush=True,
                             )
                             escalate_result = process_function(
@@ -660,63 +664,174 @@ def create_app(state_file, event_bus=None):
                     cf = funcs.get(ck)
                     if cf and cf.get("score", 0) < good_enough:
                         deps_remaining += 1
-            result.append({
-                "key": c["key"],
-                "name": f["name"],
-                "address": f["address"],
-                "program": f.get("program_name", ""),
-                "score": f.get("score", 0),
-                "fixable": round(f.get("fixable", 0), 1),
-                "callers": f.get("caller_count", 0),
-                "roi": round(c["roi"], 1),
-                "readiness": round(c.get("readiness", 1.0), 2),
-                "deps_remaining": deps_remaining,
-                "is_leaf": f.get("is_leaf", False),
-                "call_graph_layer": c.get("call_graph_layer"),
-                "last_result": f.get("last_result"),
-                "pinned": c["pinned"],
-                "needs_scoring": c["needs_scoring"],
-                "classification": f.get("classification", ""),
-            })
+            result.append(
+                {
+                    "key": c["key"],
+                    "name": f["name"],
+                    "address": f["address"],
+                    "program": f.get("program_name", ""),
+                    "score": f.get("score", 0),
+                    "fixable": round(f.get("fixable", 0), 1),
+                    "callers": f.get("caller_count", 0),
+                    "roi": round(c["roi"], 1),
+                    "readiness": round(c.get("readiness", 1.0), 2),
+                    "deps_remaining": deps_remaining,
+                    "is_leaf": f.get("is_leaf", False),
+                    "call_graph_layer": c.get("call_graph_layer"),
+                    "last_result": f.get("last_result"),
+                    "pinned": c["pinned"],
+                    "needs_scoring": c["needs_scoring"],
+                    "classification": f.get("classification", ""),
+                }
+            )
         return result
 
     def compute_run_stats(logs, total_override=None, today_override=None):
+        empty = {
+            "total_runs": total_override or 0,
+            "today_runs": today_override or 0,
+            "avg_delta": 0,
+            "success_rate": 0,
+            "by_provider": {},
+            "stuck_functions": [],
+            "failure_modes": {},
+            "regressions": 0,
+            "zero_delta": 0,
+            "audit": {"ran": 0, "improved": 0, "regressed": 0, "no_change": 0, "skipped_good": 0, "skipped_delta": 0, "today_ran": 0, "today_improved": 0, "today_skipped_good": 0, "today_skipped_delta": 0},
+            "today": {"runs": 0, "success_rate": 0, "avg_delta": 0, "by_provider": {}},
+        }
         if not logs:
-            return {
-                "total_runs": total_override or 0,
-                "today_runs": today_override or 0,
-                "avg_delta": 0,
-                "success_rate": 0,
-                "by_provider": {},
-                "stuck_functions": [],
-            }
+            return empty
+
         today = datetime.now().date().isoformat()
         today_logs = [l for l in logs if l.get("timestamp", "").startswith(today)]
+
         deltas = []
         success = 0
-        by_provider = defaultdict(lambda: {"runs": 0, "deltas": []})
+        regressions = 0
+        zero_delta = 0
+        failure_modes = defaultdict(int)
+        by_provider = defaultdict(
+            lambda: {
+                "runs": 0,
+                "deltas": [],
+                "success": 0,
+                "failed": 0,
+                "tool_calls": [],
+                "today_runs": 0,
+                "today_deltas": [],
+                "today_success": 0,
+            }
+        )
         func_results = defaultdict(lambda: {"fails": 0, "name": "", "address": ""})
+
+        # Audit tracking
+        audit_ran = 0
+        audit_improved = 0
+        audit_regressed = 0
+        audit_no_change = 0
+        audit_skipped_good = 0
+        audit_skipped_delta = 0
+        # Today-specific audit tracking
+        today_audit_ran = 0
+        today_audit_improved = 0
+        today_audit_skipped_good = 0
+        today_audit_skipped_delta = 0
+
+        is_today = {}  # cache per-log today check
+
         for l in logs:
-            before, after = l.get("score_before"), l.get("score_after")
-            result, provider = l.get("result", ""), l.get("provider", "unknown")
+            before = l.get("score_before")
+            after = l.get("score_after")
+            result = l.get("result", "")
+            provider = l.get("provider", "unknown")
+            delta = l.get("score_delta")
+            tc = l.get("tool_calls")
+            l_today = l.get("timestamp", "").startswith(today)
+
+            bp = by_provider[provider]
+
             if before is not None and after is not None:
-                deltas.append(after - before)
-                by_provider[provider]["deltas"].append(after - before)
-            by_provider[provider]["runs"] += 1
+                d = delta if delta is not None else (after - before)
+                deltas.append(d)
+                bp["deltas"].append(d)
+                if d < 0:
+                    regressions += 1
+                elif d == 0 and result == "completed":
+                    zero_delta += 1
+                if l_today:
+                    bp["today_deltas"].append(d)
+
+            bp["runs"] += 1
+            if l_today:
+                bp["today_runs"] += 1
+
+            if tc is not None:
+                bp["tool_calls"].append(tc)
+
             if result == "completed":
                 success += 1
+                bp["success"] += 1
+                if l_today:
+                    bp["today_success"] += 1
+            elif result in ("failed", "needs_redo", "blocked", "rate_limited"):
+                bp["failed"] += 1
+                failure_modes[result] += 1
+
+            # Audit outcome
+            ao = l.get("audit_outcome")
+            if ao == "ran":
+                audit_ran += 1
+                if l_today:
+                    today_audit_ran += 1
+                ab = l.get("audit_score_before")
+                aa = l.get("audit_score_after")
+                if ab is not None and aa is not None:
+                    if aa > ab:
+                        audit_improved += 1
+                        if l_today:
+                            today_audit_improved += 1
+                    elif aa < ab:
+                        audit_regressed += 1
+                    else:
+                        audit_no_change += 1
+            elif ao == "skipped_good_enough":
+                audit_skipped_good += 1
+                if l_today:
+                    today_audit_skipped_good += 1
+            elif ao == "skipped_delta":
+                audit_skipped_delta += 1
+                if l_today:
+                    today_audit_skipped_delta += 1
+
             fkey = f"{l.get('program', '')}::{l.get('address', '')}"
             func_results[fkey]["name"] = l.get("function", "")
             func_results[fkey]["address"] = l.get("address", "")
             if result in ("failed", "needs_redo"):
                 func_results[fkey]["fails"] += 1
+
+        # Per-provider stats
         provider_stats = {}
-        for p, data in by_provider.items():
+        for p, data in sorted(by_provider.items()):
             d = data["deltas"]
+            r = data["runs"]
+            td = data["today_deltas"]
+            tc = data["tool_calls"]
             provider_stats[p] = {
-                "runs": data["runs"],
+                "runs": r,
                 "avg_delta": round(sum(d) / len(d), 1) if d else 0,
+                "success_rate": round(data["success"] / r * 100, 1) if r else 0,
+                "fail_rate": round(data["failed"] / r * 100, 1) if r else 0,
+                "avg_tools": round(sum(tc) / len(tc), 1) if tc else 0,
+                "today_runs": data["today_runs"],
+                "today_avg_delta": round(sum(td) / len(td), 1) if td else 0,
+                "today_success_rate": (
+                    round(data["today_success"] / data["today_runs"] * 100, 1)
+                    if data["today_runs"]
+                    else 0
+                ),
             }
+
         stuck = sorted(
             [
                 {"name": v["name"], "address": v["address"], "fails": v["fails"]}
@@ -726,13 +841,49 @@ def create_app(state_file, event_bus=None):
             key=lambda x: x["fails"],
             reverse=True,
         )[:10]
+
+        # Today aggregate
+        today_deltas = [
+            l.get("score_delta", 0)
+            for l in today_logs
+            if l.get("score_before") is not None and l.get("score_after") is not None
+        ]
+        today_success = sum(1 for l in today_logs if l.get("result") == "completed")
+        today_stats = {
+            "runs": len(today_logs),
+            "success_rate": (
+                round(today_success / len(today_logs) * 100, 1) if today_logs else 0
+            ),
+            "avg_delta": (
+                round(sum(today_deltas) / len(today_deltas), 1) if today_deltas else 0
+            ),
+        }
+
         return {
             "total_runs": total_override if total_override is not None else len(logs),
-            "today_runs": today_override if today_override is not None else len(today_logs),
+            "today_runs": (
+                today_override if today_override is not None else len(today_logs)
+            ),
             "avg_delta": round(sum(deltas) / len(deltas), 1) if deltas else 0,
             "success_rate": round(success / len(logs) * 100, 1) if logs else 0,
             "by_provider": provider_stats,
             "stuck_functions": stuck,
+            "failure_modes": dict(failure_modes),
+            "regressions": regressions,
+            "zero_delta": zero_delta,
+            "audit": {
+                "ran": audit_ran,
+                "improved": audit_improved,
+                "regressed": audit_regressed,
+                "no_change": audit_no_change,
+                "skipped_good": audit_skipped_good,
+                "skipped_delta": audit_skipped_delta,
+                "today_ran": today_audit_ran,
+                "today_improved": today_audit_improved,
+                "today_skipped_good": today_audit_skipped_good,
+                "today_skipped_delta": today_audit_skipped_delta,
+            },
+            "today": today_stats,
         }
 
     def compute_stats(state):
@@ -759,7 +910,8 @@ def create_app(state_file, event_bus=None):
         # that can't be documented and inflate the score distribution chart
         # with a misleading 0-9% block.
         scoreable = {
-            k: v for k, v in funcs.items()
+            k: v
+            for k, v in funcs.items()
             if not v.get("is_thunk") and not v.get("is_external")
         }
         total = len(scoreable)
@@ -1223,15 +1375,19 @@ def create_app(state_file, event_bus=None):
             # because populate_call_graph includes thunks in the adjacency
             # set while the dashboard excludes them.
             if layer_filter is not None:
-                if not hasattr(search_functions, '_layer_cache'):
+                if not hasattr(search_functions, "_layer_cache"):
                     search_functions._layer_cache = {}
                 cache_key = (program or state.get("active_binary"), layer_filter)
                 if cache_key not in search_functions._layer_cache:
                     # Build layer map matching the dashboard's BFS
                     active_bin = program or state.get("active_binary")
-                    bf = {k: v for k, v in all_funcs.items()
-                          if v.get("program_name") == active_bin
-                          and not v.get("is_thunk") and not v.get("is_external")}
+                    bf = {
+                        k: v
+                        for k, v in all_funcs.items()
+                        if v.get("program_name") == active_bin
+                        and not v.get("is_thunk")
+                        and not v.get("is_external")
+                    }
                     sa = set()
                     for v in bf.values():
                         sa.add(v.get("address", ""))
@@ -1252,13 +1408,15 @@ def create_app(state_file, event_bus=None):
                         nx = set()
                         for a in cur:
                             for ca in cr.get(a, set()):
-                                if ca in dp: continue
+                                if ca in dp:
+                                    continue
                                 if all(c in dp for c in co.get(ca, set())):
                                     dp[ca] = ln + 1
                                     nx.add(ca)
                         cur = nx
                         ln += 1
-                        if ln > 200: break
+                        if ln > 200:
+                            break
                     lm = {}
                     for a in sa:
                         lm[a] = dp.get(a)  # None = cyclic
@@ -1287,8 +1445,10 @@ def create_app(state_file, event_bus=None):
             else:
                 prog = func.get("program")
                 deps_remaining = sum(
-                    1 for ca in callees
-                    if (cf := all_funcs.get(f"{prog}::{ca}")) and cf.get("score", 0) < good_enough
+                    1
+                    for ca in callees
+                    if (cf := all_funcs.get(f"{prog}::{ca}"))
+                    and cf.get("score", 0) < good_enough
                 )
             results.append(
                 {
@@ -1318,19 +1478,28 @@ def create_app(state_file, event_bus=None):
         elif sort == "status":
             # Sort by score bucket: unscored first, then NEW (<70), FIX (70-79), DONE (80+)
             def _status_key(r):
-                if r.get("unscored"): return 0
+                if r.get("unscored"):
+                    return 0
                 s = r.get("score", 0)
-                if s >= 80: return 3
-                if s >= 70: return 2
+                if s >= 80:
+                    return 3
+                if s >= 70:
+                    return 2
                 return 1
+
             results.sort(key=_status_key)
         elif sort == "status_desc":
+
             def _status_key_desc(r):
-                if r.get("unscored"): return 0
+                if r.get("unscored"):
+                    return 0
                 s = r.get("score", 0)
-                if s >= 80: return 3
-                if s >= 70: return 2
+                if s >= 80:
+                    return 3
+                if s >= 70:
+                    return 2
                 return 1
+
             results.sort(key=_status_key_desc, reverse=True)
         elif sort == "score_desc":
             results.sort(key=lambda r: -r["score"])
@@ -1343,15 +1512,27 @@ def create_app(state_file, event_bus=None):
         elif sort == "deps_desc":
             results.sort(key=lambda r: (-r.get("deps_remaining", 0), r["score"]))
         elif sort == "layer":
-            results.sort(key=lambda r: (
-                r.get("call_graph_layer") if r.get("call_graph_layer") is not None else 999,
-                r["score"],
-            ))
+            results.sort(
+                key=lambda r: (
+                    (
+                        r.get("call_graph_layer")
+                        if r.get("call_graph_layer") is not None
+                        else 999
+                    ),
+                    r["score"],
+                )
+            )
         elif sort == "layer_desc":
-            results.sort(key=lambda r: (
-                -(r.get("call_graph_layer") if r.get("call_graph_layer") is not None else -1),
-                -r["score"],
-            ))
+            results.sort(
+                key=lambda r: (
+                    -(
+                        r.get("call_graph_layer")
+                        if r.get("call_graph_layer") is not None
+                        else -1
+                    ),
+                    -r["score"],
+                )
+            )
         else:  # "score" (default — lowest first)
             results.sort(key=lambda r: r["score"])
         total_match = len(results)

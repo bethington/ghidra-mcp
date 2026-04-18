@@ -359,17 +359,69 @@
                 <div class="panel">
                     <div class="panel-header"><h2>Model Performance</h2></div>
                     <div class="panel-content" id="runStatsPanel">
-                        <div style="display: flex; gap: 0.75rem; margin-bottom: 0.4rem;">
+                        <!-- Top-level summary row -->
+                        <div style="display: flex; gap: 0.75rem; margin-bottom: 0.4rem; flex-wrap: wrap;">
                             <div><span class="mono" style="color: var(--accent-gold);">{{ stats.run_stats.total_runs }}</span> <span style="color: var(--text-muted); font-size: 0.65rem;">runs</span></div>
                             <div><span class="mono" style="color: var(--color-set);">{{ stats.run_stats.success_rate }}%</span> <span style="color: var(--text-muted); font-size: 0.65rem;">success</span></div>
+                            <div><span class="mono" style="color: var(--accent-red-light);">{{ stats.run_stats.regressions }}</span> <span style="color: var(--text-muted); font-size: 0.65rem;">regressed</span></div>
+                            <div><span class="mono" style="color: var(--text-secondary);">{{ stats.run_stats.zero_delta }}</span> <span style="color: var(--text-muted); font-size: 0.65rem;">zero-Δ</span></div>
                         </div>
+
+                        <!-- Today vs All-time toggle -->
+                        {% if stats.run_stats.today.runs > 0 %}
+                        <div style="margin-bottom: 0.4rem; padding: 0.3rem 0.5rem; background: var(--bg-light); border-radius: 4px; font-size: 0.65rem;">
+                            <span style="color: var(--accent-gold);">Today:</span>
+                            <span class="mono" style="color: var(--text-primary);">{{ stats.run_stats.today.runs }}</span> runs
+                            <span style="color: var(--text-muted);">·</span>
+                            <span class="mono" style="color: var(--color-set);">{{ stats.run_stats.today.success_rate }}%</span> success
+                            <span style="color: var(--text-muted);">·</span>
+                            avg <span class="mono" style="color: {% if stats.run_stats.today.avg_delta > 0 %}var(--color-set){% elif stats.run_stats.today.avg_delta < 0 %}var(--accent-red-light){% else %}var(--text-muted){% endif %};">{{ stats.run_stats.today.avg_delta }}%</span> Δ
+                        </div>
+                        {% endif %}
+
+                        <!-- Per-provider cards (enriched) -->
                         {% for provider, pstats in stats.run_stats.by_provider.items() %}
-                        <div class="provider-card">
+                        <div class="provider-card" style="flex-wrap: wrap;">
                             <span class="provider-name">{{ provider }}</span>
                             <span class="provider-stat">{{ pstats.runs }} runs</span>
-                            <span class="provider-stat">avg {{ pstats.avg_delta }}%</span>
+                            <span class="provider-stat" style="color: {% if pstats.avg_delta > 0 %}var(--color-set){% elif pstats.avg_delta < 0 %}var(--accent-red-light){% else %}var(--text-muted){% endif %};">avg {{ pstats.avg_delta }}%</span>
+                            <span class="provider-stat" style="color: {% if pstats.success_rate >= 80 %}var(--color-set){% elif pstats.success_rate >= 50 %}var(--accent-gold){% else %}var(--accent-red-light){% endif %};">{{ pstats.success_rate }}% ok</span>
+                            {% if pstats.avg_tools > 0 %}
+                            <span class="provider-stat" style="color: var(--text-muted);">{{ pstats.avg_tools }} tools</span>
+                            {% endif %}
+                            {% if pstats.today_runs > 0 %}
+                            <span class="provider-stat" style="color: var(--color-magic); font-size: 0.6rem;">today: {{ pstats.today_runs }} · {{ pstats.today_avg_delta }}%Δ</span>
+                            {% endif %}
                         </div>
                         {% endfor %}
+
+                        <!-- Failure modes breakdown -->
+                        {% if stats.run_stats.failure_modes %}
+                        <div style="margin-top: 0.4rem; font-size: 0.65rem;">
+                            <strong style="color: var(--accent-red-light);">Failures:</strong>
+                            {% for mode, count in stats.run_stats.failure_modes.items() %}
+                            <span style="color: var(--text-muted); margin-left: 0.3rem;">{{ mode }} <span class="mono">{{ count }}</span></span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Audit effectiveness -->
+                        {% if stats.run_stats.audit.ran > 0 or stats.run_stats.audit.skipped_good > 0 %}
+                        <div style="margin-top: 0.4rem; padding: 0.3rem 0.5rem; background: var(--bg-light); border-radius: 4px; font-size: 0.65rem;">
+                            <strong style="color: var(--color-magic);">Audit:</strong>
+                            <span class="mono" style="color: var(--text-primary);">{{ stats.run_stats.audit.ran }}</span> ran
+                            <span style="color: var(--text-muted);">·</span>
+                            <span class="mono" style="color: var(--color-set);">{{ stats.run_stats.audit.improved }}</span> improved
+                            <span style="color: var(--text-muted);">·</span>
+                            <span class="mono" style="color: var(--accent-red-light);">{{ stats.run_stats.audit.regressed }}</span> regressed
+                            <span style="color: var(--text-muted);">·</span>
+                            <span class="mono" style="color: var(--text-muted);">{{ stats.run_stats.audit.no_change }}</span> no change
+                            <span style="color: var(--text-muted);">·</span>
+                            <span class="mono" style="color: var(--text-muted);">{{ stats.run_stats.audit.skipped_good + stats.run_stats.audit.skipped_delta }}</span> skipped
+                        </div>
+                        {% endif %}
+
+                        <!-- Stuck functions -->
                         {% if stats.run_stats.stuck_functions %}
                         <div style="margin-top: 0.4rem; font-size: 0.65rem; color: var(--accent-red-light);">
                             <strong>Stuck:</strong>
@@ -416,8 +468,11 @@
                 <span id="refreshLastAt" style="font-family: var(--font-mono); color: var(--text-secondary);">never</span>
                 <span id="refreshStaleSkips" style="font-family: var(--font-mono); color: var(--text-muted);"></span>
                 <span style="color: var(--border-light);">|</span>
-                <span style="color: var(--text-muted);">Handoffs:</span>
+                <span style="color: var(--text-muted);">Escalations:</span>
                 <span id="handoffCount" style="font-family: var(--font-mono); color: var(--text-secondary);">0</span>
+                <span style="color: var(--border-light);">|</span>
+                <span style="color: var(--text-muted);">Audits:</span>
+                <span id="auditCount" style="font-family: var(--font-mono); color: var(--text-secondary);" title="ran / skipped (good enough + low delta)">—</span>
                 <button class="btn" onclick="drainDone()" id="btnDrainDone" title="Batch-score every pinned function and auto-dequeue any that are already above good_enough" style="margin-left: auto;">Drain Done</button>
                 <button class="btn" onclick="manualRefresh()" id="btnRefresh" title="Batch-rescore the top 50 ROI candidates for the active binary">Refresh Top 50</button>
             </div>
@@ -649,7 +704,7 @@
             </tr>`;
         }
 
-        function repaintRefreshStatus(meta) {
+        function repaintRefreshStatus(meta, runStats) {
             if (!meta) return;
             const lastEl = document.getElementById('refreshLastAt');
             const staleEl = document.getElementById('refreshStaleSkips');
@@ -680,6 +735,20 @@
                 const n = meta.handoffs_this_session || 0;
                 handoffEl.textContent = String(n);
                 handoffEl.style.color = n > 0 ? 'var(--color-rare)' : 'var(--text-secondary)';
+            }
+            const auditEl = document.getElementById('auditCount');
+            if (auditEl && runStats && runStats.audit) {
+                const a = runStats.audit;
+                const ran = a.today_ran || 0;
+                const skipped = (a.today_skipped_good || 0) + (a.today_skipped_delta || 0);
+                if (ran > 0 || skipped > 0) {
+                    const improved = a.today_improved || 0;
+                    auditEl.textContent = `${ran} ran${improved ? ` (${improved} ↑)` : ''} / ${skipped} skipped`;
+                    auditEl.style.color = ran > 0 ? 'var(--color-rare)' : 'var(--text-secondary)';
+                } else {
+                    auditEl.textContent = '—';
+                    auditEl.style.color = 'var(--text-secondary)';
+                }
             }
         }
 
@@ -782,7 +851,7 @@
                     }
                     if (dm) dm.checked = !!stats.queue_config.debug_mode;
                 }
-                if (stats.queue_meta) repaintRefreshStatus(stats.queue_meta);
+                if (stats.queue_meta) repaintRefreshStatus(stats.queue_meta, stats.run_stats);
                 if (stats.roi_queue) repaintQueue(stats.roi_queue);
 
                 // Score distribution
