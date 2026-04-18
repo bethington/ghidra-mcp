@@ -65,6 +65,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
     // Endpoint handler registry
     private HeadlessEndpointHandler endpointHandler;
+    private HeadlessManagementService managementService;
     private int registeredEndpointCount;
 
     // Ghidra server connection manager
@@ -98,6 +99,8 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         // Create server manager for shared Ghidra server support
         serverManager = new GhidraServerManager();
+
+        managementService = new HeadlessManagementService(programProvider, serverManager);
 
         // Load initial programs if specified
         loadInitialPrograms(args);
@@ -299,7 +302,8 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             endpointHandler.getCommentService(), endpointHandler.getSymbolLabelService(),
             endpointHandler.getXrefCallGraphService(), endpointHandler.getDataTypeService(),
             endpointHandler.getAnalysisService(), endpointHandler.getDocumentationHashService(),
-            endpointHandler.getMalwareSecurityService(), endpointHandler.getProgramScriptService());
+            endpointHandler.getMalwareSecurityService(), endpointHandler.getProgramScriptService(),
+            managementService);
 
         for (EndpointDef ep : scanner.getEndpoints()) {
             server.createContext(ep.path(), exchange -> {
@@ -339,41 +343,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, "{\"error\": \"Headless mode - use get_function_by_address\"}");
         });
 
-        // --- Program Management ---
-
-        server.createContext("/load_program", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String filePath = params.get("file");
-            sendResponse(exchange, endpointHandler.loadProgram(filePath));
-        });
-
-        server.createContext("/close_program", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String name = params.get("name");
-            sendResponse(exchange, endpointHandler.closeProgram(name));
-        });
-
-        // --- Project Management (headless-specific) ---
-
-        server.createContext("/open_project", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String projectPath = params.get("path");
-            sendResponse(exchange, endpointHandler.openProject(projectPath));
-        });
-
-        server.createContext("/close_project", exchange -> {
-            sendResponse(exchange, endpointHandler.closeProject());
-        });
-
-        server.createContext("/load_program_from_project", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String programPath = params.get("path");
-            sendResponse(exchange, endpointHandler.loadProgramFromProject(programPath));
-        });
-
-        server.createContext("/get_project_info", exchange -> {
-            sendResponse(exchange, endpointHandler.getProjectInfo());
-        });
+        // --- Program Management --- (registered via HeadlessManagementService)
 
         // GET_DATA_TYPE_SIZE - Not yet in service layer
         server.createContext("/get_data_type_size", exchange -> {
@@ -383,14 +353,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, endpointHandler.getDataTypeSize(typeName, programName));
         });
 
-        // --- Project Lifecycle ---
-
-        server.createContext("/create_project", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            String parentDir = params.get("parentDir");
-            String name = params.get("name");
-            sendResponse(exchange, endpointHandler.createProject(parentDir, name));
-        });
+        // --- Project Lifecycle --- (/create_project registered via HeadlessManagementService)
 
         server.createContext("/delete_project", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -430,9 +393,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, serverManager.connect());
         });
 
-        server.createContext("/server/status", exchange -> {
-            sendResponse(exchange, serverManager.getStatus());
-        });
+        // /server/status registered via HeadlessManagementService
 
         server.createContext("/server/repositories", exchange -> {
             sendResponse(exchange, serverManager.listRepositories());
@@ -546,9 +507,9 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     }
 
     private int countEndpoints() {
-        // registeredEndpointCount = shared endpoints from EndpointRegistry
-        // 39 = infrastructure + schema + headless-only endpoints registered via createContext
-        return registeredEndpointCount + 39;
+        // registeredEndpointCount = annotation-scanned (shared services + HeadlessManagementService)
+        // 31 = infrastructure + schema + remaining manual createContext registrations
+        return registeredEndpointCount + 31;
     }
 
     public void stop() {
