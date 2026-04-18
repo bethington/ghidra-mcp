@@ -1814,12 +1814,36 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     private static final long SLOW_HANDLER_WARN_MS = 2000;
 
+    /**
+     * Read-only health endpoints that bypass the auth check even when
+     * GHIDRA_MCP_AUTH_TOKEN is configured. Keep this set minimal — anything
+     * that reveals program state or accepts writes must require auth.
+     */
+    private static boolean isAuthExempt(String path) {
+        return "/mcp/health".equals(path) || "/check_connection".equals(path);
+    }
+
     private com.sun.net.httpserver.HttpHandler safeHandler(com.sun.net.httpserver.HttpHandler handler) {
         return exchange -> {
             long startNanos = System.nanoTime();
             String path = exchange.getRequestURI().getPath();
             activeRequests.incrementAndGet();
             try {
+                if (!isAuthExempt(path)) {
+                    com.xebyte.core.SecurityConfig sec = com.xebyte.core.SecurityConfig.getInstance();
+                    if (sec.isAuthEnabled()) {
+                        String authHeader = exchange.getRequestHeaders().getFirst("Authorization");
+                        if (!sec.matchesBearerAuth(authHeader)) {
+                            byte[] body = "{\"error\": \"Unauthorized\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                            exchange.getResponseHeaders().set("Content-Type", "application/json");
+                            exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer");
+                            exchange.sendResponseHeaders(401, body.length);
+                            exchange.getResponseBody().write(body);
+                            exchange.getResponseBody().close();
+                            return;
+                        }
+                    }
+                }
                 handler.handle(exchange);
             } catch (Throwable e) {
                 try {

@@ -221,6 +221,33 @@ curl http://127.0.0.1:8089/check_connection
 curl http://127.0.0.1:8089/get_version
 ```
 
+## 🔒 Security
+
+GhidraMCP is designed for **localhost-only development**. The default configuration — HTTP server bound to `127.0.0.1`, no authentication — is safe on a trusted single-user workstation and matches pre-v5.4.1 behavior.
+
+**If you expose the server beyond loopback, configure these three environment variables first.** The server refuses to start on a non-loopback bind without a token.
+
+| Env var | Effect |
+|---|---|
+| `GHIDRA_MCP_AUTH_TOKEN` | When set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health`, `/health`, `/check_connection` are exempt. |
+| `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** — these endpoints execute arbitrary Java against the Ghidra process. |
+| `GHIDRA_MCP_FILE_ROOT` | When set to a directory path, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
+
+### Example: exposing to a private LAN with auth
+
+```bash
+export GHIDRA_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
+export GHIDRA_MCP_ALLOW_SCRIPTS=1     # only if your workflow needs it
+export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
+
+java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
+```
+
+### Migration from v5.4.0 → v5.4.1
+
+- **Script endpoints now default-off.** If you relied on `/run_script_inline` or `/run_ghidra_script`, export `GHIDRA_MCP_ALLOW_SCRIPTS=1`. This is a deliberate breaking change; the prior default was unsafe.
+- **Localhost-only deployments need no changes.** Auth, bind refusal, and path-root checks are all opt-in.
+
 ## ❓ Troubleshooting
 
 ### "GhidraMCP" menu not appearing in Tools
@@ -330,11 +357,11 @@ curl http://127.0.0.1:8089/get_version
 - `get_function_jump_targets` - Get jump target addresses from disassembly
 - `get_function_metrics` - Get complexity metrics for a function
 - `get_function_xrefs` - Get function cross-references
-- `analyze_function_complete` - Comprehensive function analysis
+- `analyze_function_full` - Comprehensive function analysis
 - `analyze_function_completeness` - Documentation completeness score
 - `batch_analyze_completeness` - Batch completeness analysis for multiple functions
-- `find_similar_functions_fuzzy` - Fuzzy similarity matching
-- `bulk_fuzzy_match` - Bulk fuzzy match across all functions
+- `find_similar_functions_across_programs` - Cross-program similarity matching
+- `bulk_fuzzy_match_functions` - Bulk fuzzy match across all functions
 - `diff_functions` - Diff two functions side by side
 - `validate_function_prototype` - Validate a function prototype string
 - `can_rename_at_address` - Check if address can be renamed
@@ -440,7 +467,6 @@ curl http://127.0.0.1:8089/get_version
 
 ### Ghidra Script Management
 - `list_scripts` - List available scripts
-- `run_script` - Run a script
 - `list_ghidra_scripts` - List custom Ghidra scripts
 - `save_ghidra_script` - Save new script
 - `get_ghidra_script` - Get script contents
@@ -472,7 +498,7 @@ curl http://127.0.0.1:8089/get_version
 ### Analysis Tools
 - `find_next_undefined_function` - Find undefined functions
 - `find_undocumented_by_string` - Find functions by string reference
-- `batch_string_anchor_report` - String anchor analysis
+- `find_undocumented_functions_by_strings` - Find undocumented functions by string references
 - `get_assembly_context` - Get assembly context
 - `analyze_struct_field_usage` - Analyze structure field access
 - `get_field_access_context` - Get field access patterns
