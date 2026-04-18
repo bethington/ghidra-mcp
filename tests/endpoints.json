@@ -1,7 +1,7 @@
 {
   "version": "5.2.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 199,
+  "total_endpoints": 200,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -85,6 +85,19 @@
         "program"
       ],
       "description": "Analyze data region"
+    },
+    {
+      "path": "/analyze_dataflow",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "address",
+        "variable",
+        "direction",
+        "max_steps",
+        "program"
+      ],
+      "description": "Trace value propagation through a function (PCode graph, forward/backward)"
     },
     {
       "path": "/analyze_for_documentation",
