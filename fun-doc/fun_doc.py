@@ -1511,6 +1511,16 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         consecutive_fails = func.get("consecutive_fails", 0)
         if consecutive_fails >= 3 and not is_pinned:
             continue
+        # Safety valve: even pinned functions get removed after 6 consecutive
+        # failures (2 full escalation cycles). Prevents infinite retry loops.
+        if consecutive_fails >= 6 and is_pinned:
+            pinned_list_copy = list(queue.get("pinned", []))
+            if key in pinned_list_copy:
+                pinned_list_copy.remove(key)
+                queue["pinned"] = pinned_list_copy
+                save_priority_queue(queue)
+                print(f"  Auto-unpinned {func.get('name', key)} after {consecutive_fails} consecutive failures")
+            continue
 
         # Recovery-pass one-shot: massive functions get exactly one
         # complexity-forced recovery pass; after that they stay out of the
@@ -1538,23 +1548,6 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         # fires). Cleared by refresh — same as the other one-shot flags.
         if func.get("stagnation_runs", 0) >= 3 and not is_pinned:
             continue
-
-        # Plate-comment-only skip: functions where the ONLY remaining fixable
-        # deduction is a missing/stub plate comment (score typically 65-75%).
-        # Writing a plate comment on a 3-instruction setter or a well-named
-        # wrapper is busywork — the assembly IS the documentation. Spending
-        # an LLM pass on these has near-zero RE value. Skip them so workers
-        # focus on functions with real type/name/struct work to do.
-        if not is_pinned and not needs_scoring and score >= 50:
-            deductions = func.get("deductions", [])
-            fixable_cats = [
-                d.get("category") for d in deductions if d.get("fixable")
-            ]
-            if fixable_cats and all(
-                c in ("missing_plate_comment", "plate_comment_stub", "plate_comment_incomplete")
-                for c in fixable_cats
-            ):
-                continue
 
         if needs_scoring:
             roi = 1_000_000  # Cold-start lane: surface unscored funcs first
@@ -2981,7 +2974,7 @@ def invoke_claude(
     if effective_provider == "codex":
         return _wrap_result(_invoke_codex(prompt, model, max_turns))
     if effective_provider == "gemini":
-        return _wrap_result(_invoke_gemini(prompt, model, max_turns))
+        return _invoke_gemini(prompt, model, max_turns)
 
     return _wrap_result(_invoke_claude(prompt, model, max_turns))
 
@@ -3132,8 +3125,10 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
 
         output_parts = []
         tool_call_count = 0
+        event_count = 0
 
         async for event in cli.run(prompt):
+            event_count += 1
             if isinstance(event, InitEvent):
                 print(
                     f"  [gemini] session={event.session_id} model={event.model}",
@@ -3173,7 +3168,19 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
                     )
 
         text = "\n".join(output_parts) if output_parts else None
-        return text
+        if not text and event_count == 0:
+            print(
+                "  [gemini] WARNING: CLI produced 0 events — session may have "
+                "failed to start or timed out",
+                flush=True,
+            )
+        elif not text:
+            print(
+                f"  [gemini] WARNING: {event_count} events but no output text "
+                f"(tool_calls={tool_call_count})",
+                flush=True,
+            )
+        return (text, {"tool_calls": tool_call_count})
 
     # Retry on transient Gemini capacity/rate-limit errors.
     # The Gemini CLI has its own internal retries but uses short backoffs that
@@ -3201,7 +3208,7 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
             else:
                 break
     print(f"ERROR: Gemini CLI failed: {last_err}", file=sys.stderr)
-    return None
+    return (None, {"tool_calls": 0})
 
 
 def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=None):
@@ -4540,10 +4547,18 @@ def process_function(
             provider=provider,
             complexity_tier=complexity_tier,
         )
-        # Merge results: use pass 2 output for final parsing, sum tool calls
+        # Merge results: use pass 2 output for final parsing, sum tool calls.
+        # Sentinel -1 means "unknown" — don't let -1 + -1 = -2 break
+        # downstream guards that check for -1 specifically.
         if output2:
             output = output2
-        tool_calls_made += meta2.get("tool_calls", 0)
+        tc2 = meta2.get("tool_calls", 0)
+        if tool_calls_made == -1 and tc2 == -1:
+            tool_calls_made = -1  # still unknown
+        elif tool_calls_made == -1:
+            tool_calls_made = tc2  # use the known value
+        elif tc2 != -1:
+            tool_calls_made += tc2  # both known, sum normally
 
     # Parse result
     result = "completed"
