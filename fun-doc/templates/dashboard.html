@@ -300,6 +300,8 @@
             <div class="stat-card"><div class="stat-value" id="stat-pct">{{ stats.pct }}%</div><div class="stat-label">Progress</div></div>
             <div class="stat-card"><div class="stat-value text-magic" id="stat-today">{{ stats.run_stats.today_runs }}</div><div class="stat-label">Runs Today</div></div>
             <div class="stat-card"><div class="stat-value" id="stat-delta">{{ stats.run_stats.avg_delta }}%</div><div class="stat-label">Avg Delta</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-audited" style="color: var(--color-magic);">{{ stats.audited }}</div><div class="stat-label">Audited</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-escalated" style="color: var(--color-rare);">{{ stats.escalated }}</div><div class="stat-label">Escalated</div></div>
         </div>
 
         <!-- Progress bar -->
@@ -832,6 +834,8 @@
                 document.getElementById("stat-pct").textContent = stats.pct + "%";
                 document.getElementById("stat-today").textContent = stats.run_stats.today_runs;
                 document.getElementById("stat-delta").textContent = stats.run_stats.avg_delta + "%";
+                document.getElementById("stat-audited").textContent = stats.audited;
+                document.getElementById("stat-escalated").textContent = stats.escalated;
                 document.getElementById("progressInner").style.width = stats.pct + "%";
                 document.getElementById("progressText").textContent = `${stats.done} / ${stats.total} (${stats.pct}%)`;
 

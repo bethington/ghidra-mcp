@@ -1251,7 +1251,7 @@ def populate_call_graph(state, prog_path):
     # BFS layers are computed on non-thunk functions only so they match the
     # dashboard's Call Graph Layers visualization. Thunks participate in
     # callee lists (so readiness can track them) but don't get layer numbers.
-    prog_addrs = set()       # all addresses (including thunks)
+    prog_addrs = set()  # all addresses (including thunks)
     scoreable_addrs = set()  # non-thunk only (for BFS)
     addr_to_key = {}
     stamped = 0
@@ -1519,7 +1519,9 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
                 pinned_list_copy.remove(key)
                 queue["pinned"] = pinned_list_copy
                 save_priority_queue(queue)
-                print(f"  Auto-unpinned {func.get('name', key)} after {consecutive_fails} consecutive failures")
+                print(
+                    f"  Auto-unpinned {func.get('name', key)} after {consecutive_fails} consecutive failures"
+                )
             continue
 
         # Recovery-pass one-shot: massive functions get exactly one
@@ -4428,6 +4430,12 @@ def process_function(
                         handoff_reason,
                         new_count,
                     )
+                    # Stamp per-function escalation tracking
+                    func["escalation_count"] = func.get("escalation_count", 0) + 1
+                    func["last_escalated"] = datetime.now().isoformat()
+                    func["last_escalation_from"] = effective_provider
+                    func["last_escalation_to"] = handoff_provider
+                    update_function_state(func_key, func)
                     # Swap provider for the rest of this function's processing
                     provider = handoff_provider
                     effective_provider = handoff_provider
@@ -4928,6 +4936,13 @@ def process_function(
             # Save program after audit writes
             if audit_tool_calls != 0:
                 ghidra_post("/save_program", params={"program": program})
+
+            # Stamp per-function audit tracking
+            func["audit_count"] = func.get("audit_count", 0) + 1
+            func["last_audited"] = datetime.now().isoformat()
+            func["last_audit_provider"] = audit_provider
+            func["last_audit_delta"] = audit_diff if audit_new_score is not None else 0
+            update_function_state(func_key, func)
 
     # Track partial_runs for requeue deprioritization
     if result == "partial":
