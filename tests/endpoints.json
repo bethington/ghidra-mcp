@@ -1,7 +1,7 @@
 {
   "version": "5.2.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 202,
+  "total_endpoints": 219,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -553,6 +553,141 @@
         "program"
       ],
       "description": "Create union"
+    },
+    {
+      "path": "/debugger/dynamic_to_static",
+      "method": "GET",
+      "category": "debugger",
+      "params": [
+        "address"
+      ],
+      "description": "Translate a runtime dynamic address from the current trace back to a static Ghidra program address"
+    },
+    {
+      "path": "/debugger/interrupt",
+      "method": "POST",
+      "category": "debugger",
+      "params": [],
+      "description": "Interrupt (break into) the running target"
+    },
+    {
+      "path": "/debugger/launch_offers",
+      "method": "GET",
+      "category": "debugger",
+      "params": [
+        "program"
+      ],
+      "description": "List available debugger launch/attach options for the current program"
+    },
+    {
+      "path": "/debugger/list_breakpoints",
+      "method": "GET",
+      "category": "debugger",
+      "params": [],
+      "description": "List all breakpoints in the current trace"
+    },
+    {
+      "path": "/debugger/modules",
+      "method": "GET",
+      "category": "debugger",
+      "params": [],
+      "description": "List modules (DLLs/EXEs) loaded in the debugged process"
+    },
+    {
+      "path": "/debugger/read_memory",
+      "method": "GET",
+      "category": "debugger",
+      "params": [
+        "address",
+        "size"
+      ],
+      "description": "Read memory from the debugged process. Returns hex dump and DWORD interpretation."
+    },
+    {
+      "path": "/debugger/registers",
+      "method": "GET",
+      "category": "debugger",
+      "params": [],
+      "description": "Read CPU registers from the current debug trace snapshot. Shows general-purpose registers (EAX-EDI, EIP, ESP, EFLAGS for x86)"
+    },
+    {
+      "path": "/debugger/remove_breakpoint",
+      "method": "POST",
+      "category": "debugger",
+      "params": [
+        "address"
+      ],
+      "description": "Remove a breakpoint at an address"
+    },
+    {
+      "path": "/debugger/resume",
+      "method": "POST",
+      "category": "debugger",
+      "params": [],
+      "description": "Resume execution of the debugged process"
+    },
+    {
+      "path": "/debugger/set_breakpoint",
+      "method": "POST",
+      "category": "debugger",
+      "params": [
+        "address"
+      ],
+      "description": "Set a software execution breakpoint at an address in the trace"
+    },
+    {
+      "path": "/debugger/stack_trace",
+      "method": "GET",
+      "category": "debugger",
+      "params": [
+        "depth"
+      ],
+      "description": "Get the call stack backtrace for the current thread"
+    },
+    {
+      "path": "/debugger/static_to_dynamic",
+      "method": "GET",
+      "category": "debugger",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Translate a static Ghidra program address to a runtime dynamic address in the current trace"
+    },
+    {
+      "path": "/debugger/status",
+      "method": "GET",
+      "category": "debugger",
+      "params": [],
+      "description": "Get debugger status: active trace, thread, execution state, module count"
+    },
+    {
+      "path": "/debugger/step_into",
+      "method": "POST",
+      "category": "debugger",
+      "params": [],
+      "description": "Single-step into the next instruction (follows calls)"
+    },
+    {
+      "path": "/debugger/step_out",
+      "method": "POST",
+      "category": "debugger",
+      "params": [],
+      "description": "Step out of the current function (run to return)"
+    },
+    {
+      "path": "/debugger/step_over",
+      "method": "POST",
+      "category": "debugger",
+      "params": [],
+      "description": "Step over the next instruction (does not follow calls)"
+    },
+    {
+      "path": "/debugger/traces",
+      "method": "GET",
+      "category": "debugger",
+      "params": [],
+      "description": "List all open debug traces"
     },
     {
       "path": "/decompile_function",

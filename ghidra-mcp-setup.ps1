@@ -402,7 +402,10 @@ function Install-GhidraDependencies {
         @{ Artifact = "Emulation";        RelPath = "Ghidra\Framework\Emulation\lib\Emulation.jar" },
         @{ Artifact = "PDB";              RelPath = "Ghidra\Features\PDB\lib\PDB.jar" },
         @{ Artifact = "FunctionID";       RelPath = "Ghidra\Features\FunctionID\lib\FunctionID.jar" },
-        @{ Artifact = "Help";             RelPath = "Ghidra\Framework\Help\lib\Help.jar" }
+        @{ Artifact = "Help";             RelPath = "Ghidra\Framework\Help\lib\Help.jar" },
+        @{ Artifact = "Debugger-api";          RelPath = "Ghidra\Debug\Debugger-api\lib\Debugger-api.jar" },
+        @{ Artifact = "Framework-TraceModeling"; RelPath = "Ghidra\Debug\Framework-TraceModeling\lib\Framework-TraceModeling.jar" },
+        @{ Artifact = "Debugger-rmi-trace";    RelPath = "Ghidra\Debug\Debugger-rmi-trace\lib\Debugger-rmi-trace.jar" }
     )
 
     foreach ($dep in $deps) {
