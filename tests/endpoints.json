@@ -347,16 +347,16 @@
     {
       "path": "/close_program",
       "method": "POST",
-      "category": "program",
+      "category": "headless",
       "params": [
-        "program"
+        "name"
       ],
-      "description": "Close a loaded program (headless)"
+      "description": "Close a loaded program and free its resources"
     },
     {
       "path": "/close_project",
       "method": "POST",
-      "category": "project",
+      "category": "headless",
       "params": [],
       "description": "Close the currently open project"
     },
@@ -500,7 +500,7 @@
     {
       "path": "/create_project",
       "method": "POST",
-      "category": "project",
+      "category": "headless",
       "params": [
         "parentDir",
         "name"
@@ -1070,9 +1070,9 @@
     {
       "path": "/get_project_info",
       "method": "GET",
-      "category": "program",
+      "category": "headless",
       "params": [],
-      "description": "Get project information (headless)"
+      "description": "Get info about the currently open project"
     },
     {
       "path": "/get_struct_layout",
@@ -1410,19 +1410,18 @@
     {
       "path": "/load_program",
       "method": "POST",
-      "category": "program",
+      "category": "headless",
       "params": [
-        "path"
+        "file"
       ],
-      "description": "Load program into headless server"
+      "description": "Load a binary file into the headless server for analysis"
     },
     {
       "path": "/load_program_from_project",
       "method": "POST",
-      "category": "program",
+      "category": "headless",
       "params": [
-        "project_path",
-        "program_path"
+        "path"
       ],
       "description": "Load program from Ghidra project (headless)"
     },
@@ -1497,11 +1496,11 @@
     {
       "path": "/open_project",
       "method": "POST",
-      "category": "project",
+      "category": "headless",
       "params": [
         "path"
       ],
-      "description": "Open an existing Ghidra project"
+      "description": "Open an existing Ghidra project (.gpr file or directory)"
     },
     {
       "path": "/project/info",
@@ -1873,9 +1872,9 @@
     {
       "path": "/server/status",
       "method": "GET",
-      "category": "server",
+      "category": "headless",
       "params": [],
-      "description": "Get server connection status"
+      "description": "Check headless server connection status"
     },
     {
       "path": "/server/version_control/add",
