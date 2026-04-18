@@ -71,6 +71,14 @@ jobs:
         mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Help/lib/Help.jar" \
             -DgroupId=ghidra -DartifactId=Help -Dversion=$GHIDRA_VERSION -Dpackaging=jar
 
+        # Install Debugger JARs (for DebuggerService, v5.4.0+)
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Debug/Debugger-api/lib/Debugger-api.jar" \
+            -DgroupId=ghidra -DartifactId=Debugger-api -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar" \
+            -DgroupId=ghidra -DartifactId=Framework-TraceModeling -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar" \
+            -DgroupId=ghidra -DartifactId=Debugger-rmi-trace -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+
         # Install Feature JARs
         mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/Base/lib/Base.jar" \
             -DgroupId=ghidra -DartifactId=Base -Dversion=$GHIDRA_VERSION -Dpackaging=jar

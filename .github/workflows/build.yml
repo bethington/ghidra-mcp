@@ -28,6 +28,9 @@ jobs:
         Framework/DB/lib/DB.jar
         Framework/Emulation/lib/Emulation.jar
         Framework/Help/lib/Help.jar
+        Debug/Debugger-api/lib/Debugger-api.jar
+        Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar
+        Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar
 
     steps:
     - uses: actions/checkout@v4
@@ -70,6 +73,14 @@ jobs:
             -DgroupId=ghidra -DartifactId=Emulation -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
         mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Help/lib/Help.jar" \
             -DgroupId=ghidra -DartifactId=Help -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+
+        # Install Debugger JARs (for DebuggerService, v5.4.0+)
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Debug/Debugger-api/lib/Debugger-api.jar" \
+            -DgroupId=ghidra -DartifactId=Debugger-api -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar" \
+            -DgroupId=ghidra -DartifactId=Framework-TraceModeling -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar" \
+            -DgroupId=ghidra -DartifactId=Debugger-rmi-trace -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
 
         # Install Feature JARs
         mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/Base/lib/Base.jar" \

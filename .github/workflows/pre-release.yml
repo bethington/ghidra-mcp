@@ -70,6 +70,11 @@ jobs:
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Emulation/lib/Emulation.jar"       -DgroupId=ghidra -DartifactId=Emulation          -Dversion=${GV} -Dpackaging=jar
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Help/lib/Help.jar"                 -DgroupId=ghidra -DartifactId=Help               -Dversion=${GV} -Dpackaging=jar
 
+        # Debugger JARs (for DebuggerService, v5.4.0+)
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Debug/Debugger-api/lib/Debugger-api.jar"                     -DgroupId=ghidra -DartifactId=Debugger-api              -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar" -DgroupId=ghidra -DartifactId=Framework-TraceModeling -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar"         -DgroupId=ghidra -DartifactId=Debugger-rmi-trace        -Dversion=${GV} -Dpackaging=jar
+
         # Feature JARs
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/Base/lib/Base.jar"                  -DgroupId=ghidra -DartifactId=Base               -Dversion=${GV} -Dpackaging=jar
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/Decompiler/lib/Decompiler.jar"      -DgroupId=ghidra -DartifactId=Decompiler         -Dversion=${GV} -Dpackaging=jar

@@ -84,7 +84,10 @@ jobs:
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/PDB/lib/PDB.jar"                    -DgroupId=ghidra -DartifactId=PDB               -Dversion=${GV} -Dpackaging=jar
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Features/FunctionID/lib/FunctionID.jar"      -DgroupId=ghidra -DartifactId=FunctionID       -Dversion=${GV} -Dpackaging=jar
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Framework/Help/lib/Help.jar"              -DgroupId=ghidra -DartifactId=Help             -Dversion=${GV} -Dpackaging=jar
-        echo "✅ Installed 15 Ghidra JARs to Maven local repository"
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Debug/Debugger-api/lib/Debugger-api.jar"                     -DgroupId=ghidra -DartifactId=Debugger-api              -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar" -DgroupId=ghidra -DartifactId=Framework-TraceModeling -Dversion=${GV} -Dpackaging=jar
+        mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar"         -DgroupId=ghidra -DartifactId=Debugger-rmi-trace        -Dversion=${GV} -Dpackaging=jar
+        echo "✅ Installed 18 Ghidra JARs to Maven local repository"
 
     - name: Build with Maven
       run: |
