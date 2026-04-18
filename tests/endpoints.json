@@ -1,7 +1,7 @@
 {
-  "version": "5.4.0",
+  "version": "5.4.1",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 219,
+  "total_endpoints": 216,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -111,7 +111,7 @@
       "description": "Composite RE documentation analysis (decompile + classify + variables + completeness)"
     },
     {
-      "path": "/analyze_function_complete",
+      "path": "/analyze_function_full",
       "method": "GET",
       "category": "analysis",
       "params": [
@@ -284,9 +284,9 @@
       "description": "Set multiple variable types"
     },
     {
-      "path": "/batch_string_anchor_report",
+      "path": "/find_undocumented_functions_by_strings",
       "method": "GET",
-      "category": "utility",
+      "category": "documentation",
       "params": [
         "pattern",
         "program"
@@ -294,7 +294,7 @@
       "description": "Report strings and their undocumented functions"
     },
     {
-      "path": "/bulk_fuzzy_match",
+      "path": "/bulk_fuzzy_match_functions",
       "method": "GET",
       "category": "utility",
       "params": [
@@ -340,7 +340,7 @@
     {
       "path": "/clear_instruction_flow_override",
       "method": "POST",
-      "category": "datatype",
+      "category": "analysis",
       "params": [
         "address",
         "program"
@@ -928,9 +928,9 @@
       "description": "Find similar functions"
     },
     {
-      "path": "/find_similar_functions_fuzzy",
+      "path": "/find_similar_functions_across_programs",
       "method": "GET",
-      "category": "utility",
+      "category": "documentation",
       "params": [
         "address",
         "source_program",
@@ -1264,16 +1264,6 @@
       "description": "Get structure layout"
     },
     {
-      "path": "/get_type_size",
-      "method": "GET",
-      "category": "getter",
-      "params": [
-        "type_name",
-        "program"
-      ],
-      "description": "Get data type size"
-    },
-    {
       "path": "/get_valid_data_types",
       "method": "GET",
       "category": "getter",
@@ -1506,17 +1496,6 @@
         "program"
       ],
       "description": "List imported symbols"
-    },
-    {
-      "path": "/list_methods",
-      "method": "GET",
-      "category": "listing",
-      "params": [
-        "offset",
-        "limit",
-        "program"
-      ],
-      "description": "List all function names"
     },
     {
       "path": "/list_namespaces",
@@ -1844,17 +1823,6 @@
       "description": "Run script with output capture"
     },
     {
-      "path": "/run_script",
-      "method": "POST",
-      "category": "script",
-      "params": [
-        "script_path",
-        "args",
-        "program"
-      ],
-      "description": "Run Ghidra script"
-    },
-    {
       "path": "/run_script_inline",
       "method": "POST",
       "category": "script",
@@ -2146,7 +2114,7 @@
     {
       "path": "/set_function_no_return",
       "method": "POST",
-      "category": "datatype",
+      "category": "function",
       "params": [
         "function_address",
         "no_return",
