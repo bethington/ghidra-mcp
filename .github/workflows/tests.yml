@@ -93,15 +93,21 @@ jobs:
     
     - name: Build with Maven
       run: mvn clean package assembly:single -q -DskipTests
-    
+
+    - name: Run offline Java tests
+      run: |
+        # Annotation-scanner and endpoints.json parity tests.
+        # No Ghidra server needed — pure reflection + static catalog checks.
+        # Integration tests (GhidraMCPPluginTest, EndpointRegistrationTest,
+        # AppTest, ServiceUtilsAddressTest) require a running Ghidra instance
+        # and are deliberately excluded from this run.
+        mvn -q test -Dtest='com.xebyte.offline.*Test'
+
     - name: Verify build artifacts
       run: |
-        echo "✅ Java compilation successful"
+        echo "✅ Java compilation + offline tests passed"
         ls -la target/GhidraMCP-*.zip 2>/dev/null || echo "No zip artifact (assembly may use different name)"
         ls -la target/*.jar 2>/dev/null | head -5
-        # Note: All Java tests (EndpointRegistrationTest, GhidraMCPPluginTest) are integration
-        # tests that require a running Ghidra instance with the plugin loaded. They cannot run
-        # in CI. Compilation verification is the CI gate for Java changes.
     
     - name: Upload test results
       if: always()
