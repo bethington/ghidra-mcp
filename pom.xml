@@ -91,6 +91,12 @@
             <artifactId>Help</artifactId>
             <version>${ghidra.version}</version>
         </dependency>
+        <!-- Ghidra Emulation (for EmulationService P-code emulator) -->
+        <dependency>
+            <groupId>ghidra</groupId>
+            <artifactId>Emulation</artifactId>
+            <version>${ghidra.version}</version>
+        </dependency>
         <!-- Gson (provided — bundled with Ghidra in Framework/Generic/lib/) -->
         <dependency>
             <groupId>com.google.code.gson</groupId>

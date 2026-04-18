@@ -228,6 +228,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private final com.xebyte.core.AnalysisService analysisService;
     private final com.xebyte.core.MalwareSecurityService malwareSecurityService;
     private final com.xebyte.core.ProgramScriptService programScriptService;
+    private final com.xebyte.core.EmulationService emulationService;
 
     public GhidraMCPPlugin(PluginTool tool) {
         super(tool);
@@ -247,6 +248,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         this.analysisService = new com.xebyte.core.AnalysisService(programProvider, threadingStrategy, this.functionService);
         this.malwareSecurityService = new com.xebyte.core.MalwareSecurityService(programProvider, threadingStrategy);
         this.programScriptService = new com.xebyte.core.ProgramScriptService(programProvider, threadingStrategy);
+        this.emulationService = new com.xebyte.core.EmulationService(programProvider, threadingStrategy);
         Msg.info(this, "============================================");
         Msg.info(this, "GhidraMCP " + VersionInfo.getFullVersion());
         Msg.info(this, "Endpoints: " + VersionInfo.getEndpointCount());
@@ -469,7 +471,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         AnnotationScanner scanner = new AnnotationScanner(programProvider,
             listingService, functionService, commentService, symbolLabelService,
             xrefCallGraphService, dataTypeService, analysisService,
-            documentationHashService, malwareSecurityService, programScriptService);
+            documentationHashService, malwareSecurityService, programScriptService,
+            emulationService);
 
         for (EndpointDef ep : scanner.getEndpoints()) {
             server.createContext(ep.path(), safeHandler(exchange -> {

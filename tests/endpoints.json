@@ -1,7 +1,7 @@
 {
   "version": "5.2.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 200,
+  "total_endpoints": 202,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -16,7 +16,8 @@
     "project": "Project lifecycle management",
     "server": "Server connection and version control",
     "script": "Script execution",
-    "utility": "Utility endpoints"
+    "utility": "Utility endpoints",
+    "emulation": "P-code emulation (run functions with controlled inputs)"
   },
   "endpoints": [
     {
@@ -689,6 +690,36 @@
         "program"
       ],
       "description": "Disassemble function"
+    },
+    {
+      "path": "/emulate_function",
+      "method": "POST",
+      "category": "emulation",
+      "params": [
+        "address",
+        "registers",
+        "memory",
+        "max_steps",
+        "return_registers",
+        "program"
+      ],
+      "description": "Emulate a single function with controlled register/memory inputs. Returns final register state after execution. Ideal for understanding hash functions, crypto routines, or any pure-computation code path."
+    },
+    {
+      "path": "/emulate_hash_batch",
+      "method": "POST",
+      "category": "emulation",
+      "params": [
+        "hash_function_address",
+        "string_register",
+        "result_register",
+        "target_hash",
+        "candidates",
+        "initial_registers",
+        "wide_string",
+        "program"
+      ],
+      "description": "Brute-force API hash resolution. Emulates a hash function with each candidate API name and returns the one that produces the target hash. Ideal for resolving ROR13, CRC32, djb2, FNV, and custom hash algorithms."
     },
     {
       "path": "/exit_ghidra",
