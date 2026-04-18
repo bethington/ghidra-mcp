@@ -1211,63 +1211,19 @@ def create_app(state_file, event_bus=None):
         good_enough = queue.get("config", {}).get("good_enough_score", 80)
         pinned = set(queue.get("pinned", []))
 
-        # For layer filtering, compute BFS layers dynamically (same as
-        # /api/call_graph_layers) so they match the dashboard visualization.
-        layer_map = {}  # addr -> layer (int or None for cyclic)
-        if layer_filter is not None:
-            active_bin = program or state.get("active_binary")
-            bin_funcs = {k: v for k, v in all_funcs.items()
-                         if v.get("program_name") == active_bin
-                         and not v.get("is_thunk") and not v.get("is_external")}
-            all_addrs = set()
-            callees_of_map = {}
-            callers_of_map = defaultdict(set)
-            for k, v in bin_funcs.items():
-                addr = v.get("address", "")
-                all_addrs.add(addr)
-                ic = set(v.get("callees", [])) & all_addrs
-                callees_of_map[addr] = ic
-                for c in ic:
-                    callers_of_map[c].add(addr)
-            # Second pass for internal callees (needs all addrs known)
-            for addr in all_addrs:
-                callees_of_map[addr] = set(
-                    next((v.get("callees", []) for k, v in bin_funcs.items()
-                          if v.get("address") == addr), [])
-                ) & all_addrs
-                for c in callees_of_map[addr]:
-                    callers_of_map[c].add(addr)
-            depth = {}
-            current = set()
-            for addr in all_addrs:
-                if not callees_of_map.get(addr):
-                    depth[addr] = 0
-                    current.add(addr)
-            ln = 0
-            while current:
-                nxt = set()
-                for addr in current:
-                    for caller in callers_of_map.get(addr, set()):
-                        if caller in depth: continue
-                        if all(c in depth for c in callees_of_map.get(caller, set())):
-                            depth[caller] = ln + 1
-                            nxt.add(caller)
-                current = nxt
-                ln += 1
-                if ln > 200: break
-            for addr in all_addrs:
-                layer_map[addr] = depth.get(addr)  # None = cyclic
-
         results = []
         for key, func in all_funcs.items():
             if func.get("is_thunk") or func.get("is_external"):
                 continue
             if program and func.get("program_name") != program:
                 continue
-            # Layer filter
+            # Layer filter — uses pre-computed call_graph_layer from state.json
+            # (stamped by populate_call_graph during scan). Layer 0 includes
+            # true leaves (no callees) AND functions whose callees are all
+            # external (outside the program) — both are "leaves" in the
+            # internal call graph.
             if layer_filter is not None:
-                addr = func.get("address", "")
-                func_layer = layer_map.get(addr)
+                func_layer = func.get("call_graph_layer")
                 if layer_filter == "cyclic":
                     if func_layer is not None:
                         continue
