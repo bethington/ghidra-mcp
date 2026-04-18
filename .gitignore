@@ -584,3 +584,6 @@ fun-doc/state.json.corrupt-*
 fun-doc/logs/
 fun-doc/priority_queue.json
 fun-doc/debug/
+
+# Playwright MCP scratch directory (snapshots, screenshots, console logs)
+.playwright-mcp/
