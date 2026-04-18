@@ -4,6 +4,7 @@ import com.xebyte.core.AnalysisService;
 import com.xebyte.core.BinaryComparisonService;
 import com.xebyte.core.CommentService;
 import com.xebyte.core.DataTypeService;
+import com.xebyte.core.DebuggerService;
 import com.xebyte.core.DocumentationHashService;
 import com.xebyte.core.FunctionService;
 import com.xebyte.core.ListingService;
@@ -53,6 +54,10 @@ public final class ServiceFactory {
         HeadlessManagementService headlessManagementService =
             new HeadlessManagementService(new HeadlessProgramProvider(), new GhidraServerManager());
 
+        // DebuggerService uses PluginTool only at runtime; scanner only reflects on
+        // method signatures, so a null tool is safe for offline scanning.
+        DebuggerService debuggerService = new DebuggerService(provider, ts, null);
+
         return new Object[] {
             listingService,
             functionService,
@@ -66,6 +71,7 @@ public final class ServiceFactory {
             programScriptService,
             emulationService,
             headlessManagementService,
+            debuggerService,
         };
     }
 
