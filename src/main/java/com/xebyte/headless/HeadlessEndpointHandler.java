@@ -826,7 +826,13 @@ public class HeadlessEndpointHandler {
 
     /**
      * Set multiple comments in a single batch operation.
+     *
+     * Suppresses the deprecated-API warning for Ghidra 12's Listing.setComment(Address, int, String)
+     * and CodeUnit.PLATE_COMMENT / PRE_COMMENT / EOL_COMMENT int constants. The replacement
+     * ghidra.program.model.listing.CommentType enum API will be adopted when this handler is
+     * refactored to delegate to CommentService (the GUI-side path already uses the enum).
      */
+    @SuppressWarnings("deprecation")
     public String batchSetComments(String functionAddress, String decompilerCommentsJson,
                                    String disassemblyCommentsJson, String plateComment, String programName) {
         Program program = getProgram(programName);

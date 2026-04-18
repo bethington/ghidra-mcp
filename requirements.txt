@@ -5,7 +5,8 @@
 mcp>=1.5.0,<2.0.0
 
 # HTTP client library
-requests>=2.28.0,<3.0.0
+# 2.32.0 is the floor for CVE-2024-35195 (certificate verification bypass).
+requests>=2.32.0,<3.0.0
 
 # URL parsing utilities (included in stdlib but explicit for clarity)
 # urllib.parse - included in Python standard library
