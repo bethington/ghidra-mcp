@@ -518,6 +518,10 @@ d2-analysis/
 
 # DLL export/ordinal mapping files (project-specific binaries)
 dll_exports/
+# Exception: the small fixture used by tests/unit/test_address_map.py is
+# source-of-truth for that test and must stay in git.
+!tests/fixtures/dll_exports/
+!tests/fixtures/dll_exports/**
 
 # Project-specific examples and reference data
 examples/

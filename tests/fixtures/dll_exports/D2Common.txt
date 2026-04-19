@@ -1,0 +1,3 @@
+D2COMMON.DLL::Ordinal_10000@6fd9f450->Ordinal_10000
+D2COMMON.DLL::Ordinal_10624@6fda1234->CalcMissileVelocityParam
+D2COMMON.DLL::Ordinal_10864@6fdb5678->GetMaxGoldBank

@@ -185,6 +185,12 @@ def is_pid_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True  # Running but owned by another user
+    except OSError as e:
+        # Windows may raise WinError 87 ("The parameter is incorrect")
+        # for clearly invalid PIDs instead of ProcessLookupError.
+        if getattr(e, "winerror", None) == 87:
+            return False
+        raise
 
 
 def validate_server_url(url: str) -> bool:
@@ -725,10 +731,13 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
                 str_params["dry_run"] = "true"
             return dispatch_get(endpoint, params=str_params if str_params else None)
         else:
-            query_params = None
             if dry_run:
-                query_params = {"dry_run": "true"}
-            return dispatch_post(endpoint, data=filtered, query_params=query_params)
+                return dispatch_post(
+                    endpoint,
+                    data=filtered,
+                    query_params={"dry_run": "true"},
+                )
+            return dispatch_post(endpoint, data=filtered)
 
     # Build function signature with proper types and defaults
     # Params with defaults must come after params without defaults
