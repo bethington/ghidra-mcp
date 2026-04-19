@@ -4,6 +4,7 @@
 - `get_function_variables` (refresh after prototype changes in Step 2)
 - `set_local_variable_type`
 - `set_parameter_type`
+- `batch_set_variable_types` (set multiple variable types in one call -- saves call budget)
 - `set_variables` (atomic type + rename in one call, preferred)
 - `rename_variables` (batch rename only, if types already resolved)
 - `set_function_prototype` (only if this-pointer type needs fixing)
