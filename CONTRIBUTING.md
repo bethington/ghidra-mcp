@@ -160,17 +160,14 @@ Priority: Medium - helpful for malware analysis
    ```
 
 3. Document in `tests/endpoints.json`:
-   ```markdown
-   ### my_new_tool()
-   
-   Brief description.
-   
-   ```python
-   result = my_new_tool(param1="value", param2=5)
-   # Returns: {...}
-   ```
-   
-   **Use when**: Specific use case
+   ```json
+   {
+     "path": "/my_new_tool",
+     "method": "GET",
+     "category": "analysis",
+     "params": ["param1", "param2", "program"],
+     "description": "Brief description."
+   }
    ```
 
 4. Add example in `examples/`:

@@ -121,7 +121,7 @@ All Ghidra libraries are automatically downloaded and configured:
 - Utility.jar, Gui.jar
 
 ### Quality Assurance
-- **Full test suite execution** (offline + integration test suite)
+- **Automated CI validation** (offline Java tests, Python unit tests, build verification)
 - **Build verification** before release creation
 - **Artifact validation** and proper naming
 - **Professional documentation** generation
