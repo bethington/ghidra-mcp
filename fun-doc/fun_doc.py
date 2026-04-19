@@ -4116,11 +4116,13 @@ def _inject_tool_block(prompt):
     RELEVANT_TOOLS = {
         "analyze_for_documentation",
         "get_function_variables",
+        "get_plate_comment",
         "set_variables",
         "rename_function_by_address",
         "set_function_prototype",
         "set_local_variable_type",
         "set_parameter_type",
+        "batch_set_variable_types",
         "rename_variable",
         "rename_variables",
         "batch_set_comments",
