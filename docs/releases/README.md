@@ -202,4 +202,4 @@ Each release directory should contain:
 
 - For the latest release: See [CHANGELOG.md](../../CHANGELOG.md) (v5.4.1)
 - For specific versions: Browse the version directories above
-- For overall project changes: See [CHANGELOG.md](../CHANGELOG.md) in the project root
+- For overall project changes: See [CHANGELOG.md](../../CHANGELOG.md) in the project root
