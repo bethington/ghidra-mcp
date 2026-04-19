@@ -1,9 +1,19 @@
 # Ghidra MCP Server
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Java Version](https://img.shields.io/badge/Java-21%20LTS-orange.svg)](https://openjdk.java.net/projects/jdk/21/)
-[![Ghidra Version](https://img.shields.io/badge/Ghidra-12.0.3-green.svg)](https://ghidra-sre.org/)
-[![Version](https://img.shields.io/badge/Version-5.4.1-brightgreen.svg)](CHANGELOG.md)
+[![Tests](https://img.shields.io/github/actions/workflow/status/bethington/ghidra-mcp/tests.yml?branch=main&style=for-the-badge&label=Tests&logo=github-actions&logoColor=white)](https://github.com/bethington/ghidra-mcp/actions/workflows/tests.yml)
+[![Release](https://img.shields.io/github/v/release/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=blue)](https://github.com/bethington/ghidra-mcp/releases/latest)
+[![License](https://img.shields.io/github/license/bethington/ghidra-mcp?style=for-the-badge&color=green)](LICENSE)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/bethington?style=for-the-badge&logo=githubsponsors&logoColor=white&label=Sponsors&labelColor=ea4aaa&color=ea4aaa)](https://github.com/sponsors/bethington)
+
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Java](https://img.shields.io/badge/Java-21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![Ghidra](https://img.shields.io/badge/Ghidra-12.0.3-brightgreen?style=for-the-badge&logoColor=white)](https://ghidra-sre.org/)
+[![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-6C5CE7?style=for-the-badge&logoColor=white)](https://modelcontextprotocol.io/)
+
+[![Stars](https://img.shields.io/github/stars/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=yellow)](https://github.com/bethington/ghidra-mcp/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/bethington/ghidra-mcp?style=for-the-badge&logo=git&logoColor=white)](https://github.com/bethington/ghidra-mcp/commits/main)
+[![Discussions](https://img.shields.io/github/discussions/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white)](https://github.com/bethington/ghidra-mcp/discussions)
+[![Issues](https://img.shields.io/github/issues/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=orange)](https://github.com/bethington/ghidra-mcp/issues)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
 
