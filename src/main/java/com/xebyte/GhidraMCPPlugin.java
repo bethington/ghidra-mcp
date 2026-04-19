@@ -99,7 +99,7 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "5.3.2"; // Default fallback
+    private static String VERSION = "5.4.1"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
@@ -107,19 +107,24 @@ class VersionInfo {
     private static final int ENDPOINT_COUNT = 175;
 
     static {
+        // v5.4.2: loading "/version.properties" from the classpath root was
+        // hitting a sibling version.properties exported by another Ghidra
+        // module, which resolved first and returned stale values. Move the
+        // resource under the com/xebyte/ package path so the lookup is scoped
+        // to this plugin's classes.
         try (InputStream input = GhidraMCPPlugin.class
-                .getResourceAsStream("/version.properties")) {
+                .getResourceAsStream("/com/xebyte/version.properties")) {
             if (input != null) {
                 Properties props = new Properties();
                 props.load(input);
-                VERSION = props.getProperty("app.version", "5.3.2");
-                APP_NAME = props.getProperty("app.name", "GhidraMCP");
-                GHIDRA_VERSION = props.getProperty("ghidra.version", "unknown");
-                BUILD_TIMESTAMP = props.getProperty("build.timestamp", "dev");
-                BUILD_NUMBER = props.getProperty("build.number", "0");
+                VERSION = props.getProperty("app.version", VERSION);
+                APP_NAME = props.getProperty("app.name", APP_NAME);
+                GHIDRA_VERSION = props.getProperty("ghidra.version", GHIDRA_VERSION);
+                BUILD_TIMESTAMP = props.getProperty("build.timestamp", BUILD_TIMESTAMP);
+                BUILD_NUMBER = props.getProperty("build.number", BUILD_NUMBER);
             }
         } catch (IOException e) {
-            // Use defaults if file not found
+            // Use defaults (hard-coded above) if file not found.
         }
     }
 

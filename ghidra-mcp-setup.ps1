@@ -939,6 +939,27 @@ $userExtensionsDir = "$userExtensionsBase\GhidraMCP"
 
 try {
     if ($PSCmdlet.ShouldProcess($userExtensionsDir, "Extract extension ZIP to user Extensions directory")) {
+        # v5.4.2: purge any stale versioned JARs before extraction. Expand-Archive
+        # -Force only overwrites same-named files; if the version number in the
+        # JAR name changed (e.g. GhidraMCP-5.3.2.jar -> GhidraMCP-5.4.1.jar) the
+        # old JAR would linger in lib/ and Ghidra's classloader would load
+        # whichever one it found first. That caused upgraders from v5.3.x to
+        # silently keep running the old code.
+        $libDir = "$userExtensionsDir\lib"
+        if (Test-Path $libDir) {
+            $staleJars = @(Get-ChildItem -Path $libDir -Filter "GhidraMCP*.jar" -ErrorAction SilentlyContinue)
+            if ($staleJars.Count -gt 0) {
+                foreach ($stale in $staleJars) {
+                    try {
+                        Remove-Item -Path $stale.FullName -Force -ErrorAction Stop
+                        Write-LogInfo "Removed stale plugin JAR: $($stale.Name)"
+                    } catch {
+                        Write-LogWarning "Could not remove $($stale.Name) - is Ghidra still running? $($_.Exception.Message)"
+                    }
+                }
+            }
+        }
+
         # Extract ZIP contents to user Extensions dir (GhidraMCP/ subfolder is inside the ZIP)
         Expand-Archive -Path $artifactPath -DestinationPath $userExtensionsBase -Force
         Write-LogSuccess "Installed: extension extracted to $userExtensionsDir"

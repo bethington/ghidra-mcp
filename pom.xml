@@ -150,7 +150,7 @@
                 <directory>src/main/resources</directory>
                 <filtering>true</filtering>
                 <includes>
-                    <include>version.properties</include>
+                    <include>com/xebyte/version.properties</include>
                     <include>extension.properties</include>
                 </includes>
             </resource>
@@ -158,7 +158,7 @@
                 <directory>src/main/resources</directory>
                 <filtering>false</filtering>
                 <excludes>
-                    <exclude>version.properties</exclude>
+                    <exclude>com/xebyte/version.properties</exclude>
                     <exclude>extension.properties</exclude>
                 </excludes>
             </resource>
