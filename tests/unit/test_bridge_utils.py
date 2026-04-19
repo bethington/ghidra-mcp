@@ -27,11 +27,17 @@ class TestGetSocketDir(unittest.TestCase):
         result = get_socket_dir()
         self.assertEqual(result, Path("/run/user/1000/ghidra-mcp"))
 
-    @patch.dict(os.environ, {"TMPDIR": "/custom/tmp", "USER": "testuser"}, clear=False)
     def test_tmpdir_fallback(self):
-        env = os.environ.copy()
-        env.pop("XDG_RUNTIME_DIR", None)
-        with patch.dict(os.environ, env, clear=True):
+        # Force TMPDIR fallback by:
+        #   (a) clearing XDG_RUNTIME_DIR so the function skips the first branch
+        #   (b) shadowing os.getuid to return a UID whose /run/user/<uid> won't
+        #       exist (CI's ubuntu-latest runner has /run/user/1001 populated,
+        #       which would otherwise win before the TMPDIR branch)
+        env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
+        env["TMPDIR"] = "/custom/tmp"
+        env["USER"] = "testuser"
+        with patch.dict(os.environ, env, clear=True), \
+             patch("os.getuid", return_value=9_999_999, create=True):
             from bridge_mcp_ghidra import get_socket_dir
 
             result = get_socket_dir()
