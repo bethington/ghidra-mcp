@@ -305,6 +305,7 @@ install_ghidra_dependencies() {
         "Base" "Decompiler" "Docking" "Generic" "Project"
         "SoftwareModeling" "Utility" "Gui" "FileSystem" "Graph"
         "DB" "Emulation" "PDB" "FunctionID" "Help"
+        "Debugger-api" "Framework-TraceModeling" "Debugger-rmi-trace"
     )
     local -a artifact_paths=(
         "Ghidra/Features/Base/lib/Base.jar"
@@ -322,6 +323,9 @@ install_ghidra_dependencies() {
         "Ghidra/Features/PDB/lib/PDB.jar"
         "Ghidra/Features/FunctionID/lib/FunctionID.jar"
         "Ghidra/Framework/Help/lib/Help.jar"
+        "Ghidra/Debug/Debugger-api/lib/Debugger-api.jar"
+        "Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar"
+        "Ghidra/Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar"
     )
 
     local quiet_flag=""
