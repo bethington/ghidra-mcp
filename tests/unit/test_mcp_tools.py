@@ -181,7 +181,8 @@ class TestSchemaFormat(unittest.TestCase):
         }
         fn = _build_tool_function("/test", "POST", schema)
         sig = inspect.signature(fn)
-        self.assertEqual(len(sig.parameters), 4)
+        self.assertEqual(len(sig.parameters), 5)
+        self.assertIn("dry_run", sig.parameters)
 
     def test_schema_with_descriptions(self):
         """Schema properties with descriptions should not affect function building."""
