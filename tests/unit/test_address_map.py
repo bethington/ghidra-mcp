@@ -1,7 +1,6 @@
 """Unit tests for debugger/address_map.py — address translation and ordinal parsing."""
 
 import os
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -126,16 +125,7 @@ class TestAddressMapper:
 class TestOrdinalParsing:
     def setup_method(self):
         self.mapper = AddressMapper()
-        self.tmpdir = tempfile.mkdtemp()
-
-        # Write a test export file
-        content = (
-            "D2COMMON.DLL::Ordinal_10000@6fd9f450->Ordinal_10000\n"
-            "D2COMMON.DLL::Ordinal_10624@6fda1234->CalcMissileVelocityParam\n"
-            "D2COMMON.DLL::Ordinal_10864@6fdb5678->GetMaxGoldBank\n"
-        )
-        with open(os.path.join(self.tmpdir, "D2Common.txt"), "w") as f:
-            f.write(content)
+        self.tmpdir = Path(__file__).parent.parent / "fixtures" / "dll_exports"
 
     def test_load_ordinals(self):
         summary = self.mapper.load_ordinal_exports(self.tmpdir)
