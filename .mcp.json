@@ -3,7 +3,7 @@
     "ghidra-mcp": {
       "command": "python",
       "args": [
-        "C:\\MPBT\\ghidra-mcp\\bridge_mcp_ghidra.py",
+        "bridge_mcp_ghidra.py",
         "--transport",
         "stdio",
         "--no-lazy"
