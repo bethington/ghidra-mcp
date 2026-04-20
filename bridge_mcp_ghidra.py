@@ -174,10 +174,32 @@ SEGMENT_ADDR_WITH_0X_PATTERN = re.compile(
     r"^([a-zA-Z_][a-zA-Z0-9_]*):0[xX]([0-9a-fA-F]+)$"
 )
 FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+INVALID_TOOL_NAME_CHARS = re.compile(r"[^a-zA-Z0-9_-]+")
+REPEATED_UNDERSCORES = re.compile(r"_+")
 
 
 def is_pid_alive(pid: int) -> bool:
     """Check if a process with the given PID is still running."""
+    if pid <= 0:
+        return False
+
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        # PROCESS_QUERY_LIMITED_INFORMATION is enough for a liveness probe and
+        # avoids the POSIX-only os.kill(pid, 0) behavior that can hang on Windows.
+        handle = kernel32.OpenProcess(0x1000, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+
+        error = kernel32.GetLastError()
+        if error == 5:  # ERROR_ACCESS_DENIED: alive but not queryable.
+            return True
+        return False
+
     try:
         os.kill(pid, 0)
         return True
@@ -211,6 +233,40 @@ def validate_hex_address(address: str) -> bool:
     if SEGMENT_ADDRESS_PATTERN.match(address):
         return True
     return bool(HEX_ADDRESS_PATTERN.match(address))
+
+
+def sanitize_tool_name(name: str) -> str:
+    """Normalize an MCP tool name for clients with strict CAPI validation."""
+    sanitized = INVALID_TOOL_NAME_CHARS.sub("_", name.lower())
+    sanitized = REPEATED_UNDERSCORES.sub("_", sanitized).strip("_")
+    if not sanitized:
+        raise ValueError(f"Tool name {name!r} is empty after sanitization")
+    if not TOOL_NAME_PATTERN.match(sanitized):
+        raise ValueError(f"Sanitized tool name {sanitized!r} is still invalid")
+    return sanitized
+
+
+def _allocate_tool_name(base_name: str, used_names: set[str]) -> str:
+    """Return a unique MCP tool name, adding a deterministic suffix on collision."""
+    if base_name not in used_names:
+        used_names.add(base_name)
+        return base_name
+
+    suffix = 2
+    while True:
+        candidate = f"{base_name}_{suffix}"
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        suffix += 1
+
+
+def validate_tool_name(name: str) -> None:
+    """Fail fast if an exposed MCP tool name is not CAPI-safe."""
+    if not TOOL_NAME_PATTERN.match(name):
+        raise ValueError(
+            f"Invalid MCP tool name {name!r}; expected {TOOL_NAME_PATTERN.pattern}"
+        )
 
 
 def uds_request(
@@ -604,6 +660,32 @@ _TYPE_MAP = {
 }
 
 
+def _normalize_tool_def_names(schema: list[dict]) -> list[dict]:
+    """Normalize and de-duplicate MCP-visible names while keeping HTTP endpoints intact."""
+    normalized_schema: list[dict] = []
+    used_names = set(STATIC_TOOL_NAMES)
+
+    for tool_def in schema:
+        raw_name = tool_def.get("original_name") or tool_def.get("name") or tool_def["endpoint"].lstrip("/")
+        sanitized_name = sanitize_tool_name(raw_name)
+
+        # Preserve the existing behavior for valid dynamic names that exactly
+        # overlap a static bridge tool: _register_tool_def will skip them.
+        if sanitized_name in STATIC_TOOL_NAMES and sanitized_name == raw_name:
+            name = sanitized_name
+        else:
+            name = _allocate_tool_name(sanitized_name, used_names)
+
+        normalized = dict(tool_def)
+        normalized["name"] = name
+        normalized["original_name"] = raw_name
+        normalized["sanitized_name"] = sanitized_name
+        normalized["name_collided"] = name != sanitized_name
+        normalized_schema.append(normalized)
+
+    return normalized_schema
+
+
 def _parse_schema(raw: dict) -> list[dict]:
     """Convert upstream AnnotationScanner schema to internal tool defs.
 
@@ -613,7 +695,7 @@ def _parse_schema(raw: dict) -> list[dict]:
     tool_defs = []
     for tool in raw.get("tools", []):
         path = tool["path"]
-        name = path.lstrip("/")
+        raw_name = tool.get("name") or path.lstrip("/")
         params = tool.get("params", [])
 
         properties = {}
@@ -630,7 +712,8 @@ def _parse_schema(raw: dict) -> list[dict]:
 
         tool_defs.append(
             {
-                "name": name,
+                "name": raw_name,
+                "original_name": raw_name,
                 "endpoint": path,
                 "http_method": tool.get("method", "GET"),
                 "description": tool.get("description", ""),
@@ -644,7 +727,7 @@ def _parse_schema(raw: dict) -> list[dict]:
             }
         )
 
-    return tool_defs
+    return _normalize_tool_def_names(tool_defs)
 
 
 # ==========================================================================
@@ -684,6 +767,9 @@ STATIC_TOOL_NAMES = {
     "debugger_watch_stop",
     "debugger_watch_log",
 }
+
+for _static_tool_name in STATIC_TOOL_NAMES:
+    validate_tool_name(_static_tool_name)
 
 _dynamic_tool_names: list[str] = []
 _full_schema: list[dict] = []  # Complete parsed schema
@@ -778,6 +864,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
 def _register_tool_def(tool_def: dict) -> bool:
     """Register a single tool from a schema definition. Returns True if registered."""
     name = tool_def["name"]
+    validate_tool_name(name)
     if name in STATIC_TOOL_NAMES:
         return False  # Don't overwrite static tools
     description = tool_def.get("description", "")
@@ -817,16 +904,16 @@ def register_tools_from_schema(
     _loaded_groups.clear()
 
     # Store full schema for lazy loading
-    _full_schema = schema
+    _full_schema = _normalize_tool_def_names(schema)
 
     count = 0
-    for tool_def in schema:
+    for tool_def in _full_schema:
         category = tool_def.get("category", "unknown")
         if groups is not None and category not in groups:
             continue
-        _register_tool_def(tool_def)
-        _loaded_groups.add(category)
-        count += 1
+        if _register_tool_def(tool_def):
+            _loaded_groups.add(category)
+            count += 1
 
     return count
 

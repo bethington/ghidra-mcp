@@ -8,6 +8,7 @@ They test transport utilities, timeout logic, and discovery functions.
 import json
 import os
 import inspect
+import re
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -174,6 +175,111 @@ class TestBuildToolFunction(unittest.TestCase):
         fn = _build_tool_function("/test", "GET", schema)
         sig = inspect.signature(fn)
         self.assertEqual(len(sig.parameters), 0)
+
+
+class TestToolNameSanitization(unittest.TestCase):
+    """Test MCP tool name normalization for strict clients."""
+
+    def test_sanitize_tool_name_replaces_invalid_separators(self):
+        from bridge_mcp_ghidra import sanitize_tool_name
+
+        self.assertEqual(sanitize_tool_name("/Debugger.Status "), "debugger_status")
+        self.assertEqual(sanitize_tool_name("server/status"), "server_status")
+        self.assertEqual(sanitize_tool_name("A::B...C"), "a_b_c")
+
+    def test_sanitize_tool_name_rejects_empty_names(self):
+        from bridge_mcp_ghidra import sanitize_tool_name
+
+        with self.assertRaises(ValueError):
+            sanitize_tool_name("///")
+
+    def test_parse_schema_normalizes_nested_endpoint_paths(self):
+        from bridge_mcp_ghidra import _parse_schema
+
+        schema = _parse_schema(
+            {
+                "tools": [
+                    {
+                        "path": "/server/status",
+                        "method": "GET",
+                        "params": [],
+                    }
+                ]
+            }
+        )
+        self.assertEqual(schema[0]["name"], "server_status")
+        self.assertEqual(schema[0]["endpoint"], "/server/status")
+
+    def test_parse_schema_suffixes_static_name_collisions(self):
+        from bridge_mcp_ghidra import _parse_schema
+
+        schema = _parse_schema(
+            {
+                "tools": [
+                    {
+                        "path": "/debugger/status",
+                        "method": "GET",
+                        "params": [],
+                    }
+                ]
+            }
+        )
+        self.assertEqual(schema[0]["name"], "debugger_status_2")
+        self.assertEqual(schema[0]["sanitized_name"], "debugger_status")
+        self.assertTrue(schema[0]["name_collided"])
+
+    def test_parse_schema_suffixes_dynamic_name_collisions(self):
+        from bridge_mcp_ghidra import _parse_schema
+
+        schema = _parse_schema(
+            {
+                "tools": [
+                    {"path": "/foo.bar", "method": "GET", "params": []},
+                    {"path": "/foo/bar", "method": "GET", "params": []},
+                ]
+            }
+        )
+        self.assertEqual([tool["name"] for tool in schema], ["foo_bar", "foo_bar_2"])
+
+    def test_active_registry_tool_names_are_valid(self):
+        import bridge_mcp_ghidra as bridge
+
+        pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
+        invalid = [
+            name for name in bridge.mcp._tool_manager._tools
+            if not pattern.fullmatch(name)
+        ]
+        self.assertEqual(invalid, [])
+
+    def test_registered_dynamic_tool_names_are_valid(self):
+        import bridge_mcp_ghidra as bridge
+
+        schema = bridge._parse_schema(
+            {
+                "tools": [
+                    {"path": "/server/status", "method": "GET", "params": []},
+                    {"path": "/debugger/status", "method": "GET", "params": []},
+                    {"path": "/foo.bar", "method": "GET", "params": []},
+                    {"path": "/foo/bar", "method": "GET", "params": []},
+                ]
+            }
+        )
+
+        bridge.register_tools_from_schema(schema, groups=None)
+        pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
+        try:
+            invalid = [
+                name
+                for name in bridge.mcp._tool_manager._tools
+                if not pattern.fullmatch(name)
+            ]
+            self.assertEqual(invalid, [])
+            self.assertIn("server_status", bridge.mcp._tool_manager._tools)
+            self.assertIn("debugger_status_2", bridge.mcp._tool_manager._tools)
+            self.assertIn("foo_bar", bridge.mcp._tool_manager._tools)
+            self.assertIn("foo_bar_2", bridge.mcp._tool_manager._tools)
+        finally:
+            bridge.register_tools_from_schema([], groups=None)
 
 
 class TestRegisterToolsFromSchema(unittest.TestCase):
