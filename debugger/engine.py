@@ -17,17 +17,13 @@ import struct
 import threading
 import time
 from collections import namedtuple
+from contextlib import contextmanager, nullcontext
 from concurrent.futures import Future
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, cast
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
-_localappdata = os.environ.get("LOCALAPPDATA")
-if os.name == "nt" and _localappdata:
-    _pybag_cache = os.path.join(_localappdata, "pybag_cache")
-    if (
-        "WINDBG_DIR" not in os.environ
-        and os.path.exists(os.path.join(_pybag_cache, "dbgeng.dll"))
-    ):
-        os.environ["WINDBG_DIR"] = _pybag_cache
+from .windbg import ensure_windbg_dir
+
+ensure_windbg_dir()
 
 from pybag import pydbg, userdbg  # type: ignore
 from pybag.dbgeng import core as DbgEng  # type: ignore
@@ -39,12 +35,85 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 C = TypeVar("C", bound=Callable[..., Any])
+_IMAGE_FILE_MACHINE_I386 = 0x014C
+_IMAGE_FILE_MACHINE_AMD64 = 0x8664
 
-IMAGE_FILE_MACHINE_I386 = 0x014C
-DBGENG_PROCESSOR_X86 = getattr(DbgEng, "DEBUG_PROCESSOR_X86", 0)
-IMAGE_TO_DBGENG_PROCESSOR_TYPES = {
-    IMAGE_FILE_MACHINE_I386: DBGENG_PROCESSOR_X86,
-}
+
+def _normalize_pid_match(match: Any) -> int:
+    if isinstance(match, tuple):
+        if not match:
+            raise RuntimeError("Process lookup returned an empty match tuple")
+        match = match[0]
+    return int(match)
+
+
+def _module_info_from_pybag_entry(raw_module: Any) -> ModuleInfo:
+    if isinstance(raw_module, ModuleInfo):
+        return raw_module
+
+    if isinstance(raw_module, tuple) and len(raw_module) == 2:
+        name_info, params = raw_module
+        if isinstance(name_info, tuple):
+            image_path = str(name_info[0]) if len(name_info) > 0 and name_info[0] else ""
+            short_name = str(name_info[1]) if len(name_info) > 1 and name_info[1] else ""
+            loaded_name = str(name_info[2]) if len(name_info) > 2 and name_info[2] else ""
+            name = short_name or os.path.basename(image_path) or os.path.basename(loaded_name) or image_path or str(name_info)
+        else:
+            name = str(name_info)
+
+        runtime_base = getattr(params, "Base", getattr(params, "base", None))
+        size = getattr(params, "Size", getattr(params, "size", None))
+        if runtime_base is None or size is None:
+            raise ValueError(f"Unsupported pybag module tuple: {raw_module!r}")
+        return ModuleInfo(name=name, runtime_base=int(runtime_base), size=int(size))
+
+    name = getattr(raw_module, "name", None)
+    runtime_base = getattr(raw_module, "runtime_base", getattr(raw_module, "base", getattr(raw_module, "Base", None)))
+    size = getattr(raw_module, "size", getattr(raw_module, "Size", None))
+    if name is None or runtime_base is None or size is None:
+        raise ValueError(f"Unsupported pybag module entry: {raw_module!r}")
+    return ModuleInfo(name=str(name), runtime_base=int(runtime_base), size=int(size))
+
+
+def _register_query_plan(bitness: str) -> List[Tuple[str, str]]:
+    if bitness == "64":
+        return [
+            ("RAX", "rax"),
+            ("RBX", "rbx"),
+            ("RCX", "rcx"),
+            ("RDX", "rdx"),
+            ("RSI", "rsi"),
+            ("RDI", "rdi"),
+            ("RSP", "rsp"),
+            ("RBP", "rbp"),
+            ("RIP", "rip"),
+            ("R8", "r8"),
+            ("R9", "r9"),
+            ("R10", "r10"),
+            ("R11", "r11"),
+            ("R12", "r12"),
+            ("R13", "r13"),
+            ("R14", "r14"),
+            ("R15", "r15"),
+            ("EFLAGS", "efl"),
+        ]
+    return [
+        ("EAX", "eax"),
+        ("EBX", "ebx"),
+        ("ECX", "ecx"),
+        ("EDX", "edx"),
+        ("ESI", "esi"),
+        ("EDI", "edi"),
+        ("ESP", "esp"),
+        ("EBP", "ebp"),
+        ("EIP", "eip"),
+        ("EFLAGS", "efl"),
+    ]
+
+
+def _is_wow64_module_name(name: str) -> bool:
+    normalized = name.lower()
+    return normalized.startswith("wow64")
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +227,7 @@ class DebugEngine:
         self._target_pid: Optional[int] = None
         self._target_name: Optional[str] = None
         self._executing = False  # True when target is running
-        self._target_image_path: Optional[str] = None
-        self._target_pe_machine: Optional[int] = None
-        self._target_processor_type: Optional[int] = None
+        self._is_wow64 = False
         self._protected_base: Optional[AllDbg] = None
         self._events = EngineEventHandler()
 
@@ -229,81 +296,6 @@ class DebugEngine:
             return self._run_on_engine(func, *args, **kwargs)
         return cast(C, wrapper)
 
-    def _get_main_module_entry(self) -> Optional[Tuple[Tuple[str, str, str], Any]]:
-        try:
-            modules = self._base.module_list()
-        except Exception:
-            return None
-        return next(iter(modules), None)
-
-    def _read_pe_machine_from_file(self, image_path: str) -> Optional[int]:
-        try:
-            with open(image_path, "rb") as fh:
-                header = fh.read(0x1000)
-            if len(header) < 0x40 or header[:2] != b"MZ":
-                return None
-            pe_offset = struct.unpack_from("<I", header, 0x3C)[0]
-            if pe_offset + 6 <= len(header):
-                pe_header = header[pe_offset:pe_offset + 6]
-            else:
-                with open(image_path, "rb") as fh:
-                    fh.seek(pe_offset)
-                    pe_header = fh.read(6)
-            if len(pe_header) < 6 or pe_header[:4] != b"PE\x00\x00":
-                return None
-            return struct.unpack_from("<H", pe_header, 4)[0]
-        except OSError:
-            return None
-
-    def _detect_target_processor_type(self) -> None:
-        main_module = self._get_main_module_entry()
-        if main_module is None:
-            return
-
-        module_names, _ = main_module
-        image_path = next((
-            candidate
-            for candidate in module_names
-            if candidate and os.path.exists(candidate)
-        ), None)
-        if not image_path or image_path == self._target_image_path:
-            return
-
-        self._target_image_path = image_path
-        self._target_pe_machine = self._read_pe_machine_from_file(image_path)
-        self._target_processor_type = IMAGE_TO_DBGENG_PROCESSOR_TYPES.get(
-            self._target_pe_machine
-        )
-
-    def _apply_target_processor_type(self) -> None:
-        if self._target_processor_type is None:
-            return
-        base = self._base
-        try:
-            effective = base._control.GetEffectiveProcessorType()
-        except Exception:
-            effective = None
-        if effective != self._target_processor_type:
-            base._control.SetEffectiveProcessorType(self._target_processor_type)
-            logger.info(
-                "Switched effective processor to x86 for %s",
-                self._target_image_path or "<unknown>",
-            )
-
-    def _select_event_thread(self) -> None:
-        base = self._base
-        try:
-            event_thread = base._systems.GetEventThread()
-            base._systems.SetCurrentThreadId(event_thread)
-        except Exception:
-            pass
-
-    def _configure_target_context(self, detect_processor: bool = False) -> None:
-        if detect_processor:
-            self._detect_target_processor_type()
-        self._apply_target_processor_type()
-        self._select_event_thread()
-
     # -- Process management ------------------------------------------------
 
     def attach(self, target: str) -> dict:
@@ -322,28 +314,43 @@ class DebugEngine:
             raise RuntimeError(f"Cannot attach in state {self._state.value}")
 
         base = self._base
+        target_name = target
 
         # Resolve PID
         try:
             pid = int(target)
         except ValueError:
-            pids = base.pids_by_name(target)
-            if not pids:
+            matches = base.pids_by_name(target)
+            if not matches:
                 raise RuntimeError(f"No process found matching '{target}'")
-            pid = pids[0]
+            pid = _normalize_pid_match(matches[0])
+            if isinstance(matches[0], tuple) and len(matches[0]) > 1:
+                target_name = os.path.basename(str(matches[0][1])) or str(matches[0][1])
 
         logger.info(f"Attaching to PID {pid}...")
-        base.attach_proc(pid)
-        self._configure_target_context(detect_processor=True)
+        try:
+            base.attach_proc(pid)
+            raw_modules = self._wait_for_target_access_impl()
+            modules = [_module_info_from_pybag_entry(mod) for mod in raw_modules]
+        except Exception as exc:
+            try:
+                base.detach_proc()
+            except Exception as detach_exc:
+                logger.warning(f"Detach after failed attach raised: {detach_exc}")
+            self._target_pid = None
+            self._target_name = None
+            self._state = DebuggerState.DETACHED
+            self._executing = False
+            raise RuntimeError(
+                f"Attached to PID {pid} but the target never became queryable: {exc}"
+            ) from exc
 
         self._target_pid = pid
-        try:
-            self._target_name = base.get_name_by_offset(base.reg.get_pc())
-        except Exception:
-            self._target_name = target
+        self._is_wow64 = self._detect_wow64_target(modules)
+        self._target_name = modules[0].name if modules else target_name
         self._state = DebuggerState.STOPPED
+        self._executing = False
 
-        modules = self._get_modules_impl()
         logger.info(f"Attached to PID {pid}, {len(modules)} modules loaded")
         return {
             "pid": pid,
@@ -351,6 +358,55 @@ class DebugEngine:
             "module_count": len(modules),
             "state": self._state.value,
         }
+
+    def _wait_for_target_access_impl(self, timeout_seconds: float = 5.0) -> List[Any]:
+        deadline = time.monotonic() + timeout_seconds
+        last_error: Optional[Exception] = None
+
+        while time.monotonic() < deadline:
+            try:
+                self._base.reg.get_pc()
+                return list(self._base.module_list())
+            except Exception as exc:
+                last_error = exc
+                time.sleep(0.05)
+
+        if last_error is not None:
+            raise last_error
+        return []
+
+    def _detect_wow64_target(self, modules: List[ModuleInfo]) -> bool:
+        try:
+            actual_processor = self._base._control.GetActualProcessorType()
+        except Exception:
+            return False
+        if actual_processor != _IMAGE_FILE_MACHINE_AMD64:
+            return False
+        return any(_is_wow64_module_name(module.name) for module in modules)
+
+    @contextmanager
+    def _effective_processor_context(self, processor_type: Optional[int]) -> Iterator[None]:
+        if processor_type is None:
+            yield
+            return
+
+        control = self._base._control
+        previous_type: Optional[int] = None
+        changed = False
+        try:
+            previous_type = control.GetEffectiveProcessorType()
+            if previous_type != processor_type:
+                control.SetEffectiveProcessorType(processor_type)
+                changed = True
+            yield
+        finally:
+            if changed and previous_type is not None:
+                control.SetEffectiveProcessorType(previous_type)
+
+    def _wow64_x86_context(self) -> Iterator[None]:
+        if self._is_wow64:
+            return self._effective_processor_context(_IMAGE_FILE_MACHINE_I386)
+        return nullcontext()
 
     def detach(self) -> dict:
         """Detach from the target process."""
@@ -366,9 +422,7 @@ class DebugEngine:
         pid = self._target_pid
         self._target_pid = None
         self._target_name = None
-        self._target_image_path = None
-        self._target_pe_machine = None
-        self._target_processor_type = None
+        self._is_wow64 = False
         self._state = DebuggerState.DETACHED
         self._executing = False
         logger.info(f"Detached from PID {pid}")
@@ -411,18 +465,10 @@ class DebugEngine:
 
     def interrupt(self) -> dict:
         """Break into the debugger (interrupt execution)."""
-        return self._run_on_engine(self._interrupt_impl)
-
-    def _interrupt_impl(self) -> dict:
-        self._require_attached()
-        self._base._control.SetInterrupt(DbgEng.DEBUG_INTERRUPT_ACTIVE)
-        try:
-            self._base.wait(timeout=5000)
-        except exception.DbgEngTimeout as exc:
-            self._state = DebuggerState.RUNNING
-            self._executing = True
-            raise RuntimeError("Timed out waiting for debuggee to break") from exc
-        self._configure_target_context(detect_processor=True)
+        # interrupt() can be called from any thread
+        if self._protected_base is not None:
+            self._protected_base._control.SetInterrupt(
+                DbgEng.DEBUG_INTERRUPT_ACTIVE)
         self._state = DebuggerState.STOPPED
         self._executing = False
         return {"state": "stopped"}
@@ -434,7 +480,7 @@ class DebugEngine:
     def _step_into_impl(self, count: int) -> dict:
         self._require_stopped()
         self._base.stepi(count)
-        return {"state": "stopped", "pc": f"0x{self._base.reg.get_pc():08X}"}
+        return {"state": "stopped", "pc": f"0x{self._read_pc_impl():08X}"}
 
     def step_over(self, count: int = 1) -> dict:
         """Step over (proceed)."""
@@ -443,7 +489,7 @@ class DebugEngine:
     def _step_over_impl(self, count: int) -> dict:
         self._require_stopped()
         self._base.stepo(count)
-        return {"state": "stopped", "pc": f"0x{self._base.reg.get_pc():08X}"}
+        return {"state": "stopped", "pc": f"0x{self._read_pc_impl():08X}"}
 
     # -- State inspection --------------------------------------------------
 
@@ -464,13 +510,8 @@ class DebugEngine:
         self._require_attached()
         modules = []
         try:
-            for names, params in self._base.module_list():
-                display_name = names[1] or names[0] or names[2] or "<unknown>"
-                modules.append(ModuleInfo(
-                    name=display_name,
-                    runtime_base=params.Base,
-                    size=params.Size,
-                ))
+            for mod in self._base.module_list():
+                modules.append(_module_info_from_pybag_entry(mod))
         except Exception as e:
             logger.error(f"Error enumerating modules: {e}")
         return modules
@@ -481,47 +522,27 @@ class DebugEngine:
 
     def _get_registers_impl(self) -> Dict[str, int]:
         self._require_stopped()
-        self._configure_target_context()
+        return self._collect_registers_impl()
+
+    def _collect_registers_impl(self) -> Dict[str, int]:
         regs = {}
         reg_obj = self._base.reg
-        try:
-            effective = self._base._control.GetEffectiveProcessorType()
-        except Exception:
-            effective = None
-
-        if effective == DBGENG_PROCESSOR_X86:
-            reg_names = [
-                ("eax", "EAX"),
-                ("ebx", "EBX"),
-                ("ecx", "ECX"),
-                ("edx", "EDX"),
-                ("esi", "ESI"),
-                ("edi", "EDI"),
-                ("esp", "ESP"),
-                ("ebp", "EBP"),
-                ("eip", "EIP"),
-                ("efl", "EFLAGS"),
-            ]
-        else:
-            reg_names = [
-                ("rax", "RAX"),
-                ("rbx", "RBX"),
-                ("rcx", "RCX"),
-                ("rdx", "RDX"),
-                ("rsi", "RSI"),
-                ("rdi", "RDI"),
-                ("rsp", "RSP"),
-                ("rbp", "RBP"),
-                ("rip", "RIP"),
-                ("efl", "EFLAGS"),
-            ]
-
-        for source_name, label in reg_names:
-            try:
-                regs[label] = reg_obj._get_register(source_name)
-            except Exception:
-                pass
+        bitness = self._get_effective_bitness_impl()
+        with self._wow64_x86_context():
+            for result_name, query_name in _register_query_plan(bitness):
+                try:
+                    regs[result_name] = reg_obj._get_register(query_name)
+                except Exception:
+                    pass
         return regs
+
+    def _get_effective_bitness_impl(self) -> str:
+        if self._is_wow64:
+            return "32"
+        try:
+            return self._base.bitness()
+        except Exception:
+            return "32"
 
     def read_memory(self, address: int, size: int) -> bytes:
         """Read memory from the target."""
@@ -529,7 +550,6 @@ class DebugEngine:
 
     def _read_memory_impl(self, address: int, size: int) -> bytes:
         self._require_stopped()
-        self._configure_target_context()
         return bytes(self._base.read(address, size))
 
     def read_dword(self, address: int) -> int:
@@ -547,25 +567,25 @@ class DebugEngine:
 
     def _get_stack_trace_impl(self, depth: int) -> List[dict]:
         self._require_stopped()
-        self._configure_target_context()
         frames = []
         try:
-            for i, frame in enumerate(self._base.backtrace_list()):
-                if i >= depth:
-                    break
-                entry: dict = {
-                    "level": i,
-                    "instruction_offset": f"0x{frame.InstructionOffset:08X}",
-                    "return_offset": f"0x{frame.ReturnOffset:08X}",
-                    "stack_offset": f"0x{frame.StackOffset:08X}",
-                    "frame_offset": f"0x{frame.FrameOffset:08X}",
-                }
-                try:
-                    name = self._base.get_name_by_offset(frame.InstructionOffset)
-                    entry["symbol"] = name
-                except Exception:
-                    pass
-                frames.append(entry)
+            with self._wow64_x86_context():
+                for i, frame in enumerate(self._base.backtrace_list()):
+                    if i >= depth:
+                        break
+                    entry: dict = {
+                        "level": i,
+                        "instruction_offset": f"0x{frame.InstructionOffset:08X}",
+                        "return_offset": f"0x{frame.ReturnOffset:08X}",
+                        "stack_offset": f"0x{frame.StackOffset:08X}",
+                        "frame_offset": f"0x{frame.FrameOffset:08X}",
+                    }
+                    try:
+                        name = self._base.get_name_by_offset(frame.InstructionOffset)
+                        entry["symbol"] = name
+                    except Exception:
+                        pass
+                    frames.append(entry)
         except Exception as e:
             logger.error(f"Error reading stack trace: {e}")
         return frames
@@ -688,11 +708,19 @@ class DebugEngine:
 
     def get_pc(self) -> int:
         """Get current program counter."""
-        return self._run_on_engine(lambda: self._base.reg.get_pc())
+        return self._run_on_engine(self._read_pc_impl)
 
     def get_sp(self) -> int:
         """Get current stack pointer."""
-        return self._run_on_engine(lambda: self._base.reg.get_sp())
+        return self._run_on_engine(self._read_sp_impl)
+
+    def _read_pc_impl(self) -> int:
+        with self._wow64_x86_context():
+            return self._base.reg.get_pc()
+
+    def _read_sp_impl(self) -> int:
+        with self._wow64_x86_context():
+            return self._base.reg.get_sp()
 
     def resolve_symbol(self, address: int) -> Optional[str]:
         """Try to resolve an address to a symbol name."""
