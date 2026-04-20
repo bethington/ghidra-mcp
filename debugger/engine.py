@@ -20,12 +20,14 @@ from collections import namedtuple
 from concurrent.futures import Future
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, cast
 
-_pybag_cache = os.path.join(os.environ.get("LOCALAPPDATA", ""), "pybag_cache")
-if (
-    "WINDBG_DIR" not in os.environ
-    and os.path.exists(os.path.join(_pybag_cache, "dbgeng.dll"))
-):
-    os.environ["WINDBG_DIR"] = _pybag_cache
+_localappdata = os.environ.get("LOCALAPPDATA")
+if os.name == "nt" and _localappdata:
+    _pybag_cache = os.path.join(_localappdata, "pybag_cache")
+    if (
+        "WINDBG_DIR" not in os.environ
+        and os.path.exists(os.path.join(_pybag_cache, "dbgeng.dll"))
+    ):
+        os.environ["WINDBG_DIR"] = _pybag_cache
 
 from pybag import pydbg, userdbg  # type: ignore
 from pybag.dbgeng import core as DbgEng  # type: ignore
@@ -38,7 +40,11 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 C = TypeVar("C", bound=Callable[..., Any])
 
-PE_MACHINE_I386 = 0x014C
+IMAGE_FILE_MACHINE_I386 = 0x014C
+DBGENG_PROCESSOR_X86 = getattr(DbgEng, "DEBUG_PROCESSOR_X86", 0)
+IMAGE_TO_DBGENG_PROCESSOR_TYPES = {
+    IMAGE_FILE_MACHINE_I386: DBGENG_PROCESSOR_X86,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +158,9 @@ class DebugEngine:
         self._target_pid: Optional[int] = None
         self._target_name: Optional[str] = None
         self._executing = False  # True when target is running
+        self._target_image_path: Optional[str] = None
+        self._target_pe_machine: Optional[int] = None
+        self._target_processor_type: Optional[int] = None
         self._protected_base: Optional[AllDbg] = None
         self._events = EngineEventHandler()
 
@@ -225,9 +234,7 @@ class DebugEngine:
             modules = self._base.module_list()
         except Exception:
             return None
-        if not modules:
-            return None
-        return modules[0]
+        return next(iter(modules), None)
 
     def _read_pe_machine_from_file(self, image_path: str) -> Optional[int]:
         try:
@@ -248,32 +255,54 @@ class DebugEngine:
         except OSError:
             return None
 
-    def _configure_target_context(self) -> None:
-        base = self._base
-
+    def _detect_target_processor_type(self) -> None:
         main_module = self._get_main_module_entry()
-        if main_module is not None:
-            module_names, _ = main_module
-            image_path = next(
-                (candidate for candidate in module_names if candidate and os.path.exists(candidate)),
-                None,
-            )
-            if image_path:
-                machine = self._read_pe_machine_from_file(image_path)
-                if machine == PE_MACHINE_I386:
-                    try:
-                        effective = base._control.GetEffectiveProcessorType()
-                    except Exception:
-                        effective = None
-                    if effective != PE_MACHINE_I386:
-                        base._control.SetEffectiveProcessorType(PE_MACHINE_I386)
-                        logger.info("Switched effective processor to x86 for %s", image_path)
+        if main_module is None:
+            return
 
+        module_names, _ = main_module
+        image_path = next((
+            candidate
+            for candidate in module_names
+            if candidate and os.path.exists(candidate)
+        ), None)
+        if not image_path or image_path == self._target_image_path:
+            return
+
+        self._target_image_path = image_path
+        self._target_pe_machine = self._read_pe_machine_from_file(image_path)
+        self._target_processor_type = IMAGE_TO_DBGENG_PROCESSOR_TYPES.get(
+            self._target_pe_machine
+        )
+
+    def _apply_target_processor_type(self) -> None:
+        if self._target_processor_type is None:
+            return
+        base = self._base
+        try:
+            effective = base._control.GetEffectiveProcessorType()
+        except Exception:
+            effective = None
+        if effective != self._target_processor_type:
+            base._control.SetEffectiveProcessorType(self._target_processor_type)
+            logger.info(
+                "Switched effective processor to x86 for %s",
+                self._target_image_path or "<unknown>",
+            )
+
+    def _select_event_thread(self) -> None:
+        base = self._base
         try:
             event_thread = base._systems.GetEventThread()
             base._systems.SetCurrentThreadId(event_thread)
         except Exception:
             pass
+
+    def _configure_target_context(self, detect_processor: bool = False) -> None:
+        if detect_processor:
+            self._detect_target_processor_type()
+        self._apply_target_processor_type()
+        self._select_event_thread()
 
     # -- Process management ------------------------------------------------
 
@@ -305,7 +334,7 @@ class DebugEngine:
 
         logger.info(f"Attaching to PID {pid}...")
         base.attach_proc(pid)
-        self._configure_target_context()
+        self._configure_target_context(detect_processor=True)
 
         self._target_pid = pid
         try:
@@ -337,6 +366,9 @@ class DebugEngine:
         pid = self._target_pid
         self._target_pid = None
         self._target_name = None
+        self._target_image_path = None
+        self._target_pe_machine = None
+        self._target_processor_type = None
         self._state = DebuggerState.DETACHED
         self._executing = False
         logger.info(f"Detached from PID {pid}")
@@ -390,7 +422,7 @@ class DebugEngine:
             self._state = DebuggerState.RUNNING
             self._executing = True
             raise RuntimeError("Timed out waiting for debuggee to break") from exc
-        self._configure_target_context()
+        self._configure_target_context(detect_processor=True)
         self._state = DebuggerState.STOPPED
         self._executing = False
         return {"state": "stopped"}
@@ -457,7 +489,7 @@ class DebugEngine:
         except Exception:
             effective = None
 
-        if effective == PE_MACHINE_I386:
+        if effective == DBGENG_PROCESSOR_X86:
             reg_names = [
                 ("eax", "EAX"),
                 ("ebx", "EBX"),
