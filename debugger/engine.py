@@ -20,6 +20,13 @@ from collections import namedtuple
 from concurrent.futures import Future
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, cast
 
+_pybag_cache = os.path.join(os.environ.get("LOCALAPPDATA", ""), "pybag_cache")
+if (
+    "WINDBG_DIR" not in os.environ
+    and os.path.exists(os.path.join(_pybag_cache, "dbgeng.dll"))
+):
+    os.environ["WINDBG_DIR"] = _pybag_cache
+
 from pybag import pydbg, userdbg  # type: ignore
 from pybag.dbgeng import core as DbgEng  # type: ignore
 from pybag.dbgeng import exception  # type: ignore
@@ -30,6 +37,8 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 C = TypeVar("C", bound=Callable[..., Any])
+
+PE_MACHINE_I386 = 0x014C
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +220,61 @@ class DebugEngine:
             return self._run_on_engine(func, *args, **kwargs)
         return cast(C, wrapper)
 
+    def _get_main_module_entry(self) -> Optional[Tuple[Tuple[str, str, str], Any]]:
+        try:
+            modules = self._base.module_list()
+        except Exception:
+            return None
+        if not modules:
+            return None
+        return modules[0]
+
+    def _read_pe_machine_from_file(self, image_path: str) -> Optional[int]:
+        try:
+            with open(image_path, "rb") as fh:
+                header = fh.read(0x1000)
+            if len(header) < 0x40 or header[:2] != b"MZ":
+                return None
+            pe_offset = struct.unpack_from("<I", header, 0x3C)[0]
+            if pe_offset + 6 <= len(header):
+                pe_header = header[pe_offset:pe_offset + 6]
+            else:
+                with open(image_path, "rb") as fh:
+                    fh.seek(pe_offset)
+                    pe_header = fh.read(6)
+            if len(pe_header) < 6 or pe_header[:4] != b"PE\x00\x00":
+                return None
+            return struct.unpack_from("<H", pe_header, 4)[0]
+        except OSError:
+            return None
+
+    def _configure_target_context(self) -> None:
+        base = self._base
+
+        main_module = self._get_main_module_entry()
+        if main_module is not None:
+            module_names, _ = main_module
+            image_path = next(
+                (candidate for candidate in module_names if candidate and os.path.exists(candidate)),
+                None,
+            )
+            if image_path:
+                machine = self._read_pe_machine_from_file(image_path)
+                if machine == PE_MACHINE_I386:
+                    try:
+                        effective = base._control.GetEffectiveProcessorType()
+                    except Exception:
+                        effective = None
+                    if effective != PE_MACHINE_I386:
+                        base._control.SetEffectiveProcessorType(PE_MACHINE_I386)
+                        logger.info("Switched effective processor to x86 for %s", image_path)
+
+        try:
+            event_thread = base._systems.GetEventThread()
+            base._systems.SetCurrentThreadId(event_thread)
+        except Exception:
+            pass
+
     # -- Process management ------------------------------------------------
 
     def attach(self, target: str) -> dict:
@@ -241,12 +305,7 @@ class DebugEngine:
 
         logger.info(f"Attaching to PID {pid}...")
         base.attach_proc(pid)
-
-        # Wait for initial break
-        try:
-            base.wait(timeout=10000)
-        except exception.DbgEngTimeout:
-            logger.warning("Timeout waiting for initial break, continuing anyway")
+        self._configure_target_context()
 
         self._target_pid = pid
         try:
@@ -320,10 +379,18 @@ class DebugEngine:
 
     def interrupt(self) -> dict:
         """Break into the debugger (interrupt execution)."""
-        # interrupt() can be called from any thread
-        if self._protected_base is not None:
-            self._protected_base._control.SetInterrupt(
-                DbgEng.DEBUG_INTERRUPT_ACTIVE)
+        return self._run_on_engine(self._interrupt_impl)
+
+    def _interrupt_impl(self) -> dict:
+        self._require_attached()
+        self._base._control.SetInterrupt(DbgEng.DEBUG_INTERRUPT_ACTIVE)
+        try:
+            self._base.wait(timeout=5000)
+        except exception.DbgEngTimeout as exc:
+            self._state = DebuggerState.RUNNING
+            self._executing = True
+            raise RuntimeError("Timed out waiting for debuggee to break") from exc
+        self._configure_target_context()
         self._state = DebuggerState.STOPPED
         self._executing = False
         return {"state": "stopped"}
@@ -365,11 +432,12 @@ class DebugEngine:
         self._require_attached()
         modules = []
         try:
-            for mod in self._base.module_list():
+            for names, params in self._base.module_list():
+                display_name = names[1] or names[0] or names[2] or "<unknown>"
                 modules.append(ModuleInfo(
-                    name=mod.name,
-                    runtime_base=mod.base,
-                    size=mod.size,
+                    name=display_name,
+                    runtime_base=params.Base,
+                    size=params.Size,
                 ))
         except Exception as e:
             logger.error(f"Error enumerating modules: {e}")
@@ -381,21 +449,46 @@ class DebugEngine:
 
     def _get_registers_impl(self) -> Dict[str, int]:
         self._require_stopped()
+        self._configure_target_context()
         regs = {}
         reg_obj = self._base.reg
-        # x86 general-purpose registers
-        for name in ["EAX", "EBX", "ECX", "EDX", "ESI", "EDI",
-                      "ESP", "EBP", "EIP"]:
+        try:
+            effective = self._base._control.GetEffectiveProcessorType()
+        except Exception:
+            effective = None
+
+        if effective == PE_MACHINE_I386:
+            reg_names = [
+                ("eax", "EAX"),
+                ("ebx", "EBX"),
+                ("ecx", "ECX"),
+                ("edx", "EDX"),
+                ("esi", "ESI"),
+                ("edi", "EDI"),
+                ("esp", "ESP"),
+                ("ebp", "EBP"),
+                ("eip", "EIP"),
+                ("efl", "EFLAGS"),
+            ]
+        else:
+            reg_names = [
+                ("rax", "RAX"),
+                ("rbx", "RBX"),
+                ("rcx", "RCX"),
+                ("rdx", "RDX"),
+                ("rsi", "RSI"),
+                ("rdi", "RDI"),
+                ("rsp", "RSP"),
+                ("rbp", "RBP"),
+                ("rip", "RIP"),
+                ("efl", "EFLAGS"),
+            ]
+
+        for source_name, label in reg_names:
             try:
-                val = reg_obj._get_register(name)
-                regs[name] = val
+                regs[label] = reg_obj._get_register(source_name)
             except Exception:
                 pass
-        # Flags
-        try:
-            regs["EFLAGS"] = reg_obj._get_register("efl")
-        except Exception:
-            pass
         return regs
 
     def read_memory(self, address: int, size: int) -> bytes:
@@ -404,6 +497,7 @@ class DebugEngine:
 
     def _read_memory_impl(self, address: int, size: int) -> bytes:
         self._require_stopped()
+        self._configure_target_context()
         return bytes(self._base.read(address, size))
 
     def read_dword(self, address: int) -> int:
@@ -421,6 +515,7 @@ class DebugEngine:
 
     def _get_stack_trace_impl(self, depth: int) -> List[dict]:
         self._require_stopped()
+        self._configure_target_context()
         frames = []
         try:
             for i, frame in enumerate(self._base.backtrace_list()):
