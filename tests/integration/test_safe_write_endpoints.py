@@ -214,7 +214,7 @@ class TestSafeCommentOperations:
         # Decompiler comments are typically per-line, use function entry
         response = http_client.post(
             "/set_decompiler_comment",
-            data={"address": address, "comment": ""},  # Empty comment is safe
+            json_data={"address": address, "comment": ""},
         )
 
         # May not have existing comment, empty should be safe

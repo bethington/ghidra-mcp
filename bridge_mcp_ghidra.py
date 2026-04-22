@@ -624,6 +624,8 @@ def _parse_schema(raw: dict) -> list[dict]:
                 pdef["description"] = p["description"]
             if "default" in p and p["default"] is not None:
                 pdef["default"] = p["default"]
+            if p.get("param_type"):
+                pdef["param_type"] = p["param_type"]
             properties[p["name"]] = pdef
             if p.get("required", False):
                 required.append(p["name"])
@@ -706,7 +708,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         # Sanitize address parameters before dispatch
         for pname, pdef in properties.items():
             if (
-                pdef.get("paramType") == "address"
+                pdef.get("param_type") == "address"
                 and pname in kwargs
                 and kwargs[pname] is not None
             ):
