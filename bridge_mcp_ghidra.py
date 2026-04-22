@@ -1049,8 +1049,14 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     """
     Switch the MCP bridge to a different Ghidra instance by project name.
 
-    After connecting, fetches the tool schema from the instance and dynamically
-    registers all available tools. Use list_instances() first to see available instances.
+    IMPORTANT: Before calling this function only ~30 static tools are exposed
+    (list_instances, connect_instance, tool-group management, debugger proxy).
+    The full ~220 Ghidra analysis tools are registered dynamically from the
+    instance's /mcp/schema endpoint after a successful connect. Clients that
+    cache the initial tools/list and don't honor the tools/list_changed
+    notification must re-list tools after this call to see the full set.
+
+    Use list_instances() first to see available instances.
 
     Args:
         project: Project name (or substring) to connect to
@@ -1835,6 +1841,11 @@ def main():
     if args.mcp_port:
         mcp.settings.port = args.mcp_port
     logger.info(f"Starting MCP bridge ({args.transport})")
+    if args.transport in ("sse", "streamable-http"):
+        host = args.mcp_host
+        port = args.mcp_port if args.mcp_port else mcp.settings.port
+        path = "/sse" if args.transport == "sse" else "/mcp"
+        logger.info(f"MCP endpoint: http://{host}:{port}{path}")
     mcp.run(transport=args.transport)
 
 
