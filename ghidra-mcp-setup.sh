@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# GhidraMCP Deployment Script for Linux (Ubuntu/Debian)
+# GhidraMCP Deployment Script for Linux and macOS
 # Automatically builds, installs, and configures the GhidraMCP plugin
-# Target: Ghidra 12.0.3
+# Target: Ghidra 12.0.3+ (12.0.4 via Homebrew on macOS)
 #
 # Usage:
 #   ./ghidra-mcp-setup.sh --deploy --ghidra-path /opt/ghidra_12.0.3_PUBLIC
@@ -10,6 +10,9 @@
 #   ./ghidra-mcp-setup.sh --clean
 #   ./ghidra-mcp-setup.sh --preflight --ghidra-path /opt/ghidra_12.0.3_PUBLIC
 #   ./ghidra-mcp-setup.sh --help
+#
+# macOS (Homebrew):
+#   ./ghidra-mcp-setup.sh --deploy --ghidra-path /opt/homebrew/opt/ghidra/libexec --ghidra-version 12.0.4
 
 set -euo pipefail
 
@@ -28,6 +31,27 @@ log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 log_info()    { echo -e "${CYAN}[INFO]${NC} $1"; }
 log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# ============================================================================
+# Platform detection
+# ============================================================================
+IS_MACOS=false
+[[ "$OSTYPE" == "darwin"* ]] && IS_MACOS=true
+
+# Returns the Ghidra user config base directory (platform-specific)
+get_ghidra_config_base() {
+    if $IS_MACOS; then
+        echo "$HOME/Library/ghidra"
+    else
+        echo "$HOME/.config/ghidra"
+    fi
+}
+
+# Returns true if a valid Ghidra executable exists at the given path
+ghidra_executable_exists() {
+    local path="$1"
+    [[ -f "${path}/ghidraRun" ]] || [[ -f "${path}/ghidra" ]]
+}
 
 # ============================================================================
 # Configuration
@@ -132,9 +156,9 @@ get_pom_ghidra_version() {
         echo ""
         return
     fi
-    # Parse XML with grep/sed (no dependency on xmllint)
+    # Parse XML with sed (portable — avoids grep -P which is GNU-only)
     local version
-    version=$(grep -oP '<ghidra\.version>\K[^<]+' "$pom_path" 2>/dev/null || echo "")
+    version=$(sed -n 's|.*<ghidra\.version>\([^<]*\).*|\1|p' "$pom_path" 2>/dev/null | head -1 || echo "")
     echo "$version"
 }
 
@@ -144,6 +168,17 @@ get_version_from_ghidra_properties() {
     if [[ -z "$ghidra_path" ]]; then echo ""; return; fi
 
     local props_path="${ghidra_path}/Ghidra/application.properties"
+    # macOS .app bundle fallbacks (path may point at the bundle itself,
+    # or at its parent; bundle name may be Ghidra.app or ghidra.app)
+    if [[ ! -f "$props_path" ]]; then
+        props_path="${ghidra_path}/Contents/Resources/Ghidra/application.properties"
+    fi
+    if [[ ! -f "$props_path" ]]; then
+        props_path="${ghidra_path}/Ghidra.app/Contents/Resources/Ghidra/application.properties"
+    fi
+    if [[ ! -f "$props_path" ]]; then
+        props_path="${ghidra_path}/ghidra.app/Contents/Resources/Ghidra/application.properties"
+    fi
     if [[ ! -f "$props_path" ]]; then
         echo ""
         return
@@ -382,7 +417,8 @@ invoke_clean_action() {
     fi
 
     # Remove GhidraMCP from user config extensions
-    local ghidra_config_base="$HOME/.config/ghidra"
+    local ghidra_config_base
+    ghidra_config_base="$(get_ghidra_config_base)"
     if [[ -d "$ghidra_config_base" ]]; then
         for version_dir in "$ghidra_config_base"/ghidra_*; do
             if [[ -d "$version_dir" ]]; then
@@ -550,7 +586,7 @@ invoke_preflight_checks() {
     fi
 
     # Ghidra layout and required jars
-    if [[ ! -f "${resolved_ghidra_path}/ghidraRun" ]]; then
+    if ! ghidra_executable_exists "${resolved_ghidra_path}"; then
         issues+=("Ghidra executable not found at: ${resolved_ghidra_path}")
     else
         log_success "Ghidra path looks valid."
@@ -581,7 +617,8 @@ invoke_preflight_checks() {
 
     # Write access checks
     local ghidra_public_version="ghidra_${resolved_ghidra_version}_PUBLIC"
-    local user_ext_dir="$HOME/.config/ghidra/${ghidra_public_version}/Extensions"
+    local user_ext_dir
+    user_ext_dir="$(get_ghidra_config_base)/${ghidra_public_version}/Extensions"
     if ! test_write_access "$user_ext_dir"; then
         issues+=("No write access to user extension directory: $user_ext_dir")
     else
@@ -655,8 +692,10 @@ if [[ -z "$GHIDRA_PATH" ]]; then
     GHIDRA_PATH="${GHIDRA_PATH:-}"
 fi
 if [[ -z "$GHIDRA_PATH" ]]; then
-    # Auto-detect from common Linux installation paths
+    # Auto-detect from common installation paths (Linux + macOS Homebrew)
     common_paths=(
+        "/opt/homebrew/opt/ghidra/libexec"              # macOS Homebrew Apple Silicon
+        "/usr/local/opt/ghidra/libexec"                 # macOS Homebrew Intel
         "/opt/ghidra_${GHIDRA_VERSION}_PUBLIC"
         "$HOME/ghidra_${GHIDRA_VERSION}_PUBLIC"
         "/usr/local/ghidra_${GHIDRA_VERSION}_PUBLIC"
@@ -665,7 +704,7 @@ if [[ -z "$GHIDRA_PATH" ]]; then
         "$HOME/Downloads/ghidra_${GHIDRA_VERSION}_PUBLIC"
     )
     for path in "${common_paths[@]}"; do
-        if [[ -f "${path}/ghidraRun" ]]; then
+        if ghidra_executable_exists "$path"; then
             GHIDRA_PATH="$path"
             log_info "Auto-detected Ghidra at: $GHIDRA_PATH"
             break
@@ -754,7 +793,7 @@ fi
 # Action: Setup Dependencies
 # ============================================================================
 if [[ "$ACTION" == "setup-deps" ]]; then
-    if [[ ! -f "${GHIDRA_PATH}/ghidraRun" ]]; then
+    if ! ghidra_executable_exists "${GHIDRA_PATH}"; then
         log_error "Ghidra not found at: $GHIDRA_PATH"
         log_info "Please specify the correct path: ./ghidra-mcp-setup.sh --setup-deps --ghidra-path '/path/to/ghidra'"
         exit 1
@@ -774,7 +813,7 @@ fi
 # ============================================================================
 
 # Validate Ghidra path
-if [[ ! -f "${GHIDRA_PATH}/ghidraRun" ]]; then
+if ! ghidra_executable_exists "${GHIDRA_PATH}"; then
     log_error "Ghidra not found at: $GHIDRA_PATH"
     log_info "Please specify the correct path: ./ghidra-mcp-setup.sh --ghidra-path '/path/to/ghidra'"
     exit 1
@@ -820,7 +859,7 @@ if [[ -n "$(get_ghidra_pids)" ]]; then
 fi
 
 # Clean up ALL cached GhidraMCP extensions
-ghidra_config_base="$HOME/.config/ghidra"
+ghidra_config_base="$(get_ghidra_config_base)"
 if [[ -d "$ghidra_config_base" ]]; then
     cleaned_count=0
     for version_dir in "$ghidra_config_base"/ghidra_*; do
@@ -861,7 +900,7 @@ fi
 # Detect version from pom.xml
 pom_path="${SCRIPT_DIR}/pom.xml"
 if [[ -f "$pom_path" ]]; then
-    version=$(grep -oP '<version>\K[^<]+' "$pom_path" | head -1 || echo "$PLUGIN_VERSION")
+    version=$(sed -n 's|.*<version>\([^<]*\).*|\1|p' "$pom_path" | head -1 || echo "$PLUGIN_VERSION")
     log_success "Detected version: $version"
 else
     log_warning "pom.xml not found, using default version: $PLUGIN_VERSION"
@@ -894,14 +933,15 @@ fi
 log_success "Using artifact: $(basename "$artifact_path") ($version)"
 
 # ============================================================================
-# Deploy to user Extensions directory (Linux-specific)
-# On Linux, Ghidra looks for extensions in:
-#   $HOME/.config/ghidra/ghidra_<VERSION>_PUBLIC/Extensions/
+# Deploy to user Extensions directory
+# Ghidra looks for extensions in:
+#   Linux: $HOME/.config/ghidra/ghidra_<VERSION>_PUBLIC/Extensions/
+#   macOS: $HOME/Library/ghidra/ghidra_<VERSION>_PUBLIC/Extensions/
 # We extract the ZIP contents there, creating:
-#   $HOME/.config/ghidra/ghidra_<VERSION>_PUBLIC/Extensions/GhidraMCP/
+#   .../Extensions/GhidraMCP/
 # ============================================================================
 ghidra_public_version="ghidra_${GHIDRA_VERSION}_PUBLIC"
-user_extensions_dir="$HOME/.config/ghidra/${ghidra_public_version}/Extensions"
+user_extensions_dir="$(get_ghidra_config_base)/${ghidra_public_version}/Extensions"
 
 log_info "Installing extension to: ${user_extensions_dir}/"
 
@@ -936,7 +976,7 @@ fi
 # ============================================================================
 # Update preferences file with LastExtensionImportDirectory
 # ============================================================================
-preferences_dir="$HOME/.config/ghidra/${ghidra_public_version}"
+preferences_dir="$(get_ghidra_config_base)/${ghidra_public_version}"
 preferences_file="${preferences_dir}/preferences"
 ext_import_dir="${user_extensions_dir}/GhidraMCP"
 pref_key="LastExtensionImportDirectory"
@@ -949,7 +989,11 @@ if ! $DRY_RUN; then
         # Check if the key already exists in the file
         if grep -q "^${pref_key}=" "$preferences_file" 2>/dev/null; then
             # Update existing line
-            sed -i "s|^${pref_key}=.*|${pref_line}|" "$preferences_file"
+            if $IS_MACOS; then
+                sed -i '' "s|^${pref_key}=.*|${pref_line}|" "$preferences_file"
+            else
+                sed -i "s|^${pref_key}=.*|${pref_line}|" "$preferences_file"
+            fi
             log_success "Updated ${pref_key} in preferences"
         else
             # Append the line
@@ -1086,8 +1130,14 @@ if [[ -d "${user_extensions_dir}/GhidraMCP" ]]; then
 
         # Start Ghidra
         log_info "Starting Ghidra..."
+        ghidra_exe=""
+        if [[ -f "${GHIDRA_PATH}/ghidraRun" ]]; then
+            ghidra_exe="${GHIDRA_PATH}/ghidraRun"
+        else
+            ghidra_exe="${GHIDRA_PATH}/ghidra"
+        fi
         if ! $DRY_RUN; then
-            nohup "${GHIDRA_PATH}/ghidraRun" &>/dev/null &
+            nohup "$ghidra_exe" &>/dev/null &
             ghidra_pid=$!
             sleep 3
 
@@ -1098,7 +1148,7 @@ if [[ -d "${user_extensions_dir}/GhidraMCP" ]]; then
                 log_info "Ghidra launch initiated - it may take a moment to fully start."
             fi
         else
-            log_info "[DRY RUN] Would start: ${GHIDRA_PATH}/ghidraRun"
+            log_info "[DRY RUN] Would start: ${ghidra_exe}"
         fi
     else
         if $ghidra_was_running; then
