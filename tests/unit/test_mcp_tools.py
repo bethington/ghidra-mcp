@@ -7,6 +7,7 @@ tool registration, transport mode management, and static tool contracts.
 
 import json
 import os
+import re
 import unittest
 from pathlib import Path
 
@@ -199,6 +200,21 @@ class TestSchemaFormat(unittest.TestCase):
         }
         fn = _build_tool_function("/decompile_function", "GET", schema)
         self.assertTrue(callable(fn))
+
+    def test_parsed_schema_tool_names_match_capi_regex(self):
+        """Every parsed MCP-visible tool name should be safe for Copilot/CAPI."""
+        from bridge_mcp_ghidra import _parse_schema
+
+        raw = {
+            "tools": [
+                {"path": "/regular_tool", "method": "GET", "params": []},
+                {"path": "/debugger/status", "method": "GET", "params": []},
+                {"path": "/server/status", "method": "GET", "params": []},
+            ]
+        }
+        pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
+        for tool in _parse_schema(raw):
+            self.assertRegex(tool["name"], pattern)
 
 
 if __name__ == "__main__":

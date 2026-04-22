@@ -134,12 +134,7 @@ class TraceSession:
                 if base is None:
                     return DbgEng.DEBUG_STATUS_GO_HANDLED
 
-                # Read registers directly (we're on the engine thread)
-                regs = {
-                    "ESP": base.reg.get_sp(),
-                    "ECX": base.reg._get_register("ECX"),
-                    "EDX": base.reg._get_register("EDX"),
-                }
+                regs = self._engine._collect_registers_impl()
 
                 args = read_args(regs, lambda a: struct.unpack("<I", base.read(a, 4))[0],
                                  convention, arg_count)
@@ -322,7 +317,7 @@ class TraceSession:
                 if base is None:
                     return DbgEng.DEBUG_STATUS_GO_HANDLED
 
-                pc = base.reg.get_pc()
+                pc = self._engine._read_pc_impl()
 
                 # Read the watched value
                 value = None

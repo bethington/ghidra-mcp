@@ -146,11 +146,17 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_status(self):
         ds = self._ds()
         engine = ds.engine
+        module_count = 0
+        if engine.get_state() != DebuggerState.DETACHED:
+            try:
+                module_count = len(engine.get_modules())
+            except Exception:
+                module_count = len(ds.mapper.get_all_modules())
         status = StatusResponse(
             state=engine.get_state(),
             target_pid=engine.get_target_pid(),
             target_name=engine.get_target_name(),
-            module_count=len(ds.mapper.get_all_modules()),
+            module_count=module_count,
             breakpoint_count=len(engine.list_breakpoints()) if engine.get_state() != DebuggerState.DETACHED else 0,
             active_traces=ds.tracer.active_count() if ds.tracer else 0,
             active_watches=ds.tracer.watch_count() if ds.tracer else 0,

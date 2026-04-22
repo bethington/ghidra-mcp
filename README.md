@@ -57,6 +57,12 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
+> **Compatibility note:** MCP tool names are normalized for GitHub Copilot CLI
+> and CAPI validation. Exposed tool names use lowercase letters, digits,
+> underscores, and hyphens only; nested HTTP paths such as `/debugger/status`
+> are advertised as names like `debugger_status_2` when needed to avoid
+> collisions with static bridge tools.
+
 ### Binary Analysis Capabilities
 - **Function Analysis** — Decompilation, call graphs, cross-references, completeness scoring
 - **Data Flow Analysis** — PCode-graph value propagation (forward / backward) from any variable or register

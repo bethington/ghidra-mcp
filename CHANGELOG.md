@@ -60,6 +60,21 @@ New [`com.xebyte.core.SecurityConfig`](src/main/java/com/xebyte/core/SecurityCon
   they now gate every push/PR on `main` and `develop`. Integration
   tests (which require live Ghidra on port 8089) remain excluded.
 
+### Fixed
+
+- **Python debugger startup + target query flow on Windows** — the
+  debugger backend now validates `WINDBG_DIR` before importing `pybag`,
+  falls back to a Microsoft Store WinDbg cache when the Windows Kits
+  debugger directory is incomplete, stops double-waiting after
+  `AttachProcess`, parses `pybag` module tuples correctly, and reads
+  x64 register sets (`RAX`-`R15`/`RIP`) instead of returning empty
+  register output on 64-bit targets.
+- **WOW64 register context** — when attached to 32-bit processes under
+  WOW64, debugger register reads now switch dbgeng's effective
+  processor to x86 so the API returns `EAX`/`ECX`/`ESP`/`EIP` instead of
+  the host-side 64-bit `R*` context. The same x86 view is used for
+  stack-context reads that depend on those registers.
+
 ### Docs
 
 - **`CHANGELOG.md`** — v5.4.0 entry backfilled (was missing at tag
