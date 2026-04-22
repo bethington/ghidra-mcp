@@ -2997,4 +2997,481 @@ public class FunctionService {
     public Response validateBatchOperationResults(String functionAddress, Map<String, String> expectedRenames, Map<String, String> expectedTypes) {
         return validateBatchOperationResults(functionAddress, expectedRenames, expectedTypes, null);
     }
+
+    // ========================================================================
+    // Function tag methods
+    //
+    // Thin wrappers over Ghidra's FunctionTagManager / Function.addTag / removeTag.
+    // Tags are program-wide definitions (name + optional comment) that can be
+    // attached to any Function. Adding a tag by name to a Function auto-creates
+    // the tag definition if it does not already exist.
+    // ========================================================================
+
+    private static Map<String, Object> serializeTag(FunctionTag tag, Integer useCount) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", tag.getId());
+        m.put("name", tag.getName());
+        String comment = tag.getComment();
+        m.put("comment", comment != null ? comment : "");
+        if (useCount != null) m.put("use_count", useCount);
+        return m;
+    }
+
+    private static List<String> splitTagList(String raw) {
+        List<String> out = new ArrayList<>();
+        if (raw == null) return out;
+        for (String part : raw.split(",")) {
+            String t = part.trim();
+            if (!t.isEmpty()) out.add(t);
+        }
+        return out;
+    }
+
+    @McpTool(path = "/get_function_tags", description = "List all tags assigned to a specific function. Accepts either a function address or a function name.", category = "function")
+    public Response getFunctionTags(
+            @Param(value = "function", paramType = "address",
+                   description = "Function address (0x<hex> or <space>:<hex>) or function name") String functionRef,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (functionRef == null || functionRef.isEmpty()) {
+            return Response.err("function (address or name) is required");
+        }
+        Function func = ServiceUtils.resolveFunction(program, functionRef);
+        if (func == null) return Response.err("No function found for " + functionRef);
+
+        List<Map<String, Object>> tags = new ArrayList<>();
+        for (FunctionTag tag : func.getTags()) {
+            tags.add(serializeTag(tag, null));
+        }
+        tags.sort(Comparator.comparing(m -> ((String) m.get("name"))));
+        return Response.ok(JsonHelper.mapOf(
+                "function", func.getName(),
+                "address", func.getEntryPoint().toString(),
+                "tag_count", tags.size(),
+                "tags", tags));
+    }
+
+    @McpTool(path = "/add_function_tag", method = "POST",
+             description = "Attach one or more tags to a function. Tags are comma-separated and will be auto-created if they do not already exist.",
+             category = "function")
+    public Response addFunctionTag(
+            @Param(value = "function", source = ParamSource.BODY, paramType = "address",
+                   description = "Function address or function name") String functionRef,
+            @Param(value = "tags", source = ParamSource.BODY,
+                   description = "Comma-separated tag names to attach (e.g. \"syscall,lpe-surface\")") String tagsCsv,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (functionRef == null || functionRef.isEmpty()) return Response.err("function is required");
+        List<String> tagNames = splitTagList(tagsCsv);
+        if (tagNames.isEmpty()) return Response.err("tags is required (comma-separated list)");
+
+        Function func = ServiceUtils.resolveFunction(program, functionRef);
+        if (func == null) return Response.err("No function found for " + functionRef);
+
+        List<String> added = new ArrayList<>();
+        List<String> alreadyPresent = new ArrayList<>();
+        try {
+            threadingStrategy.executeWrite(program, "Add function tags via HTTP", () -> {
+                for (String name : tagNames) {
+                    if (func.addTag(name)) {
+                        added.add(name);
+                    } else {
+                        alreadyPresent.add(name);
+                    }
+                }
+                return null;
+            });
+            program.flushEvents();
+        } catch (Exception e) {
+            Msg.error(this, "Failed to add function tag(s)", e);
+            return Response.err("Failed to add tag(s): " + e.getMessage());
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "function", func.getName(),
+                "address", func.getEntryPoint().toString(),
+                "added", added,
+                "already_present", alreadyPresent));
+    }
+
+    @McpTool(path = "/remove_function_tag", method = "POST",
+             description = "Detach one or more tags from a function. Does not delete the program-wide tag definition — use delete_function_tag for that.",
+             category = "function")
+    public Response removeFunctionTag(
+            @Param(value = "function", source = ParamSource.BODY, paramType = "address",
+                   description = "Function address or function name") String functionRef,
+            @Param(value = "tags", source = ParamSource.BODY,
+                   description = "Comma-separated tag names to detach") String tagsCsv,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (functionRef == null || functionRef.isEmpty()) return Response.err("function is required");
+        List<String> tagNames = splitTagList(tagsCsv);
+        if (tagNames.isEmpty()) return Response.err("tags is required (comma-separated list)");
+
+        Function func = ServiceUtils.resolveFunction(program, functionRef);
+        if (func == null) return Response.err("No function found for " + functionRef);
+
+        Set<String> currentBefore = new HashSet<>();
+        for (FunctionTag t : func.getTags()) currentBefore.add(t.getName());
+
+        List<String> removed = new ArrayList<>();
+        List<String> notPresent = new ArrayList<>();
+        try {
+            threadingStrategy.executeWrite(program, "Remove function tags via HTTP", () -> {
+                for (String name : tagNames) {
+                    if (currentBefore.contains(name)) {
+                        func.removeTag(name);
+                        removed.add(name);
+                    } else {
+                        notPresent.add(name);
+                    }
+                }
+                return null;
+            });
+            program.flushEvents();
+        } catch (Exception e) {
+            Msg.error(this, "Failed to remove function tag(s)", e);
+            return Response.err("Failed to remove tag(s): " + e.getMessage());
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "function", func.getName(),
+                "address", func.getEntryPoint().toString(),
+                "removed", removed,
+                "not_present", notPresent));
+    }
+
+    @McpTool(path = "/list_function_tags",
+             description = "List all program-wide function tag definitions with their use counts.",
+             category = "function")
+    public Response listFunctionTags(
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "500",
+                   description = "Maximum number of tags to return (default 500, which covers most programs in full)") int limit,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
+        List<? extends FunctionTag> all = mgr.getAllFunctionTags();
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (FunctionTag tag : all) {
+            rows.add(serializeTag(tag, mgr.getUseCount(tag)));
+        }
+        rows.sort(Comparator.comparing(m -> ((String) m.get("name"))));
+
+        int total = rows.size();
+        int from = Math.max(0, offset);
+        int to = Math.min(total, from + Math.max(0, limit));
+        List<Map<String, Object>> page = from < to ? rows.subList(from, to) : List.of();
+        return Response.ok(JsonHelper.mapOf(
+                "total", total,
+                "offset", from,
+                "limit", limit,
+                "tags", page));
+    }
+
+    @McpTool(path = "/create_function_tag", method = "POST",
+             description = "Create a program-wide function tag definition with an optional comment. Use add_function_tag to attach it to functions.",
+             category = "function")
+    public Response createFunctionTag(
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Tag name (case-sensitive; Ghidra treats whitespace-trimmed names as unique)") String name,
+            @Param(value = "comment", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional description for the tag") String comment,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (name == null || name.trim().isEmpty()) return Response.err("name is required");
+        final String tagName = name.trim();
+        final String tagComment = comment != null ? comment : "";
+
+        FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
+        if (mgr.getFunctionTag(tagName) != null) {
+            return Response.err("Tag already exists: " + tagName);
+        }
+
+        AtomicReference<FunctionTag> created = new AtomicReference<>();
+        try {
+            threadingStrategy.executeWrite(program, "Create function tag via HTTP", () -> {
+                created.set(mgr.createFunctionTag(tagName, tagComment));
+                return null;
+            });
+            program.flushEvents();
+        } catch (Exception e) {
+            Msg.error(this, "Failed to create function tag", e);
+            return Response.err("Failed to create tag: " + e.getMessage());
+        }
+        FunctionTag tag = created.get();
+        if (tag == null) return Response.err("createFunctionTag returned null");
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "tag", serializeTag(tag, 0)));
+    }
+
+    @McpTool(path = "/delete_function_tag", method = "POST",
+             description = "Delete a program-wide function tag definition. This detaches the tag from every function that had it.",
+             category = "function")
+    public Response deleteFunctionTag(
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Tag name to delete program-wide") String name,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (name == null || name.isEmpty()) return Response.err("name is required");
+
+        FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
+        FunctionTag tag = mgr.getFunctionTag(name);
+        if (tag == null) return Response.err("Tag not found: " + name);
+
+        final int useCount = mgr.getUseCount(tag);
+        try {
+            threadingStrategy.executeWrite(program, "Delete function tag via HTTP", () -> {
+                tag.delete();
+                return null;
+            });
+            program.flushEvents();
+        } catch (Exception e) {
+            Msg.error(this, "Failed to delete function tag", e);
+            return Response.err("Failed to delete tag: " + e.getMessage());
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "name", name,
+                "detached_from_functions", useCount));
+    }
+
+    @McpTool(path = "/set_function_tag_comment", method = "POST",
+             description = "Update the comment/description on an existing program-wide function tag.",
+             category = "function")
+    public Response setFunctionTagComment(
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "Tag name") String name,
+            @Param(value = "comment", source = ParamSource.BODY,
+                   description = "New comment text (pass an empty string to clear)") String comment,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (name == null || name.isEmpty()) return Response.err("name is required");
+
+        FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
+        FunctionTag tag = mgr.getFunctionTag(name);
+        if (tag == null) return Response.err("Tag not found: " + name);
+
+        final String newComment = comment != null ? comment : "";
+        try {
+            threadingStrategy.executeWrite(program, "Update function tag comment via HTTP", () -> {
+                tag.setComment(newComment);
+                return null;
+            });
+            program.flushEvents();
+        } catch (Exception e) {
+            Msg.error(this, "Failed to update tag comment", e);
+            return Response.err("Failed to update comment: " + e.getMessage());
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "tag", serializeTag(tag, mgr.getUseCount(tag))));
+    }
+
+    @McpTool(path = "/search_functions_by_tag",
+             description = "List all functions that have a specified tag attached. Returns name + entry address.",
+             category = "function")
+    public Response searchFunctionsByTag(
+            @Param(value = "tag", description = "Tag name to search for") String tagName,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "1000") int limit,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (tagName == null || tagName.isEmpty()) return Response.err("tag is required");
+
+        FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
+        if (mgr.getFunctionTag(tagName) == null) {
+            return Response.err("Tag not found: " + tagName);
+        }
+
+        List<Map<String, Object>> matches = new ArrayList<>();
+        for (Function func : program.getFunctionManager().getFunctions(true)) {
+            for (FunctionTag t : func.getTags()) {
+                if (t.getName().equals(tagName)) {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("name", func.getName());
+                    row.put("address", func.getEntryPoint().toString());
+                    matches.add(row);
+                    break;
+                }
+            }
+        }
+        matches.sort(Comparator.comparing(m -> ((String) m.get("address"))));
+        int total = matches.size();
+        int from = Math.max(0, offset);
+        int to = Math.min(total, from + Math.max(0, limit));
+        List<Map<String, Object>> page = from < to ? matches.subList(from, to) : List.of();
+        return Response.ok(JsonHelper.mapOf(
+                "tag", tagName,
+                "total", total,
+                "offset", from,
+                "limit", limit,
+                "functions", page));
+    }
+
+    @McpTool(path = "/batch_add_function_tags", method = "POST",
+             description = "Attach tags to many functions in one transaction. Body: [{\"function\":\"0x140200ae6\",\"tags\":\"syscall,lpe-surface\"}, ...]. Tags auto-create.",
+             category = "function")
+    public Response batchAddFunctionTags(
+            @Param(value = "assignments", source = ParamSource.BODY,
+                   description = "Array of {function, tags} objects. `function` may be an address or name; `tags` is a comma-separated list.") List<Map<String, String>> assignments,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (assignments == null || assignments.isEmpty()) return Response.err("assignments is required (non-empty array)");
+
+        List<Map<String, Object>> results = new ArrayList<>();
+        AtomicInteger tagsAdded = new AtomicInteger(0);
+        AtomicInteger funcsTouched = new AtomicInteger(0);
+        try {
+            threadingStrategy.executeWrite(program, "Batch add function tags via HTTP", () -> {
+                for (Map<String, String> entry : assignments) {
+                    String ref = entry.get("function");
+                    String tagsCsv = entry.get("tags");
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("function", ref);
+                    if (ref == null || ref.isEmpty()) {
+                        row.put("status", "error");
+                        row.put("error", "missing function field");
+                        results.add(row);
+                        continue;
+                    }
+                    Function func = ServiceUtils.resolveFunction(program, ref);
+                    if (func == null) {
+                        row.put("status", "error");
+                        row.put("error", "function not found");
+                        results.add(row);
+                        continue;
+                    }
+                    List<String> names = splitTagList(tagsCsv);
+                    if (names.isEmpty()) {
+                        row.put("status", "error");
+                        row.put("error", "missing/empty tags field");
+                        results.add(row);
+                        continue;
+                    }
+                    List<String> added = new ArrayList<>();
+                    List<String> already = new ArrayList<>();
+                    for (String n : names) {
+                        if (func.addTag(n)) added.add(n);
+                        else already.add(n);
+                    }
+                    tagsAdded.addAndGet(added.size());
+                    if (!added.isEmpty()) funcsTouched.incrementAndGet();
+                    row.put("status", "success");
+                    row.put("address", func.getEntryPoint().toString());
+                    row.put("added", added);
+                    row.put("already_present", already);
+                    results.add(row);
+                }
+                return null;
+            });
+            program.flushEvents();
+        } catch (Exception e) {
+            Msg.error(this, "Batch add function tags failed", e);
+            return Response.err("Batch failed: " + e.getMessage());
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "functions_touched", funcsTouched.get(),
+                "tags_added", tagsAdded.get(),
+                "results", results));
+    }
+
+    @McpTool(path = "/batch_remove_function_tags", method = "POST",
+             description = "Detach tags from many functions in one transaction. Body shape matches /batch_add_function_tags.",
+             category = "function")
+    public Response batchRemoveFunctionTags(
+            @Param(value = "assignments", source = ParamSource.BODY,
+                   description = "Array of {function, tags} objects.") List<Map<String, String>> assignments,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        if (assignments == null || assignments.isEmpty()) return Response.err("assignments is required (non-empty array)");
+
+        List<Map<String, Object>> results = new ArrayList<>();
+        AtomicInteger tagsRemoved = new AtomicInteger(0);
+        AtomicInteger funcsTouched = new AtomicInteger(0);
+        try {
+            threadingStrategy.executeWrite(program, "Batch remove function tags via HTTP", () -> {
+                for (Map<String, String> entry : assignments) {
+                    String ref = entry.get("function");
+                    String tagsCsv = entry.get("tags");
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("function", ref);
+                    if (ref == null || ref.isEmpty()) {
+                        row.put("status", "error");
+                        row.put("error", "missing function field");
+                        results.add(row);
+                        continue;
+                    }
+                    Function func = ServiceUtils.resolveFunction(program, ref);
+                    if (func == null) {
+                        row.put("status", "error");
+                        row.put("error", "function not found");
+                        results.add(row);
+                        continue;
+                    }
+                    List<String> names = splitTagList(tagsCsv);
+                    if (names.isEmpty()) {
+                        row.put("status", "error");
+                        row.put("error", "missing/empty tags field");
+                        results.add(row);
+                        continue;
+                    }
+                    Set<String> have = new HashSet<>();
+                    for (FunctionTag t : func.getTags()) have.add(t.getName());
+                    List<String> removed = new ArrayList<>();
+                    List<String> notPresent = new ArrayList<>();
+                    for (String n : names) {
+                        if (have.contains(n)) {
+                            func.removeTag(n);
+                            removed.add(n);
+                        } else {
+                            notPresent.add(n);
+                        }
+                    }
+                    tagsRemoved.addAndGet(removed.size());
+                    if (!removed.isEmpty()) funcsTouched.incrementAndGet();
+                    row.put("status", "success");
+                    row.put("address", func.getEntryPoint().toString());
+                    row.put("removed", removed);
+                    row.put("not_present", notPresent);
+                    results.add(row);
+                }
+                return null;
+            });
+            program.flushEvents();
+        } catch (Exception e) {
+            Msg.error(this, "Batch remove function tags failed", e);
+            return Response.err("Batch failed: " + e.getMessage());
+        }
+        return Response.ok(JsonHelper.mapOf(
+                "status", "success",
+                "functions_touched", funcsTouched.get(),
+                "tags_removed", tagsRemoved.get(),
+                "results", results));
+    }
 }
