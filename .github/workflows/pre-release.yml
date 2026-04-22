@@ -12,8 +12,8 @@ on:
         default: 'main'
 
 env:
-  GHIDRA_VERSION: 12.0.3
-  GHIDRA_DATE: 20260210
+  GHIDRA_VERSION: 12.0.4
+  GHIDRA_DATE: 20260303
 
 jobs:
   create-prerelease:

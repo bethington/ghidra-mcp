@@ -388,14 +388,28 @@
                             <span class="provider-stat">{{ pstats.runs }} runs</span>
                             <span class="provider-stat" style="color: {% if pstats.avg_delta > 0 %}var(--color-set){% elif pstats.avg_delta < 0 %}var(--accent-red-light){% else %}var(--text-muted){% endif %};">avg {{ pstats.avg_delta }}%</span>
                             <span class="provider-stat" style="color: {% if pstats.success_rate >= 80 %}var(--color-set){% elif pstats.success_rate >= 50 %}var(--accent-gold){% else %}var(--accent-red-light){% endif %};">{{ pstats.success_rate }}% ok</span>
-                            {% if pstats.avg_tools > 0 %}
+                            {% if pstats.known_tool_runs > 0 %}
                             <span class="provider-stat" style="color: var(--text-muted);">{{ pstats.avg_tools }} tools</span>
+                            <span class="provider-stat" style="color: var(--text-muted); font-size: 0.6rem;">{{ pstats.known_tool_runs }} known</span>
+                            {% endif %}
+                            {% if pstats.unknown_tool_runs > 0 %}
+                            <span class="provider-stat" style="color: var(--accent-gold); font-size: 0.6rem;">{{ pstats.unknown_tool_runs }} unknown tc</span>
                             {% endif %}
                             {% if pstats.today_runs > 0 %}
                             <span class="provider-stat" style="color: var(--color-magic); font-size: 0.6rem;">today: {{ pstats.today_runs }} · {{ pstats.today_avg_delta }}%Δ</span>
                             {% endif %}
                         </div>
                         {% endfor %}
+
+                        {% if stats.run_stats.handoffs.total > 0 %}
+                        <div style="margin-top: 0.4rem; padding: 0.3rem 0.5rem; background: var(--bg-light); border-radius: 4px; font-size: 0.65rem;">
+                            <strong style="color: var(--color-magic);">Handoffs:</strong>
+                            <span class="mono" style="color: var(--text-primary);">{{ stats.run_stats.handoffs.total }}</span> total
+                            {% for item in stats.run_stats.handoffs.top_pairs[:3] %}
+                            <span style="color: var(--text-muted);">· {{ item.pair }} <span class="mono">{{ item.count }}</span></span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
 
                         <!-- Failure modes breakdown -->
                         {% if stats.run_stats.failure_modes %}

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # GhidraMCP Deployment Script for Linux and macOS
 # Automatically builds, installs, and configures the GhidraMCP plugin
-# Target: Ghidra 12.0.3+ (12.0.4 via Homebrew on macOS)
+# Target: Ghidra 12.0.4+
 #
 # Usage:
-#   ./ghidra-mcp-setup.sh --deploy --ghidra-path /opt/ghidra_12.0.3_PUBLIC
-#   ./ghidra-mcp-setup.sh --setup-deps --ghidra-path /opt/ghidra_12.0.3_PUBLIC
+#   ./ghidra-mcp-setup.sh --deploy --ghidra-path /opt/ghidra_12.0.4_PUBLIC
+#   ./ghidra-mcp-setup.sh --setup-deps --ghidra-path /opt/ghidra_12.0.4_PUBLIC
 #   ./ghidra-mcp-setup.sh --build-only
 #   ./ghidra-mcp-setup.sh --clean
-#   ./ghidra-mcp-setup.sh --preflight --ghidra-path /opt/ghidra_12.0.3_PUBLIC
+#   ./ghidra-mcp-setup.sh --preflight --ghidra-path /opt/ghidra_12.0.4_PUBLIC
 #   ./ghidra-mcp-setup.sh --help
 #
 # macOS (Homebrew):
@@ -57,7 +57,7 @@ ghidra_executable_exists() {
 # Configuration
 # ============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_GHIDRA_VERSION="12.0.3"
+DEFAULT_GHIDRA_VERSION="12.0.4"
 PLUGIN_VERSION="5.2.0"
 
 # Parameters (defaults)
@@ -72,6 +72,14 @@ DRY_RUN=false
 FORCE=false
 VERBOSE=false
 USE_VENV=false
+INSTALL_DEBUGGER_DEPS=false
+
+is_truthy() {
+    case "${1,,}" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
 # ============================================================================
 # Usage / Help
@@ -88,7 +96,7 @@ show_usage() {
     echo "  --preflight        Validate environment and prerequisites without making changes"
     echo ""
     echo "Common options:"
-    echo "  --ghidra-path PATH    Path to Ghidra install (e.g., /opt/ghidra_12.0.3_PUBLIC)"
+    echo "  --ghidra-path PATH    Path to Ghidra install (e.g., /opt/ghidra_12.0.4_PUBLIC)"
     echo "  --ghidra-version VER  Explicit Ghidra version (must match pom.xml/path version)"
     echo "  --strict-preflight    Fail preflight on network checks (Maven Central/PyPI reachability)"
     echo "  --no-auto-prereqs     Disable automatic prerequisite setup during deploy"
@@ -101,10 +109,10 @@ show_usage() {
     echo "  --help, -h            Show this help text"
     echo ""
     echo "Examples:"
-    echo "  ./ghidra-mcp-setup.sh --deploy --ghidra-path /opt/ghidra_12.0.3_PUBLIC"
-    echo "  ./ghidra-mcp-setup.sh --deploy --ghidra-path /opt/ghidra_12.0.3_PUBLIC --use-venv"
-    echo "  ./ghidra-mcp-setup.sh --setup-deps --ghidra-path /opt/ghidra_12.0.3_PUBLIC"
-    echo "  ./ghidra-mcp-setup.sh --preflight --ghidra-path /opt/ghidra_12.0.3_PUBLIC"
+    echo "  ./ghidra-mcp-setup.sh --deploy --ghidra-path /opt/ghidra_12.0.4_PUBLIC"
+    echo "  ./ghidra-mcp-setup.sh --deploy --ghidra-path /opt/ghidra_12.0.4_PUBLIC --use-venv"
+    echo "  ./ghidra-mcp-setup.sh --setup-deps --ghidra-path /opt/ghidra_12.0.4_PUBLIC"
+    echo "  ./ghidra-mcp-setup.sh --preflight --ghidra-path /opt/ghidra_12.0.4_PUBLIC"
     echo "  ./ghidra-mcp-setup.sh --build-only"
     echo "  ./ghidra-mcp-setup.sh --clean"
     echo ""
@@ -190,7 +198,7 @@ get_version_from_ghidra_properties() {
     echo "$version"
 }
 
-# Extract version from Ghidra path name (e.g., ghidra_12.0.3_PUBLIC)
+# Extract version from Ghidra path name (e.g., ghidra_12.0.4_PUBLIC)
 get_version_from_ghidra_path() {
     local path_value="$1"
     if [[ -z "$path_value" ]]; then echo ""; return; fi
@@ -530,6 +538,10 @@ install_python_packages() {
         run_cmd "Ensuring Python dependencies" "$python_cmd" "${pip_args[@]}"
         log_success "Python dependencies are ready."
     fi
+
+    if $INSTALL_DEBUGGER_DEPS; then
+        log_warning "INSTALL_DEBUGGER_DEPS=true requested, but debugger dependencies are only auto-installed by the Windows PowerShell setup path. Skipping on this platform."
+    fi
 }
 
 invoke_preflight_checks() {
@@ -569,6 +581,10 @@ invoke_preflight_checks() {
                 log_success "pip is available."
             fi
         fi
+    fi
+
+    if $INSTALL_DEBUGGER_DEPS; then
+        log_warning "INSTALL_DEBUGGER_DEPS=true is set, but the standalone debugger server is Windows-only in this setup flow."
     fi
 
     # Java
@@ -662,6 +678,12 @@ if [[ -f "$env_file" ]]; then
             verbose_log "Loaded from .env: $key"
         fi
     done < "$env_file"
+fi
+
+if is_truthy "${INSTALL_DEBUGGER_DEPS:-false}"; then
+    INSTALL_DEBUGGER_DEPS=true
+else
+    INSTALL_DEBUGGER_DEPS=false
 fi
 
 # ============================================================================
@@ -1076,10 +1098,16 @@ if $NO_AUTO_PREREQS; then
     else
         echo "      pip install -r requirements.txt"
     fi
+    if $INSTALL_DEBUGGER_DEPS; then
+        echo "   INSTALL_DEBUGGER_DEPS=true is ignored on this platform by the shell setup script."
+    fi
 else
     echo "1. Python dependencies were auto-checked/installed."
     if $USE_VENV; then
         echo "   Run the bridge with: .venv/bin/python bridge_mcp_ghidra.py"
+    fi
+    if $INSTALL_DEBUGGER_DEPS; then
+        echo "   Debugger dependency auto-install is skipped on this platform."
     fi
 fi
 echo "2. Start Ghidra"
@@ -1105,7 +1133,7 @@ echo ""
 if [[ "$version" =~ ^2\. ]]; then
     log_info "New in v2.0.0 - Major Release:"
     echo "   + 133 total endpoints (was 132)"
-    echo "   + Ghidra 12.0.3 support"
+    echo "   + Ghidra 12.0.4 support"
     echo "   + Malware analysis: IOC extraction, behavior detection, anti-analysis detection"
     echo "   + Function similarity analysis with CFG comparison"
     echo "   + Control flow complexity analysis (cyclomatic complexity)"

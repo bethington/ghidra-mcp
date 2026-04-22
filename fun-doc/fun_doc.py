@@ -70,6 +70,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from collections import defaultdict
 from datetime import datetime, date
 from pathlib import Path
@@ -1942,7 +1943,26 @@ _debug_ctx: "contextvars.ContextVar[dict]" = contextvars.ContextVar(
 _debug_log_lock = threading.Lock()
 
 
-def _debug_set_context(func_key, func_name, program, address, provider):
+def _normalize_tool_name(tool_name):
+    """Normalize provider-specific tool names to a common short name."""
+    if not tool_name:
+        return ""
+    normalized = str(tool_name)
+    for prefix in ("mcp_ghidra-mcp_", "mcp__ghidra-mcp__"):
+        if normalized.startswith(prefix):
+            return normalized.removeprefix(prefix)
+    return normalized
+
+
+def _debug_set_context(
+    func_key,
+    func_name,
+    program,
+    address,
+    provider,
+    run_id,
+    requested_provider=None,
+):
     """Set the current function context for debug logging. Called once per
     function at the start of process_function so all tool calls in subsequent
     provider invocations get tagged with the same metadata. Re-reads queue
@@ -1952,7 +1972,9 @@ def _debug_set_context(func_key, func_name, program, address, provider):
         "func_name": func_name,
         "program": program,
         "address": address,
+        "run_id": run_id,
         "provider": provider,
+        "requested_provider": requested_provider or provider,
         "iteration": 0,
         "log_path": None,
     }
@@ -1962,6 +1984,15 @@ def _debug_set_context(func_key, func_name, program, address, provider):
         ctx["enabled"] = bool(cfg.get("debug_mode", False))
     except Exception:
         ctx["enabled"] = False
+    _debug_ctx.set(ctx)
+
+
+def _debug_update_context(**fields):
+    """Update the active debug context in-place for provider/model handoffs."""
+    ctx = dict(_debug_ctx.get())
+    if not ctx:
+        return
+    ctx.update(fields)
     _debug_ctx.set(ctx)
 
 
@@ -1977,7 +2008,9 @@ def _debug_get_log_path():
         prog = ctx.get("program") or "unknown"
         prog = prog.replace("/", "_").replace("\\", "_").strip("_") or "unknown"
         addr = ctx.get("address") or "unknown"
-        path = date_dir / f"{prog}__{addr}.jsonl"
+        provider = ctx.get("requested_provider") or ctx.get("provider") or "unknown"
+        run_id = ctx.get("run_id") or "unknown"
+        path = date_dir / f"{prog}__{addr}__{provider}__{run_id}.jsonl"
         # ContextVar values are shallow-immutable by convention — rebuild the
         # dict with the cached path so subsequent calls in this context skip
         # the mkdir overhead.
@@ -2024,14 +2057,18 @@ def _debug_log_tool_call(tool, args, result, status, duration_ms=None):
     result_str = "" if result is None else str(result)
     result_full_size = len(result_str)
     result_preview = result_str[:500]
+    normalized_tool = _normalize_tool_name(tool)
 
     entry = {
         "ts": datetime.now().isoformat(),
+        "run_id": ctx.get("run_id"),
         "function_key": ctx.get("func_key"),
         "function_name": ctx.get("func_name"),
         "provider": ctx.get("provider"),
+        "requested_provider": ctx.get("requested_provider"),
         "iteration": iteration,
-        "tool": tool,
+        "tool": normalized_tool,
+        "tool_raw": tool,
         "args": args,
         "result_preview": result_preview,
         "result_full_size": result_full_size,
@@ -2051,7 +2088,7 @@ def _debug_log_tool_call(tool, args, result, status, duration_ms=None):
     args_summary = _debug_summarize_args(args)
     duration_str = f", {duration_ms}ms" if duration_ms is not None else ""
     print(
-        f"  [debug] #{iteration} {tool}({args_summary}) -> {status} "
+        f"  [debug] #{iteration} {normalized_tool}({args_summary}) -> {status} "
         f"({result_full_size}b{duration_str})",
         flush=True,
     )
@@ -2961,7 +2998,10 @@ def _wrap_result(result):
     """Normalize AI provider return to (text, metadata) tuple."""
     if isinstance(result, tuple):
         return result
-    return (result, {"tool_calls": -1})  # -1 = unknown (provider doesn't track)
+    return (
+        result,
+        {"tool_calls": -1, "tool_calls_known": False},
+    )  # -1 = unknown (provider doesn't track)
 
 
 def invoke_claude(
@@ -3016,6 +3056,7 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
         # Use streamed mode to show progress
         streamed = await thread.run_streamed(prompt)
         output_parts = []
+        tool_call_count = 0
         async for event in streamed.events:
             event_type = getattr(event, "type", "")
             if event_type == "item.completed":
@@ -3026,18 +3067,34 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
                     print(text)
                     output_parts.append(str(text))
                 elif item_type == "McpToolCallItem":
+                    tool_call_count += 1
                     tool = getattr(
                         item,
                         "tool",
                         getattr(item, "tool_name", getattr(item, "name", "?")),
                     )
+                    normalized_tool = _normalize_tool_name(tool)
                     server = getattr(item, "server", "")
                     raw_status = getattr(item, "status", "?")
                     status = "error" if raw_status in ("failed", "error") else "success"
-                    print(f"  [mcp] {tool}: calling", flush=True)
-                    print(f"  [mcp] {tool}: {status}", flush=True)
-                    bus_emit("tool_call", {"tool": tool, "status": "calling"})
-                    bus_emit("tool_result", {"tool": tool, "status": status})
+                    print(f"  [mcp] {normalized_tool}: calling", flush=True)
+                    print(f"  [mcp] {normalized_tool}: {status}", flush=True)
+                    bus_emit(
+                        "tool_call",
+                        {
+                            "tool": normalized_tool,
+                            "raw_tool": tool,
+                            "status": "calling",
+                        },
+                    )
+                    bus_emit(
+                        "tool_result",
+                        {
+                            "tool": normalized_tool,
+                            "raw_tool": tool,
+                            "status": status,
+                        },
+                    )
 
                     # Best-effort args/result extraction. Codex SDK item shapes
                     # vary by version, so try a few common attribute names.
@@ -3067,7 +3124,10 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
                     tokens = getattr(usage, "total_tokens", "?")
                     print(f"  [tokens: {tokens}]", flush=True)
 
-        return "\n".join(output_parts) if output_parts else None
+        return (
+            "\n".join(output_parts) if output_parts else None,
+            {"tool_calls": tool_call_count, "tool_calls_known": True},
+        )
 
     # Retry transient Codex CLI crashes (exit code 1 with "Reading prompt from stdin")
     last_err = None
@@ -3120,7 +3180,7 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
             model=model,
             approval_mode="yolo",
             allowed_mcp_servers=["ghidra-mcp"],
-            cwd=str(REPO_ROOT),
+            cwd=str(SCRIPT_DIR),
             timeout=600.0,
         )
         cli = GeminiCli(options)
@@ -3142,19 +3202,21 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
                     output_parts.append(event.content)
             elif isinstance(event, ToolUseEvent):
                 tool_call_count += 1
-                short_name = (
-                    event.name.removeprefix("mcp_ghidra-mcp_") if event.name else ""
-                )
+                short_name = _normalize_tool_name(event.name)
                 print(f"  [mcp] {short_name}: calling", flush=True)
-                bus_emit("tool_call", {"tool": event.name, "status": "calling"})
+                bus_emit(
+                    "tool_call",
+                    {"tool": short_name, "raw_tool": event.name, "status": "calling"},
+                )
                 _debug_log_tool_call(event.name, event.arguments, None, "calling", None)
             elif isinstance(event, ToolResultEvent):
                 status = "error" if event.is_error else "success"
-                short_name = (
-                    event.name.removeprefix("mcp_ghidra-mcp_") if event.name else ""
-                )
+                short_name = _normalize_tool_name(event.name)
                 print(f"  [mcp] {short_name}: {status}", flush=True)
-                bus_emit("tool_result", {"tool": event.name, "status": status})
+                bus_emit(
+                    "tool_result",
+                    {"tool": short_name, "raw_tool": event.name, "status": status},
+                )
                 _debug_log_tool_call(event.name, {}, event.output, status, None)
             elif isinstance(event, ErrorEvent):
                 print(f"  [gemini error] {event.message}", flush=True)
@@ -3182,7 +3244,7 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
                 f"(tool_calls={tool_call_count})",
                 flush=True,
             )
-        return (text, {"tool_calls": tool_call_count})
+        return (text, {"tool_calls": tool_call_count, "tool_calls_known": True})
 
     # Retry on transient Gemini capacity/rate-limit errors.
     # The Gemini CLI has its own internal retries but uses short backoffs that
@@ -3210,7 +3272,7 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
             else:
                 break
     print(f"ERROR: Gemini CLI failed: {last_err}", file=sys.stderr)
-    return (None, {"tool_calls": 0})
+    return (None, {"tool_calls": 0, "tool_calls_known": True})
 
 
 def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=None):
@@ -3565,6 +3627,7 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
 
         output_parts = []
         tool_id_to_name = {}
+        tool_call_count = 0
         # Pending tool-use info awaiting its matching tool-result block. Claude
         # Agent SDK delivers ToolUseBlock in AssistantMessage.content and the
         # corresponding ToolResultBlock in UserMessage.content (per the
@@ -3610,6 +3673,7 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
 
                     elif block_type == "ToolUseBlock":
                         tool_name = getattr(block, "name", "?")
+                        tool_call_count += 1
                         tool_id = getattr(block, "id", "")
                         tool_input = getattr(block, "input", None) or {}
                         tool_id_to_name[tool_id] = tool_name
@@ -3618,14 +3682,16 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                             "input": tool_input,
                             "start_time": time.perf_counter(),
                         }
+                        normalized_tool = _normalize_tool_name(tool_name)
                         print(
-                            f"  [mcp] {tool_name.removeprefix('mcp__ghidra-mcp__')}: calling",
+                            f"  [mcp] {normalized_tool}: calling",
                             flush=True,
                         )
                         bus_emit(
                             "tool_call",
                             {
-                                "tool": tool_name,
+                                "tool": normalized_tool,
+                                "raw_tool": tool_name,
                                 "status": "calling",
                                 "id": tool_id,
                             },
@@ -3655,14 +3721,13 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                             if call_info
                             else None
                         )
-                        print(
-                            f"  [mcp] {tool_name.removeprefix('mcp__ghidra-mcp__')}: {status}",
-                            flush=True,
-                        )
+                        normalized_tool = _normalize_tool_name(tool_name)
+                        print(f"  [mcp] {normalized_tool}: {status}", flush=True)
                         bus_emit(
                             "tool_result",
                             {
-                                "tool": tool_name,
+                                "tool": normalized_tool,
+                                "raw_tool": tool_name,
                                 "status": status,
                                 "id": tool_id,
                             },
@@ -3711,7 +3776,10 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
         if mcp_init_failed:
             return "__MCP_INIT_FAILED__"
 
-        return "\n".join(output_parts) if output_parts else None
+        return (
+            "\n".join(output_parts) if output_parts else None,
+            {"tool_calls": tool_call_count, "tool_calls_known": True},
+        )
 
     # Retry on transient errors:
     #   - "not found": intermittent when previous Claude Code process is still exiting
@@ -4164,10 +4232,23 @@ def process_function(
     address = func["address"]
     program = func["program"]
     name = func["name"]
+    requested_provider = provider or AI_PROVIDER
+    requested_model = model
+    effective_provider = requested_provider
+    provider_chain = [requested_provider]
+    run_id = uuid.uuid4().hex[:12]
 
     # Set debug-logging context for any tool calls in this function's processing.
     # No-op when debug_mode is off; otherwise tool calls go to logs/debug/...
-    _debug_set_context(func_key, name, program, address, provider or AI_PROVIDER)
+    _debug_set_context(
+        func_key,
+        name,
+        program,
+        address,
+        requested_provider,
+        run_id,
+        requested_provider=requested_provider,
+    )
 
     bus_emit(
         "function_started",
@@ -4336,7 +4417,7 @@ def process_function(
         prompt = build_full_doc_prompt(func_name, address, data, program=program)
 
     # Gemini has native MCP discovery — skip injecting tool block
-    effective_provider_for_tools = provider or AI_PROVIDER
+    effective_provider_for_tools = effective_provider
     if effective_provider_for_tools != "gemini":
         prompt = _inject_tool_block(prompt)
 
@@ -4385,7 +4466,6 @@ def process_function(
         mode = "FULL:recovery"
 
     # Complexity gate: skip functions too complex for MiniMax
-    effective_provider = provider or AI_PROVIDER
     if effective_provider == "minimax" and mode in ("FULL", "FULL:recovery"):
         completeness = data.get("completeness")
         if completeness and isinstance(completeness, dict):
@@ -4441,6 +4521,8 @@ def process_function(
                     # Swap provider for the rest of this function's processing
                     provider = handoff_provider
                     effective_provider = handoff_provider
+                    provider_chain.append(handoff_provider)
+                    _debug_update_context(provider=effective_provider)
                     # Re-select the model for the new provider (mode hasn't changed)
                     selected_model = select_model(mode, model, provider=provider)
                     # Fall through to invoke_claude — do NOT return
@@ -4461,6 +4543,7 @@ def process_function(
         "function_mode",
         {"key": func_key, "mode": mode, "model": selected_model, "score": live_score},
     )
+    _debug_update_context(provider=effective_provider)
     print(f"  {mode} | {selected_model} | {len(prompt):,} chars | score: {live_score}%")
 
     if dry_run:
@@ -4516,6 +4599,7 @@ def process_function(
         prompt, model=selected_model, provider=provider, complexity_tier=complexity_tier
     )
     tool_calls_made = meta.get("tool_calls", -1)
+    tool_calls_known = bool(meta.get("tool_calls_known", tool_calls_made != -1))
 
     # Two-pass: if recovery pass made tool calls, run pass 2 (comments) with fresh data
     # Don't gate on "DONE:" text — the model may produce think-only output or empty response
@@ -4563,12 +4647,14 @@ def process_function(
         if output2:
             output = output2
         tc2 = meta2.get("tool_calls", 0)
+        tc2_known = bool(meta2.get("tool_calls_known", tc2 != -1))
         if tool_calls_made == -1 and tc2 == -1:
             tool_calls_made = -1  # still unknown
         elif tool_calls_made == -1:
             tool_calls_made = tc2  # use the known value
         elif tc2 != -1:
             tool_calls_made += tc2  # both known, sum normally
+        tool_calls_known = tool_calls_known or tc2_known
 
     # Parse result
     result = "completed"
@@ -4832,6 +4918,8 @@ def process_function(
     audit_score_before = None
     audit_score_after = None
     audit_outcome = None  # "skipped_good_enough", "skipped_delta", "ran", or None
+    audit_tool_calls = None
+    audit_tool_calls_known = None
     audit_cfg = (
         cfg
         if "audit_provider" in cfg
@@ -4889,17 +4977,21 @@ def process_function(
 
             audit_outcome = "ran"
             audit_score_before = new_score
+            audit_model = select_model("FIX", provider=audit_provider)
             print(
                 f"  [audit] FIX | {audit_provider} | {len(audit_prompt):,} chars | score: {new_score}%"
             )
             print()
             audit_output, audit_meta = invoke_claude(
                 audit_prompt,
-                model="sonnet",
+                model=audit_model,
                 provider=audit_provider,
                 max_turns=15,
             )
             audit_tool_calls = audit_meta.get("tool_calls", -1)
+            audit_tool_calls_known = bool(
+                audit_meta.get("tool_calls_known", audit_tool_calls != -1)
+            )
 
             # Rescore after audit
             audit_new_score, audit_completeness = _rescore_and_sync(
@@ -4953,13 +5045,17 @@ def process_function(
     # Log this run for audit trail
     _append_run_log(
         {
+            "run_id": run_id,
             "timestamp": datetime.now().isoformat(),
             "program": program,
             "address": address,
             "function": func_name,
             "mode": mode,
             "model": selected_model,
-            "provider": provider or AI_PROVIDER,
+            "provider": effective_provider,
+            "requested_provider": requested_provider,
+            "requested_model": requested_model,
+            "provider_chain": provider_chain,
             "score_before": live_score,
             "score_after": new_score,
             "score_delta": (
@@ -4969,7 +5065,10 @@ def process_function(
             ),
             "result": result,
             "tool_calls": tool_calls_made,
+            "tool_calls_known": tool_calls_known,
             "complexity_tier": complexity_tier,
+            "prompt_chars": len(prompt),
+            "debug_log": str(_debug_get_log_path()) if _debug_get_log_path() else None,
             "missing_artifacts": missing_artifacts if missing_artifacts else None,
             "audit_provider": (
                 audit_provider
@@ -4979,6 +5078,10 @@ def process_function(
             "audit_outcome": audit_outcome,
             "audit_score_before": audit_score_before,
             "audit_score_after": audit_score_after,
+            "audit_tool_calls": audit_tool_calls,
+            "audit_tool_calls_known": audit_tool_calls_known,
+            "input_tokens": meta.get("input_tokens"),
+            "output_tokens": meta.get("output_tokens"),
             "output": output[:5000] if output else None,
         }
     )
@@ -5151,13 +5254,23 @@ def main():
         action="store_true",
         help="Disable auto-start of web dashboard (default: dashboard starts in background)",
     )
+    parser.add_argument(
+        "--state-file",
+        default=None,
+        help="Path to state JSON file (default: state.json next to this script)",
+    )
 
     args = parser.parse_args()
 
     # Override AI provider if specified via CLI
-    global AI_PROVIDER
+    global AI_PROVIDER, STATE_FILE
     if args.provider:
         AI_PROVIDER = args.provider
+
+    if args.state_file:
+        STATE_FILE = Path(args.state_file)
+        if not STATE_FILE.is_absolute():
+            STATE_FILE = Path.cwd() / STATE_FILE
 
     state = load_state()
 

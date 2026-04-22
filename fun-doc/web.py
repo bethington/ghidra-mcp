@@ -708,6 +708,7 @@ def create_app(state_file, event_bus=None):
             "avg_delta": 0,
             "success_rate": 0,
             "by_provider": {},
+            "handoffs": {"total": 0, "top_pairs": [], "top_chains": []},
             "stuck_functions": [],
             "failure_modes": {},
             "regressions": 0,
@@ -743,13 +744,16 @@ def create_app(state_file, event_bus=None):
                 "deltas": [],
                 "success": 0,
                 "failed": 0,
-                "tool_calls": [],
+                "known_tool_calls": [],
+                "unknown_tool_runs": 0,
                 "today_runs": 0,
                 "today_deltas": [],
                 "today_success": 0,
             }
         )
         func_results = defaultdict(lambda: {"fails": 0, "name": "", "address": ""})
+        handoff_pairs = defaultdict(int)
+        handoff_chains = defaultdict(int)
 
         # Audit tracking
         audit_ran = 0
@@ -771,11 +775,25 @@ def create_app(state_file, event_bus=None):
             after = l.get("score_after")
             result = l.get("result", "")
             provider = l.get("provider", "unknown")
+            requested_provider = l.get("requested_provider") or provider
+            provider_chain = l.get("provider_chain") or [requested_provider]
             delta = l.get("score_delta")
             tc = l.get("tool_calls")
+            tc_known = bool(l.get("tool_calls_known", tc is not None and tc >= 0))
             l_today = l.get("timestamp", "").startswith(today)
 
             bp = by_provider[provider]
+
+            if not isinstance(provider_chain, list) or not provider_chain:
+                provider_chain = (
+                    [requested_provider, provider]
+                    if requested_provider != provider
+                    else [provider]
+                )
+            chain_label = " -> ".join(str(x) for x in provider_chain)
+            if requested_provider != provider or len(provider_chain) > 1:
+                handoff_chains[chain_label] += 1
+                handoff_pairs[f"{requested_provider} -> {provider}"] += 1
 
             if before is not None and after is not None:
                 d = delta if delta is not None else (after - before)
@@ -792,8 +810,10 @@ def create_app(state_file, event_bus=None):
             if l_today:
                 bp["today_runs"] += 1
 
-            if tc is not None:
-                bp["tool_calls"].append(tc)
+            if tc_known and isinstance(tc, (int, float)) and tc >= 0:
+                bp["known_tool_calls"].append(tc)
+            else:
+                bp["unknown_tool_runs"] += 1
 
             if result == "completed":
                 success += 1
@@ -842,13 +862,15 @@ def create_app(state_file, event_bus=None):
             d = data["deltas"]
             r = data["runs"]
             td = data["today_deltas"]
-            tc = data["tool_calls"]
+            tc = data["known_tool_calls"]
             provider_stats[p] = {
                 "runs": r,
                 "avg_delta": round(sum(d) / len(d), 1) if d else 0,
                 "success_rate": round(data["success"] / r * 100, 1) if r else 0,
                 "fail_rate": round(data["failed"] / r * 100, 1) if r else 0,
                 "avg_tools": round(sum(tc) / len(tc), 1) if tc else 0,
+                "known_tool_runs": len(tc),
+                "unknown_tool_runs": data["unknown_tool_runs"],
                 "today_runs": data["today_runs"],
                 "today_avg_delta": round(sum(td) / len(td), 1) if td else 0,
                 "today_success_rate": (
@@ -893,6 +915,25 @@ def create_app(state_file, event_bus=None):
             "avg_delta": round(sum(deltas) / len(deltas), 1) if deltas else 0,
             "success_rate": round(success / len(logs) * 100, 1) if logs else 0,
             "by_provider": provider_stats,
+            "handoffs": {
+                "total": sum(handoff_chains.values()),
+                "top_pairs": sorted(
+                    (
+                        {"pair": pair, "count": count}
+                        for pair, count in handoff_pairs.items()
+                    ),
+                    key=lambda x: x["count"],
+                    reverse=True,
+                )[:5],
+                "top_chains": sorted(
+                    (
+                        {"chain": chain, "count": count}
+                        for chain, count in handoff_chains.items()
+                    ),
+                    key=lambda x: x["count"],
+                    reverse=True,
+                )[:5],
+            },
             "stuck_functions": stuck,
             "failure_modes": dict(failure_modes),
             "regressions": regressions,

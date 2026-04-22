@@ -363,9 +363,13 @@ def do_request(
     """
     with _ghidra_lock:
         if _transport_mode == "uds" and _active_socket:
-            return uds_request(_active_socket, method, endpoint, params, json_data, timeout)
+            return uds_request(
+                _active_socket, method, endpoint, params, json_data, timeout
+            )
         elif _transport_mode == "tcp" and _active_tcp:
-            return tcp_request(_active_tcp, method, endpoint, params, json_data, timeout)
+            return tcp_request(
+                _active_tcp, method, endpoint, params, json_data, timeout
+            )
         else:
             raise ConnectionError(
                 "No Ghidra instance connected. Use connect_instance() first."
@@ -609,7 +613,9 @@ def dispatch_get(endpoint: str, params: dict | None = None, retries: int = 3) ->
     return json.dumps({"error": "Max retries exceeded"})
 
 
-def dispatch_post(endpoint: str, data: dict, retries: int = 3, query_params: dict | None = None) -> str:
+def dispatch_post(
+    endpoint: str, data: dict, retries: int = 3, query_params: dict | None = None
+) -> str:
     """POST JSON request via active transport. Returns raw response text."""
     err = _ensure_connected()
     if err:
@@ -618,7 +624,9 @@ def dispatch_post(endpoint: str, data: dict, retries: int = 3, query_params: dic
     timeout = get_timeout(endpoint, data)
     for attempt in range(retries):
         try:
-            text, status = do_request("POST", endpoint, params=query_params, json_data=data, timeout=timeout)
+            text, status = do_request(
+                "POST", endpoint, params=query_params, json_data=data, timeout=timeout
+            )
             if status == 200:
                 return text.strip()
             if status >= 500 and attempt < retries - 1:
@@ -666,7 +674,11 @@ def _normalize_tool_def_names(schema: list[dict]) -> list[dict]:
     used_names = set(STATIC_TOOL_NAMES)
 
     for tool_def in schema:
-        raw_name = tool_def.get("original_name") or tool_def.get("name") or tool_def["endpoint"].lstrip("/")
+        raw_name = (
+            tool_def.get("original_name")
+            or tool_def.get("name")
+            or tool_def["endpoint"].lstrip("/")
+        )
         sanitized_name = sanitize_tool_name(raw_name)
 
         # Preserve the existing behavior for valid dynamic names that exactly
@@ -706,6 +718,8 @@ def _parse_schema(raw: dict) -> list[dict]:
                 pdef["description"] = p["description"]
             if "default" in p and p["default"] is not None:
                 pdef["default"] = p["default"]
+            if p.get("source"):
+                pdef["source"] = p["source"]
             if p.get("param_type"):
                 pdef["param_type"] = p["param_type"]
             properties[p["name"]] = pdef
@@ -810,7 +824,8 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         # know which were defaults. Empty string is not a meaningful value
         # for any current Ghidra endpoint — safe to filter.
         filtered = {
-            k: v for k, v in kwargs.items()
+            k: v
+            for k, v in kwargs.items()
             if v is not None and not (isinstance(v, str) and v == "")
         }
         if http_method == "GET":
@@ -819,13 +834,20 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
                 str_params["dry_run"] = "true"
             return dispatch_get(endpoint, params=str_params if str_params else None)
         else:
+            body_data = {}
+            query_params = {}
+            for key, value in filtered.items():
+                if properties.get(key, {}).get("source") == "query":
+                    query_params[key] = str(value)
+                else:
+                    body_data[key] = value
             if dry_run:
-                return dispatch_post(
-                    endpoint,
-                    data=filtered,
-                    query_params={"dry_run": "true"},
-                )
-            return dispatch_post(endpoint, data=filtered)
+                query_params["dry_run"] = "true"
+            return dispatch_post(
+                endpoint,
+                data=body_data,
+                query_params=query_params or None,
+            )
 
     # Build function signature with proper types and defaults
     # Params with defaults must come after params without defaults
@@ -852,8 +874,10 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     if http_method == "POST":
         sig_params.append(
             inspect.Parameter(
-                "dry_run", inspect.Parameter.KEYWORD_ONLY,
-                default=False, annotation=bool
+                "dry_run",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=False,
+                annotation=bool,
             )
         )
     handler.__signature__ = inspect.Signature(sig_params, return_annotation=str)
@@ -1436,8 +1460,13 @@ def _auto_connect():
 DEBUGGER_URL = os.getenv("GHIDRA_DEBUGGER_URL", "http://127.0.0.1:8099")
 
 
-def _debugger_request(method: str, path: str, body: dict | None = None,
-                      query: dict | None = None, timeout: int = 30) -> str:
+def _debugger_request(
+    method: str,
+    path: str,
+    body: dict | None = None,
+    query: dict | None = None,
+    timeout: int = 30,
+) -> str:
     """Send a request to the debugger server. Returns JSON string."""
     parsed = urlparse(DEBUGGER_URL)
     conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=timeout)
@@ -1446,8 +1475,9 @@ def _debugger_request(method: str, path: str, body: dict | None = None,
         if query:
             url += "?" + urlencode(query)
         headers = {"Content-Type": "application/json"} if body else {}
-        conn.request(method, url, body=json.dumps(body) if body else None,
-                     headers=headers)
+        conn.request(
+            method, url, body=json.dumps(body) if body else None, headers=headers
+        )
         resp = conn.getresponse()
         data = resp.read().decode("utf-8")
         if resp.status >= 400:
@@ -1458,8 +1488,12 @@ def _debugger_request(method: str, path: str, body: dict | None = None,
                 return json.dumps({"error": data})
         return data
     except ConnectionRefusedError:
-        return json.dumps({"error": f"Debugger server not running at {DEBUGGER_URL}. "
-                           "Start it with: python -m debugger"})
+        return json.dumps(
+            {
+                "error": f"Debugger server not running at {DEBUGGER_URL}. "
+                "Start it with: python -m debugger"
+            }
+        )
     except Exception as e:
         return json.dumps({"error": f"Debugger request failed: {e}"})
     finally:
@@ -1486,13 +1520,23 @@ def debugger_attach(target: str) -> str:
             programs_text = dispatch_get("/list_open_programs")
             if programs_text:
                 programs_data = json.loads(programs_text)
-                programs = programs_data if isinstance(programs_data, list) else programs_data.get("programs", [])
+                programs = (
+                    programs_data
+                    if isinstance(programs_data, list)
+                    else programs_data.get("programs", [])
+                )
                 ghidra_bases = {}
                 for prog in programs:
-                    prog_path = prog if isinstance(prog, str) else prog.get("path", prog.get("name", ""))
+                    prog_path = (
+                        prog
+                        if isinstance(prog, str)
+                        else prog.get("path", prog.get("name", ""))
+                    )
                     if prog_path:
                         try:
-                            meta_text = dispatch_get("/get_metadata", params={"program": prog_path})
+                            meta_text = dispatch_get(
+                                "/get_metadata", params={"program": prog_path}
+                            )
                             meta = json.loads(meta_text)
                             image_base = meta.get("imageBase", meta.get("image_base"))
                             if image_base:
@@ -1500,8 +1544,9 @@ def debugger_attach(target: str) -> str:
                         except Exception:
                             pass
                 if ghidra_bases:
-                    _debugger_request("POST", "/debugger/sync_modules",
-                                      {"ghidra_bases": ghidra_bases})
+                    _debugger_request(
+                        "POST", "/debugger/sync_modules", {"ghidra_bases": ghidra_bases}
+                    )
         except Exception as e:
             logger.warning(f"Auto-sync address map failed (non-fatal): {e}")
 
@@ -1541,14 +1586,18 @@ def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
         dll: DLL name (e.g. "D2Common.dll").
         ordinal: Ordinal number (e.g. 10624).
     """
-    return _debugger_request("GET", "/debugger/ordinal",
-                             query={"dll": dll, "ordinal": str(ordinal)})
+    return _debugger_request(
+        "GET", "/debugger/ordinal", query={"dll": dll, "ordinal": str(ordinal)}
+    )
 
 
 @mcp.tool()
-def debugger_set_breakpoint(ghidra_address: str, module: str = "",
-                            bp_type: str = "software",
-                            oneshot: bool = False) -> str:
+def debugger_set_breakpoint(
+    ghidra_address: str,
+    module: str = "",
+    bp_type: str = "software",
+    oneshot: bool = False,
+) -> str:
     """Set a breakpoint at a Ghidra address. Auto-translates to runtime address.
 
     Args:
@@ -1557,12 +1606,16 @@ def debugger_set_breakpoint(ghidra_address: str, module: str = "",
         bp_type: "software" (INT3) or "hardware" (debug register).
         oneshot: If true, breakpoint is removed after first hit.
     """
-    return _debugger_request("POST", "/debugger/breakpoint", {
-        "ghidra_address": ghidra_address,
-        "module": module,
-        "type": bp_type,
-        "oneshot": oneshot,
-    })
+    return _debugger_request(
+        "POST",
+        "/debugger/breakpoint",
+        {
+            "ghidra_address": ghidra_address,
+            "module": module,
+            "type": bp_type,
+            "oneshot": oneshot,
+        },
+    )
 
 
 @mcp.tool()
@@ -1621,9 +1674,9 @@ def debugger_registers() -> str:
 
 
 @mcp.tool()
-def debugger_read_memory(address: str, size: int = 64,
-                         address_type: str = "runtime",
-                         module: str = "") -> str:
+def debugger_read_memory(
+    address: str, size: int = 64, address_type: str = "runtime", module: str = ""
+) -> str:
     """Read memory from the debugged process.
 
     Returns hex dump and 32-bit DWORD interpretation of the memory region.
@@ -1634,9 +1687,16 @@ def debugger_read_memory(address: str, size: int = 64,
         address_type: "runtime" for live address, "ghidra" to auto-translate.
         module: DLL name when address_type="ghidra" for disambiguation.
     """
-    return _debugger_request("GET", "/debugger/memory",
-                             query={"address": address, "size": str(size),
-                                    "address_type": address_type, "module": module})
+    return _debugger_request(
+        "GET",
+        "/debugger/memory",
+        query={
+            "address": address,
+            "size": str(size),
+            "address_type": address_type,
+            "module": module,
+        },
+    )
 
 
 @mcp.tool()
@@ -1650,8 +1710,9 @@ def debugger_stack_trace(depth: int = 20) -> str:
 
 
 @mcp.tool()
-def debugger_read_args(convention: str = "__stdcall", count: int = 4,
-                       arg_names: str = "") -> str:
+def debugger_read_args(
+    convention: str = "__stdcall", count: int = 4, arg_names: str = ""
+) -> str:
     """Read function arguments at the current breakpoint based on calling convention.
 
     Reads arguments from registers and stack according to the calling convention.
@@ -1662,16 +1723,23 @@ def debugger_read_args(convention: str = "__stdcall", count: int = 4,
         count: Number of arguments to read.
         arg_names: Comma-separated names for readability (e.g. "pUnit,nSkillId").
     """
-    return _debugger_request("GET", "/debugger/read_args",
-                             query={"convention": convention, "count": str(count),
-                                    "arg_names": arg_names})
+    return _debugger_request(
+        "GET",
+        "/debugger/read_args",
+        query={"convention": convention, "count": str(count), "arg_names": arg_names},
+    )
 
 
 @mcp.tool()
-def debugger_trace_function(ghidra_address: str, module: str = "",
-                            convention: str = "__stdcall", arg_count: int = 4,
-                            arg_names: str = "", capture_return: bool = False,
-                            max_hits: int = 0) -> str:
+def debugger_trace_function(
+    ghidra_address: str,
+    module: str = "",
+    convention: str = "__stdcall",
+    arg_count: int = 4,
+    arg_names: str = "",
+    capture_return: bool = False,
+    max_hits: int = 0,
+) -> str:
     """Start non-breaking tracing on a function. Logs every call with arguments
     WITHOUT stopping the game.
 
@@ -1687,15 +1755,19 @@ def debugger_trace_function(ghidra_address: str, module: str = "",
         capture_return: Also capture return value (EAX).
         max_hits: Stop tracing after N hits (0 = unlimited).
     """
-    return _debugger_request("POST", "/debugger/trace/start", {
-        "ghidra_address": ghidra_address,
-        "module": module,
-        "convention": convention,
-        "arg_count": arg_count,
-        "arg_names": arg_names,
-        "capture_return": capture_return,
-        "max_hits": max_hits,
-    })
+    return _debugger_request(
+        "POST",
+        "/debugger/trace/start",
+        {
+            "ghidra_address": ghidra_address,
+            "module": module,
+            "convention": convention,
+            "arg_count": arg_count,
+            "arg_names": arg_names,
+            "capture_return": capture_return,
+            "max_hits": max_hits,
+        },
+    )
 
 
 @mcp.tool()
@@ -1705,8 +1777,7 @@ def debugger_trace_stop(trace_id: int = -1) -> str:
     Args:
         trace_id: ID returned by debugger_trace_function, or -1 for all.
     """
-    return _debugger_request("POST", "/debugger/trace/stop",
-                             {"trace_id": trace_id})
+    return _debugger_request("POST", "/debugger/trace/stop", {"trace_id": trace_id})
 
 
 @mcp.tool()
@@ -1717,9 +1788,11 @@ def debugger_trace_log(trace_id: int = -1, last_n: int = 50) -> str:
         trace_id: Filter by trace ID, or -1 for all traces.
         last_n: Number of most recent entries to return.
     """
-    return _debugger_request("GET", "/debugger/trace/log",
-                             query={"trace_id": str(trace_id),
-                                    "last_n": str(last_n)})
+    return _debugger_request(
+        "GET",
+        "/debugger/trace/log",
+        query={"trace_id": str(trace_id), "last_n": str(last_n)},
+    )
 
 
 @mcp.tool()
@@ -1729,8 +1802,9 @@ def debugger_trace_list() -> str:
 
 
 @mcp.tool()
-def debugger_watch_memory(ghidra_address: str, size: int = 4,
-                          access: str = "write", module: str = "") -> str:
+def debugger_watch_memory(
+    ghidra_address: str, size: int = 4, access: str = "write", module: str = ""
+) -> str:
     """Set a hardware watchpoint on a memory range to monitor read/write access.
 
     Limited to 4 simultaneous watchpoints (x86 debug register limit).
@@ -1742,12 +1816,16 @@ def debugger_watch_memory(ghidra_address: str, size: int = 4,
         access: "read", "write", or "readwrite".
         module: DLL name for address resolution.
     """
-    return _debugger_request("POST", "/debugger/watch/start", {
-        "ghidra_address": ghidra_address,
-        "module": module,
-        "size": size,
-        "access": access,
-    })
+    return _debugger_request(
+        "POST",
+        "/debugger/watch/start",
+        {
+            "ghidra_address": ghidra_address,
+            "module": module,
+            "size": size,
+            "access": access,
+        },
+    )
 
 
 @mcp.tool()
@@ -1757,8 +1835,7 @@ def debugger_watch_stop(watch_id: int = -1) -> str:
     Args:
         watch_id: ID returned by debugger_watch_memory, or -1 for all.
     """
-    return _debugger_request("POST", "/debugger/watch/stop",
-                             {"watch_id": watch_id})
+    return _debugger_request("POST", "/debugger/watch/stop", {"watch_id": watch_id})
 
 
 @mcp.tool()
@@ -1769,9 +1846,11 @@ def debugger_watch_log(watch_id: int = -1, last_n: int = 50) -> str:
         watch_id: Filter by watch ID, or -1 for all.
         last_n: Number of most recent entries.
     """
-    return _debugger_request("GET", "/debugger/watch/log",
-                             query={"watch_id": str(watch_id),
-                                    "last_n": str(last_n)})
+    return _debugger_request(
+        "GET",
+        "/debugger/watch/log",
+        query={"watch_id": str(watch_id), "last_n": str(last_n)},
+    )
 
 
 # ==========================================================================

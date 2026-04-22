@@ -7,7 +7,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
-[![Ghidra](https://img.shields.io/badge/Ghidra-12.0.3-brightgreen?style=for-the-badge&logoColor=white)](https://ghidra-sre.org/)
+[![Ghidra](https://img.shields.io/badge/Ghidra-12.0.4-brightgreen?style=for-the-badge&logoColor=white)](https://ghidra-sre.org/)
 [![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-6C5CE7?style=for-the-badge&logoColor=white)](https://modelcontextprotocol.io/)
 
 [![Stars](https://img.shields.io/github/stars/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=yellow)](https://github.com/bethington/ghidra-mcp/stargazers)
@@ -97,7 +97,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 - **Java 21 LTS** (OpenJDK recommended)
 - **Apache Maven 3.9+**
-- **Ghidra 12.0.3** (or compatible version)
+- **Ghidra 12.0.4** (or compatible version)
 - **Python 3.8+** with pip
 
 ### Installation
@@ -116,18 +116,18 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 2. **Recommended: run environment preflight first:**
    ```powershell
-   .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+   .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "F:\ghidra_12.0.4_PUBLIC"
    ```
 
 3. **Build and deploy to Ghidra (single command):**
    ```powershell
-   .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+   .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "F:\ghidra_12.0.4_PUBLIC"
    ```
 
 4. **Optional strict/manual mode** (advanced):
    ```powershell
    # Skip automatic prerequisite setup
-   .\ghidra-mcp-setup.ps1 -Deploy -NoAutoPrereqs -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+   .\ghidra-mcp-setup.ps1 -Deploy -NoAutoPrereqs -GhidraPath "F:\ghidra_12.0.4_PUBLIC"
    ```
 
 5. **Show script help**:
@@ -171,12 +171,12 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 3. **Run environment preflight:**
    ```bash
-   ./ghidra-mcp-setup.sh --preflight --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   ./ghidra-mcp-setup.sh --preflight --ghidra-path ~/ghidra_12.0.4_PUBLIC
    ```
 
 4. **Build and deploy to Ghidra (single command):**
    ```bash
-   ./ghidra-mcp-setup.sh --deploy --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   ./ghidra-mcp-setup.sh --deploy --ghidra-path ~/ghidra_12.0.4_PUBLIC
    ```
 
    This will:
@@ -188,7 +188,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 5. **Optional: setup only Maven dependencies:**
    ```bash
-   ./ghidra-mcp-setup.sh --setup-deps --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   ./ghidra-mcp-setup.sh --setup-deps --ghidra-path ~/ghidra_12.0.4_PUBLIC
    ```
 
 6. **Show script help:**
@@ -268,6 +268,15 @@ python bridge_mcp_ghidra.py --transport streamable-http --mcp-host 127.0.0.1 --m
 python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 ```
 
+#### Optional: Start the standalone debugger server
+```bash
+python -m pip install -r requirements-debugger.txt
+python -m debugger
+```
+
+The debugger server listens on `http://127.0.0.1:8099/` by default and is
+required for the `debugger_*` proxy tools exposed by the MCP bridge.
+
 #### In Ghidra
 1. Start Ghidra and open a **CodeBrowser** window
 2. In **CodeBrowser**, enable the plugin via **File > Configure > Configure All Plugins > GhidraMCP**
@@ -339,6 +348,20 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
    ```
 4. Look for errors in Ghidra console: **Window > Console**
 
+### `python -m debugger` fails with `ModuleNotFoundError` for `pybag` or `comtypes`
+
+**Cause:** The standalone debugger server uses optional Windows-only Python
+dependencies that are not installed by the base requirements file.
+
+**Solution:**
+```powershell
+python -m pip install -r requirements-debugger.txt
+python -m debugger
+```
+
+If you have both a global Python and a project venv, make sure you install
+into and run from the same interpreter.
+
 ### 500 Internal Server Errors
 
 **Cause:** Server-side exception, often due to missing program data.
@@ -363,7 +386,7 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 **Cause:** JAR file in wrong location.
 
 **Solution:**
-1. Manual install location: `~/.ghidra/ghidra_12.0.3_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
+1. Manual install location: `~/.ghidra/ghidra_12.0.4_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
 2. Or use: **File > Install Extensions > Add** and select the ZIP file
 3. Ensure JAR/ZIP was built for your Ghidra version
 
@@ -374,7 +397,7 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 **Solution:**
 ```powershell
 # Windows (recommended)
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
 
 # Or manual install (see install-ghidra-deps.sh)
 ```
@@ -639,7 +662,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 ### Building from Source
 ```bash
 # Recommended: one command does setup + build + deploy
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
 
 # Optional: build only (no deploy)
 .\ghidra-mcp-setup.ps1 -BuildOnly
@@ -658,8 +681,8 @@ Primary actions (choose one):
 - `-Preflight`: validate tools, paths, required Ghidra jars, and write access without making changes
 
 Useful options:
-- `-GhidraPath "C:\ghidra_12.0.3_PUBLIC"`
-- `-GhidraVersion "12.0.3"`
+- `-GhidraPath "C:\ghidra_12.0.4_PUBLIC"`
+- `-GhidraVersion "12.0.4"`
 - `-StrictPreflight`
 - `-NoAutoPrereqs`
 - `-SkipBuild`
@@ -673,19 +696,19 @@ Quick examples:
 
 ```powershell
 # Standard deploy (recommended)
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
 
 # First-time dependency setup only
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
 
 # Build only
 .\ghidra-mcp-setup.ps1 -BuildOnly
 
 # Preflight checks only
-.\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+.\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
 
 # Strict preflight (fails on warnings)
-.\ghidra-mcp-setup.ps1 -Preflight -StrictPreflight -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+.\ghidra-mcp-setup.ps1 -Preflight -StrictPreflight -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
 
 # Show command help
 .\ghidra-mcp-setup.ps1 -Help
@@ -720,7 +743,7 @@ This is a one-time setup per machine, and again when your Ghidra version changes
 The tool enforces version consistency between:
 - `pom.xml` (`ghidra.version`)
 - `-GhidraVersion` (if provided)
-- `-GhidraPath` version segment (e.g., `ghidra_12.0.3_PUBLIC`)
+- `-GhidraPath` version segment (e.g., `ghidra_12.0.4_PUBLIC`)
 
 If these do not match, deployment fails fast with a clear error.
 
@@ -734,15 +757,15 @@ If you see a version mismatch error, align all three values:
 Then rerun:
 
 ```powershell
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC" -GhidraVersion "12.0.3"
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.4_PUBLIC" -GhidraVersion "12.0.4"
 ```
 
 ```powershell
 # Windows
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.3_PUBLIC"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.4_PUBLIC"
 
 # Optional version override
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.3_PUBLIC" -GhidraVersion "12.0.3"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.4_PUBLIC" -GhidraVersion "12.0.4"
 ```
 
 **Required Libraries (14 JARs, ~37MB):**

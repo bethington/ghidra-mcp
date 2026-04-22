@@ -37,8 +37,9 @@ class TestGetSocketDir(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
         env["TMPDIR"] = "/custom/tmp"
         env["USER"] = "testuser"
-        with patch.dict(os.environ, env, clear=True), \
-             patch("os.getuid", return_value=9_999_999, create=True):
+        with patch.dict(os.environ, env, clear=True), patch(
+            "os.getuid", return_value=9_999_999, create=True
+        ):
             from bridge_mcp_ghidra import get_socket_dir
 
             result = get_socket_dir()
@@ -176,6 +177,41 @@ class TestBuildToolFunction(unittest.TestCase):
         sig = inspect.signature(fn)
         self.assertEqual(len(sig.parameters), 0)
 
+    def test_post_query_params_are_not_sent_in_body(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {
+            "properties": {
+                "function_address": {
+                    "type": "string",
+                    "source": "body",
+                    "param_type": "address",
+                },
+                "prototype": {"type": "string", "source": "body"},
+                "program": {"type": "string", "source": "query", "default": ""},
+            },
+            "required": ["function_address", "prototype"],
+        }
+        fn = _build_tool_function("/set_function_prototype", "POST", schema)
+
+        with patch("bridge_mcp_ghidra.dispatch_post") as mock_dispatch_post:
+            mock_dispatch_post.return_value = "ok"
+            result = fn(
+                function_address="6FA26FD0",
+                prototype="undefined4 __fastcall FUN_6fa26fd0(int param_1, uint param_2)",
+                program="/Vanilla/1.13d/D2MCPClient.dll",
+            )
+
+        self.assertEqual(result, "ok")
+        mock_dispatch_post.assert_called_once_with(
+            "/set_function_prototype",
+            data={
+                "function_address": "0x6fa26fd0",
+                "prototype": "undefined4 __fastcall FUN_6fa26fd0(int param_1, uint param_2)",
+            },
+            query_params={"program": "/Vanilla/1.13d/D2MCPClient.dll"},
+        )
+
 
 class TestToolNameSanitization(unittest.TestCase):
     """Test MCP tool name normalization for strict clients."""
@@ -246,7 +282,8 @@ class TestToolNameSanitization(unittest.TestCase):
 
         pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
         invalid = [
-            name for name in bridge.mcp._tool_manager._tools
+            name
+            for name in bridge.mcp._tool_manager._tools
             if not pattern.fullmatch(name)
         ]
         self.assertEqual(invalid, [])

@@ -110,7 +110,7 @@ Each release includes:
 ### Build Environment
 - **OS:** Ubuntu Latest
 - **Java:** OpenJDK 21 (Temurin)
-- **Ghidra:** Version 12.0.3 (auto-downloaded)
+- **Ghidra:** Version 12.0.4 (auto-downloaded)
 - **Maven:** Latest stable version
 - **Build Command:** `mvn clean package assembly:single`
 
@@ -148,8 +148,8 @@ All Ghidra libraries are automatically downloaded and configured:
 Update these variables in all workflow files:
 ```yaml
 env:
-  GHIDRA_VERSION: 12.0.3
-  GHIDRA_DATE: 20250415
+   GHIDRA_VERSION: 12.0.4
+   GHIDRA_DATE: 20260303
 ```
 
 ### Adding New Artifacts

@@ -18,6 +18,7 @@ state.json. They exercise:
   * Read-retry behavior when the main file is corrupt
   * update_function_state preserves concurrent updates to other keys
 """
+
 import json
 import os
 import threading
@@ -31,6 +32,7 @@ import pytest
 def isolated_state(monkeypatch, tmp_path):
     """Point fun_doc.STATE_FILE at a temp path for the duration of one test."""
     import sys
+
     # Ensure fun-doc is importable
     funcdoc_dir = Path(__file__).parent.parent.parent / "fun-doc"
     sys.path.insert(0, str(funcdoc_dir))
@@ -156,7 +158,11 @@ def test_update_function_state_preserves_concurrent_other_keys(isolated_state):
 
     # Simulate worker A: write key 0 at score 99
     key_a = "prog::addr0000"
-    func_a = {**fun_doc.load_state()["functions"][key_a], "score": 99, "last_result": "A"}
+    func_a = {
+        **fun_doc.load_state()["functions"][key_a],
+        "score": 99,
+        "last_result": "A",
+    }
     fun_doc.update_function_state(key_a, func_a)
 
     # Simulate worker B with a STALE in-memory copy that doesn't see A's update.
@@ -172,9 +178,9 @@ def test_update_function_state_preserves_concurrent_other_keys(isolated_state):
 
     # Re-read from disk — both updates must be present
     final = json.loads(path.read_text())
-    assert final["functions"][key_a]["score"] == 99, (
-        "Worker A's update was lost — update_function_state clobbered it"
-    )
+    assert (
+        final["functions"][key_a]["score"] == 99
+    ), "Worker A's update was lost — update_function_state clobbered it"
     assert final["functions"][key_b]["score"] == 55
     assert final["functions"][key_a]["last_result"] == "A"
     assert final["functions"][key_b]["last_result"] == "B"
@@ -217,3 +223,76 @@ def test_save_state_truncation_corruption_is_recoverable(isolated_state, tmp_pat
         # No .bak available — this is the "both corrupt" path and we explicitly
         # raise rather than silently starting fresh
         assert "corrupt" in str(e).lower()
+
+
+def test_debug_log_path_is_unique_per_run_and_provider(
+    isolated_state, monkeypatch, tmp_path
+):
+    """Each run should get its own debug file path, even for the same function."""
+    fun_doc, _ = isolated_state
+    monkeypatch.setattr(fun_doc, "LOG_DIR", tmp_path / "logs")
+
+    fun_doc._debug_set_context(
+        "/test/prog::401000",
+        "ExampleFunc",
+        "/test/prog",
+        "401000",
+        "minimax",
+        "runalpha",
+        requested_provider="minimax",
+    )
+    path_a = fun_doc._debug_get_log_path()
+
+    fun_doc._debug_set_context(
+        "/test/prog::401000",
+        "ExampleFunc",
+        "/test/prog",
+        "401000",
+        "gemini",
+        "runbeta",
+        requested_provider="gemini",
+    )
+    path_b = fun_doc._debug_get_log_path()
+
+    assert path_a != path_b
+    assert "runalpha" in str(path_a)
+    assert "runbeta" in str(path_b)
+    assert "minimax" in str(path_a)
+    assert "gemini" in str(path_b)
+
+
+def test_debug_log_normalizes_tool_names_and_preserves_raw_name(
+    isolated_state, monkeypatch, tmp_path
+):
+    """Debug entries should use a comparable short tool name while keeping the raw provider name."""
+    fun_doc, _ = isolated_state
+    monkeypatch.setattr(fun_doc, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(
+        fun_doc,
+        "load_priority_queue",
+        lambda: {"config": {"debug_mode": True}},
+    )
+
+    fun_doc._debug_set_context(
+        "/test/prog::401000",
+        "ExampleFunc",
+        "/test/prog",
+        "401000",
+        "gemini",
+        "runxyz",
+        requested_provider="gemini",
+    )
+    fun_doc._debug_log_tool_call(
+        "mcp_ghidra-mcp_batch_set_comments",
+        {"address": "0x401000"},
+        {"ok": True},
+        "success",
+        None,
+    )
+
+    log_path = fun_doc._debug_get_log_path()
+    entry = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["tool"] == "batch_set_comments"
+    assert entry["tool_raw"] == "mcp_ghidra-mcp_batch_set_comments"
+    assert entry["run_id"] == "runxyz"
+    assert entry["requested_provider"] == "gemini"

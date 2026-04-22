@@ -384,7 +384,7 @@ reports/
 # Any directory named 'build' at any level
 **/build/
 
-# Any directory named 'dist' at any level  
+# Any directory named 'dist' at any level
 **/dist/
 
 # Any directory named 'target' at any level
@@ -395,6 +395,7 @@ tmp/
 temp/
 .tmp/
 .temp/
+.tmp_pytest/
 
 # =============================================================================
 # ORDINAL FIX LOGS (Temporary - not part of repo)

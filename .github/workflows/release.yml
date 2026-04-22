@@ -16,15 +16,15 @@ on:
         default: true
 
 env:
-  GHIDRA_VERSION: 12.0.3
-  GHIDRA_DATE: 20260210
+  GHIDRA_VERSION: 12.0.4
+  GHIDRA_DATE: 20260303
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Required for creating releases and tags
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -108,11 +108,11 @@ jobs:
       run: |
         echo "Preparing release artifacts..."
         mkdir -p release
-        
+
         # List what's in target directory for debugging
         echo "Contents of target directory:"
         ls -la target/
-        
+
         # Copy main plugin ZIP (the version should match the tag)
         if [ -f "target/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip" ]; then
           echo "Copying versioned zip: GhidraMCP-${{ steps.version.outputs.VERSION }}.zip"
@@ -131,17 +131,17 @@ jobs:
             exit 1
           fi
         fi
-        
+
         # Copy Python MCP bridge
         cp bridge_mcp_ghidra.py release/
-        
+
         # Copy requirements files
         cp requirements.txt release/
-        
+
         # Copy README and LICENSE
         cp README.md release/
         cp LICENSE release/ 2>/dev/null || echo "LICENSE file not found, skipping"
-        
+
         # Create installation instructions
         # Use endpoints.json as authoritative tool count (maintained by tests)
         MCP_TOOLS=$(python3 -c "import json; print(json.load(open('tests/endpoints.json'))['total_endpoints'])" 2>/dev/null || echo "193")
@@ -173,10 +173,10 @@ jobs:
 
         For detailed documentation, see the [README](https://github.com/bethington/ghidra-mcp#readme).
         INSTEOF
-        
+
         echo "Release artifacts prepared:"
         ls -la release/
-        
+
         # Verify the main zip file is present
         if [ -f "release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip" ]; then
           echo "✅ Main plugin zip confirmed: release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip"
@@ -241,10 +241,10 @@ jobs:
         echo "=== DEBUG: Files that will be uploaded to release ==="
         echo "Main plugin zip:"
         ls -la release/GhidraMCP-${{ steps.version.outputs.VERSION }}.zip || echo "❌ ZIP NOT FOUND"
-        
+
         echo "All release files:"
         find release/ -type f -exec ls -la {} \;
-        
+
         echo "File checksums:"
         find release/ -type f -exec sha256sum {} \;
 
@@ -326,5 +326,5 @@ jobs:
         echo "- **Ghidra Version:** ${{ env.GHIDRA_VERSION }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Build Time:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
         echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-        
+
         echo "✅ Release workflow completed successfully!"

@@ -10,8 +10,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      GHIDRA_VERSION: 12.0.3
-      GHIDRA_DATE: 20260210
+      GHIDRA_VERSION: 12.0.4
+      GHIDRA_DATE: 20260303
       GHIDRA_LIBS: >-
         Features/Base/lib/Base.jar
         Features/Decompiler/lib/Decompiler.jar
@@ -49,7 +49,7 @@ jobs:
     - name: Install Ghidra JARs to Maven local repository
       run: |
         GHIDRA_DIR="ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC"
-        
+
         # Install Framework JARs
         mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Generic/lib/Generic.jar" \
             -DgroupId=ghidra -DartifactId=Generic -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
@@ -91,7 +91,7 @@ jobs:
             -DgroupId=ghidra -DartifactId=PDB -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
         mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/FunctionID/lib/FunctionID.jar" \
             -DgroupId=ghidra -DartifactId=FunctionID -Dversion=${{ env.GHIDRA_VERSION }} -Dpackaging=jar
-        
+
         echo "✅ Installed Ghidra JARs to Maven local repository"
 
     - name: Build with Maven

@@ -466,6 +466,8 @@ Deadlocks:   0 since test start
 
 #### Fixed
 
+- **fun-doc run/debug log provenance** — `runs.jsonl` now records `run_id`, requested vs effective provider, provider chain, `tool_calls_known`, prompt size, token metadata, and the concrete debug log path. Debug traces are now one file per run attempt instead of co-mingling multiple providers in a single per-function file, and tool names are normalized across Gemini/Claude/Codex/MiniMax while preserving the raw provider-specific name.
+- **fun-doc dashboard + handoff analysis follow-up** — provider cards now compute average tool counts from known samples only, explicitly count unknown tool-call runs, surface handoff/provider-chain summaries, ship a dedicated `fun-doc/analyze_runs.py` CLI for requested→effective provider analysis, and move the live complexity handoff target from Codex to Gemini.
 - **Cold-start lane infinite re-processing loop** — `_sync_func_state` didn't stamp `last_processed`, so the selector kept re-picking already-scored functions. Worst seen: SafeDelete stuck at 83% across hundreds of iterations.
 - **"Stale at X%" misleading message** — The cached score was captured after `_sync_func_state` had already overwritten it, so the log always showed the live value. Captures `original_cached_score` before sync now.
 - **`RETRY_SIZE` vs client timeout math** — Retry batch was 10 × 90 s = 900 s > 600 s client budget. Reduced to `RETRY_SIZE = 3` (270 s, fits with 330 s margin).

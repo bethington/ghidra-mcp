@@ -122,7 +122,7 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 ### v2.0.2
 
-- Ghidra 12.0.3 support, pagination for large functions
+- Ghidra 12.0.4 support, pagination for large functions
 
 ### v2.0.1
 
