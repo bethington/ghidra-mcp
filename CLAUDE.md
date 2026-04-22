@@ -4,7 +4,7 @@
 
 MCP server bridging Ghidra reverse engineering with AI tools. 222 MCP tools for binary analysis.
 
-- **Package**: `com.xebyte` | **Version**: 5.4.1 | **Java**: 21 LTS | **Ghidra**: 12.0.3
+- **Package**: `com.xebyte` | **Version**: 5.4.1 | **Java**: 21 LTS | **Ghidra**: 12.0.4
 
 ## Boil the ocean
 
@@ -21,6 +21,7 @@ AI Tools <-> MCP Bridge (bridge_mcp_ghidra.py) <-> Ghidra Plugin (GhidraMCPPlugi
 - **Service Layer**: `src/main/java/com/xebyte/core/` -- 14 service classes (~20K lines), `@McpTool`/`@Param` annotated. v5.4.0 adds `EmulationService` (P-code emulation), `DebuggerService` (TraceRmi wrapping — GUI-only)
 - **Debugger (Python)**: `debugger/` -- standalone HTTP server on port 8099 (engine, protocol, tracing, address_map, d2/ conventions). Bridge proxies via `GHIDRA_DEBUGGER_URL` env var.
 - **Headless**: `src/main/java/com/xebyte/headless/` -- standalone server without GUI. Includes `HeadlessManagementService` for program/project lifecycle.
+- **fun-doc**: `fun-doc/` -- AI-driven function documentation workflow (separate from MCP tools). `fun_doc.py` (~5,600 lines) manages a priority queue of functions, routes LLM scoring, and writes atomic state to `fun-doc/state.json` (~37 MB, backup-rotated). `web.py` is a web dashboard UI. Not exposed as MCP tools — internal curation subsystem. See `tests/performance/test_state_atomicity.py` for state corruption/recovery tests.
 - **Annotation Scanner**: `AnnotationScanner.java` discovers `@McpTool` methods, generates `/mcp/schema`
 
 Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
@@ -46,7 +47,7 @@ Use this file for architecture, conventions, and implementation guidance; use th
 ```
 
 - Maven: `C:\Users\benam\tools\apache-maven-3.9.6\bin\mvn.cmd`
-- Ghidra install: `F:\ghidra_12.0.3_PUBLIC`
+- Ghidra install: `F:\ghidra_12.0.4_PUBLIC`
 - Deploy handles: Maven build, extension install, FrontEndTool.xml patching, Ghidra restart
 
 ## Running the MCP Server
@@ -54,6 +55,8 @@ Use this file for architecture, conventions, and implementation guidance; use th
 ```bash
 python bridge_mcp_ghidra.py                  # stdio (recommended for AI tools)
 python bridge_mcp_ghidra.py --transport sse   # SSE (web/HTTP clients)
+python -m pip install -r requirements-debugger.txt  # optional debugger deps
+python -m debugger                            # standalone debugger server on :8099
 ```
 
 Ghidra HTTP endpoint: `http://127.0.0.1:8089`
