@@ -203,6 +203,54 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 > - `functions-extract.sh` — Extract functions via Ghidra REST API (uses `curl`/`jq`)
 > - `functions-process.sh` — Parallel function processing with Claude CLI
 
+### Installation (macOS — Homebrew)
+
+1. **Install prerequisites:**
+   ```bash
+   brew install openjdk@21 maven python ghidra
+   ```
+
+2. **Clone the repository:**
+   ```bash
+   git clone https://github.com/bethington/ghidra-mcp.git
+   cd ghidra-mcp
+   ```
+
+3. **Install Ghidra JARs into local Maven:**
+   ```bash
+   ./ghidra-mcp-setup.sh --setup-deps \
+     --ghidra-path /opt/homebrew/opt/ghidra/libexec \
+     --ghidra-version 12.0.4
+   ```
+
+4. **Build and deploy:**
+   ```bash
+   ./ghidra-mcp-setup.sh --deploy \
+     --ghidra-path /opt/homebrew/opt/ghidra/libexec \
+     --ghidra-version 12.0.4
+   ```
+   The extension is installed to `~/Library/ghidra/ghidra_12.0.4_PUBLIC/Extensions/GhidraMCP/`.
+
+   > **Note:** `--ghidra-version` is required when using the Homebrew path because the path contains no version string.
+
+5. **Start Ghidra and enable the plugin:**
+   ```bash
+   /opt/homebrew/opt/ghidra/libexec/ghidraRun
+   ```
+   In the main project window: **Tools > GhidraMCP > Start MCP Server**
+
+6. **Configure Cursor/Claude MCP** (`~/.cursor/mcp.json`):
+   ```json
+   {
+     "mcpServers": {
+       "ghidra": {
+         "command": "uv",
+         "args": ["run", "--script", "/path/to/ghidra-mcp/bridge_mcp_ghidra.py"]
+       }
+     }
+   }
+   ```
+
 ### Basic Usage
 
 #### Option 1: Stdio Transport (Recommended for AI tools)
