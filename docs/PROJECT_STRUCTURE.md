@@ -18,9 +18,9 @@ ghidra-mcp/
 │   └── README.md                      # Project overview
 │
 ├── 🔨 Build & Deployment (Root)
-│   ├── ghidra-mcp-setup.ps1           # Unified script: setup deps, build, deploy, clean
-│   ├── clean-install.ps1             # Clean installation script
-│   └── cleanup.ps1                   # Cleanup build artifacts
+│   ├── tools/setup/                  # Python-first setup/build/deploy/versioning helpers
+│   ├── pom.xml                       # Canonical Maven build configuration
+│   └── build.gradle                  # Secondary/manual Gradle build support
 │
 ├── 📊 Analysis & Data Files (Root)
 │   ├── game.json                     # Game executable analysis data
@@ -215,9 +215,9 @@ Essential files that define the project and should remain at root level:
 
 ### Build & Deployment (Keep in Root)
 Scripts frequently used during development:
-- `ghidra-mcp-setup.ps1`
-- `clean-install.ps1`
-- `cleanup.ps1`
+- `python -m tools.setup preflight`
+- `python -m tools.setup ensure-prereqs`
+- `python -m tools.setup build`
 
 ### Data Files (Keep in Root)
 Frequently accessed analysis data:
@@ -354,7 +354,7 @@ After moving files:
 | Task | Location |
 |------|----------|
 | Start MCP server | `bridge_mcp_ghidra.py` |
-| Deploy plugin | `ghidra-mcp-setup.ps1` |
+| Deploy plugin | `python -m tools.setup deploy` |
 | Run tests | `pytest tests/` |
 | Extract functions | `scripts/functions-extract.ps1` |
 | Process data | `scripts/data-process.ps1` |
@@ -371,7 +371,7 @@ After moving files:
 - **Root-level files**: ~40 files (to be reduced to ~25)
 - **Documentation files**: ~15 in root, ~30 in docs/
 - **Python scripts**: ~172 total
-- **PowerShell scripts**: ~24 total
+- **PowerShell scripts**: legacy/compatibility only where still present
 - **Directories**: 15+ main directories
 
 ---

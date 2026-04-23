@@ -102,11 +102,10 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Installation
 
-> Recommended for Windows: use `ghidra-mcp-setup.ps1` as the primary entry point.
-> It handles prerequisite setup + build + deployment in one command.
+> Recommended for all platforms: use `python -m tools.setup` directly.
 >
-> **Important:** `-SetupDeps` installs Maven/Ghidra JAR dependencies only.
-> `-Deploy` is the end-user command and (by default) also ensures Python requirements before build/deploy.
+> `ensure-prereqs` installs runtime Python requirements plus the Ghidra JARs needed in the local Maven repository.
+> `deploy` copies the build output, installs the user-profile extension, and patches Ghidra user config.
 
 1. **Clone the repository:**
    ```bash
@@ -116,32 +115,35 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 2. **Recommended: run environment preflight first:**
    ```powershell
-   .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "F:\ghidra_12.0.4_PUBLIC"
+   python -m tools.setup preflight --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
    ```
 
 3. **Build and deploy to Ghidra (single command):**
    ```powershell
-   .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "F:\ghidra_12.0.4_PUBLIC"
+   python -m tools.setup ensure-prereqs --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
+   python -m tools.setup build
+   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
+   python -m tools.setup start-ghidra --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
    ```
 
 4. **Optional strict/manual mode** (advanced):
    ```powershell
    # Skip automatic prerequisite setup
-   .\ghidra-mcp-setup.ps1 -Deploy -NoAutoPrereqs -GhidraPath "F:\ghidra_12.0.4_PUBLIC"
+   python -m tools.setup build
+   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
    ```
 
-5. **Show script help**:
+5. **Show command help**:
    ```powershell
-   .\ghidra-mcp-setup.ps1 -Help
-   # or
-   Get-Help .\ghidra-mcp-setup.ps1 -Detailed
+   python -m tools.setup --help
    ```
 
 6. **Optional build-only mode** (advanced/troubleshooting):
    ```powershell
-   # Preferred: script-managed build-only
-   .\ghidra-mcp-setup.ps1 -BuildOnly
+   python -m tools.setup build
    ```
+
+   Supported build path: `python -m tools.setup build` uses Maven under the hood and is the canonical workflow used by the repo tasks and docs.
 
    ```bash
    # Manual Maven build (requires Ghidra deps already installed in local .m2)
@@ -149,14 +151,11 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    ```
 
    ```bash
-   # Manual Gradle build (requires GHIDRA_INSTALL_DIR)
+   # Secondary/manual Gradle build path only (not used by tools.setup or VS Code tasks)
    GHIDRA_INSTALL_DIR=/path/to/ghidra gradle buildExtension
    ```
 
 ### Installation (Linux — Ubuntu/Debian)
-
-> Use `ghidra-mcp-setup.sh` as the primary entry point on Linux.
-> It handles prerequisite setup, Maven dependency installation, building, and deployment.
 
 1. **Clone the repository:**
    ```bash
@@ -171,12 +170,14 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 3. **Run environment preflight:**
    ```bash
-   ./ghidra-mcp-setup.sh --preflight --ghidra-path ~/ghidra_12.0.4_PUBLIC
+   python -m tools.setup preflight --ghidra-path ~/ghidra_12.0.4_PUBLIC
    ```
 
 4. **Build and deploy to Ghidra (single command):**
    ```bash
-   ./ghidra-mcp-setup.sh --deploy --ghidra-path ~/ghidra_12.0.4_PUBLIC
+   python -m tools.setup ensure-prereqs --ghidra-path ~/ghidra_12.0.4_PUBLIC
+   python -m tools.setup build
+   python -m tools.setup deploy --ghidra-path ~/ghidra_12.0.4_PUBLIC
    ```
 
    This will:
@@ -188,12 +189,12 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 5. **Optional: setup only Maven dependencies:**
    ```bash
-   ./ghidra-mcp-setup.sh --setup-deps --ghidra-path ~/ghidra_12.0.4_PUBLIC
+   python -m tools.setup install-ghidra-deps --ghidra-path ~/ghidra_12.0.4_PUBLIC
    ```
 
-6. **Show script help:**
+6. **Show command help:**
    ```bash
-   ./ghidra-mcp-setup.sh --help
+   python -m tools.setup --help
    ```
 
 > **Linux paths:** The extension is installed to `$HOME/.config/ghidra/ghidra_<version>_PUBLIC/Extensions/GhidraMCP/`.
@@ -218,16 +219,17 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 3. **Install Ghidra JARs into local Maven:**
    ```bash
-   ./ghidra-mcp-setup.sh --setup-deps \
-     --ghidra-path /opt/homebrew/opt/ghidra/libexec \
-     --ghidra-version 12.0.4
+    python -m tools.setup install-ghidra-deps \
+       --ghidra-path /opt/homebrew/opt/ghidra/libexec
    ```
 
 4. **Build and deploy:**
    ```bash
-   ./ghidra-mcp-setup.sh --deploy \
-     --ghidra-path /opt/homebrew/opt/ghidra/libexec \
-     --ghidra-version 12.0.4
+    python -m tools.setup ensure-prereqs \
+       --ghidra-path /opt/homebrew/opt/ghidra/libexec
+    python -m tools.setup build
+    python -m tools.setup deploy \
+       --ghidra-path /opt/homebrew/opt/ghidra/libexec
    ```
    The extension is installed to `~/Library/ghidra/ghidra_12.0.4_PUBLIC/Extensions/GhidraMCP/`.
 
@@ -397,7 +399,7 @@ into and run from the same interpreter.
 **Solution:**
 ```powershell
 # Windows (recommended)
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
+python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
 # Or manual install (see install-ghidra-deps.sh)
 ```
@@ -661,57 +663,56 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Building from Source
 ```bash
-# Recommended: one command does setup + build + deploy
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
+# Recommended: direct Python-first workflow
+python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
+python -m tools.setup build
+python -m tools.setup deploy --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
-# Optional: build only (no deploy)
-.\ghidra-mcp-setup.ps1 -BuildOnly
-
-# Version bump (updates all 7 project files atomically)
-.\bump-version.ps1 -New X.Y.Z
+# Version bump (updates all maintained version references atomically)
+python -m tools.setup bump-version --new X.Y.Z
 ```
 
-### Script Command Reference
+The authoritative build system today is Maven. `tools.setup`, the VS Code tasks, and the documented deploy flow all build through `pom.xml` and write artifacts to `target/`. `build.gradle` remains in the repo as a manual fallback for direct Ghidra/Gradle users, but it is not the primary path.
+
+### Command Reference
 
 Primary actions (choose one):
-- `-Deploy` (default): auto-setup prereqs, build, deploy
-- `-SetupDeps`: install Ghidra JARs into local `.m2` (Maven deps only; no Python package install)
-- `-BuildOnly`: build artifacts only
-- `-Clean`: remove build/cache artifacts and local Ghidra dependency folders in `.m2` for the active Ghidra version
-- `-Preflight`: validate tools, paths, required Ghidra jars, and write access without making changes
+- `python -m tools.setup ensure-prereqs --ghidra-path ...`: install runtime Python requirements and Ghidra Maven deps
+- `python -m tools.setup build`: build artifacts only
+- `python -m tools.setup deploy --ghidra-path ...`: deploy build output and patch the user Ghidra profile
+- `python -m tools.setup clean-all`: remove build/cache artifacts
+- `python -m tools.setup preflight --ghidra-path ...`: validate tools, paths, required Ghidra jars, and write access without making changes
 
 Useful options:
-- `-GhidraPath "C:\ghidra_12.0.4_PUBLIC"`
-- `-GhidraVersion "12.0.4"`
-- `-StrictPreflight`
-- `-NoAutoPrereqs`
-- `-SkipBuild`
-- `-SkipRestart`
-- `-DryRun`
-- `-Force`
-- `-Verbose`
-- `-Help`
+- `--ghidra-path "C:\ghidra_12.0.4_PUBLIC"`
+- `--strict`
+- `--use-debugger-toggle`
+- `--dry-run`
+- `--force`
+- `python -m tools.setup --help`
 
 Quick examples:
 
 ```powershell
 # Standard deploy (recommended)
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
+python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
+python -m tools.setup build
+python -m tools.setup deploy --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
 # First-time dependency setup only
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
+python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
 # Build only
-.\ghidra-mcp-setup.ps1 -BuildOnly
+python -m tools.setup build
 
 # Preflight checks only
-.\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
+python -m tools.setup preflight --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
 # Strict preflight (fails on warnings)
-.\ghidra-mcp-setup.ps1 -Preflight -StrictPreflight -GhidraPath "C:\ghidra_12.0.4_PUBLIC"
+python -m tools.setup preflight --strict --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
 # Show command help
-.\ghidra-mcp-setup.ps1 -Help
+python -m tools.setup --help
 ```
 
 ### Project Structure
@@ -742,30 +743,25 @@ This is a one-time setup per machine, and again when your Ghidra version changes
 
 The tool enforces version consistency between:
 - `pom.xml` (`ghidra.version`)
-- `-GhidraVersion` (if provided)
-- `-GhidraPath` version segment (e.g., `ghidra_12.0.4_PUBLIC`)
+- `--ghidra-path` version segment (e.g., `ghidra_12.0.4_PUBLIC`)
 
 If these do not match, deployment fails fast with a clear error.
 
 ### Troubleshooting: Version Mismatch
 
-If you see a version mismatch error, align all three values:
+If you see a version mismatch error, align both values:
 1. `pom.xml` → `ghidra.version`
-2. `-GhidraVersion` (if used)
-3. `-GhidraPath` version segment (`ghidra_X.Y.Z_PUBLIC`)
+2. `--ghidra-path` version segment (`ghidra_X.Y.Z_PUBLIC`)
 
 Then rerun:
 
 ```powershell
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.4_PUBLIC" -GhidraVersion "12.0.4"
+python -m tools.setup preflight --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 ```
 
 ```powershell
 # Windows
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.4_PUBLIC"
-
-# Optional version override
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.4_PUBLIC" -GhidraVersion "12.0.4"
+python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 ```
 
 **Required Libraries (14 JARs, ~37MB):**
@@ -789,10 +785,10 @@ Then rerun:
 
 > **Note**: Libraries are NOT included in the repository (see `.gitignore`). You must install them from your Ghidra installation before building.
 
-> **Script roles**:
-> - `ghidra-mcp-setup.ps1`: unified automation script (`-SetupDeps`, `-BuildOnly`, `-Deploy`, `-Clean`)
-> - default `-Deploy` behavior: auto-setup prerequisites, then build and deploy
-> - use `-NoAutoPrereqs` for strict/manual prerequisite management
+> **Automation entry point**:
+> - `python -m tools.setup` is the supported setup/build/deploy/versioning interface
+> - use `ensure-prereqs`, `build`, `deploy`, `preflight`, `clean-all`, and `bump-version` directly
+> - these commands currently use Maven as the canonical Java build backend
 
 ### Development Features
 - **Automated Deployment**: Version-aware deployment script

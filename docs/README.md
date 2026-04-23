@@ -8,7 +8,8 @@ This directory contains all project documentation organized by category for easy
 docs/
 ├── project-management/     # Project administration and reports
 │   ├── CLAUDE.md          # Claude AI interaction notes
-│   └── CLEANUP_FINAL_REPORT.md  # Project cleanup documentation
+│   ├── CLEANUP_FINAL_REPORT.md  # Project cleanup documentation
+│   └── GRADLE_MIGRATION_CHECKLIST.md  # Planned Gradle cutover checklist
 │
 ├── prompts/               # AI prompting workflows and guides
 │   ├── README.md         # Overview of prompting system

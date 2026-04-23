@@ -40,15 +40,38 @@ Use this file for architecture, conventions, and implementation guidance; use th
 
 ## Build & Deploy
 
+Two backends are supported. Maven is the default; Gradle is the new primary path. Switch with `TOOLS_SETUP_BACKEND=gradle`.
+
+**Gradle (set `TOOLS_SETUP_BACKEND=gradle` or invoke directly):**
+
 ```powershell
-.\ghidra-mcp-setup.ps1 -BuildOnly          # Build only (~7s)
-.\ghidra-mcp-setup.ps1 -Deploy              # Build + deploy + restart Ghidra
-.\ghidra-mcp-setup.ps1 -SetupDeps           # First-time: install Ghidra JARs to local Maven
+# Direct Gradle invocation — no tools.setup required
+./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
+./gradlew preflight      -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
+./gradlew deploy         -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
+./gradlew startGhidra    -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
+
+# Via tools.setup facade (same commands, Gradle backend)
+$env:TOOLS_SETUP_BACKEND = "gradle"
+python -m tools.setup build
+python -m tools.setup preflight --ghidra-path F:\ghidra_12.0.4_PUBLIC
+python -m tools.setup deploy    --ghidra-path F:\ghidra_12.0.4_PUBLIC
+```
+
+**Maven (default — existing tooling unchanged):**
+
+```powershell
+python -m tools.setup build
+python -m tools.setup preflight      --ghidra-path F:\ghidra_12.0.4_PUBLIC
+python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.0.4_PUBLIC
+python -m tools.setup deploy         --ghidra-path F:\ghidra_12.0.4_PUBLIC
 ```
 
 - Maven: `C:\Users\benam\tools\apache-maven-3.9.6\bin\mvn.cmd`
 - Ghidra install: `F:\ghidra_12.0.4_PUBLIC`
-- Deploy handles: Maven build, extension install, FrontEndTool.xml patching, Ghidra restart
+- `tools.setup` delegates to Maven by default; set `TOOLS_SETUP_BACKEND=gradle` to route the same commands to Gradle
+- Deploy handles: build, extension install, FrontEndTool.xml patching, Ghidra restart
+- Migration plan: `docs/project-management/GRADLE_MIGRATION_CHECKLIST.md`
 
 ## Running the MCP Server
 
@@ -95,10 +118,12 @@ When building new tools or modifying existing ones, wire validation through `Nam
 ## Testing
 
 - **Offline (no Ghidra required)**:
-  - Java: `mvn test -Dtest='com.xebyte.offline.*Test'` -- annotation scanner + `tests/endpoints.json` parity (~0.5s, 11 tests)
+  - Java (Gradle): `./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC`
+  - Java (Maven): `mvn test -Dtest='com.xebyte.offline.*Test'` -- annotation scanner + `tests/endpoints.json` parity (~0.5s, 11 tests)
   - Python: `pytest tests/performance/test_selector_invariants.py tests/performance/test_state_atomicity.py`
 - **Integration (Ghidra required on port 8089)**:
-  - Java: `mvn test` -- runs everything including endpoint registration tests
+  - Java (Gradle): `./gradlew test -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC`
+  - Java (Maven): `mvn test` -- runs everything including endpoint registration tests
   - Python: `pytest tests/`
 - **Catalog drift**: if `EndpointsJsonParityTest` fails after adding/modifying an `@McpTool`, run `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true` to rewrite `tests/endpoints.json` from the scanner (preserves hand-authored descriptions and hand-registered routes).
 
