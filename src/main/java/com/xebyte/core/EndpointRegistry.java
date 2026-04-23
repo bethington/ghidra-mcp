@@ -121,6 +121,14 @@ public class EndpointRegistry {
         return qStr(name, "");
     }
 
+    private static EndpointDef.ParamDef qStrOpt(String name, String desc) {
+        return new EndpointDef.ParamDef(name, "string", "query", false, null, desc);
+    }
+
+    private static EndpointDef.ParamDef qStrOpt(String name) {
+        return qStrOpt(name, "");
+    }
+
     private static EndpointDef.ParamDef qInt(String name, int def, String desc) {
         return new EndpointDef.ParamDef(name, "integer", "query", false, String.valueOf(def), desc);
     }
@@ -470,7 +478,7 @@ public class EndpointRegistry {
             (q, b) -> functionService.forceDecompile(str(q, "address"), str(q, "program")));
 
         get("/batch_decompile", "Decompile multiple functions at once",
-            params(qStr("functions", "Comma-separated function names"), pProg()),
+            params(qStr("functions", "Comma-separated function references (names or addresses)"), pProg()),
             (q, b) -> functionService.batchDecompileFunctions(str(q, "functions"), str(q, "program")));
 
         post("/rename_function", "Rename function by old and new name",
@@ -482,8 +490,8 @@ public class EndpointRegistry {
             (q, b) -> functionService.renameFunctionByAddress(bodyStr(b, "function_address"), bodyStr(b, "new_name"), str(q, "program")));
 
         post("/rename_variable", "Rename a variable in a function",
-            params(bStr("functionName"), bStr("oldName"), bStr("newName"), pProg()),
-            (q, b) -> functionService.renameVariableInFunction(bodyStr(b, "functionName"), bodyStr(b, "oldName"),
+            params(bStrOpt("functionName"), bStrOpt("function_address"), bStr("oldName"), bStr("newName"), pProg()),
+            (q, b) -> functionService.renameVariableInFunction(bodyStr(b, "functionName"), bodyStr(b, "function_address"), bodyStr(b, "oldName"),
                 bodyStr(b, "newName"), str(q, "program")));
 
         post("/set_function_prototype", "Set function prototype with calling convention",
@@ -533,8 +541,8 @@ public class EndpointRegistry {
                 bodyStr(b, "variable_name"), bodyStr(b, "storage"), str(q, "program")));
 
         get("/get_function_variables", "List all variables in a function",
-            params(qStr("function_name", "Function name"), pProg()),
-            (q, b) -> functionService.getFunctionVariables(str(q, "function_name"), str(q, "program"), null, null));
+            params(qStrOpt("function_name", "Function name"), qStrOpt("address", "Function address; takes precedence over function_name"), pProg()),
+            (q, b) -> functionService.getFunctionVariables(str(q, "function_name"), str(q, "address"), str(q, "program"), null, null));
 
         post("/batch_rename_function_components", "Rename function and components atomically",
             params(bStr("function_address"), bStrOpt("function_name"), bObj("parameter_renames"),
@@ -977,7 +985,7 @@ public class EndpointRegistry {
                 num(q, "limit", 100), str(q, "program")));
 
         get("/analyze_function_complete", "Comprehensive single-call function analysis",
-            params(qStr("name", "Function name"), qBool("include_xrefs", true), qBool("include_callees", true),
+            params(qStr("name", "Function reference (name or address)"), qBool("include_xrefs", true), qBool("include_callees", true),
                 qBool("include_callers", true), qBool("include_disasm", true),
                 qBool("include_variables", true), pProg()),
             (q, b) -> analysisService.analyzeFunctionComplete(str(q, "name"),

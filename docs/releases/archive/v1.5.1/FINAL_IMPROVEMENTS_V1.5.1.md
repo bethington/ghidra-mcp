@@ -340,12 +340,12 @@ mvn clean package assembly:single -DskipTests -q
 ## Deployment Instructions
 
 ### Quick Deployment (Recommended)
-```powershell
-.\ghidra-mcp-setup.ps1
+```text
+python -m tools.setup deploy --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 ```
 
-This script will:
-1. Auto-detect Ghidra installation
+This command will:
+1. Use the configured Ghidra installation
 2. Remove old GhidraMCP installations
 3. Install GhidraMCP-1.5.1.zip to Extensions/Ghidra/
 4. Copy JAR to user Extensions directory
@@ -356,9 +356,8 @@ This script will:
 
 1. **Stop Ghidra** if running
 2. **Install Plugin**:
-   ```powershell
-   Copy-Item target\GhidraMCP-1.5.1.zip "C:\ghidra\Extensions\Ghidra\"
-   ```
+   Copy `target\GhidraMCP-1.5.1.zip` into your Ghidra `Extensions\Ghidra`
+   directory.
 3. **Restart Ghidra**
 4. **Enable Plugin** (if not auto-enabled):
    - File → Configure...

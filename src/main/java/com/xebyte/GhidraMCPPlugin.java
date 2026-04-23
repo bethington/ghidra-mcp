@@ -261,12 +261,19 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         Msg.info(this, "Endpoints: " + VersionInfo.getEndpointCount());
         Msg.info(this, "============================================");
 
-        // Server authenticator: GhidraMCPAuthInitializer (ModuleInitializer) handles
-        // early registration from GHIDRA_SERVER_PASSWORD env var — runs before project opens.
-        // The /server/authenticate endpoint handles runtime credential updates.
+        // Server authenticator: ensure credentials are registered before any project opens.
+        // GhidraMCPAuthInitializer implements ModuleInitializer, but that ExtensionPoint
+        // is only reliable for Ghidra's own built-in modules — user extensions may not be
+        // discovered by ClassSearcher in time. Call run() explicitly here as a guaranteed
+        // fallback; it has an idempotency guard so double-invocation is safe.
+        if (!com.xebyte.core.GhidraMCPAuthInitializer.isRegistered()) {
+            new com.xebyte.core.GhidraMCPAuthInitializer().run();
+        }
         if (com.xebyte.core.GhidraMCPAuthInitializer.isRegistered()) {
             this.authenticator = com.xebyte.core.GhidraMCPAuthInitializer.getAuthenticator();
-            Msg.info(this, "GhidraMCP: Server authenticator was registered at startup");
+            Msg.info(this, "GhidraMCP: Server authenticator registered — auto-login active");
+        } else {
+            Msg.info(this, "GhidraMCP: No server credentials configured — GUI auth will be used");
         }
 
         // Register configuration options
@@ -2592,7 +2599,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      */
     @SuppressWarnings("deprecation")
     private String getFunctionVariables(String functionName, String programName) {
-        return functionService.getFunctionVariables(functionName, programName, null, null).toJson();
+        return functionService.getFunctionVariables(functionName, null, programName, null, null).toJson();
     }
 
     // Backward compatibility overload

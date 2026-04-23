@@ -30,8 +30,14 @@ REQUIRED_GHIDRA_JARS: tuple[tuple[str, str], ...] = (
     ("FunctionID", "Ghidra/Features/FunctionID/lib/FunctionID.jar"),
     ("Help", "Ghidra/Framework/Help/lib/Help.jar"),
     ("Debugger-api", "Ghidra/Debug/Debugger-api/lib/Debugger-api.jar"),
-    ("Framework-TraceModeling", "Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar"),
-    ("Debugger-rmi-trace", "Ghidra/Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar"),
+    (
+        "Framework-TraceModeling",
+        "Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar",
+    ),
+    (
+        "Debugger-rmi-trace",
+        "Ghidra/Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar",
+    ),
 )
 
 PLUGIN_CLASS = "com.xebyte.GhidraMCPPlugin"
@@ -59,14 +65,18 @@ def _version_sort_key(name: str) -> tuple[int, int, int]:
     return (int(match.group(1)), int(match.group(2)), int(match.group(3) or 0))
 
 
-def resolve_ghidra_user_dir(ghidra_path: Path, user_base_dir: Path | None = None) -> Path:
+def resolve_ghidra_user_dir(
+    ghidra_path: Path, user_base_dir: Path | None = None
+) -> Path:
     user_base_dir = user_base_dir or ghidra_user_base_dir()
     target_version = infer_ghidra_version_from_path(ghidra_path)
 
     if user_base_dir.is_dir() and target_version:
         matching_dirs = sorted(user_base_dir.glob(f"ghidra_{target_version}*"))
         if matching_dirs:
-            public_dir = next((path for path in matching_dirs if "PUBLIC" in path.name), None)
+            public_dir = next(
+                (path for path in matching_dirs if "PUBLIC" in path.name), None
+            )
             return public_dir or matching_dirs[0]
 
     if user_base_dir.is_dir():
@@ -107,7 +117,7 @@ def patch_frontend_tool_config(content: str) -> tuple[str, bool]:
         replacement = (
             '<PACKAGE NAME="Utility">\n'
             f'                <INCLUDE CLASS="{PLUGIN_CLASS}" />\n'
-            '            </PACKAGE>'
+            "            </PACKAGE>"
         )
         updated = updated.replace(utility_self_closing, replacement, 1)
         return updated, True
@@ -121,13 +131,13 @@ def patch_frontend_tool_config(content: str) -> tuple[str, bool]:
         updated = updated.replace(utility_block, replacement, 1)
         return updated, True
 
-    root_node = '<ROOT_NODE'
+    root_node = "<ROOT_NODE"
     if root_node in updated:
         insertion = (
             '<PACKAGE NAME="Utility">\n'
             f'                <INCLUDE CLASS="{PLUGIN_CLASS}" />\n'
-            '            </PACKAGE>\n'
-            '<ROOT_NODE'
+            "            </PACKAGE>\n"
+            "<ROOT_NODE"
         )
         updated = updated.replace(root_node, insertion, 1)
         return updated, True
@@ -153,7 +163,9 @@ def patch_ghidra_user_configs(user_base_dir: Path, *, dry_run: bool = False) -> 
         return
 
     for front_end_file in sorted(user_base_dir.glob("*/FrontEndTool.xml")):
-        updated, modified = patch_frontend_tool_config(front_end_file.read_text(encoding="utf-8"))
+        updated, modified = patch_frontend_tool_config(
+            front_end_file.read_text(encoding="utf-8")
+        )
         if not modified:
             continue
         if dry_run:
@@ -184,11 +196,17 @@ def _find_plugin_jar(repo_root: Path) -> Path | None:
         if candidate.is_file():
             return candidate
 
-    jars = sorted(target_dir.glob("GhidraMCP*.jar"), key=lambda path: path.stat().st_mtime, reverse=True)
+    jars = sorted(
+        target_dir.glob("GhidraMCP*.jar"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
     return jars[0] if jars else None
 
 
-def install_user_extension(repo_root: Path, ghidra_path: Path, archive_path: Path, *, dry_run: bool = False) -> Path:
+def install_user_extension(
+    repo_root: Path, ghidra_path: Path, archive_path: Path, *, dry_run: bool = False
+) -> Path:
     user_base_dir = ghidra_user_base_dir()
     user_version_dir = resolve_ghidra_user_dir(ghidra_path, user_base_dir)
     user_extensions_base = user_version_dir / "Extensions"
@@ -215,7 +233,9 @@ def install_user_extension(repo_root: Path, ghidra_path: Path, archive_path: Pat
     except Exception as exc:
         plugin_jar = _find_plugin_jar(repo_root)
         if plugin_jar is None:
-            raise RuntimeError("Extension extraction failed and no fallback plugin jar was found") from exc
+            raise RuntimeError(
+                "Extension extraction failed and no fallback plugin jar was found"
+            ) from exc
 
         fallback_destination = user_lib_dir / "GhidraMCP.jar"
         shutil.copy2(plugin_jar, fallback_destination)
@@ -248,11 +268,17 @@ def find_plugin_archive(repo_root: Path) -> Path:
             return candidate
 
     for search_dir in [repo_root / "build" / "distributions", repo_root / "target"]:
-        archives = sorted(search_dir.glob("GhidraMCP*.zip"), key=lambda path: path.stat().st_mtime, reverse=True)
+        archives = sorted(
+            search_dir.glob("GhidraMCP*.zip"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
         if archives:
             return archives[0]
 
-    raise FileNotFoundError("No GhidraMCP plugin archive found in build/distributions/ or target/")
+    raise FileNotFoundError(
+        "No GhidraMCP plugin archive found in build/distributions/ or target/"
+    )
 
 
 def print_command(command: list[str]) -> None:
@@ -275,7 +301,12 @@ def install_ghidra_dependencies(
         if not jar_path.is_file():
             raise FileNotFoundError(f"Missing required Ghidra jar: {jar_path}")
 
-        cached_jar = m2_root / artifact_id / ghidra_version / f"{artifact_id}-{ghidra_version}.jar"
+        cached_jar = (
+            m2_root
+            / artifact_id
+            / ghidra_version
+            / f"{artifact_id}-{ghidra_version}.jar"
+        )
         if cached_jar.is_file() and not force:
             print(f"Skipping already installed dependency: {artifact_id}")
             continue
@@ -350,15 +381,23 @@ def collect_preflight_issues(
     if install_debugger:
         debugger_requirements = repo_root / "requirements-debugger.txt"
         if not debugger_requirements.is_file():
-            issues.append(f"Debugger requirements file not found: {debugger_requirements}")
+            issues.append(
+                f"Debugger requirements file not found: {debugger_requirements}"
+            )
 
     extensions_dir = ghidra_path / "Extensions" / "Ghidra"
     if not test_write_access(extensions_dir):
-        issues.append(f"No write access to Ghidra extensions directory: {extensions_dir}")
+        issues.append(
+            f"No write access to Ghidra extensions directory: {extensions_dir}"
+        )
 
-    user_extension_dir = resolve_ghidra_user_dir(ghidra_path, user_base_dir) / "Extensions"
+    user_extension_dir = (
+        resolve_ghidra_user_dir(ghidra_path, user_base_dir) / "Extensions"
+    )
     if not test_write_access(user_extension_dir):
-        issues.append(f"No write access to user extension directory: {user_extension_dir}")
+        issues.append(
+            f"No write access to user extension directory: {user_extension_dir}"
+        )
 
     if strict:
         for url in ("https://repo.maven.apache.org", "https://pypi.org"):
@@ -372,22 +411,35 @@ def collect_preflight_issues(
     return issues
 
 
-def deploy_to_ghidra(repo_root: Path, ghidra_path: Path, *, dry_run: bool = False) -> int:
+def deploy_to_ghidra(
+    repo_root: Path, ghidra_path: Path, *, dry_run: bool = False
+) -> int:
     archive_path = find_plugin_archive(repo_root)
     extensions_dir = ghidra_path / "Extensions" / "Ghidra"
     destination_archive = extensions_dir / archive_path.name
     bridge_source = repo_root / "bridge_mcp_ghidra.py"
     requirements_source = repo_root / "requirements.txt"
+    dotenv_source = repo_root / ".env"
     user_base_dir = ghidra_user_base_dir()
 
     if dry_run:
         print(f"DRY RUN: ensure directory {extensions_dir}")
-        print(f"DRY RUN: remove existing archives matching {extensions_dir / 'GhidraMCP*.zip'}")
+        print(
+            f"DRY RUN: remove existing archives matching {extensions_dir / 'GhidraMCP*.zip'}"
+        )
         print(f"DRY RUN: copy {archive_path} -> {destination_archive}")
         if bridge_source.is_file():
-            print(f"DRY RUN: copy {bridge_source} -> {ghidra_path / bridge_source.name}")
+            print(
+                f"DRY RUN: copy {bridge_source} -> {ghidra_path / bridge_source.name}"
+            )
         if requirements_source.is_file():
-            print(f"DRY RUN: copy {requirements_source} -> {ghidra_path / requirements_source.name}")
+            print(
+                f"DRY RUN: copy {requirements_source} -> {ghidra_path / requirements_source.name}"
+            )
+        if dotenv_source.is_file():
+            print(
+                f"DRY RUN: copy {dotenv_source} -> {ghidra_path / dotenv_source.name}"
+            )
         install_user_extension(repo_root, ghidra_path, archive_path, dry_run=True)
         patch_ghidra_user_configs(user_base_dir, dry_run=True)
         return 0
@@ -409,6 +461,11 @@ def deploy_to_ghidra(repo_root: Path, ghidra_path: Path, *, dry_run: bool = Fals
         requirements_destination = ghidra_path / requirements_source.name
         shutil.copy2(requirements_source, requirements_destination)
         print(f"Copied requirements to {requirements_destination}")
+
+    if dotenv_source.is_file():
+        dotenv_destination = ghidra_path / dotenv_source.name
+        shutil.copy2(dotenv_source, dotenv_destination)
+        print(f"Copied .env to {dotenv_destination}")
 
     install_user_extension(repo_root, ghidra_path, archive_path)
     patch_ghidra_user_configs(user_base_dir)

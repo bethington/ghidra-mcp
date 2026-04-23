@@ -28,23 +28,79 @@ def get_current_version(repo_root: Path) -> str:
     return read_pom_versions(repo_root).project_version
 
 
-def build_rules(repo_root: Path, old_version: str, new_version: str) -> list[ReplacementRule]:
+def build_rules(
+    repo_root: Path, old_version: str, new_version: str
+) -> list[ReplacementRule]:
     escaped_old = re.escape(old_version)
     return [
-        ReplacementRule(repo_root / "pom.xml", rf"(<version>){escaped_old}(</version>)", rf"\g<1>{new_version}\g<2>"),
+        ReplacementRule(
+            repo_root / "pom.xml",
+            rf"(<version>){escaped_old}(</version>)",
+            rf"\g<1>{new_version}\g<2>",
+        ),
         ReplacementRule(repo_root / "pom.xml", rf"v{escaped_old}:", f"v{new_version}:"),
-        ReplacementRule(repo_root / "src/main/resources/META-INF/MANIFEST.MF", rf"(Plugin-Version:\s*){escaped_old}", rf"\g<1>{new_version}"),
-        ReplacementRule(repo_root / "src/main/java/com/xebyte/GhidraMCPPlugin.java", rf'"{escaped_old}"', f'"{new_version}"'),
-        ReplacementRule(repo_root / "src/main/java/com/xebyte/headless/HeadlessEndpointHandler.java", rf'"{escaped_old}-headless"', f'"{new_version}-headless"'),
-        ReplacementRule(repo_root / "src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java", rf'"{escaped_old}-headless"', f'"{new_version}-headless"'),
-        ReplacementRule(repo_root / "tests/endpoints.json", r'("version":\s*")\d+\.\d+\.\d+(")', rf'\g<1>{new_version}\g<2>'),
-        ReplacementRule(repo_root / "CLAUDE.md", r"(\*\*Version\*\*:\s*)\d+\.\d+\.\d+", rf"\g<1>{new_version}"),
-        ReplacementRule(repo_root / "README.md", r"(\|\s*\*\*Version\*\*\s*\|\s*)\d+\.\d+\.\d+(\s*\|)", rf"\g<1>{new_version}\g<2>"),
-        ReplacementRule(repo_root / "README.md", rf"Version-{escaped_old}-brightgreen", f"Version-{new_version}-brightgreen"),
-        ReplacementRule(repo_root / "README.md", rf"GhidraMCP Headless Server v{escaped_old}", f"GhidraMCP Headless Server v{new_version}"),
-        ReplacementRule(repo_root / "AGENTS.md", r"(\*\*Version\*\*:\s*)\d+\.\d+\.\d+", rf"\g<1>{new_version}"),
-        ReplacementRule(repo_root / "docs/releases/README.md", r"### v\d+\.\d+\.\d+ \(Latest\)", f"### v{new_version} (Latest)"),
-        ReplacementRule(repo_root / "docs/releases/README.md", r"\(v\d+\.\d+\.\d+\)", f"(v{new_version})"),
+        ReplacementRule(
+            repo_root / "src/main/resources/META-INF/MANIFEST.MF",
+            rf"(Plugin-Version:\s*){escaped_old}",
+            rf"\g<1>{new_version}",
+        ),
+        ReplacementRule(
+            repo_root / "src/main/java/com/xebyte/GhidraMCPPlugin.java",
+            rf'"{escaped_old}"',
+            f'"{new_version}"',
+        ),
+        ReplacementRule(
+            repo_root
+            / "src/main/java/com/xebyte/headless/HeadlessEndpointHandler.java",
+            rf'"{escaped_old}-headless"',
+            f'"{new_version}-headless"',
+        ),
+        ReplacementRule(
+            repo_root
+            / "src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java",
+            rf'"{escaped_old}-headless"',
+            f'"{new_version}-headless"',
+        ),
+        ReplacementRule(
+            repo_root / "tests/endpoints.json",
+            r'("version":\s*")\d+\.\d+\.\d+(")',
+            rf"\g<1>{new_version}\g<2>",
+        ),
+        ReplacementRule(
+            repo_root / "CLAUDE.md",
+            r"(\*\*Version\*\*:\s*)\d+\.\d+\.\d+",
+            rf"\g<1>{new_version}",
+        ),
+        ReplacementRule(
+            repo_root / "README.md",
+            r"(\|\s*\*\*Version\*\*\s*\|\s*)\d+\.\d+\.\d+(\s*\|)",
+            rf"\g<1>{new_version}\g<2>",
+        ),
+        ReplacementRule(
+            repo_root / "README.md",
+            rf"Version-{escaped_old}-brightgreen",
+            f"Version-{new_version}-brightgreen",
+        ),
+        ReplacementRule(
+            repo_root / "README.md",
+            rf"GhidraMCP Headless Server v{escaped_old}",
+            f"GhidraMCP Headless Server v{new_version}",
+        ),
+        ReplacementRule(
+            repo_root / "AGENTS.md",
+            r"(\*\*Version\*\*:\s*)\d+\.\d+\.\d+",
+            rf"\g<1>{new_version}",
+        ),
+        ReplacementRule(
+            repo_root / "docs/releases/README.md",
+            r"### v\d+\.\d+\.\d+ \(Latest\)",
+            f"### v{new_version} (Latest)",
+        ),
+        ReplacementRule(
+            repo_root / "docs/releases/README.md",
+            r"\(v\d+\.\d+\.\d+\)",
+            f"(v{new_version})",
+        ),
     ]
 
 
@@ -57,7 +113,9 @@ def apply_version_bump(
     tag: bool = False,
 ) -> int:
     validated_new = validate_version(new_version)
-    effective_old = validate_version(old_version) if old_version else get_current_version(repo_root)
+    effective_old = (
+        validate_version(old_version) if old_version else get_current_version(repo_root)
+    )
 
     if effective_old == validated_new:
         print(f"SKIP: already at version {validated_new}")
@@ -102,7 +160,16 @@ def apply_version_bump(
         print("")
         print(f"Creating git tag {tag_name}...")
         completed = subprocess.run(
-            ["git", "-C", str(repo_root), "tag", "-a", tag_name, "-m", f"Release {tag_name}"],
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "tag",
+                "-a",
+                tag_name,
+                "-m",
+                f"Release {tag_name}",
+            ],
             check=False,
         )
         if completed.returncode == 0:

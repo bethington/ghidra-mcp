@@ -175,6 +175,7 @@ SEGMENT_ADDR_WITH_0X_PATTERN = re.compile(
 )
 FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+MAX_TOOL_NAME_LENGTH = 64
 INVALID_TOOL_NAME_CHARS = re.compile(r"[^a-zA-Z0-9_-]+")
 REPEATED_UNDERSCORES = re.compile(r"_+")
 
@@ -241,6 +242,10 @@ def sanitize_tool_name(name: str) -> str:
     sanitized = REPEATED_UNDERSCORES.sub("_", sanitized).strip("_")
     if not sanitized:
         raise ValueError(f"Tool name {name!r} is empty after sanitization")
+    if len(sanitized) > MAX_TOOL_NAME_LENGTH:
+        sanitized = sanitized[:MAX_TOOL_NAME_LENGTH].rstrip("_")
+    if not sanitized:
+        raise ValueError(f"Tool name {name!r} is empty after truncation")
     if not TOOL_NAME_PATTERN.match(sanitized):
         raise ValueError(f"Sanitized tool name {sanitized!r} is still invalid")
     return sanitized
@@ -254,7 +259,11 @@ def _allocate_tool_name(base_name: str, used_names: set[str]) -> str:
 
     suffix = 2
     while True:
-        candidate = f"{base_name}_{suffix}"
+        suffix_text = f"_{suffix}"
+        trimmed_base = base_name[: MAX_TOOL_NAME_LENGTH - len(suffix_text)].rstrip("_")
+        if not trimmed_base:
+            raise ValueError(f"Tool name {base_name!r} is too short to suffix safely")
+        candidate = f"{trimmed_base}{suffix_text}"
         if candidate not in used_names:
             used_names.add(candidate)
             return candidate
@@ -263,9 +272,9 @@ def _allocate_tool_name(base_name: str, used_names: set[str]) -> str:
 
 def validate_tool_name(name: str) -> None:
     """Fail fast if an exposed MCP tool name is not CAPI-safe."""
-    if not TOOL_NAME_PATTERN.match(name):
+    if not TOOL_NAME_PATTERN.match(name) or len(name) > MAX_TOOL_NAME_LENGTH:
         raise ValueError(
-            f"Invalid MCP tool name {name!r}; expected {TOOL_NAME_PATTERN.pattern}"
+            f"Invalid MCP tool name {name!r}; expected {TOOL_NAME_PATTERN.pattern} and length <= {MAX_TOOL_NAME_LENGTH}"
         )
 
 
@@ -795,7 +804,7 @@ _loaded_groups: set[str] = set()
 CORE_GROUPS = {"listing", "function", "program"}
 
 # CLI-configurable: --lazy keeps only default groups, otherwise load all
-_lazy_mode = True  # default: lazy (only load default groups on connect)
+_lazy_mode = False  # default: eager (load all groups on connect)
 _default_groups: set[str] = CORE_GROUPS
 
 
@@ -1073,12 +1082,15 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     """
     Switch the MCP bridge to a different Ghidra instance by project name.
 
-    IMPORTANT: Before calling this function only ~30 static tools are exposed
-    (list_instances, connect_instance, tool-group management, debugger proxy).
-    The full ~220 Ghidra analysis tools are registered dynamically from the
-    instance's /mcp/schema endpoint after a successful connect. Clients that
-    cache the initial tools/list and don't honor the tools/list_changed
-    notification must re-list tools after this call to see the full set.
+    IMPORTANT: Before calling this function only the static bridge tools are
+    exposed (list_instances, connect_instance, tool-group management,
+    debugger proxy). After a successful connect the bridge fetches the
+    instance's /mcp/schema and registers Ghidra analysis tools dynamically.
+    By default all tool groups are loaded on connect. When started with
+    --lazy, only the default groups are loaded initially and clients may need
+    to call load_tool_group() for additional categories. Clients that cache
+    the initial tools/list and don't honor tools/list_changed must re-list
+    tools after this call.
 
     Use list_instances() first to see available instances.
 
@@ -1110,6 +1122,11 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
             try:
                 count = _fetch_and_register_schema()
                 total = len(_full_schema)
+                note = (
+                    f"Loaded {count}/{total} tools (default groups). Use load_tool_group() for more."
+                    if _lazy_mode
+                    else f"Loaded all {count} tools on connect."
+                )
                 await _notify_tools_changed(ctx)
                 return json.dumps(
                     {
@@ -1121,7 +1138,7 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
                         "tools_registered": count,
                         "tools_total": total,
                         "loaded_groups": sorted(_loaded_groups),
-                        "note": f"Loaded {count}/{total} tools (core groups). Use load_tool_group() for more.",
+                        "note": note,
                     }
                 )
             except Exception as e:
@@ -1143,6 +1160,11 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
         _transport_mode = "tcp"
         count = _fetch_and_register_schema()
         total = len(_full_schema)
+        note = (
+            f"Loaded {count}/{total} tools (default groups). Use load_tool_group() for more."
+            if _lazy_mode
+            else f"Loaded all {count} tools on connect."
+        )
         await _notify_tools_changed(ctx)
         return json.dumps(
             {
@@ -1152,6 +1174,7 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
                 "tools_registered": count,
                 "tools_total": total,
                 "loaded_groups": sorted(_loaded_groups),
+                "note": note,
             }
         )
     except Exception as e:

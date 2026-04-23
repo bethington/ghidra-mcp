@@ -44,7 +44,7 @@ Two backends are supported. Maven is the default; Gradle is the new primary path
 
 **Gradle (set `TOOLS_SETUP_BACKEND=gradle` or invoke directly):**
 
-```powershell
+```text
 # Direct Gradle invocation — no tools.setup required
 ./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
 ./gradlew preflight      -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
@@ -60,7 +60,7 @@ python -m tools.setup deploy    --ghidra-path F:\ghidra_12.0.4_PUBLIC
 
 **Maven (default — existing tooling unchanged):**
 
-```powershell
+```text
 python -m tools.setup build
 python -m tools.setup preflight      --ghidra-path F:\ghidra_12.0.4_PUBLIC
 python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.0.4_PUBLIC

@@ -151,7 +151,7 @@ git pull origin main
 mvn clean package assembly:single -DskipTests
 
 # 3. Deploy to Ghidra
-.\ghidra-mcp-setup.ps1
+python -m tools.setup deploy --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 
 # 4. Restart Ghidra
 ```
@@ -164,13 +164,13 @@ git clone https://github.com/bethington/ghidra-mcp.git
 cd ghidra-mcp
 
 # 2. Install Ghidra libraries
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra"
+python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 
 # 3. Build plugin
 mvn clean package assembly:single
 
 # 4. Deploy
-.\ghidra-mcp-setup.ps1
+python -m tools.setup deploy --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 ```
 
 ---

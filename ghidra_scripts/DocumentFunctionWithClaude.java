@@ -104,7 +104,7 @@ public class DocumentFunctionWithClaude extends GhidraScript {
         String mcpConfig = findMcpConfig(userHome);
         
         if (mcpConfig == null) {
-            popup("Could not find mcp-config.json. Please ensure it exists in:\n" +
+            popup("Could not find .mcp.json. Please ensure it exists in:\n" +
                   "- " + userHome + "\\source\\mcp\\ghidra-mcp\\\n" +
                   "- Current directory");
             return;
@@ -153,11 +153,10 @@ public class DocumentFunctionWithClaude extends GhidraScript {
     }
 
     private String findMcpConfig(String userHome) {
-        // Check common locations
         String[] possiblePaths = {
-            userHome + "\\source\\mcp\\ghidra-mcp\\mcp-config.json",
-            System.getProperty("user.dir") + "\\mcp-config.json",
-            "..\\mcp-config.json"
+            userHome + "\\source\\mcp\\ghidra-mcp\\.mcp.json",
+            System.getProperty("user.dir") + "\\.mcp.json",
+            "..\\.mcp.json"
         };
         
         for (String path : possiblePaths) {

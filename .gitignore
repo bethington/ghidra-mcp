@@ -536,10 +536,6 @@ FunctionsTodo.txt
 # Project-specific batch processing scripts
 apply_prefix_renames.py
 batch-unify-ordinals.bat
-functions-extract.ps1
-functions-extract.sh
-functions-process.ps1
-functions-process.sh
 
 # Project-specific session notes and enhancement docs
 MEMORY.md
@@ -592,3 +588,9 @@ fun-doc/debug/
 
 # Playwright MCP scratch directory (snapshots, screenshots, console logs)
 .playwright-mcp/
+
+# AI tool config directories (Gemini, etc.) — local only, not project config
+.gemini/
+
+# fun-doc historical analysis snapshots (large per-project state files)
+fun-doc/state_*.json

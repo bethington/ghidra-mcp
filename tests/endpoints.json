@@ -124,7 +124,7 @@
         "include_completeness",
         "program"
       ],
-      "description": "Comprehensive single-call function analysis. Requires function name — if you only have an address, call get_function_by_address first."
+      "description": "Comprehensive single-call function analysis. Accepts function name or address."
     },
     {
       "path": "/analyze_function_completeness",
@@ -249,7 +249,7 @@
         "functions",
         "program"
       ],
-      "description": "Batch decompile functions"
+      "description": "Decompile multiple functions at once. Accepts comma-separated function names or addresses."
     },
     {
       "path": "/batch_delete_labels",
@@ -1261,11 +1261,12 @@
       "category": "getter",
       "params": [
         "function_name",
+        "address",
         "program",
         "limit",
         "filter"
       ],
-      "description": "Get function variables"
+      "description": "List all variables in a function. Accepts function_name or address (address takes precedence). Use address to avoid name-lookup issues after a recent rename."
     },
     {
       "path": "/get_function_xrefs",
@@ -1856,11 +1857,12 @@
       "category": "rename",
       "params": [
         "functionName",
+        "function_address",
         "oldName",
         "newName",
         "program"
       ],
-      "description": "Rename variable"
+      "description": "Rename a variable in a function. Accepts functionName or function_address; address is more stable after recent renames."
     },
     {
       "path": "/rename_variables",
@@ -2206,7 +2208,7 @@
         "calling_convention",
         "program"
       ],
-      "description": "Set function prototype"
+      "description": "Set function prototype (return type, param types, calling convention). NOTE: the function name in the prototype string does NOT rename the function — call rename_function_by_address separately if needed."
     },
     {
       "path": "/set_image_base",

@@ -2,11 +2,14 @@ package com.xebyte.core;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
 
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -88,6 +91,23 @@ public final class JsonHelper {
             if (item instanceof Map<?, ?> map) {
                 Map<String, String> strMap = new LinkedHashMap<>();
                 map.forEach((k, v) -> strMap.put(String.valueOf(k), v != null ? String.valueOf(v) : null));
+                result.add(strMap);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Convert a parsed JSON array element to List<Map<String, String>>.
+     */
+    public static List<Map<String, String>> toMapStringList(JsonElement jsonElement) {
+        if (jsonElement == null || !jsonElement.isJsonArray()) return null;
+        List<Map<String, String>> result = new ArrayList<>();
+        for (JsonElement item : jsonElement.getAsJsonArray()) {
+            if (item != null && item.isJsonObject()) {
+                Map<String, Object> rawMap = GSON.fromJson(item, LinkedHashMap.class);
+                Map<String, String> strMap = new LinkedHashMap<>();
+                rawMap.forEach((k, v) -> strMap.put(String.valueOf(k), v != null ? String.valueOf(v) : null));
                 result.add(strMap);
             }
         }

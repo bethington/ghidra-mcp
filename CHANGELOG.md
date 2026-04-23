@@ -208,7 +208,7 @@ count rises from 199 → 219 on main.
   scan the headless-only service so catalog drift in these endpoints
   now fails at `mvn test` time.
 
-- **`--use-venv` flag for Linux setup** (#120) — `ghidra-mcp-setup.sh`
+- **`--use-venv` flag for Linux setup** (#120) — the legacy Linux setup flow
   can now install Python deps into a local `.venv` instead of the
   system Python, required on Ubuntu 24.04+ where system Python is
   externally-managed.
@@ -659,8 +659,8 @@ This is a contract change. If you have scripts or prompts built against earlier 
 
 - **Fixed POST endpoint data format** (#66): `safe_post()` was sending form-urlencoded data while the Java server expected JSON. Changed to send `json=data` instead of `data=data`, fixing `rename_function_by_address` and all other POST-based endpoints.
 - **Added segment:offset address support** (#65): Bridge now accepts segment-prefixed addresses (e.g., `mem:20de`, `code:00169d`) used by non-x86/segmented architectures. Updated `sanitize_address()`, `validate_hex_address()`, and `normalize_address()` to pass through segment-qualified addresses without incorrect `0x` prefixing.
-- **Relaxed Ghidra version compatibility check** (#64): Setup scripts (`ghidra-mcp-setup.ps1` and `ghidra-mcp-setup.sh`) now warn instead of error when deploying to a Ghidra installation with a different patch version (e.g., building with 12.0.3 and deploying to 12.0.4). Major.minor mismatches still block deployment.
-- **Fixed Linux phantom process detection** (#63): Tightened `get_ghidra_pids()` regex in `ghidra-mcp-setup.sh` to match only the Java class name pattern (`ghidra.GhidraRun`/`ghidra.GhidraLauncher`), removing overly broad alternatives that caused false positives.
+- **Relaxed Ghidra version compatibility check** (#64): The legacy setup flow now warns instead of error when deploying to a Ghidra installation with a different patch version (e.g., building with 12.0.3 and deploying to 12.0.4). Major.minor mismatches still block deployment.
+- **Fixed Linux phantom process detection** (#63): Tightened the legacy Linux setup process detection regex to match only the Java class name pattern (`ghidra.GhidraRun`/`ghidra.GhidraLauncher`), removing overly broad alternatives that caused false positives.
 - **Fixed FrontEndProgramProvider multi-version bugs**: Fixed consumer reference leak on cache overwrite, `pathToName` not cleared in `releaseAll()`, and `getAllOpenPrograms()` deduplicating by name instead of identity (hiding same-named programs from different versions).
 - **Reduced MCP response token usage ~30-40%**: Optimized JSON response payloads across service endpoints.
 
@@ -810,8 +810,8 @@ This is a contract change. If you have scripts or prompts built against earlier 
 #### Infrastructure
 - **Fixed ENDPOINT_COUNT** -- Corrected from 146 to 149 to match actual `createContext` registration count
 - **Centralized version in extension.properties** -- Description now uses `${project.version}` Maven filtering instead of hardcoded version string
-- **Expanded bump-version.ps1** -- Now covers 11 files (up from 7): added README badge, AGENTS.md, docs/releases/README.md. Extension.properties is now Maven-dynamic.
-- **Version consistency audit** -- Fixed stale 3.0.0 references across ghidra-mcp-setup.ps1, tests/endpoints.json, README.md, AGENTS.md, and docs/releases/README.md
+- **Expanded version bump workflow** -- Now covers 11 files (up from 7): added README badge, AGENTS.md, docs/releases/README.md. Extension.properties is now Maven-dynamic.
+- **Version consistency audit** -- Fixed stale 3.0.0 references across setup/config files, tests/endpoints.json, README.md, AGENTS.md, and docs/releases/README.md
 
 ---
 
@@ -879,7 +879,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - `run_analysis` Ã¢â‚¬â€ trigger analysis programmatically
 
 #### Ã°Å¸â€Â§ Infrastructure
-- **`bump-version.ps1`**: Single-command version bump across all 7 project files
+- **Version bump workflow**: Single-command version bump across all 7 project files
 - **`tests/unit/`**: New unit test suite Ã¢â‚¬â€ endpoint catalog consistency, MCP tool functions, response schemas
 - **`.markdownlintrc`**: Markdown lint config for CI quality gate
 - **`mcp-config.json`**: Fixed env key to match bridge (`GHIDRA_SERVER_URL`)
@@ -931,7 +931,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 
 ## v2.0.1 - 2026-02-19
 
-### Patch Release - CI Fixes, Documentation, PowerShell Improvements
+### Patch Release - CI Fixes, Documentation, Setup Workflow Improvements
 
 #### Ã°Å¸â€Â§ CI/Build Fixes
 - **Fixed CI workflow**: Ghidra JARs now properly installed to Maven repository instead of just copied to lib/ (PR #23)
@@ -944,7 +944,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - **Verification steps**: Added curl commands to verify server is working
 - **Better error guidance**: Covers 500 errors, 404s, missing menus, and installation issues
 
-#### Ã°Å¸â€“Â¥Ã¯Â¸Â PowerShell Setup Script
+#### Ã°Å¸â€“Â¥Ã¯Â¸Â Setup Workflow
 - **Fixed version sorting bug**: Now uses semantic version sorting instead of string sorting (PR #21)
 - **Correct Ghidra detection**: Properly selects `ghidra_12.0.2_PUBLIC` over `ghidra_12.0_PUBLIC`
 - Fixes issue #19
@@ -1308,7 +1308,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - `ClearCallReturnOverrides.java` - Clean orphaned flow overrides
 - Ã¢Å“â€¦ **mcp-config.json** - Claude MCP configuration template
 - Ã¢Å“â€¦ **mcp_function_processor.py** - Batch function processing automation
-- Ã¢Å“â€¦ **scripts/hybrid-function-processor.ps1** - Automated analysis workflows
+- Ã¢Å“â€¦ **hybrid function processor workflow** - Automated analysis workflows
 
 ### Enhanced Documentation
 - Ã¢Å“â€¦ **examples/punit/** - Complete UnitAny structure case study (8 files)
@@ -1361,7 +1361,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - create_d2_typedefs.py - Type definition generation
   - populate_d2_structs.py - Structure population automation
   - test_data_xrefs_tool.py - Unit tests for xref tools
-  - data-extract.ps1, data-process.ps1, function-process.ps1, functions-extract.ps1 - PowerShell automation
+  - data extraction and function-processing helpers - automation utilities used during that release cycle
 
 ### Project Organization
 - Ã¢Å“â€¦ **Restructured Documentation**

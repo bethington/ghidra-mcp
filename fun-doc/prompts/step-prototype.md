@@ -25,7 +25,7 @@ If signals are mixed or weak: no prefix.
 2. If no rename is needed (current name already has correct prefix + accurate description): **SKIP** `rename_function_by_address`.
 3. If the name needs changing: call `rename_function_by_address` with the complete prefixed name.
 
-Call rename + prototype in parallel **only when rename is actually needed**. If rename is skipped, call only `set_function_prototype`.
+Call rename + prototype in parallel **only when rename is actually needed**. If later tool calls in the same pass need to re-query the function, use its address instead of assuming the new name is available immediately. If rename is skipped, call only `set_function_prototype`.
 
 ## Naming Rules
 
@@ -48,7 +48,7 @@ Invalid patterns:
 - Mark implicit register parameters with IMPLICIT keyword in plate comment (Step 4)
 - `__thiscall`: first param is `this` in ECX -- do NOT include a typed `this` in the prototype (see Step 3 known limitation)
 
-**Note**: Prototype changes trigger re-decompilation and may create new SSA variables. Step 3 will refresh the variable list.
+**Note**: Prototype changes trigger re-decompilation and may create new SSA variables. Step 3 will refresh the variable list by address.
 
 ## Caller Verification (required for register params and enums)
 

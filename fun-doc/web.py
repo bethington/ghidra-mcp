@@ -148,6 +148,7 @@ class WorkerManager:
                 load_priority_queue,
                 reset_handoff_counter,
                 _bump_handoff_counter,
+                get_auto_escalation_provider,
                 update_function_state,
             )
 
@@ -303,17 +304,8 @@ class WorkerManager:
                     stop_flag=worker["stop_flag"],
                 )
 
-                # Auto-escalation: if the function didn't reach good_enough
-                # (either it made progress but not enough, or it failed
-                # outright), immediately retry with a stronger model before
-                # releasing the key. The escalation order is:
-                # minimax → claude → codex → (give up).
-                ESCALATION_ORDER = {
-                    "minimax": "claude",
-                    "claude": "codex",
-                    "codex": None,  # no further escalation
-                    "gemini": "claude",
-                }
+                # Optional immediate retry: only use an explicitly configured
+                # provider. Do not silently fall back to a stronger provider.
                 if (
                     result in ("completed", "partial", "failed", "needs_redo")
                     and not worker["stop_flag"].is_set()
@@ -323,7 +315,9 @@ class WorkerManager:
                     fresh_func = fresh.get("functions", {}).get(key)
                     if fresh_func:
                         current_score = fresh_func.get("score", 0)
-                        escalate_to = ESCALATION_ORDER.get(worker["provider"])
+                        escalate_to = get_auto_escalation_provider(
+                            worker["provider"], queue=load_priority_queue()
+                        )
                         if (
                             current_score < good_enough
                             and current_score > 0
@@ -1415,6 +1409,49 @@ def create_app(state_file, event_bus=None):
                         jsonify({"error": "audit_min_delta must be int 0-100"}),
                         400,
                     )
+            if "provider_models" in data:
+                provider_models = data["provider_models"]
+                if not isinstance(provider_models, dict):
+                    return jsonify({"error": "provider_models must be an object"}), 400
+
+                normalized_models = {}
+                for provider, mode_map in provider_models.items():
+                    if provider not in ("claude", "codex", "minimax", "gemini"):
+                        return (
+                            jsonify(
+                                {
+                                    "error": f"unsupported provider in provider_models: {provider}"
+                                }
+                            ),
+                            400,
+                        )
+                    if not isinstance(mode_map, dict):
+                        return (
+                            jsonify(
+                                {
+                                    "error": f"provider_models.{provider} must be an object"
+                                }
+                            ),
+                            400,
+                        )
+                    for mode, model_name in mode_map.items():
+                        normalized_mode = str(mode).upper()
+                        if normalized_mode not in ("FULL", "FIX", "VERIFY"):
+                            return (
+                                jsonify(
+                                    {
+                                        "error": f"unsupported mode in provider_models.{provider}: {mode}"
+                                    }
+                                ),
+                                400,
+                            )
+                        normalized_name = str(model_name or "").strip()
+                        if normalized_name:
+                            normalized_models.setdefault(provider, {})[
+                                normalized_mode
+                            ] = normalized_name
+
+                cfg["provider_models"] = normalized_models
             queue["config"] = cfg
             save_queue(queue)
             socketio.emit("queue_changed", {"action": "config", "config": cfg})

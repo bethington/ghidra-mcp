@@ -16,7 +16,9 @@ def read_pom_versions(repo_root: Path) -> VersionInfo:
     pom_path = repo_root / "pom.xml"
     tree = ET.parse(pom_path)
     root = tree.getroot()
-    namespace = {"m": root.tag.split("}")[0].strip("{")} if root.tag.startswith("{") else {}
+    namespace = (
+        {"m": root.tag.split("}")[0].strip("{")} if root.tag.startswith("{") else {}
+    )
 
     def find_text(path: str) -> str:
         if namespace:
@@ -30,7 +32,9 @@ def read_pom_versions(repo_root: Path) -> VersionInfo:
     return VersionInfo(
         project_version=find_text("m:version" if namespace else "version"),
         ghidra_version=find_text(
-            "m:properties/m:ghidra.version" if namespace else "properties/ghidra.version"
+            "m:properties/m:ghidra.version"
+            if namespace
+            else "properties/ghidra.version"
         ),
     )
 

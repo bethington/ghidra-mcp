@@ -1999,9 +1999,9 @@ public class AnalysisService {
     /**
      * Comprehensive function analysis combining decompilation, xrefs, callees, callers, disassembly, and variables
      */
-    @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Requires function name — if you only have an address, call get_function_by_address first.", category = "analysis")
+        @McpTool(path = "/analyze_function_complete", description = "Comprehensive single-call function analysis. Accepts function name or address.", category = "analysis")
     public Response analyzeFunctionComplete(
-            @Param(value = "name", description = "Function name (not an address — use get_function_by_address to resolve an address to a name first)") String name,
+            @Param(value = "name", description = "Function reference (name or address)") String name,
             @Param(value = "include_xrefs", defaultValue = "true") boolean includeXrefs,
             @Param(value = "include_callees", defaultValue = "true") boolean includeCallees,
             @Param(value = "include_callers", defaultValue = "true") boolean includeCallers,
@@ -2019,16 +2019,7 @@ public class AnalysisService {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Function func = null;
-                    FunctionManager funcMgr = program.getFunctionManager();
-
-                    // Find function by name
-                    for (Function f : funcMgr.getFunctions(true)) {
-                        if (f.getName().equals(name)) {
-                            func = f;
-                            break;
-                        }
-                    }
+                    Function func = ServiceUtils.resolveFunction(program, name);
 
                     if (func == null) {
                         errorMsg.set("Function not found: " + name);

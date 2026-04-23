@@ -571,7 +571,7 @@ public class HeadlessEndpointHandler {
      * Get all variables (parameters and locals) for a function.
      */
     public String getFunctionVariables(String functionName, String programName) {
-        return functionService.getFunctionVariables(functionName, programName, null, null).toJson();
+        return functionService.getFunctionVariables(functionName, null, programName, null, null).toJson();
     }
 
     /**

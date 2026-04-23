@@ -110,7 +110,7 @@ cd ghidra-mcp
 mvn clean package
 
 # Deploy to Ghidra
-.\ghidra-mcp-setup.ps1
+python -m tools.setup deploy --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 ```
 
 ## Next Steps

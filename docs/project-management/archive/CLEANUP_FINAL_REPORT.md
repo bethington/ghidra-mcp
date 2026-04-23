@@ -21,7 +21,7 @@ Successfully completed comprehensive 3-phase cleanup and reorganization of the G
 - ✅ Deleted 77 historical ordinal_fix_log_*.txt files
 - ✅ Markdown files: 71 → 29 (-59%)
 - ✅ Root directory clutter: -27%
-- ✅ Created cleanup.ps1 script for reuse
+- ✅ Created a reusable cleanup helper for that pass
 
 **Files Removed**:
 - 5 Process/Status documentation files
@@ -190,9 +190,9 @@ Navigation: Fully indexed
 
 ## Tools Created (Reusable)
 
-### cleanup.ps1 (PowerShell Script)
+### Cleanup Helper
 - **Purpose**: Safe deletion of outdated files
-- **Usage**: `.\cleanup.ps1` (dry-run) or `.\cleanup.ps1 -Force` (execute)
+- **Usage**: historical helper created for that cleanup pass
 - **Features**:
   - Categorized deletion lists
   - Dry-run mode for safety
@@ -259,7 +259,7 @@ Navigation: Fully indexed
 ✅ **Phase 1 Cleanup**
 - [x] 42 files deleted
 - [x] 77 ordinal logs removed
-- [x] cleanup.ps1 created and tested
+- [x] cleanup helper created and tested
 - [x] Statistics calculated
 
 ✅ **Phase 2 Reorganization**

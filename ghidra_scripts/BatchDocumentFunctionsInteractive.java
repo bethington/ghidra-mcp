@@ -180,7 +180,7 @@ public class BatchDocumentFunctionsInteractive extends GhidraScript {
 
     private boolean configureOptions() throws Exception {
         // Mode selection
-        String modeAnalyze = "Analyze Only (generate todo file for functions-process.ps1)";
+        String modeAnalyze = "Analyze Only (generate todo file for an external processor)";
         String modeClaude = "Analyze and Invoke Claude (process directly)";
         String modeQuick = "Quick Analysis (dry run, no output files)";
 
@@ -535,8 +535,8 @@ public class BatchDocumentFunctionsInteractive extends GhidraScript {
 
     private String findMcpConfig(String userHome) {
         String[] paths = {
-            userHome + "\\source\\mcp\\ghidra-mcp\\mcp-config.json",
-            "mcp-config.json"
+            userHome + "\\source\\mcp\\ghidra-mcp\\.mcp.json",
+            ".mcp.json"
         };
         for (String p : paths) {
             if (new File(p).exists()) return p;

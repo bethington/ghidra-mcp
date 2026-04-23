@@ -165,6 +165,18 @@
         .worker-pane-header .wp-status { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.6rem; }
         .worker-pane-header .wp-actions { margin-left: auto; display: flex; gap: 3px; }
         .worker-pane-output { flex: 1; overflow-y: auto; padding: 0.2rem 0.3rem; font-family: var(--font-mono); font-size: 0.6rem; line-height: 1.25; background: var(--bg-darkest); }
+        .settings-popout { max-height: 0; overflow: hidden; background: linear-gradient(180deg, var(--bg-medium), var(--bg-dark)); border-bottom: 1px solid transparent; transition: max-height 0.18s ease, border-color 0.18s ease; }
+        .settings-popout.active { max-height: 420px; border-bottom-color: var(--border-dark); }
+        .settings-popout-inner { max-width: 1400px; margin: 0 auto; width: 100%; padding: 0 1rem; }
+        .settings-popout-panel { margin: 0 0 0.75rem; border-top: none; border-radius: 0 0 6px 6px; }
+        .settings-popout-panel .panel-header { border-radius: 0; }
+        .settings-bar { display: flex; flex-wrap: wrap; gap: 0.6rem 0.9rem; align-items: center; }
+        .settings-group { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+        .settings-label { font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px; }
+        .models-grid { display: grid; grid-template-columns: 64px repeat(3, minmax(110px, 1fr)); gap: 4px 6px; align-items: center; width: 100%; }
+        .models-grid-header { color: var(--text-muted); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.6px; }
+        .models-provider { color: var(--accent-gold); font-family: var(--font-mono); font-size: 0.65rem; }
+        .settings-divider { width: 1px; align-self: stretch; background: var(--border-dark); }
         .footer { background: var(--bg-dark); border-top: 1px solid var(--border-dark); padding: 0.4rem; text-align: center; color: var(--text-muted); font-size: 0.65rem; }
     </style>
 </head>
@@ -197,53 +209,87 @@
                 <input type="checkbox" id="workerContinuous" style="margin: 0;"> <span style="line-height: 1;">Auto</span>
             </label>
             <button class="btn btn-primary" id="btnRunWorker" onclick="startWorker()">Run Worker</button>
-            <span class="header-sep"></span>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="Functions at or above this score are excluded from the queue (unless pinned)">
-                <span>Good@</span>
-                <input type="number" class="worker-input" id="goodEnoughInput" value="{{ stats.queue_config.good_enough_score|default(80) }}" min="0" max="100" onchange="saveQueueConfig()">
-            </label>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 3px;" title="Surface unscored functions to the worker so they get scored on first contact">
-                <input type="checkbox" id="requireScoredInput" {% if stats.queue_config.require_scored %}checked{% endif %} onchange="saveQueueConfig()" style="margin: 0;">
-                <span style="line-height: 1;">Score Cold</span>
-            </label>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="When the active provider's complexity gate fires, hand the function off to this provider instead of skipping. Set to Off to disable.">
-                <span>Handoff→</span>
-                <select class="header-select" id="handoffProviderInput" onchange="saveQueueConfig()">
-                    <option value="off" {% if not stats.queue_config.complexity_handoff_provider %}selected{% endif %}>Off</option>
-                    <option value="claude" {% if stats.queue_config.complexity_handoff_provider == 'claude' %}selected{% endif %}>Claude</option>
-                    <option value="codex" {% if stats.queue_config.complexity_handoff_provider == 'codex' %}selected{% endif %}>Codex</option>
-                    <option value="gemini" {% if stats.queue_config.complexity_handoff_provider == 'gemini' %}selected{% endif %}>Gemini</option>
-                </select>
-            </label>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="Maximum handoffs per worker session. 0 = unlimited.">
-                <span>Max</span>
-                <input type="number" class="worker-input" id="handoffMaxInput" value="{{ stats.queue_config.complexity_handoff_max|default(0) }}" min="0" max="999" onchange="saveQueueConfig()" style="width: 38px;">
-            </label>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 3px;" title="Write detailed per-tool-call JSONL logs to logs/debug/{date}/. Use analyze_debug.py to inspect patterns.">
-                <input type="checkbox" id="debugModeInput" {% if stats.queue_config.debug_mode %}checked{% endif %} onchange="saveQueueConfig()" style="margin: 0;">
-                <span style="line-height: 1;">Debug Logs</span>
-            </label>
-            <span class="header-sep"></span>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="After the worker finishes, a second provider reviews and fixes gaps. Off = no audit pass.">
-                <span>Audit→</span>
-                <select class="header-select" id="auditProviderInput" onchange="saveQueueConfig()">
-                    <option value="off" {% if not stats.queue_config.audit_provider %}selected{% endif %}>Off</option>
-                    <option value="claude" {% if stats.queue_config.audit_provider == 'claude' %}selected{% endif %}>Claude</option>
-                    <option value="codex" {% if stats.queue_config.audit_provider == 'codex' %}selected{% endif %}>Codex</option>
-                    <option value="minimax" {% if stats.queue_config.audit_provider == 'minimax' %}selected{% endif %}>MiniMax</option>
-                    <option value="gemini" {% if stats.queue_config.audit_provider == 'gemini' %}selected{% endif %}>Gemini</option>
-                </select>
-            </label>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="Skip audit if worker's score gain >= this value. Lower = more audits.">
-                <span>MinΔ</span>
-                <input type="number" class="worker-input" id="auditMinDeltaInput" value="{{ stats.queue_config.audit_min_delta|default(5) }}" min="0" max="100" onchange="saveQueueConfig()" style="width: 38px;">
-            </label>
+            <button class="btn" id="btnToggleSettings" onclick="toggleSettingsPanel()" aria-expanded="false" aria-controls="settingsPopout">Settings</button>
         </div>
         <span class="header-info">
             <span class="live-dot" id="liveDot"></span>
             <span id="connStatus">Connecting...</span> | {{ stats.project_folder }}
         </span>
     </header>
+
+    <div class="settings-popout" id="settingsPopout">
+        <div class="settings-popout-inner">
+            <div class="panel settings-popout-panel">
+                <div class="panel-header"><h2>Settings</h2></div>
+                <div class="panel-content">
+                    <div class="settings-bar">
+                        <div class="settings-group">
+                            <label class="settings-label" title="Functions at or above this score are excluded from the queue (unless pinned)">
+                                <span>Good@</span>
+                                <input type="number" class="worker-input" id="goodEnoughInput" value="{{ stats.queue_config.good_enough_score|default(80) }}" min="0" max="100" onchange="saveQueueConfig()">
+                            </label>
+                            <label class="settings-label" title="Surface unscored functions to the worker so they get scored on first contact">
+                                <input type="checkbox" id="requireScoredInput" {% if stats.queue_config.require_scored %}checked{% endif %} onchange="saveQueueConfig()" style="margin: 0;">
+                                <span>Score Cold</span>
+                            </label>
+                            <label class="settings-label" title="Write detailed per-tool-call JSONL logs to logs/debug/{date}/. Use analyze_debug.py to inspect patterns.">
+                                <input type="checkbox" id="debugModeInput" {% if stats.queue_config.debug_mode %}checked{% endif %} onchange="saveQueueConfig()" style="margin: 0;">
+                                <span>Debug Logs</span>
+                            </label>
+                        </div>
+                        <div class="settings-divider"></div>
+                        <div class="settings-group">
+                            <label class="settings-label" title="When the active provider's complexity gate fires, hand the function off to this provider instead of skipping. Set to Off to disable.">
+                                <span>Handoff→</span>
+                                <select class="header-select" id="handoffProviderInput" onchange="saveQueueConfig()">
+                                    <option value="off" {% if not stats.queue_config.complexity_handoff_provider %}selected{% endif %}>Off</option>
+                                    <option value="claude" {% if stats.queue_config.complexity_handoff_provider == 'claude' %}selected{% endif %}>Claude</option>
+                                    <option value="codex" {% if stats.queue_config.complexity_handoff_provider == 'codex' %}selected{% endif %}>Codex</option>
+                                    <option value="gemini" {% if stats.queue_config.complexity_handoff_provider == 'gemini' %}selected{% endif %}>Gemini</option>
+                                </select>
+                            </label>
+                            <label class="settings-label" title="Maximum handoffs per worker session. 0 = unlimited.">
+                                <span>Max</span>
+                                <input type="number" class="worker-input" id="handoffMaxInput" value="{{ stats.queue_config.complexity_handoff_max|default(0) }}" min="0" max="999" onchange="saveQueueConfig()" style="width: 48px;">
+                            </label>
+                        </div>
+                        <div class="settings-divider"></div>
+                        <div class="settings-group">
+                            <label class="settings-label" title="After the worker finishes, a second provider reviews and fixes gaps. Off = no audit pass.">
+                                <span>Audit→</span>
+                                <select class="header-select" id="auditProviderInput" onchange="saveQueueConfig()">
+                                    <option value="off" {% if not stats.queue_config.audit_provider %}selected{% endif %}>Off</option>
+                                    <option value="claude" {% if stats.queue_config.audit_provider == 'claude' %}selected{% endif %}>Claude</option>
+                                    <option value="codex" {% if stats.queue_config.audit_provider == 'codex' %}selected{% endif %}>Codex</option>
+                                    <option value="minimax" {% if stats.queue_config.audit_provider == 'minimax' %}selected{% endif %}>MiniMax</option>
+                                    <option value="gemini" {% if stats.queue_config.audit_provider == 'gemini' %}selected{% endif %}>Gemini</option>
+                                </select>
+                            </label>
+                            <label class="settings-label" title="Skip audit if worker's score gain >= this value. Lower = more audits.">
+                                <span>MinΔ</span>
+                                <input type="number" class="worker-input" id="auditMinDeltaInput" value="{{ stats.queue_config.audit_min_delta|default(5) }}" min="0" max="100" onchange="saveQueueConfig()" style="width: 48px;">
+                            </label>
+                        </div>
+                    </div>
+                    <div style="margin-top: 0.75rem;">
+                        <div style="font-size: 0.65rem; color: var(--text-secondary); margin-bottom: 0.35rem;" title="Dashboard-owned model config. These values are the default source for provider/model selection.">Provider Models</div>
+                        <div class="models-grid">
+                            <div></div>
+                            <div class="models-grid-header">Full</div>
+                            <div class="models-grid-header">Fix</div>
+                            <div class="models-grid-header">Verify</div>
+                            {% for provider in ['minimax', 'gemini', 'claude', 'codex'] %}
+                            <div class="models-provider">{{ provider }}</div>
+                            <input type="text" class="worker-input" id="model-{{ provider }}-FULL" value="{{ stats.queue_config.provider_models.get(provider, {}).get('FULL', '') }}" placeholder="full" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
+                            <input type="text" class="worker-input" id="model-{{ provider }}-FIX" value="{{ stats.queue_config.provider_models.get(provider, {}).get('FIX', '') }}" placeholder="fix" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
+                            <input type="text" class="worker-input" id="model-{{ provider }}-VERIFY" value="{{ stats.queue_config.provider_models.get(provider, {}).get('VERIFY', '') }}" placeholder="verify" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <main class="main-container">
         <!-- Status banner -->
@@ -859,6 +905,7 @@
                     const ho = document.getElementById('handoffProviderInput');
                     const hm = document.getElementById('handoffMaxInput');
                     const dm = document.getElementById('debugModeInput');
+                    const providerModels = stats.queue_config.provider_models || {};
                     if (ge && document.activeElement !== ge) ge.value = stats.queue_config.good_enough_score;
                     if (rs) rs.checked = !!stats.queue_config.require_scored;
                     if (ho && document.activeElement !== ho) {
@@ -868,6 +915,13 @@
                         hm.value = stats.queue_config.complexity_handoff_max || 0;
                     }
                     if (dm) dm.checked = !!stats.queue_config.debug_mode;
+                    ['minimax', 'gemini', 'claude', 'codex'].forEach(provider => {
+                        ['FULL', 'FIX', 'VERIFY'].forEach(mode => {
+                            const input = document.getElementById(`model-${provider}-${mode}`);
+                            if (!input || document.activeElement === input) return;
+                            input.value = ((providerModels[provider] || {})[mode]) || '';
+                        });
+                    });
                 }
                 if (stats.queue_meta) repaintRefreshStatus(stats.queue_meta, stats.run_stats);
                 if (stats.roi_queue) repaintQueue(stats.roi_queue);
@@ -1140,6 +1194,7 @@
             const audit = auditSel ? auditSel.value : 'off';
             const auditDeltaEl = document.getElementById('auditMinDeltaInput');
             const auditDelta = auditDeltaEl ? (parseInt(auditDeltaEl.value) || 5) : 5;
+            const providerModels = collectProviderModels();
             await fetch('/api/queue/config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1151,6 +1206,7 @@
                     debug_mode: debug,
                     audit_provider: audit === 'off' ? null : audit,
                     audit_min_delta: auditDelta,
+                    provider_models: providerModels,
                 }),
             });
             // queue_changed event will trigger a refreshStats which repaints the queue
@@ -1260,6 +1316,30 @@
             const btn = document.getElementById('btnRunWorker');
             btn.disabled = true;
             setTimeout(() => { btn.disabled = false; }, 2000);
+        }
+        function toggleSettingsPanel(forceOpen) {
+            const popout = document.getElementById('settingsPopout');
+            const button = document.getElementById('btnToggleSettings');
+            if (!popout || !button) return;
+            const open = forceOpen === undefined ? !popout.classList.contains('active') : !!forceOpen;
+            popout.classList.toggle('active', open);
+            button.classList.toggle('btn-primary', open);
+            button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+        function collectProviderModels() {
+            const providers = ['minimax', 'gemini', 'claude', 'codex'];
+            const modes = ['FULL', 'FIX', 'VERIFY'];
+            const providerModels = {};
+            providers.forEach(provider => {
+                modes.forEach(mode => {
+                    const input = document.getElementById(`model-${provider}-${mode}`);
+                    const value = input ? input.value.trim() : '';
+                    if (!value) return;
+                    if (!providerModels[provider]) providerModels[provider] = {};
+                    providerModels[provider][mode] = value;
+                });
+            });
+            return providerModels;
         }
         function stopWorker(wid) { socket.emit('request_stop_worker', {worker_id: wid}); }
         function stopAllWorkers() {
@@ -1574,6 +1654,10 @@
                 el.innerHTML = `<div style="color: var(--accent-red-light); padding: 0.5rem;">Error loading call graph: ${e.message}</div>`;
             }
         }
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') toggleSettingsPanel(false);
+        });
     </script>
 </body>
 </html>

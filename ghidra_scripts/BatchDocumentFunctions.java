@@ -45,7 +45,7 @@ public class BatchDocumentFunctions extends GhidraScript {
     private static final int MAX_FUNCTIONS = 0;           // 0 = unlimited
     private static final int DEFAULT_THRESHOLD = 80;      // Default minimum completeness threshold
     private static final boolean DRY_RUN = false;         // If true, only generate list without invoking Claude
-    private static final boolean GENERATE_TODO_FILE = true; // Generate FunctionsTodo.txt for PowerShell script
+    private static final boolean GENERATE_TODO_FILE = true; // Generate FunctionsTodo.txt for an external processor
     private static final boolean INVOKE_CLAUDE_DIRECTLY = false; // Invoke Claude from Java (slower)
     private static final int DELAY_BETWEEN_FUNCTIONS_MS = 2000;   // Delay between Claude calls
 
@@ -459,7 +459,7 @@ public class BatchDocumentFunctions extends GhidraScript {
     }
 
     /**
-     * Generate FunctionsTodo.txt for use with functions-process.ps1
+    * Generate FunctionsTodo.txt for use with an external processing workflow.
      */
     private void generateTodoFile() throws Exception {
         File todoFile = new File(getScriptArgs().length > 0 ? getScriptArgs()[0] : "FunctionsTodo.txt");
@@ -665,9 +665,9 @@ public class BatchDocumentFunctions extends GhidraScript {
 
     private String findMcpConfig(String userHome) {
         String[] possiblePaths = {
-            userHome + "\\source\\mcp\\ghidra-mcp\\mcp-config.json",
-            System.getProperty("user.dir") + "\\mcp-config.json",
-            "..\\mcp-config.json"
+            userHome + "\\source\\mcp\\ghidra-mcp\\.mcp.json",
+            System.getProperty("user.dir") + "\\.mcp.json",
+            "..\\.mcp.json"
         };
 
         for (String path : possiblePaths) {

@@ -144,12 +144,12 @@ See `KNOWN_ISSUES.md` for full details.
 
 ### Automated Deployment (Windows)
 
-```powershell
+```text
 # Rebuild with correct version
 mvn clean package assembly:single -DskipTests
 
 # Deploy to Ghidra
-.\ghidra-mcp-setup.ps1
+python -m tools.setup deploy --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 ```
 
 ### Manual Installation

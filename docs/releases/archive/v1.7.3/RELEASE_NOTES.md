@@ -135,8 +135,8 @@ POST http://127.0.0.1:8089/disassemble_bytes
 
 4. **Install the updated plugin**:
    ```bash
-   # Windows PowerShell (recommended):
-   .\ghidra-mcp-setup.ps1
+   # Recommended:
+   python -m tools.setup deploy --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 
    # Or manual installation:
    copy target\GhidraMCP.jar "<ghidra_install>\Extensions\Ghidra\"

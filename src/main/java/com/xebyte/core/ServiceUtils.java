@@ -263,6 +263,31 @@ public final class ServiceUtils {
             return result;
         }
 
+        if (obj instanceof String json) {
+            String trimmed = json.trim();
+            if (trimmed.isEmpty()) {
+                return null;
+            }
+
+            Object parsed = JsonHelper.parseJson(trimmed);
+            List<Map<String, String>> parsedList = JsonHelper.toMapStringList(parsed);
+            if (parsedList != null) {
+                return parsedList;
+            }
+
+            // Some providers stringify arrays directly; parseJson() only handles objects.
+            if (trimmed.startsWith("[")) {
+                try {
+                    parsedList = JsonHelper.toMapStringList(
+                        com.google.gson.JsonParser.parseString(trimmed));
+                } catch (Exception ignored) {
+                    // Fall through and return null below.
+                }
+            }
+
+            return parsedList;
+        }
+
         return null;
     }
 

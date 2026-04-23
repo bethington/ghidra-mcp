@@ -223,6 +223,15 @@ class TestToolNameSanitization(unittest.TestCase):
         self.assertEqual(sanitize_tool_name("server/status"), "server_status")
         self.assertEqual(sanitize_tool_name("A::B...C"), "a_b_c")
 
+    def test_sanitize_tool_name_truncates_to_claude_limit(self):
+        from bridge_mcp_ghidra import MAX_TOOL_NAME_LENGTH, sanitize_tool_name
+
+        raw = "/" + ("VeryLongToolNameSegment_" * 6)
+        sanitized = sanitize_tool_name(raw)
+
+        self.assertLessEqual(len(sanitized), MAX_TOOL_NAME_LENGTH)
+        self.assertRegex(sanitized, r"^[a-zA-Z0-9_-]{1,64}$")
+
     def test_sanitize_tool_name_rejects_empty_names(self):
         from bridge_mcp_ghidra import sanitize_tool_name
 
@@ -277,10 +286,29 @@ class TestToolNameSanitization(unittest.TestCase):
         )
         self.assertEqual([tool["name"] for tool in schema], ["foo_bar", "foo_bar_2"])
 
+    def test_parse_schema_suffixes_truncated_name_collisions_within_limit(self):
+        from bridge_mcp_ghidra import MAX_TOOL_NAME_LENGTH, _parse_schema
+
+        raw = "/" + ("LongEndpointSegment_" * 5)
+        schema = _parse_schema(
+            {
+                "tools": [
+                    {"path": raw, "method": "GET", "params": []},
+                    {"path": raw + "/v2", "method": "GET", "params": []},
+                ]
+            }
+        )
+
+        self.assertLessEqual(len(schema[0]["name"]), MAX_TOOL_NAME_LENGTH)
+        self.assertLessEqual(len(schema[1]["name"]), MAX_TOOL_NAME_LENGTH)
+        self.assertNotEqual(schema[0]["name"], schema[1]["name"])
+        self.assertRegex(schema[0]["name"], r"^[a-zA-Z0-9_-]{1,64}$")
+        self.assertRegex(schema[1]["name"], r"^[a-zA-Z0-9_-]{1,64}$")
+
     def test_active_registry_tool_names_are_valid(self):
         import bridge_mcp_ghidra as bridge
 
-        pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
+        pattern = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
         invalid = [
             name
             for name in bridge.mcp._tool_manager._tools
@@ -303,7 +331,7 @@ class TestToolNameSanitization(unittest.TestCase):
         )
 
         bridge.register_tools_from_schema(schema, groups=None)
-        pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
+        pattern = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
         try:
             invalid = [
                 name

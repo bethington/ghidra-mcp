@@ -5,11 +5,14 @@ Tests the thin multiplexer's core functionality: schema parsing,
 tool registration, transport mode management, and static tool contracts.
 """
 
+import asyncio
 import json
 import os
 import re
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import sys
 
@@ -67,6 +70,11 @@ class TestStaticTools(unittest.TestCase):
 
 class TestToolGroupManagement(unittest.TestCase):
     """Test tool group management tools."""
+
+    def test_lazy_loading_disabled_by_default(self):
+        import bridge_mcp_ghidra as bridge
+
+        self.assertFalse(bridge._lazy_mode)
 
     def test_list_tool_groups_registered(self):
         import bridge_mcp_ghidra as bridge
@@ -140,6 +148,81 @@ class TestToolGroupManagement(unittest.TestCase):
         loaded = _load_group("grp_beta")
         self.assertEqual(loaded, ["grp_test_b"])
         self.assertIn("grp_beta", _loaded_groups)
+
+
+class TestConnectInstance(unittest.TestCase):
+    """Test connect_instance eager-loading behavior."""
+
+    def test_connect_instance_eager_loads_all_tools_and_notifies(self):
+        import bridge_mcp_ghidra as bridge
+
+        schema = {
+            "tools": [
+                {
+                    "path": "/listing_tool",
+                    "method": "GET",
+                    "category": "listing",
+                    "params": [],
+                },
+                {
+                    "path": "/datatype_tool",
+                    "method": "GET",
+                    "category": "datatype",
+                    "params": [],
+                },
+            ]
+        }
+
+        session = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
+        ctx = SimpleNamespace(
+            _request_context=object(),
+            request_context=SimpleNamespace(session=session),
+        )
+
+        old_lazy_mode = bridge._lazy_mode
+        old_active_socket = bridge._active_socket
+        old_active_tcp = bridge._active_tcp
+        old_transport_mode = bridge._transport_mode
+        old_connected_project = bridge._connected_project
+        old_dynamic_names = list(bridge._dynamic_tool_names)
+        old_full_schema = list(bridge._full_schema)
+        old_loaded_groups = set(bridge._loaded_groups)
+
+        try:
+            bridge._lazy_mode = False
+            with mock.patch.object(
+                bridge,
+                "discover_instances",
+                return_value=[
+                    {"project": "TestProject", "socket": "/tmp/test.sock", "pid": 42}
+                ],
+            ), mock.patch.object(
+                bridge,
+                "do_request",
+                return_value=(json.dumps(schema), 200),
+            ):
+                result = json.loads(
+                    asyncio.run(bridge.connect_instance("TestProject", ctx=ctx))
+                )
+
+            self.assertTrue(result["connected"])
+            self.assertEqual(result["tools_registered"], 2)
+            self.assertEqual(result["tools_total"], 2)
+            self.assertEqual(set(result["loaded_groups"]), {"listing", "datatype"})
+            self.assertEqual(result["note"], "Loaded all 2 tools on connect.")
+            session.send_tool_list_changed.assert_awaited_once()
+        finally:
+            for name in list(bridge._dynamic_tool_names):
+                bridge.mcp._tool_manager._tools.pop(name, None)
+            bridge._dynamic_tool_names[:] = old_dynamic_names
+            bridge._full_schema[:] = old_full_schema
+            bridge._loaded_groups.clear()
+            bridge._loaded_groups.update(old_loaded_groups)
+            bridge._lazy_mode = old_lazy_mode
+            bridge._active_socket = old_active_socket
+            bridge._active_tcp = old_active_tcp
+            bridge._transport_mode = old_transport_mode
+            bridge._connected_project = old_connected_project
 
 
 class TestEndpointTimeouts(unittest.TestCase):
