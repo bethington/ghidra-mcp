@@ -37,7 +37,7 @@ public class ExportFunctionsEnhanced extends GhidraScript {
         String[] pathParts = programPath.replace("\\", "/").split("/");
         String gameType = "Unknown";  // Classic or LoD
         String version = "Unknown";
-        
+
         // Find VersionChanger in path to extract game type and version
         for (int i = 0; i < pathParts.length - 2; i++) {
             if (pathParts[i].equals("VersionChanger")) {
@@ -69,7 +69,6 @@ public class ExportFunctionsEnhanced extends GhidraScript {
 
         // Initialize decompiler for better analysis
         decompiler = new DecompInterface();
-        decompiler.openProgram(currentProgram);
 
         FunctionManager funcManager = currentProgram.getFunctionManager();
         ReferenceManager refManager = currentProgram.getReferenceManager();
@@ -81,43 +80,46 @@ public class ExportFunctionsEnhanced extends GhidraScript {
         int namedFuncs = 0;
         int processedFuncs = 0;
 
-        // Count total for progress
-        FunctionIterator countIter = funcManager.getFunctions(true);
-        while (countIter.hasNext()) {
-            countIter.next();
-            totalFuncs++;
-        }
+        try {
+            decompiler.openProgram(currentProgram);
 
-        println("Total functions to process: " + totalFuncs);
-
-        FunctionIterator funcIter = funcManager.getFunctions(true);
-        while (funcIter.hasNext()) {
-            if (monitor.isCancelled()) {
-                println("Export cancelled by user");
-                break;
+            // Count total for progress
+            FunctionIterator countIter = funcManager.getFunctions(true);
+            while (countIter.hasNext()) {
+                countIter.next();
+                totalFuncs++;
             }
 
-            Function func = funcIter.next();
-            processedFuncs++;
+            println("Total functions to process: " + totalFuncs);
 
-            // Progress update every 100 functions
-            if (processedFuncs % 100 == 0) {
-                monitor.setMessage("Processing " + processedFuncs + "/" + totalFuncs);
-                println("Progress: " + processedFuncs + "/" + totalFuncs);
-            }
+            FunctionIterator funcIter = funcManager.getFunctions(true);
+            while (funcIter.hasNext()) {
+                if (monitor.isCancelled()) {
+                    println("Export cancelled by user");
+                    break;
+                }
 
-            String name = func.getName();
-            long address = func.getEntryPoint().getOffset();
-            long rva = address - imageBase;
+                Function func = funcIter.next();
+                processedFuncs++;
 
-            // Check if it has a custom name
-            boolean hasCustomName = !name.startsWith("FUN_") &&
-                                   !name.startsWith("thunk_FUN_") &&
-                                   !name.equals("entry");
+                // Progress update every 100 functions
+                if (processedFuncs % 100 == 0) {
+                    monitor.setMessage("Processing " + processedFuncs + "/" + totalFuncs);
+                    println("Progress: " + processedFuncs + "/" + totalFuncs);
+                }
 
-            if (hasCustomName) {
-                namedFuncs++;
-            }
+                String name = func.getName();
+                long address = func.getEntryPoint().getOffset();
+                long rva = address - imageBase;
+
+                // Check if it has a custom name
+                boolean hasCustomName = !name.startsWith("FUN_") &&
+                                       !name.startsWith("thunk_FUN_") &&
+                                       !name.equals("entry");
+
+                if (hasCustomName) {
+                    namedFuncs++;
+                }
 
             // Get signature and calling convention
             String signature = func.getSignature().getPrototypeString();
@@ -187,7 +189,7 @@ public class ExportFunctionsEnhanced extends GhidraScript {
             try {
                 ReferenceIterator refIter = refManager.getReferenceIterator(func.getEntryPoint());
                 AddressSet funcAddrs = new AddressSet(body);
-                
+
                 // Check all references FROM this function
                 InstructionIterator instrIter = currentProgram.getListing().getInstructions(body, true);
                 while (instrIter.hasNext() && strings.size() < maxStrings) {
@@ -257,7 +259,7 @@ public class ExportFunctionsEnhanced extends GhidraScript {
             entry.append("      \"instruction_count\": ").append(instructionCount).append(",\n");
             entry.append("      \"local_var_count\": ").append(localVarCount).append(",\n");
             entry.append("      \"param_count\": ").append(parameters.size()).append(",\n");
-            
+
             // Instructions array
             entry.append("      \"instructions\": [");
             for (int i = 0; i < instructions.size(); i++) {
@@ -298,12 +300,14 @@ public class ExportFunctionsEnhanced extends GhidraScript {
             }
             entry.append("]\n");
 
-            entry.append("    }");
-            functionEntries.add(entry.toString());
+                entry.append("    }");
+                functionEntries.add(entry.toString());
+            }
+        } finally {
+            if (decompiler != null) {
+                decompiler.dispose();
+            }
         }
-
-        // Cleanup decompiler
-        decompiler.dispose();
 
         // Write JSON file
         try (PrintWriter writer = new PrintWriter(new FileWriter(outputFile))) {
