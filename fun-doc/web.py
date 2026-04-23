@@ -1341,6 +1341,8 @@ def create_app(state_file, event_bus=None):
     def queue_config():
         from fun_doc import DEFAULT_QUEUE_CONFIG
 
+        supported_providers = ("claude", "codex", "minimax", "gemini")
+
         queue = load_queue()
         if request.method == "POST":
             data = request.json or {}
@@ -1409,6 +1411,38 @@ def create_app(state_file, event_bus=None):
                         jsonify({"error": "audit_min_delta must be int 0-100"}),
                         400,
                     )
+            if "provider_max_turns" in data:
+                provider_max_turns = data["provider_max_turns"]
+                if not isinstance(provider_max_turns, dict):
+                    return (
+                        jsonify({"error": "provider_max_turns must be an object"}),
+                        400,
+                    )
+
+                normalized_turns = {}
+                for provider, turn_value in provider_max_turns.items():
+                    if provider not in supported_providers:
+                        return (
+                            jsonify(
+                                {
+                                    "error": f"unsupported provider in provider_max_turns: {provider}"
+                                }
+                            ),
+                            400,
+                        )
+                    try:
+                        normalized_turns[provider] = max(1, int(turn_value))
+                    except (TypeError, ValueError):
+                        return (
+                            jsonify(
+                                {
+                                    "error": f"provider_max_turns.{provider} must be int >= 1"
+                                }
+                            ),
+                            400,
+                        )
+
+                cfg["provider_max_turns"] = normalized_turns
             if "provider_models" in data:
                 provider_models = data["provider_models"]
                 if not isinstance(provider_models, dict):
@@ -1416,7 +1450,7 @@ def create_app(state_file, event_bus=None):
 
                 normalized_models = {}
                 for provider, mode_map in provider_models.items():
-                    if provider not in ("claude", "codex", "minimax", "gemini"):
+                    if provider not in supported_providers:
                         return (
                             jsonify(
                                 {

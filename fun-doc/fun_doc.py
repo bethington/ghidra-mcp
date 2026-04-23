@@ -47,6 +47,8 @@ Dashboard config (edit via header controls or priority_queue.json):
     pre_escalate_retry          — enable/disable that immediate retry.
     debug_mode                  — write per-tool-call JSONL to logs/debug/
     pre_refresh_on_start        — batch-rescore top 20 before worker loop begins
+    provider_max_turns          — dict of per-provider tool-call turn limits, e.g.
+                                  {"claude": 30, "minimax": 20, "codex": 15, "gemini": 25}
 
 Recovery-pass one-shot (automatic, no config):
     Functions that finish a complexity-forced recovery pass ("COMPLEXITY: massive
@@ -1548,6 +1550,15 @@ DEFAULT_QUEUE_CONFIG = {
     # Minutes of freshness to honor: if the last refresh is newer than this,
     # skip pre-refresh entirely. Multiple workers starting together share one.
     "pre_refresh_freshness_min": 5,
+    # Per-provider max tool-call turns. Edit via dashboard or priority_queue.json.
+    # Lower values prevent over-analysis loops; higher values give the model more
+    # room to complete complex functions in one session.
+    "provider_max_turns": {
+        "claude": 25,
+        "codex": 25,
+        "gemini": 25,
+        "minimax": 25,
+    },
 }
 
 PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"
@@ -3665,6 +3676,10 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
             }
             if tools_openai:
                 kwargs["tools"] = tools_openai
+                # Sequential tool calls: prevents the model from issuing parallel
+                # reads before processing earlier results, which causes it to miss
+                # context from tool responses and repeat the same calls.
+                kwargs["parallel_tool_calls"] = False
 
             # Retry transient errors (429 rate limit, 529 overloaded, 5xx server)
             response = None
@@ -4911,10 +4926,18 @@ def process_function(
             return "quit"
         return "manual_prompt_generated"
 
+    # Per-provider max_turns from dashboard config (overrides hardcoded default)
+    _pmt = cfg.get("provider_max_turns") or {}
+    worker_max_turns = int(_pmt.get(effective_provider, 25))
+
     # Auto mode: invoke AI (provider based on AI_PROVIDER)
     print()
     output, meta = invoke_claude(
-        prompt, model=selected_model, provider=provider, complexity_tier=complexity_tier
+        prompt,
+        model=selected_model,
+        provider=provider,
+        complexity_tier=complexity_tier,
+        max_turns=worker_max_turns,
     )
     tool_calls_made = meta.get("tool_calls", -1)
     tool_calls_known = bool(meta.get("tool_calls_known", tool_calls_made != -1))
@@ -4958,6 +4981,7 @@ def process_function(
             model=selected_model,
             provider=provider,
             complexity_tier=complexity_tier,
+            max_turns=worker_max_turns,
         )
         # Merge results: use pass 2 output for final parsing, sum tool calls.
         # Sentinel -1 means "unknown" — don't let -1 + -1 = -2 break

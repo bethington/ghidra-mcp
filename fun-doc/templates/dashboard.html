@@ -173,7 +173,7 @@
         .settings-bar { display: flex; flex-wrap: wrap; gap: 0.6rem 0.9rem; align-items: center; }
         .settings-group { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
         .settings-label { font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px; }
-        .models-grid { display: grid; grid-template-columns: 64px repeat(3, minmax(110px, 1fr)); gap: 4px 6px; align-items: center; width: 100%; }
+        .models-grid { display: grid; grid-template-columns: 64px repeat(3, minmax(110px, 1fr)) minmax(70px, 90px); gap: 4px 6px; align-items: center; width: 100%; }
         .models-grid-header { color: var(--text-muted); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.6px; }
         .models-provider { color: var(--accent-gold); font-family: var(--font-mono); font-size: 0.65rem; }
         .settings-divider { width: 1px; align-self: stretch; background: var(--border-dark); }
@@ -272,17 +272,19 @@
                         </div>
                     </div>
                     <div style="margin-top: 0.75rem;">
-                        <div style="font-size: 0.65rem; color: var(--text-secondary); margin-bottom: 0.35rem;" title="Dashboard-owned model config. These values are the default source for provider/model selection.">Provider Models</div>
+                        <div style="font-size: 0.65rem; color: var(--text-secondary); margin-bottom: 0.35rem;" title="Dashboard-owned model config. These values are the default source for provider/model selection. Max Turns sets the per-provider tool-call cap.">Provider Models</div>
                         <div class="models-grid">
                             <div></div>
                             <div class="models-grid-header">Full</div>
                             <div class="models-grid-header">Fix</div>
                             <div class="models-grid-header">Verify</div>
+                            <div class="models-grid-header" title="Maximum tool-call turns per provider.">Max Turns</div>
                             {% for provider in ['minimax', 'gemini', 'claude', 'codex'] %}
                             <div class="models-provider">{{ provider }}</div>
                             <input type="text" class="worker-input" id="model-{{ provider }}-FULL" value="{{ stats.queue_config.provider_models.get(provider, {}).get('FULL', '') }}" placeholder="full" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
                             <input type="text" class="worker-input" id="model-{{ provider }}-FIX" value="{{ stats.queue_config.provider_models.get(provider, {}).get('FIX', '') }}" placeholder="fix" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
                             <input type="text" class="worker-input" id="model-{{ provider }}-VERIFY" value="{{ stats.queue_config.provider_models.get(provider, {}).get('VERIFY', '') }}" placeholder="verify" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
+                            <input type="number" class="worker-input" id="turns-{{ provider }}" value="{{ stats.queue_config.provider_max_turns.get(provider, 25) }}" min="1" max="999" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
                             {% endfor %}
                         </div>
                     </div>
@@ -905,6 +907,7 @@
                     const ho = document.getElementById('handoffProviderInput');
                     const hm = document.getElementById('handoffMaxInput');
                     const dm = document.getElementById('debugModeInput');
+                    const providerMaxTurns = stats.queue_config.provider_max_turns || {};
                     const providerModels = stats.queue_config.provider_models || {};
                     if (ge && document.activeElement !== ge) ge.value = stats.queue_config.good_enough_score;
                     if (rs) rs.checked = !!stats.queue_config.require_scored;
@@ -915,6 +918,11 @@
                         hm.value = stats.queue_config.complexity_handoff_max || 0;
                     }
                     if (dm) dm.checked = !!stats.queue_config.debug_mode;
+                    ['minimax', 'gemini', 'claude', 'codex'].forEach(provider => {
+                        const input = document.getElementById(`turns-${provider}`);
+                        if (!input || document.activeElement === input) return;
+                        input.value = providerMaxTurns[provider] || 25;
+                    });
                     ['minimax', 'gemini', 'claude', 'codex'].forEach(provider => {
                         ['FULL', 'FIX', 'VERIFY'].forEach(mode => {
                             const input = document.getElementById(`model-${provider}-${mode}`);
@@ -1194,6 +1202,7 @@
             const audit = auditSel ? auditSel.value : 'off';
             const auditDeltaEl = document.getElementById('auditMinDeltaInput');
             const auditDelta = auditDeltaEl ? (parseInt(auditDeltaEl.value) || 5) : 5;
+            const providerMaxTurns = collectProviderMaxTurns();
             const providerModels = collectProviderModels();
             await fetch('/api/queue/config', {
                 method: 'POST',
@@ -1206,10 +1215,20 @@
                     debug_mode: debug,
                     audit_provider: audit === 'off' ? null : audit,
                     audit_min_delta: auditDelta,
+                    provider_max_turns: providerMaxTurns,
                     provider_models: providerModels,
                 }),
             });
             // queue_changed event will trigger a refreshStats which repaints the queue
+        }
+
+        function collectProviderMaxTurns() {
+            const providerMaxTurns = {};
+            ['minimax', 'gemini', 'claude', 'codex'].forEach(provider => {
+                const input = document.getElementById(`turns-${provider}`);
+                providerMaxTurns[provider] = input ? (parseInt(input.value) || 25) : 25;
+            });
+            return providerMaxTurns;
         }
 
         // --- All Functions: server-side search + filter ---
