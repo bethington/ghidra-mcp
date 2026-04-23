@@ -16,6 +16,8 @@
 [![Issues](https://img.shields.io/github/issues/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=orange)](https://github.com/bethington/ghidra-mcp/issues)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
+>
+> If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
 A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **222 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
@@ -324,6 +326,14 @@ curl http://127.0.0.1:8089/check_connection
 # Get version info
 curl http://127.0.0.1:8089/get_version
 ```
+
+## Support This Project
+
+If Ghidra MCP saves you engineering or reverse-engineering time, consider [sponsoring the project](https://github.com/sponsors/bethington).
+
+- One-time sponsorship helps fund fixes, compatibility updates, and release work.
+- Recurring sponsorship helps keep maintenance, docs, and production hardening moving.
+- Company support helps prioritize long-term reliability for the bridge, headless server, debugger integration, and workflow tooling.
 
 ## 🔒 Security
 
@@ -872,7 +882,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v5.4.1
+# Connection OK - GhidraMCP Headless Server v5.5.0
 ```
 
 ### Headless API Workflow
@@ -938,7 +948,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 5.4.1 |
+| **Version** | 5.5.0 |
 | **MCP Tools** | 222 fully implemented |
 | **GUI Endpoints** | 198 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |

@@ -4,6 +4,38 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.5.0 - 2026-04-23 (maintenance)
+
+Maintenance release focused on cleanup and release readiness after the
+v5.4.1 security hardening work.
+
+### Fixed
+
+- **`FunctionService` decompiler lifetime handling** — closes owned
+  `DecompInterface` instances on all relevant success, early-return, and
+  exception paths to avoid leaking decompiler subprocesses during
+  decompilation and variable-update workflows.
+- **Claude/CAPI tool-name compatibility in the Python bridge** —
+  `bridge_mcp_ghidra.py` now enforces the stricter `^[a-zA-Z0-9_-]{1,64}$`
+  constraint when sanitizing and collision-suffixing tool names, matching
+  client expectations instead of emitting overlong names.
+- **Bundled Ghidra script resource ownership** — script-side
+  `DecompInterface` usage now follows scoped `try/finally` disposal in the
+  affected batch, export, survey, and audit helpers.
+- **Claude subprocess lifetime in bundled scripts** — the Claude-invoking
+  scripts now drain and close readers with try-with-resources and use
+  bounded `waitFor(timeout, TimeUnit.SECONDS)` handling with terminate/kill
+  fallback instead of unbounded waits.
+
+### Docs
+
+- **Release metadata refreshed to `5.5.0`** across Maven, plugin/headless
+  fallbacks, manifest metadata, endpoint catalog, operator docs, and the
+  release index.
+- **`CONTRIBUTING.md`** — added a concise resource-ownership checklist for
+  services and bundled scripts, covering disposable helpers,
+  transactions, child-process lifecycle, and timeout expectations.
+
 ## v5.4.1 - 2026-04-18 (security)
 
 Security + operational-readiness release on top of v5.4.0. Addresses the

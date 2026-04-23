@@ -6,9 +6,9 @@
     <groupId>com.xebyte</groupId>
     <artifactId>GhidraMCP</artifactId>
     <packaging>jar</packaging>
-    <version>5.4.1</version>
+    <version>5.5.0</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.4.1 security release: opt-in HTTP bearer-token authentication (GHIDRA_MCP_AUTH_TOKEN), non-loopback bind refusal without auth, script-endpoint gate (GHIDRA_MCP_ALLOW_SCRIPTS, default off), filesystem path-root allow-list mechanism (GHIDRA_MCP_FILE_ROOT), CI fixes, docs refresh, and the v5.4.0 emulation / debugger / data-flow feature set.</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.5.0 maintenance release: decompiler lifecycle fixes in FunctionService, Claude/CAPI-compatible bridge tool-name sanitization, bundled-script resource ownership cleanup, bounded Claude subprocess waits, and refreshed release metadata on top of the v5.4.x security and debugger/emulation feature set.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.release>21</maven.compiler.release>

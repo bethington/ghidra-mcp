@@ -6,12 +6,21 @@ For the full version history, see [CHANGELOG.md](../../CHANGELOG.md) in the proj
 
 ## Current Releases
 
-### v5.4.1 (Latest) — security release
+### v5.5.0 (Latest) — maintenance release
+
+- **Decompiler lifecycle fixes** — `FunctionService` now disposes owned `DecompInterface` instances across success, early-return, and exception paths instead of leaking subprocesses in long-running sessions.
+- **Bridge compatibility fix** — Python tool-name sanitization now enforces Claude/CAPI's 64-character limit and valid-character rules during collision handling.
+- **Bundled script hardening** — script-side `DecompInterface` ownership was normalized to scoped cleanup, and Claude-invoking scripts now use bounded waits with terminate/kill fallback.
+- **Contributor guidance** — `CONTRIBUTING.md` now includes a release-relevant resource-ownership checklist for disposables, transactions, child-process handling, and timeout expectations.
+- **Release metadata refresh** — Maven/package metadata, headless/plugin fallback versions, endpoint catalog version, and release docs were updated to `5.5.0`.
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.4.1 — security release
 
 - **Bearer-token auth** — when `GHIDRA_MCP_AUTH_TOKEN` is set, every HTTP request must carry `Authorization: Bearer <token>`. Timing-safe comparison. `/mcp/health`, `/health`, `/check_connection` are auth-exempt.
 - **Bind hardening** — headless server refuses to start on non-loopback `--bind` unless a token is configured.
 - **Script gate (breaking change)** — `/run_script_inline` and `/run_ghidra_script` default to 403 unless `GHIDRA_MCP_ALLOW_SCRIPTS=1` is set. These endpoints execute arbitrary Java against the Ghidra process; the pre-v5.4.1 default was unauthenticated RCE when exposed beyond loopback.
-- **`GHIDRA_MCP_FILE_ROOT` mechanism** — path-root canonicalization helper for file-handling endpoints. Per-endpoint wire-up scheduled for v5.4.2.
+- **`GHIDRA_MCP_FILE_ROOT` mechanism** — path-root canonicalization helper for file-handling endpoints. Per-endpoint wire-up scheduled for a follow-on release.
 - **CI / ops** — Debugger JARs installed across all 4 GitHub Actions workflows; offline Java tests (11, ~3s) now gate every push/PR; deprecated Ghidra API warnings suppressed; `requests` floor raised to 2.32.0 per CVE-2024-35195.
 - **Docs refresh** — `README.md` Security section, `CLAUDE.md`, `CHANGELOG.md` (v5.4.0 entry backfilled), operator prompt docs now cover emulation / debugger / data-flow.
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details.
