@@ -119,6 +119,12 @@ TOOLCHAINS = {
             # it silently and emits OS/Subsystem Version 4.00/4.00 in
             # the PE header (matches D2's 4.00/4.00 exactly).
             "/SUBSYSTEM:WINDOWS,4.00",
+            # Match D2Common.dll's image base so our function addresses
+            # land at 0x6FD5xxxx instead of 0x1000xxxx. This makes
+            # cross-binary diffs easier (an address in our Benchmark.dll
+            # sits in the same numeric range as its D2 inspiration) and
+            # avoids Ghidra having to rebase on import.
+            "/BASE:0x6FD50000",
             "/OPT:REF",
             # ICF is what Blizzard used the VS 2003 linker FOR — it's
             # the feature VC6 didn't have. Enable it to match D2's
