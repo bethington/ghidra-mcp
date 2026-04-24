@@ -63,9 +63,10 @@ TOOLCHAINS = {
         ],
     },
     "vc6sp6": {
-        "description": "Visual C++ 6.0 SP6 (target toolchain — matches D2 1.13d Rich header)",
-        # These paths are placeholders; wire them up when VC6 is installed
-        # (e.g. via the archive installer to C:\VC6). Leave unused until then.
+        "description": "Visual C++ 6.0 SP6 (build 6030 — matches D2 1.13d Rich header)",
+        # Portable install at C:\VC6\ (see docs/VC6_INSTALL.md). The
+        # compiler banner should read "Version 12.00.8804" — that's the
+        # SP6 patch level D2 was built with.
         "cl_path": r"C:\VC6\VC98\Bin\cl.exe",
         "link_path": r"C:\VC6\VC98\Bin\link.exe",
         "include": [r"C:\VC6\VC98\Include", r"C:\VC6\VC98\ATL\Include"],

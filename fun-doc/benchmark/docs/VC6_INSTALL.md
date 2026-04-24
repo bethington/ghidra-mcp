@@ -1,5 +1,12 @@
 # Installing Visual C++ 6.0 SP6 for the benchmark toolchain
 
+> **Status (2026-04-24):** This install is **complete** on this machine at
+> `C:\VC6\`. `build.py --toolchain vc6sp6` produces a VC6 SP6 Benchmark.dll.
+> The steps below document the portable-install procedure used; keep them
+> for reproducibility on other machines.
+
+
+
 The benchmark binary `Benchmark.dll` is built by the fast-tier walking skeleton with modern MSVC 2022 as a placeholder. D2 1.13d was actually compiled with **Visual C++ 6.0 SP6** (Rich-header evidence: product IDs 0x005C/0x005D/0x005E/0x005F, build 6030, dominant in D2Common.dll). Switching the benchmark toolchain to VC6 SP6 matters because MSVC's code-generation style drifted significantly between VC6 and modern compilers: different prologue/epilogue, different SEH emission, different switch-table layouts, different loop idioms. Benchmarking fun-doc's pattern-recognition against modern-MSVC decompile output grades the model on bytecode the production workers don't actually see.
 
 ## What you need
@@ -33,11 +40,61 @@ For our walking-skeleton purposes the exact installer bits matter less than the 
    ```
    You should see the banner.
 
+## Portable install procedure actually used on this machine
+
+Bypass the installer entirely — extract directly from the ISOs + SP6 self-extractor. This avoids the admin-required InstallShield flow and the MSJava registration failures on modern Windows.
+
+Given the Ben-provided `D:\vc6-sp6-ent\` folder with `en_vs6_ent_cd1.iso` and `en_vs6_sp6.exe`:
+
+```bash
+# 1. Extract the VC98 tree + helper DLLs from CD1
+mkdir -p /c/VC6 && cd /c/VC6
+7z x /d/vc6-sp6-ent/en_vs6_ent_cd1.iso \
+    "VC98" \
+    "COMMON/MSDEV98/BIN/MSPDB60.DLL" \
+    "COMMON/MSDEV98/BIN/MSDIS110.DLL" \
+    "COMMON/MSDEV98/BIN/MSOBJ10.DLL" -y
+
+# 2. Copy helper DLLs into VC98/Bin so cl.exe finds them alongside itself
+cp /c/VC6/COMMON/MSDEV98/BIN/MSPDB60.DLL /c/VC6/VC98/Bin/
+cp /c/VC6/COMMON/MSDEV98/BIN/MSDIS110.DLL /c/VC6/VC98/Bin/
+cp /c/VC6/COMMON/MSDEV98/BIN/MSOBJ10.DLL /c/VC6/VC98/Bin/
+
+# 3. Extract the SP6 self-extractor + its inner CABs
+mkdir -p /c/tmp/sp6_extract
+7z x /d/vc6-sp6-ent/en_vs6_sp6.exe -o/c/tmp/sp6_extract -y
+mkdir -p /c/tmp/sp6_files
+for n in 1 2 3 4; do
+    7z x /c/tmp/sp6_extract/VS6sp6$n.cab -o/c/tmp/sp6_files -y
+done
+
+# 4. Overlay SP6-patched files onto C:\VC6\VC98\
+cp -rf /c/tmp/sp6_files/vc98/bin/.     /c/VC6/VC98/Bin/
+cp -rf /c/tmp/sp6_files/vc98/include/. /c/VC6/VC98/Include/
+cp -rf /c/tmp/sp6_files/vc98/lib/.     /c/VC6/VC98/Lib/
+
+# 5. CRITICAL: apply the Processor Pack C2.DLL to fix the SP6 C1/C2 mismatch
+7z x /d/vc6-sp6-ent/vcpp5.exe -o/c/tmp/vcpp5 -y
+cp /c/tmp/vcpp5/c2.dll /c/VC6/VC98/Bin/C2.DLL
+
+# 6. Verify
+/c/VC6/VC98/Bin/cl.exe   # should print "Version 12.00.8804 for 80x86"
+```
+
+### The SP6 C1/C2 mismatch bug
+
+SP6 ships a patched **C1** front-end (dated 1999-10-26, IL version `19991026`) but **does NOT** ship a matching patched **C2** back-end. The base CD's C2.DLL is from 1998-06-17 (IL version `19970710`). Combining them produces:
+
+```
+fatal error C1900: Il mismatch between 'P1' version '19991026' and 'P2' version '19970710'
+```
+
+The fix Microsoft shipped for this is the **Visual C++ 6.0 Processor Pack** (distributed as `vcpp5.exe` in the Ben-provided folder), which contains a patched `c2.dll` dated 2000-11-09 that's IL-compatible with SP6's C1. Without it, SP6 compiles nothing. Step 5 above deploys it.
+
 ## Known gotchas on modern Windows
 
-- **Admin-required installer**: VC6's setup writes to HKLM; run it elevated.
-- **"Access denied" on MSJava**: one of the installer steps tries to register MSJava DLLs which Windows 10/11 refuse. Ignore the error and continue — the C/C++ toolchain installs fine.
-- **MSVCRT mismatch** if you also have a modern MSVC installed: VC6's static CRT (`/MT`) is self-contained, so there's no conflict. Dynamic CRT (`/MD`) would link against MSVCR60.dll which modern Windows doesn't ship; avoid unless you install the VC6 runtime redistributable.
+- **No admin required** for the portable install above — everything lands under `C:\VC6\` and nothing gets registered.
+- **MSVCRT static** (`/MT`) is self-contained, so there's no runtime conflict with a modern MSVC also installed. Dynamic CRT (`/MD`) would link against MSVCR60.dll which modern Windows doesn't ship; avoid unless you install the VC6 runtime redistributable.
 - **Path length errors during compile**: VC6's tools cap paths at 127 chars somewhere internally. Keep `C:\VC6\` and your source tree short.
 
 ## Verifying the install is benchmark-ready
