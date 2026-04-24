@@ -1,0 +1,22 @@
+{
+  "description": "Typical fun-doc output on get_stat_list_prev_link — recognizes the validated accessor + linked-list traversal pattern, plate identifies the prev-pointer semantics.",
+  "wall_time_sec": 17.3,
+  "captured": {
+    "name": "GetStatListPrev",
+    "return_type": "int",
+    "parameters": [
+      {"name": "pStatList", "type": "int *"}
+    ],
+    "locals": [],
+    "plate": "Reads the prev-link pointer from a StatList at offset +0x34. Validates the list pointer is non-null and the magic number at offset 0 matches 0x01020304. On success returns the 32-bit pointer — this is the reverse-traversal link in a doubly-linked StatList chain. Returns 0 on null-pointer or magic mismatch."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x100011A0"}, "status": "ok"},
+    {"tool": "get_function_signature", "args": {"address": "0x100011A0"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x100011A0"}, "status": "ok"},
+    {"tool": "set_function_prototype", "args": {"address": "0x100011A0", "prototype": "int GetStatListPrev(int *pStatList)"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x100011A0", "name": "GetStatListPrev"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x100011A0", "comment": "Reads the prev-link pointer..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x100011A0"}, "status": "ok"}
+  ]
+}

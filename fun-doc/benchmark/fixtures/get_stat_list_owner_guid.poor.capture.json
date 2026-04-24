@@ -1,0 +1,22 @@
+{
+  "description": "Poor fun-doc output on get_stat_list_owner_guid — generic name, missed the magic validation and the struct semantics.",
+  "wall_time_sec": 20.2,
+  "captured": {
+    "name": "GetValue",
+    "return_type": "undefined4",
+    "parameters": [
+      {"name": "param_1", "type": "undefined4 *"}
+    ],
+    "locals": [],
+    "plate": "Returns a value from memory if validation passes."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001180"}, "status": "ok"},
+    {"tool": "decompile_function", "args": {"address": "0x10001180"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001180"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001180"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001180", "name": "GetValue"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001180", "comment": "Returns a value..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001180"}, "status": "ok"}
+  ]
+}

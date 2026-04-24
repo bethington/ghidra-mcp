@@ -23,9 +23,22 @@ integration is TODO once the pipeline end-to-end is committed.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+
+# Haiku judge configuration. Overridable via env so the benchmark
+# can test model-routing changes (e.g. switch judge to Sonnet for a
+# run, compare vs Haiku).
+HAIKU_JUDGE_MODEL = os.environ.get(
+    "FUNDOC_BENCHMARK_JUDGE_MODEL", "claude-haiku-4-5"
+)
+# Set FUNDOC_BENCHMARK_NO_LLM=1 to force-fallback to the Jaccard stub
+# even when ANTHROPIC_API_KEY is set — useful for deterministic
+# test runs where you don't want network variability.
+_LLM_DISABLED = os.environ.get("FUNDOC_BENCHMARK_NO_LLM") == "1"
 
 
 # ---------- Multi-level rubric primitives ----------
@@ -223,20 +236,13 @@ def _score_algorithm(captured: dict, truth: dict) -> dict[str, Any]:
     }
 
 
-def _score_plate(captured: dict, truth: dict) -> dict[str, Any]:
-    """LLM-as-judge for plate semantic equivalence.
+def _jaccard_plate_fallback(canon: str, gen: str) -> dict[str, Any]:
+    """Pure-Python fallback used when the LLM judge isn't available.
 
-    Walking skeleton stub: word-overlap Jaccard as a rough proxy. Real
-    implementation will invoke Haiku 4.5 with the canonical plate and
-    the worker's plate as a pair, asking for 0-10 equivalence.
+    Tokenizes both plates, drops stop words, computes Jaccard. Coarse
+    but monotonic — higher overlap means higher similarity. Gets us
+    reasonable mock/offline scoring without a network round-trip.
     """
-    canon = truth.get("canonical_plate") or ""
-    gen = captured.get("plate") or ""
-    if not canon:
-        return {"score": 0.0, "tier": "no_canonical", "note": "truth has no canonical_plate"}
-    if not gen:
-        return {"score": 0.0, "tier": "miss", "note": "worker produced no plate"}
-
     words_a = set(re.findall(r"\w+", canon.lower()))
     words_b = set(re.findall(r"\w+", gen.lower()))
     stop = {
@@ -247,14 +253,119 @@ def _score_plate(captured: dict, truth: dict) -> dict[str, Any]:
     words_b -= stop
     if not words_a:
         return {"score": 0.0, "tier": "no_canonical", "note": "canonical plate has no scoreable words"}
-
     jaccard = len(words_a & words_b) / len(words_a | words_b)
     return {
         "score": round(jaccard, 3),
-        "tier": "llm_stub",
-        "note": "stub: jaccard word overlap; swap in Haiku judge",
+        "tier": "jaccard",
+        "note": "LLM judge unavailable; Jaccard word-overlap fallback",
         "jaccard": round(jaccard, 3),
     }
+
+
+_HAIKU_JUDGE_SYSTEM = (
+    "You are a scoring judge for reverse-engineering documentation quality.\n"
+    "You will receive a CANONICAL plate comment (ground truth) and a "
+    "GENERATED plate comment (produced by an automated doc tool).\n"
+    "Score how semantically equivalent the two comments are on a 0.0 - 1.0 "
+    "scale where:\n"
+    "  1.0 = same algorithm identified, same semantics described, "
+    "same input/output contract communicated\n"
+    "  0.7 = mostly right, missing a detail or has minor inaccuracies\n"
+    "  0.5 = partially right, gets the gist but misses a material piece\n"
+    "  0.3 = wrong algorithm / missing the core point but some overlap\n"
+    "  0.0 = wrong or generic (no real semantic match)\n"
+    "\n"
+    "Respond with ONLY the score as a decimal number between 0.0 and 1.0, "
+    "nothing else. No explanation, no punctuation, no units.\n"
+)
+
+
+def _haiku_judge_plate(canon: str, gen: str) -> Optional[float]:
+    """Call Haiku 4.5 to score plate-comment equivalence. Returns None on failure.
+
+    The prompt is small (~200 tokens system + ~2x the plate length user
+    content) and the response is capped at 16 tokens (just the number).
+    Expected cost per call: ~$0.00005 on Haiku 4.5. A full fast-tier
+    benchmark run invokes this 5 times; core tier 4 times.
+
+    Catches every exception — a Haiku failure must fall through to
+    the Jaccard fallback so a network blip doesn't kill the benchmark.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        return None
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model=HAIKU_JUDGE_MODEL,
+            max_tokens=16,
+            system=_HAIKU_JUDGE_SYSTEM,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"CANONICAL:\n{canon.strip()}\n\n"
+                        f"GENERATED:\n{gen.strip()}\n\n"
+                        f"Score (0.0 - 1.0):"
+                    ),
+                }
+            ],
+        )
+        # Response is the score as a decimal. Extract the first float.
+        text = ""
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                text += block.text
+        # Allow a leading minus so we can clamp negative values to 0.0
+        # rather than silently flipping their sign.
+        match = re.search(r"-?\d*\.?\d+", text)
+        if not match:
+            return None
+        score = float(match.group(0))
+        # Clamp — models sometimes emit >1.0 or <0 on degenerate inputs.
+        return max(0.0, min(1.0, score))
+    except Exception:
+        # Network failure, rate limit, malformed response — fall back.
+        return None
+
+
+def _score_plate(captured: dict, truth: dict) -> dict[str, Any]:
+    """Score plate-comment semantic equivalence.
+
+    Preferred path: Haiku 4.5 as a judge via the Anthropic SDK (Q6
+    default). Falls back to Jaccard word-overlap when:
+      * ANTHROPIC_API_KEY is not set
+      * the anthropic SDK isn't installed
+      * FUNDOC_BENCHMARK_NO_LLM=1 (force-offline mode for tests)
+      * the Haiku call errors (network, rate limit, malformed response)
+
+    The fallback is coarse but monotonic so offline scoring still
+    discriminates good plates from bad. The real Haiku judge is what
+    you want for actual regression grading.
+    """
+    canon = truth.get("canonical_plate") or ""
+    gen = captured.get("plate") or ""
+    if not canon:
+        return {"score": 0.0, "tier": "no_canonical", "note": "truth has no canonical_plate"}
+    if not gen:
+        return {"score": 0.0, "tier": "miss", "note": "worker produced no plate"}
+
+    if not _LLM_DISABLED:
+        haiku_score = _haiku_judge_plate(canon, gen)
+        if haiku_score is not None:
+            return {
+                "score": round(haiku_score, 3),
+                "tier": "llm_haiku",
+                "model": HAIKU_JUDGE_MODEL,
+                "note": "Haiku 4.5 semantic equivalence judgment",
+            }
+
+    return _jaccard_plate_fallback(canon, gen)
 
 
 def _score_locals(captured: dict, truth: dict) -> dict[str, Any]:

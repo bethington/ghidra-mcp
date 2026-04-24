@@ -149,6 +149,130 @@
         "locals": 0.15
       }
     },
+    "get_stat_list_layer": {
+      "name": "get_stat_list_layer",
+      "source_file": "get_stat_list_layer.c",
+      "return_type": "unsigned int",
+      "parameters": [
+        {
+          "name": "pStatList",
+          "type": "const unsigned char *"
+        }
+      ],
+      "locals": [],
+      "doc_comment": "Read the layer field from a D2 StatList structure.\n\nReturns the 32-bit DWORD at offset +0x04 (the StatList's layer\nindex). Performs NO validation \u2014 assumes the caller has already\nverified pStatList is non-null and points at a well-formed\nStatList. Callers that want the safety of magic-number validation\nshould use a validated variant instead.\n\n@param pStatList  pointer to a StatList structure\n@return the DWORD at offset +0x04 (layer index)",
+      "name_synonyms": [
+        "get_stat_list_layer",
+        "GetStatListLayer",
+        "getStatListLayer",
+        "StatListLayer",
+        "stat_list_layer",
+        "ReadStatListLayer",
+        "StatList_GetLayer",
+        "GetLayer"
+      ],
+      "canonical_plate": "Reads the layer index (DWORD at offset +0x04) from a D2 StatList\nstructure. Unvalidated \u2014 directly dereferences the pointer with\nno null-check and no magic-number validation. Callers must\nensure pStatList points at a well-formed StatList before\ninvocation. Returns the raw 32-bit value at +0x04.\n",
+      "algorithm_tag": "raw field read",
+      "algorithm_synonyms": [
+        "raw field read",
+        "struct accessor",
+        "direct read",
+        "unvalidated accessor",
+        "offset accessor"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "get_stat_list_owner_guid": {
+      "name": "get_stat_list_owner_guid",
+      "source_file": "get_stat_list_owner_guid.c",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "pStatList",
+          "type": "int *"
+        }
+      ],
+      "locals": [],
+      "doc_comment": "Read the owner GUID from a D2 StatList structure.\n\nReturns the 32-bit GUID at offset +0x20 after validating the\npointer is non-null and the magic signature at offset 0 matches\nthe StatList tag 0x01020304. Returns 0 on null-pointer or\nmagic-mismatch (corruption guard).\n\n@param pStatList  pointer to a StatList structure\n@return the GUID at offset +0x20, or 0 if invalid",
+      "name_synonyms": [
+        "get_stat_list_owner_guid",
+        "GetStatListOwnerGuid",
+        "getStatListOwnerGuid",
+        "StatListOwnerGuid",
+        "ReadStatListOwnerGuid",
+        "StatList_GetOwnerGuid",
+        "GetOwnerGuid",
+        "get_owner_guid",
+        "StatListGetOwnerID"
+      ],
+      "canonical_plate": "Read the owner GUID from a D2 StatList structure. Validates the\nlist pointer is non-null and the magic signature at offset 0\nmatches 0x01020304. On success returns the 32-bit GUID at\noffset +0x20. Returns 0 on null-pointer or magic-mismatch,\nguarding against reads from corrupted or non-StatList memory.\n",
+      "algorithm_tag": "struct accessor",
+      "algorithm_synonyms": [
+        "struct accessor",
+        "struct getter",
+        "field read",
+        "validated accessor",
+        "magic number",
+        "corruption guard",
+        "offset accessor"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "get_stat_list_prev_link": {
+      "name": "get_stat_list_prev_link",
+      "source_file": "get_stat_list_prev_link.c",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "pStatList",
+          "type": "int *"
+        }
+      ],
+      "locals": [],
+      "doc_comment": "Read the prev_link pointer from a D2 StatList structure.\n\nReturns the 32-bit pointer at offset +0x34 after validating\npStatList is non-null and its magic signature at offset 0\nmatches 0x01020304. Part of a linked-list traversal: following\nthis pointer repeatedly walks backwards through the stat list\nchain. Returns 0 on null or corruption.\n\n@param pStatList  pointer to a StatList structure\n@return the prev-link pointer at +0x34, or 0 if invalid",
+      "name_synonyms": [
+        "get_stat_list_prev_link",
+        "GetStatListPrevLink",
+        "getStatListPrevLink",
+        "StatListPrevLink",
+        "ReadStatListPrevLink",
+        "StatList_GetPrevLink",
+        "GetPrevLink",
+        "get_prev",
+        "StatListGetPrev",
+        "GetPrevStatList"
+      ],
+      "canonical_plate": "Read the prev-link pointer from a D2 StatList structure.\nValidates the list pointer is non-null and the magic signature\nat offset 0 matches 0x01020304. On success returns the 32-bit\npointer at offset +0x34 \u2014 this is the reverse traversal link in\na doubly-linked StatList chain. Following it repeatedly walks\nbackwards through the chain. Returns 0 on null-pointer or\nmagic-mismatch.\n",
+      "algorithm_tag": "linked-list traversal",
+      "algorithm_synonyms": [
+        "linked list",
+        "linked-list traversal",
+        "doubly linked list",
+        "prev pointer",
+        "prev link",
+        "struct accessor",
+        "validated accessor"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
     "stat_list_add": {
       "name": "stat_list_add",
       "source_file": "stat_list_add.c",

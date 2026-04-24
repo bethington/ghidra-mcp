@@ -49,13 +49,31 @@ Suite definitions live in `suites/*.yaml`.
 
 Per-function quality score is a weighted combination of:
 
-- **name**: function name — rubric cascade (exact → prefix → embedding → Haiku judge → miss)
-- **plate**: plate comment — Haiku judge against canonical plate in `truth.yaml`
+- **name**: function name — rubric cascade (exact → prefix → embedding → LLM judge → miss)
+- **plate**: plate comment — Haiku 4.5 judge against canonical plate in `truth.yaml`, with Jaccard word-overlap fallback when the LLM is unavailable
 - **signature**: return type + param types — structural exact match, no wiggle room
 - **locals**: local variable names + types — rubric cascade for names, structural for types
 - **algorithm**: whether the plate mentions the algorithm tag — structural
 
-Guardrails (reported separately, block regressions on their own):
+### LLM judge for plate scoring
+
+The plate dimension's scorer invokes Haiku 4.5 via the Anthropic SDK by default. The judge prompt is small (~200 token system + ~2× the plate length user content), capped at 16 tokens output — a full fast-tier run calls the judge 5 times; core tier 4 times. Expected cost per call ≈ $0.00005 on Haiku 4.5.
+
+Configuration:
+
+| Env var | Default | Effect |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | (unset) | When set, real Haiku is invoked. When unset, Jaccard fallback fires. |
+| `FUNDOC_BENCHMARK_JUDGE_MODEL` | `claude-haiku-4-5` | Swap in a different judge model (e.g. `claude-sonnet-4-6`) |
+| `FUNDOC_BENCHMARK_NO_LLM` | (unset) | Set to `1` to force Jaccard fallback even with an API key set — useful for deterministic test runs. |
+
+The Jaccard fallback is coarse but monotonic — high word-overlap means high similarity. It's what offline tests use and what runs before you've set the API key. The scorer's output `dimensions.plate.tier` tells you which path fired: `llm_haiku` (real Haiku), `jaccard` (fallback), `miss` (worker wrote no plate), or `no_canonical` (truth yaml has no canonical_plate).
+
+Failures in the Haiku call (network, rate limit, malformed response) silently fall through to the Jaccard path — a benchmark run shouldn't abort on a transient API hiccup.
+
+### Guardrails
+
+Reported separately, block regressions on their own:
 
 - `tool_calls_per_quality_point` — lower is better
 - `duplicate_tool_call_ratio` — same (tool, args) inside one run; stays near 0

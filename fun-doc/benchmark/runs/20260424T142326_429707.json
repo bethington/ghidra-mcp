@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "timestamp": "2026-04-24T14:27:00",
+  "timestamp": "2026-04-24T14:23:26",
   "commit": "e356b9c",
   "tier": "core",
   "providers": [
@@ -44,8 +44,8 @@
           },
           "plate": {
             "score": 0.686,
-            "tier": "jaccard",
-            "note": "LLM judge unavailable; Jaccard word-overlap fallback",
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
             "jaccard": 0.686
           },
           "algorithm": {
@@ -118,8 +118,8 @@
           },
           "plate": {
             "score": 0.625,
-            "tier": "jaccard",
-            "note": "LLM judge unavailable; Jaccard word-overlap fallback",
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
             "jaccard": 0.625
           },
           "algorithm": {
@@ -192,8 +192,8 @@
           },
           "plate": {
             "score": 0.694,
-            "tier": "jaccard",
-            "note": "LLM judge unavailable; Jaccard word-overlap fallback",
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
             "jaccard": 0.694
           },
           "algorithm": {
@@ -266,8 +266,8 @@
           },
           "plate": {
             "score": 0.5,
-            "tier": "jaccard",
-            "note": "LLM judge unavailable; Jaccard word-overlap fallback",
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
             "jaccard": 0.5
           },
           "algorithm": {

@@ -1,0 +1,41 @@
+# Semantic ground truth for src/get_stat_list_owner_guid.c::get_stat_list_owner_guid.
+#
+# D2-derived reconstruction: /Mods/PD2-S12/D2Common.dll @ 6fd6dfb0
+# (validated accessor; reads offset +0x20 after magic-number check)
+
+function: get_stat_list_owner_guid
+
+name_synonyms:
+  - get_stat_list_owner_guid
+  - GetStatListOwnerGuid
+  - getStatListOwnerGuid
+  - StatListOwnerGuid
+  - ReadStatListOwnerGuid
+  - StatList_GetOwnerGuid
+  - GetOwnerGuid
+  - get_owner_guid
+  - StatListGetOwnerID
+
+canonical_plate: |
+  Read the owner GUID from a D2 StatList structure. Validates the
+  list pointer is non-null and the magic signature at offset 0
+  matches 0x01020304. On success returns the 32-bit GUID at
+  offset +0x20. Returns 0 on null-pointer or magic-mismatch,
+  guarding against reads from corrupted or non-StatList memory.
+
+algorithm_tag: struct accessor
+algorithm_synonyms:
+  - struct accessor
+  - struct getter
+  - field read
+  - validated accessor
+  - magic number
+  - corruption guard
+  - offset accessor
+
+weights:
+  name: 0.25
+  signature: 0.25
+  plate: 0.20
+  algorithm: 0.15
+  locals: 0.15
