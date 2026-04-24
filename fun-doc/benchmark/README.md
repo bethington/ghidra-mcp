@@ -77,29 +77,86 @@ Walking skeleton uses modern MSVC 2022 as a placeholder so the pipeline can be p
 
 ## Running
 
+Two modes: `--mock` (reads pre-captured worker output fixtures — fast, deterministic, offline) and `--real` (drives the actual fun-doc pipeline against Ghidra — slower, exercises the full runtime).
+
+### Mock mode — fast-iterating on the scorer
+
 ```text
-# Default: minimax only, fast tier, compare to runs/latest.json
-python fun-doc/benchmark/run_benchmark.py --tier fast --compare
+# Default: fast tier, baseline variant, compare to runs/latest.json
+python fun-doc/benchmark/run_benchmark.py --mock --tier fast --compare
 
-# Core tier against a specific commit's model config
-python fun-doc/benchmark/run_benchmark.py --tier core
-
-# Cross-provider matrix (runs every provider in provider_models config)
-python fun-doc/benchmark/run_benchmark.py --tier core --full
+# Regress check: run poor variant, see what scoring flags
+python fun-doc/benchmark/run_benchmark.py --mock --tier fast --variant poor --compare
 
 # Diff two specific runs
 python fun-doc/benchmark/compare_runs.py runs/<before>.json runs/<after>.json
 ```
 
-## Adding a baseline function
+### Real mode — actual fun-doc-against-Ghidra regression harness
 
-1. Pick a real D2 function whose documentation you already have high confidence in.
-2. Write `src/<name>.c` containing plausible C that would compile to similar bytecode.
-3. Write `truth/<name>.truth.yaml` with synonyms, canonical plate, algorithm tag, weights.
-4. Add the function to the appropriate suite in `suites/*.yaml`.
-5. Run `build.py` — if the decompile output of our binary diverges from the real D2 function in a way that matters, iterate on the C source.
-6. Add to the appropriate tier in `suites/*.yaml` (fast / core / stretch).
-7. Re-run the benchmark and commit the resulting `runs/latest.json`.
+Real mode requires Ghidra running with `Benchmark.dll` imported, and whichever provider you're benchmarking reachable. First-time setup:
+
+```text
+# 1. Build the binary (produces build/Benchmark.dll)
+python fun-doc/benchmark/build.py
+
+# 2. Import it into the running Ghidra instance. Idempotent — re-running
+#    is a no-op if already imported. Goes to /benchmark/Benchmark.dll by
+#    default; override with FUNDOC_BENCHMARK_PROGRAM.
+python fun-doc/benchmark/setup_ghidra_benchmark.py
+
+# 3. Run the benchmark. Default provider is minimax, default tier is fast.
+python fun-doc/benchmark/run_benchmark.py --tier fast --compare
+
+# Cross-provider matrix (every provider listed in priority_queue config)
+python fun-doc/benchmark/run_benchmark.py --tier fast --full --compare
+```
+
+Real mode captures a **pristine snapshot** of each baseline function's current Ghidra state before the first run and restores it between function invocations. This avoids the complexity of a `.gzf` export/restore cycle at the cost of not unrolling struct definitions that fun-doc creates mid-run (they persist until manually cleaned up).
+
+The real-mode invocation:
+1. Resolves the target function's address in the benchmark program via `/search_functions`
+2. Captures pristine state on first encounter (name, prototype, plate, locals)
+3. Invokes `fun_doc.process_function` against the target with a **temp state file** so production state is never polluted
+4. Subscribes to bus events to collect the tool-call stream
+5. Scrapes Ghidra post-run for the resulting name / prototype / plate / locals
+6. Scores via the same rubric as mock mode
+7. Restores the pristine snapshot before moving to the next function
+
+If Ghidra isn't running or `Benchmark.dll` isn't imported, `--real` fails early with a clear message pointing you at `setup_ghidra_benchmark.py`.
+
+## Adding a core-tier function (D2-derived)
+
+The workflow is scaffolded — start with `tools/add_core_function.py` to pull the reference material from Ghidra:
+
+```text
+python fun-doc/benchmark/tools/add_core_function.py \
+    --program /Mods/PD2-S12/D2Common.dll \
+    --address 6fd7f3a0 \
+    --name CalcDamageBonus
+```
+
+This fetches the function's current decompilation and plate comment from the running Ghidra, pastes them into a new `src/<name>.c` as reference blocks, and creates a matching `truth/<name>.truth.yaml` with TODOs you fill in.
+
+Then:
+
+1. Read the DECOMPILATION + EXISTING PLATE blocks at the top of the scaffolded `.c` file. These are your starting reference.
+2. Below them, reconstruct the function in plausible C that would compile to similar bytecode. Use mid-2000s MSVC-compatible idioms (no C99 features, explicit types, structs lifted from `memory/structs.md`).
+3. Fill out the TODOs in `truth/<name>.truth.yaml`: accepted synonyms, canonical plate, algorithm tag.
+4. Run `python build.py` and check the compiled output decompiles similarly to the real D2 function in Ghidra. Iterate if it doesn't.
+5. Add the function to `suites/core.yaml` (either a solo suite or grouped with related struct-affinity functions).
+6. Author a baseline fixture at `fixtures/<name>.baseline.capture.json` — copy from an existing one and adapt.
+7. `python run_benchmark.py --mock --tier core --variant baseline` to verify scoring is in the 0.7–0.9 band.
+
+## Adding a fast-tier or stretch-tier function (archetype)
+
+Simpler workflow — these are authored from scratch to exercise a specific pattern, not reconstructed from D2:
+
+1. Write `src/<name>.c` with the archetype you want to cover (e.g. bit-twiddling, switch ladder, recursion).
+2. Write `truth/<name>.truth.yaml` with synonyms, canonical plate, algorithm tag.
+3. Author two fixtures: `fixtures/<name>.baseline.capture.json` and `fixtures/<name>.poor.capture.json`.
+4. Add to `suites/fast.yaml` (or `stretch.yaml`).
+5. Run `python build.py && python extract_truth.py && python run_benchmark.py --mock --tier fast` to validate.
 
 ## When to run
 

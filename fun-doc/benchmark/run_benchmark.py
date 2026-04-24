@@ -134,27 +134,98 @@ def _capture_mock(fn_name: str, variant: str) -> tuple[dict, list[dict], float]:
     )
 
 
-def _capture_real(fn_name: str, provider: str, model: Optional[str]) -> tuple[dict, list[dict], float]:
-    """Invoke fun-doc on the benchmark function and scrape Ghidra for the result.
+# Module-level cache: pristine snapshots keyed by (program, address).
+# Captured once at the start of each --real run so we can restore
+# between suites without re-scraping. The scrape itself takes ~3 HTTP
+# round-trips per function; cheap but not free.
+_pristine_cache: dict[tuple[str, str], dict] = {}
 
-    Phase 2 — stubbed. Implementing this requires:
-      1. A dedicated Ghidra project with Benchmark.dll imported and
-         default-analyzed. Path configurable via FUNDOC_BENCHMARK_PROJECT.
-      2. A reset_ghidra.py Ghidra script (triggered via run_ghidra_script
-         MCP) that clears prior documentation — rename -> FUN_<addr>,
-         clear plate, clear EOL comments, reset local types to undefined.
-      3. Direct invocation of fun_doc.process_function on the target
-         function key (bypassing the priority-queue worker loop so the
-         benchmark targets exactly one function per call).
-      4. MCP-side scraping after the run: get_function_signature,
-         get_plate_comment, get_function_variables.
+
+def _get_benchmark_program() -> str:
+    """Resolve the Ghidra program path for Benchmark.dll.
+
+    Priority:
+      1. FUNDOC_BENCHMARK_PROGRAM env var (exact path)
+      2. Common defaults across local projects
+      3. Fail with a clear "import Benchmark.dll into Ghidra" message
+
+    The path is a GHIDRA project path (e.g. "/benchmark/Benchmark.dll"),
+    not a filesystem path — Ghidra maps these separately.
     """
-    raise NotImplementedError(
-        "--real path not implemented yet (walking skeleton uses --mock). "
-        "Implementing requires: Benchmark.dll imported into a dedicated Ghidra "
-        "project; reset_ghidra.py script; direct process_function invocation; "
-        "MCP state scrape. Tracked under the 'promote from skeleton' milestone."
+    env = os.environ.get("FUNDOC_BENCHMARK_PROGRAM")
+    if env:
+        return env
+    # Default convention: a folder named /benchmark/ in whichever
+    # Ghidra project is currently active. If the user put it elsewhere
+    # they override with the env var.
+    return "/benchmark/Benchmark.dll"
+
+
+def _capture_real(fn_name: str, provider: str, model: Optional[str]) -> tuple[dict, list[dict], float]:
+    """Invoke fun-doc on the benchmark function, scrape Ghidra for the result.
+
+    Full --real path (Phase 2): resolves the function in Benchmark.dll,
+    snapshots its pristine state, drives fun_doc.process_function to
+    document it, scrapes Ghidra for the post-doc state, then restores
+    pristine for the next run.
+    """
+    from ghidra_bridge import (
+        GhidraBridgeError,
+        capture_pristine,
+        find_function_by_name,
+        restore_pristine,
+        scrape_function_state,
     )
+    from invoke_fundoc import invoke_fundoc
+
+    program = _get_benchmark_program()
+
+    # Locate the function by name
+    try:
+        address = find_function_by_name(program, fn_name)
+    except GhidraBridgeError as e:
+        raise RuntimeError(
+            f"Could not reach Ghidra or find {fn_name} in {program}: {e}\n"
+            f"Make sure Ghidra is running and Benchmark.dll has been imported. "
+            f"See fun-doc/benchmark/README.md § '--real setup'."
+        )
+    if address is None:
+        raise RuntimeError(
+            f"Function {fn_name!r} not found in Ghidra program {program!r}. "
+            f"Run fun-doc/benchmark/setup_ghidra_benchmark.py to import "
+            f"Benchmark.dll, or set FUNDOC_BENCHMARK_PROGRAM to the path "
+            f"where you placed it."
+        )
+
+    # Snapshot pristine state (once per run; cache across functions).
+    # On the first invocation of this process, the state IS pristine
+    # because no prior benchmark run has touched it. On subsequent
+    # invocations, whatever state is there becomes our new pristine —
+    # not ideal but the tradeoff for this non-.gzf reset path.
+    key = (program, address)
+    if key not in _pristine_cache:
+        _pristine_cache[key] = capture_pristine(program, address)
+
+    # Drive fun-doc
+    result_code, tool_calls, wall_time = invoke_fundoc(
+        program=program,
+        address=address,
+        fn_name=fn_name,
+        provider=provider,
+        model=model,
+    )
+
+    # Scrape the post-doc state
+    captured = scrape_function_state(program, address)
+
+    # Restore pristine for the next run. Best-effort: log failures but
+    # don't abort — the scoring has already happened.
+    try:
+        restore_pristine(program, address, _pristine_cache[key])
+    except GhidraBridgeError as e:
+        print(f"  [real] restore_pristine failed: {e}")
+
+    return captured, tool_calls, wall_time
 
 
 # ---------- Orchestration ----------
@@ -351,11 +422,6 @@ def main():
         help="After writing the run, diff it against the previous latest",
     )
     args = ap.parse_args()
-
-    if not args.mock:
-        # The --real path is unimplemented for the walking skeleton.
-        # Make that explicit; don't silently succeed with nonsense data.
-        _capture_real("", args.provider, args.model)
 
     # Snapshot the CURRENT latest.json now, before we overwrite it —
     # that's the "prior" the --compare flag should diff against.

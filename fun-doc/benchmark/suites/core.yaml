@@ -1,0 +1,22 @@
+# Core tier — D2-derived reconstructions.
+#
+# Target runtime: ~15 min against real Ghidra + minimax.
+# Each entry is our C-reconstruction of a real D2 1.13d function we
+# already understand deeply, compiled into Benchmark.dll. Ground truth
+# is the reconstructed C source + a truth.yaml overlay.
+#
+# Suites are the unit of Ghidra-state reset (Q7: suite-level reset).
+# For core-tier, group related functions into suites when they legit-
+# imately share structs or cross-call. Solo functions get one-function
+# suites so state reset is clean between unrelated archetypes.
+#
+# Scaffold a new core function with:
+#   python tools/add_core_function.py \
+#       --program /Mods/PD2-S12/D2Common.dll \
+#       --address 6fd7f3a0 \
+#       --name CalcDamageBonus
+#
+# Then reconstruct, author the truth.yaml, and add an entry below.
+
+tier: core
+suites: []   # empty — populated as D2-derived reconstructions land
