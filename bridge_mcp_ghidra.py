@@ -32,6 +32,7 @@ from urllib.parse import urlencode, urlparse
 
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.lowlevel.server import NotificationOptions
+from mcp.server.transport_security import TransportSecuritySettings
 
 # ==========================================================================
 # Configuration
@@ -1942,6 +1943,28 @@ def main():
     mcp.settings.host = args.mcp_host
     if args.mcp_port:
         mcp.settings.port = args.mcp_port
+
+    # The MCP SDK's DNS rebinding protection is configured at FastMCP construction
+    # time, before --mcp-host is known.  Patch it now based on the resolved host so
+    # that non-localhost binds don't get a 421 Misdirected Request.
+    _LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "::1"}
+    _WILDCARD_HOSTS = {"0.0.0.0", "::"}
+    _host = args.mcp_host
+    if _host not in _LOCALHOST_HOSTS:
+        if _host in _WILDCARD_HOSTS:
+            # Operator is explicitly binding to all interfaces; disable rebinding
+            # protection — network-level isolation is the intended security boundary.
+            mcp.settings.transport_security = TransportSecuritySettings(
+                enable_dns_rebinding_protection=False,
+            )
+        else:
+            # Explicit non-localhost host: keep protection on but allow that host.
+            mcp.settings.transport_security = TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=[f"{_host}:*", "localhost:*", "127.0.0.1:*"],
+                allowed_origins=[f"http://{_host}:*", "http://localhost:*", "http://127.0.0.1:*"],
+            )
+
     logger.info(f"Starting MCP bridge ({args.transport})")
     if args.transport in ("sse", "streamable-http"):
         host = args.mcp_host
