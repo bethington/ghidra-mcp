@@ -5721,6 +5721,52 @@ def main():
                 print(f"  Dashboard opened: {dashboard_url}")
             else:
                 print(f"  Dashboard: {dashboard_url}")
+
+            # Phase 1 audit loop: start the report-only watcher alongside
+            # the dashboard. Reads rules from audit/rules.yaml, subscribes
+            # to the shared event bus, records matches to audit/queue.jsonl.
+            # No agent drains the queue yet (Phase 3).
+            try:
+                from audit.registry import AuditRegistry
+                from audit.watcher import AuditWatcher, load_rules_from_yaml
+                import requests as _audit_requests
+
+                audit_dir = SCRIPT_DIR / "audit"
+                rules_path = audit_dir / "rules.yaml"
+                if rules_path.is_file():
+                    audit_registry = AuditRegistry(audit_dir / "registry.json")
+
+                    def _fetch_bridge_counters():
+                        try:
+                            r = _audit_requests.get(
+                                f"http://127.0.0.1:{dash_port}/api/_diag_bridge",
+                                timeout=2,
+                            )
+                            return (r.json() or {}).get("bridge_counters", {}) or {}
+                        except Exception:
+                            return {}
+
+                    audit_watcher = AuditWatcher(
+                        bus=bus,
+                        registry=audit_registry,
+                        rules=load_rules_from_yaml(rules_path),
+                        queue_path=audit_dir / "queue.jsonl",
+                        bridge_counters_fetcher=_fetch_bridge_counters,
+                    )
+                    audit_watcher.start()
+                    print(
+                        f"  Audit watcher: {len(audit_watcher._rules)} rule(s) "
+                        f"loaded (Phase 1, report-only)"
+                    )
+                else:
+                    print("  Audit watcher: rules.yaml not found; skipping")
+            except ImportError as _audit_exc:
+                print(f"  Audit watcher: import failed ({_audit_exc}); skipping")
+            except Exception as _audit_exc:
+                print(
+                    f"  Audit watcher: startup failed "
+                    f"({type(_audit_exc).__name__}: {_audit_exc})"
+                )
         except ImportError:
             print(f"  Dashboard requires flask: pip install flask")
         except Exception as e:
