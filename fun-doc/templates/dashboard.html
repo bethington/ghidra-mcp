@@ -150,9 +150,14 @@
         .worker-card .btn-stop { position: absolute; top: 0.4rem; right: 0.4rem; }
         .worker-pane { background: var(--bg-dark); border: 1px solid var(--border-dark); border-radius: 6px; display: flex; flex-direction: column; min-height: 100px; max-height: 180px; }
         .worker-pane.running { border-color: var(--color-set); }
+        .worker-pane.timeout { border-color: var(--accent-red-light); box-shadow: 0 0 8px rgba(201, 48, 48, 0.2); }
         .worker-pane.focused { border-color: var(--accent-gold); border-width: 2px; box-shadow: 0 0 8px rgba(199, 179, 119, 0.3); }
         .worker-pane.stopping { border-color: var(--color-rare); }
+        .worker-pane.stalled { border-color: var(--accent-red-light); background: rgba(201, 48, 48, 0.08); box-shadow: 0 0 10px rgba(201, 48, 48, 0.35); }
         .worker-pane.finished { border-color: var(--text-muted); opacity: 0.85; }
+        .wp-stale-badge { color: var(--accent-red-light); font-weight: 700; padding: 0 0.3rem; font-family: var(--font-mono); }
+        .wp-stale-badge.kill-fired { color: var(--color-rare); }
+        .wp-phase { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.6rem; padding: 0 0.3rem; }
         .sortable-header { cursor: pointer; user-select: none; white-space: nowrap; }
         .sortable-header:hover { color: var(--accent-gold); }
         .sortable-header span { font-size: 0.6rem; color: var(--accent-gold); }
@@ -163,6 +168,8 @@
         .worker-pane-header { padding: 0.25rem 0.5rem; background: linear-gradient(180deg, var(--bg-light), var(--bg-medium)); border-bottom: 1px solid var(--border-dark); border-radius: 6px 6px 0 0; display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; }
         .worker-pane-header .wp-title { font-family: var(--font-mono); color: var(--accent-gold); font-weight: 600; }
         .worker-pane-header .wp-status { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.6rem; }
+        .worker-pane-header .wp-alert { font-family: var(--font-mono); font-size: 0.55rem; color: var(--accent-red-light); border: 1px solid rgba(201, 48, 48, 0.4); background: rgba(139, 32, 32, 0.18); border-radius: 3px; padding: 1px 4px; display: none; }
+        .worker-pane-header .wp-alert.active { display: inline-block; }
         .worker-pane-header .wp-actions { margin-left: auto; display: flex; gap: 3px; }
         .worker-pane-output { flex: 1; overflow-y: auto; padding: 0.2rem 0.3rem; font-family: var(--font-mono); font-size: 0.6rem; line-height: 1.25; background: var(--bg-darkest); }
         .settings-popout { max-height: 0; overflow: hidden; background: linear-gradient(180deg, var(--bg-medium), var(--bg-dark)); border-bottom: 1px solid transparent; transition: max-height 0.18s ease, border-color 0.18s ease; }
@@ -974,6 +981,7 @@
                 <div class="worker-pane-header">
                     <span class="wp-title">${provider || '?'} #${workerId}</span>
                     <span class="wp-status" id="wp-status-${workerId}">${binary || ''}</span>
+                    <span class="wp-alert" id="wp-alert-${workerId}"></span>
                     <div class="wp-actions">
                         <button class="btn" onclick="focusWorker('${workerId}')" id="wp-focus-${workerId}">Focus</button>
                         <button class="btn btn-danger" onclick="stopWorker('${workerId}')" id="wp-stop-${workerId}">Stop</button>
@@ -1001,6 +1009,23 @@
         function dismissPane(workerId) {
             const pane = workerPanes[workerId];
             if (pane) { pane.element.remove(); delete workerPanes[workerId]; }
+        }
+
+        function setPaneAlert(workerId, alert) {
+            const pane = workerPanes[workerId];
+            const badge = document.getElementById(`wp-alert-${workerId}`);
+            if (!pane || !badge) return;
+            if (alert && alert.type === 'provider_timeout') {
+                badge.textContent = `TIMEOUT${alert.timeout_secs ? ' ' + alert.timeout_secs + 's' : ''}`;
+                badge.title = alert.message || 'Provider timeout';
+                badge.classList.add('active');
+                pane.element.classList.add('timeout');
+            } else {
+                badge.textContent = '';
+                badge.title = '';
+                badge.classList.remove('active');
+                pane.element.classList.remove('timeout');
+            }
         }
 
         function markPaneFinished(workerId, reason) {
@@ -1059,7 +1084,11 @@
         // Worker lifecycle events
         socket.on("worker_started", d => {
             getOrCreatePane(d.worker_id, d.provider, d.binary || '');
-            appendToPane(d.worker_id, `Worker started: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`, 'scan');
+            appendToPane(
+                d.worker_id,
+                `Worker started: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`,
+                'scan'
+            );
             // Show Stop All button when any worker is running
             const stopAllBtn = document.getElementById('btnStopAll');
             if (stopAllBtn) stopAllBtn.style.display = '';
@@ -1087,6 +1116,15 @@
         socket.on("function_mode", d => appendToPane(d.worker_id, `  ${d.mode} | ${d.model} | score: ${d.score}%`, 'neutral'));
         socket.on("tool_call", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, 'tool'));
         socket.on("tool_result", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, d.status === 'failed' ? 'error' : 'tool'));
+        socket.on("provider_timeout", d => {
+            if (d.worker_id) {
+                getOrCreatePane(d.worker_id, d.provider, null);
+                appendToPane(d.worker_id, `  [watchdog] ${d.message || 'provider timeout'} — killed stalled session`, 'error');
+                setPaneAlert(d.worker_id, d);
+            }
+            showBanner(`Provider timeout: ${d.message || 'stalled provider session killed'}`);
+            setTimeout(hideBanner, 5000);
+        });
         socket.on("model_text", d => { if (d.text) appendToPane(d.worker_id, d.text.substring(0, 300), 'text'); });
         socket.on("score_update", d => {
             const delta = (d.score_after||0) - (d.score_before||0);
@@ -1382,6 +1420,12 @@
             addActivity(`Worker ${d.worker_id} ${d.reason}`, d.reason === 'finished' ? 'success' : 'neutral');
             refreshStats();
         });
+        socket.on('provider_timeout', d => addActivity(`Worker ${d.worker_id}: timeout ${d.provider || 'provider'} (${d.timeout_secs || '?'}s)`, 'error'));
+        socket.on('worker_stalled', d => {
+            const mins = Math.floor((d.stale_sec || 0) / 60);
+            const ageStr = mins >= 1 ? `${mins}m` : `${d.stale_sec || '?'}s`;
+            addActivity(`Worker ${d.worker_id} STALLED (${ageStr}, phase=${d.phase || '?'}, killed ${d.subprocesses_killed || 0} subprocess${d.subprocesses_killed === 1 ? '' : 'es'})`, 'error');
+        });
         socket.on('worker_status', workers => {
             // Update pane borders and status text based on worker status.
             // On page refresh the local workerPanes map starts empty but the
@@ -1410,15 +1454,32 @@
                         titleEl.textContent = titleText;
                     }
                 }
-                const cls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : 'finished';
-                pane.element.className = `worker-pane ${cls}`;
+                // Stalled workers (heartbeat silent > threshold) override the
+                // border/background so the user sees at a glance that a worker
+                // is wedged — previously only visible via /api/stats.
+                const baseCls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : 'finished';
+                const stalledCls = w.is_stale ? ' stalled' : '';
+                pane.element.className = `worker-pane ${baseCls}${stalledCls}`;
+                setPaneAlert(w.id, w.last_alert);
                 const done = w.progress.completed + w.progress.skipped + w.progress.failed;
                 const status = document.getElementById(`wp-status-${w.id}`);
                 if (status) {
+                    const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
                     const countStr = w.continuous ? 'auto' : `${done}/${w.count}`;
                     const cur = w.progress.current ? w.progress.current.name : '';
                     const skipStr = w.progress.skipped > 0 ? ` ${w.progress.skipped}skip` : '';
-                    status.textContent = `${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${cur ? ' | ' + cur : ''}`;
+                    const timeoutStr = w.timeout_count > 0 ? ` | ${w.timeout_count} timeout${w.timeout_count > 1 ? 's' : ''}` : '';
+                    const phaseStr = (w.phase && w.status === 'running') ? ` <span class="wp-phase">[${esc(w.phase)}]</span>` : '';
+                    let staleStr = '';
+                    if (w.is_stale && typeof w.stale_sec === 'number') {
+                        const mins = Math.floor(w.stale_sec / 60);
+                        const label = mins >= 1 ? `${mins}m` : `${w.stale_sec}s`;
+                        const killedCls = w.stall_kill_fired ? ' kill-fired' : '';
+                        const killedTag = w.stall_kill_fired ? ' kill-sent' : '';
+                        staleStr = ` <span class="wp-stale-badge${killedCls}">STALLED ${esc(label)}${esc(killedTag)}</span>`;
+                    }
+                    const curStr = cur ? ` | ${esc(cur)}` : '';
+                    status.innerHTML = `${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${timeoutStr}${curStr}${phaseStr}${staleStr}`;
                 }
             });
             // Show/hide Stop All button based on active workers

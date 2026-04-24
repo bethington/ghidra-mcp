@@ -27,6 +27,11 @@ v5.4.1 security hardening work.
   bounded `waitFor(timeout, TimeUnit.SECONDS)` handling with terminate/kill
   fallback instead of unbounded waits.
 
+- **fun-doc logging diagnostics** - provider watchdog workers now inherit
+  per-run debug context, early exits are recorded in `runs.jsonl`, Ghidra
+  HTTP failures write structured diagnostics, and debug analyzers count
+  normalized provider error statuses.
+
 ### Docs
 
 - **Release metadata refreshed to `5.5.0`** across Maven, plugin/headless

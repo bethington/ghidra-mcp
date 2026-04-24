@@ -6,6 +6,7 @@ These tests mock the HTTP layer so no real Ghidra instance is needed.
 
 import sys
 import threading
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -111,7 +112,7 @@ def test_check_ghidra_online_returns_true_when_reachable():
 # ---------------------------------------------------------------------------
 
 
-def test_process_function_skips_model_when_ghidra_offline():
+def test_process_function_skips_model_when_ghidra_offline(monkeypatch, tmp_path):
     """process_function must return 'failed' and never reach the model when
     Ghidra is not reachable, preserving last_result='ghidra_offline'."""
     state = {"functions": {}}
@@ -120,6 +121,9 @@ def test_process_function_skips_model_when_ghidra_offline():
     state["functions"][func_key] = func
 
     model_invoked = []
+    log_file = tmp_path / "runs.jsonl"
+    monkeypatch.setattr(fun_doc, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(fun_doc, "LOG_FILE", log_file)
 
     def _fake_invoke(*args, **kwargs):
         model_invoked.append(True)
@@ -138,6 +142,9 @@ def test_process_function_skips_model_when_ghidra_offline():
     assert result == "failed", f"Expected 'failed', got {result!r}"
     assert not model_invoked, "Model was invoked despite Ghidra being offline"
     assert func.get("last_result") == "ghidra_offline"
+    entry = json.loads(log_file.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["result"] == "ghidra_offline"
+    assert entry["reason"] == f"server not reachable at {fun_doc.GHIDRA_URL}"
 
 
 def test_process_function_resumes_after_ghidra_comes_online():

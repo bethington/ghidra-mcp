@@ -73,7 +73,7 @@ def find_fail_retries(entries):
     """Find places where a failed call was immediately retried with the same tool."""
     retries = []
     for i, e in enumerate(entries[:-1]):
-        if e.get("status") == "failed":
+        if e.get("status") in ("failed", "error", "timeout"):
             nxt = entries[i + 1]
             if nxt["tool"] == e["tool"]:
                 retries.append({
@@ -137,7 +137,9 @@ def analyze_file(path, tool_filter=None):
         "repeated_args": repeats,
         "total_time_ms": total_time,
         "time_per_tool": dict(time_per_tool),
-        "failed_count": sum(1 for e in entries if e.get("status") == "failed"),
+        "failed_count": sum(
+            1 for e in entries if e.get("status") in ("failed", "error", "timeout")
+        ),
     }
 
 

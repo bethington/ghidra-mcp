@@ -20,12 +20,30 @@ state.json. They exercise:
 """
 
 import json
+import multiprocessing
 import os
 import threading
 import time
 from pathlib import Path
 
 import pytest
+
+
+def _debug_child_probe(funcdoc_dir, log_dir, debug_ctx, result_queue):
+    import sys
+
+    sys.path.insert(0, str(funcdoc_dir))
+    import fun_doc
+
+    fun_doc._restore_debug_context_for_worker(debug_ctx, log_dir)
+    fun_doc._debug_log_tool_call(
+        "mcp_ghidra-mcp_rename_variable",
+        {"address": "0x401000", "name": "nValue"},
+        {"ok": True},
+        "failed",
+        12,
+    )
+    result_queue.put(str(fun_doc._debug_get_log_path()))
 
 
 @pytest.fixture
@@ -296,3 +314,45 @@ def test_debug_log_normalizes_tool_names_and_preserves_raw_name(
     assert entry["tool_raw"] == "mcp_ghidra-mcp_batch_set_comments"
     assert entry["run_id"] == "runxyz"
     assert entry["requested_provider"] == "gemini"
+
+
+def test_debug_context_is_restored_in_spawned_worker(
+    isolated_state, monkeypatch, tmp_path
+):
+    """Watchdog-spawned provider workers must keep per-run debug logging."""
+    fun_doc, _ = isolated_state
+    log_dir = tmp_path / "logs"
+    monkeypatch.setattr(fun_doc, "LOG_DIR", log_dir)
+    monkeypatch.setattr(
+        fun_doc,
+        "load_priority_queue",
+        lambda: {"config": {"debug_mode": True}},
+    )
+
+    fun_doc._debug_set_context(
+        "/test/prog::401000",
+        "ExampleFunc",
+        "/test/prog",
+        "401000",
+        "claude",
+        "spawnrun",
+        requested_provider="claude",
+    )
+    debug_ctx = dict(fun_doc._debug_ctx.get())
+    funcdoc_dir = Path(__file__).parent.parent.parent / "fun-doc"
+
+    ctx = multiprocessing.get_context("spawn")
+    result_queue = ctx.Queue(maxsize=1)
+    proc = ctx.Process(
+        target=_debug_child_probe,
+        args=(funcdoc_dir, str(log_dir), debug_ctx, result_queue),
+    )
+    proc.start()
+    proc.join(timeout=10)
+
+    assert proc.exitcode == 0
+    log_path = Path(result_queue.get(timeout=2))
+    entry = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+    assert entry["run_id"] == "spawnrun"
+    assert entry["tool"] == "rename_variable"
+    assert entry["status"] == "error"
