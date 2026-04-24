@@ -158,6 +158,42 @@ When building new tools or modifying existing ones, wire validation through `Nam
 
 **Status.** The fast tier's 5 archetype functions (CRC-16, state machine, strlen, struct mutator, recursion) are authored and ship as `Benchmark.dll`; the `--mock` path (reads pre-captured fixtures under `fixtures/`) is the only driver that works today. The `--real` path — which would invoke fun-doc against `Benchmark.dll` in Ghidra for real — is stubbed pending (1) install of VC6 SP6 to match D2 1.13d's toolchain (modern MSVC is the current placeholder), (2) a dedicated Ghidra project hosting `Benchmark.dll`, (3) a reset script that restores a pristine `.gzf` between suites. See `fun-doc/benchmark/README.md` for the full design and rollout plan.
 
+## Auditing
+
+Two independent systems both called "audit". They don't interact. Knowing which one's active for which problem saves hours.
+
+### System-health audit watcher (Phase 1, always on)
+
+Lives in [`fun-doc/audit/`](fun-doc/audit/). Subscribes to the bus (`ghidra_health`, `worker_started`, `worker_stopped`, `provider_timeout`, `run_logged`) and evaluates rules in [`rules.yaml`](fun-doc/audit/rules.yaml) every 30 s. When a rule fires:
+
+- `audit.triggered` event → `logs/events.jsonl`
+- Fire record appended to [`audit/queue.jsonl`](fun-doc/audit/queue.jsonl)
+- Registry updated in [`audit/registry.json`](fun-doc/audit/registry.json) — tracks per-signature cooldowns (1-per-day default) and a global circuit breaker (3 fires in 10 min → halt all fires for 1 h)
+- All rules currently pinned at `mode: report` — no agent action. Phase 3 will wire in a drain agent that acts on the queue.
+
+The watcher has already earned its keep: the four deadlocked workers we debugged on 2026-04-24 were first flagged by the `bridge_counter_stall` rule 30+ min before py-spy confirmed the root cause. Treat fires as real signals even before Phase 3.
+
+Reset procedure (when rules have false-positive fired and cooldowns are blocking fresh evidence):
+
+```bash
+# Archive today's fires, reset registry to armed state
+mv fun-doc/audit/queue.jsonl fun-doc/audit/queue.jsonl.$(date +%Y-%m-%d)-archived
+printf '' > fun-doc/audit/queue.jsonl
+python -c "import json; open('fun-doc/audit/registry.json','w').write(json.dumps({'circuit_breaker':{'fires_window':[],'halt_until':None,'state':'armed','tripped_at':None},'signatures':{}}, indent=2))"
+# Restart dashboard for the live watcher to re-read from disk (file edits don't hot-reload)
+```
+
+### Per-function audit (optional second-pass review)
+
+After a worker documents a function, a different provider re-examines the result and fixes gaps. Configured in the dashboard's settings popout (or directly in `priority_queue.json`):
+
+| Field | Values | Effect |
+| --- | --- | --- |
+| `config.audit_provider` | `null` / `claude` / `codex` / `minimax` / `gemini` | Which provider runs the second pass. `null` = off. |
+| `config.audit_min_delta` | integer (default 5) | Skip audit if the worker already gained ≥ this many points. Lower = more audits. |
+
+When enabled, every run writes an `audit_outcome` field into `logs/runs.jsonl` (`improved` / `regressed` / `no_change` / `skipped_good` / `skipped_delta`). The dashboard's "Audit:" line under run stats renders the aggregate. Current default pairing: **minimax** does the primary doc pass, **gemini** does audits (complementary family per model-routing memory).
+
 ## Documentation
 
 - Workflow: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md`
