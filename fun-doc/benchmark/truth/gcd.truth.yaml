@@ -1,0 +1,37 @@
+# Semantic ground truth for src/gcd.c::compute_gcd.
+
+function: compute_gcd
+
+name_synonyms:
+  - compute_gcd
+  - ComputeGcd
+  - gcd
+  - Gcd
+  - CalcGcd
+  - calc_gcd
+  - EuclideanGcd
+  - euclidean_gcd
+  - GreatestCommonDivisor
+  - greatest_common_divisor
+
+canonical_plate: |
+  Computes the greatest common divisor of two non-negative integers
+  using Euclid's algorithm. Recursive implementation: gcd(a, b) =
+  gcd(b, a mod b), with gcd(a, 0) = a as the base case. No overflow
+  protection; inputs are assumed to be within a reasonable range.
+
+algorithm_tag: euclidean
+algorithm_synonyms:
+  - Euclid
+  - Euclidean algorithm
+  - Euclidean GCD
+  - GCD
+  - greatest common divisor
+  - modulo recursion
+
+weights:
+  name: 0.25
+  signature: 0.25
+  plate: 0.20
+  algorithm: 0.15
+  locals: 0.15

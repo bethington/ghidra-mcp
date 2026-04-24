@@ -1,0 +1,28 @@
+{
+  "description": "Typical fun-doc output on advance_parser_state — recognizes the state machine, picks a reasonable name, gets signature right, plate identifies the state transitions.",
+  "wall_time_sec": 19.4,
+  "captured": {
+    "name": "ParserStateTransition",
+    "return_type": "int",
+    "parameters": [
+      {"name": "state", "type": "int"},
+      {"name": "ch", "type": "byte"}
+    ],
+    "locals": [
+      {"name": "next", "type": "int"}
+    ],
+    "plate": "Parser state machine transition. Advances a small state machine one input byte. Letters transition INIT to IDENT, digits transition INIT to NUMBER, punctuation transitions INIT to PUNCT, and stay-in-state while the character class continues. Returns the next state."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001000"}, "status": "ok"},
+    {"tool": "get_function_signature", "args": {"address": "0x10001000"}, "status": "ok"},
+    {"tool": "get_function_variables", "args": {"address": "0x10001000"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001000"}, "status": "ok"},
+    {"tool": "set_function_prototype", "args": {"address": "0x10001000", "prototype": "int ParserStateTransition(int state, byte ch)"}, "status": "ok"},
+    {"tool": "rename_variables", "args": {"function": "0x10001000", "renames": {"local_4": "next"}}, "status": "ok"},
+    {"tool": "set_local_variable_type", "args": {"function": "0x10001000", "variable": "next", "type": "int"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001000", "name": "ParserStateTransition"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001000", "comment": "Parser state machine transition..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001000"}, "status": "ok"}
+  ]
+}

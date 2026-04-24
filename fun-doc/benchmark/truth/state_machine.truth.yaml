@@ -1,0 +1,38 @@
+# Semantic ground truth for src/state_machine.c::advance_parser_state.
+
+function: advance_parser_state
+
+name_synonyms:
+  - advance_parser_state
+  - AdvanceParserState
+  - advance_state
+  - next_parser_state
+  - NextParserState
+  - ParserStateTransition
+  - parser_transition
+  - TokenizerStep
+  - ParseByte
+
+canonical_plate: |
+  Advances a small tokenizer-style state machine one input byte.
+  Given (current_state, input_byte) returns the next state. Letters
+  transition into an IDENT state, digits into NUMBER, single-byte
+  punctuation (',', ';', '.') emits PUNCT, and anything else resets
+  to INIT. IDENT and NUMBER are "sticky" while their character class
+  continues; mismatches fall back to INIT.
+
+algorithm_tag: state-machine
+algorithm_synonyms:
+  - state machine
+  - state-machine
+  - state transition
+  - tokenizer state
+  - finite state
+  - FSM
+
+weights:
+  name: 0.25
+  signature: 0.25
+  plate: 0.20
+  algorithm: 0.15
+  locals: 0.15

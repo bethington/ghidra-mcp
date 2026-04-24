@@ -42,11 +42,3 @@ unsigned short __stdcall calc_crc16(const unsigned char *data, unsigned int leng
     }
     return crc;
 }
-
-BOOL WINAPI DllMain(HINSTANCE hinstance, DWORD reason, LPVOID reserved)
-{
-    (void)hinstance;
-    (void)reason;
-    (void)reserved;
-    return TRUE;
-}

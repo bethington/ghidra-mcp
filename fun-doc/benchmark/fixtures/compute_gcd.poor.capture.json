@@ -1,0 +1,25 @@
+{
+  "description": "Poor fun-doc output on compute_gcd — didn't identify Euclidean algorithm, generic name, types left as undefined, plate doesn't mention recursion.",
+  "wall_time_sec": 22.9,
+  "captured": {
+    "name": "ModReduce",
+    "return_type": "undefined4",
+    "parameters": [
+      {"name": "param_1", "type": "undefined4"},
+      {"name": "param_2", "type": "undefined4"}
+    ],
+    "locals": [
+      {"name": "uVar1", "type": "uint"}
+    ],
+    "plate": "Performs a modulo reduction on two input values."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001130"}, "status": "ok"},
+    {"tool": "decompile_function", "args": {"address": "0x10001130"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001130"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001130"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001130", "name": "ModReduce"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001130", "comment": "Performs modulo reduction..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001130"}, "status": "ok"}
+  ]
+}

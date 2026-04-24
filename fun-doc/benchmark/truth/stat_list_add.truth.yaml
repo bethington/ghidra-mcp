@@ -1,0 +1,38 @@
+# Semantic ground truth for src/stat_list_add.c::stat_list_add.
+
+function: stat_list_add
+
+name_synonyms:
+  - stat_list_add
+  - StatListAdd
+  - AddStat
+  - AppendStat
+  - stat_append
+  - StatListAppend
+  - PushStat
+  - AddStatEntry
+  - add_stat_entry
+
+canonical_plate: |
+  Appends one stat entry to a StatList. Validates the list pointer
+  is non-null and that the list's magic number matches the expected
+  value (a corruption guard). If the list has capacity remaining,
+  writes the new entry at the next free slot, increments entry_count,
+  and returns 1. Returns 0 on overflow or validation failure.
+
+algorithm_tag: struct mutator
+algorithm_synonyms:
+  - struct mutator
+  - struct append
+  - array append
+  - bounded array
+  - list append
+  - stat list
+  - magic number
+
+weights:
+  name: 0.25
+  signature: 0.25
+  plate: 0.20
+  algorithm: 0.15
+  locals: 0.15

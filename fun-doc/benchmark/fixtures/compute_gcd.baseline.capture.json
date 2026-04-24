@@ -1,0 +1,28 @@
+{
+  "description": "Typical fun-doc output on compute_gcd — recognizes Euclidean algorithm, names it correctly, notes recursion in the plate.",
+  "wall_time_sec": 14.2,
+  "captured": {
+    "name": "CalcGcd",
+    "return_type": "uint",
+    "parameters": [
+      {"name": "dwA", "type": "uint"},
+      {"name": "dwB", "type": "uint"}
+    ],
+    "locals": [
+      {"name": "dwRemainder", "type": "uint"}
+    ],
+    "plate": "Computes the greatest common divisor of two non-negative integers using Euclid's algorithm. Recursive implementation: gcd(a, b) = gcd(b, a mod b), with gcd(a, 0) = a as the base case. No overflow protection."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001130"}, "status": "ok"},
+    {"tool": "get_function_signature", "args": {"address": "0x10001130"}, "status": "ok"},
+    {"tool": "get_function_variables", "args": {"address": "0x10001130"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001130"}, "status": "ok"},
+    {"tool": "set_function_prototype", "args": {"address": "0x10001130", "prototype": "uint CalcGcd(uint dwA, uint dwB)"}, "status": "ok"},
+    {"tool": "rename_variables", "args": {"function": "0x10001130", "renames": {"local_4": "dwRemainder"}}, "status": "ok"},
+    {"tool": "set_local_variable_type", "args": {"function": "0x10001130", "variable": "dwRemainder", "type": "uint"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001130", "name": "CalcGcd"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001130", "comment": "Computes greatest common divisor..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001130"}, "status": "ok"}
+  ]
+}

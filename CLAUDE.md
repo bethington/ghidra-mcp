@@ -156,7 +156,7 @@ When building new tools or modifying existing ones, wire validation through `Nam
 - The provider client wrappers (minimax / gemini / claude / codex invocation paths)
 - `priority_queue.json`'s `config.provider_models` — the benchmark tests whatever model table is live
 
-**Walking-skeleton status.** Only the CRC-16 function is wired in, and the `--mock` path (reads pre-captured fixtures under `fixtures/`) is the only path that works. The `--real` path — which would invoke fun-doc against `Benchmark.dll` in Ghidra for real — is stubbed pending (1) install of VC6 SP6 to match D2 1.13d's toolchain, (2) a dedicated Ghidra project hosting `Benchmark.dll`, (3) a reset script that restores a pristine `.gzf` between suites. See `fun-doc/benchmark/README.md` for the full design and rollout plan.
+**Status.** The fast tier's 5 archetype functions (CRC-16, state machine, strlen, struct mutator, recursion) are authored and ship as `Benchmark.dll`; the `--mock` path (reads pre-captured fixtures under `fixtures/`) is the only driver that works today. The `--real` path — which would invoke fun-doc against `Benchmark.dll` in Ghidra for real — is stubbed pending (1) install of VC6 SP6 to match D2 1.13d's toolchain (modern MSVC is the current placeholder), (2) a dedicated Ghidra project hosting `Benchmark.dll`, (3) a reset script that restores a pristine `.gzf` between suites. See `fun-doc/benchmark/README.md` for the full design and rollout plan.
 
 ## Documentation
 

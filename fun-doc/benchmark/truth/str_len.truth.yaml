@@ -1,0 +1,37 @@
+# Semantic ground truth for src/str_len.c::compute_str_len.
+
+function: compute_str_len
+
+name_synonyms:
+  - compute_str_len
+  - ComputeStrLen
+  - StrLen
+  - string_length
+  - StringLength
+  - calc_str_len
+  - CalcStrLen
+  - strlen_impl
+  - my_strlen
+
+canonical_plate: |
+  Computes the length of a null-terminated byte string. Walks the
+  input pointer one byte at a time until a zero byte is found, then
+  returns the distance from the start. Equivalent to the standard C
+  library's strlen() but implemented in-place (does not call into
+  the CRT). Behavior on a non-null-terminated buffer is undefined.
+
+algorithm_tag: strlen
+algorithm_synonyms:
+  - strlen
+  - string length
+  - null-terminated
+  - null terminator
+  - byte walk
+  - pointer walk
+
+weights:
+  name: 0.25
+  signature: 0.25
+  plate: 0.20
+  algorithm: 0.15
+  locals: 0.15

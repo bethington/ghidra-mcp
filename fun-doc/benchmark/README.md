@@ -23,11 +23,21 @@ Comparing two runs is a terminal diff of these JSON files.
 
 ## Tiers
 
-| Tier    | Functions | Target runtime | When to run |
-| ------- | --------- | -------------- | ----------- |
-| fast    | 5         | ≤ 3 min        | Quick sanity check while iterating on prompt / scoring / tool behavior |
-| core    | 15        | ~15 min        | Before committing changes that affect documentation quality |
-| stretch | 30        | ~30–60 min     | Periodically, or when you want the full picture |
+| Tier    | Functions | Target runtime | Status   | When to run |
+| ------- | --------- | -------------- | -------- | ----------- |
+| fast    | 5         | ≤ 3 min        | **complete** — CRC-16, state machine, strlen, struct mutator, recursion | Quick sanity check while iterating on prompt / scoring / tool behavior |
+| core    | 15        | ~15 min        | pending — D2-derived reconstructions | Before committing changes that affect documentation quality |
+| stretch | 30        | ~30–60 min     | pending  | Periodically, or when you want the full picture |
+
+Fast tier's 5 functions cover the archetype spectrum deliberately:
+
+| Function | Archetype | Pattern exercised |
+| -------- | --------- | ----------------- |
+| `calc_crc16` | CRC / bit-twiddling | loop, shift, conditional XOR with polynomial constant |
+| `advance_parser_state` | State machine | switch-ladder, enum dispatch, fall-through-to-default |
+| `compute_str_len` | Pointer walk | null-terminated loop, pointer arithmetic, `ptr - base` subtraction |
+| `stat_list_add` | Struct mutator | struct field access, magic-number validation, bounded-array append |
+| `compute_gcd` | Recursion | self-call, base case, modulo reduction |
 
 ## Suites
 

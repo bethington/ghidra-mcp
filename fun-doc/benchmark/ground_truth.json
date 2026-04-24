@@ -56,6 +56,216 @@
         "algorithm": 0.15,
         "locals": 0.15
       }
+    },
+    "compute_gcd": {
+      "name": "compute_gcd",
+      "source_file": "gcd.c",
+      "return_type": "unsigned int",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "unsigned int"
+        },
+        {
+          "name": "b",
+          "type": "unsigned int"
+        }
+      ],
+      "locals": [
+        {
+          "name": "remainder",
+          "type": "unsigned int"
+        }
+      ],
+      "doc_comment": "Compute the greatest common divisor via Euclid's algorithm.\n\nRecursive implementation: gcd(a, b) = gcd(b, a mod b), with\ngcd(a, 0) = a. Handles the classical GCD definition for\nnon-negative integers. No overflow protection \u2014 assumes inputs\nare within a reasonable range.\n\n@param a  first input\n@param b  second input\n@return the greatest common divisor of a and b",
+      "name_synonyms": [
+        "compute_gcd",
+        "ComputeGcd",
+        "gcd",
+        "Gcd",
+        "CalcGcd",
+        "calc_gcd",
+        "EuclideanGcd",
+        "euclidean_gcd",
+        "GreatestCommonDivisor",
+        "greatest_common_divisor"
+      ],
+      "canonical_plate": "Computes the greatest common divisor of two non-negative integers\nusing Euclid's algorithm. Recursive implementation: gcd(a, b) =\ngcd(b, a mod b), with gcd(a, 0) = a as the base case. No overflow\nprotection; inputs are assumed to be within a reasonable range.\n",
+      "algorithm_tag": "euclidean",
+      "algorithm_synonyms": [
+        "Euclid",
+        "Euclidean algorithm",
+        "Euclidean GCD",
+        "GCD",
+        "greatest common divisor",
+        "modulo recursion"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "stat_list_add": {
+      "name": "stat_list_add",
+      "source_file": "stat_list_add.c",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "list",
+          "type": "struct StatList *"
+        },
+        {
+          "name": "id",
+          "type": "unsigned short"
+        },
+        {
+          "name": "flags",
+          "type": "unsigned short"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "locals": [
+        {
+          "name": "slot_index",
+          "type": "unsigned int"
+        },
+        {
+          "name": "slot",
+          "type": "struct StatEntry *"
+        }
+      ],
+      "doc_comment": "Append one stat entry to a StatList.\n\nValidates the list's magic number (rejects corrupted or\nuninitialized lists). If the list has room (entry_count <\nSTAT_LIST_CAPACITY), writes the new entry at the next free slot,\nincrements entry_count, and returns 1. Returns 0 on overflow or\ncorruption. The list's list_flags OR'd-in bits are untouched.\n\n@param list   pointer to the StatList to mutate\n@param id     stat id (u16, e.g. enum StatType)\n@param flags  entry flags (u16)\n@param value  stat numeric value\n@return 1 on success, 0 on overflow / corruption",
+      "name_synonyms": [
+        "stat_list_add",
+        "StatListAdd",
+        "AddStat",
+        "AppendStat",
+        "stat_append",
+        "StatListAppend",
+        "PushStat",
+        "AddStatEntry",
+        "add_stat_entry"
+      ],
+      "canonical_plate": "Appends one stat entry to a StatList. Validates the list pointer\nis non-null and that the list's magic number matches the expected\nvalue (a corruption guard). If the list has capacity remaining,\nwrites the new entry at the next free slot, increments entry_count,\nand returns 1. Returns 0 on overflow or validation failure.\n",
+      "algorithm_tag": "struct mutator",
+      "algorithm_synonyms": [
+        "struct mutator",
+        "struct append",
+        "array append",
+        "bounded array",
+        "list append",
+        "stat list",
+        "magic number"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "advance_parser_state": {
+      "name": "advance_parser_state",
+      "source_file": "state_machine.c",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "current_state",
+          "type": "int"
+        },
+        {
+          "name": "input",
+          "type": "unsigned char"
+        }
+      ],
+      "locals": [
+        {
+          "name": "next_state",
+          "type": "int"
+        }
+      ],
+      "doc_comment": "Advance the parser state machine one input byte.\n\nGiven the current state and one input byte, return the next state.\nLetters advance into IDENT; digits into NUMBER; single punctuation\ncharacters (comma, semicolon, period) emit PUNCT; everything else\nresets to INIT. IDENT / NUMBER stay in-state while the character\nclass continues.\n\n@param current_state one of the PARSER_STATE_* enum values\n@param input         next input byte\n@return the next state",
+      "name_synonyms": [
+        "advance_parser_state",
+        "AdvanceParserState",
+        "advance_state",
+        "next_parser_state",
+        "NextParserState",
+        "ParserStateTransition",
+        "parser_transition",
+        "TokenizerStep",
+        "ParseByte"
+      ],
+      "canonical_plate": "Advances a small tokenizer-style state machine one input byte.\nGiven (current_state, input_byte) returns the next state. Letters\ntransition into an IDENT state, digits into NUMBER, single-byte\npunctuation (',', ';', '.') emits PUNCT, and anything else resets\nto INIT. IDENT and NUMBER are \"sticky\" while their character class\ncontinues; mismatches fall back to INIT.\n",
+      "algorithm_tag": "state-machine",
+      "algorithm_synonyms": [
+        "state machine",
+        "state-machine",
+        "state transition",
+        "tokenizer state",
+        "finite state",
+        "FSM"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "compute_str_len": {
+      "name": "compute_str_len",
+      "source_file": "str_len.c",
+      "return_type": "unsigned int",
+      "parameters": [
+        {
+          "name": "str",
+          "type": "const char *"
+        }
+      ],
+      "locals": [
+        {
+          "name": "cursor",
+          "type": "const char *"
+        }
+      ],
+      "doc_comment": "Compute the length of a null-terminated byte string.\n\nWalks the input pointer one byte at a time until a zero byte is\nencountered; returns the distance from start to the first zero.\nMatches the semantics of standard strlen() but is a fresh\nreimplementation (does not call into CRT). Behavior on a non-null-\nterminated buffer is undefined.\n\n@param str  pointer to a null-terminated C string\n@return number of bytes before the terminating zero",
+      "name_synonyms": [
+        "compute_str_len",
+        "ComputeStrLen",
+        "StrLen",
+        "string_length",
+        "StringLength",
+        "calc_str_len",
+        "CalcStrLen",
+        "strlen_impl",
+        "my_strlen"
+      ],
+      "canonical_plate": "Computes the length of a null-terminated byte string. Walks the\ninput pointer one byte at a time until a zero byte is found, then\nreturns the distance from the start. Equivalent to the standard C\nlibrary's strlen() but implemented in-place (does not call into\nthe CRT). Behavior on a non-null-terminated buffer is undefined.\n",
+      "algorithm_tag": "strlen",
+      "algorithm_synonyms": [
+        "strlen",
+        "string length",
+        "null-terminated",
+        "null terminator",
+        "byte walk",
+        "pointer walk"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
     }
   }
 }

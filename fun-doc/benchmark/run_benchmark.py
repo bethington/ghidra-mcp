@@ -37,6 +37,8 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+import yaml
+
 from scorer import guardrails, score_function
 
 
@@ -69,24 +71,46 @@ def _load_ground_truth() -> dict[str, Any]:
     return json.loads(GROUND_TRUTH_FILE.read_text(encoding="utf-8"))
 
 
-def _tier_function_names(tier: str) -> list[str]:
-    """Return the list of function names the given tier should benchmark.
+def _load_tier_suites(tier: str) -> list[dict[str, Any]]:
+    """Load the suite definitions for the given tier.
 
-    For the walking skeleton there's only one function (calc_crc16) and
-    no suite yaml yet. Once we add suites/*.yaml the tier-> function
-    resolution will move into a load-suite step.
+    Suites are the unit of Ghidra-state reset (Q7: suite-level reset
+    via .gzf restore). Each suite yaml lives at suites/<tier>.yaml
+    and lists one-or-more suites, each with a name + list of
+    function names. Returns the suite dicts in declared order.
     """
+    suite_path = SUITES_DIR / f"{tier}.yaml"
+    if suite_path.is_file():
+        with suite_path.open(encoding="utf-8") as f:
+            parsed = yaml.safe_load(f) or {}
+        suites = parsed.get("suites") or []
+        if not suites:
+            raise RuntimeError(f"{suite_path} has no `suites:` list")
+        return suites
+    # Tiers with no yaml yet fall back to "all functions in a single
+    # one-off suite". This keeps --tier all / stretch working before
+    # their yaml is authored.
     gt = _load_ground_truth()
     all_fns = list(gt.get("functions", {}).keys())
-    if tier == "fast":
-        return all_fns[:5]
     if tier == "core":
-        return all_fns[:15]
-    if tier == "stretch":
-        return all_fns[:50]
-    if tier == "all":
-        return all_fns
-    raise ValueError(f"unknown tier {tier!r}; expected fast/core/stretch/all")
+        fns = all_fns[:15]
+    elif tier == "stretch":
+        fns = all_fns[:50]
+    elif tier == "all":
+        fns = all_fns
+    else:
+        raise ValueError(
+            f"no suite yaml at {suite_path} and no fallback for tier {tier!r}"
+        )
+    return [{"name": f"{tier}_all", "description": f"Fallback: all {len(fns)} function(s)", "functions": fns}]
+
+
+def _tier_function_names(tier: str) -> list[str]:
+    """Flatten every function across every suite in the given tier."""
+    names: list[str] = []
+    for suite in _load_tier_suites(tier):
+        names.extend(suite.get("functions", []))
+    return names
 
 
 # ---------- Capture backends ----------

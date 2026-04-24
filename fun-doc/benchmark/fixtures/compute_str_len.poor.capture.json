@@ -1,0 +1,23 @@
+{
+  "description": "Poor fun-doc output on compute_str_len — missed the strlen idiom, generic name, signature undefined, plate vague.",
+  "wall_time_sec": 27.3,
+  "captured": {
+    "name": "CountBytes",
+    "return_type": "undefined4",
+    "parameters": [
+      {"name": "param_1", "type": "undefined4 *"}
+    ],
+    "locals": [
+      {"name": "iVar1", "type": "int"}
+    ],
+    "plate": "Iterates over a buffer and returns a count value."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001230"}, "status": "ok"},
+    {"tool": "decompile_function", "args": {"address": "0x10001230"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001230"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001230", "name": "CountBytes"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001230", "comment": "Iterates over a buffer..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001230"}, "status": "ok"}
+  ]
+}

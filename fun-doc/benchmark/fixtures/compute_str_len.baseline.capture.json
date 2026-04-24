@@ -1,0 +1,27 @@
+{
+  "description": "Typical fun-doc output on compute_str_len — recognizes the strlen idiom, picks a strlen-family name, signature matches, plate mentions null-terminated.",
+  "wall_time_sec": 12.8,
+  "captured": {
+    "name": "StrLen",
+    "return_type": "uint",
+    "parameters": [
+      {"name": "pszInput", "type": "char *"}
+    ],
+    "locals": [
+      {"name": "pCursor", "type": "char *"}
+    ],
+    "plate": "Computes the length of a null-terminated string. Walks the input pointer one byte at a time until the terminating zero byte is found, then returns the distance. Fresh reimplementation of strlen, does not call into the CRT."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001230"}, "status": "ok"},
+    {"tool": "get_function_signature", "args": {"address": "0x10001230"}, "status": "ok"},
+    {"tool": "get_function_variables", "args": {"address": "0x10001230"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001230"}, "status": "ok"},
+    {"tool": "set_function_prototype", "args": {"address": "0x10001230", "prototype": "uint StrLen(char *pszInput)"}, "status": "ok"},
+    {"tool": "rename_variables", "args": {"function": "0x10001230", "renames": {"local_4": "pCursor"}}, "status": "ok"},
+    {"tool": "set_local_variable_type", "args": {"function": "0x10001230", "variable": "pCursor", "type": "char *"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001230", "name": "StrLen"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001230", "comment": "Computes the length of a null-terminated string..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001230"}, "status": "ok"}
+  ]
+}
