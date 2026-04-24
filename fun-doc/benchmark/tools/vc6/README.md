@@ -15,18 +15,21 @@ You need your own licensed copy of **Visual Studio 6.0 Enterprise** (or Professi
 
 ### Option 1 — automated extraction from media you own
 
-If your source files live at `D:\vc6-sp6-ent\` (or equivalent — `en_vs6_ent_cd1.iso`, `en_vs6_sp6.exe`, `vcpp5.exe` all present), the bootstrap script handles extraction end-to-end:
+If your source files live at `D:\vc6-sp6-ent\` (`en_vs6_ent_cd1.iso`, `en_vs6_sp6.exe`, `vcpp5.exe`) and optionally `D:\vs2003-pro\` (the VS 2003 Pro ISO for the linker), the bootstrap script handles extraction end-to-end:
 
 ```bash
-python fun-doc/benchmark/tools/bootstrap_vc6.py --source D:\vc6-sp6-ent
+python fun-doc/benchmark/tools/bootstrap_vc6.py \
+    --source D:\vc6-sp6-ent \
+    --vs7-source D:\vs2003-pro        # optional but recommended — see below
 ```
 
 The script:
 1. Extracts `VC98\` tree and helper DLLs (MSPDB60 / MSDIS110 / MSOBJ10) from CD1 via 7-Zip
 2. Extracts the SP6 self-extractor and its four inner CABs, overlays the patched files
 3. Extracts the Processor Pack `c2.dll` (the SP6 C1/C2 mismatch workaround) and deploys it
+4. **Optional**: extracts VS 2003 `link.exe` + `cvtres.exe` + its DLL dependencies (`mspdb71.dll`, `msdis140.dll`, `msvcr71.dll`) into `VS7/Bin/`. This is the mixed toolchain D2 1.13d actually used — VC6 SP6 compiler paired with VS 7.10 linker. If you skip this, the build falls back to VC6's own `link.exe` 6.00, which works but produces `OptionalHeader.MajorLinkerVersion = 6.00` instead of D2's `7.10`, and lacks the `/OPT:ICF` feature Blizzard relied on.
 
-All output lands under `fun-doc/benchmark/tools/vc6/VC98/`. Nothing in this directory is ever committed to git — the `.gitignore` in this folder enforces that.
+All output lands under `fun-doc/benchmark/tools/vc6/VC98/` (compiler) and `fun-doc/benchmark/tools/vc6/VS7/` (linker). Nothing in this directory is ever committed to git — the `.gitignore` in this folder enforces that.
 
 ### Option 2 — manual extraction
 

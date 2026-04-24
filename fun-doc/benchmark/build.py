@@ -43,6 +43,17 @@ BUILD_DIR = BENCHMARK_DIR / "build"
 _DEFAULT_VC6_ROOT = BENCHMARK_DIR / "tools" / "vc6" / "VC98"
 VC6_ROOT = Path(os.environ.get("FUNDOC_VC6_ROOT") or str(_DEFAULT_VC6_ROOT))
 
+# VS 2003 linker root — D2 1.13d's Rich header shows VC6 SP6 compiler
+# BUT VS 7.10 linker (OptionalHeader MajorLinkerVersion=7.10). The mixed
+# toolchain is period-accurate: Blizzard upgraded their linker for
+# better /OPT:ICF + large-binary handling while keeping VC6's compiler.
+# Source media: D:\vs2003-pro\*.iso (Visual Studio .NET 2003 Professional).
+# Linker padding byte: VS 7.10+ defaults to 0xCC (int 3 / trap) where
+# VC6 link.exe defaults to 0x90 (nop) — a cosmetic detail but one that
+# shows up in byte-level diffs of the resulting .text sections.
+_DEFAULT_VS7_ROOT = BENCHMARK_DIR / "tools" / "vc6" / "VS7"
+VS7_ROOT = Path(os.environ.get("FUNDOC_VS7_ROOT") or str(_DEFAULT_VS7_ROOT))
+
 
 # Toolchain registry. Keys = logical toolchain name passed via --toolchain.
 # Each entry describes enough to locate cl.exe + link.exe and produce an
@@ -72,14 +83,24 @@ TOOLCHAINS = {
         ],
     },
     "vc6sp6": {
-        "description": "Visual C++ 6.0 SP6 (build 6030 — matches D2 1.13d Rich header)",
-        # Toolchain lives in-tree at fun-doc/benchmark/tools/vc6/VC98/
-        # (gitignored; populated by tools/bootstrap_vc6.py). Override
-        # via FUNDOC_VC6_ROOT env var if your VC6 lives elsewhere.
-        # The compiler banner should read "Version 12.00.8804" — that's
-        # the SP6 patch level D2 was built with.
+        "description": (
+            "Mixed toolchain: VC6 SP6 cl.exe (compiler, build 6030) "
+            "+ VS 2003 link.exe (linker, 7.10). Matches D2 1.13d's "
+            "Rich header compiler products AND OptionalHeader linker "
+            "version 7.10 AND 0xCC inter-function padding byte."
+        ),
+        # Compiler: VC6 SP6. Banner reads "Version 12.00.8804".
+        # Lives at fun-doc/benchmark/tools/vc6/VC98/ (gitignored).
+        # FUNDOC_VC6_ROOT overrides.
         "cl_path": str(VC6_ROOT / "Bin" / "cl.exe"),
-        "link_path": str(VC6_ROOT / "Bin" / "link.exe"),
+        # Linker: VS 2003 (VC7.1). Banner reads "Version 7.10.3077".
+        # Period-accurate to D2 1.13d. Lives at
+        # fun-doc/benchmark/tools/vc6/VS7/Bin/. FUNDOC_VS7_ROOT overrides.
+        "link_path": str(VS7_ROOT / "Bin" / "link.exe"),
+        # The VS 2003 linker needs its own DLLs on PATH (mspdb71,
+        # msdis140, msvcr71) — adding VS7/Bin to PATH picks them up.
+        # cl.exe still uses its own mspdb60 from VC6/Bin.
+        "extra_path": [str(VS7_ROOT / "Bin")],
         "include": [str(VC6_ROOT / "Include"), str(VC6_ROOT / "Atl" / "Include")],
         "lib": [str(VC6_ROOT / "Lib")],
         "cl_flags": [
@@ -94,8 +115,15 @@ TOOLCHAINS = {
         "link_flags": [
             "/NOLOGO",
             "/MACHINE:IX86",
+            # SUBSYSTEM:WINDOWS,4.00 — VC6 would warn; VS 2003 accepts
+            # it silently and emits OS/Subsystem Version 4.00/4.00 in
+            # the PE header (matches D2's 4.00/4.00 exactly).
             "/SUBSYSTEM:WINDOWS,4.00",
             "/OPT:REF",
+            # ICF is what Blizzard used the VS 2003 linker FOR — it's
+            # the feature VC6 didn't have. Enable it to match D2's
+            # COMDAT folding behavior.
+            "/OPT:ICF",
             "/MAP",
         ],
     },
@@ -149,8 +177,16 @@ def _make_env_for_toolchain(tc: dict) -> dict[str, str]:
         env["INCLUDE"] = os.pathsep.join(tc["include"])
     if "lib" in tc:
         env["LIB"] = os.pathsep.join(tc["lib"])
-    path_prefix = str(Path(tc["cl_path"]).parent)
-    env["PATH"] = path_prefix + os.pathsep + env.get("PATH", "")
+    # PATH: cl.exe's directory first, then any `extra_path` dirs (for
+    # mixed-toolchain setups where link.exe lives elsewhere and needs
+    # its own DLLs), then the inherited PATH. Order matters — cl.exe's
+    # dir must come first so cl.exe resolves its own MSPDB60.DLL, not
+    # a newer mspdb71.dll from the linker's dir.
+    path_parts = [str(Path(tc["cl_path"]).parent)]
+    if tc.get("extra_path"):
+        path_parts.extend(tc["extra_path"])
+    path_parts.append(env.get("PATH", ""))
+    env["PATH"] = os.pathsep.join(p for p in path_parts if p)
     return env
 
 
@@ -192,31 +228,77 @@ def build(toolchain_name: str, clean: bool = False) -> Path:
     out_dll = BUILD_DIR / "Benchmark.dll"
     out_map = BUILD_DIR / "Benchmark.map"
 
-    # cl.exe with /LD builds a DLL and invokes the linker internally.
-    # /Fe sets the output DLL name; /Fm the map file; /Fo the .obj dir.
-    cmd = [
+    print(f"[build] toolchain={toolchain_name} ({tc['description']})")
+
+    # If the toolchain specifies a separate link_path, do a two-step
+    # compile-then-link so we can use a different linker than the one
+    # cl.exe would pick up from its own Bin dir. This matches the
+    # Blizzard pattern for D2 1.13d: VC6 cl.exe drives compilation,
+    # VS 2003 link.exe does the link (producing OptionalHeader
+    # LinkerVersion 7.10 and 0xCC inter-function padding).
+    separate_linker = tc.get("link_path")
+
+    # --- Step 1: compile every .c to .obj ---
+    compile_cmd = [
         cl,
         *tc["cl_flags"],
-        f"/Fe{out_dll}",
-        f"/Fm{out_map}",
-        f"/Fo{BUILD_DIR}\\",
+        "/c",                        # compile only, no link
+        f"/Fo{BUILD_DIR}\\",          # .obj output dir (trailing backslash required)
         *[str(s) for s in sources],
-        "/link",
-        *tc["link_flags"],
     ]
-    print(f"[build] toolchain={toolchain_name} ({tc['description']})")
-    print(f"[build] cmd: {' '.join(cmd)}")
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    # Drop /LD from compile-only cmd — it's a linker flag that cl.exe
+    # passes through when linking; harmless but confusing in a /c cmd.
+    compile_cmd = [x for x in compile_cmd if x != "/LD"]
+    print(f"[build][cl]   {' '.join(compile_cmd)}")
+    result = subprocess.run(compile_cmd, env=env, capture_output=True, text=True)
     if result.stdout:
         print(result.stdout)
     if result.stderr:
         print(result.stderr, file=sys.stderr)
     if result.returncode != 0:
-        raise RuntimeError(
-            f"Build failed (exit {result.returncode}). See stderr above."
-        )
+        raise RuntimeError(f"Compile failed (exit {result.returncode}).")
+
+    # --- Step 2: link the .objs into the DLL ---
+    objs = sorted(BUILD_DIR.glob("*.obj"))
+    if not objs:
+        raise RuntimeError(f"No .obj files produced in {BUILD_DIR}")
+
+    if separate_linker:
+        # Resolve link.exe absolute path (same CreateProcess PATH issue as cl.exe)
+        link_exe = separate_linker
+        if not Path(link_exe).is_absolute():
+            link_exe = shutil.which(link_exe, path=env.get("PATH", "")) or link_exe
+        if not Path(link_exe).is_file():
+            raise RuntimeError(
+                f"link.exe not found at {separate_linker}. Has tools/vc6/VS7/Bin/ "
+                f"been populated? See tools/vc6/README.md."
+            )
+    else:
+        # No separate linker — use link.exe from cl.exe's own Bin dir
+        link_exe = str(Path(cl).parent / "link.exe")
+
+    link_cmd = [
+        link_exe,
+        *tc["link_flags"],
+        "/DLL",                       # output a DLL (replaces cl.exe's /LD)
+        f"/OUT:{out_dll}",
+        f"/MAP:{out_map}",
+        # The default EntryPoint for a DLL is _DllMainCRTStartup@12;
+        # link.exe picks it automatically when /DLL is set. We provide
+        # DllMain ourselves in dllmain.c, so the CRT entry point is
+        # happy to delegate. No /ENTRY override needed.
+        *[str(o) for o in objs],
+    ]
+    print(f"[build][link] {' '.join(link_cmd)}")
+    result = subprocess.run(link_cmd, env=env, capture_output=True, text=True)
+    if result.stdout:
+        print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(f"Link failed (exit {result.returncode}).")
     if not out_dll.is_file():
-        raise RuntimeError(f"Build succeeded but {out_dll} not produced")
+        raise RuntimeError(f"Link succeeded but {out_dll} not produced")
 
     # Write a small manifest so downstream tools can read which toolchain
     # produced the binary — useful for the run record to include and for

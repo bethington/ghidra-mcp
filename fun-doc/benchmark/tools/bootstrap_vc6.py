@@ -39,6 +39,7 @@ BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 VC6_ROOT = BENCHMARK_DIR / "tools" / "vc6"
 VC98_DIR = VC6_ROOT / "VC98"
 BIN_DIR = VC98_DIR / "Bin"
+VS7_BIN_DIR = VC6_ROOT / "VS7" / "Bin"
 
 
 REQUIRED_SOURCE_FILES = {
@@ -46,6 +47,21 @@ REQUIRED_SOURCE_FILES = {
     "sp6": "en_vs6_sp6.exe",
     "vcpp5": "vcpp5.exe",
 }
+
+
+# Optional VS 2003 pieces — D2 1.13d used VC6 cl.exe + VS 7.10 link.exe
+# (mixed toolchain). Bootstrap this if present to get OptionalHeader
+# LinkerVersion 7.10 matching D2 exactly. If the VS 2003 ISO isn't
+# supplied the mixed toolchain is skipped and the build falls back to
+# VC6's own link.exe (6.00).
+VS7_SOURCE_GLOB = "Microsoft Visual Studio .NET 2003 Professional - Disc 1.iso"
+VS7_FILES_IN_ISO = [
+    ("Program Files/Microsoft Visual Studio .NET 2003/Vc7/bin/link.exe",   "link.exe"),
+    ("Program Files/Microsoft Visual Studio .NET 2003/Vc7/bin/cvtres.exe", "cvtres.exe"),
+    ("Program Files/Microsoft Visual Studio .NET 2003/Common7/IDE/mspdb71.dll",   "mspdb71.dll"),
+    ("Program Files/Microsoft Visual Studio .NET 2003/Common7/IDE/msdis140.dll",  "msdis140.dll"),
+    ("Program Files/Microsoft Visual Studio .NET 2003/Common7/IDE/msvcr71.dll",   "msvcr71.dll"),
+]
 
 
 def _check_7z_available() -> str:
@@ -240,6 +256,69 @@ def bootstrap(source_dir: Path, force: bool = False) -> None:
         sys.exit(6)
 
 
+def bootstrap_vs7(vs7_source: Path) -> None:
+    """Extract VS 2003 link.exe + dependencies into tools/vc6/VS7/Bin/.
+
+    Optional — if vs7_source doesn't point at a valid VS 2003 install
+    ISO, skip silently and the build falls back to VC6's linker.
+    """
+    if not vs7_source or not vs7_source.exists():
+        print(
+            f"  [vs7] source {vs7_source} not found; skipping VS 2003 linker. "
+            f"Build will fall back to VC6 link.exe (OptionalHeader LinkerVersion 6.00)."
+        )
+        return
+
+    # Locate the ISO in the source dir
+    if vs7_source.is_dir():
+        candidates = list(vs7_source.glob("*.iso"))
+        iso = next((c for c in candidates if "2003" in c.name.lower()), None)
+        if iso is None:
+            print(
+                f"  [vs7] no VS 2003 ISO found in {vs7_source}; skipping. "
+                f"Expected a filename containing '2003'.",
+                file=sys.stderr,
+            )
+            return
+    elif vs7_source.is_file() and vs7_source.suffix.lower() == ".iso":
+        iso = vs7_source
+    else:
+        print(f"  [vs7] unrecognized source {vs7_source}; skipping", file=sys.stderr)
+        return
+
+    sevenz = _check_7z_available()
+    VS7_BIN_DIR.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix="fundoc_vs7_bootstrap_") as tmp_str:
+        tmp = Path(tmp_str)
+        print(f"  [vs7] extracting VS 2003 linker bits from {iso.name} ...")
+        patterns = [src for src, _ in VS7_FILES_IN_ISO]
+        _run_7z(sevenz, iso, tmp, *patterns)
+        for src_rel, dest_name in VS7_FILES_IN_ISO:
+            src_file = tmp / src_rel
+            if src_file.is_file():
+                shutil.copy2(src_file, VS7_BIN_DIR / dest_name)
+            else:
+                print(f"  [vs7] WARNING: {src_rel} not found in ISO", file=sys.stderr)
+
+    link_exe = VS7_BIN_DIR / "link.exe"
+    if not link_exe.is_file():
+        print(f"  [vs7] ERROR: link.exe not staged at {link_exe}", file=sys.stderr)
+        return
+    try:
+        result = subprocess.run(
+            [str(link_exe)], capture_output=True, text=True, timeout=15
+        )
+        combined = result.stdout + "\n" + result.stderr
+        banner = next(
+            (ln.strip() for ln in combined.splitlines() if "Incremental Linker" in ln),
+            None,
+        )
+        print(f"  [vs7] {banner or 'linker banner not captured'}")
+    except Exception as e:
+        print(f"  [vs7] WARNING: link.exe failed to run: {e}", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Bootstrap VC6 SP6 into fun-doc/benchmark/tools/vc6/ from local source media."
@@ -251,9 +330,17 @@ def main():
         "(default: $FUNDOC_VC6_SOURCE or D:\\vc6-sp6-ent)",
     )
     ap.add_argument(
+        "--vs7-source",
+        type=Path,
+        help="Directory or ISO for VS 2003 Professional (for link.exe 7.10). "
+        "Optional — if present, the mixed VC6-compiler + VS7-linker toolchain is wired up "
+        "to match D2 1.13d's OptionalHeader LinkerVersion exactly. "
+        "(default: $FUNDOC_VS7_SOURCE or D:\\vs2003-pro)",
+    )
+    ap.add_argument(
         "--force",
         action="store_true",
-        help="Wipe tools/vc6/VC98/ before extracting",
+        help="Wipe tools/vc6/VC98/ and VS7/ before extracting",
     )
     ap.add_argument(
         "--verify",
@@ -279,6 +366,22 @@ def main():
         sys.exit(1)
 
     bootstrap(source, force=args.force)
+
+    # VS 2003 linker — optional, only if source provided or default exists.
+    vs7_source = (
+        args.vs7_source
+        or Path(os.environ.get("FUNDOC_VS7_SOURCE", r"D:\vs2003-pro"))
+    )
+    if args.force and VS7_BIN_DIR.exists():
+        shutil.rmtree(VS7_BIN_DIR)
+    if vs7_source.exists():
+        bootstrap_vs7(vs7_source)
+    else:
+        print(
+            f"  [vs7] {vs7_source} not present; VS 2003 linker not bootstrapped. "
+            f"Build will use VC6's link.exe (linker version 6.00 in the PE header). "
+            f"To match D2's linker version 7.10, supply --vs7-source <path>."
+        )
 
 
 if __name__ == "__main__":

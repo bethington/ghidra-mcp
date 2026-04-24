@@ -13,6 +13,7 @@ After running `bootstrap_vc6.py`, the following third-party files land under `VC
 | `VC98/Bin/MSPDB60.DLL`, `MSDIS110.DLL`, `MSOBJ10.DLL` | Microsoft Corporation | Visual Studio 6.0 Enterprise CD1 ISO |
 | `VC98/Include/*.h` | Microsoft Corporation | Visual Studio 6.0 Enterprise CD1 ISO + SP6 |
 | `VC98/Lib/*.lib` | Microsoft Corporation | Visual Studio 6.0 Enterprise CD1 ISO + SP6 |
+| `VS7/Bin/link.exe`, `cvtres.exe`, `mspdb71.dll`, `msdis140.dll`, `msvcr71.dll` | Microsoft Corporation | Visual Studio .NET 2003 Professional CD1 ISO (optional — staged by `bootstrap_vc6.py --vs7-source`; used for the mixed toolchain that matches D2 1.13d's `OptionalHeader.LinkerVersion` of 7.10) |
 
 Copyright in these files runs through approximately **2093** (1998 + 95 years under 17 U.S.C. § 302(c) for works-for-hire). They are not public domain and Microsoft has not declared them freely redistributable.
 
