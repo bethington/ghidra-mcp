@@ -1,0 +1,12 @@
+# Visual C++ 6.0 SP6 toolchain lives in this directory on your local
+# machine but is NOT redistributed via git — see README.md + NOTICE.md.
+# The three tracked files below explain what should be here and how to
+# populate the directory from your own licensed source media.
+
+# Ignore everything by default
+*
+
+# Re-include the tracked explanatory files
+!.gitignore
+!README.md
+!NOTICE.md

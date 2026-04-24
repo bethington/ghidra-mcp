@@ -34,6 +34,15 @@ BENCHMARK_DIR = Path(__file__).resolve().parent
 SRC_DIR = BENCHMARK_DIR / "src"
 BUILD_DIR = BENCHMARK_DIR / "build"
 
+# VC6 SP6 toolchain root. Lives in the project tree (gitignored) so the
+# benchmark is self-contained per machine; populated by
+# `tools/bootstrap_vc6.py` from the user's licensed source media. See
+# tools/vc6/README.md + tools/vc6/NOTICE.md for the redistribution posture.
+# FUNDOC_VC6_ROOT env var overrides this if the user has VC6 installed
+# elsewhere (e.g., a system install at C:\VC6\).
+_DEFAULT_VC6_ROOT = BENCHMARK_DIR / "tools" / "vc6" / "VC98"
+VC6_ROOT = Path(os.environ.get("FUNDOC_VC6_ROOT") or str(_DEFAULT_VC6_ROOT))
+
 
 # Toolchain registry. Keys = logical toolchain name passed via --toolchain.
 # Each entry describes enough to locate cl.exe + link.exe and produce an
@@ -64,13 +73,15 @@ TOOLCHAINS = {
     },
     "vc6sp6": {
         "description": "Visual C++ 6.0 SP6 (build 6030 — matches D2 1.13d Rich header)",
-        # Portable install at C:\VC6\ (see docs/VC6_INSTALL.md). The
-        # compiler banner should read "Version 12.00.8804" — that's the
-        # SP6 patch level D2 was built with.
-        "cl_path": r"C:\VC6\VC98\Bin\cl.exe",
-        "link_path": r"C:\VC6\VC98\Bin\link.exe",
-        "include": [r"C:\VC6\VC98\Include", r"C:\VC6\VC98\ATL\Include"],
-        "lib": [r"C:\VC6\VC98\Lib"],
+        # Toolchain lives in-tree at fun-doc/benchmark/tools/vc6/VC98/
+        # (gitignored; populated by tools/bootstrap_vc6.py). Override
+        # via FUNDOC_VC6_ROOT env var if your VC6 lives elsewhere.
+        # The compiler banner should read "Version 12.00.8804" — that's
+        # the SP6 patch level D2 was built with.
+        "cl_path": str(VC6_ROOT / "Bin" / "cl.exe"),
+        "link_path": str(VC6_ROOT / "Bin" / "link.exe"),
+        "include": [str(VC6_ROOT / "Include"), str(VC6_ROOT / "Atl" / "Include")],
+        "lib": [str(VC6_ROOT / "Lib")],
         "cl_flags": [
             "/nologo",
             "/W3",
