@@ -80,7 +80,7 @@ from collections import defaultdict
 from datetime import datetime, date
 from pathlib import Path
 
-from event_bus import emit as bus_emit
+from event_bus import emit as bus_emit, get_bus
 
 # Thread safety for state.json access across concurrent workers
 _state_lock = threading.Lock()
