@@ -65,7 +65,52 @@ def _program_exists(program_path: str) -> bool:
     return False
 
 
+def _check_not_shared_project() -> None:
+    """Refuse to import into a shared-server Ghidra project.
+
+    Benchmark artifacts (Benchmark.dll, struct definitions created by
+    fun-doc runs, renames applied by the benchmark) should never leak
+    into a team-visible project. Probing /project/info tells us
+    whether the current Ghidra is on a shared server; if so, we bail
+    with instructions to switch to a local project first.
+
+    Overridable via FUNDOC_BENCHMARK_ALLOW_SHARED=1 for the rare case
+    where a team explicitly wants the benchmark in a shared project.
+    """
+    import os as _os
+
+    if _os.environ.get("FUNDOC_BENCHMARK_ALLOW_SHARED") == "1":
+        return
+    try:
+        info = _get("/project/info")
+    except GhidraBridgeError:
+        # If the endpoint isn't available, we can't verify — proceed
+        # rather than block indefinitely.
+        return
+    if not isinstance(info, dict):
+        return
+    if info.get("shared"):
+        project = info.get("project", "?")
+        server = info.get("server_info", "?")
+        raise SystemExit(
+            f"REFUSING to import Benchmark.dll into shared project {project!r} "
+            f"(server: {server}).\n\n"
+            f"Benchmark runs would sync to the shared server and be visible to "
+            f"other developers. Benchmark.dll, its fun-doc-applied renames, and "
+            f"its struct definitions should live in a LOCAL Ghidra project.\n\n"
+            f"To proceed:\n"
+            f"  1. In Ghidra: File > New Project > Non-Shared Project\n"
+            f"  2. In the new project: File > Import File, pick Benchmark.dll,\n"
+            f"     run full analysis, save.\n"
+            f"  3. Re-run this setup script against the local project.\n\n"
+            f"If you really want to import into the shared project anyway, set "
+            f"FUNDOC_BENCHMARK_ALLOW_SHARED=1 in the environment and re-run."
+        )
+
+
 def setup(force: bool = False) -> None:
+    _check_not_shared_project()
+
     folder, program_path = _resolve_target_path()
 
     if not BENCHMARK_DLL.is_file():

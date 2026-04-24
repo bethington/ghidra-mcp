@@ -1,0 +1,41 @@
+# Semantic ground truth for src/get_stat_list_flags.c::get_stat_list_flags.
+#
+# D2-derived reconstruction: /Mods/PD2-S12/D2Common.dll @ 6fd6e170
+# (ordinal 10198; real StatList layout, magic 0x01020304, flags at +0x10)
+
+function: get_stat_list_flags
+
+name_synonyms:
+  - get_stat_list_flags
+  - GetStatListFlags
+  - getStatListFlags
+  - ReadStatListFlags
+  - read_stat_list_flags
+  - StatListFlags
+  - StatList_GetFlags
+  - stat_list_flags
+  - GetFlags
+
+canonical_plate: |
+  Read the flags bitfield from a D2 StatList structure. Validates
+  the list pointer is non-null and the magic signature at offset 0
+  matches 0x01020304 (the StatList tag). On success returns the
+  32-bit flags value at offset 0x10. Returns 0 on null-pointer or
+  magic-mismatch, guarding against reads from corrupted / non-
+  StatList memory.
+
+algorithm_tag: struct accessor
+algorithm_synonyms:
+  - struct accessor
+  - struct getter
+  - field read
+  - magic number
+  - corruption guard
+  - offset accessor
+
+weights:
+  name: 0.25
+  signature: 0.25
+  plate: 0.20
+  algorithm: 0.15
+  locals: 0.15

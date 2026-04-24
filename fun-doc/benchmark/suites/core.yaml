@@ -19,4 +19,12 @@
 # Then reconstruct, author the truth.yaml, and add an entry below.
 
 tier: core
-suites: []   # empty — populated as D2-derived reconstructions land
+suites:
+
+  - name: stat_list_accessors
+    description: StatList struct accessors (magic 0x01020304 layout, D2Common.dll)
+    functions:
+      - get_stat_list_flags
+      # TODO: get_stat_list_layer @ +0x04
+      # TODO: get_stat_list_owner_guid @ +0x20
+      # TODO: get_stat_list_owner_type @ +0x3C

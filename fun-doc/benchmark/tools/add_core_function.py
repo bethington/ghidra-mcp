@@ -163,6 +163,31 @@ def scaffold(program: str, address: str, name: str, force: bool = False) -> None
     """))
 
 
+def _unmangle_msys_path(raw: str) -> str:
+    """Undo MSYS2 / Git-Bash automatic path conversion on Ghidra paths.
+
+    When this script is invoked from git-bash with an argument like
+    `/Mods/PD2-S12/D2Common.dll`, MSYS2 helpfully "translates" it to
+    `C:/Program Files/Git/Mods/PD2-S12/D2Common.dll` before Python
+    ever sees it. We detect that prefix and strip it.
+
+    Also handles the generic `C:/Users/.../cygdrive` and similar cases
+    by looking for `/Mods/` or `/Vanilla/` fragments that signal the
+    true Ghidra path starts mid-string.
+    """
+    if not raw:
+        return raw
+    # Git-bash install-dir prefix
+    lowered = raw.replace("\\", "/").lower()
+    for marker in ("/mods/", "/vanilla/", "/benchmark/"):
+        idx = lowered.find(marker)
+        if idx > 0:
+            # Keep original casing; slice based on the detected index.
+            # Convert backslashes to forward to match Ghidra's path style.
+            return raw.replace("\\", "/")[idx:]
+    return raw
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Scaffold a D2-derived core-tier benchmark function"
@@ -172,7 +197,10 @@ def main():
     ap.add_argument("--name", required=True, help="function name (PascalCase or snake_case)")
     ap.add_argument("--force", action="store_true", help="overwrite existing files")
     args = ap.parse_args()
-    scaffold(args.program, args.address.lower().replace("0x", ""), args.name, force=args.force)
+    program = _unmangle_msys_path(args.program)
+    if program != args.program:
+        print(f"[scaffold] auto-corrected MSYS-mangled path: {args.program!r} -> {program!r}")
+    scaffold(program, args.address.lower().replace("0x", ""), args.name, force=args.force)
 
 
 if __name__ == "__main__":

@@ -108,6 +108,47 @@
         "locals": 0.15
       }
     },
+    "get_stat_list_flags": {
+      "name": "get_stat_list_flags",
+      "source_file": "get_stat_list_flags.c",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "pStatList",
+          "type": "int *"
+        }
+      ],
+      "locals": [],
+      "doc_comment": "Read the flags bitfield from a D2 StatList structure.\n\nReturns the 32-bit flags value at offset 0x10 after validating the\npointer is non-null and the magic signature at offset 0x00 matches\nthe StatList tag 0x01020304. Returns 0 on null-pointer or magic-\nmismatch (corruption guard).\n\n@param pStatList  pointer to a StatList structure\n@return the flags at offset 0x10, or 0 if invalid",
+      "name_synonyms": [
+        "get_stat_list_flags",
+        "GetStatListFlags",
+        "getStatListFlags",
+        "ReadStatListFlags",
+        "read_stat_list_flags",
+        "StatListFlags",
+        "StatList_GetFlags",
+        "stat_list_flags",
+        "GetFlags"
+      ],
+      "canonical_plate": "Read the flags bitfield from a D2 StatList structure. Validates\nthe list pointer is non-null and the magic signature at offset 0\nmatches 0x01020304 (the StatList tag). On success returns the\n32-bit flags value at offset 0x10. Returns 0 on null-pointer or\nmagic-mismatch, guarding against reads from corrupted / non-\nStatList memory.\n",
+      "algorithm_tag": "struct accessor",
+      "algorithm_synonyms": [
+        "struct accessor",
+        "struct getter",
+        "field read",
+        "magic number",
+        "corruption guard",
+        "offset accessor"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
     "stat_list_add": {
       "name": "stat_list_add",
       "source_file": "stat_list_add.c",
