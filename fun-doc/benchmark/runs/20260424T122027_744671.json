@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "timestamp": "2026-04-24T12:20:27",
+  "commit": "59a5edf",
+  "tier": "fast",
+  "providers": [
+    "minimax"
+  ],
+  "mock": true,
+  "variant": "baseline",
+  "functions": {
+    "calc_crc16": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 24.7,
+        "quality": 0.803,
+        "dimensions": {
+          "name": {
+            "score": 1.0,
+            "tier": "exact",
+            "matched_against": "CalcCrc16Ccitt",
+            "generated": "CalcCrc16Ccitt"
+          },
+          "signature": {
+            "score": 0.75,
+            "return_type_match": true,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": false,
+                "truth": {
+                  "name": "data",
+                  "type": "const unsigned char *"
+                },
+                "generated": {
+                  "name": "pbBuffer",
+                  "type": "byte *"
+                },
+                "reason": "type mismatch"
+              },
+              {
+                "index": 1,
+                "match": true,
+                "truth": {
+                  "name": "length",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "dwLength",
+                  "type": "uint"
+                },
+                "reason": null
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.564,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.564
+          },
+          "algorithm": {
+            "score": 1.0,
+            "mention_found": true,
+            "matched_tag": "CRC-16-CCITT"
+          },
+          "locals": {
+            "score": 0.688,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "crc",
+                  "type": "unsigned short"
+                },
+                "generated": {
+                  "name": "wCrc",
+                  "type": "ushort"
+                },
+                "name_tier": "prefix",
+                "type_match": true,
+                "score": 0.85
+              },
+              {
+                "truth": {
+                  "name": "byte_index",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "iByte",
+                  "type": "uint"
+                },
+                "name_tier": "llm_stub",
+                "type_match": true,
+                "score": 0.713
+              },
+              {
+                "truth": {
+                  "name": "bit_index",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "iBit",
+                  "type": "uint"
+                },
+                "name_tier": "miss",
+                "type_match": true,
+                "score": 0.5
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 12,
+        "tool_calls_per_quality_point": 14.94,
+        "duplicate_tool_call_ratio": 0.083,
+        "captured": {
+          "name": "CalcCrc16Ccitt",
+          "return_type": "ushort",
+          "parameters": [
+            {
+              "name": "pbBuffer",
+              "type": "byte *"
+            },
+            {
+              "name": "dwLength",
+              "type": "uint"
+            }
+          ],
+          "locals": [
+            {
+              "name": "wCrc",
+              "type": "ushort"
+            },
+            {
+              "name": "iByte",
+              "type": "uint"
+            },
+            {
+              "name": "iBit",
+              "type": "uint"
+            }
+          ],
+          "plate": "Computes a CRC-16-CCITT checksum over a buffer of bytes. Uses polynomial 0x1021 and an initial value of 0xFFFF. Processes one byte at a time with 8 bit-shifts per byte. No input or output reflection. Classic CRC used in XMODEM and many network protocols."
+        }
+      }
+    }
+  },
+  "aggregate": {
+    "quality_mean": 0.803,
+    "wall_time_sec_total": 24.7,
+    "tool_calls_total": 12,
+    "tool_calls_per_quality_point": 14.94,
+    "duplicate_tool_call_ratio": 0.083,
+    "function_count": 1
+  }
+}

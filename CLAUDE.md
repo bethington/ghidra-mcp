@@ -136,6 +136,28 @@ When building new tools or modifying existing ones, wire validation through `Nam
 - **Plate comment `\n` creates literal text**, not newlines -- use actual multi-line text
 - **GUI operations from HTTP threads** must use `SwingUtilities.invokeAndWait()`
 
+## Benchmark
+
+`fun-doc/benchmark/` holds a reproducible regression harness for fun-doc's documentation quality. It re-documents a fixed set of functions against a ground-truth answer key (handcrafted C compiled into `Benchmark.dll`) and scores the result via a multi-level rubric plus structural signature/type checks, reporting quality and guardrail metrics.
+
+**When to run.** Manual only — no automation fires it. Run `python fun-doc/benchmark/run_benchmark.py --mock --tier fast --compare` *before and after* any change that can affect documentation quality. The `--compare` flag diffs against the previous `runs/latest.json`. Commit the resulting `runs/*.json` + `runs/latest.json` along with the code change so `git blame` on `runs/latest.json` tells you exactly which commit moved a score.
+
+**Files whose changes SHOULD trigger a rerun:**
+
+- `fun-doc/fun_doc.py` — prompt construction, scoring, orchestration, provider invocation
+- `fun-doc/web.py` — worker loop, pre-refresh, adaptive refresh, phase transitions
+- `fun-doc/benchmark/scorer.py` — the scorer itself (validate the benchmark didn't drift with the rubric)
+- `fun-doc/benchmark/truth/*.truth.yaml` — ground-truth semantic overlays
+- `fun-doc/benchmark/src/*.c` — the baseline binary's source (requires `build.py` + `extract_truth.py` rerun first)
+- `src/main/java/com/xebyte/core/NamingConventions.java` — any change to the validation cascade
+- `src/main/java/com/xebyte/core/*.java` service changes that alter MCP tool behavior
+- `tests/endpoints.json` — tool schema / description changes (affects what the worker calls)
+- `bridge_mcp_ghidra.py` — bridge-level prompt caching, tool orchestration, provider routing
+- The provider client wrappers (minimax / gemini / claude / codex invocation paths)
+- `priority_queue.json`'s `config.provider_models` — the benchmark tests whatever model table is live
+
+**Walking-skeleton status.** Only the CRC-16 function is wired in, and the `--mock` path (reads pre-captured fixtures under `fixtures/`) is the only path that works. The `--real` path — which would invoke fun-doc against `Benchmark.dll` in Ghidra for real — is stubbed pending (1) install of VC6 SP6 to match D2 1.13d's toolchain, (2) a dedicated Ghidra project hosting `Benchmark.dll`, (3) a reset script that restores a pristine `.gzf` between suites. See `fun-doc/benchmark/README.md` for the full design and rollout plan.
+
 ## Documentation
 
 - Workflow: `docs/prompts/FUNCTION_DOC_WORKFLOW_V5.md`

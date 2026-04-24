@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "functions": {
+    "calc_crc16": {
+      "name": "calc_crc16",
+      "source_file": "crc16.c",
+      "return_type": "unsigned short",
+      "parameters": [
+        {
+          "name": "data",
+          "type": "const unsigned char *"
+        },
+        {
+          "name": "length",
+          "type": "unsigned int"
+        }
+      ],
+      "locals": [
+        {
+          "name": "crc",
+          "type": "unsigned short"
+        },
+        {
+          "name": "byte_index",
+          "type": "unsigned int"
+        },
+        {
+          "name": "bit_index",
+          "type": "unsigned int"
+        }
+      ],
+      "doc_comment": "Compute CRC-16-CCITT checksum over a byte buffer.\n\nUses polynomial 0x1021 (CCITT / XMODEM variant), initial value 0xFFFF,\nno input reflection, no output reflection, no final XOR. Processes\none byte at a time, shifting through 8 bits of state per byte. This is\nthe classic CRC-16 used in a lot of network and storage protocols.\n\n@param data   pointer to the input buffer\n@param length number of bytes to checksum\n@return the 16-bit CRC",
+      "name_synonyms": [
+        "calc_crc16",
+        "compute_crc16",
+        "Crc16",
+        "CalcCrc16",
+        "ComputeCrc16",
+        "Crc16Ccitt",
+        "ComputeCrc16Ccitt",
+        "CalcCrc16Ccitt"
+      ],
+      "canonical_plate": "Computes a CRC-16 checksum over a byte buffer using the CCITT /\nXMODEM variant of the algorithm.\nPolynomial: 0x1021\nInitial CRC value: 0xFFFF\nNo input or output reflection, no final XOR.\nProcesses input one byte at a time, shifting 8 bits of state per byte.\n",
+      "algorithm_tag": "CRC-16-CCITT",
+      "algorithm_synonyms": [
+        "CRC-16-CCITT",
+        "CRC16-CCITT",
+        "CCITT CRC",
+        "XMODEM CRC",
+        "CRC-16/CCITT-FALSE"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    }
+  }
+}

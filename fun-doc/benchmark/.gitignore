@@ -1,0 +1,22 @@
+# Build artifacts — reproducible from src/*.c via build.py.
+# Keep these out of git; regenerate with `python build.py`.
+build/
+
+# Ground truth is regenerated from src/*.c + truth/*.truth.yaml via
+# extract_truth.py, but we commit it so consumers don't need libclang
+# installed just to inspect the baseline. If libclang is available,
+# `python extract_truth.py` will refresh it.
+# (Intentionally NOT ignored.)
+# ground_truth.json
+
+# Cached pristine Ghidra .gzf — kept in git for reproducibility,
+# BUT binary assets > 10MB or so should use git-lfs. Leave commented
+# until we know the size.
+# benchmark.gzf
+
+# Runs are committed on purpose — the git history of runs/*.json is
+# how we track "when did a score change, and what commit moved it."
+# Do NOT ignore runs/.
+
+__pycache__/
+*.pyc

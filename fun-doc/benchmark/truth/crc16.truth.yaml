@@ -1,0 +1,59 @@
+# Semantic ground truth for src/crc16.c::calc_crc16.
+#
+# Structural truth (return type, param types, local names, etc) is
+# derived by libclang parsing src/crc16.c — do not duplicate that here.
+# This file carries only what the parser cannot infer: accepted name
+# synonyms, canonical plate, algorithm tag, and per-dimension weights.
+
+function: calc_crc16   # must match the symbol name in src/crc16.c
+
+# Accepted synonyms. The multi-level rubric uses these for cheap
+# deterministic matching before escalating to the LLM judge:
+#   exact match against `function` or any synonym -> 1.0
+#   containment / shared-prefix against any       -> 0.7
+# A good rule of thumb: list 3-6 names that a human reviewer would
+# accept as "obviously correct" for this function.
+name_synonyms:
+  - calc_crc16
+  - compute_crc16
+  - Crc16
+  - CalcCrc16
+  - ComputeCrc16
+  - Crc16Ccitt
+  - ComputeCrc16Ccitt
+  - CalcCrc16Ccitt
+
+# Canonical plate text. Haiku-as-judge compares the worker's plate
+# against this for semantic equivalence. Keep it prose, 3-8 lines,
+# factual: what the function does + the algorithm's key parameters.
+# Wording does not need to match; meaning does.
+canonical_plate: |
+  Computes a CRC-16 checksum over a byte buffer using the CCITT /
+  XMODEM variant of the algorithm.
+  Polynomial: 0x1021
+  Initial CRC value: 0xFFFF
+  No input or output reflection, no final XOR.
+  Processes input one byte at a time, shifting 8 bits of state per byte.
+
+# Structured algorithm tag. The scorer checks whether the worker's
+# plate mentions this tag (or one of its fuzzy equivalents) — a
+# binary "did the model identify the algorithm?" signal that doesn't
+# need LLM judgment.
+algorithm_tag: CRC-16-CCITT
+algorithm_synonyms:
+  - CRC-16-CCITT
+  - CRC16-CCITT
+  - CCITT CRC
+  - XMODEM CRC
+  - CRC-16/CCITT-FALSE
+
+# Per-dimension weights for the final quality score. Must sum to 1.0.
+# Adjust if a function is unusually weighted toward one axis (e.g. a
+# pure struct-access function would weight `signature` and `locals`
+# higher than `plate`).
+weights:
+  name: 0.25
+  signature: 0.25
+  plate: 0.20
+  algorithm: 0.15
+  locals: 0.15

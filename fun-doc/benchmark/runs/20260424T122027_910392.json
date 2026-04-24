@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "timestamp": "2026-04-24T12:20:27",
+  "commit": "59a5edf",
+  "tier": "fast",
+  "providers": [
+    "minimax"
+  ],
+  "mock": true,
+  "variant": "poor",
+  "functions": {
+    "calc_crc16": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 41.2,
+        "quality": 0.046,
+        "dimensions": {
+          "name": {
+            "score": 0.0,
+            "tier": "miss",
+            "matched_against": null,
+            "generated": "ProcessBuffer"
+          },
+          "signature": {
+            "score": 0.0,
+            "return_type_match": false,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": false,
+                "truth": {
+                  "name": "data",
+                  "type": "const unsigned char *"
+                },
+                "generated": {
+                  "name": "param_1",
+                  "type": "undefined4"
+                },
+                "reason": "type mismatch"
+              },
+              {
+                "index": 1,
+                "match": false,
+                "truth": {
+                  "name": "length",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "param_2",
+                  "type": "undefined4"
+                },
+                "reason": "type mismatch"
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.229,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.229
+          },
+          "algorithm": {
+            "score": 0.0,
+            "mention_found": false,
+            "matched_tag": null
+          },
+          "locals": {
+            "score": 0.0,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "crc",
+                  "type": "unsigned short"
+                },
+                "generated": null,
+                "name_tier": "miss",
+                "type_match": false,
+                "score": 0.0
+              },
+              {
+                "truth": {
+                  "name": "byte_index",
+                  "type": "unsigned int"
+                },
+                "generated": null,
+                "name_tier": "miss",
+                "type_match": false,
+                "score": 0.0
+              },
+              {
+                "truth": {
+                  "name": "bit_index",
+                  "type": "unsigned int"
+                },
+                "generated": null,
+                "name_tier": "miss",
+                "type_match": false,
+                "score": 0.0
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 9,
+        "tool_calls_per_quality_point": 195.65,
+        "duplicate_tool_call_ratio": 0.444,
+        "captured": {
+          "name": "ProcessBuffer",
+          "return_type": "undefined4",
+          "parameters": [
+            {
+              "name": "param_1",
+              "type": "undefined4"
+            },
+            {
+              "name": "param_2",
+              "type": "undefined4"
+            }
+          ],
+          "locals": [
+            {
+              "name": "iVar1",
+              "type": "int"
+            },
+            {
+              "name": "iVar2",
+              "type": "int"
+            },
+            {
+              "name": "iVar3",
+              "type": "int"
+            }
+          ],
+          "plate": "This function processes a buffer and computes a value. It iterates over the input and updates an internal state. Returns the final state value."
+        }
+      }
+    }
+  },
+  "aggregate": {
+    "quality_mean": 0.046,
+    "wall_time_sec_total": 41.2,
+    "tool_calls_total": 9,
+    "tool_calls_per_quality_point": 195.65,
+    "duplicate_tool_call_ratio": 0.444,
+    "function_count": 1
+  }
+}
