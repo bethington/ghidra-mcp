@@ -4402,8 +4402,24 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
                 time.sleep(wait)
             else:
                 break
-    print(f"ERROR: Gemini CLI failed: {last_err}", file=sys.stderr)
-    return (None, {"tool_calls": 0, "tool_calls_known": True})
+    # Surface the error in the run record so the dashboard / runs.jsonl shows
+    # *why* a Gemini run failed instead of a silent "tool_calls=0, output=null".
+    # Quota-exhausted ("You have exhausted your capacity on this model. Your
+    # quota will reset after Xh") in particular was previously invisible —
+    # users saw a worker burning through retries with no diagnosis.
+    err_str_for_log = str(last_err) if last_err is not None else "unknown"
+    print(f"ERROR: Gemini CLI failed: {err_str_for_log}", file=sys.stderr)
+    return (
+        None,
+        {
+            "tool_calls": 0,
+            "tool_calls_known": True,
+            "provider_error": err_str_for_log[:500],
+            "provider_error_type": (
+                type(last_err).__name__ if last_err is not None else "Unknown"
+            ),
+        },
+    )
 
 
 # Tools MiniMax actually uses for RE documentation (empirically derived from 194
