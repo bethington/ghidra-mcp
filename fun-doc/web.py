@@ -140,6 +140,27 @@ class WorkerManager:
 
             worker_id = str(uuid.uuid4())[:8]
             stop_flag = threading.Event()
+
+            # Capture a frozen snapshot of every queue.config field that
+            # should remain constant for this worker's lifetime. See
+            # fun_doc.build_worker_config_snapshot for the schema. The
+            # snapshot is opaque to WorkerManager — _run_worker passes
+            # it through to process_function on every iteration. Nothing
+            # mutates the snapshot after this point; live config edits via
+            # the dashboard apply only to workers started AFTER the edit.
+            try:
+                from fun_doc import build_worker_config_snapshot, load_priority_queue
+                config_snapshot = build_worker_config_snapshot(
+                    load_priority_queue(), provider
+                )
+            except Exception as e:
+                # Snapshot is best-effort. If we can't build one (rare —
+                # corrupt queue file etc.), fall back to None and the
+                # worker will use live config reads, matching pre-snapshot
+                # behavior.
+                print(f"  WARNING: config snapshot build failed: {e}")
+                config_snapshot = None
+
             worker = {
                 "id": worker_id,
                 "provider": provider,
@@ -155,6 +176,7 @@ class WorkerManager:
                 "restore_on_restart": True,
                 "timeout_count": 0,
                 "last_alert": None,
+                "config_snapshot": config_snapshot,
                 "progress": {
                     "completed": 0,
                     "skipped": 0,
@@ -216,6 +238,12 @@ class WorkerManager:
                     ),
                     "progress": dict(w["progress"]),
                     "started_at": w["started_at"],
+                    # Snapshot is what the dashboard renders in the per-worker
+                    # config sub-line. Unconditionally emitted so the dashboard
+                    # can detect drift vs current live config and show the
+                    # save-time toast (Q5). None for legacy/CLI workers; the
+                    # dashboard renders no sub-line in that case.
+                    "config_snapshot": w.get("config_snapshot"),
                 }
                 for w in self._workers.values()
             ]
@@ -255,6 +283,30 @@ class WorkerManager:
                     "restored": worker.get("restored", False),
                 },
             )
+
+            # Persist worker.started to events.jsonl with the frozen config
+            # snapshot. This is the durable record that lets a future analysis
+            # of runs.jsonl join on worker_id to see the exact config under
+            # which each function was processed. Snapshot is None on workers
+            # that started before the snapshot field existed (legacy/CLI),
+            # which is fine — the field is just absent in those records.
+            try:
+                from event_log import log_event as _log_event
+                _log_event(
+                    "worker.started",
+                    worker_id=worker_id,
+                    provider=worker["provider"],
+                    count=worker["count"],
+                    continuous=bool(worker.get("continuous", False)),
+                    binary=worker.get("binary"),
+                    model=worker.get("model"),
+                    restored=bool(worker.get("restored", False)),
+                    config_snapshot=worker.get("config_snapshot"),
+                )
+            except Exception:
+                # Event-log failures must not abort worker startup; the worker
+                # is still functional, just less observable.
+                pass
 
             state = load_state()
             original_binary = state.get("active_binary")
@@ -394,6 +446,7 @@ class WorkerManager:
                     model=worker["model"],
                     provider=worker["provider"],
                     stop_flag=worker["stop_flag"],
+                    config_snapshot=worker.get("config_snapshot"),
                 )
 
                 # Optional immediate retry: only use an explicitly configured
@@ -443,6 +496,7 @@ class WorkerManager:
                                 model=None,  # auto-select for the escalation provider
                                 provider=escalate_to,
                                 stop_flag=worker["stop_flag"],
+                                config_snapshot=worker.get("config_snapshot"),
                             )
                             # Use the escalation result for stats
                             if escalate_result in ("completed", "partial"):

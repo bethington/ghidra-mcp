@@ -1833,6 +1833,68 @@ def _normalize_provider_models(raw_models):
     return normalized
 
 
+def build_worker_config_snapshot(queue, primary_provider):
+    """Build a frozen config snapshot for a worker about to start.
+
+    Captures every queue.config field that should remain constant for the
+    worker's lifetime. The snapshot is opaque to the worker thread — it just
+    holds it and passes it to process_function on every iteration. The
+    snapshot's shape is stable across the codebase: tests, the dashboard, the
+    event-log persister, and process_function all agree on what fields exist.
+
+    Includes settings for every provider this worker can actually invoke:
+        * primary_provider (passed in)
+        * audit_provider (if config.audit_provider is set and != primary)
+        * complexity_handoff_provider (if set and != primary)
+
+    Each provider entry holds its `max_turns` and the FULL/FIX/VERIFY model
+    slice from `provider_models`. Providers this worker won't invoke are not
+    snapshotted — keeps the snapshot compact and the run records clean.
+
+    Returns a plain dict suitable for json.dumps. No references back into
+    the queue dict.
+    """
+    cfg = (queue or {}).get("config") or {}
+
+    # Top-level worker policy (Tier 1 + Tier 2 from the design discussion)
+    snapshot = {
+        "good_enough_score": int(cfg.get("good_enough_score", 80)),
+        "audit_provider": cfg.get("audit_provider"),
+        "audit_min_delta": int(cfg.get("audit_min_delta", 5)),
+        "complexity_handoff_provider": cfg.get("complexity_handoff_provider"),
+        "complexity_handoff_max": int(cfg.get("complexity_handoff_max", 0) or 0),
+    }
+
+    # Per-provider slices — only the providers this worker can invoke. The
+    # primary's slice is always present; audit and escalation are added only
+    # when configured (and only if they differ from primary, since the same
+    # provider's slice would just duplicate).
+    pmt = cfg.get("provider_max_turns") or {}
+    pm = cfg.get("provider_models") or {}
+    providers_seen: set[str] = set()
+    providers: dict[str, dict] = {}
+
+    def _add_provider(name):
+        if not name or name in providers_seen:
+            return
+        if name not in SUPPORTED_PROVIDERS:
+            return
+        providers_seen.add(name)
+        # Default max_turns is 25 (matches DEFAULT_QUEUE_CONFIG); coerce to int
+        # so JSON serialization doesn't surface accidental floats.
+        providers[name] = {
+            "max_turns": int(pmt.get(name, 25)),
+            "models": dict(pm.get(name) or {}),
+        }
+
+    _add_provider(primary_provider)
+    _add_provider(snapshot["audit_provider"])
+    _add_provider(snapshot["complexity_handoff_provider"])
+    snapshot["providers"] = providers
+    snapshot["primary_provider"] = primary_provider
+    return snapshot
+
+
 def load_priority_queue():
     """Load the priority queue file. Always returns a dict with pinned/config.
 
@@ -2398,6 +2460,37 @@ def _mode_label(mode):
     }.get(mode, mode)
 
 
+def _format_mode_banner(mode, selected_model, effective_provider, score, config_snapshot, prompt):
+    """Build the per-function mode banner string.
+
+    Steady-state output: `FULL/pass1 (types+structs) | score: 13%`. Mode
+    label and score only — the model is in the worker's header sub-line and
+    the prompt char count is debug-only noise that hides important signal.
+
+    Deviation output: `HANDOFF:minimax→gemini | gemini-2.5-pro | score: 13%`.
+    The model token appears only when `selected_model` differs from what the
+    worker's snapshot says it should be using for this provider/mode. That
+    way "the model token is present" is itself the visual signal that this
+    function ran with something other than the worker's default — a
+    deviation worth your attention.
+
+    When no snapshot is present (CLI invocation, legacy callers), we can't
+    detect deviation, so we always show the model — matches pre-snapshot
+    behavior so existing log scrapers still see what they expect.
+    """
+    parts = [_mode_label(mode)]
+    worker_default_model = None
+    if config_snapshot is not None:
+        snap_entry = (config_snapshot.get("providers") or {}).get(effective_provider) or {}
+        snap_models = snap_entry.get("models") or {}
+        lookup_mode = "FULL" if str(mode).startswith("FULL:") else mode
+        worker_default_model = snap_models.get(lookup_mode)
+    if worker_default_model is None or selected_model != worker_default_model:
+        parts.append(str(selected_model))
+    parts.append(f"score: {score}%")
+    return "  " + " | ".join(parts)
+
+
 def _emit_handoff(func_key, from_provider, to_provider, reason, count, score=None):
     """Emit a function_mode event so the dashboard pane shows the handoff."""
     bus_emit(
@@ -2818,17 +2911,36 @@ def determine_mode(score, deductions=None, completeness=None):
     return "FULL"
 
 
-def select_model(mode, user_model=None, provider=None):
-    """Auto-select model based on mode and provider, with user override."""
+def select_model(mode, user_model=None, provider=None, config_snapshot=None):
+    """Auto-select model based on mode and provider, with user override.
+
+    `config_snapshot` is the worker's frozen snapshot. When present, the
+    snapshot's per-provider models slice is consulted first — that means
+    audit / handoff / recovery passes inside a worker all use the same
+    model that was chosen at worker-start, even if the dashboard model
+    dropdown moves mid-run.
+    """
     if user_model:
         return user_model
     # FULL:recovery, FULL:comments, etc. are sub-modes — use FULL for dashboard lookup
     lookup_mode = "FULL" if str(mode).startswith("FULL:") else mode
-    configured_model = get_configured_model(provider or AI_PROVIDER, lookup_mode)
+    target_provider = provider or AI_PROVIDER
+
+    # Snapshot-first lookup. Only a slice covering the requested provider
+    # is captured; if the snapshot doesn't have it (e.g. an unconfigured
+    # handoff fired), fall through to the live config like normal.
+    if config_snapshot is not None:
+        snap_providers = config_snapshot.get("providers") or {}
+        snap_entry = snap_providers.get(target_provider) or {}
+        snap_models = snap_entry.get("models") or {}
+        if snap_models.get(lookup_mode):
+            return snap_models[lookup_mode]
+
+    configured_model = get_configured_model(target_provider, lookup_mode)
     if configured_model:
         return configured_model
     raise ValueError(
-        f"No model configured for provider '{provider or AI_PROVIDER}' mode '{str(mode).upper()}'. Set it in the web dashboard."
+        f"No model configured for provider '{target_provider}' mode '{str(mode).upper()}'. Set it in the web dashboard."
     )
 
 
@@ -5620,8 +5732,20 @@ def process_function(
     dry_run=False,
     provider=None,
     stop_flag=None,
+    config_snapshot=None,
 ):
-    """Process a single function: fetch data, build prompt, invoke AI provider."""
+    """Process a single function: fetch data, build prompt, invoke AI provider.
+
+    `config_snapshot` is an optional frozen view of queue.config captured at
+    worker start (see build_worker_config_snapshot). When present, fields that
+    affect this worker's policy — max_turns, audit_provider, audit_min_delta,
+    complexity_handoff_provider, complexity_handoff_max, good_enough_score,
+    and per-provider model/turn slices — are read from the snapshot instead of
+    a live load_priority_queue() call. This makes worker behavior consistent
+    across the worker's lifetime even if someone edits the config dropdown
+    mid-run. CLI invocations and legacy callers that don't have a worker
+    context pass None and fall through to live reads (pre-snapshot behavior).
+    """
     if stop_flag and stop_flag.is_set():
         return "stopped"
 
@@ -5889,9 +6013,16 @@ def process_function(
         # score. State.json scores can drift stale; without this gate, a function
         # the selector picked at (cached) 76% but is live 93% still burns tokens.
         # Pinned functions bypass the gate (user explicitly queued them).
+        # `good_enough_score` is read from the worker's frozen snapshot when one
+        # was supplied, so two workers started at different times under
+        # different thresholds don't get their behavior altered mid-run by
+        # someone moving the slider in the dashboard.
         queue = load_priority_queue()
         cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
-        good_enough = cfg.get("good_enough_score", 80)
+        if config_snapshot is not None:
+            good_enough = int(config_snapshot.get("good_enough_score", 80))
+        else:
+            good_enough = cfg.get("good_enough_score", 80)
         is_pinned = func_key in set(queue.get("pinned", []))
 
         # Pinned functions used to bypass this gate so the user could force
@@ -5958,7 +6089,7 @@ def process_function(
 
     # Select model
     try:
-        selected_model = select_model(mode, model, provider=provider)
+        selected_model = select_model(mode, model, provider=provider, config_snapshot=config_snapshot)
     except ValueError as e:
         reason = str(e)
         print(f"  CONFIG ERROR: {reason}", flush=True)
@@ -6095,13 +6226,13 @@ def process_function(
                 if can_handoff:
                     new_count = _bump_handoff_counter()
                     handoff_reason = f"{detail} — handoff #{new_count}"
-                    score_label = (
-                        f"{live_score}%" if live_score is not None else "unscored"
-                    )
-                    print(
-                        f"  HANDOFF (too complex for {effective_provider}, score: {score_label}): "
-                        f"{effective_provider} -> {handoff_provider} | {detail}"
-                    )
+                    # The mode banner that prints next includes the new
+                    # provider's model when it deviates from the worker's
+                    # snapshot, which IS the handoff signal. The standalone
+                    # banner here was redundant with that — the deviation
+                    # in the mode banner tells you handoff fired and where
+                    # to. We still emit the function_mode bus event so the
+                    # dashboard pane shows HANDOFF:from->to.
                     _emit_handoff(
                         func_key,
                         effective_provider,
@@ -6127,7 +6258,8 @@ def process_function(
                     lookup_mode = "FULL" if str(mode).startswith("FULL:") else mode
                     try:
                         selected_model = select_model(
-                            lookup_mode, model, provider=provider
+                            lookup_mode, model, provider=provider,
+                            config_snapshot=config_snapshot,
                         )
                     except ValueError as e:
                         reason = str(e)
@@ -6172,9 +6304,7 @@ def process_function(
         {"key": func_key, "mode": mode, "model": selected_model, "score": live_score},
     )
     _debug_update_context(provider=effective_provider)
-    print(
-        f"  {_mode_label(mode)} | {selected_model} | {len(prompt):,} chars | score: {live_score}%"
-    )
+    print(_format_mode_banner(mode, selected_model, effective_provider, live_score, config_snapshot, prompt))
 
     if dry_run:
         print(
@@ -6223,9 +6353,23 @@ def process_function(
             return _finish("quit", score_after=new_score)
         return _finish("manual_prompt_generated", score_after=new_score)
 
-    # Per-provider max_turns from dashboard config (overrides hardcoded default)
-    _pmt = cfg.get("provider_max_turns") or {}
-    worker_max_turns = int(_pmt.get(effective_provider, 25))
+    # Per-provider max_turns. Snapshot wins when present (frozen for the
+    # worker's life), falling through to live config for legacy/CLI invocations
+    # that don't have a worker context.
+    if config_snapshot is not None:
+        snap_providers = config_snapshot.get("providers") or {}
+        snap_entry = snap_providers.get(effective_provider) or {}
+        if snap_entry:
+            worker_max_turns = int(snap_entry.get("max_turns", 25))
+        else:
+            # Snapshot exists but didn't capture this provider — happens when
+            # an unconfigured-at-start escalation/handoff target gets invoked.
+            # Fall through to live config rather than guessing wrong.
+            _pmt = cfg.get("provider_max_turns") or {}
+            worker_max_turns = int(_pmt.get(effective_provider, 25))
+    else:
+        _pmt = cfg.get("provider_max_turns") or {}
+        worker_max_turns = int(_pmt.get(effective_provider, 25))
 
     # Auto mode: invoke AI (provider based on AI_PROVIDER)
     print()
@@ -6269,9 +6413,7 @@ def process_function(
         if effective_provider != "gemini":
             prompt2 = _inject_tool_block(prompt2)
         mode = "FULL:comments"
-        print(
-            f"  {_mode_label(mode)} | {selected_model} | {len(prompt2):,} chars | score: {mid_score}%"
-        )
+        print(_format_mode_banner(mode, selected_model, effective_provider, mid_score, config_snapshot, prompt2))
         print()
         output2, meta2 = invoke_claude(
             prompt2,
@@ -6559,13 +6701,20 @@ def process_function(
     audit_outcome = None  # "skipped_good_enough", "skipped_delta", "ran", or None
     audit_tool_calls = None
     audit_tool_calls_known = None
-    audit_cfg = (
-        cfg
-        if "audit_provider" in cfg
-        else ((load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG))
-    )
-    audit_provider = audit_cfg.get("audit_provider")
-    audit_min_delta = audit_cfg.get("audit_min_delta", 5)
+    if config_snapshot is not None:
+        # Frozen snapshot: audit policy was decided at worker start. Even if
+        # the dashboard dropdown moves mid-run, this worker keeps its original
+        # audit configuration for every function it processes.
+        audit_provider = config_snapshot.get("audit_provider")
+        audit_min_delta = int(config_snapshot.get("audit_min_delta", 5))
+    else:
+        audit_cfg = (
+            cfg
+            if "audit_provider" in cfg
+            else ((load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG))
+        )
+        audit_provider = audit_cfg.get("audit_provider")
+        audit_min_delta = audit_cfg.get("audit_min_delta", 5)
 
     if (
         audit_provider
@@ -6575,7 +6724,12 @@ def process_function(
         and mode not in ("VERIFY", "FULL:recovery")
     ):
         worker_diff = new_score - live_score
-        good_enough = audit_cfg.get("good_enough_score", 80)
+        # Use the snapshot's good_enough when present so an audit decision
+        # is consistent with the gate decision earlier in this same function.
+        if config_snapshot is not None:
+            good_enough = int(config_snapshot.get("good_enough_score", 80))
+        else:
+            good_enough = audit_cfg.get("good_enough_score", 80)
 
         if new_score >= good_enough:
             audit_outcome = "skipped_good_enough"
@@ -6616,7 +6770,9 @@ def process_function(
 
             audit_score_before = new_score
             try:
-                audit_model = select_model("FIX", provider=audit_provider)
+                audit_model = select_model(
+                    "FIX", provider=audit_provider, config_snapshot=config_snapshot
+                )
             except ValueError as e:
                 audit_outcome = "config_error"
                 print(f"  [audit] skipped — {e}")
