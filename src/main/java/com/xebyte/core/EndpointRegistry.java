@@ -794,8 +794,10 @@ public class EndpointRegistry {
             params(qInt("offset", 0), qInt("limit", 100), pProg()),
             (q, b) -> dataTypeService.listDataTypeCategories(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        post("/create_struct", "Create a structure data type",
-            params(bStr("name"), bJson("fields"), pProg()),
+        post("/create_struct", "Create a structure data type. Body fields must be a JSON array of objects with name and type, plus optional decimal offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name.",
+            params(bStr("name", "New structure type name, for example UnitAny or SkillTableEntry"),
+                bJson("fields", "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off."),
+                pProg()),
             (q, b) -> dataTypeService.createStruct(bodyStr(b, "name"), bodyFieldsJson(b, "fields"), str(q, "program")));
 
         post("/create_enum", "Create an enum data type",

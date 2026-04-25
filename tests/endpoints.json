@@ -560,7 +560,7 @@
         "fields",
         "program"
       ],
-      "description": "Create structure"
+      "description": "Create structure. Body fields must be a JSON array of objects with name and type, plus optional decimal offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name."
     },
     {
       "path": "/create_typedef",

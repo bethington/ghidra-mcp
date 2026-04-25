@@ -127,6 +127,14 @@ enforcement at the rename layer.
 
 ### Fixed
 
+- **`list_functions_enhanced` thunk parity** — `isThunk` now uses the same
+  `AnalysisService.classifyFunction` path as
+  `analyze_function_completeness`, so single-jump thunk heuristics agree
+  across both tools. Thanks to PR #165 by c8rri3r.
+- **`create_struct` tool guidance** — MCP schema/catalog descriptions now
+  spell out the expected `fields` JSON array format, optional decimal
+  `offset`, accepted alternate field keys, and valid type sources so agents
+  stop trying C-like struct strings or CSV bodies.
 - **Gemini quota errors silently swallowed** — `_invoke_gemini`'s retry-
   exhaust path now propagates `provider_error` / `provider_error_type`
   into the run record so the dashboard and `runs.jsonl` show the actual
