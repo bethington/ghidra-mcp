@@ -1829,6 +1829,11 @@ DEFAULT_QUEUE_CONFIG = {
     # workers — only runs when zero workers are active. See inventory_scorer.py
     # and the Inventory panel on the dashboard.
     "inventory_enabled": False,
+    # Background global-variable scorer (v5.7.0, opt-in). Walks every binary
+    # in the project tree and audits every global symbol for the four-axis
+    # documentation bar (name + type + bytes + plate). Same idle-time pattern
+    # as the function inventory scorer; persists to global_inventory.json.
+    "global_inventory_enabled": False,
 }
 
 PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"

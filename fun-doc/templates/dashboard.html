@@ -547,6 +547,34 @@
                     </div>
                 </div>
                 <div class="panel">
+                    <div class="panel-header" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <h2 style="margin: 0;">Global Inventory (v5.7.0)</h2>
+                        <span id="globalInventoryHeaderState" style="font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono);" title="Background global-variable auditor — enabled, paused, or disabled">disabled</span>
+                        <button class="btn" id="btnGlobalInventoryToggle" onclick="toggleGlobalScorer()" style="margin-left: auto; font-size: 0.65rem;">Enable</button>
+                    </div>
+                    <div class="panel-content" id="globalInventoryPanel" style="max-height: 300px; overflow-y: auto;">
+                        <div id="globalInventoryTotalsLine" style="padding: 0.25rem 0.5rem; font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); border-bottom: 1px solid var(--border-dark);">Loading…</div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Binary</th>
+                                    <th>Coverage</th>
+                                    <th>Documented</th>
+                                    <th>Total</th>
+                                    <th>Issues</th>
+                                    <th>%</th>
+                                    <th>Status</th>
+                                    <th>Last Scan</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="globalInventoryTableBody">
+                                <tr><td colspan="9" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">No global-inventory data yet — enable the scorer.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="panel">
                     <div class="panel-header"><h2>Cross-Binary Progress</h2></div>
                     <div class="panel-content" id="perBinaryPanel" style="max-height: 300px; overflow-y: auto;">
                         <table class="data-table"><thead><tr><th>Binary</th><th>Progress</th><th>Done</th><th>Total</th><th>Avg</th><th>Fixable</th><th></th></tr></thead><tbody>
@@ -903,6 +931,105 @@
         socket.on('inventory_status', () => {
             if (_inventoryRefreshTimer) clearTimeout(_inventoryRefreshTimer);
             _inventoryRefreshTimer = setTimeout(refreshInventory, 300);
+        });
+
+        // ---- Global Inventory (v5.7.0) ----
+        let _globalInventoryRefreshTimer = null;
+        let _globalInventoryEnabled = false;
+
+        function refreshGlobalInventory() {
+            fetch('/api/global_inventory/status').then(r => r.json()).then(data => {
+                if (!data || data.error) return;
+                _renderGlobalInventoryHeader(data.scorer || {});
+                _renderGlobalInventoryTable(data.binaries || [], data.totals || {}, (data.scorer || {}).blacklisted || []);
+            }).catch(() => {});
+        }
+
+        function _renderGlobalInventoryHeader(scorer) {
+            const el = document.getElementById('globalInventoryHeaderState');
+            const btn = document.getElementById('btnGlobalInventoryToggle');
+            if (!el || !btn) return;
+            _globalInventoryEnabled = !!scorer.enabled;
+            if (!scorer.enabled) {
+                el.textContent = 'disabled';
+                el.style.color = 'var(--text-muted)';
+                btn.textContent = 'Enable';
+            } else if (scorer.paused_reason) {
+                el.textContent = `paused (${scorer.paused_reason})`;
+                el.style.color = 'var(--text-muted)';
+                btn.textContent = 'Disable';
+            } else if (scorer.current_target) {
+                el.textContent = 'running';
+                el.style.color = 'var(--accent-gold)';
+                btn.textContent = 'Disable';
+            } else {
+                el.textContent = 'enabled';
+                el.style.color = 'var(--text-secondary)';
+                btn.textContent = 'Disable';
+            }
+        }
+
+        function _renderGlobalInventoryTable(binaries, totals, blacklist) {
+            const body = document.getElementById('globalInventoryTableBody');
+            const totalsLine = document.getElementById('globalInventoryTotalsLine');
+            if (!body) return;
+            if (!binaries.length) {
+                body.innerHTML = '<tr><td colspan="9" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">No global-inventory data yet — enable the scorer.</td></tr>';
+                if (totalsLine) totalsLine.textContent = '';
+                return;
+            }
+            const blackset = new Set(blacklist || []);
+            const rows = binaries.map(r => {
+                const pct = r.percent || 0;
+                const barColor = pct >= 99 ? 'var(--color-set)' : pct >= 50 ? 'var(--accent-gold)' : 'var(--color-crafted)';
+                const statusColor = r.status === 'complete' ? 'var(--color-set)'
+                    : r.status === 'blacklisted' ? 'var(--accent-red-light)'
+                    : r.status === 'in_progress' ? 'var(--accent-gold)'
+                    : 'var(--text-muted)';
+                const last = r.last_scan ? r.last_scan.replace('T', ' ').slice(0, 19) : '—';
+                const isBlack = blackset.has(r.path);
+                const actionBtn = isBlack
+                    ? `<button class="btn" onclick="clearGlobalInventoryBlacklist('${escapeHtml(r.path)}')" title="Clear session blacklist for this binary">Retry</button>`
+                    : '';
+                return `<tr>
+                    <td style="cursor: pointer; color: var(--accent-gold);" title="${escapeHtml(r.path)}">${escapeHtml(r.name)}</td>
+                    <td style="width: 100px;"><div style="width: 100%; height: 8px; background: var(--bg-darkest); border-radius: 2px; overflow: hidden;"><div style="height: 100%; width: ${pct}%; background: ${barColor}; border-radius: 2px;"></div></div></td>
+                    <td class="mono">${(r.fully_documented || 0).toLocaleString()}</td>
+                    <td class="mono">${(r.total_documentable || 0).toLocaleString()}</td>
+                    <td class="mono" style="color: ${(r.with_issues || 0) > 0 ? 'var(--accent-red-light)' : 'var(--text-muted)'};">${(r.with_issues || 0).toLocaleString()}</td>
+                    <td class="mono">${pct}%</td>
+                    <td class="mono" style="color: ${statusColor};">${escapeHtml(r.status || '')}</td>
+                    <td class="mono" style="color: var(--text-muted); font-size: 0.6rem;">${escapeHtml(last)}</td>
+                    <td>${actionBtn}</td>
+                </tr>`;
+            }).join('');
+            body.innerHTML = rows;
+            if (totalsLine) {
+                const overall = totals.total_documentable > 0 ? Math.round(1000 * totals.fully_documented / totals.total_documentable) / 10 : 0;
+                totalsLine.textContent = `${(totals.fully_documented || 0).toLocaleString()} / ${(totals.total_documentable || 0).toLocaleString()} fully documented (${overall}%) • ${(totals.with_issues || 0).toLocaleString()} globals with issues • ${totals.binaries_complete || 0} / ${binaries.length} binaries complete`;
+            }
+        }
+
+        function toggleGlobalScorer() {
+            const next = !_globalInventoryEnabled;
+            fetch('/api/global_inventory/toggle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled: next}),
+            }).then(r => r.json()).then(() => refreshGlobalInventory());
+        }
+
+        function clearGlobalInventoryBlacklist(path) {
+            fetch('/api/global_inventory/clear_blacklist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path: path}),
+            }).then(r => r.json()).then(() => refreshGlobalInventory());
+        }
+
+        socket.on('global_inventory_status', () => {
+            if (_globalInventoryRefreshTimer) clearTimeout(_globalInventoryRefreshTimer);
+            _globalInventoryRefreshTimer = setTimeout(refreshGlobalInventory, 300);
         });
 
         // ---- Quota-pause wake countdown ----
@@ -2145,6 +2272,8 @@
         // inventory_status WebSocket event.
         refreshInventory();
         setInterval(refreshInventory, 30000);
+        refreshGlobalInventory();
+        setInterval(refreshGlobalInventory, 30000);
     </script>
 </body>
 </html>

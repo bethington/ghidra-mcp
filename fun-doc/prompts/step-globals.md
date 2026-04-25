@@ -27,23 +27,33 @@ A global is "properly documented" when **all four** of these hold:
 
 ## Canonical workflow
 
-**Always start with `audit_global` to see the state**, never with a write. The audit response shows exactly what's missing:
+**Always start with `audit_globals_in_function` first.** It walks the function's instructions, collects every unique data-reference target, audits each one, and returns a single result with both per-global details and a summary histogram. One call instead of N — much cheaper than iterating `audit_global` per xref:
 
 ```
-audit_global(address="0x6fdf64d8", program="...")
+audit_globals_in_function(address="0x6fcab220", program="...")
 → {
-    "address": "6fdf64d8",
-    "name": "DAT_6fdf64d8",
-    "type": "undefined4",
-    "length": 4,
-    "plate_comment": "",
-    "xref_count": 17,
-    "issues": ["generic_name", "untyped", "missing_plate_comment"],
-    "fully_documented": false
+    "function": {"address": "6fcab220", "name": "SendStateUpdateCommand"},
+    "globals": [
+      {"address": "6fdf64d8", "name": "DAT_6fdf64d8", "type": "undefined4",
+       "issues": ["generic_name", "untyped", "missing_plate_comment"], ...},
+      {"address": "6fdf65a0", "name": "g_pUnitList", "type": "UnitAny *",
+       "issues": [], "fully_documented": true, ...},
+      ...
+    ],
+    "summary": {
+      "total": 7,
+      "fully_documented": 3,
+      "with_issues": 4,
+      "issue_histogram": {"untyped": 2, "missing_plate_comment": 4, "generic_name": 2}
+    }
   }
 ```
 
-Then **fix everything in one `set_global` call**:
+If the function has no global xrefs (`summary.total == 0`), skip the rest of this step — there's nothing to fix. Otherwise, work through the `globals` array and call `set_global` on each one with `issues`.
+
+For deeper inspection of a single global mid-fix, use `audit_global(address)` — same per-global shape as the entries inside `audit_globals_in_function.globals`.
+
+Then **fix everything in one `set_global` call** per global:
 
 ```
 set_global(

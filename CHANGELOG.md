@@ -7,84 +7,118 @@ Complete version history for the Ghidra MCP Server project.
 ## v5.7.0 - 2026-04-25 (global variable documentation enforcement)
 
 Release focused on bringing global variables up to the same documentation
-bar as functions: enforce a four-axis "properly documented" standard
-(name + type + bytes formatted + plate comment) at the rename layer, and
-replace the fragile 4-tool fix chain with a single atomic write.
+bar as functions: a four-axis "properly documented" standard
+(name + type + bytes formatted + plate comment) enforced at three layers
+(prompt + scorer + validator), three new MCP endpoints replacing the
+fragile 4-tool fix chain with a single atomic write, and a binary-wide
+bulk auditor mirroring the function inventory scorer pattern.
 
 ### Added
 
-- **`audit_global` MCP endpoint** — read-only inspector. Returns address,
-  name, type, length, plate comment, xref count, and a structured `issues`
-  list (`generic_name`, `untyped`, `unformatted_bytes_length_mismatch`,
+#### MCP endpoints
+
+- **`audit_global`** — read-only inspector. Returns address, name, type,
+  length, plate comment, xref count, and a structured `issues` list
+  (`generic_name`, `untyped`, `unformatted_bytes_length_mismatch`,
   `unformatted_bytes_should_be_string`, `missing_plate_comment`,
-  `plate_comment_too_short`). Use it before `set_global` so the model
-  knows exactly what to fix.
-- **`set_global` MCP endpoint** — atomic single-transaction write that
-  applies type, optional `array_length`, name, and plate comment as a
-  unit. Pre-flight validation rejects on naming/type/format failures
-  with a structured error (`status: "rejected"`, `error`, `issue`,
-  `suggestion`). No partial writes — either everything applies or
-  nothing does. Replaces the four-tool chain
-  (`apply_data_type` → `rename_data` → `batch_set_comments` → `create_label`)
-  that was prone to partial-application bugs.
+  `plate_comment_too_short`).
+- **`audit_globals_in_function`** — per-function bulk auditor. Walks
+  the function's instructions, collects unique data-reference targets,
+  audits each via the shared `auditGlobalAt` helper, and returns
+  `{function, globals: [...], summary: {total, fully_documented,
+  with_issues, issue_histogram}}`. The killer per-function pre-flight
+  tool — one MCP call instead of N.
+- **`set_global`** — atomic single-transaction write that applies type,
+  optional `array_length`, name, and plate comment as a unit. Pre-flight
+  validation rejects on naming/type/format failures with a structured
+  error (`status: "rejected"`, `error`, `issue`, `suggestion`). No
+  partial writes — either everything applies or nothing does. Replaces
+  the four-tool chain (`apply_data_type` → `rename_data` →
+  `batch_set_comments` → `create_label`).
+
+#### Per-function scorer deductions
+
+Four new categories surface bad globals in the work queue at scoring
+time, capped at -20 aggregate per function:
+
+- `untyped_global` -8 — referenced global has `undefined*` type.
+- `unformatted_global_bytes` -5 — wrong byte layout (length mismatch
+  or string-as-char).
+- `generic_global_name` -5 — auto-generated remnant or fails
+  `checkGlobalNameQuality`.
+- `missing_global_plate_comment` -3 — empty or `<4-word` first line.
+
+#### Binary-wide bulk scorer
+
+- **`fun-doc/global_scorer.py`** — opt-in idle-time daemon that walks
+  every binary in the Ghidra project tree, audits every global symbol,
+  and tallies per-binary `total_documentable` / `fully_documented`
+  counts. Mirrors `inventory_scorer.py`'s architecture: single-thread,
+  cooperative pause when doc workers run, session-only blacklist after
+  3 strikes, persisted to `fun-doc/global_inventory.json`. Most-globals-
+  with-issues-first ordering, reverse-alpha tiebreak.
+- **Dashboard "Global Inventory" panel** — per-binary table with coverage
+  bar, fully_documented / total / with_issues counts, percent, status,
+  last scan, and a Retry button on blacklisted rows. Live updates via
+  `global_inventory_status` WebSocket event.
+- **New endpoints** — `GET /api/global_inventory/status`,
+  `POST /api/global_inventory/toggle`,
+  `POST /api/global_inventory/clear_blacklist`.
+- **`global_inventory_enabled`** added to `DEFAULT_QUEUE_CONFIG` (default
+  False; opt-in via the dashboard toggle).
+
+#### Naming + plate-comment helpers
+
 - **`NamingConventions.checkGlobalNameQuality(name, type)`** — structured
-  global-name validator backing `rename_data`, `rename_global_variable`,
-  and `set_global`. Enforces:
-  - `g_` prefix required.
-  - Hungarian prefix after `g_` matching the variable's type (reuses
-    existing `validateHungarianPrefix`).
-  - ≥2-char descriptor.
-  - Reject auto-generated remnants: `g_DAT_*`, `g_PTR_*`, `g_FUN_*`,
-    `g_LAB_*`, `g_SUB_*`, `g_<prefix>_<hex>`.
-  - Conservative placeholders (`g_dwField1D0`, `g_pUnk20`) are
-    explicitly accepted per CLAUDE.md's underclaim convention.
+  global-name validator. Enforces `g_` prefix + Hungarian matching type +
+  ≥2-char descriptor + reject auto-generated remnants (`g_DAT_*`,
+  `g_PTR_*`, `g_FUN_*`, `g_LAB_*`, `g_SUB_*`, `g_<prefix>_<hex>`).
+  Conservative placeholders (`g_dwField1D0`, `g_pUnk20`) are accepted
+  per CLAUDE.md's underclaim convention.
 - **`NamingConventions.isAutoGeneratedGlobalName`** — recognizer for
-  Ghidra's auto-generated global symbols (`DAT_xxx`, `PTR_DAT_xxx`,
-  `LAB_xxx`, `UNDEFINED_xxx`, `s_xxx`, etc.). Used to exempt these
-  from the quality check (they get the existing `unrenamed_globals`
-  deduction at scoring time instead).
-- **`prompts/step-globals.md`** — new step module loaded by both the
-  full and recovery prompt builders. Documents the four-axis bar, the
-  Hungarian-vs-type table, the `audit_global` → `set_global` workflow,
-  and how to handle structured rejections.
+  Ghidra's auto-generated global symbols.
+- **`NamingConventions.checkGlobalPlateComment`** — shared helper used
+  by both `audit_global` and `set_global` so they apply the same
+  ≥4-word first-line rule.
+- **`DataTypeService.auditGlobalAt`** — public static helper; the
+  shared per-global audit routine called by `audit_global`,
+  `audit_globals_in_function`, and the new scorer deductions.
+
+#### Prompt
+
+- **`prompts/step-globals.md`** — new step module loaded by FULL and
+  recovery prompt builders. Documents the four-axis bar, the
+  Hungarian-vs-type table, the canonical `audit_globals_in_function` →
+  `set_global` workflow, and how to handle structured rejections.
 
 ### Changed
 
-- **`rename_data` validator gate** — hard-rejects names failing
-  `checkGlobalNameQuality` against the data's existing type. Returns
+- **`rename_data` / `rename_global_variable` validator gates** — hard-
+  reject names failing `checkGlobalNameQuality` with structured errors:
   `{"status": "rejected", "error": "name_quality", "issue": ...,
   "rejected_name": ..., "current_type": ..., "message": ...,
-  "suggestion": ...}` without modifying the program. The model retries
-  with a corrected name.
-- **`rename_global_variable` validator gate** — same structured
-  rejection pattern. Replaces the prior soft-warning path so the model
-  can't ignore feedback.
+  "suggestion": ...}`. Function unchanged on rejection. The model
+  retries informed by the error rather than ignoring soft warnings.
 
 ### Tests
 
-- 11 new offline JUnit tests for `checkGlobalNameQuality` covering
-  every rejection code (`missing_g_prefix`, `auto_generated_remnant`,
-  `missing_hungarian_prefix`, `short_descriptor`,
-  `prefix_type_mismatch`), the placeholder-acceptance contract,
-  null-type fallback, auto-gen exemption, and null/empty inputs.
-  47 total Java offline tests passing.
+- **17 new offline JUnit tests** for `NamingConventions.checkGlobalNameQuality`
+  + `checkGlobalPlateComment` (53 total — was 47, +6 plate-comment).
+- **19 new offline Python tests** for `global_scorer.py` (ordering,
+  blacklist, pause-gate, persistence shape, threaded-class behavior).
+- **18 new live integration tests** in `tests/integration/test_global_endpoints.py`
+  exercising every rejection code, the no-partial-application contract
+  on `set_global`, the per-function bulk auditor's response shape, and
+  endpoint-catalog parity. Auto-skip with a clear "deploy first"
+  message when the live plugin doesn't have the new endpoints.
+- **`docs/releases/v5.7.0-VERIFY.md`** — manual verification checklist
+  walking the rejection table by hand for spot-checks.
 
-### Deferred to v5.8
-
-- `audit_globals_in_function` (per-function bulk auditor; the model can
-  iterate `audit_global` per xref in the meantime).
-- New per-function scorer deductions for global quality
-  (`untyped_global` -8, `unformatted_global_bytes` -5,
-  `generic_global_name` -5, `missing_global_plate_comment` -3). The
-  existing `unrenamed_globals` deduction continues to fire.
-- `fun-doc/global_scorer.py` — binary-wide bulk daemon mirroring
-  `inventory_scorer.py`. Mechanical port of ~400 lines; warrants its
-  own PR with full test coverage.
-- New dashboard panel for global inventory.
-
-These deferrals are a scope decision, not a design decision — the
-v5.7.0 work establishes the validator + canonical write tool that the
-deferred scorer will use as its fix-it primitive.
+The fragile 4-tool fix chain still works for non-global data items;
+globals are encouraged to use `set_global` exclusively via the prompt.
+The validator + bulk scorer + per-function deductions provide three
+independent ways for sloppy globals to surface in the worker's
+attention.
 
 ---
 

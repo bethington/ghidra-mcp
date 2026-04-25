@@ -1561,6 +1561,80 @@ def create_app(state_file, event_bus=None):
     except Exception as _exc:
         print(f"  Inventory scorer auto-start skipped: {_exc}")
 
+    # --- Background global-variable scorer (v5.7.0) ---
+    from global_scorer import (
+        GlobalScorer,
+        load_inventory as load_global_inventory,
+    )
+
+    def _emit_global_inventory_status(status: dict):
+        try:
+            socketio.emit("global_inventory_status", status or {})
+        except Exception:
+            pass
+
+    def _list_globals_for_program(prog_path):
+        """Adapter — fetch every global symbol's address from a program
+        via the existing /list_globals MCP endpoint. Returns a list of
+        dicts with at least an 'address' key."""
+        from fun_doc import ghidra_get
+        resp = ghidra_get("/list_globals", params={"program": prog_path}, timeout=30)
+        if not resp:
+            return []
+        if isinstance(resp, str):
+            try:
+                resp = json.loads(resp)
+            except (json.JSONDecodeError, ValueError):
+                # Plain-text list_globals response — parse "<name> @ <hex>" lines.
+                import re
+                addrs = []
+                for line in resp.splitlines():
+                    m = re.search(r"@\s+([0-9a-fA-F]{4,})\b", line)
+                    if m:
+                        addrs.append({"address": f"0x{m.group(1)}"})
+                return addrs
+        items = resp.get("items") or resp.get("globals") or resp.get("results") or []
+        out = []
+        for item in items:
+            if isinstance(item, dict):
+                addr = item.get("address") or item.get("addr")
+                if addr:
+                    out.append({"address": addr if str(addr).startswith("0x") else f"0x{addr}"})
+        return out
+
+    def _audit_global_via_mcp(prog_path, addr):
+        """Adapter — fetch one global's audit via /audit_global."""
+        from fun_doc import ghidra_get
+        resp = ghidra_get("/audit_global", params={"program": prog_path, "address": addr}, timeout=10)
+        if not resp:
+            return None
+        if isinstance(resp, str):
+            try:
+                resp = json.loads(resp)
+            except (json.JSONDecodeError, ValueError):
+                return None
+        return resp
+
+    def _make_global_scorer():
+        from fun_doc import _fetch_programs
+        return GlobalScorer(
+            worker_manager=worker_mgr,
+            project_folder_getter=_project_folder,
+            state_dir=Path(__file__).parent,
+            fetch_programs=_fetch_programs,
+            list_globals_for_program=_list_globals_for_program,
+            audit_global=_audit_global_via_mcp,
+            on_status_change=_emit_global_inventory_status,
+        )
+
+    global_scorer = _make_global_scorer()
+
+    try:
+        if (load_queue().get("config") or {}).get("global_inventory_enabled"):
+            global_scorer.set_enabled(True)
+    except Exception as _exc:
+        print(f"  Global scorer auto-start skipped: {_exc}")
+
     @socketio.on("request_start_worker")
     def handle_start_worker(data):
         try:
@@ -1906,6 +1980,12 @@ def create_app(state_file, event_bus=None):
                     inventory_scorer.set_enabled(cfg["inventory_enabled"])
                 except Exception as _exc:
                     print(f"  Inventory scorer toggle failed: {_exc}")
+            if "global_inventory_enabled" in data:
+                cfg["global_inventory_enabled"] = bool(data["global_inventory_enabled"])
+                try:
+                    global_scorer.set_enabled(cfg["global_inventory_enabled"])
+                except Exception as _exc:
+                    print(f"  Global scorer toggle failed: {_exc}")
             queue["config"] = cfg
             save_queue(queue)
             socketio.emit("queue_changed", {"action": "config", "config": cfg})
@@ -2014,6 +2094,77 @@ def create_app(state_file, event_bus=None):
         data = request.json or {}
         path = data.get("path")
         inventory_scorer.clear_blacklist(path)
+        return jsonify({"ok": True})
+
+    # --- Global-variable inventory (v5.7.0) ---
+
+    @app.route("/api/global_inventory/status", methods=["GET"])
+    def global_inventory_status():
+        """Combined snapshot: global-scorer runtime state + per-binary
+        global-coverage records. The dashboard panel reads `binaries`
+        for the table; the scorer state is the live status line."""
+        try:
+            persisted = load_global_inventory(Path(__file__).parent).get("binaries", {})
+            scorer_status = global_scorer.get_status()
+            blacklist = set(scorer_status.get("blacklisted") or [])
+
+            from global_scorer import status_for as _global_status_for
+            binaries = []
+            for path, rec in persisted.items():
+                total = rec.get("total_documentable", 0) or 0
+                fully = rec.get("fully_documented", 0) or 0
+                with_issues = max(0, total - fully)
+                pct = round(100.0 * fully / total, 1) if total else 0.0
+                row_status = _global_status_for(rec)
+                if path in blacklist:
+                    row_status = "blacklisted"
+                binaries.append({
+                    "path": path,
+                    "name": rec.get("name") or Path(path).name,
+                    "total_documentable": total,
+                    "fully_documented": fully,
+                    "with_issues": with_issues,
+                    "percent": pct,
+                    "last_scan": rec.get("last_scan"),
+                    "status": row_status,
+                })
+            binaries.sort(key=lambda r: r["name"], reverse=True)
+            binaries.sort(key=lambda r: r["with_issues"], reverse=True)
+            totals = {
+                "total_documentable": sum(r["total_documentable"] for r in binaries),
+                "fully_documented": sum(r["fully_documented"] for r in binaries),
+                "with_issues": sum(r["with_issues"] for r in binaries),
+                "binaries_total": len(binaries),
+                "binaries_complete": sum(
+                    1 for r in binaries if r["status"] == "complete"
+                ),
+            }
+            return jsonify({
+                "scorer": scorer_status,
+                "totals": totals,
+                "binaries": binaries,
+            })
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+
+    @app.route("/api/global_inventory/toggle", methods=["POST"])
+    def global_inventory_toggle():
+        """Enable/disable the global scorer. Persists to priority_queue.json."""
+        data = request.json or {}
+        enabled = bool(data.get("enabled"))
+        queue = load_queue()
+        cfg = dict(queue.get("config") or {})
+        cfg["global_inventory_enabled"] = enabled
+        queue["config"] = cfg
+        save_queue(queue)
+        global_scorer.set_enabled(enabled)
+        return jsonify({"ok": True, "enabled": enabled})
+
+    @app.route("/api/global_inventory/clear_blacklist", methods=["POST"])
+    def global_inventory_clear_blacklist():
+        data = request.json or {}
+        path = data.get("path")
+        global_scorer.clear_blacklist(path)
         return jsonify({"ok": True})
 
     # --- Provider quota pauses (Q1-Q11) ---

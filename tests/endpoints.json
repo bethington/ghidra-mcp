@@ -1,7 +1,7 @@
 {
   "version": "5.7.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 227,
+  "total_endpoints": 228,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -210,6 +210,16 @@
         "program"
       ],
       "description": "Audit a global variable's documentation state. Returns name, type, length, plate comment, xref count, and list of issues. Use this before set_global so you know exactly what's missing."
+    },
+    {
+      "path": "/audit_globals_in_function",
+      "method": "GET",
+      "category": "datatype",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs."
     },
     {
       "path": "/batch_analyze_completeness",

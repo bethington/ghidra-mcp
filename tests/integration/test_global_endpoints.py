@@ -321,3 +321,52 @@ def test_set_global_categorized_as_datatype(endpoints):
     set_g = by_path.get("/set_global")
     assert set_g is not None
     assert set_g.get("category") == "datatype"
+
+
+def test_audit_globals_in_function_in_endpoint_catalog(endpoints):
+    paths = {e["path"] for e in endpoints}
+    assert "/audit_globals_in_function" in paths
+
+
+# ---------- audit_globals_in_function ----------
+
+
+def test_audit_globals_in_function_returns_summary(http_client, http_session, server_url):
+    """Smoke: pick a real function and verify the bulk audit endpoint
+    returns the expected shape — function metadata + per-global array
+    + summary histogram. The function might or might not have global
+    xrefs; either is fine, we just check the response shape."""
+    import json
+    # Find a function to audit.
+    response = http_session.get(f"{server_url}/list_functions", params={"limit": 1}, timeout=10)
+    if response.status_code != 200 or not response.text.strip():
+        pytest.skip("No functions available")
+    # Try to parse function address.
+    import re
+    m = re.search(r"@\s+([0-9a-fA-F]+)", response.text)
+    if not m:
+        m = re.search(r'"address"\s*:\s*"?([0-9a-fA-F]+)', response.text)
+    if not m:
+        pytest.skip("Could not parse a function address")
+    fn_addr = f"0x{m.group(1)}"
+
+    response = http_client.get("/audit_globals_in_function", params={"address": fn_addr})
+    assert response.status_code == 200, response.text
+    data = json.loads(response.text)
+    assert "function" in data
+    assert "globals" in data
+    assert "summary" in data
+    summary = data["summary"]
+    for k in ("total", "fully_documented", "with_issues", "issue_histogram"):
+        assert k in summary, f"summary missing {k}"
+    assert isinstance(data["globals"], list)
+    assert isinstance(summary["issue_histogram"], dict)
+    # Summary totals must be self-consistent.
+    assert summary["fully_documented"] + summary["with_issues"] == summary["total"]
+    assert len(data["globals"]) == summary["total"]
+
+
+def test_audit_globals_in_function_invalid_address(http_client):
+    response = http_client.get("/audit_globals_in_function", params={"address": "0x0"})
+    # Either rejected (status:rejected) or err'd cleanly — but no 5xx.
+    assert response.status_code < 500
