@@ -9,12 +9,27 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.6.0 (Latest) — release regression
+### v5.6.0 (Latest) — release regression + fun-doc workflow
+
+Deploy / regression / debugger:
 
 - **Live deploy regression tiers** — `tools.setup deploy` can run selected contract, benchmark read/write, multi-program, negative-contract, debugger-live, and release-grade suites.
 - **Benchmark debugger fixture** — `fun-doc/benchmark` now builds `BenchmarkDebug.exe` alongside `Benchmark.dll` so debugger endpoints can be exercised against a real launched process.
 - **Scoped prompt policy** — `/prompt_policy` temporarily handles known automation dialogs during deploy/regression runs while leaving normal interactive prompts untouched.
 - **Safer deploy lifecycle** — deploy saves open programs/traces, exits or force-kills matching Ghidra processes, starts Ghidra, waits for MCP/project readiness, and runs schema smoke checks.
+
+fun-doc workflow:
+
+- **Worker config snapshot** — workers freeze policy fields (`good_enough_score`, audit/handoff providers, per-provider `provider_max_turns` + `provider_models`) at start; mid-run live edits no longer affect a running worker. Dashboard renders a per-worker config sub-line and toasts when saved config diverges from a running worker's snapshot.
+- **Background inventory scorer** — opt-in idle-time daemon that fills missing `analyze_function_completeness` scores across every binary in the Ghidra project tree. Most-missing-first ordering, single-thread, cooperative pause when doc workers run, session blacklist after 3 strikes. Inventory panel shows per-binary coverage.
+- **Quota-aware provider pause/resume** — fun-doc parses provider quota-wall errors (gemini "exhausted your capacity", claude "credit balance is too low", codex "insufficient_quota", minimax) and parks every worker on the affected (provider, model) until the parsed reset time. Soft rate limits (<5 min) stay in retry logic; hard walls (≥5 min) install a pause. Dashboard shows a `quota_paused` worker state with a live wake-time countdown.
+- **Function-block worker output** — per-function logs are wrapped in a three-sided gold bracket (top + left + bottom), with header + footer showing the function name (post-rescore name in the footer so renames are visible). Three-column worker grid for higher density.
+- **Three new endpoints** — `GET/POST /api/inventory/...` and `GET/POST /api/provider_pauses/...`.
+
+Function-name quality enforcement:
+
+- **Verb-tier rules** at the rename layer: `rename_function_by_address` hard-rejects names that fail Tier 1 / Tier 2 / Tier 3 specificity checks or collide via token-subset with another function in the same program. Returns a structured error (`vague_verb`, `weak_noun_only`, `missing_specifier`, `name_collision`) with a concrete suggestion. Three new completeness deductions surface existing bad names in the work queue.
+
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details.
 
 ### v5.5.0 — maintenance release

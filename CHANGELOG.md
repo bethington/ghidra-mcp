@@ -4,32 +4,151 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## v5.6.0 - 2026-04-25 (release regression)
+## v5.6.0 - 2026-04-25 (release regression + fun-doc workflow)
 
-Release focused on deploy safety, live benchmark regression coverage, and
-debugger endpoint validation.
+Release covering deploy/regression safety, live benchmark coverage, debugger
+endpoint validation, and a substantial fun-doc workflow upgrade: per-worker
+config freezing, quota-aware provider pause/resume, a continuously-running
+background inventory scorer, and verb-tier function-name quality
+enforcement at the rename layer.
 
 ### Added
 
-- **Live deploy release regression** - deploy can now opt into benchmark-backed
+#### Deploy / regression / debugger
+
+- **Live deploy release regression** — deploy can opt into benchmark-backed
   read/write, multi-program, negative-contract, and debugger-live regression
-  tiers with `--test ...` or local `GHIDRA_MCP_DEPLOY_TESTS`.
-- **Benchmark debugger fixture** - `fun-doc/benchmark` now builds
-  `BenchmarkDebug.exe` alongside `Benchmark.dll` so debugger MCP endpoints can
-  be exercised against a real launched process.
-- **Scoped prompt policy endpoint** - `/prompt_policy` temporarily handles a
-  narrow allow-list of known Ghidra automation dialogs during deploy/regression
-  runs while leaving normal interactive prompts untouched.
+  tiers via `--test ...` or local `GHIDRA_MCP_DEPLOY_TESTS`.
+- **Benchmark debugger fixture** — `fun-doc/benchmark` now builds
+  `BenchmarkDebug.exe` alongside `Benchmark.dll` so debugger MCP endpoints
+  can be exercised against a real launched process.
+- **Scoped prompt policy endpoint** — `/prompt_policy` temporarily handles a
+  narrow allow-list of known Ghidra automation dialogs during
+  deploy/regression runs while leaving normal interactive prompts
+  untouched.
+
+#### fun-doc workflow
+
+- **Worker config snapshot** — workers freeze the dashboard's policy fields
+  (`good_enough_score`, `audit_provider`, `audit_min_delta`,
+  `complexity_handoff_provider`, `complexity_handoff_max`, per-provider
+  `provider_max_turns` + `provider_models`) at start and read from the
+  snapshot for the rest of their life. Mid-run live-config edits no longer
+  affect a running worker — restart-to-change semantics. Snapshot is
+  persisted to `events.jsonl` via a `worker.started` event so post-hoc log
+  analysis can join run records to the exact config under which they ran.
+  Dashboard shows a per-worker config sub-line and fires a toast when
+  saving the queue config diverges from any running worker's snapshot.
+- **Provider model + max-turns defaults backfill** — `priority_queue.json`
+  now backfills missing per-provider entries from a module-level
+  `DEFAULT_PROVIDER_MODELS` (gemini, claude, codex, minimax). Fresh
+  installs and partial configs get fully populated dashboard inputs
+  without manual setup.
+- **Background inventory scorer** — opt-in daemon that fills missing
+  `analyze_function_completeness` scores across every binary in the Ghidra
+  project tree. Idle-time backfill (yields when any doc worker is active),
+  most-missing-first ordering with reverse-alpha tiebreak, single-thread,
+  cooperative pause at chunk boundaries, session blacklist after 3
+  strikes, dedicated `fun-doc/inventory.json` persistence. Dashboard
+  widget plus an Inventory panel with sortable per-binary table (coverage
+  bar, scored, total, missing, %, status, last scan).
+- **Quota-aware provider pause/resume** — when a provider returns a quota-
+  wall error (gemini's "exhausted your capacity", claude's "credit balance
+  is too low", codex's "insufficient_quota", minimax's quota messages),
+  fun-doc parses the reset duration, installs a per-(provider, model)
+  pause in `fun-doc/provider_pauses.json`, and parks every worker on that
+  model until the timer fires. Soft rate limits (<5 min) stay in retry
+  logic; hard walls (≥5 min) install a pause. Dashboard surfaces a
+  `quota_paused` worker state with a live wake-time countdown. Manual
+  override via `POST /api/provider_pauses/clear`.
+- **Function-block visual** — per-function worker output is wrapped in a
+  three-sided gold bracket (top + left + bottom, open right). Header is
+  the function's start name; footer is the post-rescore name (so renames
+  are visible). Body indented; blank lines stripped within a block; one
+  blank line of breathing room between blocks. Worker abandon mid-function
+  emits a synthetic `(interrupted)` footer so headers never go orphaned.
+- **Three-column worker grid** — dashboard now shows 3 worker panes per
+  row instead of 2, fitting ~50% more workers without scrolling.
+
+#### Naming-quality enforcement
+
+- **Verb-tier function-name quality** — `NamingConventions` gains Tier 1 /
+  Tier 2 / Tier 3 verb classification, a weak-noun denylist, PascalCase
+  tokenization, and a `checkFunctionNameQuality` API returning structured
+  rejection (`vague_verb`, `weak_noun_only`, `missing_specifier`). Tier 3
+  verbs (`Process`, `Handle`, `Manage`, …) require ≥2 specifier tokens
+  after the verb; weak nouns (`Data`, `Info`, `Stuff`, …) don't count as
+  specifiers.
+- **Token-subset duplicate detection** —
+  `NamingConventions.findTokenSubsetCollision` flags function-name
+  collisions where one name's tokens are a strict subset of another's
+  within the same module-prefix scope (e.g., `SendStateUpdate` ⊂
+  `SendStateUpdateCommand`).
+- **Three new completeness deductions** — `low_name_quality` (-8),
+  `name_collision` (-10), `missing_module_prefix` (-5; fires when name has
+  no `UPPERCASE_` prefix and ≥3 callees share one). Surfaces existing bad
+  legacy names in the work queue with point pressure to fix them.
+
+#### New endpoints
+
+- `GET /api/inventory/status`, `POST /api/inventory/toggle`,
+  `POST /api/inventory/clear_blacklist` — background scorer surface.
+- `GET /api/provider_pauses`, `POST /api/provider_pauses/clear` —
+  quota-pause surface.
 
 ### Changed
 
-- **Deploy lifecycle** - deploy now saves all open programs, attempts graceful
-  Ghidra exit, force-kills matching leftovers when needed, installs the
-  extension, starts Ghidra, waits for MCP/project readiness, and runs schema
-  smoke checks.
-- **Benchmark project reset** - benchmark tiers reset `/testing/benchmark` in
-  the active project, import both benchmark binaries, auto-analyze them, and
-  clear restored benchmark tool state before startup.
+- **Deploy lifecycle** — deploy now saves all open programs, attempts
+  graceful Ghidra exit, force-kills matching leftovers when needed,
+  installs the extension, starts Ghidra, waits for MCP/project readiness,
+  and runs schema smoke checks.
+- **Benchmark project reset** — benchmark tiers reset `/testing/benchmark`
+  in the active project, import both benchmark binaries, auto-analyze
+  them, and clear restored benchmark tool state before startup.
+- **`rename_function_by_address` validator gate** — hard-rejects names
+  failing the verb-tier rules or token-subset uniqueness with a structured
+  error: `{"status": "rejected", "error": …, "issue": …,
+  "rejected_name": …, "conflicts_with": …, "message": …, "suggestion": …}`.
+  Function is unchanged on rejection; the model retries with a better
+  name. Auto-generated names are exempt. `step-prototype.md` documents the
+  verb tiers, weak-noun list, a worked-example pass/fail table, and a
+  rejection round-trip guide.
+- **Complexity-handoff fall-through** — when handoff can't fire (no
+  provider configured, cap reached, or target walled), the worker now
+  continues with primary instead of skipping the function. Removes a
+  silent `consecutive_fails` increment on healthy functions for
+  config/transient reasons.
+- **Worker title color treatment** — provider/id token in the worker pane
+  header is now white (`text-primary`); the active function name is gold
+  (`accent-gold`) so the eye lands on what you're tracking.
+- **Audit / handoff under quota wall** — when the target provider+model is
+  walled, audits log `audit_outcome: quota_paused` and skip; handoffs
+  pre-empt and stick with primary. No `consecutive_fails` bump.
+
+### Fixed
+
+- **Gemini quota errors silently swallowed** — `_invoke_gemini`'s retry-
+  exhaust path now propagates `provider_error` / `provider_error_type`
+  into the run record so the dashboard and `runs.jsonl` show the actual
+  message ("exhausted your capacity, quota will reset after Xh") instead
+  of `output: null` / `error: null`.
+- **State lock reentrancy** — `_state_lock` switched from `Lock` to
+  `RLock` so `load_state` can be called from within a `with _state_lock:`
+  block without deadlocking.
+
+### Tests
+
+- 28 offline tests for the inventory scorer (ordering, blacklist,
+  pause-gate, scored definition, JSON shape stability).
+- 34 offline tests for the provider-pause module (parser, per-provider
+  detectors, threshold, manager round-trip, callback semantics).
+- 13 offline tests for the worker config snapshot (shape, freeze
+  guarantees, fall-through, conditional banner).
+- 31 offline tests for `NamingConventions` (tokenize, verb tiers,
+  specifier counting, all rejection codes, token-subset collision in
+  both directions, module-prefix scoping, exact-match exemption).
+- Updated `test_provider_selection.py` to cover the new
+  `DEFAULT_PROVIDER_MODELS` backfill behavior.
 
 ## v5.5.0 - 2026-04-23 (maintenance)
 
