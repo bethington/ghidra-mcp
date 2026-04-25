@@ -69,6 +69,7 @@ Offline analysis:
 
 import argparse
 import contextvars
+import copy
 import json
 import multiprocessing
 import os
@@ -1756,12 +1757,29 @@ def compute_priority(func):
     return base + impact + effort_bonus + fixable_bonus
 
 
+# Per-provider FULL/FIX/VERIFY model defaults. Used to backfill missing
+# providers / modes when normalizing the dashboard config so:
+#   * a fresh priority_queue.json with no provider_models gets every provider
+#     populated with sensible values,
+#   * a partial config (e.g. minimax/gemini/claude set, codex unset) backfills
+#     codex from defaults instead of showing blank dashboard inputs,
+#   * a user-set value always wins (empty strings count as unset).
+# Update these whenever a model is renamed/deprecated upstream — they're the
+# single source of truth for "what model should each provider call by default."
+DEFAULT_PROVIDER_MODELS = {
+    "minimax": {"FULL": "MiniMax-M2.7", "FIX": "MiniMax-M2.7", "VERIFY": "MiniMax-M2.7"},
+    "gemini":  {"FULL": "gemini-2.5-pro", "FIX": "gemini-2.5-flash", "VERIFY": "gemini-2.5-flash"},
+    "claude":  {"FULL": "claude-sonnet-4-6", "FIX": "claude-sonnet-4-6", "VERIFY": "claude-sonnet-4-6"},
+    "codex":   {"FULL": "gpt-5.5", "FIX": "gpt-5.5", "VERIFY": "gpt-5.5"},
+}
+
+
 DEFAULT_QUEUE_CONFIG = {
     "good_enough_score": 80,
     "require_scored": False,
-    # Dashboard-owned provider -> mode -> model mapping. Left empty in code so
-    # model names only come from persisted config or an explicit CLI override.
-    "provider_models": {},
+    # Dashboard-owned provider -> mode -> model mapping. Defaults from
+    # DEFAULT_PROVIDER_MODELS — overridable per-provider/mode via the dashboard.
+    "provider_models": copy.deepcopy(DEFAULT_PROVIDER_MODELS),
     # Auto-handoff: when the active provider's complexity gate fires, swap to
     # this provider for the current function instead of skipping. Off by
     # default so stronger providers are only consumed when explicitly enabled.
@@ -1811,8 +1829,15 @@ PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"
 
 
 def _normalize_provider_models(raw_models):
-    """Normalize provider->mode->model config from the dashboard."""
-    normalized = {}
+    """Normalize provider->mode->model config, backfilling missing entries
+    from DEFAULT_PROVIDER_MODELS.
+
+    Deep-merge semantics: every supported provider/mode is populated. User
+    values win when present and non-empty; defaults fill the rest. This is
+    what makes a fresh priority_queue.json or a partially-configured one
+    show fully-populated dashboard inputs without manual setup.
+    """
+    normalized = copy.deepcopy(DEFAULT_PROVIDER_MODELS)
     if not isinstance(raw_models, dict):
         return normalized
 
@@ -1895,6 +1920,23 @@ def build_worker_config_snapshot(queue, primary_provider):
     return snapshot
 
 
+def _normalize_provider_max_turns(raw):
+    """Backfill provider_max_turns with DEFAULT_QUEUE_CONFIG values for any
+    missing provider. Mirrors _normalize_provider_models — partial user
+    config gets the missing keys filled in instead of dropped on the floor."""
+    defaults = DEFAULT_QUEUE_CONFIG.get("provider_max_turns") or {}
+    normalized = dict(defaults)
+    if isinstance(raw, dict):
+        for provider, turns in raw.items():
+            if provider not in SUPPORTED_PROVIDERS:
+                continue
+            try:
+                normalized[provider] = int(turns)
+            except (TypeError, ValueError):
+                continue
+    return normalized
+
+
 def load_priority_queue():
     """Load the priority queue file. Always returns a dict with pinned/config.
 
@@ -1911,9 +1953,10 @@ def load_priority_queue():
     else:
         queue = {}
     queue.setdefault("pinned", [])
-    cfg = dict(DEFAULT_QUEUE_CONFIG)
+    cfg = copy.deepcopy(DEFAULT_QUEUE_CONFIG)
     cfg.update(queue.get("config") or {})
     cfg["provider_models"] = _normalize_provider_models(cfg.get("provider_models"))
+    cfg["provider_max_turns"] = _normalize_provider_max_turns(cfg.get("provider_max_turns"))
     queue["config"] = cfg
     return queue
 
@@ -1971,6 +2014,7 @@ def save_priority_queue(queue):
     if isinstance(queue, dict):
         cfg = dict(queue.get("config") or {})
         cfg["provider_models"] = _normalize_provider_models(cfg.get("provider_models"))
+        cfg["provider_max_turns"] = _normalize_provider_max_turns(cfg.get("provider_max_turns"))
         queue["config"] = cfg
         # Drop any lingering dashboard_active_workers meta — workers no
         # longer auto-restore across restarts, so persisting a snapshot
