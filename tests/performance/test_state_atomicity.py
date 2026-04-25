@@ -204,6 +204,115 @@ def test_update_function_state_preserves_concurrent_other_keys(isolated_state):
     assert final["functions"][key_b]["last_result"] == "B"
 
 
+def test_finalize_worker_session_does_not_clobber_concurrent_function_updates(
+    isolated_state,
+):
+    """Worker-loop end-of-run persistence must not reintroduce the lost-update
+    race that update_function_state exists to solve.
+
+    Scenario: worker A loads state, worker B concurrently commits a per-function
+    update via update_function_state, worker A finalizes its session. If worker
+    A's finalize writes the full in-memory state, worker B's update is lost.
+    finalize_worker_session does RMW, so B's update survives.
+    """
+    fun_doc, path = isolated_state
+
+    fun_doc.save_state(_sample_state(10))
+
+    # Worker A loads state (stale snapshot from here on)
+    worker_a_state = fun_doc.load_state()
+    session_a = fun_doc.start_session(worker_a_state)
+    session_a["completed"] = 3
+    session_a["functions"] = ["prog::addr0001", "prog::addr0002", "prog::addr0003"]
+
+    # Worker B commits a per-function update — invisible to A's cached state
+    key_b = "prog::addr0007"
+    on_disk = json.loads(path.read_text())
+    func_b = {**on_disk["functions"][key_b], "score": 88, "last_result": "B"}
+    fun_doc.update_function_state(key_b, func_b)
+
+    # Worker A finalizes its session. Must NOT clobber B's update.
+    fun_doc.finalize_worker_session(session_a)
+
+    final = json.loads(path.read_text())
+    assert (
+        final["functions"][key_b]["score"] == 88
+    ), "finalize_worker_session clobbered a concurrent per-function update"
+    assert final["functions"][key_b]["last_result"] == "B"
+
+    # Session was recorded with ended timestamp
+    assert len(final["sessions"]) == 1
+    archived = final["sessions"][0]
+    assert archived["completed"] == 3
+    assert archived["functions"] == ["prog::addr0001", "prog::addr0002", "prog::addr0003"]
+    assert archived.get("ended")
+
+
+def test_finalize_worker_session_handles_active_binary_restore(isolated_state):
+    """active_binary override path: pass a value to set, pass None to clear,
+    omit to leave the on-disk value untouched."""
+    fun_doc, path = isolated_state
+
+    # Seed: active_binary already set on disk (e.g., by dashboard)
+    seed = _sample_state(3)
+    seed["active_binary"] = "dashboard_binary"
+    fun_doc.save_state(seed)
+
+    # Worker finishes, no override: on-disk active_binary must be preserved
+    session = {"started": "2026-04-24T10:00:00", "completed": 1}
+    fun_doc.finalize_worker_session(session)
+    assert json.loads(path.read_text())["active_binary"] == "dashboard_binary"
+
+    # Worker restores a prior original_binary
+    session2 = {"started": "2026-04-24T11:00:00", "completed": 1}
+    fun_doc.finalize_worker_session(session2, active_binary="original")
+    assert json.loads(path.read_text())["active_binary"] == "original"
+
+    # Worker clears (original was None)
+    session3 = {"started": "2026-04-24T12:00:00", "completed": 1}
+    fun_doc.finalize_worker_session(session3, active_binary=None)
+    assert "active_binary" not in json.loads(path.read_text())
+
+
+def test_finalize_worker_session_only_clears_matching_current_session(isolated_state):
+    """current_session must only be cleared if it still references this worker's
+    session. Another worker's concurrent session should stay untouched."""
+    fun_doc, path = isolated_state
+
+    # Seed state with another worker's current_session already recorded
+    seed = _sample_state(3)
+    other_session = {"started": "2026-04-24T09:00:00", "completed": 0}
+    seed["current_session"] = other_session
+    fun_doc.save_state(seed)
+
+    my_session = {"started": "2026-04-24T10:00:00", "completed": 2}
+    fun_doc.finalize_worker_session(my_session)
+
+    final = json.loads(path.read_text())
+    # Other worker's current_session untouched
+    assert final["current_session"] == other_session
+    # My session archived
+    assert len(final["sessions"]) == 1
+    assert final["sessions"][0]["started"] == "2026-04-24T10:00:00"
+
+
+def test_finalize_worker_session_uses_backup_when_state_is_corrupt(isolated_state):
+    """Worker finalization should preserve recoverable history by loading the
+    same backup that load_state() would use instead of writing a fresh default."""
+    fun_doc, path = isolated_state
+    bak_path = path.with_suffix(".json.bak")
+    good = _sample_state(2)
+    good["current_session"] = {"started": "2026-04-24T10:00:00", "completed": 0}
+    bak_path.write_text(json.dumps(good))
+    path.write_text('{"functions": {"foo": {"classificat')
+
+    fun_doc.finalize_worker_session({"started": "2026-04-24T10:00:00", "completed": 1})
+
+    final = json.loads(path.read_text())
+    assert len(final["functions"]) == 2
+    assert final["sessions"][-1]["completed"] == 1
+
+
 def test_save_state_truncation_corruption_is_recoverable(isolated_state, tmp_path):
     """End-to-end: simulate the exact failure mode we hit — a truncated
     state.json where a function entry is cut off mid-value. The recovery

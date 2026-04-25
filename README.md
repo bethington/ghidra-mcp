@@ -19,13 +19,13 @@
 >
 > If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **222 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **225 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **222 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
+- **225 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -55,7 +55,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Core MCP Integration
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **222 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
+- **225 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
@@ -125,8 +125,11 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    python -m tools.setup ensure-prereqs --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
    python -m tools.setup build
    python -m tools.setup deploy --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
-   python -m tools.setup start-ghidra --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
    ```
+
+   `deploy` saves/closes an already-running matching Ghidra instance when
+   needed, installs the extension, starts Ghidra, waits for MCP health, and runs
+   schema smoke checks.
 
 4. **Optional strict/manual mode** (advanced):
    ```text
@@ -455,7 +458,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.0.4_PUBLIC
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 222 tools fully implemented
+- **MCP Tools**: 225 tools fully implemented
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -696,7 +699,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Components
 
-- **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (222 tools)
+- **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (225 catalog entries)
 - **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (175 GUI endpoints)
 - **GhidraMCPHeadlessServer** — Standalone headless server — 183 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
@@ -742,13 +745,15 @@ Common flags accepted by most commands:
 | `--force` | Reinstall Ghidra JARs even if already present (`install-ghidra-deps`, `ensure-prereqs`). |
 | `--with-debugger` | Force-install debugger Python requirements (Windows only). |
 | `--use-debugger-toggle` | Read `INSTALL_DEBUGGER_DEPS` from `.env` to decide whether to install debugger deps. |
+| `--test TIER` | (`deploy` only) Opt into live deploy regression tiers such as `release` or `debugger-live`. |
 | `--strict` | (`preflight` only) Also check network reachability for Maven Central and PyPI. |
 
 Deploy test tiers are opt-in because benchmark tiers can import/reset
-`Benchmark.dll` in the active Ghidra project. Use `--test release` before
-cutting releases, or set `GHIDRA_MCP_DEPLOY_TESTS=release` in a local `.env`
-when you want every deploy on your machine to run the live benchmark
-regression. See [Testing and Release Regression](docs/TESTING.md).
+`Benchmark.dll` and `BenchmarkDebug.exe` in the active Ghidra project. Use
+`--test release` before cutting releases, or set
+`GHIDRA_MCP_DEPLOY_TESTS=release` in a local `.env` when you want every deploy
+on your machine to run the live benchmark regression. See
+[Testing and Release Regression](docs/TESTING.md).
 
 ```text
 # Standard first-time setup and deploy
@@ -760,7 +765,7 @@ python -m tools.setup deploy --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 python -m tools.setup preflight --strict --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
 # Version bump and tag
-python -m tools.setup bump-version --new 5.5.0 --tag
+python -m tools.setup bump-version --new 5.6.0 --tag
 
 # Run offline Java tests
 python -m tools.setup run-tests
@@ -772,17 +777,17 @@ python -m tools.setup --help
 ### Project Structure
 ```
 ghidra-mcp/
-├── bridge_mcp_ghidra.py     # MCP server (Python, 222 tools)
+├── bridge_mcp_ghidra.py     # MCP server (Python, 225 catalog entries)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (175 endpoints)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (177 endpoints)
 │       ├── headless/                    # Headless server (183 endpoints)
 │       └── core/                        # Shared service layer (12 services)
 ├── debugger/                # Optional standalone debugger server (port 8099)
 ├── ghidra_scripts/          # Automation scripts for batch workflows
 ├── tests/                   # Python unit tests + endpoint catalog
 │   ├── unit/               # Catalog consistency, schema, tool function tests
-│   └── endpoints.json      # Endpoint specification (222 entries)
+│   └── endpoints.json      # Endpoint specification (225 entries)
 ├── docs/                    # Documentation
 │   ├── prompts/            # AI workflow prompts (V5 documentation workflows)
 │   ├── releases/           # Version release notes
@@ -889,7 +894,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v5.5.0
+# Connection OK - GhidraMCP Headless Server v5.6.0
 ```
 
 ### Headless API Workflow
@@ -955,9 +960,9 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 5.5.0 |
-| **MCP Tools** | 222 fully implemented |
-| **GUI Endpoints** | 198 (GhidraMCPPlugin) |
+| **Version** | 5.6.0 |
+| **MCP Tools** | 225 fully implemented |
+| **GUI Endpoints** | 177 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |
 | **Batch Efficiency** | 93% API call reduction |

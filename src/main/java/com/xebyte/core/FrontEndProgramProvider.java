@@ -378,6 +378,57 @@ public class FrontEndProgramProvider implements ProgramProvider {
     }
 
     /**
+     * Release a cached program opened directly by this provider.
+     *
+     * @param nameOrPath Program name or project path
+     * @return true if a cached program reference was released
+     */
+    public boolean releaseCachedProgram(String nameOrPath) {
+        if (nameOrPath == null || nameOrPath.trim().isEmpty()) {
+            return false;
+        }
+
+        String search = nameOrPath.trim();
+        List<String> keys = new ArrayList<>();
+        String directKey = pathToName.get(search);
+        if (directKey != null) {
+            keys.add(directKey);
+        }
+        keys.add(search);
+
+        for (Map.Entry<String, Program> entry : openPrograms.entrySet()) {
+            Program program = entry.getValue();
+            if (program.getName().equalsIgnoreCase(search) ||
+                    (program.getDomainFile() != null &&
+                            program.getDomainFile().getPathname().equalsIgnoreCase(search))) {
+                keys.add(entry.getKey());
+            }
+        }
+
+        boolean released = false;
+        for (String key : new ArrayList<>(keys)) {
+            Program program = openPrograms.remove(key);
+            if (program == null) {
+                continue;
+            }
+            try {
+                program.release(consumer);
+                released = true;
+                if (program == currentProgram) {
+                    currentProgram = null;
+                }
+                Msg.info(this, "Released cached program: " + key);
+            } catch (Exception e) {
+                Msg.warn(this, "Error releasing cached program " + key + ": " + e.getMessage());
+            }
+        }
+
+        pathToName.entrySet().removeIf(entry -> keys.contains(entry.getValue()) ||
+                entry.getKey().equalsIgnoreCase(search));
+        return released;
+    }
+
+    /**
      * Get the underlying PluginTool.
      *
      * @return The PluginTool

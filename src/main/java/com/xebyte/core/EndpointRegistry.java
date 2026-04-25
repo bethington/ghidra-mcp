@@ -1113,6 +1113,10 @@ public class EndpointRegistry {
             params(pProg()),
             (q, b) -> programScriptService.saveCurrentProgram(str(q, "program")));
 
+        get("/save_all_programs", "Save all open programs",
+            params(),
+            (q, b) -> programScriptService.saveAllOpenPrograms());
+
         get("/list_open_programs", "List all open programs",
             params(),
             (q, b) -> programScriptService.listOpenPrograms());

@@ -200,6 +200,17 @@ def _cl_executable(tc: dict) -> str:
     return tc.get("cl_path", "cl.exe")
 
 
+def _run_command(command: list[str], env: dict[str, str], failure_label: str) -> None:
+    print(f"[build][cmd]  {' '.join(command)}")
+    result = subprocess.run(command, env=env, capture_output=True, text=True)
+    if result.stdout:
+        print(result.stdout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(f"{failure_label} failed (exit {result.returncode}).")
+
+
 def build(toolchain_name: str, clean: bool = False) -> Path:
     if toolchain_name not in TOOLCHAINS:
         raise ValueError(
@@ -211,7 +222,8 @@ def build(toolchain_name: str, clean: bool = False) -> Path:
         shutil.rmtree(BUILD_DIR)
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
-    sources = sorted(SRC_DIR.glob("*.c"))
+    harness_source = SRC_DIR / "benchmark_debug.c"
+    sources = sorted(s for s in SRC_DIR.glob("*.c") if s.name != harness_source.name)
     if not sources:
         raise RuntimeError(f"No .c sources found in {SRC_DIR}")
 
@@ -255,14 +267,7 @@ def build(toolchain_name: str, clean: bool = False) -> Path:
     # Drop /LD from compile-only cmd — it's a linker flag that cl.exe
     # passes through when linking; harmless but confusing in a /c cmd.
     compile_cmd = [x for x in compile_cmd if x != "/LD"]
-    print(f"[build][cl]   {' '.join(compile_cmd)}")
-    result = subprocess.run(compile_cmd, env=env, capture_output=True, text=True)
-    if result.stdout:
-        print(result.stdout)
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(f"Compile failed (exit {result.returncode}).")
+    _run_command(compile_cmd, env, "Compile")
 
     # --- Step 2: link the .objs into the DLL ---
     objs = sorted(BUILD_DIR.glob("*.obj"))
@@ -295,16 +300,31 @@ def build(toolchain_name: str, clean: bool = False) -> Path:
         # happy to delegate. No /ENTRY override needed.
         *[str(o) for o in objs],
     ]
-    print(f"[build][link] {' '.join(link_cmd)}")
-    result = subprocess.run(link_cmd, env=env, capture_output=True, text=True)
-    if result.stdout:
-        print(result.stdout)
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(f"Link failed (exit {result.returncode}).")
+    _run_command(link_cmd, env, "Link")
     if not out_dll.is_file():
         raise RuntimeError(f"Link succeeded but {out_dll} not produced")
+
+    out_exe = BUILD_DIR / "BenchmarkDebug.exe"
+    if harness_source.is_file():
+        exe_cmd = [
+            cl,
+            "/nologo",
+            "/W3",
+            "/O2",
+            "/GF",
+            "/MT",
+            "/GS-",
+            "/Gy",
+            f"/Fe{out_exe}",
+            str(harness_source),
+            "/link",
+            "/NOLOGO",
+            "/MACHINE:X86",
+            "/SUBSYSTEM:CONSOLE,4.00",
+        ]
+        _run_command(exe_cmd, env, "Debug harness build")
+        if not out_exe.is_file():
+            raise RuntimeError(f"Build succeeded but {out_exe} not produced")
 
     # Write a small manifest so downstream tools can read which toolchain
     # produced the binary — useful for the run record to include and for
@@ -314,12 +334,15 @@ def build(toolchain_name: str, clean: bool = False) -> Path:
         "description": tc["description"],
         "sources": [s.name for s in sources],
         "dll": out_dll.name,
+        "debug_exe": out_exe.name if out_exe.is_file() else None,
         "map": out_map.name,
     }
     (BUILD_DIR / "build_manifest.json").write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
     print(f"[build] ok — {out_dll} ({out_dll.stat().st_size} bytes)")
+    if out_exe.is_file():
+        print(f"[build] ok - {out_exe} ({out_exe.stat().st_size} bytes)")
     return out_dll
 
 

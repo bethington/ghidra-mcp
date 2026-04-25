@@ -18,6 +18,7 @@ import javax.swing.SwingUtilities;
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -29,6 +30,7 @@ public class ProgramScriptService {
 
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
+    private static final String AUTO_ANALYSIS_COMPLETION_MESSAGE = "Auto-analysis completed";
 
     public ProgramScriptService(ProgramProvider programProvider, ThreadingStrategy threadingStrategy) {
         this.programProvider = programProvider;
@@ -50,6 +52,46 @@ public class ProgramScriptService {
             return mtp.getActiveTool();
         }
         return null;
+    }
+
+    private boolean runAutoAnalysisAndPersistFlags(Program program, boolean force) {
+        if (program == null) {
+            return false;
+        }
+        try {
+            ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
+            AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
+            if (force) {
+                mgr.reAnalyzeAll(null);
+            }
+            mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+            mgr.waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
+            ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
+            persistProgram(program, AUTO_ANALYSIS_COMPLETION_MESSAGE);
+            return true;
+        } catch (Exception e) {
+            Msg.warn(this, "Auto-analysis failed: " + e.getMessage());
+            try {
+                suppressAnalysisPrompt(program);
+            } catch (Exception ignored) {
+                // Preserve the original analysis failure in the log.
+            }
+            return false;
+        }
+    }
+
+    private void suppressAnalysisPrompt(Program program) throws IOException, ghidra.util.exception.CancelledException {
+        ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
+        persistProgram(program, "Suppress analysis prompt");
+    }
+
+    private void persistProgram(Program program, String reason)
+            throws IOException, ghidra.util.exception.CancelledException {
+        if (program == null || !program.canSave()) {
+            return;
+        }
+        program.flushEvents();
+        program.save(reason, ghidra.util.task.TaskMonitor.DUMMY);
     }
 
     // ========================================================================
@@ -156,6 +198,73 @@ public class ProgramScriptService {
     }
 
     /**
+     * Save every currently open program. This is intended for automation paths
+     * such as deploy shutdown where Ghidra would otherwise prompt for each
+     * modified domain object on exit.
+     */
+    @McpTool(path = "/save_all_programs", description = "Save all open programs", category = "program")
+    public Response saveAllOpenPrograms() {
+        Program[] programs = programProvider.getAllOpenPrograms();
+        if (programs == null || programs.length == 0) {
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "saved_count", 0,
+                "programs", List.of(),
+                "errors", List.of(),
+                "message", "No open programs to save"
+            ));
+        }
+
+        final AtomicReference<List<Map<String, Object>>> saved = new AtomicReference<>(new ArrayList<>());
+        final AtomicReference<List<Map<String, Object>>> errors = new AtomicReference<>(new ArrayList<>());
+
+        Runnable saveTask = () -> {
+            Set<Program> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+            for (Program program : programs) {
+                if (program == null || !seen.add(program)) {
+                    continue;
+                }
+
+                Map<String, Object> info = new LinkedHashMap<>();
+                info.put("program", program.getName());
+                try {
+                    ghidra.framework.model.DomainFile df = program.getDomainFile();
+                    if (df == null) {
+                        info.put("error", "Program has no domain file");
+                        errors.get().add(info);
+                        continue;
+                    }
+                    info.put("path", df.getPathname());
+                    df.save(new ConsoleTaskMonitor());
+                    saved.get().add(info);
+                } catch (Throwable e) {
+                    info.put("error", e.getMessage() != null ? e.getMessage() : e.toString());
+                    errors.get().add(info);
+                    Msg.error(this, "Error saving program " + program.getName(), e);
+                }
+            }
+        };
+
+        try {
+            if (SwingUtilities.isEventDispatchThread()) {
+                saveTask.run();
+            } else {
+                SwingUtilities.invokeAndWait(saveTask);
+            }
+        } catch (Throwable e) {
+            return Response.err("Failed to save all programs: " +
+                    (e.getMessage() != null ? e.getMessage() : e.toString()));
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+            "success", errors.get().isEmpty(),
+            "saved_count", saved.get().size(),
+            "programs", saved.get(),
+            "errors", errors.get()
+        ));
+    }
+
+    /**
      * List all currently open programs in Ghidra.
      */
     @McpTool(path = "/list_open_programs", description = "List all open programs. If more than one program is listed, always pass the program name explicitly in subsequent tool calls — omitting it will silently target the active program, which may not be the intended one.", category = "program")
@@ -188,6 +297,64 @@ public class ProgramScriptService {
             "programs", programList,
             "count", programs.length,
             "current_program", currentProgram != null ? currentProgram.getName() : ""
+        ));
+    }
+
+    @McpTool(path = "/close_program", method = "POST",
+             description = "Close an open program by project path or name", category = "program")
+    public Response closeProgram(
+            @Param(value = "name", source = ParamSource.BODY,
+                    description = "Program name or project path") String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return Response.err("Program name or path is required");
+        }
+
+        String search = name.trim();
+        AtomicInteger closedCount = new AtomicInteger(0);
+        AtomicReference<String> error = new AtomicReference<>();
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    for (ProgramManager pm : findAllProgramManagers()) {
+                        for (Program program : pm.getAllOpenPrograms()) {
+                            if (programMatches(program, search)) {
+                                pm.closeProgram(program, false);
+                                closedCount.incrementAndGet();
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    error.set(e.getMessage() != null ? e.getMessage() : e.toString());
+                }
+            });
+        } catch (Exception e) {
+            return Response.err("Failed to close program: " +
+                    (e.getMessage() != null ? e.getMessage() : e.toString()));
+        }
+
+        if (closedCount.get() == 0) {
+            for (Program program : programProvider.getAllOpenPrograms()) {
+                if (programMatches(program, search) && programProvider.closeProgram(program)) {
+                    closedCount.incrementAndGet();
+                }
+            }
+        }
+
+        if (error.get() != null) {
+            return Response.err("Failed to close program: " + error.get());
+        }
+
+        boolean releasedCache = false;
+        if (programProvider instanceof FrontEndProgramProvider fpp) {
+            releasedCache = fpp.releaseCachedProgram(search);
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+            "success", true,
+            "closed_count", closedCount.get(),
+            "released_cache", releasedCache,
+            "name", search
         ));
     }
 
@@ -534,6 +701,11 @@ public class ProgramScriptService {
         for (Program prog : openPrograms) {
             if (prog.getDomainFile().getPathname().equals(path)) {
                 // Already open, just switch to it
+                try {
+                    suppressAnalysisPrompt(prog);
+                } catch (Exception e) {
+                    Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
+                }
                 programProvider.setCurrentProgram(prog);
                 return Response.ok(JsonHelper.mapOf(
                     "success", true,
@@ -558,22 +730,25 @@ public class ProgramScriptService {
                 return Response.err("Failed to open program: " + path);
             }
 
-            // Add to tool and set as current
-            pm.openProgram(program);
-            pm.setCurrentProgram(program);
+            ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
 
-            // Optionally trigger auto-analysis
             boolean analyzed = false;
             if (autoAnalyze) {
+                analyzed = runAutoAnalysisAndPersistFlags(program, true);
+            } else {
                 try {
-                    AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-                    mgr.reAnalyzeAll(null);
-                    mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
-                    analyzed = true;
-                } catch (Exception ae) {
-                    Msg.warn(this, "Auto-analysis failed: " + ae.getMessage());
+                    suppressAnalysisPrompt(program);
+                } catch (Exception e) {
+                    Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
                 }
             }
+
+            // Open after the analysis flags are persisted so CodeBrowser does not prompt.
+            Program finalProgram = program;
+            SwingUtilities.invokeAndWait(() -> {
+                pm.openProgram(finalProgram);
+                pm.setCurrentProgram(finalProgram);
+            });
 
             return Response.ok(JsonHelper.mapOf(
                 "success", true,
@@ -657,7 +832,6 @@ public class ProgramScriptService {
                 }
                 // Save to project folder (creates DomainFile)
                 loaded.save(ghidra.util.task.TaskMonitor.DUMMY);
-                loaded.release(this);
             } else {
                 // Auto-detect format
                 LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
@@ -673,40 +847,41 @@ public class ProgramScriptService {
                 }
                 // Save to project folder before releasing (prevents "Database is closed")
                 loadResults.save(ghidra.util.task.TaskMonitor.DUMMY);
-                loadResults.release(this);
             }
 
             // Suppress the "Analysis Options" dialog — we handle analysis programmatically
             ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
 
-            // Open in CodeBrowser
+            boolean autoAnalyzed = false;
+            if (autoAnalyze) {
+                autoAnalyzed = runAutoAnalysisAndPersistFlags(program, false);
+            } else {
+                try {
+                    suppressAnalysisPrompt(program);
+                } catch (Exception e) {
+                    Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
+                }
+            }
+
+            // Open after the analysis flags are persisted so CodeBrowser does not prompt.
             ProgramManager pm = findOrCreateProgramManager(tool);
             if (pm == null) {
                 return Response.err("Could not find or create a CodeBrowser tool");
             }
 
-            pm.openProgram(program);
-            pm.setCurrentProgram(program);
-
-            // Optionally trigger auto-analysis
-            boolean analyzing = false;
-            if (autoAnalyze) {
-                try {
-                    AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-                    mgr.reAnalyzeAll(null);
-                    mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
-                    analyzing = true;
-                } catch (Exception ae) {
-                    Msg.warn(this, "Auto-analysis failed: " + ae.getMessage());
-                }
-            }
+            Program finalProgram = program;
+            SwingUtilities.invokeAndWait(() -> {
+                pm.openProgram(finalProgram);
+                pm.setCurrentProgram(finalProgram);
+            });
 
             return Response.ok(JsonHelper.mapOf(
                 "success", true,
                 "name", program.getName(),
                 "path", program.getDomainFile().getPathname(),
                 "language", program.getLanguageID().getIdAsString(),
-                "analyzing", analyzing
+                "analyzing", false,
+                "auto_analyzed", autoAnalyzed
             ));
         } catch (Exception e) {
             String msg = e.getMessage();
@@ -731,14 +906,13 @@ public class ProgramScriptService {
         Program program = pe.program();
 
         try {
-            AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-            mgr.reAnalyzeAll(null);
-            mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+            boolean analyzed = runAutoAnalysisAndPersistFlags(program, true);
             return Response.ok(JsonHelper.mapOf(
-                "success", true,
+                "success", analyzed,
                 "name", program.getName(),
-                "analyzing", true,
-                "message", "Auto-analysis started for " + program.getName()
+                "analyzing", false,
+                "message", analyzed ? AUTO_ANALYSIS_COMPLETION_MESSAGE + " for " + program.getName()
+                    : "Auto-analysis failed for " + program.getName()
             ));
         } catch (Exception e) {
             return Response.err("Failed to start analysis: " + e.getMessage());
@@ -760,15 +934,21 @@ public class ProgramScriptService {
                 continue;
             }
             boolean analyzing = false;
+            boolean analyzed = false;
+            boolean shouldAskToAnalyze = false;
             try {
                 AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(prog);
                 analyzing = mgr.isAnalyzing();
+                analyzed = ghidra.program.util.GhidraProgramUtilities.isAnalyzed(prog);
+                shouldAskToAnalyze = ghidra.program.util.GhidraProgramUtilities.shouldAskToAnalyze(prog);
             } catch (Exception e) {
                 // May not have an analysis manager in headless mode
             }
             results.add(JsonHelper.mapOf(
                 "name", prog.getName(),
                 "analyzing", analyzing,
+                "analyzed", analyzed,
+                "should_ask_to_analyze", shouldAskToAnalyze,
                 "function_count", prog.getFunctionManager().getFunctionCount()
             ));
         }
@@ -800,6 +980,48 @@ public class ProgramScriptService {
 
     // ========================================================================
     // Script Execution
+    private List<ProgramManager> findAllProgramManagers() {
+        List<ProgramManager> managers = new ArrayList<>();
+        Set<PluginTool> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+
+        PluginTool activeTool = getToolFromProvider();
+        if (activeTool != null) {
+            seen.add(activeTool);
+            ProgramManager pm = activeTool.getService(ProgramManager.class);
+            if (pm != null) {
+                managers.add(pm);
+            }
+
+            try {
+                ghidra.framework.model.Project project = activeTool.getProject();
+                if (project != null) {
+                    ghidra.framework.model.ToolManager tm = project.getToolManager();
+                    if (tm != null) {
+                        for (PluginTool runningTool : tm.getRunningTools()) {
+                            if (!seen.add(runningTool)) {
+                                continue;
+                            }
+                            ProgramManager runningPm = runningTool.getService(ProgramManager.class);
+                            if (runningPm != null) {
+                                managers.add(runningPm);
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Msg.warn(this, "Error scanning for ProgramManager services: " + e.getMessage());
+            }
+        }
+
+        if (programProvider instanceof MultiToolProgramProvider mtp) {
+            ProgramManager pm = mtp.findProgramManager();
+            if (pm != null && !managers.contains(pm)) {
+                managers.add(pm);
+            }
+        }
+        return managers;
+    }
+
     /**
      * Find an existing ProgramManager or launch a new CodeBrowser to get one.
      */

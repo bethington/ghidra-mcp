@@ -231,10 +231,9 @@ class WorkerManager:
         try:
             from fun_doc import (
                 load_state,
-                save_state,
                 get_next_functions,
                 start_session,
-                end_session,
+                finalize_worker_session,
                 process_function,
                 refresh_candidate_scores,
                 load_priority_queue,
@@ -558,13 +557,15 @@ class WorkerManager:
 
                 self._emit_status()
 
-            end_session(state)
+            # Persist session + optional active_binary restore via a
+            # read-modify-write that leaves state["functions"] alone. A
+            # full-state save here would write the functions snapshot this
+            # worker loaded, clobbering per-function updates written
+            # concurrently by other workers via update_function_state().
             if worker["binary"] and original_binary != worker["binary"]:
-                if original_binary:
-                    state["active_binary"] = original_binary
-                else:
-                    state.pop("active_binary", None)
-            save_state(state)
+                finalize_worker_session(session, active_binary=original_binary)
+            else:
+                finalize_worker_session(session)
 
         except Exception as e:
             self._bus.emit(

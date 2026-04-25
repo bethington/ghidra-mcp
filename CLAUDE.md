@@ -2,9 +2,9 @@
 
 ## Overview
 
-MCP server bridging Ghidra reverse engineering with AI tools. 222 MCP tools for binary analysis.
+MCP server bridging Ghidra reverse engineering with AI tools. 225 MCP tools for binary analysis.
 
-- **Package**: `com.xebyte` | **Version**: 5.5.0 | **Java**: 21 LTS | **Ghidra**: 12.0.4
+- **Package**: `com.xebyte` | **Version**: 5.6.0 | **Java**: 21 LTS | **Ghidra**: 12.0.4
 
 ## Boil the ocean
 
@@ -32,7 +32,7 @@ Services use constructor injection: `ProgramProvider` + `ThreadingStrategy`.
 
 Do not try to keep the full tool list in this file.
 
-- **Authoritative repo snapshot**: `tests/endpoints.json` (222 endpoints, categories, descriptions)
+- **Authoritative repo snapshot**: `tests/endpoints.json` (225 endpoints, categories, descriptions)
 - **Authoritative runtime schema**: `/mcp/schema` from the running server
 - **Usage patterns / operator guide**: `docs/prompts/TOOL_USAGE_GUIDE.md`
 
@@ -72,6 +72,24 @@ python -m tools.setup deploy         --ghidra-path F:\ghidra_12.0.4_PUBLIC
 - `tools.setup` delegates to Maven by default; set `TOOLS_SETUP_BACKEND=gradle` to route the same commands to Gradle
 - Deploy handles: build, extension install, FrontEndTool.xml patching, Ghidra restart
 - Migration plan: `docs/project-management/GRADLE_MIGRATION_CHECKLIST.md`
+
+## Releases
+
+Use `docs/releases/RELEASE_CHECKLIST.md` as the canonical release runbook. Do
+not duplicate the whole checklist here; keep this file light enough to fit in
+agent context.
+
+Release floor before tagging or publishing:
+
+```text
+python -m tools.setup verify-version
+python -m tools.setup build
+pytest tests/unit/ -v --no-cov
+python -m tools.setup deploy --ghidra-path F:\ghidra_12.0.4_PUBLIC --test release
+```
+
+Run UI-touching deploy/regression only after confirming the current Ghidra UI
+state when modal dialogs may be present.
 
 ## Running the MCP Server
 
@@ -117,15 +135,87 @@ When building new tools or modifying existing ones, wire validation through `Nam
 
 ## Testing
 
-- **Offline (no Ghidra required)**:
-  - Java (Gradle): `./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC`
-  - Java (Maven): `mvn test -Dtest='com.xebyte.offline.*Test'` -- annotation scanner + `tests/endpoints.json` parity (~0.5s, 11 tests)
-  - Python: `pytest tests/performance/test_selector_invariants.py tests/performance/test_state_atomicity.py`
-- **Integration (Ghidra required on port 8089)**:
-  - Java (Gradle): `./gradlew test -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC`
-  - Java (Maven): `mvn test` -- runs everything including endpoint registration tests
-  - Python: `pytest tests/`
-- **Catalog drift**: if `EndpointsJsonParityTest` fails after adding/modifying an `@McpTool`, run `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true` to rewrite `tests/endpoints.json` from the scanner (preserves hand-authored descriptions and hand-registered routes).
+Three tiers by cost and prerequisites:
+
+1. **Unit** (`pytest tests/unit/`) — pure Python, no Ghidra, no side effects. Covers bridge utils, debugger engine, setup CLI, catalog/schema consistency. Fast (<5s).
+2. **Offline** — Java scanner/parity + Python regression tests that don't hit Ghidra on 8089. Fast (<10s).
+3. **Integration** (`pytest tests/` + `mvn test`) — requires live Ghidra on port 8089 with a binary open. Slow and stateful.
+
+### Match change → tests
+
+Find the file(s) you edited below; run everything in that row. Always include the tier-1 Unit + Offline row as a floor unless noted.
+
+| Change location | Run |
+| --- | --- |
+| `src/main/java/com/xebyte/core/*Service.java` (any service class) | Offline (Java) + Integration (Java) + `tests/integration/test_readonly_endpoints.py` |
+| `src/main/java/com/xebyte/core/NamingConventions.java` | Offline (Java) + `tests/integration/test_safe_write_endpoints.py` + fun-doc benchmark (`--mock --tier fast --compare`) |
+| Add/modify `@McpTool` / `@Param` annotation | Offline (Java) first — `EndpointsJsonParityTest` will fail if `tests/endpoints.json` is stale. Regenerate: `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`. Then Integration (Java). |
+| `src/main/java/com/xebyte/GhidraMCPPlugin.java` (HTTP routes) | Offline (Java) + `EndpointRegistrationTest` (integration) + `tests/performance/test_http_concurrency.py` |
+| `src/main/java/com/xebyte/headless/*` | Offline (Java) + `tests/unit/test_setup_ghidra.py` + Integration (Java) headless run |
+| `bridge_mcp_ghidra.py` | `tests/unit/test_bridge_utils.py tests/unit/test_mcp_tools.py tests/unit/test_mcp_tool_functions.py tests/unit/test_response_schemas.py tests/unit/test_endpoint_catalog.py` |
+| `fun-doc/fun_doc.py` — state, sessions, locking, selector, scoring | `tests/performance/test_state_atomicity.py tests/performance/test_state_lock_reentrant.py tests/performance/test_selector_invariants.py tests/performance/test_event_bus_drain.py` + fun-doc benchmark (`--mock --tier fast --compare`) |
+| `fun-doc/fun_doc.py` — provider routing, prompt construction | `tests/performance/test_provider_selection.py tests/performance/test_ghidra_offline.py` + fun-doc benchmark |
+| `fun-doc/web.py` — worker loop, heartbeats, dashboard | `tests/performance/test_state_atomicity.py tests/performance/test_worker_watchdog.py tests/performance/test_dashboard_single_instance.py` |
+| `fun-doc/event_bus.py` / `event_log.py` | `tests/performance/test_event_bus_drain.py` |
+| `fun-doc/audit/*` | `tests/performance/test_audit_rules.py tests/performance/test_audit_registry.py` |
+| `fun-doc/benchmark/scorer.py` or `truth/*.yaml` or `src/*.c` | `tests/performance/test_benchmark_scorer.py tests/performance/test_benchmark_extract_truth.py tests/performance/test_benchmark_haiku_judge.py tests/performance/test_benchmark_ghidra_bridge.py` + rerun the benchmark itself |
+| `debugger/*` | `tests/unit/test_address_map.py tests/unit/test_d2_conventions.py tests/unit/test_debugger_engine.py tests/unit/test_debugger_server.py tests/unit/test_windbg.py` |
+| `tools/setup/*`, `build.gradle`, `pom.xml` | `tests/unit/test_setup_cli.py tests/unit/test_setup_ghidra.py tests/unit/test_gradle_tasks.py tests/unit/test_version_bump.py tests/unit/test_project_consistency.py` |
+| `tests/endpoints.json` hand-edit | Offline (Java) — `EndpointsJsonParityTest` verifies every `@McpTool` is listed and hand-authored descriptions are preserved |
+| CLI: `bridge_mcp_ghidra.py --transport`, `tools.setup` subcommands | `tests/unit/test_setup_cli.py` + manual invocation |
+
+### Commands
+
+**Unit (always cheap, run by default):**
+
+```text
+pytest tests/unit/ --no-cov
+```
+
+**Offline Java (scanner + endpoints.json parity, ~11 tests, <1s):**
+
+```text
+# Gradle
+./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
+# Maven
+mvn test -Dtest='com.xebyte.offline.*Test'
+```
+
+**Offline Python (no Ghidra needed — the whole performance/ dir minus 4 integration-flavored files):**
+
+```text
+pytest tests/performance/ \
+  --ignore=tests/performance/test_batch_scoring_consistency.py \
+  --ignore=tests/performance/test_health_endpoint.py \
+  --ignore=tests/performance/test_http_concurrency.py \
+  --ignore=tests/performance/test_listing_consistency.py \
+  --no-cov
+```
+
+(The four excluded files hit `http://127.0.0.1:8089` and need live Ghidra.)
+
+**Integration (Ghidra running on 8089 with a binary open):**
+
+```text
+# Java
+./gradlew test -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC   # or: mvn test
+# Python — subset by marker
+pytest tests/ -m readonly          # safe, no writes
+pytest tests/ -m safe_write        # identity writes only
+pytest tests/                      # full suite, includes mutating tests
+```
+
+### Known pre-existing failures
+
+- `tests/performance/test_worker_watchdog.py` — three tests reference `WorkerManager._watchdog_stop`, which no longer exists. Failures are unrelated to most changes; ignore unless editing the watchdog itself.
+
+### Catalog drift
+
+If `EndpointsJsonParityTest` fails after `@McpTool` edits, regenerate `tests/endpoints.json` from the scanner (preserves hand-authored descriptions and hand-registered routes):
+
+```text
+mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true
+```
 
 ## Key Gotchas
 

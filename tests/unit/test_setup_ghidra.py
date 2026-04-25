@@ -33,6 +33,7 @@ def test_patch_frontend_tool_config_adds_plugin_to_self_closing_utility_block():
     assert modified is True
     assert PLUGIN_CLASS in updated
     assert '<PACKAGE NAME="Utility">' in updated
+    assert '<EXTENSION NAME="GhidraMCP" />' in updated
 
 
 def test_patch_frontend_tool_config_removes_stale_package_and_inserts_plugin():
@@ -51,6 +52,7 @@ def test_patch_frontend_tool_config_removes_stale_package_and_inserts_plugin():
     assert 'PACKAGE NAME="GhidraMCP"' not in updated
     assert PLUGIN_CLASS in updated
     assert updated.count(PLUGIN_CLASS) == 1
+    assert '<EXTENSION NAME="GhidraMCP" />' in updated
 
 
 def test_patch_codebrowser_tcd_removes_ghidra_mcp_package_block():
@@ -67,6 +69,7 @@ def test_patch_codebrowser_tcd_removes_ghidra_mcp_package_block():
     assert modified is True
     assert PLUGIN_CLASS not in updated
     assert 'PACKAGE NAME="GhidraMCP"' not in updated
+    assert '<EXTENSION NAME="GhidraMCP" />' in updated
 
 
 def test_resolve_ghidra_user_dir_prefers_matching_public_dir(tmp_path: Path):
@@ -359,10 +362,15 @@ def test_run_deploy_tests_dispatches_release_tier(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(ghidra, "run_benchmark_read_test", lambda *args: calls.append("read"))
     monkeypatch.setattr(ghidra, "run_benchmark_write_test", lambda *args: calls.append("write"))
     monkeypatch.setattr(ghidra, "run_release_regression_tests", lambda *args: calls.append("release"))
+    monkeypatch.setattr(
+        ghidra,
+        "_mcp_request",
+        lambda *args, **kwargs: calls.append("prompt_policy") or (200, {"enabled": True}),
+    )
 
     run_deploy_tests(Path("C:/repo"), "http://127.0.0.1:8089", ["release"])
 
-    assert calls == ["smoke", "release"]
+    assert calls == ["smoke", "prompt_policy", "release"]
 
 
 def test_run_deploy_tests_default_does_not_import_benchmark(monkeypatch: pytest.MonkeyPatch):

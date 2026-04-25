@@ -1,7 +1,7 @@
 {
-  "version": "5.5.0",
+  "version": "5.6.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 222,
+  "total_endpoints": 225,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -391,11 +391,11 @@
     {
       "path": "/close_program",
       "method": "POST",
-      "category": "headless",
+      "category": "program",
       "params": [
         "name"
       ],
-      "description": "Close a loaded program and free its resources"
+      "description": "Close an open program by project path or name"
     },
     {
       "path": "/close_project",
@@ -608,6 +608,21 @@
         "program"
       ],
       "description": "List available debugger launch/attach options for the current program"
+    },
+    {
+      "path": "/debugger/launch",
+      "method": "POST",
+      "category": "debugger",
+      "params": [
+        "executable_path",
+        "args",
+        "cwd",
+        "timeout_seconds",
+        "program",
+        "offer",
+        "python_executable"
+      ],
+      "description": "Launch an executable through Ghidra's Trace RMI debugger launcher"
     },
     {
       "path": "/debugger/list_breakpoints",
@@ -1743,6 +1758,17 @@
       "description": "Get detailed project info including running tools and open programs"
     },
     {
+      "path": "/prompt_policy",
+      "method": "POST",
+      "category": "system",
+      "params": [
+        "action",
+        "reason",
+        "seconds"
+      ],
+      "description": "Temporarily enable, disable, or query scoped automation prompt handling"
+    },
+    {
       "path": "/read_memory",
       "method": "GET",
       "category": "analysis",
@@ -1917,6 +1943,13 @@
         "program"
       ],
       "description": "Save current program"
+    },
+    {
+      "path": "/save_all_programs",
+      "method": "GET",
+      "category": "program",
+      "params": [],
+      "description": "Save all open programs"
     },
     {
       "path": "/search_byte_patterns",
