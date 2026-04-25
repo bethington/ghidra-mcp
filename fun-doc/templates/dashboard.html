@@ -984,11 +984,51 @@
                         <button class="btn" onclick="dismissPane('${workerId}')" style="display:none" id="wp-dismiss-${workerId}">X</button>
                     </div>
                 </div>
+                <div class="wp-config" id="wp-config-${workerId}" style="display:none; padding:0.15rem 0.5rem; font-family: var(--font-mono); font-size: 0.58rem; color: var(--text-secondary); border-bottom: 1px solid var(--border-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
                 <div class="worker-pane-output" id="wp-out-${workerId}"></div>
             `;
             grid.appendChild(pane);
             workerPanes[workerId] = {element: pane, output: pane.querySelector('.worker-pane-output')};
             return workerPanes[workerId];
+        }
+
+        // Render the per-worker frozen-config sub-line. Called from the
+        // worker_status handler whenever a worker's config_snapshot field
+        // updates. Sub-line is hidden when the worker has no snapshot
+        // (legacy/CLI workers — pre-snapshot behavior).
+        function renderWorkerConfig(workerId, snap) {
+            const el = document.getElementById(`wp-config-${workerId}`);
+            if (!el) return;
+            if (!snap || typeof snap !== 'object') {
+                el.style.display = 'none';
+                el.textContent = '';
+                return;
+            }
+            const provs = snap.providers || {};
+            const primary = snap.primary_provider;
+            const primaryEntry = provs[primary] || {};
+            const tokens = [];
+            // Model from FULL mode for the primary provider — what the worker
+            // actually uses unless it switches to FIX/VERIFY mid-run.
+            const fullModel = (primaryEntry.models || {}).FULL;
+            if (fullModel) tokens.push(fullModel);
+            if (primaryEntry.max_turns !== undefined) tokens.push(`t:${primaryEntry.max_turns}`);
+            // Audit policy. "off" if null/undefined, otherwise show provider + min-delta.
+            if (snap.audit_provider) {
+                tokens.push(`audit:${snap.audit_provider} Δ${snap.audit_min_delta}`);
+            } else {
+                tokens.push('audit:off');
+            }
+            // Escalation target.
+            if (snap.complexity_handoff_provider) {
+                tokens.push(`esc:${snap.complexity_handoff_provider}`);
+            } else {
+                tokens.push('esc:off');
+            }
+            // good_enough is a numeric threshold; show as good@N.
+            if (snap.good_enough_score !== undefined) tokens.push(`good@${snap.good_enough_score}`);
+            el.textContent = tokens.join(' · ');
+            el.style.display = '';
         }
 
         function appendToPane(workerId, text, type) {
@@ -1240,22 +1280,79 @@
             const auditDelta = auditDeltaEl ? (parseInt(auditDeltaEl.value) || 5) : 5;
             const providerMaxTurns = collectProviderMaxTurns();
             const providerModels = collectProviderModels();
+            const newConfig = {
+                good_enough_score: good,
+                require_scored: cold,
+                complexity_handoff_provider: handoff === 'off' ? null : handoff,
+                complexity_handoff_max: handoffMax,
+                debug_mode: debug,
+                audit_provider: audit === 'off' ? null : audit,
+                audit_min_delta: auditDelta,
+                provider_max_turns: providerMaxTurns,
+                provider_models: providerModels,
+            };
             await fetch('/api/queue/config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    good_enough_score: good,
-                    require_scored: cold,
-                    complexity_handoff_provider: handoff === 'off' ? null : handoff,
-                    complexity_handoff_max: handoffMax,
-                    debug_mode: debug,
-                    audit_provider: audit === 'off' ? null : audit,
-                    audit_min_delta: auditDelta,
-                    provider_max_turns: providerMaxTurns,
-                    provider_models: providerModels,
-                }),
+                body: JSON.stringify(newConfig),
             });
+            // Toast informing the user that running workers keep their
+            // frozen snapshots — the new config applies to NEXT workers.
+            // Only fires when at least one running worker's snapshot
+            // diverges from what was just saved; if every running worker
+            // already matches (or there are no running workers), the save
+            // was a no-op for everyone and the toast would just be noise.
+            const drifted = countDriftedWorkers(newConfig);
+            if (drifted > 0) {
+                showBanner(
+                    `Config saved. ${drifted} running worker${drifted === 1 ? '' : 's'} ` +
+                    `will keep ${drifted === 1 ? 'its' : 'their'} current settings until ` +
+                    `restarted. New workers will use the updated config.`
+                );
+                setTimeout(hideBanner, 6000);
+            }
             // queue_changed event will trigger a refreshStats which repaints the queue
+        }
+
+        // Compare each running worker's frozen snapshot against the config
+        // the user just saved. Returns the count of workers whose snapshot
+        // differs from the new config in any of the snapshotted fields.
+        // The cached worker_status payload (stamped by the worker_status
+        // socket handler) is the source of truth for current snapshots.
+        function countDriftedWorkers(newConfig) {
+            const workers = window.__lastWorkerStatus || [];
+            let count = 0;
+            for (const w of workers) {
+                if (!w || (w.status !== 'running' && w.status !== 'starting')) continue;
+                const snap = w.config_snapshot;
+                if (!snap) continue;  // legacy worker, no snapshot to drift
+                if (snapshotDiffersFromConfig(snap, newConfig)) count++;
+            }
+            return count;
+        }
+
+        function snapshotDiffersFromConfig(snap, cfg) {
+            if (snap.good_enough_score !== cfg.good_enough_score) return true;
+            if ((snap.audit_provider || null) !== (cfg.audit_provider || null)) return true;
+            if (snap.audit_min_delta !== cfg.audit_min_delta) return true;
+            if ((snap.complexity_handoff_provider || null) !==
+                (cfg.complexity_handoff_provider || null)) return true;
+            if (snap.complexity_handoff_max !== cfg.complexity_handoff_max) return true;
+            // Per-provider drift: if the snapshot captured a provider that
+            // appears in the new config with a different max_turns or model
+            // slice, that's drift the user might want to know about.
+            const snapProvs = snap.providers || {};
+            for (const provName of Object.keys(snapProvs)) {
+                const snapEntry = snapProvs[provName] || {};
+                const cfgTurns = (cfg.provider_max_turns || {})[provName];
+                if (cfgTurns !== undefined && cfgTurns !== snapEntry.max_turns) return true;
+                const cfgModels = (cfg.provider_models || {})[provName] || {};
+                const snapModels = snapEntry.models || {};
+                for (const mode of ['FULL', 'FIX', 'VERIFY']) {
+                    if ((cfgModels[mode] || '') !== (snapModels[mode] || '')) return true;
+                }
+            }
+            return false;
         }
 
         function collectProviderMaxTurns() {
@@ -1460,7 +1557,14 @@
                     const restoredStr = w.restored ? 'restored | ' : '';
                     status.textContent = `${restoredStr}${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${timeoutStr}${cur ? ' | ' + cur : ''}`;
                 }
+                // Snapshot sub-line. Frozen at worker start, never changes
+                // for this worker. Hidden when no snapshot present.
+                renderWorkerConfig(w.id, w.config_snapshot);
             });
+            // Cache the latest worker_status payload so the config-save
+            // toast (Q5) can compare current snapshots against the new
+            // queue config without an extra round-trip.
+            window.__lastWorkerStatus = workers;
             // Show/hide Stop All button based on active workers
             const activeCount = workers.filter(w => w.status === 'running' || w.status === 'stopping').length;
             const stopAllBtn = document.getElementById('btnStopAll');
