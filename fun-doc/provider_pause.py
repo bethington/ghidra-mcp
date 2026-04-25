@@ -322,21 +322,17 @@ class ProviderPauseManager:
 
     def all_active(self) -> list:
         """Return list of (provider, model, paused_until_iso, reason) for
-        every active pause. Used by the dashboard."""
-        now = datetime.now()
-        with self._lock:
-            stale = [k for k, (until, _) in self._entries.items() if until <= now]
-            for k in stale:
-                self._entries.pop(k)
-            if stale:
-                self._save_locked()
-            out = [
-                (p, m, until.isoformat(), reason)
-                for (p, m), (until, reason) in self._entries.items()
-            ]
-        if stale:
-            self._notify()
-        return out
+        every active pause. Used by the dashboard.
+
+        Splits compute-from-state and notify steps so a callback that calls
+        back into all_active() doesn't recurse: _compute_active_locked is
+        called under the lock and returns a snapshot, _notify is invoked
+        once with that snapshot if any entries were pruned.
+        """
+        snapshot, pruned = self._compute_active_locked()
+        if pruned:
+            self._notify(snapshot)
+        return snapshot
 
     def prune_expired(self) -> int:
         """Drop any entries whose paused_until is in the past. Returns
@@ -402,12 +398,36 @@ class ProviderPauseManager:
                 pass
         tmp.replace(path)
 
-    def _notify(self) -> None:
+    def _compute_active_locked(self) -> tuple[list, bool]:
+        """Return (snapshot, pruned). Acquires the lock once: prunes expired
+        entries, persists if any were dropped, and snapshots the surviving
+        entries. Used by all_active() and _notify() so callbacks can't cause
+        recursion via all_active() -> _notify() -> all_active()."""
+        now = datetime.now()
+        with self._lock:
+            stale = [k for k, (until, _) in self._entries.items() if until <= now]
+            for k in stale:
+                self._entries.pop(k)
+            if stale:
+                self._save_locked()
+            snapshot = [
+                (p, m, until.isoformat(), reason)
+                for (p, m), (until, reason) in self._entries.items()
+            ]
+        return snapshot, bool(stale)
+
+    def _notify(self, snapshot=None) -> None:
+        """Fire the on_change callback with a snapshot of active entries.
+        When the caller already has a snapshot in hand (e.g., post-install),
+        pass it in to avoid a redundant compute. When None, compute fresh
+        without re-entering all_active() (which would itself call _notify)."""
         cb = self._on_change
         if cb is None:
             return
+        if snapshot is None:
+            snapshot, _ = self._compute_active_locked()
         try:
-            cb(self.all_active())
+            cb(snapshot)
         except Exception:  # noqa: BLE001 — callbacks must never break the manager
             pass
 

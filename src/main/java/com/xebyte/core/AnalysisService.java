@@ -64,6 +64,47 @@ public class AnalysisService {
     }
 
     // ========================================================================
+    // Per-program tokenized-name cache (Copilot review feedback on PR #168)
+    // ========================================================================
+    // The name_collision deduction below would otherwise tokenize every
+    // function name in the program on every scoring call — O(n²) per
+    // binary-wide rescore. We cache the precomputed tokens per Program
+    // with a short TTL so batch scoring amortizes the work. WeakHashMap
+    // lets the entries get GC'd when a Program closes; the synchronized
+    // wrapper makes concurrent access safe.
+
+    private static final Map<Program, ProgramNameCache> NAME_CACHE =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+    private static final long NAME_CACHE_TTL_MS = 30_000L;
+
+    private static final class ProgramNameCache {
+        final List<NamingConventions.TokenizedName> tokenized;
+        final long timestamp;
+        ProgramNameCache(List<NamingConventions.TokenizedName> tokenized, long ts) {
+            this.tokenized = tokenized;
+            this.timestamp = ts;
+        }
+    }
+
+    private static List<NamingConventions.TokenizedName> getProgramTokenizedNames(Program program) {
+        if (program == null) return java.util.Collections.emptyList();
+        long now = System.currentTimeMillis();
+        ProgramNameCache cached = NAME_CACHE.get(program);
+        if (cached != null && (now - cached.timestamp) < NAME_CACHE_TTL_MS) {
+            return cached.tokenized;
+        }
+        List<String> names = new ArrayList<>();
+        for (Function f : program.getFunctionManager().getFunctions(true)) {
+            String n = f.getName();
+            if (n != null && !n.isEmpty()) names.add(n);
+        }
+        List<NamingConventions.TokenizedName> tokenized =
+                NamingConventions.precomputeTokenized(names);
+        NAME_CACHE.put(program, new ProgramNameCache(tokenized, now));
+        return tokenized;
+    }
+
+    // ========================================================================
     // Function classification utility
     // ========================================================================
 
@@ -2466,17 +2507,17 @@ public class AnalysisService {
             }
 
             // Token-subset collision against any other function in this
-            // program (same module-prefix scope). Iterates the program's
-            // function manager — fast at typical sizes (<10k functions).
-            ghidra.program.model.listing.Program owner = func.getProgram();
-            if (owner != null) {
-                List<String> otherNames = new ArrayList<>();
-                for (Function other : owner.getFunctionManager().getFunctions(true)) {
-                    if (other == func) continue;
-                    String n = other.getName();
-                    if (n != null && !n.isEmpty()) otherNames.add(n);
-                }
-                String collidesWith = NamingConventions.findTokenSubsetCollision(name, otherNames);
+            // program (same module-prefix scope). Uses a process-wide
+            // WeakHashMap cache (TTL 30s) of precomputed token-sets so
+            // batch scoring amortizes the per-name tokenization cost
+            // across calls (Copilot review on PR #168 flagged the prior
+            // O(n²) pattern of re-tokenizing every name on every score).
+            Program owner = func.getProgram();
+            List<NamingConventions.TokenizedName> tokenizedNames =
+                    getProgramTokenizedNames(owner);
+            if (!tokenizedNames.isEmpty()) {
+                String collidesWith = NamingConventions.findTokenSubsetCollisionPrecomputed(
+                        name, tokenizedNames);
                 if (collidesWith != null) {
                     fixablePenalty += 10;
                     breakdown.add(deductionItem("name_collision", 10.0, true, 1,

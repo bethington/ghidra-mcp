@@ -348,3 +348,44 @@ def test_on_change_callback_exception_does_not_break_install(tmp_path):
     # Should not raise.
     mgr.install("gemini", "gemini-2.5-pro", pp.ResetInfo(60.0, "x"))
     assert mgr.is_paused("gemini", "gemini-2.5-pro")
+
+
+def test_callback_calling_all_active_does_not_recurse(tmp_path):
+    """Copilot review feedback (PR #168 / provider_pause.py:339): a callback
+    that itself calls back into all_active() must NOT trigger a second
+    notify cycle. Pre-fix: all_active() -> _notify() -> cb(all_active())
+    -> all_active() -> _notify() -> ... — duplicate work and possible
+    recursion. Post-fix: _compute_active_locked separates compute from
+    notify so a callback that re-queries the manager is just one extra
+    read with no notify side-effect."""
+    mgr = _make_mgr(tmp_path)
+    notify_count = {"n": 0}
+
+    def cb(active):
+        notify_count["n"] += 1
+        # Callback re-queries the manager — should NOT trigger another notify.
+        mgr.all_active()
+        mgr.is_paused("gemini", "gemini-2.5-pro")
+
+    # Install a valid future pause first (set_on_change is None at this
+    # point, so no notify fires for the install).
+    mgr.install("gemini", "gemini-2.5-pro", pp.ResetInfo(60.0, "test"))
+    # Now expire the entry by directly mutating its paused_until. This is
+    # the deterministic way to land in the "stale entry to be pruned" branch
+    # of _compute_active_locked without sleeping or relying on jitter.
+    with mgr._lock:
+        until, reason = mgr._entries[("gemini", "gemini-2.5-pro")]
+        mgr._entries[("gemini", "gemini-2.5-pro")] = (
+            until - timedelta(seconds=120), reason
+        )
+
+    mgr.set_on_change(cb)
+
+    # all_active prunes the stale entry and fires _notify once. The cb
+    # then calls all_active and is_paused — both must be no-op for notify.
+    snapshot = mgr.all_active()
+    assert snapshot == []
+    assert notify_count["n"] == 1, (
+        "Expected exactly one notify; pre-fix would have produced 2+ via the "
+        "all_active <-> _notify recursion."
+    )

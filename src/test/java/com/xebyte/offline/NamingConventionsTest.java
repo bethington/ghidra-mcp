@@ -43,6 +43,28 @@ public class NamingConventionsTest extends TestCase {
         assertTrue(NamingConventions.tokenizeFunctionName("processData").isEmpty());
     }
 
+    public void testTokenizeRejectsNamesWithInternalUnderscores() {
+        // Validates the PASCAL_CASE pattern check (Copilot review feedback):
+        // names that have a module prefix stripped but still contain underscores
+        // in the main part are not valid PascalCase and must not tokenize.
+        assertTrue(NamingConventions.tokenizeFunctionName("DATATBLS_Compile_Table").isEmpty());
+        assertTrue(NamingConventions.tokenizeFunctionName("Compile_Table").isEmpty());
+    }
+
+    public void testTokenizeRejectsLowercaseAfterPrefix() {
+        // "DATATBLS_compileTable" is invalid: the part after the prefix
+        // doesn't start with uppercase.
+        assertTrue(NamingConventions.tokenizeFunctionName("DATATBLS_compileTable").isEmpty());
+    }
+
+    public void testTokenizeKeepsDigitRunsAttachedToWord() {
+        // Copilot review feedback: confirm the documented behavior — digits
+        // stay glued to the preceding word rather than starting a new token.
+        // 'Utf8DecodeBlock' -> [Utf8, Decode, Block] (Utf8 is one token).
+        assertEquals(java.util.Arrays.asList("Utf8", "Decode", "Block"),
+                NamingConventions.tokenizeFunctionName("Utf8DecodeBlock"));
+    }
+
     // ---------- getVerbTier ----------
 
     public void testTier1VerbsClassified() {
@@ -123,6 +145,21 @@ public class NamingConventionsTest extends TestCase {
         NameQualityResult r = NamingConventions.checkFunctionNameQuality("GetData");
         assertFalse(r.ok);
         assertEquals("weak_noun_only", r.issue);
+    }
+
+    public void testTier0VerbWithWeakNounOnlyRejected() {
+        // Copilot review feedback: a Tier-0 (unknown) verb with only weak nouns
+        // (e.g., 'FrobnicateData') was previously slipping through. The class
+        // doc says Tier 0 follows Tier 2 semantics; the weak_noun_only check
+        // now covers it.
+        NameQualityResult r = NamingConventions.checkFunctionNameQuality("FrobnicateData");
+        assertFalse(r.ok);
+        assertEquals("weak_noun_only", r.issue);
+    }
+
+    public void testTier0VerbWithStrongSpecifierAccepted() {
+        // Sanity check: an unknown verb with a non-weak specifier still passes.
+        assertTrue(NamingConventions.checkFunctionNameQuality("FrobnicatePacket").ok);
     }
 
     public void testSingleTokenNameRejected() {

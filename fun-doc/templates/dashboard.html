@@ -1250,6 +1250,13 @@
             el.style.display = '';
         }
 
+        // Cap the number of body lines per function block so a verbose run
+        // (e.g., 200+ tool calls) can't accumulate unbounded DOM nodes inside
+        // one .fn-block.body. Older entries get trimmed once the cap is hit.
+        // Copilot review feedback on PR #168 flagged the prior pruning logic
+        // as only counting top-level blocks — one block could blow up alone.
+        const FN_BLOCK_BODY_MAX_LINES = 300;
+
         function appendToPane(workerId, text, type) {
             const pane = workerPanes[workerId];
             if (!pane) return;
@@ -1265,6 +1272,12 @@
             // arrive outside a function — e.g. worker startup lines).
             const target = (pane.currentFnBlock && pane.currentFnBlock.body) || pane.output;
             target.appendChild(el);
+            // Per-block trim (within the active fn-block.body).
+            if (pane.currentFnBlock && pane.currentFnBlock.body
+                    && pane.currentFnBlock.body.children.length > FN_BLOCK_BODY_MAX_LINES) {
+                pane.currentFnBlock.body.removeChild(pane.currentFnBlock.body.firstChild);
+            }
+            // Top-level trim (bare pane lines + total fn-blocks).
             if (pane.output.children.length > 200) pane.output.removeChild(pane.output.firstChild);
             pane.output.scrollTop = pane.output.scrollHeight;
         }

@@ -175,7 +175,10 @@ public final class NamingConventions {
      * Tokenize a PascalCase name into its component words.
      * "GetPlayerHealth" -> [Get, Player, Health].
      * "DATATBLS_CompileTxtDataTable" -> [Compile, Txt, Data, Table] (prefix stripped).
-     * Returns an empty list for non-PascalCase or null inputs.
+     * Returns an empty list for non-PascalCase, null, or empty inputs. The
+     * main part (after stripping any UPPERCASE_ prefix) must match the
+     * {@link #PASCAL_CASE} pattern — names with internal underscores or
+     * lowercase starts after the prefix would otherwise be mis-tokenized.
      */
     public static List<String> tokenizeFunctionName(String name) {
         if (name == null || name.isEmpty()) return List.of();
@@ -184,11 +187,12 @@ public final class NamingConventions {
         if (MODULE_PREFIX.matcher(name).matches()) {
             mainName = name.substring(name.indexOf('_') + 1);
         }
-        if (!Character.isUpperCase(mainName.charAt(0))) return List.of();
+        if (mainName.isEmpty() || !PASCAL_CASE.matcher(mainName).matches()) return List.of();
         List<String> tokens = new ArrayList<>();
         int start = 0;
         for (int i = 1; i < mainName.length(); i++) {
-            // New token starts at every uppercase char OR every digit run boundary.
+            // New token starts at every uppercase char. Embedded digit
+            // runs (e.g., "UTF8") stay attached to the preceding word.
             if (Character.isUpperCase(mainName.charAt(i))) {
                 tokens.add(mainName.substring(start, i));
                 start = i;
@@ -239,15 +243,17 @@ public final class NamingConventions {
                     "or add 2 concrete specifier tokens describing what is being processed (e.g., 'ProcessNetworkPacket' instead of 'ProcessData')."
             );
         }
-        if ((tier == 1 || tier == 2 || tier == 0) && specifiers == 0 && tokens.size() < 2) {
+        if (specifiers == 0 && tokens.size() < 2) {
             return NameQualityResult.reject(
                     "missing_specifier",
                     "Name '" + name + "' has only one token. Function names need at least one specifier after the verb.",
                     "Add a specifier describing what the function operates on (e.g., 'Get' alone is not enough — try 'GetSize', 'GetPlayerHealth')."
             );
         }
-        // Tier 1/2 with weak-only specifiers (e.g., "GetData") — mid-strength rejection.
-        if ((tier == 1 || tier == 2) && specifiers == 0 && tokens.size() >= 2) {
+        // Tier 1/2/0 with weak-only specifiers (e.g., "GetData", "FrobnicateData")
+        // — mid-strength rejection. Tier 0 (unknown verbs) follow Tier 2
+        // semantics per the class comment, so they share this rule.
+        if (tier != 3 && specifiers == 0 && tokens.size() >= 2) {
             return NameQualityResult.reject(
                     "weak_noun_only",
                     "Name '" + name + "' uses only weak nouns (Data, Info, Stuff, ...) after the verb. " +
@@ -308,6 +314,62 @@ public final class NamingConventions {
     public static String extractModulePrefix(String name) {
         if (name == null || !MODULE_PREFIX.matcher(name).matches()) return null;
         return name.substring(0, name.indexOf('_'));
+    }
+
+    /**
+     * A function name plus its precomputed tokens and module prefix.
+     * Built once per program-scan via {@link #precomputeTokenized(Iterable)};
+     * lets the per-function collision check avoid re-tokenizing every name
+     * in the program on every scoring call (the O(n²) pattern Copilot flagged
+     * on PR #168).
+     */
+    public static final class TokenizedName {
+        public final String name;
+        public final String modulePrefix; // null if none
+        public final Set<String> tokens;
+
+        public TokenizedName(String name) {
+            this.name = name;
+            this.modulePrefix = extractModulePrefix(name);
+            this.tokens = new HashSet<>(tokenizeFunctionName(name));
+        }
+    }
+
+    /** Tokenize a collection of names once for repeated collision checks. */
+    public static List<TokenizedName> precomputeTokenized(Iterable<String> names) {
+        List<TokenizedName> out = new ArrayList<>();
+        if (names == null) return out;
+        for (String n : names) {
+            if (n != null && !n.isEmpty()) out.add(new TokenizedName(n));
+        }
+        return out;
+    }
+
+    /**
+     * Same semantics as {@link #findTokenSubsetCollision} but skips
+     * re-tokenizing each existing name. Use this in hot paths (per-function
+     * scoring) where the precomputed list can be reused across many calls.
+     */
+    public static String findTokenSubsetCollisionPrecomputed(
+            String candidate, List<TokenizedName> precomputed) {
+        if (candidate == null || candidate.isEmpty()) return null;
+        if (precomputed == null || precomputed.isEmpty()) return null;
+        List<String> candTokens = tokenizeFunctionName(candidate);
+        if (candTokens.isEmpty()) return null;
+        Set<String> candSet = new HashSet<>(candTokens);
+        String candPrefix = extractModulePrefix(candidate);
+
+        for (TokenizedName entry : precomputed) {
+            if (entry.name.equals(candidate)) continue;
+            if (!Objects.equals(candPrefix, entry.modulePrefix)) continue;
+            if (entry.tokens.isEmpty()) continue;
+            if (candSet.size() != entry.tokens.size()) {
+                if (entry.tokens.containsAll(candSet) || candSet.containsAll(entry.tokens)) {
+                    return entry.name;
+                }
+            }
+        }
+        return null;
     }
 
     // -----------------------------------------------------------------------
