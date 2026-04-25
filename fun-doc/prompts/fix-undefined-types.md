@@ -11,7 +11,7 @@
 
 ## Recipe
 
-1. **Review the inline variable list** for variables with `undefined*` types
+1. **Review the inline variable list** for variables with `undefined*` types. Skip any variable with `is_phantom: true`; these stack-frame-only/decompiler artifact entries are not typeable through the API even when their type is `undefined4`.
 2. **Determine correct type from usage context** in the decompiled source:
    - `undefined4` used as pointer -> `void *` or specific struct pointer
    - `undefined4` used in arithmetic -> `int` or `uint`
@@ -24,5 +24,5 @@
 5. Scoring is handled externally -- do not call `analyze_function_completeness`.
 
 ## Skip Conditions
-- Phantom variables (`extraout_*`, `in_*`): attempt once, skip on failure. Document in plate comment.
+- Phantom variables (`is_phantom: true`, `extraout_*`, `in_*`, stack-frame-only `local_*`): do not attempt type-setting. Document in plate comment if relevant.
 - Register-only variables: if `set_local_variable_type` fails, document via PRE_COMMENT instead.

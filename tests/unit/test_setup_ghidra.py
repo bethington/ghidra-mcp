@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
 from tools.setup.ghidra import (
+    DEFAULT_MCP_URL,
     PLUGIN_CLASS,
     REQUIRED_GHIDRA_JARS,
     collect_preflight_issues,
     find_plugin_archive,
     patch_codebrowser_tcd,
     patch_frontend_tool_config,
+    resolve_mcp_url,
+    resolve_deploy_test_modes,
     resolve_ghidra_user_dir,
+    run_deploy_tests,
+    run_default_smoke_test,
+    run_endpoint_catalog_test,
+    run_selected_endpoint_contract_test,
 )
 from tools.setup.versioning import VersionInfo
 
@@ -191,3 +199,181 @@ def test_collect_preflight_issues_passes_with_required_files(
     )
 
     assert issues == []
+
+
+def test_resolve_mcp_url_uses_env_url(tmp_path: Path):
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_URL=http://127.0.0.1:9999\n", encoding="utf-8"
+    )
+
+    assert resolve_mcp_url(tmp_path) == "http://127.0.0.1:9999"
+
+
+def test_resolve_mcp_url_builds_from_bind_and_port(tmp_path: Path):
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_BIND_ADDRESS=0.0.0.0\nGHIDRA_MCP_PORT=8090\n",
+        encoding="utf-8",
+    )
+
+    assert resolve_mcp_url(tmp_path) == "http://127.0.0.1:8090"
+
+
+def test_resolve_mcp_url_defaults_when_env_missing(tmp_path: Path):
+    assert resolve_mcp_url(tmp_path) == DEFAULT_MCP_URL
+
+
+def test_resolve_deploy_test_modes_defaults_to_cli_only(tmp_path: Path):
+    assert resolve_deploy_test_modes(tmp_path, ["selected-contract"]) == ["selected-contract"]
+
+
+def test_resolve_deploy_test_modes_reads_local_env(tmp_path: Path):
+    (tmp_path / ".env").write_text(
+        "GHIDRA_MCP_DEPLOY_TESTS=release,endpoint-catalog\n", encoding="utf-8"
+    )
+
+    assert resolve_deploy_test_modes(tmp_path, []) == ["release", "endpoint-catalog"]
+
+
+def test_resolve_deploy_test_modes_can_disable_local_env(tmp_path: Path):
+    (tmp_path / ".env").write_text("GHIDRA_MCP_DEPLOY_TESTS=off\n", encoding="utf-8")
+
+    assert resolve_deploy_test_modes(tmp_path, []) == []
+
+
+def test_run_default_smoke_test_requires_key_tools(tmp_path: Path, monkeypatch):
+    from tools.setup import ghidra
+
+    schema = {
+        "tools": [
+            {"path": f"/{name}"}
+            for name in sorted(ghidra.SMOKE_REQUIRED_TOOLS)
+        ]
+    }
+    monkeypatch.setattr(
+        ghidra,
+        "_mcp_request",
+        lambda repo, url, path, **kwargs: (200, schema),
+    )
+
+    run_default_smoke_test(tmp_path, "http://127.0.0.1:8089")
+
+
+def test_endpoint_catalog_accepts_schema_with_catalog_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from tools.setup import ghidra
+
+    endpoints_dir = tmp_path / "tests"
+    endpoints_dir.mkdir()
+    (endpoints_dir / "endpoints.json").write_text(
+        json.dumps({"endpoints": [{"path": "/one"}, {"path": "/two"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        ghidra,
+        "_mcp_request",
+        lambda repo, url, path, **kwargs: (
+            200,
+            {"tools": [{"path": "/one"}, {"name": "two"}]},
+        ),
+    )
+
+    run_endpoint_catalog_test(tmp_path, "http://127.0.0.1:8089")
+
+
+def test_selected_endpoint_contract_checks_schema_against_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from tools.setup import ghidra
+
+    endpoints_dir = tmp_path / "tests"
+    endpoints_dir.mkdir()
+    selected = sorted(ghidra.RELEASE_CONTRACT_TOOLS)
+    (endpoints_dir / "endpoints.json").write_text(
+        json.dumps(
+            {
+                "endpoints": [
+                    {
+                        "path": f"/{name}",
+                        "method": "POST" if name in {"create_struct", "delete_file"} else "GET",
+                        "params": ["program"] if name != "delete_file" else ["filePath"],
+                    }
+                    for name in selected
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        ghidra,
+        "_mcp_request",
+        lambda repo, url, path, **kwargs: (
+            200,
+            {
+                "tools": [
+                    {
+                        "path": f"/{name}",
+                        "method": "POST" if name in {"create_struct", "delete_file"} else "GET",
+                        "params": (
+                            [{"name": "filePath"}]
+                            if name == "delete_file"
+                            else [{"name": "program"}]
+                        ),
+                    }
+                    for name in selected
+                ]
+            },
+        ),
+    )
+
+    run_selected_endpoint_contract_test(tmp_path, "http://127.0.0.1:8089")
+
+
+def test_selected_endpoint_contract_reports_missing_selected_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from tools.setup import ghidra
+
+    endpoints_dir = tmp_path / "tests"
+    endpoints_dir.mkdir()
+    (endpoints_dir / "endpoints.json").write_text(
+        json.dumps({"endpoints": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        ghidra,
+        "_mcp_request",
+        lambda repo, url, path, **kwargs: (200, {"tools": []}),
+    )
+
+    with pytest.raises(RuntimeError, match="Release schema missing selected"):
+        run_selected_endpoint_contract_test(tmp_path, "http://127.0.0.1:8089")
+
+
+def test_run_deploy_tests_dispatches_release_tier(monkeypatch: pytest.MonkeyPatch):
+    from tools.setup import ghidra
+
+    calls: list[str] = []
+    monkeypatch.setattr(ghidra, "run_default_smoke_test", lambda *args: calls.append("smoke"))
+    monkeypatch.setattr(ghidra, "reset_benchmark_fixture", lambda *args: calls.append("reset"))
+    monkeypatch.setattr(ghidra, "run_benchmark_read_test", lambda *args: calls.append("read"))
+    monkeypatch.setattr(ghidra, "run_benchmark_write_test", lambda *args: calls.append("write"))
+    monkeypatch.setattr(ghidra, "run_release_regression_tests", lambda *args: calls.append("release"))
+
+    run_deploy_tests(Path("C:/repo"), "http://127.0.0.1:8089", ["release"])
+
+    assert calls == ["smoke", "release"]
+
+
+def test_run_deploy_tests_default_does_not_import_benchmark(monkeypatch: pytest.MonkeyPatch):
+    from tools.setup import ghidra
+
+    calls: list[str] = []
+    monkeypatch.setattr(ghidra, "run_default_smoke_test", lambda *args: calls.append("smoke"))
+    monkeypatch.setattr(ghidra, "reset_benchmark_fixture", lambda *args: calls.append("reset"))
+    monkeypatch.setattr(ghidra, "run_benchmark_read_test", lambda *args: calls.append("read"))
+    monkeypatch.setattr(ghidra, "run_benchmark_write_test", lambda *args: calls.append("write"))
+
+    run_deploy_tests(Path("C:/repo"), "http://127.0.0.1:8089", [])
+
+    assert calls == ["smoke"]

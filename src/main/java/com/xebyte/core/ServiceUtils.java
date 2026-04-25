@@ -534,7 +534,7 @@ public final class ServiceUtils {
     public static ProgramOrError getProgramOrError(ProgramProvider provider, String programName) {
         Program program = null;
         if (programName != null && !programName.isEmpty()) {
-            program = provider.resolveProgram(programName);
+            program = provider.getProgram(programName);
         } else {
             program = provider.getCurrentProgram();
         }

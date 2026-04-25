@@ -502,6 +502,37 @@ def get_timeout(endpoint: str, payload: dict | None = None) -> int:
     return base
 
 
+def _coerce_comment_entries(value):
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped: return []
+        try:
+            return _coerce_comment_entries(json.loads(stripped))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return value
+    items = value if isinstance(value, list) else [value] if isinstance(value, dict) and "address" in value else None
+    if items is not None:
+        return [
+            {"address": str(item["address"]), "comment": str(item["comment"])}
+            for item in items
+            if isinstance(item, dict) and item.get("address") is not None and item.get("comment") is not None
+        ]
+    if isinstance(value, dict):
+        return [
+            {"address": str(address), "comment": str(comment.get("comment") if isinstance(comment, dict) else comment)}
+            for address, comment in value.items()
+            if (comment.get("comment") if isinstance(comment, dict) else comment) is not None
+        ]
+    return value
+
+
+def _normalize_post_payload(endpoint: str, data: dict) -> dict:
+    if endpoint.strip("/").split("/")[-1] == "batch_set_comments":
+        data = dict(data)
+        for key in ("decompiler_comments", "disassembly_comments"):
+            data[key] = _coerce_comment_entries(data.get(key, []))
+    return data
+
 def _try_reconnect() -> bool:
     """Try to reconnect to the previously connected project after Ghidra restarts.
 
@@ -631,6 +662,7 @@ def dispatch_post(
     if err:
         return json.dumps({"error": err})
 
+    data = _normalize_post_payload(endpoint, data)
     timeout = get_timeout(endpoint, data)
     for attempt in range(retries):
         try:
@@ -1944,27 +1976,16 @@ def main():
     if args.mcp_port:
         mcp.settings.port = args.mcp_port
 
-    # The MCP SDK's DNS rebinding protection is configured at FastMCP construction
-    # time, before --mcp-host is known.  Patch it now based on the resolved host so
-    # that non-localhost binds don't get a 421 Misdirected Request.
-    _LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "::1"}
-    _WILDCARD_HOSTS = {"0.0.0.0", "::"}
     _host = args.mcp_host
-    if _host not in _LOCALHOST_HOSTS:
-        if _host in _WILDCARD_HOSTS:
-            # Operator is explicitly binding to all interfaces; disable rebinding
-            # protection — network-level isolation is the intended security boundary.
-            mcp.settings.transport_security = TransportSecuritySettings(
-                enable_dns_rebinding_protection=False,
-            )
+    if _host not in {"127.0.0.1", "localhost", "::1"}:
+        if _host in {"0.0.0.0", "::"}:
+            mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
         else:
-            # Explicit non-localhost host: keep protection on but allow that host.
             mcp.settings.transport_security = TransportSecuritySettings(
                 enable_dns_rebinding_protection=True,
                 allowed_hosts=[f"{_host}:*", "localhost:*", "127.0.0.1:*"],
                 allowed_origins=[f"http://{_host}:*", "http://localhost:*", "http://127.0.0.1:*"],
             )
-
     logger.info(f"Starting MCP bridge ({args.transport})")
     if args.transport in ("sse", "streamable-http"):
         host = args.mcp_host

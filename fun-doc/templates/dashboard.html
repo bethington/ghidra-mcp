@@ -153,11 +153,7 @@
         .worker-pane.timeout { border-color: var(--accent-red-light); box-shadow: 0 0 8px rgba(201, 48, 48, 0.2); }
         .worker-pane.focused { border-color: var(--accent-gold); border-width: 2px; box-shadow: 0 0 8px rgba(199, 179, 119, 0.3); }
         .worker-pane.stopping { border-color: var(--color-rare); }
-        .worker-pane.stalled { border-color: var(--accent-red-light); background: rgba(201, 48, 48, 0.08); box-shadow: 0 0 10px rgba(201, 48, 48, 0.35); }
         .worker-pane.finished { border-color: var(--text-muted); opacity: 0.85; }
-        .wp-stale-badge { color: var(--accent-red-light); font-weight: 700; padding: 0 0.3rem; font-family: var(--font-mono); }
-        .wp-stale-badge.kill-fired { color: var(--color-rare); }
-        .wp-phase { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.6rem; padding: 0 0.3rem; }
         .sortable-header { cursor: pointer; user-select: none; white-space: nowrap; }
         .sortable-header:hover { color: var(--accent-gold); }
         .sortable-header span { font-size: 0.6rem; color: var(--accent-gold); }
@@ -1086,7 +1082,9 @@
             getOrCreatePane(d.worker_id, d.provider, d.binary || '');
             appendToPane(
                 d.worker_id,
-                `Worker started: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`,
+                d.restored
+                    ? `Worker restored after restart: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`
+                    : `Worker started: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`,
                 'scan'
             );
             // Show Stop All button when any worker is running
@@ -1412,7 +1410,7 @@
         socket.on('worker_started_ack', d => { /* pane created by worker_started event */ });
         socket.on('worker_error', d => { showBanner(`Worker error: ${d.error}`); setTimeout(hideBanner, 5000); });
         socket.on('worker_stop_ack', d => { /* stop handled by worker_status update */ });
-        socket.on('worker_started', d => addActivity(`Worker ${d.worker_id}: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`, 'scan'));
+        socket.on('worker_started', d => addActivity(`Worker ${d.worker_id}: ${d.provider} ${d.restored ? 'restored ' : ''}${d.continuous ? 'Auto' : 'x' + d.count}`, 'scan'));
         socket.on('worker_progress', d => {
             if (d.current) addActivity(`Worker ${d.worker_id}: ${d.current.name} (${d.completed+1}/${d.total})`, 'scan');
         });
@@ -1421,11 +1419,6 @@
             refreshStats();
         });
         socket.on('provider_timeout', d => addActivity(`Worker ${d.worker_id}: timeout ${d.provider || 'provider'} (${d.timeout_secs || '?'}s)`, 'error'));
-        socket.on('worker_stalled', d => {
-            const mins = Math.floor((d.stale_sec || 0) / 60);
-            const ageStr = mins >= 1 ? `${mins}m` : `${d.stale_sec || '?'}s`;
-            addActivity(`Worker ${d.worker_id} STALLED (${ageStr}, phase=${d.phase || '?'}, killed ${d.subprocesses_killed || 0} subprocess${d.subprocesses_killed === 1 ? '' : 'es'})`, 'error');
-        });
         socket.on('worker_status', workers => {
             // Update pane borders and status text based on worker status.
             // On page refresh the local workerPanes map starts empty but the
@@ -1454,32 +1447,18 @@
                         titleEl.textContent = titleText;
                     }
                 }
-                // Stalled workers (heartbeat silent > threshold) override the
-                // border/background so the user sees at a glance that a worker
-                // is wedged — previously only visible via /api/stats.
-                const baseCls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : 'finished';
-                const stalledCls = w.is_stale ? ' stalled' : '';
-                pane.element.className = `worker-pane ${baseCls}${stalledCls}`;
+                const cls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : 'finished';
+                pane.element.className = `worker-pane ${cls}`;
                 setPaneAlert(w.id, w.last_alert);
                 const done = w.progress.completed + w.progress.skipped + w.progress.failed;
                 const status = document.getElementById(`wp-status-${w.id}`);
                 if (status) {
-                    const esc = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
                     const countStr = w.continuous ? 'auto' : `${done}/${w.count}`;
                     const cur = w.progress.current ? w.progress.current.name : '';
                     const skipStr = w.progress.skipped > 0 ? ` ${w.progress.skipped}skip` : '';
                     const timeoutStr = w.timeout_count > 0 ? ` | ${w.timeout_count} timeout${w.timeout_count > 1 ? 's' : ''}` : '';
-                    const phaseStr = (w.phase && w.status === 'running') ? ` <span class="wp-phase">[${esc(w.phase)}]</span>` : '';
-                    let staleStr = '';
-                    if (w.is_stale && typeof w.stale_sec === 'number') {
-                        const mins = Math.floor(w.stale_sec / 60);
-                        const label = mins >= 1 ? `${mins}m` : `${w.stale_sec}s`;
-                        const killedCls = w.stall_kill_fired ? ' kill-fired' : '';
-                        const killedTag = w.stall_kill_fired ? ' kill-sent' : '';
-                        staleStr = ` <span class="wp-stale-badge${killedCls}">STALLED ${esc(label)}${esc(killedTag)}</span>`;
-                    }
-                    const curStr = cur ? ` | ${esc(cur)}` : '';
-                    status.innerHTML = `${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${timeoutStr}${curStr}${phaseStr}${staleStr}`;
+                    const restoredStr = w.restored ? 'restored | ' : '';
+                    status.textContent = `${restoredStr}${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${timeoutStr}${cur ? ' | ' + cur : ''}`;
                 }
             });
             // Show/hide Stop All button based on active workers

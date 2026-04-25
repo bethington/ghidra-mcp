@@ -119,7 +119,7 @@ Real mode requires Ghidra running with `Benchmark.dll` imported, and whichever p
 python fun-doc/benchmark/build.py
 
 # 2. Import it into the running Ghidra instance. Idempotent — re-running
-#    is a no-op if already imported. Goes to /benchmark/Benchmark.dll by
+#    is a no-op if already imported. Goes to /testing/benchmark/Benchmark.dll by
 #    default; override with FUNDOC_BENCHMARK_PROGRAM.
 python fun-doc/benchmark/setup_ghidra_benchmark.py
 

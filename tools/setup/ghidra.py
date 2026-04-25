@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
 
+from .envfile import load_env_file
 from .maven import find_maven_command
 from .versioning import infer_ghidra_version_from_path, read_pom_versions
 
@@ -41,6 +47,42 @@ REQUIRED_GHIDRA_JARS: tuple[tuple[str, str], ...] = (
 )
 
 PLUGIN_CLASS = "com.xebyte.GhidraMCPPlugin"
+DEFAULT_MCP_URL = "http://127.0.0.1:8089"
+DEFAULT_MCP_WAIT_SECONDS = 120
+DEFAULT_GHIDRA_EXIT_WAIT_SECONDS = 15
+DEFAULT_BENCHMARK_DLL = Path("fun-doc") / "benchmark" / "build" / "Benchmark.dll"
+LEGACY_BENCHMARK_PROGRAM = "/benchmark/Benchmark.dll"
+DEFAULT_BENCHMARK_FOLDER = "/testing/benchmark"
+DEFAULT_BENCHMARK_PROGRAM = f"{DEFAULT_BENCHMARK_FOLDER}/Benchmark.dll"
+DEFAULT_BENCHMARK_FUNCTION = "calc_crc16"
+SMOKE_REQUIRED_TOOLS = {
+    "decompile_function",
+    "get_function_variables",
+    "analyze_function_completeness",
+    "batch_set_comments",
+    "set_local_variable_type",
+    "rename_variables",
+    "save_program",
+    "set_function_prototype",
+    "rename_function_by_address",
+    "search_data_types",
+    "create_struct",
+    "get_struct_layout",
+    "list_open_programs",
+}
+RELEASE_CONTRACT_TOOLS = SMOKE_REQUIRED_TOOLS | {
+    "analysis_status",
+    "create_folder",
+    "delete_file",
+    "import_file",
+    "list_project_files",
+    "list_functions",
+    "search_functions",
+    "get_address_spaces",
+    "list_imports",
+    "list_exports",
+    "list_strings",
+}
 
 
 def ghidra_user_base_dir() -> Path:
@@ -222,7 +264,14 @@ def install_user_extension(
     user_extensions_base.mkdir(parents=True, exist_ok=True)
     user_lib_dir.mkdir(parents=True, exist_ok=True)
     for stale_jar in user_lib_dir.glob("GhidraMCP*.jar"):
-        stale_jar.unlink(missing_ok=True)
+        for attempt in range(10):
+            try:
+                stale_jar.unlink(missing_ok=True)
+                break
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                time.sleep(1)
         print(f"Removed stale plugin jar {stale_jar}")
 
     try:
@@ -283,6 +332,739 @@ def find_plugin_archive(repo_root: Path) -> Path:
 
 def print_command(command: list[str]) -> None:
     print(" ".join(command))
+
+
+def resolve_mcp_url(repo_root: Path) -> str:
+    env_values = load_env_file(repo_root / ".env")
+    if env_values.get("GHIDRA_MCP_URL"):
+        return env_values["GHIDRA_MCP_URL"].rstrip("/")
+    port = env_values.get("GHIDRA_MCP_PORT", "8089").strip() or "8089"
+    bind = env_values.get("GHIDRA_MCP_BIND_ADDRESS", "127.0.0.1").strip()
+    if not bind or bind in {"0.0.0.0", "::"}:
+        bind = "127.0.0.1"
+    return f"http://{bind}:{port}".rstrip("/")
+
+
+def resolve_deploy_test_modes(repo_root: Path, cli_modes: list[str] | None) -> list[str]:
+    modes = list(cli_modes or [])
+    env_values = load_env_file(repo_root / ".env")
+    raw_modes = env_values.get("GHIDRA_MCP_DEPLOY_TESTS", "").strip()
+    if raw_modes and raw_modes.lower() not in {"0", "false", "no", "none", "off"}:
+        modes.extend(
+            mode.strip()
+            for mode in re.split(r"[,;\s]+", raw_modes)
+            if mode.strip()
+        )
+    return list(dict.fromkeys(modes))
+
+
+def _mcp_headers(repo_root: Path) -> dict[str, str]:
+    env_values = load_env_file(repo_root / ".env")
+    token = env_values.get("GHIDRA_MCP_AUTH_TOKEN", "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _mcp_request(
+    repo_root: Path,
+    mcp_url: str,
+    path: str,
+    *,
+    method: str = "GET",
+    data: dict | None = None,
+    params: dict | None = None,
+    timeout: int = 10,
+) -> tuple[int, object]:
+    body = None
+    headers = _mcp_headers(repo_root)
+    if data is not None:
+        body = json.dumps(data).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    url = f"{mcp_url}{path}"
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        text = response.read().decode("utf-8", errors="replace")
+        try:
+            parsed: object = json.loads(text)
+        except ValueError:
+            parsed = text
+        return response.status, parsed
+
+
+def _ensure_mcp_ok(path: str, payload: object) -> None:
+    if isinstance(payload, dict) and payload.get("error"):
+        raise RuntimeError(f"{path} failed: {payload['error']}")
+    if isinstance(payload, str) and payload.lower().startswith("failed"):
+        raise RuntimeError(f"{path} failed: {payload}")
+
+
+def _mcp_error_message(payload: object) -> str:
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if error is not None:
+            return str(error)
+    if isinstance(payload, str):
+        return payload
+    return ""
+
+
+def _expect_mcp_error(path: str, payload: object, required_terms: tuple[str, ...]) -> None:
+    message = _mcp_error_message(payload)
+    if not message:
+        raise RuntimeError(f"{path} was expected to fail but returned: {payload}")
+    lowered = message.lower()
+    missing = [term for term in required_terms if term.lower() not in lowered]
+    if missing:
+        raise RuntimeError(
+            f"{path} error was not actionable enough; missing {missing}. Error: {message}"
+        )
+
+
+def _find_matching_ghidra_processes(ghidra_path: Path) -> list[dict[str, object]]:
+    target = str(ghidra_path.resolve()).lower()
+    if os.name == "nt":
+        command = [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            (
+                "Get-CimInstance Win32_Process | "
+                "Where-Object { $_.Name -match '^(javaw?|ghidra).*' } | "
+                "Select-Object ProcessId,Name,ExecutablePath,CommandLine | "
+                "ConvertTo-Json -Compress"
+            ),
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        if completed.returncode != 0 or not completed.stdout.strip():
+            return []
+        raw = json.loads(completed.stdout)
+        rows = raw if isinstance(raw, list) else [raw]
+        matches = []
+        for row in rows:
+            cmd = str(row.get("CommandLine") or "")
+            name = str(row.get("Name") or "").lower()
+            cmd_lower = cmd.lower()
+            is_ghidra_process = (
+                name in {"java.exe", "javaw.exe", "ghidrarun.bat", "ghidrarun"}
+                and ("ghidra.ghidra" in cmd_lower or "ghidrarun" in cmd_lower)
+            )
+            if target in cmd_lower and is_ghidra_process:
+                matches.append(
+                    {
+                        "pid": int(row["ProcessId"]),
+                        "name": row.get("Name", ""),
+                        "command": cmd,
+                    }
+                )
+        return matches
+    ps = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, check=False)
+    matches = []
+    for line in ps.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        pid_text, _, command = stripped.partition(" ")
+        command_lower = command.lower()
+        if target in command_lower and ("ghidra.ghidra" in command_lower or "ghidrarun" in command_lower):
+            matches.append({"pid": int(pid_text), "name": "process", "command": command})
+    return matches
+
+
+def _terminate_process(pid: int) -> None:
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], check=False)
+    else:
+        os.kill(pid, signal.SIGKILL)
+
+
+def close_running_ghidra_for_deploy(
+    repo_root: Path,
+    ghidra_path: Path,
+    *,
+    mcp_url: str,
+    dry_run: bool = False,
+    wait_seconds: int = DEFAULT_GHIDRA_EXIT_WAIT_SECONDS,
+) -> bool:
+    matches = _find_matching_ghidra_processes(ghidra_path)
+    if not matches:
+        print("No matching running Ghidra process detected.")
+        return False
+    for proc in matches:
+        print(f"Detected running Ghidra PID {proc['pid']}: {proc['command']}")
+    if dry_run:
+        print(f"DRY RUN: save via {mcp_url}/save_program")
+        print(f"DRY RUN: graceful exit via {mcp_url}/exit_ghidra")
+        for proc in matches:
+            print(f"DRY RUN: force-kill PID {proc['pid']} if still running")
+        return True
+
+    try:
+        _mcp_request(repo_root, mcp_url, "/save_program", timeout=60)
+        print("Requested Ghidra program save.")
+    except Exception as exc:
+        print(f"WARNING: save_program failed before deploy: {exc}")
+    try:
+        _mcp_request(repo_root, mcp_url, "/exit_ghidra", timeout=10)
+        print("Requested graceful Ghidra exit.")
+    except Exception as exc:
+        print(f"WARNING: exit_ghidra failed before deploy: {exc}")
+
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        if not _find_matching_ghidra_processes(ghidra_path):
+            print("Ghidra exited cleanly.")
+            return True
+        time.sleep(1)
+    for proc in _find_matching_ghidra_processes(ghidra_path):
+        print(f"Force-killing Ghidra PID {proc['pid']}.")
+        _terminate_process(int(proc["pid"]))
+    return True
+
+
+def wait_for_mcp(
+    repo_root: Path,
+    mcp_url: str,
+    *,
+    timeout_seconds: int = DEFAULT_MCP_WAIT_SECONDS,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        for path in ("/mcp/health", "/health", "/check_connection"):
+            try:
+                status, _payload = _mcp_request(repo_root, mcp_url, path, timeout=5)
+                if status == 200:
+                    print(f"MCP ready at {mcp_url} ({path}).")
+                    return
+            except Exception as exc:
+                last_error = exc
+        time.sleep(2)
+    raise RuntimeError(f"MCP did not become ready at {mcp_url}: {last_error}")
+
+
+def wait_for_project(
+    repo_root: Path,
+    mcp_url: str,
+    *,
+    timeout_seconds: int = DEFAULT_MCP_WAIT_SECONDS,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            _status, payload = _mcp_request(
+                repo_root,
+                mcp_url,
+                "/list_project_files",
+                params={"folder": "/"},
+                timeout=5,
+            )
+            if isinstance(payload, dict) and "error" not in payload:
+                print("Ghidra project is ready.")
+                return
+            last_error = RuntimeError(
+                payload.get("error", str(payload)) if isinstance(payload, dict) else str(payload)
+            )
+        except Exception as exc:
+            last_error = exc
+        time.sleep(2)
+    raise RuntimeError(f"Ghidra project did not become ready: {last_error}")
+
+
+def _schema_tools(schema: object) -> set[str]:
+    if not isinstance(schema, dict):
+        return set()
+    tools = schema.get("tools") or []
+    names = set()
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name")
+        path = tool.get("path")
+        if name:
+            names.add(str(name))
+        if path:
+            names.add(str(path).lstrip("/"))
+    return names
+
+
+def _schema_tool_map(schema: object) -> dict[str, dict]:
+    if not isinstance(schema, dict):
+        return {}
+    result: dict[str, dict] = {}
+    for tool in schema.get("tools") or []:
+        if not isinstance(tool, dict):
+            continue
+        keys = []
+        if tool.get("name"):
+            keys.append(str(tool["name"]))
+        if tool.get("path"):
+            keys.append(str(tool["path"]).lstrip("/"))
+        for key in keys:
+            result[key] = tool
+    return result
+
+
+def run_default_smoke_test(repo_root: Path, mcp_url: str) -> None:
+    _status, schema = _mcp_request(repo_root, mcp_url, "/mcp/schema", timeout=20)
+    tools = _schema_tools(schema)
+    missing = sorted(SMOKE_REQUIRED_TOOLS - tools)
+    if missing:
+        raise RuntimeError(f"MCP schema missing required tools: {', '.join(missing)}")
+    print(f"MCP smoke passed: schema exposes {len(tools)} tools.")
+
+
+def reset_benchmark_fixture(repo_root: Path, mcp_url: str) -> None:
+    benchmark_dll = repo_root / DEFAULT_BENCHMARK_DLL
+    if not benchmark_dll.is_file():
+        print(f"Benchmark.dll missing at {benchmark_dll}; building it now.")
+        subprocess.run(
+            [sys.executable, str(repo_root / "fun-doc" / "benchmark" / "build.py")],
+            cwd=repo_root,
+            check=True,
+        )
+    for program_path in (LEGACY_BENCHMARK_PROGRAM, DEFAULT_BENCHMARK_PROGRAM):
+        _status, payload = _mcp_request(
+            repo_root,
+            mcp_url,
+            "/delete_file",
+            data={"filePath": program_path},
+            method="POST",
+            timeout=30,
+        )
+        _ensure_mcp_ok("/delete_file", payload)
+    _status, payload = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/create_folder",
+        data={"path": DEFAULT_BENCHMARK_FOLDER},
+        method="POST",
+        timeout=30,
+    )
+    _ensure_mcp_ok("/create_folder", payload)
+    _status, payload = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/import_file",
+        data={
+            "file_path": str(benchmark_dll),
+            "project_folder": DEFAULT_BENCHMARK_FOLDER,
+            "language": "x86:LE:32:default",
+            "compiler_spec": "windows",
+            "auto_analyze": True,
+        },
+        method="POST",
+        timeout=120,
+    )
+    _ensure_mcp_ok("/import_file", payload)
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        try:
+            _status, status = _mcp_request(
+                repo_root,
+                mcp_url,
+                "/analysis_status",
+                params={"program": DEFAULT_BENCHMARK_PROGRAM},
+                timeout=10,
+            )
+            _ensure_mcp_ok("/analysis_status", status)
+            state = (status.get("state") or status.get("status")) if isinstance(status, dict) else None
+            is_idle = isinstance(status, dict) and status.get("analyzing") is False
+            if is_idle or state in {"complete", "done", "idle", "finished"}:
+                print(f"Benchmark fixture reset at {DEFAULT_BENCHMARK_PROGRAM}.")
+                return
+        except Exception:
+            pass
+        time.sleep(2)
+    print("WARNING: Benchmark analysis did not report complete within 90s; continuing.")
+
+
+def _list_benchmark_functions(repo_root: Path, mcp_url: str) -> list[tuple[str, str]]:
+    _status, payload = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/list_functions",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM},
+        timeout=60,
+    )
+    _ensure_mcp_ok("/list_functions", payload)
+    functions: list[tuple[str, str]] = []
+    if isinstance(payload, dict):
+        raw_functions = payload.get("functions") or payload.get("results") or []
+        for function in raw_functions:
+            if not isinstance(function, dict):
+                continue
+            name = str(function.get("name") or "")
+            address = function.get("address") or function.get("entry_point")
+            if name and address:
+                functions.append((name, str(address)))
+    elif isinstance(payload, str):
+        for line in payload.splitlines():
+            match = re.match(r"(.+?)\s+at\s+([0-9a-fA-Fx]+)\s*$", line.strip())
+            if match:
+                functions.append((match.group(1), match.group(2)))
+    return functions
+
+
+def _has_non_phantom_local(repo_root: Path, mcp_url: str, address: str) -> bool:
+    _status, variables = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/get_function_variables",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": address},
+        timeout=30,
+    )
+    _ensure_mcp_ok("/get_function_variables", variables)
+    if not isinstance(variables, dict):
+        return False
+    for local in variables.get("locals") or []:
+        if isinstance(local, dict) and local.get("name") and not local.get("is_phantom"):
+            return True
+    return False
+
+
+def _find_benchmark_function(repo_root: Path, mcp_url: str, *, require_local: bool = False) -> str:
+    _status, payload = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/search_functions",
+        params={
+            "program": DEFAULT_BENCHMARK_PROGRAM,
+            "name_pattern": DEFAULT_BENCHMARK_FUNCTION,
+            "limit": 10,
+        },
+        timeout=30,
+    )
+    functions = []
+    if isinstance(payload, dict):
+        _ensure_mcp_ok("/search_functions", payload)
+        functions = payload.get("results") or payload.get("functions") or []
+    for function in functions:
+        if isinstance(function, dict) and function.get("name") == DEFAULT_BENCHMARK_FUNCTION:
+            address = function.get("address") or function.get("entry_point")
+            if address and (not require_local or _has_non_phantom_local(repo_root, mcp_url, str(address))):
+                return str(address)
+
+    fallback_functions = _list_benchmark_functions(repo_root, mcp_url)
+    if require_local:
+        for _name, address in fallback_functions:
+            if _has_non_phantom_local(repo_root, mcp_url, address):
+                return address
+    elif fallback_functions:
+        return fallback_functions[0][1]
+
+    suffix = " with a non-phantom local" if require_local else ""
+    raise RuntimeError(f"Could not find a benchmark function{suffix} in {DEFAULT_BENCHMARK_PROGRAM}")
+
+
+def run_benchmark_read_test(repo_root: Path, mcp_url: str) -> None:
+    address = _find_benchmark_function(repo_root, mcp_url)
+    read_calls = [
+        ("/list_open_programs", {"program": DEFAULT_BENCHMARK_PROGRAM}),
+        ("/search_data_types", {"program": DEFAULT_BENCHMARK_PROGRAM, "pattern": "int", "limit": 5}),
+        ("/decompile_function", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
+        ("/get_function_variables", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
+        ("/analyze_function_completeness", {"program": DEFAULT_BENCHMARK_PROGRAM, "function_address": address}),
+        ("/get_plate_comment", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
+        ("/save_program", {"program": DEFAULT_BENCHMARK_PROGRAM}),
+    ]
+    for path, params in read_calls:
+        _status, payload = _mcp_request(repo_root, mcp_url, path, params=params, timeout=60)
+        _ensure_mcp_ok(path, payload)
+    struct_name = f"DeploySmokeStruct_{int(time.time())}"
+    _status, payload = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/create_struct",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM},
+        data={
+            "name": struct_name,
+            "fields": [{"name": "dwValue", "type": "uint", "offset": 0}],
+        },
+        method="POST",
+        timeout=60,
+    )
+    _ensure_mcp_ok("/create_struct", payload)
+    _status, payload = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/get_struct_layout",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM, "struct_name": struct_name},
+        timeout=30,
+    )
+    _ensure_mcp_ok("/get_struct_layout", payload)
+    print(f"Benchmark read/create test passed on benchmark function @ {address}.")
+
+
+def run_benchmark_extended_read_test(repo_root: Path, mcp_url: str) -> None:
+    address = _find_benchmark_function(repo_root, mcp_url)
+    read_calls = [
+        ("/list_project_files", {"folder": DEFAULT_BENCHMARK_FOLDER}),
+        ("/analysis_status", {"program": DEFAULT_BENCHMARK_PROGRAM}),
+        ("/list_functions", {"program": DEFAULT_BENCHMARK_PROGRAM}),
+        (
+            "/search_functions",
+            {"program": DEFAULT_BENCHMARK_PROGRAM, "name_pattern": "FUN_", "limit": 10},
+        ),
+        ("/get_address_spaces", {"program": DEFAULT_BENCHMARK_PROGRAM}),
+        ("/list_imports", {"program": DEFAULT_BENCHMARK_PROGRAM}),
+        ("/list_exports", {"program": DEFAULT_BENCHMARK_PROGRAM}),
+        ("/list_strings", {"program": DEFAULT_BENCHMARK_PROGRAM, "limit": 10}),
+        ("/decompile_function", {"program": DEFAULT_BENCHMARK_PROGRAM, "address": address}),
+    ]
+    for path, params in read_calls:
+        _status, payload = _mcp_request(repo_root, mcp_url, path, params=params, timeout=60)
+        _ensure_mcp_ok(path, payload)
+    print(f"Benchmark extended read test passed on benchmark function @ {address}.")
+
+
+def run_benchmark_write_test(repo_root: Path, mcp_url: str) -> None:
+    address = _find_benchmark_function(repo_root, mcp_url, require_local=True)
+    _status, variables = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/get_function_variables",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": address},
+        timeout=30,
+    )
+    _ensure_mcp_ok("/get_function_variables", variables)
+    local_name = None
+    if isinstance(variables, dict):
+        for local in variables.get("locals") or []:
+            if isinstance(local, dict) and local.get("name") and not local.get("is_phantom"):
+                local_name = str(local["name"])
+                break
+    if not local_name:
+        raise RuntimeError("No benchmark local variable available for write smoke")
+    write_calls = [
+        (
+            "/batch_set_comments",
+            {
+                "address": address,
+                "plate_comment": "GhidraMCP deploy benchmark write probe",
+                "disassembly_comments": [{"address": address, "comment": "deploy smoke"}],
+            },
+        ),
+        (
+            "/set_local_variable_type",
+            {
+                "function_address": address,
+                "variable_name": local_name,
+                "new_type": "uint",
+            },
+        ),
+        (
+            "/rename_variables",
+            {
+                "function_address": address,
+                "variable_renames": {local_name: "dwDeploySmoke"},
+                "force_individual": True,
+            },
+        ),
+        (
+            "/rename_function_by_address",
+            {
+                "function_address": address,
+                "new_name": "DeploySmokeCalcCrc16",
+            },
+        ),
+        (
+            "/set_function_prototype",
+            {
+                "function_address": address,
+                "prototype": "ushort DeploySmokeCalcCrc16(uchar * data, uint length)",
+                "calling_convention": "__stdcall",
+            },
+        ),
+    ]
+    for path, data in write_calls:
+        _status, payload = _mcp_request(
+            repo_root,
+            mcp_url,
+            path,
+            params={"program": DEFAULT_BENCHMARK_PROGRAM},
+            data=data,
+            method="POST",
+            timeout=60,
+        )
+        _ensure_mcp_ok(path, payload)
+    print(f"Benchmark write test passed on benchmark function @ {address}.")
+
+
+def run_negative_contract_test(repo_root: Path, mcp_url: str) -> None:
+    address = _find_benchmark_function(repo_root, mcp_url, require_local=True)
+    _status, payload = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/get_function_variables",
+        params={"program": "/testing/benchmark/Missing.dll", "address": address},
+        timeout=30,
+    )
+    _expect_mcp_error("/get_function_variables", payload, ("program not found", "available"))
+
+    _status, payload = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/decompile_function",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": "not-an-address"},
+        timeout=30,
+    )
+    _expect_mcp_error("/decompile_function", payload, ("address",))
+
+    _status, payload = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/set_local_variable_type",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM},
+        data={
+            "function_address": address,
+            "variable_name": "definitely_missing_local",
+            "new_type": "uint",
+        },
+        method="POST",
+        timeout=60,
+    )
+    _expect_mcp_error(
+        "/set_local_variable_type",
+        payload,
+        ("definitely_missing_local", "available variables"),
+    )
+    print("Negative/error-shape contract test passed.")
+
+
+def run_multi_program_targeting_test(repo_root: Path, mcp_url: str) -> None:
+    address = _find_benchmark_function(repo_root, mcp_url)
+    _status, programs = _mcp_request(repo_root, mcp_url, "/list_open_programs", timeout=30)
+    _ensure_mcp_ok("/list_open_programs", programs)
+    if not isinstance(programs, dict):
+        raise RuntimeError("/list_open_programs returned an unexpected payload")
+    open_programs = programs.get("programs") or []
+    paths = {
+        str(program.get("path"))
+        for program in open_programs
+        if isinstance(program, dict) and program.get("path")
+    }
+    if DEFAULT_BENCHMARK_PROGRAM not in paths:
+        raise RuntimeError(f"{DEFAULT_BENCHMARK_PROGRAM} is not open; open paths: {sorted(paths)}")
+
+    _status, by_path = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/get_function_variables",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM, "address": address},
+        timeout=30,
+    )
+    _ensure_mcp_ok("/get_function_variables", by_path)
+    if not isinstance(by_path, dict) or by_path.get("function_address") != address:
+        raise RuntimeError("Program path targeting returned the wrong benchmark function")
+
+    _status, by_name = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/analysis_status",
+        params={"program": "Benchmark.dll"},
+        timeout=30,
+    )
+    _ensure_mcp_ok("/analysis_status", by_name)
+    _status, by_project_path = _mcp_request(
+        repo_root,
+        mcp_url,
+        "/analysis_status",
+        params={"program": DEFAULT_BENCHMARK_PROGRAM},
+        timeout=30,
+    )
+    _ensure_mcp_ok("/analysis_status", by_project_path)
+    print("Multi-program targeting test passed.")
+
+
+def run_endpoint_catalog_test(repo_root: Path, mcp_url: str) -> None:
+    _status, schema = _mcp_request(repo_root, mcp_url, "/mcp/schema", timeout=20)
+    live_tools = _schema_tools(schema)
+    catalog = json.loads((repo_root / "tests" / "endpoints.json").read_text(encoding="utf-8"))
+    endpoints = catalog.get("endpoints", []) if isinstance(catalog, dict) else catalog
+    expected = {
+        str(endpoint.get("path", "")).lstrip("/")
+        for endpoint in endpoints
+        if isinstance(endpoint, dict) and endpoint.get("path")
+    }
+    missing = sorted(expected - live_tools)
+    if missing:
+        raise RuntimeError(f"Live schema missing {len(missing)} catalog endpoint(s): {', '.join(missing[:20])}")
+    print(f"Endpoint catalog test passed: {len(expected)} catalog endpoints present.")
+
+
+def run_selected_endpoint_contract_test(repo_root: Path, mcp_url: str) -> None:
+    _status, schema = _mcp_request(repo_root, mcp_url, "/mcp/schema", timeout=20)
+    tools = _schema_tool_map(schema)
+    missing_tools = sorted(RELEASE_CONTRACT_TOOLS - set(tools))
+    if missing_tools:
+        raise RuntimeError(
+            f"Release schema missing selected endpoint contract tool(s): {', '.join(missing_tools)}"
+        )
+
+    catalog = json.loads((repo_root / "tests" / "endpoints.json").read_text(encoding="utf-8"))
+    endpoints = catalog.get("endpoints", []) if isinstance(catalog, dict) else catalog
+    catalog_by_name = {
+        str(endpoint.get("path", "")).lstrip("/"): endpoint
+        for endpoint in endpoints
+        if isinstance(endpoint, dict) and endpoint.get("path")
+    }
+    contract_errors: list[str] = []
+    for name in sorted(RELEASE_CONTRACT_TOOLS):
+        schema_tool = tools[name]
+        catalog_tool = catalog_by_name.get(name)
+        if catalog_tool is None:
+            contract_errors.append(f"{name}: missing from tests/endpoints.json")
+            continue
+        schema_method = str(schema_tool.get("method") or "GET").upper()
+        catalog_method = str(catalog_tool.get("method") or "GET").upper()
+        if schema_method != catalog_method:
+            contract_errors.append(f"{name}: method schema={schema_method} catalog={catalog_method}")
+        schema_params = {
+            str(param.get("name"))
+            for param in schema_tool.get("params") or []
+            if isinstance(param, dict) and param.get("name")
+        }
+        catalog_params = {str(param) for param in catalog_tool.get("params") or []}
+        missing_params = sorted(catalog_params - schema_params)
+        if missing_params:
+            contract_errors.append(f"{name}: schema missing catalog params {missing_params}")
+    if contract_errors:
+        raise RuntimeError("Selected endpoint contract failed: " + "; ".join(contract_errors))
+    print(f"Selected endpoint contract test passed for {len(RELEASE_CONTRACT_TOOLS)} tools.")
+
+
+def run_release_regression_tests(repo_root: Path, mcp_url: str) -> None:
+    reset_benchmark_fixture(repo_root, mcp_url)
+    run_selected_endpoint_contract_test(repo_root, mcp_url)
+    run_benchmark_extended_read_test(repo_root, mcp_url)
+    run_multi_program_targeting_test(repo_root, mcp_url)
+    run_negative_contract_test(repo_root, mcp_url)
+    print("Release regression tier passed.")
+
+
+def run_deploy_tests(repo_root: Path, mcp_url: str, test_modes: list[str]) -> None:
+    run_default_smoke_test(repo_root, mcp_url)
+    for mode in test_modes:
+        if mode == "endpoint-catalog":
+            run_endpoint_catalog_test(repo_root, mcp_url)
+        elif mode == "benchmark-read":
+            reset_benchmark_fixture(repo_root, mcp_url)
+            run_benchmark_extended_read_test(repo_root, mcp_url)
+        elif mode == "benchmark-write":
+            reset_benchmark_fixture(repo_root, mcp_url)
+            run_benchmark_write_test(repo_root, mcp_url)
+        elif mode == "negative-contract":
+            reset_benchmark_fixture(repo_root, mcp_url)
+            run_negative_contract_test(repo_root, mcp_url)
+        elif mode == "multi-program":
+            reset_benchmark_fixture(repo_root, mcp_url)
+            run_multi_program_targeting_test(repo_root, mcp_url)
+        elif mode == "selected-contract":
+            run_selected_endpoint_contract_test(repo_root, mcp_url)
+        elif mode == "release":
+            run_release_regression_tests(repo_root, mcp_url)
 
 
 def install_ghidra_dependencies(
@@ -412,7 +1194,11 @@ def collect_preflight_issues(
 
 
 def deploy_to_ghidra(
-    repo_root: Path, ghidra_path: Path, *, dry_run: bool = False
+    repo_root: Path,
+    ghidra_path: Path,
+    *,
+    dry_run: bool = False,
+    test_modes: list[str] | None = None,
 ) -> int:
     archive_path = find_plugin_archive(repo_root)
     extensions_dir = ghidra_path / "Extensions" / "Ghidra"
@@ -421,6 +1207,12 @@ def deploy_to_ghidra(
     requirements_source = repo_root / "requirements.txt"
     dotenv_source = repo_root / ".env"
     user_base_dir = ghidra_user_base_dir()
+    mcp_url = resolve_mcp_url(repo_root)
+    test_modes = resolve_deploy_test_modes(repo_root, test_modes)
+
+    close_running_ghidra_for_deploy(
+        repo_root, ghidra_path, mcp_url=mcp_url, dry_run=dry_run
+    )
 
     if dry_run:
         print(f"DRY RUN: ensure directory {extensions_dir}")
@@ -442,6 +1234,12 @@ def deploy_to_ghidra(
             )
         install_user_extension(repo_root, ghidra_path, archive_path, dry_run=True)
         patch_ghidra_user_configs(user_base_dir, dry_run=True)
+        start_ghidra(ghidra_path, dry_run=True)
+        print(f"DRY RUN: wait up to {DEFAULT_MCP_WAIT_SECONDS}s for MCP at {mcp_url}")
+        print(f"DRY RUN: wait up to {DEFAULT_MCP_WAIT_SECONDS}s for active project")
+        print("DRY RUN: run default MCP smoke test")
+        for mode in test_modes:
+            print(f"DRY RUN: run deploy test {mode}")
         return 0
 
     extensions_dir.mkdir(parents=True, exist_ok=True)
@@ -469,6 +1267,10 @@ def deploy_to_ghidra(
 
     install_user_extension(repo_root, ghidra_path, archive_path)
     patch_ghidra_user_configs(user_base_dir)
+    start_ghidra(ghidra_path)
+    wait_for_mcp(repo_root, mcp_url, timeout_seconds=DEFAULT_MCP_WAIT_SECONDS)
+    wait_for_project(repo_root, mcp_url, timeout_seconds=DEFAULT_MCP_WAIT_SECONDS)
+    run_deploy_tests(repo_root, mcp_url, test_modes)
 
     return 0
 
@@ -485,7 +1287,7 @@ def start_ghidra(ghidra_path: Path, *, dry_run: bool = False) -> int:
         print_command(command)
         return 0
 
-    subprocess.Popen(command, cwd=ghidra_path)
+    subprocess.Popen(command, cwd=ghidra_path, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     print(f"Started Ghidra from {executable}")
     return 0
 

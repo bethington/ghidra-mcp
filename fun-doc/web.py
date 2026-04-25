@@ -11,9 +11,7 @@ Features:
 """
 
 import json
-import os
 import threading
-import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -29,21 +27,12 @@ import uuid
 # even with multiple concurrent workers hitting the threshold simultaneously.
 _adaptive_refresh_lock = threading.Lock()
 
-# Watchdog cadence. Overridable via environment for tests.
-_HEARTBEAT_INTERVAL_SEC = int(os.environ.get("FUNDOC_HEARTBEAT_INTERVAL_SEC", "5"))
-# Stall threshold — when a worker's last_heartbeat_at is older than this, the
-# watchdog will force-kill its provider subprocess and flip its stop_flag.
-# Default is 10 minutes: longer than a typical provider hard-timeout (15m)
-# would fire, but short enough that a truly wedged watchdog gets cleaned up
-# before compounding the damage. The earlier incident this fix addresses
-# left workers stuck for 67+ minutes with no automated recovery.
-_STALL_KILL_THRESHOLD_SEC = int(os.environ.get("FUNDOC_STALL_KILL_THRESHOLD_SEC", "600"))
-
 
 class WorkerManager:
     """Manages concurrent documentation worker threads (max 3)."""
 
     MAX_WORKERS = 12
+    RESTORE_META_KEY = "dashboard_active_workers"
 
     def __init__(self, state_file, bus, socketio, load_queue, save_queue):
         self._workers = {}
@@ -55,14 +44,55 @@ class WorkerManager:
         self._load_queue = load_queue
         self._save_queue = save_queue
         self._bus.on("provider_timeout", self._handle_provider_timeout)
-        # Watchdog thread: emits a worker.heartbeat event for each live
-        # worker every _HEARTBEAT_INTERVAL_SEC, and force-kills workers
-        # whose last_heartbeat_at is older than _STALL_KILL_THRESHOLD_SEC.
-        self._watchdog_stop = threading.Event()
-        self._watchdog_thread = threading.Thread(
-            target=self._watchdog_loop, name="worker-watchdog", daemon=True
-        )
-        self._watchdog_thread.start()
+
+    def _serialize_worker(self, worker):
+        return {
+            "provider": worker["provider"],
+            "count": worker["count"],
+            "continuous": bool(worker.get("continuous", False)),
+            "model": worker.get("model"),
+            "binary": worker.get("binary"),
+        }
+
+    def _persist_active_workers(self):
+        try:
+            queue = self._load_queue()
+            meta = dict(queue.get("meta") or {})
+            meta[self.RESTORE_META_KEY] = [
+                self._serialize_worker(w)
+                for w in self._workers.values()
+                if w.get("restore_on_restart", True)
+                and w["status"] in ("starting", "running")
+            ]
+            queue["meta"] = meta
+            self._save_queue(queue)
+        except Exception as e:
+            print(f"  Worker restore-state persist failed: {e}")
+
+    def restore_workers(self):
+        try:
+            queue = self._load_queue()
+            specs = list((queue.get("meta") or {}).get(self.RESTORE_META_KEY) or [])
+        except Exception as e:
+            print(f"  Worker restore-state load failed: {e}")
+            return []
+
+        restored = []
+        for spec in specs[: self.MAX_WORKERS]:
+            try:
+                restored.append(
+                    self.start_worker(
+                        provider=spec.get("provider", "minimax"),
+                        count=spec.get("count", 5),
+                        model=spec.get("model"),
+                        binary=spec.get("binary"),
+                        continuous=bool(spec.get("continuous", False)),
+                        restored=True,
+                    )
+                )
+            except Exception as e:
+                print(f"  Worker restore skipped: {e}")
+        return restored
 
     def _handle_provider_timeout(self, data):
         if not isinstance(data, dict):
@@ -92,6 +122,7 @@ class WorkerManager:
         model=None,
         binary=None,
         continuous=False,
+        restored=False,
     ):
         with self._lock:
             active = {
@@ -109,7 +140,6 @@ class WorkerManager:
 
             worker_id = str(uuid.uuid4())[:8]
             stop_flag = threading.Event()
-            now_iso = datetime.now().isoformat()
             worker = {
                 "id": worker_id,
                 "provider": provider,
@@ -119,16 +149,12 @@ class WorkerManager:
                 "binary": binary,
                 "thread": None,
                 "stop_flag": stop_flag,
-                "started_at": now_iso,
+                "started_at": datetime.now().isoformat(),
                 "status": "starting",
+                "restored": bool(restored),
+                "restore_on_restart": True,
                 "timeout_count": 0,
                 "last_alert": None,
-                # Phase reflects what the worker thread is currently doing.
-                # The watchdog reads this to label heartbeat events and to
-                # detect "stuck in phase X for Y seconds".
-                "phase": "starting",
-                "phase_since": now_iso,
-                "stall_kill_fired": False,
                 "progress": {
                     "completed": 0,
                     "skipped": 0,
@@ -137,6 +163,7 @@ class WorkerManager:
                 },
             }
             self._workers[worker_id] = worker
+            self._persist_active_workers()
 
         thread = threading.Thread(
             target=self._run_worker, args=(worker_id,), daemon=True
@@ -153,6 +180,8 @@ class WorkerManager:
                 raise ValueError(f"Unknown worker: {worker_id}")
             worker["stop_flag"].set()
             worker["status"] = "stopping"
+            worker["restore_on_restart"] = False
+            self._persist_active_workers()
         self._emit_status()
 
     def get_status(self):
@@ -171,214 +200,29 @@ class WorkerManager:
             for wid in stale:
                 del self._workers[wid]
 
-            # Compute staleness: heartbeat older than 5 minutes means the
-            # worker is likely dead or in an unrecoverable state.
-            now = datetime.now()
-            out = []
-            for w in self._workers.values():
-                hb = w.get("last_heartbeat_at")
-                stale_sec = None
-                is_stale = False
-                if hb:
-                    try:
-                        stale_sec = int((now - datetime.fromisoformat(hb)).total_seconds())
-                        is_stale = stale_sec > 300 and w["status"] == "running"
-                    except (ValueError, TypeError):
-                        pass
-                phase_since_iso = w.get("phase_since")
-                phase_age_sec = None
-                if phase_since_iso:
-                    try:
-                        phase_age_sec = int(
-                            (now - datetime.fromisoformat(phase_since_iso)).total_seconds()
-                        )
-                    except (ValueError, TypeError):
-                        pass
-                out.append(
-                    {
-                        "id": w["id"],
-                        "provider": w["provider"],
-                        "count": w["count"],
-                        "continuous": w.get("continuous", False),
-                        "model": w["model"],
-                        "binary": w["binary"],
-                        "status": w["status"],
-                        "timeout_count": int(w.get("timeout_count", 0) or 0),
-                        "last_alert": dict(w["last_alert"]) if w.get("last_alert") else None,
-                        "progress": dict(w["progress"]),
-                        "started_at": w["started_at"],
-                        "last_heartbeat_at": hb,
-                        "stale_sec": stale_sec,
-                        "is_stale": is_stale,
-                        "phase": w.get("phase"),
-                        "phase_age_sec": phase_age_sec,
-                        "stall_kill_fired": bool(w.get("stall_kill_fired", False)),
-                        "current_function_start_at": w.get("current_function_start_at"),
-                    }
-                )
-            return out
-
-    def _set_phase(self, worker_id, phase):
-        """Update a worker's current phase (called from _run_worker at checkpoints).
-
-        Also touches last_heartbeat_at — a phase transition is proof the
-        worker thread is still executing, which is exactly what the staleness
-        check wants to know.
-        """
-        now_iso = datetime.now().isoformat()
-        with self._lock:
-            w = self._workers.get(worker_id)
-            if not w:
-                return
-            w["phase"] = phase
-            w["phase_since"] = now_iso
-            w["last_heartbeat_at"] = now_iso
-
-    def _watchdog_loop(self):
-        """Emit heartbeats and force-kill stuck workers.
-
-        Runs every _HEARTBEAT_INTERVAL_SEC. For each live worker:
-          1. Writes a `worker.heartbeat` event to events.jsonl with the
-             current phase and how long since the last checkpoint. This
-             guarantees events.jsonl never has a gap longer than the
-             interval while any worker is alive.
-          2. If last_heartbeat_at is older than _STALL_KILL_THRESHOLD_SEC,
-             flips stop_flag and force-kills the worker's registered
-             provider subprocesses (via fun_doc.kill_worker_subprocesses).
-             Fires at most once per worker — the `stall_kill_fired` flag
-             prevents re-triggering on every tick after the kill.
-        """
-        try:
-            from event_log import log_event
-        except ImportError:
-            log_event = lambda *a, **kw: None
-
-        # Look up `fun_doc.kill_worker_subprocesses` per tick rather than
-        # capturing it at loop start — tests monkeypatch this after
-        # construction, and a reference captured in a closure would mask
-        # the patch.
-        try:
-            import fun_doc as _fun_doc_mod
-        except ImportError:
-            _fun_doc_mod = None
-
-        def _kill(wid):
-            if _fun_doc_mod is None:
-                return 0
-            try:
-                return _fun_doc_mod.kill_worker_subprocesses(wid)
-            except Exception:
-                return 0
-
-        while not self._watchdog_stop.is_set():
-            try:
-                now = datetime.now()
-                with self._lock:
-                    snapshot = [
-                        (wid, dict(w), w)  # dict(w) for safe field read; w for mutation flag
-                        for wid, w in self._workers.items()
-                        if w.get("status") in ("starting", "running", "stopping")
-                    ]
-
-                for wid, w_copy, w_ref in snapshot:
-                    hb_iso = w_copy.get("last_heartbeat_at")
-                    stale_sec = None
-                    if hb_iso:
-                        try:
-                            stale_sec = int(
-                                (now - datetime.fromisoformat(hb_iso)).total_seconds()
-                            )
-                        except (ValueError, TypeError):
-                            pass
-
-                    phase = w_copy.get("phase") or "unknown"
-                    phase_since_iso = w_copy.get("phase_since")
-                    phase_age_sec = None
-                    if phase_since_iso:
-                        try:
-                            phase_age_sec = int(
-                                (now - datetime.fromisoformat(phase_since_iso)).total_seconds()
-                            )
-                        except (ValueError, TypeError):
-                            pass
-
-                    current = (w_copy.get("progress") or {}).get("current")
-                    log_event(
-                        "worker.heartbeat",
-                        worker_id=wid,
-                        provider=w_copy.get("provider"),
-                        status=w_copy.get("status"),
-                        phase=phase,
-                        phase_age_sec=phase_age_sec,
-                        stale_sec=stale_sec,
-                        current_function=(current or {}).get("name"),
-                        current_address=(current or {}).get("address"),
-                        completed=(w_copy.get("progress") or {}).get("completed", 0),
-                        failed=(w_copy.get("progress") or {}).get("failed", 0),
-                        skipped=(w_copy.get("progress") or {}).get("skipped", 0),
-                    )
-
-                    # Stall kill gate
-                    if (
-                        stale_sec is not None
-                        and stale_sec > _STALL_KILL_THRESHOLD_SEC
-                        and not w_copy.get("stall_kill_fired", False)
-                    ):
-                        with self._lock:
-                            # Re-read under lock; another tick might have won.
-                            live = self._workers.get(wid)
-                            if live is None or live.get("stall_kill_fired"):
-                                continue
-                            live["stall_kill_fired"] = True
-                            live["stop_flag"].set()
-                            live["last_alert"] = {
-                                "type": "stalled_kill",
-                                "stale_sec": stale_sec,
-                                "phase": phase,
-                                "at": datetime.now().isoformat(),
-                            }
-
-                        try:
-                            killed = _kill(wid)
-                        except Exception as e:
-                            killed = 0
-                            print(
-                                f"  watchdog: kill_worker_subprocesses({wid}) failed: {e}",
-                                flush=True,
-                            )
-
-                        log_event(
-                            "worker.stalled_kill",
-                            worker_id=wid,
-                            provider=w_copy.get("provider"),
-                            stale_sec=stale_sec,
-                            phase=phase,
-                            subprocesses_killed=killed,
-                            threshold_sec=_STALL_KILL_THRESHOLD_SEC,
-                        )
-                        self._bus.emit(
-                            "worker_stalled",
-                            {
-                                "worker_id": wid,
-                                "stale_sec": stale_sec,
-                                "phase": phase,
-                                "subprocesses_killed": killed,
-                            },
-                        )
-                        self._emit_status()
-            except Exception as e:
-                # Never let the watchdog die silently. Print and continue.
-                try:
-                    print(f"  watchdog: unexpected error: {type(e).__name__}: {e}", flush=True)
-                except Exception:
-                    pass
-
-            self._watchdog_stop.wait(_HEARTBEAT_INTERVAL_SEC)
+            return [
+                {
+                    "id": w["id"],
+                    "provider": w["provider"],
+                    "count": w["count"],
+                    "continuous": w.get("continuous", False),
+                    "model": w["model"],
+                    "binary": w["binary"],
+                    "status": w["status"],
+                    "restored": bool(w.get("restored", False)),
+                    "timeout_count": int(w.get("timeout_count", 0) or 0),
+                    "last_alert": (
+                        dict(w["last_alert"]) if w.get("last_alert") else None
+                    ),
+                    "progress": dict(w["progress"]),
+                    "started_at": w["started_at"],
+                }
+                for w in self._workers.values()
+            ]
 
     def _run_worker(self, worker_id):
         """Worker loop — fetches one function at a time to avoid conflicts with other workers."""
         from event_bus import set_worker_id
-        from event_log import log_event
 
         set_worker_id(worker_id)  # Tag all events from this thread
 
@@ -398,23 +242,10 @@ class WorkerManager:
                 _bump_handoff_counter,
                 get_auto_escalation_provider,
                 update_function_state,
-                _state_lock,
-                _atomic_write_state,
             )
-            from event_bus import emit as bus_emit
 
             worker["status"] = "running"
-            self._set_phase(worker_id, "initializing")
             self._emit_status()
-            log_event(
-                "worker.started",
-                worker_id=worker_id,
-                provider=worker["provider"],
-                count=worker["count"],
-                continuous=worker.get("continuous", False),
-                binary=worker.get("binary"),
-                model=worker.get("model"),
-            )
             self._bus.emit(
                 "worker_started",
                 {
@@ -422,10 +253,10 @@ class WorkerManager:
                     "provider": worker["provider"],
                     "count": worker["count"],
                     "continuous": worker.get("continuous", False),
+                    "restored": worker.get("restored", False),
                 },
             )
 
-            self._set_phase(worker_id, "load_state")
             state = load_state()
             original_binary = state.get("active_binary")
             if worker["binary"]:
@@ -476,7 +307,6 @@ class WorkerManager:
                 if skip_reason:
                     print(f"  Pre-refresh: skipped ({skip_reason})")
                 else:
-                    self._set_phase(worker_id, "pre_refresh")
                     print(
                         f"  Pre-refresh: scoring top 20 candidates for {worker_binary}..."
                     )
@@ -505,7 +335,6 @@ class WorkerManager:
             except Exception as e:
                 print(f"  Pre-refresh failed (continuing with stale state): {e}")
 
-            self._set_phase(worker_id, "start_session")
             session = start_session(state)
             processed = 0
             # Threshold for adaptive refresh — this worker reads the shared
@@ -522,7 +351,6 @@ class WorkerManager:
                 worker["continuous"] or processed < worker["count"]
             ):
                 # Reload state each iteration to get fresh scores/queue
-                self._set_phase(worker_id, "get_next")
                 state = load_state()
                 if worker["binary"]:
                     state["active_binary"] = worker["binary"]
@@ -549,8 +377,6 @@ class WorkerManager:
                     "name": func.get("name", "?"),
                     "address": func.get("address", "?"),
                 }
-                self._set_phase(worker_id, "process_function")
-                worker["current_function_start_at"] = datetime.now().isoformat()
                 self._emit_status()
                 self._bus.emit(
                     "worker_progress",
@@ -561,19 +387,7 @@ class WorkerManager:
                         "total": worker["count"],
                     },
                 )
-                log_event(
-                    "worker.run_begin",
-                    worker_id=worker_id,
-                    provider=worker["provider"],
-                    program=func.get("program"),
-                    address=func.get("address"),
-                    function=func.get("name"),
-                    score_before=func.get("score"),
-                    fixable=func.get("fixable"),
-                    consecutive_fails=func.get("consecutive_fails", 0),
-                )
 
-                _run_begin_ts = time.time()
                 result = process_function(
                     key,
                     func,
@@ -581,18 +395,6 @@ class WorkerManager:
                     model=worker["model"],
                     provider=worker["provider"],
                     stop_flag=worker["stop_flag"],
-                )
-                _run_duration = time.time() - _run_begin_ts
-                self._set_phase(worker_id, "post_process")
-                log_event(
-                    "worker.run_end",
-                    worker_id=worker_id,
-                    provider=worker["provider"],
-                    program=func.get("program"),
-                    address=func.get("address"),
-                    function=func.get("name"),
-                    result=result,
-                    duration_sec=round(_run_duration, 1),
                 )
 
                 # Optional immediate retry: only use an explicitly configured
@@ -756,38 +558,15 @@ class WorkerManager:
 
                 self._emit_status()
 
-            self._set_phase(worker_id, "end_session")
             end_session(state)
-            # Persist only session metadata using read-modify-write.
-            # Calling save_state(state) here would clobber all per-function
-            # updates written atomically by update_function_state() during the
-            # run, because `state` is still the object loaded at worker start.
-            binary_changed = worker["binary"] and original_binary != worker["binary"]
-            with _state_lock:
-                latest = load_state()
-                latest["sessions"] = state.get("sessions", latest.get("sessions", []))
-                latest["current_session"] = state.get("current_session")
-                if binary_changed:
-                    if original_binary:
-                        latest["active_binary"] = original_binary
-                    else:
-                        latest.pop("active_binary", None)
-                _atomic_write_state(latest)
-            bus_emit("state_changed")
+            if worker["binary"] and original_binary != worker["binary"]:
+                if original_binary:
+                    state["active_binary"] = original_binary
+                else:
+                    state.pop("active_binary", None)
+            save_state(state)
 
         except Exception as e:
-            import traceback as _tb
-            # This is the silent-death path — workers previously crashed
-            # here with no audit trail. Log the traceback as a structured
-            # event so future post-mortems are one grep away.
-            log_event(
-                "worker.died",
-                worker_id=worker_id,
-                error=str(e),
-                error_type=type(e).__name__,
-                traceback=_tb.format_exc()[-2000:],
-                current_function=current_key,
-            )
             self._bus.emit(
                 "worker_stopped", {"worker_id": worker_id, "reason": f"error: {e}"}
             )
@@ -795,22 +574,13 @@ class WorkerManager:
             worker["status"] = (
                 "finished" if not worker["stop_flag"].is_set() else "stopped"
             )
+            worker["restore_on_restart"] = False
             worker["finished_at"] = datetime.now().isoformat()
-            worker["last_heartbeat_at"] = datetime.now().isoformat()
-            worker["phase"] = worker["status"]
-            worker["phase_since"] = worker["finished_at"]
             worker["progress"]["current"] = None
-            log_event(
-                "worker.stopped",
-                worker_id=worker_id,
-                reason=worker["status"],
-                completed=worker["progress"].get("completed", 0),
-                failed=worker["progress"].get("failed", 0),
-                skipped=worker["progress"].get("skipped", 0),
-            )
             with self._lock:
                 if current_key:
                     self._in_progress_keys.discard(current_key)
+                self._persist_active_workers()
             self._emit_status()
             self._bus.emit(
                 "worker_stopped",
@@ -836,24 +606,11 @@ def create_app(state_file, event_bus=None):
     # Wire EventBus -> SocketIO bridge
     bus = event_bus or get_bus()
 
-    # Per-event-type counters — lets us verify whether specific events
-    # reach the bridge. If the client isn't receiving an event type,
-    # comparing the bridge_counters to client observations tells us
-    # whether the problem is emission (bus_emit not called), bridging
-    # (bridge didn't subscribe or handler threw), or delivery (socketio
-    # emit but client didn't receive).
-    _bridge_counters = defaultdict(int)
-    _bridge_last_error = {}
-
     def bridge(event_type):
         """Forward EventBus events to all WebSocket clients."""
 
         def handler(data):
-            _bridge_counters[event_type] += 1
-            try:
-                socketio.emit(event_type, data or {})
-            except Exception as e:
-                _bridge_last_error[event_type] = f"{type(e).__name__}: {e}"
+            socketio.emit(event_type, data or {})
 
         return handler
 
@@ -874,128 +631,9 @@ def create_app(state_file, event_bus=None):
         "worker_started",
         "worker_progress",
         "worker_stopped",
-        "worker_stalled",
         "provider_timeout",
-        "provider_turn",
-        "ghidra_health",
     ]:
         bus.on(evt, bridge(evt))
-
-    # --- Persist ephemeral bus events to events.jsonl ---
-    # The SocketIO stream delivers tool_call / tool_result / provider_timeout
-    # live to connected dashboards but drops on disconnect. For post-mortem
-    # debugging we also write a durable copy to events.jsonl. model_text is
-    # deliberately excluded — it fires hundreds of times per function and
-    # would balloon the log; the tool-call stream gives enough signal.
-    #
-    # Payloads are truncated before persistence to keep the log compact.
-    try:
-        from event_log import log_event as _persist_log_event
-    except ImportError:
-        _persist_log_event = None
-
-    def _trunc(value, limit=500):
-        if isinstance(value, str) and len(value) > limit:
-            return value[: limit - 3] + "..."
-        return value
-
-    def _make_persist_handler(event_name, *, max_args=8):
-        def handler(data):
-            if _persist_log_event is None:
-                return
-            if data is None:
-                fields = {}
-            elif isinstance(data, dict):
-                fields = {k: _trunc(v) for k, v in data.items()}
-            else:
-                fields = {"value": _trunc(data)}
-            try:
-                _persist_log_event(event_name, **fields)
-            except Exception:
-                pass
-
-        return handler
-
-    for evt_bus, evt_log in [
-        ("tool_call", "tool.call"),
-        ("tool_result", "tool.result"),
-        ("provider_timeout", "provider.timeout"),
-        ("provider_turn", "provider.turn"),
-        ("worker_progress", "worker.progress"),
-    ]:
-        bus.on(evt_bus, _make_persist_handler(evt_log))
-
-    # --- Ghidra health probe ---
-    # A silent Ghidra hang (like the one at 17:36 this session) used to
-    # leave workers spinning on ghidra_offline with no visibility. A
-    # background thread now probes /mcp/schema every 20s, records latency,
-    # and broadcasts status transitions. Workers and the dashboard can
-    # consult this single source of truth instead of retrying blindly.
-    _ghidra_health = {
-        "status": "unknown",          # unknown | healthy | slow | offline
-        "last_probe_at": None,
-        "last_success_at": None,
-        "last_latency_ms": None,
-        "consecutive_timeouts": 0,
-        "consecutive_successes": 0,
-    }
-    _ghidra_health_lock = threading.Lock()
-
-    def _probe_ghidra():
-        import requests
-        try:
-            from event_log import log_event
-        except ImportError:
-            log_event = lambda *a, **kw: None
-
-        GHIDRA_URL = "http://127.0.0.1:8089"
-        SLOW_MS = 2000
-        TIMEOUT_S = 5
-        while True:
-            start = time.perf_counter()
-            try:
-                r = requests.get(f"{GHIDRA_URL}/mcp/schema", timeout=TIMEOUT_S)
-                latency_ms = int((time.perf_counter() - start) * 1000)
-                ok = r.status_code == 200
-            except Exception:
-                latency_ms = int((time.perf_counter() - start) * 1000)
-                ok = False
-
-            with _ghidra_health_lock:
-                prev_status = _ghidra_health["status"]
-                _ghidra_health["last_probe_at"] = datetime.now().isoformat()
-                _ghidra_health["last_latency_ms"] = latency_ms
-                if ok:
-                    _ghidra_health["consecutive_timeouts"] = 0
-                    _ghidra_health["consecutive_successes"] += 1
-                    _ghidra_health["last_success_at"] = _ghidra_health["last_probe_at"]
-                    _ghidra_health["status"] = "slow" if latency_ms > SLOW_MS else "healthy"
-                else:
-                    _ghidra_health["consecutive_successes"] = 0
-                    _ghidra_health["consecutive_timeouts"] += 1
-                    # 2 consecutive timeouts = offline (avoids one-off blips)
-                    if _ghidra_health["consecutive_timeouts"] >= 2:
-                        _ghidra_health["status"] = "offline"
-                    elif prev_status == "unknown":
-                        _ghidra_health["status"] = "offline"
-                new_status = _ghidra_health["status"]
-                snapshot = dict(_ghidra_health)
-
-            # On state transition, log and broadcast.
-            if new_status != prev_status:
-                log_event("ghidra.health_changed", old=prev_status, new=new_status,
-                          latency_ms=latency_ms)
-                bus.emit("ghidra_health", snapshot)
-            # Always broadcast current state periodically so clients that
-            # connect late get the picture without waiting for a change.
-            else:
-                bus.emit("ghidra_health", snapshot)
-
-            time.sleep(20)
-
-    _probe_thread = threading.Thread(target=_probe_ghidra, daemon=True,
-                                      name="ghidra-health-probe")
-    _probe_thread.start()
 
     # --- Data loading helpers ---
 
@@ -1153,7 +791,7 @@ def create_app(state_file, event_bus=None):
             )
         return result
 
-    def compute_run_stats(logs, total_override=None, today_override=None, active_program=None):
+    def compute_run_stats(logs, total_override=None, today_override=None):
         empty = {
             "total_runs": total_override or 0,
             "today_runs": today_override or 0,
@@ -1305,7 +943,6 @@ def create_app(state_file, event_bus=None):
             fkey = f"{l.get('program', '')}::{l.get('address', '')}"
             func_results[fkey]["name"] = l.get("function", "")
             func_results[fkey]["address"] = l.get("address", "")
-            func_results[fkey]["program"] = l.get("program", "")
             if result in ("failed", "needs_redo"):
                 func_results[fkey]["fails"] += 1
 
@@ -1335,15 +972,9 @@ def create_app(state_file, event_bus=None):
 
         stuck = sorted(
             [
-                {
-                    "name": v["name"],
-                    "address": v["address"],
-                    "fails": v["fails"],
-                    "program": v.get("program", ""),
-                }
+                {"name": v["name"], "address": v["address"], "fails": v["fails"]}
                 for v in func_results.values()
                 if v["fails"] >= 3
-                and (active_program is None or v.get("program") == active_program)
             ],
             key=lambda x: x["fails"],
             reverse=True,
@@ -1444,31 +1075,7 @@ def create_app(state_file, event_bus=None):
         queue = load_queue()
         cfg = queue.get("config", {})
         good_enough = cfg.get("good_enough_score", 80)
-        queue_meta = dict(queue.get("meta") or {})
-        # Expose live in-memory worker state alongside the rest of the
-        # queue meta so the dashboard can render it from /api/stats
-        # without a separate round-trip.
-        try:
-            queue_meta["dashboard_active_workers"] = [
-                {
-                    "id": w.get("id"),
-                    "provider": w.get("provider"),
-                    "count": w.get("count"),
-                    "continuous": w.get("continuous"),
-                    "model": w.get("model"),
-                    "binary": w.get("binary"),
-                    "status": w.get("status"),
-                    "last_heartbeat_at": w.get("last_heartbeat_at"),
-                    "stale_sec": w.get("stale_sec"),
-                    "is_stale": w.get("is_stale", False),
-                    "current_function_start_at": w.get("current_function_start_at"),
-                    "progress": w.get("progress"),
-                }
-                for w in worker_mgr.get_status()
-                if w.get("status") in ("starting", "running")
-            ]
-        except Exception:
-            queue_meta["dashboard_active_workers"] = []
+        queue_meta = queue.get("meta") or {}
         if total == 0:
             return {
                 "total": 0,
@@ -1590,11 +1197,7 @@ def create_app(state_file, event_bus=None):
             "all_functions": func_list,
             "all_functions_total": all_func_total,
             "deduction_breakdown": compute_deduction_breakdown(funcs),
-            "run_stats": compute_run_stats(
-                load_run_logs(),
-                *count_run_totals(),
-                active_program=(f"{folder.rstrip('/')}/{active_binary}" if active_binary else None),
-            ),
+            "run_stats": compute_run_stats(load_run_logs(), *count_run_totals()),
             "project_folder": state.get("project_folder", "unknown"),
             "active_binary": active_binary,
             "available_binaries": available_binaries,
@@ -1698,72 +1301,6 @@ def create_app(state_file, event_bus=None):
         stats = compute_stats(state)
         stats.pop("all_functions", None)
         return jsonify(stats)
-
-    @app.route("/api/_diag_bridge")
-    def api_diag_bridge():
-        """Diagnostic: how many events of each type reached the bridge?
-
-        Compare to what the client actually receives to localize missing-event
-        bugs. Divergence between bridge counter > client receipts = delivery
-        issue (socketio). Counter at 0 while bus emits fire = bridge not
-        subscribed. Counter > 0 with recorded error = emit failure.
-        """
-        return jsonify({
-            "bridge_counters": dict(_bridge_counters),
-            "bridge_errors": dict(_bridge_last_error),
-        })
-
-    @app.route("/api/ghidra_health")
-    def api_ghidra_health():
-        """Snapshot of the background Ghidra health probe.
-
-        Returns status (healthy/slow/offline/unknown), last latency,
-        consecutive timeout/success counts, and timestamps. A worker
-        or external monitor can poll this instead of probing Ghidra
-        directly — one source of truth.
-        """
-        with _ghidra_health_lock:
-            return jsonify(dict(_ghidra_health))
-
-    @app.route("/api/events")
-    def api_events():
-        """Tail the structured event log. Query: ?limit=100&since=ISO8601
-
-        Response is the last N events (default 100, max 1000), optionally
-        filtered to events after `since`. Useful for "what happened in
-        the last 15 minutes?" without grepping files.
-        """
-        try:
-            from event_log import get_log_file, get_counters
-        except ImportError:
-            return jsonify({"error": "event_log not available"}), 500
-        limit = min(int(request.args.get("limit", 100)), 1000)
-        since = request.args.get("since")
-        log_file = get_log_file()
-        events = []
-        if log_file.exists():
-            try:
-                # Read whole file; events log is small-to-moderate.
-                # Optimization: if this grows huge, add tail-seek logic.
-                with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                    lines = f.readlines()
-                for line in reversed(lines):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        e = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if since and e.get("ts", "") <= since:
-                        break
-                    events.append(e)
-                    if len(events) >= limit:
-                        break
-                events.reverse()
-            except Exception as ex:
-                return jsonify({"error": f"read failed: {ex}"}), 500
-        return jsonify({"events": events, "counters": get_counters()})
 
     @app.route("/api/queue", methods=["GET"])
     def get_queue():
@@ -2056,6 +1593,10 @@ def create_app(state_file, event_bus=None):
             socketio.emit("queue_changed", {"action": "config", "config": cfg})
             return jsonify({"ok": True, "config": cfg})
         return jsonify({"config": queue.get("config", dict(DEFAULT_QUEUE_CONFIG))})
+
+    restored_workers = worker_mgr.restore_workers()
+    if restored_workers:
+        print(f"  Restored {len(restored_workers)} dashboard worker(s) after restart")
 
     @app.route("/api/functions/search", methods=["GET"])
     def search_functions():

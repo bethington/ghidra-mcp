@@ -22,7 +22,7 @@
 1. For each variable where type contains `undefined`: determine correct type based on usage context
 2. For each parameter where name has pointer prefix (`p`, `pp`, `lpsz`) but type is `int`/`uint`: fix type to a pointer
 3. **Known limitation: `__thiscall` ECX `this` pointer** -- Ghidra's ECX auto-param for `__thiscall` functions cannot be retyped via `set_function_prototype`. Including a typed `this` in the prototype either gets ignored (still shows `void *`) or creates a spurious extra stack parameter. Do NOT attempt to type the `this` pointer. Instead, document the intended type in the plate comment Parameters section: `this: TreasureCtx * - (ECX auto-param, type not settable via API)`. The completeness scorer treats this as structural/unfixable.
-4. Skip phantoms (`extraout_*`, `in_*`) -- these are usually not retypable via API. Do not attempt type-setting on them. Document the intended type via `PRE_COMMENT` in Step 4 instead. The completeness scorer excludes them from penalty.
+4. Skip phantoms (`is_phantom: true`, `extraout_*`, `in_*`, and stack-frame-only `local_*` entries that are not visible in the decompiled source). These are not retypable via API. Do not call `set_local_variable_type` on them. Document the intended role via `PRE_COMMENT` or the plate comment if useful. The completeness scorer excludes them from fixable penalty.
 
 **Naming confidence**: Apply the Naming Confidence Rules from Core Rules. Before renaming any variable:
 - Can you justify the name from direct read/write behavior, control-flow role, or constant comparison?

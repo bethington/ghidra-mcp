@@ -27,6 +27,7 @@ def _args(**kwargs) -> argparse.Namespace:
         use_debugger_toggle=False,
         with_debugger=False,
         force=False,
+        test=[],
         requirements=[],
         python=None,
         env_file=None,
@@ -241,7 +242,10 @@ def test_cmd_deploy_routes_to_maven(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cli,
         "deploy_to_ghidra",
-        lambda root, path, dry_run=False: called.append(path) or 0,
+        lambda root, path, dry_run=False, test_modes=None: called.append(
+            (path, test_modes)
+        )
+        or 0,
     )
 
     ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
@@ -250,6 +254,16 @@ def test_cmd_deploy_routes_to_maven(tmp_path, monkeypatch):
 
     assert result == 0
     assert called
+    assert called[0][1] == []
+
+
+def test_deploy_parser_accepts_release_test_tier():
+    from tools.setup import cli
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["deploy", "--ghidra-path", "C:/ghidra", "--test", "release"])
+
+    assert args.test == ["release"]
 
 
 def test_cmd_deploy_raises_when_no_ghidra_path(tmp_path, monkeypatch):

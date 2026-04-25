@@ -5,7 +5,7 @@ Idempotent — if the program already exists in the target folder, the
 script exits successfully without re-importing.
 
 Usage:
-    python setup_ghidra_benchmark.py                         # default /benchmark/ folder
+    python setup_ghidra_benchmark.py                         # default /testing/benchmark/ folder
     python setup_ghidra_benchmark.py --folder /tests/
     python setup_ghidra_benchmark.py --force                  # re-import even if present
 
@@ -36,7 +36,7 @@ def _resolve_target_path() -> tuple[str, str]:
     if env:
         folder = str(Path(env).parent).replace("\\", "/")
         return folder, env
-    return "/benchmark", "/benchmark/Benchmark.dll"
+    return "/testing/benchmark", "/testing/benchmark/Benchmark.dll"
 
 
 def _program_exists(program_path: str) -> bool:

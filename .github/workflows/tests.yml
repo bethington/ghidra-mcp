@@ -145,10 +145,10 @@ jobs:
         pytest tests/unit/ -v --no-cov --tb=short
 
     - name: Upload coverage
-      if: always()
+      if: ${{ always() && hashFiles('coverage.xml', 'tests/coverage.xml') != '' }}
       uses: codecov/codecov-action@v5
       with:
-        files: ./coverage.xml
+        files: ./coverage.xml,./tests/coverage.xml
         flags: unittests
         fail_ci_if_error: false
 
