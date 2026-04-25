@@ -799,6 +799,11 @@ public class FunctionService {
             return Response.err("New function name is required");
         }
 
+        Function targetFunc = ServiceUtils.resolveFunction(program, functionAddrStr);
+        if (targetFunc == null) {
+            return Response.err("No function found for " + functionAddrStr);
+        }
+
         // ---- Q1-Q5 validator gate (defense in depth) ----------------------
         // Hard-reject names that fail verb-tier specificity (Q2/Q4) or
         // collide via token-subset with another function in this program
@@ -822,6 +827,7 @@ public class FunctionService {
             // execution even on 5k-function binaries.
             List<String> existingNames = new ArrayList<>();
             for (Function f : program.getFunctionManager().getFunctions(true)) {
+                if (f == targetFunc) continue;
                 String n = f.getName();
                 if (n != null && !n.isEmpty()) existingNames.add(n);
             }
@@ -851,14 +857,8 @@ public class FunctionService {
 
         try {
             threadingStrategy.executeWrite(program, "Rename function by address", () -> {
-                Function func = ServiceUtils.resolveFunction(program, functionAddrStr);
-                if (func == null) {
-                    resultMsg.append("Error: No function found for ").append(functionAddrStr);
-                    return null;
-                }
-
-                String oldName = func.getName();
-                func.setName(newName, SourceType.USER_DEFINED);
+                String oldName = targetFunc.getName();
+                targetFunc.setName(newName, SourceType.USER_DEFINED);
                 success.set(true);
                 resultMsg.append("Success: Renamed function at ").append(functionAddrStr)
                         .append(" from '").append(oldName).append("' to '").append(newName).append("'");

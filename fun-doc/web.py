@@ -11,7 +11,9 @@ Features:
 """
 
 import json
+import os
 import threading
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +28,9 @@ import uuid
 # Shared across workers so adaptive-refresh trigger fires once per stale run
 # even with multiple concurrent workers hitting the threshold simultaneously.
 _adaptive_refresh_lock = threading.Lock()
+
+HEARTBEAT_INTERVAL_SEC = float(os.environ.get("FUNDOC_HEARTBEAT_INTERVAL_SEC", "30"))
+STALL_KILL_THRESHOLD_SEC = float(os.environ.get("FUNDOC_STALL_KILL_THRESHOLD_SEC", "900"))
 
 
 class WorkerManager:
@@ -44,6 +49,84 @@ class WorkerManager:
         self._load_queue = load_queue
         self._save_queue = save_queue
         self._bus.on("provider_timeout", self._handle_provider_timeout)
+        self._watchdog_stop = threading.Event()
+        self._watchdog_thread = threading.Thread(
+            target=self._watchdog_loop,
+            name="fun-doc-worker-watchdog",
+            daemon=True,
+        )
+        self._watchdog_thread.start()
+
+    def _set_phase(self, worker_id, phase):
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if not worker:
+                return
+            worker["phase"] = phase
+            worker["phase_since"] = datetime.now().isoformat()
+
+    def _watchdog_loop(self):
+        from event_log import log_event
+
+        while not self._watchdog_stop.wait(HEARTBEAT_INTERVAL_SEC):
+            now = datetime.now()
+            heartbeats = []
+            kill_requests = []
+            with self._lock:
+                for worker_id, worker in self._workers.items():
+                    if worker.get("status") not in ("starting", "running", "stopping", "quota_paused"):
+                        continue
+                    last_raw = worker.get("last_heartbeat_at") or worker.get("started_at")
+                    try:
+                        last_dt = datetime.fromisoformat(last_raw)
+                    except (TypeError, ValueError):
+                        last_dt = now
+                    stale_sec = max(0.0, (now - last_dt).total_seconds())
+                    phase = worker.get("phase", "unknown")
+                    if stale_sec > STALL_KILL_THRESHOLD_SEC and not worker.get("stall_kill_fired", False):
+                        worker["stall_kill_fired"] = True
+                        worker["stop_flag"].set()
+                        worker["status"] = "stopping"
+                        worker["restore_on_restart"] = False
+                        worker["last_alert"] = {
+                            "type": "stalled_kill",
+                            "message": f"Worker stalled for {int(stale_sec)}s in phase {phase}",
+                            "phase": phase,
+                            "stale_sec": stale_sec,
+                            "at": now.isoformat(),
+                        }
+                        kill_requests.append((worker_id, phase, stale_sec))
+                        continue
+                    worker["last_heartbeat_at"] = now.isoformat()
+                    heartbeats.append({
+                        "worker_id": worker_id,
+                        "provider": worker.get("provider"),
+                        "status": worker.get("status"),
+                        "phase": phase,
+                        "stale_sec": stale_sec,
+                    })
+
+            for hb in heartbeats:
+                log_event("worker.heartbeat", **hb)
+
+            for worker_id, phase, stale_sec in kill_requests:
+                subprocesses_killed = 0
+                try:
+                    from fun_doc import kill_worker_subprocesses
+                    subprocesses_killed = kill_worker_subprocesses(worker_id)
+                except Exception:
+                    subprocesses_killed = 0
+                log_event(
+                    "worker.stalled_kill",
+                    worker_id=worker_id,
+                    phase=phase,
+                    stale_sec=stale_sec,
+                    threshold_sec=int(STALL_KILL_THRESHOLD_SEC),
+                    subprocesses_killed=subprocesses_killed,
+                )
+
+            if heartbeats or kill_requests:
+                self._emit_status()
 
     def _serialize_worker(self, worker):
         return {
@@ -177,6 +260,10 @@ class WorkerManager:
                 "timeout_count": 0,
                 "last_alert": None,
                 "config_snapshot": config_snapshot,
+                "phase": "starting",
+                "phase_since": datetime.now().isoformat(),
+                "stall_kill_fired": False,
+                "last_heartbeat_at": datetime.now().isoformat(),
                 "progress": {
                     "completed": 0,
                     "skipped": 0,
@@ -232,8 +319,25 @@ class WorkerManager:
             for wid in stale:
                 del self._workers[wid]
 
-            return [
-                {
+            rows = []
+            for w in self._workers.values():
+                try:
+                    phase_since_dt = (
+                        datetime.fromisoformat(w["phase_since"])
+                        if w.get("phase_since")
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    phase_since_dt = None
+                try:
+                    heartbeat_dt = datetime.fromisoformat(
+                        w.get("last_heartbeat_at") or w.get("started_at")
+                    )
+                    heartbeat_age = (now - heartbeat_dt).total_seconds()
+                except (TypeError, ValueError):
+                    heartbeat_age = 0.0
+                rows.append(
+                    {
                     "id": w["id"],
                     "provider": w["provider"],
                     "count": w["count"],
@@ -257,9 +361,19 @@ class WorkerManager:
                     # Quota-pause fields populated when status == "quota_paused".
                     "paused_until": w.get("paused_until"),
                     "paused_reason": w.get("paused_reason"),
-                }
-                for w in self._workers.values()
-            ]
+                    "phase": w.get("phase"),
+                    "phase_since": w.get("phase_since"),
+                    "phase_age_sec": (
+                        max(0.0, (now - phase_since_dt).total_seconds())
+                        if phase_since_dt
+                        else None
+                    ),
+                    "last_heartbeat_at": w.get("last_heartbeat_at"),
+                    "stall_kill_fired": bool(w.get("stall_kill_fired", False)),
+                    "is_stale": heartbeat_age > STALL_KILL_THRESHOLD_SEC,
+                    }
+                )
+            return rows
 
     def _run_worker(self, worker_id):
         """Worker loop — fetches one function at a time to avoid conflicts with other workers."""
@@ -285,6 +399,7 @@ class WorkerManager:
             )
 
             worker["status"] = "running"
+            self._set_phase(worker_id, "starting")
             self._emit_status()
             self._bus.emit(
                 "worker_started",
@@ -341,6 +456,7 @@ class WorkerManager:
             #   4. Short timeout (60s) + no individual fallback — fail fast
             #   5. Count clamped to 20 (was 50)
             try:
+                self._set_phase(worker_id, "pre_refresh")
                 pre_queue = load_priority_queue()
                 pre_cfg = pre_queue.get("config") or {}
                 pre_meta = pre_queue.get("meta") or {}
@@ -399,6 +515,7 @@ class WorkerManager:
             except Exception as e:
                 print(f"  Pre-refresh failed (continuing with stale state): {e}")
 
+            self._set_phase(worker_id, "session_start")
             session = start_session(state)
             processed = 0
             # Threshold for adaptive refresh — this worker reads the shared
@@ -481,6 +598,7 @@ class WorkerManager:
                     continue
 
                 # Reload state each iteration to get fresh scores/queue
+                self._set_phase(worker_id, "select_function")
                 state = load_state()
                 if worker["binary"]:
                     state["active_binary"] = worker["binary"]
@@ -518,6 +636,7 @@ class WorkerManager:
                     },
                 )
 
+                self._set_phase(worker_id, "process_function")
                 result = process_function(
                     key,
                     func,
@@ -568,6 +687,7 @@ class WorkerManager:
                             fresh_func["last_escalation_from"] = worker["provider"]
                             fresh_func["last_escalation_to"] = escalate_to
                             update_function_state(key, fresh_func)
+                            self._set_phase(worker_id, "auto_escalate")
                             escalate_result = process_function(
                                 key,
                                 fresh_func,
@@ -663,6 +783,7 @@ class WorkerManager:
                                 except (ValueError, TypeError):
                                     pass
                             if count >= STALE_STREAK_THRESHOLD and cooldown_ok:
+                                self._set_phase(worker_id, "adaptive_refresh")
                                 print(
                                     f"  Detected {count} stale skips — batch refreshing..."
                                 )
@@ -695,6 +816,7 @@ class WorkerManager:
             # full-state save here would write the functions snapshot this
             # worker loaded, clobbering per-function updates written
             # concurrently by other workers via update_function_state().
+            self._set_phase(worker_id, "finalize_session")
             if worker["binary"] and original_binary != worker["binary"]:
                 finalize_worker_session(session, active_binary=original_binary)
             else:
