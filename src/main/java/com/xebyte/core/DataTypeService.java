@@ -483,7 +483,19 @@ public class DataTypeService {
         }
 
         if (fieldsJson == null || fieldsJson.isEmpty()) {
-            return Response.text("Fields JSON is required");
+            return Response.text(badFieldsFormatHint("Fields JSON is required"));
+        }
+
+        // Cheap up-front shape check (issue #167): give the model a clear
+        // "what was expected vs what you sent" message before we even try
+        // to parse, so a C-struct or CSV attempt fails loudly with a
+        // concrete fix instead of a generic "No valid fields provided".
+        String fieldsTrimmed = fieldsJson.trim();
+        if (!fieldsTrimmed.startsWith("[") || !fieldsTrimmed.endsWith("]")) {
+            return Response.text(badFieldsFormatHint(
+                    "fields parameter must be a JSON array (got: "
+                            + fieldsTrimmed.substring(0, Math.min(60, fieldsTrimmed.length()))
+                            + "...)"));
         }
 
         final StringBuilder resultMsg = new StringBuilder();
@@ -495,7 +507,8 @@ public class DataTypeService {
             List<FieldDefinition> fields = parseFieldsJson(fieldsJson);
 
             if (fields.isEmpty()) {
-                return Response.text("No valid fields provided");
+                return Response.text(badFieldsFormatHint(
+                        "No valid fields parsed — every field must have name and type"));
             }
 
             DataTypeManager dtm = program.getDataTypeManager();
@@ -793,7 +806,8 @@ public class DataTypeService {
                     List<FieldDefinition> fields = parseFieldsJson(fieldsJson);
 
                     if (fields.isEmpty()) {
-                        result.append("No valid fields provided");
+                        result.append(badFieldsFormatHint(
+                                "No valid fields parsed — every field must have name and type"));
                         return;
                     }
 
@@ -2577,6 +2591,28 @@ public class DataTypeService {
      * Parse fields JSON into FieldDefinition objects using robust JSON parsing
      * Supports array format: [{"name":"field1","type":"uint"}, {"name":"field2","type":"void*"}]
      */
+    /**
+     * Build a multi-line error message that explains what the {@code fields}
+     * parameter is supposed to look like. Used by {@code create_struct} and
+     * {@code create_struct_with_fields} so an agent that sends a C-style
+     * struct, CSV, or anything else that isn't a JSON array gets back a
+     * concrete corrected example on its first wrong attempt.
+     *
+     * Closes issue #167 — agents were trying multiple formats before giving
+     * up because the prior error ("No valid fields provided") gave them no
+     * path to the right shape.
+     */
+    private static String badFieldsFormatHint(String reason) {
+        return reason + ". Expected a JSON array of objects, each with "
+                + "name (string) and type (string), with optional offset (decimal byte). "
+                + "Example: "
+                + "[{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},"
+                + "{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. "
+                + "type may be any resolvable Ghidra data type "
+                + "(uint, byte, ushort, char *, void *, MyStruct *, ...). "
+                + "Do NOT pass a C-style struct definition or CSV — only JSON.";
+    }
+
     private List<FieldDefinition> parseFieldsJson(String fieldsJson) {
         List<FieldDefinition> fields = new ArrayList<>();
 
