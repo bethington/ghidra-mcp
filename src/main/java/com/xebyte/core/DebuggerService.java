@@ -19,6 +19,7 @@ import ghidra.framework.model.ToolManager;
 import ghidra.framework.model.ToolTemplate;
 import ghidra.framework.model.Workspace;
 import ghidra.framework.plugintool.PluginTool;
+import ghidra.framework.plugintool.util.PluginException;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressFactory;
 import ghidra.program.model.address.AddressRange;
@@ -109,49 +110,160 @@ public class DebuggerService {
         return null;
     }
 
-    private PluginTool startDebuggerTool() {
+    /**
+     * Essential debugger plugin classes loaded into a host CodeBrowser when
+     * promoting it to a debugger-capable tool. Hard-coded list rather than
+     * read from the Debugger ToolTemplate — keeps us decoupled from Ghidra's
+     * tool-chest XML format and gives us tolerance to individual plugin
+     * load failures (we just skip and continue). Stable across Ghidra 11+
+     * versions; if a plugin class is renamed or moved we'll see a
+     * PluginException in the deploy log and can update the list.
+     */
+    private static final List<String> DEBUGGER_PLUGIN_CLASSES = List.of(
+            // Core trace + target services. Order matters: TraceManager and
+            // TargetService must be loaded before plugins that depend on them.
+            "ghidra.app.plugin.core.debug.service.tracemgr.DebuggerTraceManagerServicePlugin",
+            "ghidra.app.plugin.core.debug.service.target.DebuggerTargetServicePlugin",
+            "ghidra.app.plugin.core.debug.service.modules.DebuggerStaticMappingServicePlugin",
+            "ghidra.app.plugin.core.debug.service.tracermi.TraceRmiPlugin",
+            "ghidra.app.plugin.core.debug.service.control.DebuggerControlServicePlugin",
+            "ghidra.app.plugin.core.debug.service.breakpoint.DebuggerLogicalBreakpointServicePlugin",
+            "ghidra.app.plugin.core.debug.service.emulation.DebuggerEmulationServicePlugin",
+
+            // GUI providers — the panels that render in CodeBrowser when the
+            // debugger plugins are active. Users can dock/hide them as they
+            // see fit; they don't affect non-debug workflows.
+            "ghidra.app.plugin.core.debug.gui.tracermi.launcher.TraceRmiLauncherServicePlugin",
+            "ghidra.app.plugin.core.debug.gui.target.DebuggerTargetsPlugin",
+            "ghidra.app.plugin.core.debug.gui.thread.DebuggerThreadsPlugin",
+            "ghidra.app.plugin.core.debug.gui.modules.DebuggerModulesPlugin",
+            "ghidra.app.plugin.core.debug.gui.stack.DebuggerStackPlugin",
+            "ghidra.app.plugin.core.debug.gui.register.DebuggerRegistersPlugin",
+            "ghidra.app.plugin.core.debug.gui.listing.DebuggerListingPlugin",
+            "ghidra.app.plugin.core.debug.gui.console.DebuggerConsolePlugin",
+            "ghidra.app.plugin.core.debug.gui.breakpoint.DebuggerBreakpointsPlugin"
+    );
+
+    /**
+     * Load the debugger plugin set into a host PluginTool (typically a
+     * CodeBrowser). Tolerates per-plugin failures — as long as the
+     * TraceManagerService comes online afterwards, we report success.
+     * Saves the tool config so plugins persist across Ghidra restarts
+     * (Q4 design choice — see CHANGELOG v5.7.0).
+     */
+    private boolean ensureDebuggerPluginsLoaded(PluginTool tool) {
+        if (tool.getService(DebuggerTraceManagerService.class) != null) {
+            return true;  // Already debugger-capable, nothing to do.
+        }
+        int loaded = 0;
+        int failed = 0;
+        for (String pluginClass : DEBUGGER_PLUGIN_CLASSES) {
+            try {
+                tool.addPlugin(pluginClass);
+                loaded++;
+            } catch (PluginException e) {
+                failed++;
+                Msg.warn(this, "Skipped debugger plugin " + pluginClass + ": " + e.getMessage());
+            } catch (Exception e) {
+                failed++;
+                Msg.warn(this, "Skipped debugger plugin " + pluginClass + " (" +
+                        e.getClass().getSimpleName() + "): " + e.getMessage());
+            }
+        }
+        Msg.info(this, "Debugger plugins loaded into '" + tool.getName() + "': " +
+                loaded + " ok, " + failed + " failed");
+
+        if (loaded > 0) {
+            try {
+                // Persist so the user's CodeBrowser remembers the plugin set
+                // across Ghidra restarts. Ghidra serializes the tool config
+                // back to the local tool chest on saveTool().
+                tool.saveTool();
+            } catch (Exception e) {
+                Msg.warn(this, "Could not save tool after loading debugger plugins: " + e.getMessage());
+            }
+        }
+
+        // Wait briefly for the TraceManagerService to register. Plugin
+        // initialization is async; without a poll we'd race the first
+        // /debugger/launch call.
+        for (int i = 0; i < 20; i++) {
+            if (tool.getService(DebuggerTraceManagerService.class) != null) {
+                return true;
+            }
+            try { Thread.sleep(250); } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Find a non-FrontEnd PluginTool we can promote to debugger-capable.
+     * Prefers an already-running CodeBrowser; falls back to spawning one
+     * if no host tool is available. Replaces the old "spawn a Debugger
+     * tool" path so the user only ever sees one additional Ghidra window
+     * (their CodeBrowser, with debugger panels added).
+     */
+    private PluginTool promoteCodeBrowserToDebugger() {
         Project project = frontEndTool.getProject();
         if (project == null) return null;
         ToolManager tm = project.getToolManager();
         if (tm == null) return null;
         try {
-            Workspace workspace = tm.getActiveWorkspace();
-            if (workspace == null) return null;
-            for (String templateName : List.of("Debugger", "CodeBrowser")) {
-                ToolTemplate template = project.getLocalToolChest().getToolTemplate(templateName);
-                if (template == null) {
-                    continue;
-                }
-                AtomicReference<PluginTool> launched = new AtomicReference<>();
-                AtomicReference<Exception> launchError = new AtomicReference<>();
-                Runnable launcher = () -> {
-                    try {
-                        launched.set(workspace.runTool(template));
-                    } catch (Exception e) {
-                        launchError.set(e);
-                    }
-                };
-                if (SwingUtilities.isEventDispatchThread()) {
-                    launcher.run();
-                } else {
-                    SwingUtilities.invokeAndWait(launcher);
-                }
-                if (launchError.get() != null) {
-                    throw launchError.get();
-                }
-                PluginTool tool = launched.get();
-                if (tool == null) {
-                    continue;
-                }
-                for (int i = 0; i < 20; i++) {
-                    if (tool.getService(DebuggerTraceManagerService.class) != null) {
-                        return tool;
-                    }
-                    Thread.sleep(250);
+            // Look for an existing tool we can promote. Skip FrontEnd
+            // (the project manager — wrong tool kind for trace plugins).
+            PluginTool target = null;
+            for (PluginTool tool : tm.getRunningTools()) {
+                if (tool == frontEndTool) continue;
+                target = tool;
+                break;
+            }
+            if (target == null) {
+                // No host tool running — fall back to spawning a CodeBrowser.
+                target = spawnHostTool(project, tm);
+                if (target == null) {
+                    Msg.warn(this, "No CodeBrowser-style tool available to host debugger plugins.");
+                    return null;
                 }
             }
+            if (ensureDebuggerPluginsLoaded(target)) {
+                return target;
+            }
+            return null;
         } catch (Exception e) {
-            Msg.warn(this, "Failed to launch debugger tool: " + e.getMessage());
+            Msg.warn(this, "Failed to promote CodeBrowser to debugger-capable: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** Spawn a fresh CodeBrowser when no host tool is running. */
+    private PluginTool spawnHostTool(Project project, ToolManager tm) throws Exception {
+        Workspace workspace = tm.getActiveWorkspace();
+        if (workspace == null) return null;
+        // Try CodeBrowser first; fall back to Debugger template if CodeBrowser
+        // is missing (paranoia — Ghidra installs always have CodeBrowser).
+        for (String templateName : List.of("CodeBrowser", "Debugger")) {
+            ToolTemplate template = project.getLocalToolChest().getToolTemplate(templateName);
+            if (template == null) continue;
+            AtomicReference<PluginTool> launched = new AtomicReference<>();
+            AtomicReference<Exception> launchError = new AtomicReference<>();
+            Runnable launcher = () -> {
+                try {
+                    launched.set(workspace.runTool(template));
+                } catch (Exception e) {
+                    launchError.set(e);
+                }
+            };
+            if (SwingUtilities.isEventDispatchThread()) {
+                launcher.run();
+            } else {
+                SwingUtilities.invokeAndWait(launcher);
+            }
+            if (launchError.get() != null) throw launchError.get();
+            PluginTool tool = launched.get();
+            if (tool != null) return tool;
         }
         return null;
     }
@@ -178,14 +290,19 @@ public class DebuggerService {
         if (tool != null) {
             return tool;
         }
-        CompletableFuture<PluginTool> future = CompletableFuture.supplyAsync(this::startDebuggerTool);
+        // No debugger-capable tool yet — promote a CodeBrowser by loading
+        // the debugger plugin set into it (v5.7.0 architecture). Replaces
+        // the old "spawn a separate Debugger tool" path so users only ever
+        // see at most one additional Ghidra window.
+        CompletableFuture<PluginTool> future =
+                CompletableFuture.supplyAsync(this::promoteCodeBrowserToDebugger);
         try {
             tool = future.get(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
             throw e;
         } catch (Exception e) {
-            Msg.warn(this, "Failed to auto-start debugger tool: " + e.getMessage());
+            Msg.warn(this, "Failed to auto-promote CodeBrowser to debugger-capable: " + e.getMessage());
             return null;
         }
         cachedDebuggerTool = tool;

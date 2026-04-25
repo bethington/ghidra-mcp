@@ -99,6 +99,24 @@ time, capped at -20 aggregate per function:
   "rejected_name": ..., "current_type": ..., "message": ...,
   "suggestion": ...}`. Function unchanged on rejection. The model
   retries informed by the error rather than ignoring soft warnings.
+- **`DebuggerService` single-tool architecture** — instead of spawning
+  a separate "Debugger" PluginTool when first hit, debugger endpoints
+  now load the debugger plugin set INTO the user's existing CodeBrowser
+  via `tool.addPlugin(...)` and persist via `tool.saveTool()`. Result:
+  the user only ever sees at most one additional Ghidra window
+  (FrontEnd + their CodeBrowser, with debugger panels added). No more
+  orphan Debugger window left over after regression runs. The
+  membership check (`getService(DebuggerTraceManagerService.class)`)
+  runs on every debugger call so a manually-closed-and-reopened
+  CodeBrowser still gets promoted on next hit. Backwards-compatible:
+  the MCP endpoint contracts (`/debugger/launch`, `/debugger/status`,
+  etc.) and JSON shapes are unchanged. Loaded plugins are saved to
+  CodeBrowser's tool config so they persist across Ghidra restarts —
+  user must dock the new Threads / Modules / Targets / Stack panels
+  somewhere on first appearance. If a legacy "Debugger" PluginTool is
+  already running from before this change, `findDebuggerTool` reuses
+  it as-is — the new path only kicks in when no debugger-capable tool
+  is found.
 
 ### Tests
 
