@@ -1038,7 +1038,8 @@ public class ProgramScriptService {
     @McpTool(path = "/run_script_inline", method = "POST", description = "Execute inline Ghidra script code. Pass the full Java source as the 'code' body parameter. Gated by GHIDRA_MCP_ALLOW_SCRIPTS=1 (v5.4.1+).", category = "program")
     public Response runScriptInline(
             @Param(value = "code", source = ParamSource.BODY) String code,
-            @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String args) {
+            @Param(value = "args", source = ParamSource.BODY, defaultValue = "") String args,
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         if (!SecurityConfig.getInstance().areScriptsAllowed()) {
             return Response.err("Script execution disabled. Set GHIDRA_MCP_ALLOW_SCRIPTS=1 "
                 + "(and GHIDRA_MCP_AUTH_TOKEN if exposing beyond loopback) to enable. "
@@ -1125,7 +1126,7 @@ public class ProgramScriptService {
             }
 
             java.nio.file.Files.writeString(tempScript.toPath(), scriptCode);
-            responseHolder[0] = runGhidraScript(tempScript.getAbsolutePath(), args);
+            responseHolder[0] = runGhidraScript(tempScript.getAbsolutePath(), args, programName);
             return responseHolder[0];
         } catch (Exception e) {
             return Response.err("Failed to create inline script: " + e.getMessage());

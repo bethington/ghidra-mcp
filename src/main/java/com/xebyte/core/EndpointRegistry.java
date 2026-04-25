@@ -1150,8 +1150,8 @@ public class EndpointRegistry {
             (q, b) -> programScriptService.runGhidraScript(bodyStr(b, "script_path"), bodyStr(b, "args"), str(q, "program")));
 
         post("/run_script_inline", "Execute inline Ghidra script code",
-            params(bStr("code"), bStrOpt("args")),
-            (q, b) -> programScriptService.runGhidraScript(bodyStr(b, "code"), bodyStr(b, "args")));
+              params(bStr("code"), bStrOpt("args"), pProg()),
+              (q, b) -> programScriptService.runScriptInline(bodyStr(b, "code"), bodyStr(b, "args"), str(q, "program")));
 
         post("/run_ghidra_script", "Execute script with output capture and timeout",
             params(bStr("script_name"), bStrOpt("args"), bInt("timeout_seconds", 300),

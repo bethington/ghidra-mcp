@@ -1904,7 +1904,8 @@
       "category": "script",
       "params": [
         "code",
-        "args"
+        "args",
+        "program"
       ],
       "description": "Run inline script code"
     },
