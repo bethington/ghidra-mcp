@@ -4,6 +4,33 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.6.0 - 2026-04-25 (release regression)
+
+Release focused on deploy safety, live benchmark regression coverage, and
+debugger endpoint validation.
+
+### Added
+
+- **Live deploy release regression** - deploy can now opt into benchmark-backed
+  read/write, multi-program, negative-contract, and debugger-live regression
+  tiers with `--test ...` or local `GHIDRA_MCP_DEPLOY_TESTS`.
+- **Benchmark debugger fixture** - `fun-doc/benchmark` now builds
+  `BenchmarkDebug.exe` alongside `Benchmark.dll` so debugger MCP endpoints can
+  be exercised against a real launched process.
+- **Scoped prompt policy endpoint** - `/prompt_policy` temporarily handles a
+  narrow allow-list of known Ghidra automation dialogs during deploy/regression
+  runs while leaving normal interactive prompts untouched.
+
+### Changed
+
+- **Deploy lifecycle** - deploy now saves all open programs, attempts graceful
+  Ghidra exit, force-kills matching leftovers when needed, installs the
+  extension, starts Ghidra, waits for MCP/project readiness, and runs schema
+  smoke checks.
+- **Benchmark project reset** - benchmark tiers reset `/testing/benchmark` in
+  the active project, import both benchmark binaries, auto-analyze them, and
+  clear restored benchmark tool state before startup.
+
 ## v5.5.0 - 2026-04-23 (maintenance)
 
 Maintenance release focused on cleanup and release readiness after the

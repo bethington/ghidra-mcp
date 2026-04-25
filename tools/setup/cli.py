@@ -179,6 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[
             "benchmark-read",
             "benchmark-write",
+            "debugger-live",
             "endpoint-catalog",
             "multi-program",
             "negative-contract",

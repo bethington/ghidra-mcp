@@ -761,6 +761,55 @@ def end_session(state):
         state["current_session"] = None
 
 
+_SESSION_UPDATE_MISSING = object()
+
+
+def finalize_worker_session(session, *, active_binary=_SESSION_UPDATE_MISSING):
+    """Atomically merge a worker's finished session into the latest on-disk state.
+
+    Read-modify-write under `_state_lock`: re-reads state.json, sets
+    `session["ended"]`, appends to `state["sessions"]`, clears
+    `state["current_session"]` when it still points at this session, and
+    optionally updates `state["active_binary"]`. Writes atomically.
+
+    Replaces the `end_session(state); save_state(state)` pattern in worker
+    loops. A full-state save there would write the functions dict that was
+    loaded at iteration start, clobbering per-function updates made
+    concurrently by other workers through update_function_state().
+
+    `session` is the worker's local session dict (as returned by
+    start_session). If None or falsy, only active_binary handling runs.
+
+    `active_binary` uses a sentinel: pass a string to set, pass None to
+    clear (pop the key), or omit to leave whatever is on disk alone.
+    """
+    with _state_lock:
+        # Re-read latest state from disk using the same backup/raise behavior
+        # as normal loads, so a transient worker finish cannot overwrite a
+        # recoverable corrupt state file with a fresh default state.
+        latest = load_state()
+
+        if session:
+            session["ended"] = datetime.now().isoformat()
+            latest.setdefault("sessions", []).append(session)
+            # Only clear current_session if it still references this worker's
+            # session (match on the "started" timestamp, which is unique per
+            # start_session call). Another worker's concurrent session should
+            # stay untouched.
+            cur = latest.get("current_session")
+            if isinstance(cur, dict) and cur.get("started") == session.get("started"):
+                latest["current_session"] = None
+
+        if active_binary is not _SESSION_UPDATE_MISSING:
+            if active_binary is None:
+                latest.pop("active_binary", None)
+            else:
+                latest["active_binary"] = active_binary
+
+        _atomic_write_state(latest)
+    bus_emit("state_changed")
+
+
 # ---------------------------------------------------------------------------
 # Ghidra data fetching
 # ---------------------------------------------------------------------------

@@ -4,14 +4,25 @@ This directory contains version-specific release documentation for the Ghidra MC
 
 For the full version history, see [CHANGELOG.md](../../CHANGELOG.md) in the project root.
 
+For the release preparation runbook, see
+[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+
 ## Current Releases
 
-### v5.5.0 (Latest) — maintenance release
+### v5.6.0 (Latest) — release regression
+
+- **Live deploy regression tiers** — `tools.setup deploy` can run selected contract, benchmark read/write, multi-program, negative-contract, debugger-live, and release-grade suites.
+- **Benchmark debugger fixture** — `fun-doc/benchmark` now builds `BenchmarkDebug.exe` alongside `Benchmark.dll` so debugger endpoints can be exercised against a real launched process.
+- **Scoped prompt policy** — `/prompt_policy` temporarily handles known automation dialogs during deploy/regression runs while leaving normal interactive prompts untouched.
+- **Safer deploy lifecycle** — deploy saves open programs/traces, exits or force-kills matching Ghidra processes, starts Ghidra, waits for MCP/project readiness, and runs schema smoke checks.
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.5.0 — maintenance release
 
 - **Decompiler lifecycle fixes** — `FunctionService` now disposes owned `DecompInterface` instances across success, early-return, and exception paths instead of leaking subprocesses in long-running sessions.
 - **Bridge compatibility fix** — Python tool-name sanitization now enforces Claude/CAPI's 64-character limit and valid-character rules during collision handling.
 - **Bundled script hardening** — script-side `DecompInterface` ownership was normalized to scoped cleanup, and Claude-invoking scripts now use bounded waits with terminate/kill fallback.
-- **Contributor guidance** — `CONTRIBUTING.md` now includes a release-relevant resource-ownership checklist for disposables, transactions, child-process handling, and timeout expectations.
+- **Contributor guidance** — `CONTRIBUTING.md` includes a release-relevant resource-ownership checklist for disposables, transactions, child-process handling, and timeout expectations.
 - **Release metadata refresh** — Maven/package metadata, headless/plugin fallback versions, endpoint catalog version, and release docs were updated to `5.5.0`.
 - See [CHANGELOG.md](../../CHANGELOG.md) for full details.
 

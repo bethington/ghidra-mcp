@@ -44,17 +44,6 @@ public class HeadlessManagementService {
         return Response.err("Failed to load program from: " + filePath);
     }
 
-    @McpTool(path = "/close_program", method = "POST", description = "Close a loaded program and free its resources", category = "headless")
-    public Response closeProgram(
-            @Param(value = "name", source = ParamSource.BODY, description = "Program name (as shown by list_open_programs)") String name) {
-        Program program = programProvider.getProgram(name);
-        if (program == null) {
-            return Response.err("Program not found: " + (name != null ? name : "current"));
-        }
-        programProvider.closeProgram(program);
-        return Response.text("{\"success\": true, \"closed\": \"" + ServiceUtils.escapeJson(program.getName()) + "\"}");
-    }
-
     // ========================================================================
     // Project management
     // ========================================================================

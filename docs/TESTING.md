@@ -8,7 +8,7 @@ This project has two different testing surfaces:
   exercise MCP endpoints against a benchmark binary inside an active project.
 
 The live tests are intentionally opt-in because they can add or reset
-`Benchmark.dll` in the current Ghidra project.
+`Benchmark.dll` and `BenchmarkDebug.exe` in the current Ghidra project.
 
 ## Quick Commands
 
@@ -45,8 +45,9 @@ repository default.
 A plain deploy:
 
 1. Detects matching running Ghidra processes for the target install.
-2. Requests `save_program`.
-3. Requests graceful `exit_ghidra`.
+2. Requests `save_all_programs`.
+3. Requests graceful `exit_ghidra`, which saves open programs and debugger
+   traces before closing.
 4. Force-kills remaining matching Ghidra processes if graceful exit did not
    finish.
 5. Installs the extension and bridge files.
@@ -55,8 +56,8 @@ A plain deploy:
 8. Waits for a project-backed endpoint to confirm the active project is ready.
 9. Runs MCP schema smoke checks.
 
-A plain deploy does **not** import `Benchmark.dll` unless the user opts in with
-`--test ...` or `GHIDRA_MCP_DEPLOY_TESTS`.
+A plain deploy does **not** import `Benchmark.dll` or `BenchmarkDebug.exe`
+unless the user opts in with `--test ...` or `GHIDRA_MCP_DEPLOY_TESTS`.
 
 ## Live Test Tiers
 
@@ -70,7 +71,8 @@ Pass one or more `--test` values to `python -m tools.setup deploy`.
 | `benchmark-write` | Imports/resets benchmark, writes test metadata | Runs reversible write smoke checks against the benchmark. |
 | `multi-program` | Imports/resets benchmark | Confirms project-path targeting works when multiple programs are open. |
 | `negative-contract` | Imports/resets benchmark | Asserts important error cases return actionable messages. |
-| `release` | Imports/resets benchmark, writes test metadata | Runs the release-grade suite. |
+| `debugger-live` | Imports/resets benchmark, launches test process | Launches `BenchmarkDebug.exe` through MCP debugger endpoints and reads live trace state. |
+| `release` | Imports/resets benchmark, writes test metadata, launches test process | Runs the release-grade suite. |
 
 The `release` tier currently runs:
 
@@ -79,8 +81,14 @@ The `release` tier currently runs:
 3. Extended benchmark read checks.
 4. Multi-program targeting checks.
 5. Negative/error-shape checks.
+6. Debugger live launch/status/module/register/stack checks.
 
 Default deploy also runs the schema smoke check before any selected tier.
+
+When a benchmark tier runs, deploy temporarily enables the `/prompt_policy`
+endpoint. This narrowly-scoped prompt policy only responds to known automation
+dialogs for the benchmark flow, such as benchmark analysis prompts, modified
+file saves, and tool-layout save prompts. Unknown dialogs are left alone.
 
 ## Benchmark Fixture
 
@@ -89,21 +97,30 @@ active Ghidra project at:
 
 ```text
 /testing/benchmark/Benchmark.dll
+/testing/benchmark/BenchmarkDebug.exe
 ```
 
-The filesystem build artifact stays at:
+The filesystem build artifacts stay at:
 
 ```text
 fun-doc/benchmark/build/Benchmark.dll
+fun-doc/benchmark/build/BenchmarkDebug.exe
 ```
 
 Before benchmark tiers run, the deploy harness deletes any existing benchmark
 project file at the legacy and current benchmark paths, recreates the
-`/testing/benchmark` folder, imports the current binary, and waits for analysis
-to become idle.
+`/testing/benchmark` folder, imports the current binaries, and waits for
+analysis to become idle. It also removes restored benchmark CodeBrowser or
+Debugger tool state from the active project before startup so old benchmark
+windows do not trigger first-open dialogs before MCP is ready.
 
 This reset is why benchmark tiers are opt-in: users should not get a test binary
 added to their project merely because they deployed the extension.
+
+The debugger live tier is Windows-only today and uses Ghidra's Trace RMI
+debugger launcher. If the default Python on `PATH` is not compatible with the
+Ghidra debugger wheels, set `GHIDRA_DEBUGGER_PYTHON` in local `.env` to the
+Python executable Ghidra should use for debugger launches.
 
 ## GitHub Actions
 
@@ -194,7 +211,11 @@ as proving the installed GUI plugin works in a real user project.
 
 ## What To Run Before a Release
 
-Recommended release checklist:
+For the full release runbook, including versioning, documentation, PR, tagging,
+and post-release steps, see
+[`docs/releases/RELEASE_CHECKLIST.md`](releases/RELEASE_CHECKLIST.md).
+
+Minimum local verification:
 
 ```text
 python -m tools.setup preflight --ghidra-path "F:\ghidra_12.0.4_PUBLIC"

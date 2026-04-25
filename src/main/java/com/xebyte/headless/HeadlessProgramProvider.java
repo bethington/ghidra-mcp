@@ -210,9 +210,10 @@ public class HeadlessProgramProvider implements ProgramProvider {
      *
      * @param program The program to close
      */
-    public void closeProgram(Program program) {
+    @Override
+    public boolean closeProgram(Program program) {
         if (program == null) {
-            return;
+            return false;
         }
 
         openPrograms.remove(program.getName());
@@ -228,6 +229,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
         } catch (Exception e) {
             Msg.warn(this, "Error releasing program: " + e.getMessage());
         }
+        return true;
     }
 
     /**

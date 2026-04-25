@@ -372,6 +372,7 @@ allure-results/
 allure-report/
 junit/
 reports/
+live-all-mcp-tools-report.json
 
 # Performance and profiling
 *.prof
