@@ -3826,15 +3826,74 @@ def _invoke_provider_direct(
 ):
     effective_provider = provider or AI_PROVIDER
     selected_model = _require_model_name(model, effective_provider)
+
+    # Pre-call quota-pause gate (Q1 + Q9): if (provider, model) is currently
+    # walled, short-circuit before hitting the API. Synthesize a quota_paused
+    # result so the caller can log it and the worker can pause.
+    from provider_pause import (
+        detect_quota_wall,
+        get_default_manager,
+        QUOTA_PAUSE_THRESHOLD_SECONDS,
+    )
+
+    pause_mgr = get_default_manager()
+    paused_until = pause_mgr.wait_until(effective_provider, selected_model)
+    if paused_until is not None:
+        reason = pause_mgr.reason(effective_provider, selected_model) or "quota wall"
+        print(
+            f"  [{effective_provider}] quota wall active — paused until "
+            f"{paused_until.isoformat()} ({reason})",
+            flush=True,
+        )
+        return (
+            None,
+            {
+                "tool_calls": 0,
+                "tool_calls_known": True,
+                "provider_error": f"quota_paused: {reason}",
+                "provider_error_type": "QuotaPaused",
+                "quota_paused": True,
+                "quota_paused_until": paused_until.isoformat(),
+                "quota_paused_reason": reason,
+            },
+        )
+
     if effective_provider == "minimax":
-        return _invoke_minimax(
+        result = _invoke_minimax(
             prompt, selected_model, max_turns, complexity_tier=complexity_tier
         )
-    if effective_provider == "codex":
-        return _wrap_result(_invoke_codex(prompt, selected_model, max_turns))
-    if effective_provider == "gemini":
+    elif effective_provider == "codex":
+        result = _wrap_result(_invoke_codex(prompt, selected_model, max_turns))
+    elif effective_provider == "gemini":
+        # Gemini's wrapper already integrates quota-wall detection inline so
+        # it can break out of its retry loop — return its result directly.
         return _invoke_gemini(prompt, selected_model, max_turns)
-    return _wrap_result(_invoke_claude(prompt, selected_model, max_turns))
+    else:
+        result = _wrap_result(_invoke_claude(prompt, selected_model, max_turns))
+
+    # Post-call detection (Q6) for claude/codex/minimax: if the call returned
+    # an error string, run the per-provider detector. Above-threshold matches
+    # install a pause so the next worker on the same model short-circuits.
+    text, meta = result
+    err_str = (meta or {}).get("provider_error") or ""
+    http_status = (meta or {}).get("provider_http_status")
+    if err_str:
+        wall = detect_quota_wall(effective_provider, err_str, http_status=http_status)
+        if wall is not None and wall.raw_seconds >= QUOTA_PAUSE_THRESHOLD_SECONDS:
+            until = pause_mgr.install(effective_provider, selected_model, wall)
+            print(
+                f"  [{effective_provider}] quota wall — paused until "
+                f"{until.isoformat()} ({wall.reason})",
+                flush=True,
+            )
+            meta = dict(meta or {})
+            meta["provider_error_type"] = "QuotaPaused"
+            meta["quota_paused"] = True
+            meta["quota_paused_until"] = until.isoformat()
+            meta["quota_paused_reason"] = wall.reason
+            return (text, meta)
+
+    return result
 
 
 def _restore_debug_context_for_worker(debug_ctx=None, log_dir=None):
@@ -4378,16 +4437,28 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
         return (text, {"tool_calls": tool_call_count, "tool_calls_known": True})
 
     # Retry on transient Gemini capacity/rate-limit errors.
-    # The Gemini CLI has its own internal retries but uses short backoffs that
-    # aren't enough when the model is fully saturated (429 / RESOURCE_EXHAUSTED).
-    # We add longer waits between whole-session retries.
+    # Quota walls (Q9: detect on first failure when unambiguous) skip the
+    # retry chain entirely and install a pause entry — those retries would
+    # just re-discover the same wall in 90s of wasted time.
+    from provider_pause import (
+        detect_quota_wall,
+        get_default_manager,
+        QUOTA_PAUSE_THRESHOLD_SECONDS,
+    )
+
     last_err = None
+    pause_info = None
     for _attempt in range(3):
         try:
             return asyncio.run(run())
         except Exception as e:
             last_err = e
             err_str = str(e)
+            # Q9: unambiguous quota wall -> immediate pause, no retries.
+            wall = detect_quota_wall("gemini", err_str)
+            if wall and wall.raw_seconds >= QUOTA_PAUSE_THRESHOLD_SECONDS:
+                pause_info = wall
+                break
             is_transient = any(
                 k in err_str
                 for k in ("429", "RESOURCE_EXHAUSTED", "capacity", "rateLimitExceeded")
@@ -4402,11 +4473,32 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
                 time.sleep(wait)
             else:
                 break
-    # Surface the error in the run record so the dashboard / runs.jsonl shows
-    # *why* a Gemini run failed instead of a silent "tool_calls=0, output=null".
-    # Quota-exhausted ("You have exhausted your capacity on this model. Your
-    # quota will reset after Xh") in particular was previously invisible —
-    # users saw a worker burning through retries with no diagnosis.
+
+    # Quota wall reached: install pause so other workers on this model
+    # short-circuit immediately, and surface a "quota_paused" provider_error
+    # so the run record & dashboard explain the silence.
+    if pause_info is not None:
+        until = get_default_manager().install("gemini", model, pause_info)
+        print(
+            f"  [gemini] quota wall — paused until {until.isoformat()} "
+            f"({pause_info.reason})",
+            flush=True,
+        )
+        return (
+            None,
+            {
+                "tool_calls": 0,
+                "tool_calls_known": True,
+                "provider_error": str(last_err)[:500],
+                "provider_error_type": "QuotaPaused",
+                "quota_paused": True,
+                "quota_paused_until": until.isoformat(),
+                "quota_paused_reason": pause_info.reason,
+            },
+        )
+
+    # Non-quota failure — surface the error so the dashboard/runs.jsonl shows
+    # why this run was empty (previously: silent tool_calls=0, output=null).
     err_str_for_log = str(last_err) if last_err is not None else "unknown"
     print(f"ERROR: Gemini CLI failed: {err_str_for_log}", file=sys.stderr)
     return (
@@ -6283,10 +6375,34 @@ def process_function(
                 )
                 cap_reached = handoff_max > 0 and handoff_count >= handoff_max
 
+                # Q10: don't hand off to a walled provider — primary keeps
+                # the function. The handoff target's model is what matters
+                # for the wall, so resolve it before the gate check.
+                handoff_target_walled = False
+                if handoff_provider and handoff_provider != effective_provider:
+                    try:
+                        from provider_pause import get_default_manager as _get_pm
+
+                        _handoff_model = select_model(
+                            mode, provider=handoff_provider, config_snapshot=config_snapshot
+                        )
+                        if _handoff_model and _get_pm().is_paused(
+                            handoff_provider, _handoff_model
+                        ):
+                            handoff_target_walled = True
+                            print(
+                                f"  [handoff] skipped — {handoff_provider}/"
+                                f"{_handoff_model} walled; primary continues",
+                                flush=True,
+                            )
+                    except Exception:  # noqa: BLE001 — don't let pause check break handoff
+                        pass
+
                 can_handoff = (
                     handoff_provider
                     and handoff_provider != effective_provider
                     and not cap_reached
+                    and not handoff_target_walled
                 )
 
                 if can_handoff:
@@ -6448,6 +6564,31 @@ def process_function(
     )
     tool_calls_made = meta.get("tool_calls", -1)
     tool_calls_known = bool(meta.get("tool_calls_known", tool_calls_made != -1))
+
+    # Quota wall short-circuit (Q2): the provider returned `quota_paused`
+    # because (provider, model) is currently walled. Log the run as
+    # `quota_paused` so it appears in runs.jsonl for diagnostics, but DO
+    # NOT bump consecutive_fails — the wall is an account-wide transient
+    # condition, not a per-function quality signal. The worker loop will
+    # see the pause on its next iteration and yield until reset.
+    if meta.get("quota_paused"):
+        result = "quota_paused"
+        func["last_processed"] = datetime.now().isoformat()
+        func["last_result"] = result
+        # consecutive_fails counter intentionally untouched (Q2).
+        until_iso = meta.get("quota_paused_until")
+        reason = meta.get("quota_paused_reason") or "quota wall"
+        print(
+            f"  Quota wall: {provider}/{selected_model} paused until "
+            f"{until_iso} — function deferred ({reason})",
+            flush=True,
+        )
+        return _finish(
+            "quota_paused",
+            logged_result="quota_paused",
+            score_after=live_score,
+            reason=f"quota_paused until {until_iso}",
+        )
 
     # Two-pass: if recovery pass made tool calls, run pass 2 (comments) with fresh data
     # Don't gate on "DONE:" text — the model may produce think-only output or empty response
@@ -6863,15 +7004,46 @@ def process_function(
                     provider=audit_provider,
                     max_turns=15,
                 )
-                audit_tool_calls = audit_meta.get("tool_calls", -1)
-                audit_tool_calls_known = bool(
-                    audit_meta.get("tool_calls_known", audit_tool_calls != -1)
-                )
+                # Q10: when audit's provider+model is walled, skip silently.
+                # Audit is a quality second-pass; a missed audit is harmless,
+                # we don't want to log it as a failure or count it against
+                # any threshold. The function keeps the primary worker's
+                # score and moves on.
+                if audit_meta.get("quota_paused"):
+                    audit_outcome = "quota_paused"
+                    audit_score_after = audit_score_before
+                    audit_tool_calls = 0
+                    audit_tool_calls_known = True
+                    print(
+                        f"  [audit] skipped — {audit_provider} walled until "
+                        f"{audit_meta.get('quota_paused_until')}",
+                        flush=True,
+                    )
+                    bus_emit(
+                        "audit_complete",
+                        {
+                            "key": func_key,
+                            "provider": audit_provider,
+                            "score_before": audit_score_before,
+                            "score_after": audit_score_before,
+                            "outcome": "quota_paused",
+                        },
+                    )
+                else:
+                    audit_tool_calls = audit_meta.get("tool_calls", -1)
+                    audit_tool_calls_known = bool(
+                        audit_meta.get("tool_calls_known", audit_tool_calls != -1)
+                    )
 
-                # Rescore after audit
-                audit_new_score, audit_completeness = _rescore_and_sync(
-                    func, address, program
-                )
+                # Skip rescore when audit was quota-paused — the call never
+                # touched Ghidra so the score can't have changed.
+                if audit_outcome == "quota_paused":
+                    audit_new_score, audit_completeness = None, None
+                else:
+                    # Rescore after audit
+                    audit_new_score, audit_completeness = _rescore_and_sync(
+                        func, address, program
+                    )
                 if audit_new_score is not None:
                     audit_score_after = audit_new_score
                     audit_diff = audit_new_score - audit_score_before

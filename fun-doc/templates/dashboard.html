@@ -154,6 +154,8 @@
         .worker-pane.focused { border-color: var(--accent-gold); border-width: 2px; box-shadow: 0 0 8px rgba(199, 179, 119, 0.3); }
         .worker-pane.stopping { border-color: var(--color-rare); }
         .worker-pane.finished { border-color: var(--text-muted); opacity: 0.85; }
+        .worker-pane.quota_paused { border-color: #c9a747; box-shadow: 0 0 6px rgba(201, 167, 71, 0.18); }
+        .worker-pane.quota_paused .wp-status { color: #c9a747; }
         .sortable-header { cursor: pointer; user-select: none; white-space: nowrap; }
         .sortable-header:hover { color: var(--accent-gold); }
         .sortable-header span { font-size: 0.6rem; color: var(--accent-gold); }
@@ -886,6 +888,41 @@
             if (_inventoryRefreshTimer) clearTimeout(_inventoryRefreshTimer);
             _inventoryRefreshTimer = setTimeout(refreshInventory, 300);
         });
+
+        // ---- Quota-pause wake countdown ----
+        function _formatQuotaCountdown(isoStr) {
+            try {
+                const until = new Date(isoStr);
+                const now = new Date();
+                let secs = Math.max(0, Math.floor((until - now) / 1000));
+                if (secs <= 0) return 'resuming…';
+                const h = Math.floor(secs / 3600); secs -= h * 3600;
+                const m = Math.floor(secs / 60); secs -= m * 60;
+                if (h > 0) return `${h}h ${m}m`;
+                if (m > 0) return `${m}m ${secs}s`;
+                return `${secs}s`;
+            } catch { return ''; }
+        }
+
+        // Repaint paused workers every 30s so the countdown visibly ticks
+        // down without waiting for a full worker_status push. We rely on
+        // the cached __lastWorkerStatus the worker handler stashes.
+        setInterval(() => {
+            const workers = window.__lastWorkerStatus || [];
+            workers.forEach(w => {
+                if (w.status !== 'quota_paused' || !w.paused_until) return;
+                const status = document.getElementById(`wp-status-${w.id}`);
+                if (!status) return;
+                const remaining = _formatQuotaCountdown(w.paused_until);
+                const reason = w.paused_reason ? ` — ${escapeHtml(w.paused_reason).slice(0,60)}` : '';
+                status.innerHTML = `<span class="wp-current">paused</span> until ${escapeHtml(w.paused_until.replace('T',' ').slice(0,19))} (${remaining})${reason}`;
+            });
+        }, 30000);
+
+        // Backend may push provider_pauses on install/clear; we don't render
+        // a separate panel (Q7 = no banner) but the worker_status path picks
+        // up the new paused_until field naturally on the next status emit.
+        socket.on('provider_pauses', () => {});
 
         function scoreCellClass(s) {
             if (s >= 100) return 'score-100';
@@ -1710,19 +1747,30 @@
                         titleEl.textContent = titleText;
                     }
                 }
-                const cls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : 'finished';
+                const cls = w.status === 'running' ? 'running'
+                    : w.status === 'stopping' ? 'stopping'
+                    : w.status === 'quota_paused' ? 'quota_paused'
+                    : 'finished';
                 pane.element.className = `worker-pane ${cls}`;
                 setPaneAlert(w.id, w.last_alert);
                 const done = w.progress.completed + w.progress.skipped + w.progress.failed;
                 const status = document.getElementById(`wp-status-${w.id}`);
                 if (status) {
-                    const countStr = w.continuous ? 'auto' : `${done}/${w.count}`;
-                    const cur = w.progress.current ? w.progress.current.name : '';
-                    const skipStr = w.progress.skipped > 0 ? ` ${w.progress.skipped}skip` : '';
-                    const timeoutStr = w.timeout_count > 0 ? ` | ${w.timeout_count} timeout${w.timeout_count > 1 ? 's' : ''}` : '';
-                    const restoredStr = w.restored ? 'restored | ' : '';
-                    const prefix = `${restoredStr}${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${timeoutStr}`;
-                    status.innerHTML = escapeHtml(prefix) + (cur ? ' | <span class="wp-current">' + escapeHtml(cur) + '</span>' : '');
+                    if (w.status === 'quota_paused' && w.paused_until) {
+                        // Quota wall: replace the status line with a wake-time
+                        // countdown so the operator can see when work resumes.
+                        const remaining = _formatQuotaCountdown(w.paused_until);
+                        const reason = w.paused_reason ? ` — ${escapeHtml(w.paused_reason).slice(0, 60)}` : '';
+                        status.innerHTML = `<span class="wp-current">paused</span> until ${escapeHtml(w.paused_until.replace('T',' ').slice(0,19))} (${remaining})${reason}`;
+                    } else {
+                        const countStr = w.continuous ? 'auto' : `${done}/${w.count}`;
+                        const cur = w.progress.current ? w.progress.current.name : '';
+                        const skipStr = w.progress.skipped > 0 ? ` ${w.progress.skipped}skip` : '';
+                        const timeoutStr = w.timeout_count > 0 ? ` | ${w.timeout_count} timeout${w.timeout_count > 1 ? 's' : ''}` : '';
+                        const restoredStr = w.restored ? 'restored | ' : '';
+                        const prefix = `${restoredStr}${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${timeoutStr}`;
+                        status.innerHTML = escapeHtml(prefix) + (cur ? ' | <span class="wp-current">' + escapeHtml(cur) + '</span>' : '');
+                    }
                 }
                 // Snapshot sub-line. Frozen at worker start, never changes
                 // for this worker. Hidden when no snapshot present.

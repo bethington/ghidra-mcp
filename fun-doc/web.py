@@ -254,6 +254,9 @@ class WorkerManager:
                     # save-time toast (Q5). None for legacy/CLI workers; the
                     # dashboard renders no sub-line in that case.
                     "config_snapshot": w.get("config_snapshot"),
+                    # Quota-pause fields populated when status == "quota_paused".
+                    "paused_until": w.get("paused_until"),
+                    "paused_reason": w.get("paused_reason"),
                 }
                 for w in self._workers.values()
             ]
@@ -408,9 +411,75 @@ class WorkerManager:
                 load_priority_queue().get("config", {}).get("good_enough_score", 80)
             )
 
+            # Resolve the worker's primary FULL model from the frozen snapshot.
+            # The quota-pause gate keys on (provider, model); we check the
+            # FULL-mode model since that's the dominant call on most functions.
+            # Audit/handoff models on the same provider get their own pause
+            # treatment via the Q10 skip-silently path inside process_function.
+            def _worker_primary_model():
+                snap = worker.get("config_snapshot") or {}
+                providers = snap.get("providers") or {}
+                p_entry = providers.get(worker["provider"]) or {}
+                return (
+                    (p_entry.get("models") or {}).get("FULL")
+                    or worker.get("model")
+                )
+
+            def _yield_for_quota_pause():
+                """If our (provider, FULL-model) is walled, set status to
+                quota_paused and sleep until the pause clears or stop fires.
+                Returns True if we yielded (caller should `continue` the loop)."""
+                from provider_pause import get_default_manager as _get_pm
+
+                primary_model = _worker_primary_model()
+                if not primary_model:
+                    return False
+                pm = _get_pm()
+                paused_until = pm.wait_until(worker["provider"], primary_model)
+                if paused_until is None:
+                    return False
+                # Enter quota_paused state and sleep with periodic re-check.
+                worker["status"] = "quota_paused"
+                worker["paused_until"] = paused_until.isoformat()
+                worker["paused_reason"] = (
+                    pm.reason(worker["provider"], primary_model) or "quota wall"
+                )
+                self._emit_status()
+                while not worker["stop_flag"].is_set():
+                    now = datetime.now()
+                    remaining = (paused_until - now).total_seconds()
+                    if remaining <= 0:
+                        break
+                    # Re-check pause status every 30s so manual clears and
+                    # external pause-set mutations get picked up promptly.
+                    if worker["stop_flag"].wait(timeout=min(remaining, 30.0)):
+                        break  # stop requested mid-pause
+                    paused_until = pm.wait_until(worker["provider"], primary_model)
+                    if paused_until is None:
+                        break
+                if not worker["stop_flag"].is_set():
+                    worker["status"] = "running"
+                    worker.pop("paused_until", None)
+                    worker.pop("paused_reason", None)
+                    self._emit_status()
+                return True
+
+            # Q8: manual start during a pause — yield immediately at loop entry
+            # so the worker enters quota_paused without burning a redundant API
+            # call to discover the wall.
+            _yield_for_quota_pause()
+
             while not worker["stop_flag"].is_set() and (
                 worker["continuous"] or processed < worker["count"]
             ):
+                # Per-iteration pause check (Q1): another worker may have
+                # discovered the wall while we were idle/processing. Yield
+                # before picking the next function.
+                if _yield_for_quota_pause():
+                    if worker["stop_flag"].is_set():
+                        break
+                    continue
+
                 # Reload state each iteration to get fresh scores/queue
                 state = load_state()
                 if worker["binary"]:
@@ -1823,6 +1892,53 @@ def create_app(state_file, event_bus=None):
         data = request.json or {}
         path = data.get("path")
         inventory_scorer.clear_blacklist(path)
+        return jsonify({"ok": True})
+
+    # --- Provider quota pauses (Q1-Q11) ---
+    from provider_pause import get_default_manager as _get_pause_mgr
+
+    def _emit_provider_pauses(active=None):
+        try:
+            socketio.emit(
+                "provider_pauses",
+                {"active": active if active is not None else _get_pause_mgr().all_active()},
+            )
+        except Exception:
+            pass
+
+    _get_pause_mgr().set_on_change(_emit_provider_pauses)
+
+    @app.route("/api/provider_pauses", methods=["GET"])
+    def provider_pauses_list():
+        """Active per-(provider, model) pauses with paused_until + reason."""
+        active = _get_pause_mgr().all_active()
+        return jsonify(
+            {
+                "active": [
+                    {
+                        "provider": p,
+                        "model": m,
+                        "paused_until": until,
+                        "reason": reason,
+                    }
+                    for p, m, until, reason in active
+                ]
+            }
+        )
+
+    @app.route("/api/provider_pauses/clear", methods=["POST"])
+    def provider_pauses_clear():
+        """Manually clear a pause. POST {provider, model} clears one;
+        empty body clears all. Use this if the API recovered before the
+        parsed reset window (rare but possible)."""
+        data = request.json or {}
+        provider = data.get("provider")
+        model = data.get("model")
+        mgr = _get_pause_mgr()
+        if provider and model:
+            mgr.clear(provider, model)
+        else:
+            mgr.clear_all()
         return jsonify({"ok": True})
 
     restored_workers = worker_mgr.restore_workers()
