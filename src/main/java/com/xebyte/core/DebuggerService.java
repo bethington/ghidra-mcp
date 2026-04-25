@@ -134,7 +134,7 @@ public class DebuggerService {
             // debugger plugins are active. Users can dock/hide them as they
             // see fit; they don't affect non-debug workflows.
             "ghidra.app.plugin.core.debug.gui.tracermi.launcher.TraceRmiLauncherServicePlugin",
-            "ghidra.app.plugin.core.debug.gui.target.DebuggerTargetsPlugin",
+            "ghidra.app.plugin.core.debug.gui.tracermi.connection.TraceRmiConnectionManagerPlugin",
             "ghidra.app.plugin.core.debug.gui.thread.DebuggerThreadsPlugin",
             "ghidra.app.plugin.core.debug.gui.modules.DebuggerModulesPlugin",
             "ghidra.app.plugin.core.debug.gui.stack.DebuggerStackPlugin",
@@ -155,34 +155,44 @@ public class DebuggerService {
         if (tool.getService(DebuggerTraceManagerService.class) != null) {
             return true;  // Already debugger-capable, nothing to do.
         }
-        int loaded = 0;
-        int failed = 0;
-        for (String pluginClass : DEBUGGER_PLUGIN_CLASSES) {
-            try {
-                tool.addPlugin(pluginClass);
-                loaded++;
-            } catch (PluginException e) {
-                failed++;
-                Msg.warn(this, "Skipped debugger plugin " + pluginClass + ": " + e.getMessage());
-            } catch (Exception e) {
-                failed++;
-                Msg.warn(this, "Skipped debugger plugin " + pluginClass + " (" +
-                        e.getClass().getSimpleName() + "): " + e.getMessage());
+        int[] counts = new int[2]; // [loaded, failed]
+        Runnable loadOnEdt = () -> {
+            for (String pluginClass : DEBUGGER_PLUGIN_CLASSES) {
+                try {
+                    tool.addPlugin(pluginClass);
+                    counts[0]++;
+                } catch (PluginException e) {
+                    counts[1]++;
+                    Msg.warn(this, "Skipped debugger plugin " + pluginClass + ": " + e.getMessage());
+                } catch (Exception e) {
+                    counts[1]++;
+                    Msg.warn(this, "Skipped debugger plugin " + pluginClass + " (" +
+                            e.getClass().getSimpleName() + "): " + e.getMessage());
+                }
             }
+            if (counts[0] > 0) {
+                try {
+                    // Persist so the user's CodeBrowser remembers the plugin set
+                    // across Ghidra restarts. Ghidra serializes the tool config
+                    // back to the local tool chest on saveTool().
+                    tool.saveTool();
+                } catch (Exception e) {
+                    Msg.warn(this, "Could not save tool after loading debugger plugins: " + e.getMessage());
+                }
+            }
+        };
+        try {
+            if (SwingUtilities.isEventDispatchThread()) {
+                loadOnEdt.run();
+            } else {
+                SwingUtilities.invokeAndWait(loadOnEdt);
+            }
+        } catch (Exception e) {
+            Msg.warn(this, "Failed to invoke plugin load on EDT: " + e.getMessage());
+            return false;
         }
         Msg.info(this, "Debugger plugins loaded into '" + tool.getName() + "': " +
-                loaded + " ok, " + failed + " failed");
-
-        if (loaded > 0) {
-            try {
-                // Persist so the user's CodeBrowser remembers the plugin set
-                // across Ghidra restarts. Ghidra serializes the tool config
-                // back to the local tool chest on saveTool().
-                tool.saveTool();
-            } catch (Exception e) {
-                Msg.warn(this, "Could not save tool after loading debugger plugins: " + e.getMessage());
-            }
-        }
+                counts[0] + " ok, " + counts[1] + " failed");
 
         // Wait briefly for the TraceManagerService to register. Plugin
         // initialization is async; without a poll we'd race the first
@@ -475,7 +485,7 @@ public class DebuggerService {
                     description = "Optional Python executable for Python-backed debugger launchers") String pythonExecutable) {
         PluginTool tool;
         try {
-            tool = getOrStartDebuggerTool(20);
+            tool = getOrStartDebuggerTool(60);
         } catch (TimeoutException e) {
             return Response.err("Timed out while auto-starting Ghidra's Debugger tool. " +
                     "Open the Debugger tool manually, then retry debugger_launch.");
