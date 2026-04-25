@@ -716,6 +716,39 @@ public final class NamingConventions {
         return AUTO_GENERATED_GLOBAL.matcher(name).matches();
     }
 
+    /**
+     * Plate-comment quality rule for globals (v5.7.0 / Q6 design).
+     *
+     * Returns null when the comment passes ("ok"); returns a structured
+     * pair (issue, message) when it fails. Exposed as a separate static
+     * helper so DataTypeService.set_global and the matching offline
+     * NamingConventionsTest share the same rule and can't drift apart.
+     *
+     * Rule: when a plate comment is provided, its first non-empty line
+     * must be a meaningful one-line summary — at least 4 whitespace-
+     * separated words. Empty/null comments are accepted (caller decides
+     * whether the absence is itself an error).
+     *
+     * Returns {@code null} when ok, or a 2-element String[] {issue, firstLine}
+     * when the rule fails. issue is one of:
+     *   * "plate_comment_too_short" — fewer than 4 words on the first line
+     */
+    public static String[] checkGlobalPlateComment(String plateComment) {
+        if (plateComment == null) return null;
+        String trimmed = plateComment.trim();
+        if (trimmed.isEmpty()) return null;
+        String firstLine = trimmed.split("\n", 2)[0].trim();
+        if (firstLine.isEmpty()) {
+            return new String[]{"plate_comment_too_short", firstLine};
+        }
+        // split("\\s+") on a non-empty trimmed string returns ≥1 token.
+        int wordCount = firstLine.split("\\s+").length;
+        if (wordCount < 4) {
+            return new String[]{"plate_comment_too_short", firstLine};
+        }
+        return null;
+    }
+
     /** Structured result from {@link #checkGlobalNameQuality(String, String)}. */
     public static final class GlobalNameResult {
         public final boolean ok;

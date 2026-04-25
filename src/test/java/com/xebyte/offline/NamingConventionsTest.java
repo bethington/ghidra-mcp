@@ -361,4 +361,68 @@ public class NamingConventionsTest extends TestCase {
         assertTrue(NamingConventions.checkGlobalNameQuality(null, "uint").ok);
         assertTrue(NamingConventions.checkGlobalNameQuality("", "uint").ok);
     }
+
+    // ---------- checkGlobalPlateComment (Q6 design) ----------
+    //
+    // Shared helper used by both audit_global (issue detection) and
+    // set_global (pre-flight rejection). These tests pin the contract.
+
+    public void testPlateCommentNullAccepted() {
+        // Null plate-comment is the caller's concern — the helper returns
+        // null (= ok) so audit_global / set_global can decide whether
+        // missing-vs-bad plate is the right error code.
+        assertNull(NamingConventions.checkGlobalPlateComment(null));
+    }
+
+    public void testPlateCommentEmptyAccepted() {
+        // Empty/whitespace-only treated like null — helper returns null.
+        assertNull(NamingConventions.checkGlobalPlateComment(""));
+        assertNull(NamingConventions.checkGlobalPlateComment("   "));
+        assertNull(NamingConventions.checkGlobalPlateComment("\n\n  \t"));
+    }
+
+    public void testPlateCommentFourWordSummaryAccepted() {
+        assertNull(NamingConventions.checkGlobalPlateComment(
+                "Bitmap of currently-active quests for the player."));
+        assertNull(NamingConventions.checkGlobalPlateComment(
+                "Pointer to the head of the linked unit list."));
+        // Exactly 4 words is the boundary — accepted.
+        assertNull(NamingConventions.checkGlobalPlateComment(
+                "Active player quest mask"));
+    }
+
+    public void testPlateCommentTooShortRejected() {
+        // 1, 2, 3 words on the first line — all rejected.
+        for (String c : new String[]{
+                "counter",
+                "global counter",
+                "the active flag",
+                "TODO: figure out"
+        }) {
+            String[] result = NamingConventions.checkGlobalPlateComment(c);
+            assertNotNull("Expected reject for: " + c, result);
+            assertEquals("plate_comment_too_short", result[0]);
+            assertEquals(c.trim(), result[1]);
+        }
+    }
+
+    public void testPlateCommentMultilineUsesFirstLine() {
+        // A valid first line passes regardless of subsequent content.
+        assertNull(NamingConventions.checkGlobalPlateComment(
+                "Bitmap of currently-active quests for the player.\n\n"
+                + "Used by: ProcessQuestUpdate\n"
+                + "Layout: 32 bits, low 16 = act 1-2"));
+        // A short first line fails even when later lines have content.
+        String[] result = NamingConventions.checkGlobalPlateComment(
+                "global counter\nUsed by: TickPlayer\nLayout: dword");
+        assertNotNull(result);
+        assertEquals("plate_comment_too_short", result[0]);
+        assertEquals("global counter", result[1]);
+    }
+
+    public void testPlateCommentWordSplitHandlesPunctuation() {
+        // Word-split is whitespace-based; punctuation glued to a word counts
+        // as one token. "Bitmap of, the, player" = 4 tokens — accepted.
+        assertNull(NamingConventions.checkGlobalPlateComment("Bitmap of, the, player"));
+    }
 }

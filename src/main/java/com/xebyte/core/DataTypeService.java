@@ -3014,15 +3014,16 @@ public class DataTypeService {
             }
         }
 
-        // Plate comment
+        // Plate comment — uses the shared helper so audit_global and
+        // set_global apply the same rule.
         String trimmedComment = plateComment.trim();
         if (trimmedComment.isEmpty()) {
             issues.add("missing_plate_comment");
         } else {
-            // First non-empty line must have ≥4 words to count as a meaningful summary.
-            String firstLine = trimmedComment.split("\n", 2)[0].trim();
-            int wordCount = firstLine.split("\\s+").length;
-            if (wordCount < 4) issues.add("plate_comment_too_short");
+            String[] plateIssue = NamingConventions.checkGlobalPlateComment(plateComment);
+            if (plateIssue != null) {
+                issues.add(plateIssue[0]);
+            }
         }
 
         Map<String, Object> result = JsonHelper.mapOf(
@@ -3106,19 +3107,16 @@ public class DataTypeService {
             }
         }
 
-        if (plateComment != null && !plateComment.trim().isEmpty()) {
-            String firstLine = plateComment.trim().split("\n", 2)[0].trim();
-            int wordCount = firstLine.split("\\s+").length;
-            if (wordCount < 4) {
-                return Response.ok(JsonHelper.mapOf(
-                        "status", "rejected",
-                        "error", "plate_comment_too_short",
-                        "first_line", firstLine,
-                        "word_count", wordCount,
-                        "message", "Plate-comment first line must be a ≥4-word summary describing what the global represents.",
-                        "suggestion", "Replace with a one-liner like 'Bitmap of currently-active quests for the player' or 'Pointer to the head of the linked unit list.'"
-                ));
-            }
+        // Use the shared helper so audit_global and set_global agree on rule.
+        String[] plateIssue = NamingConventions.checkGlobalPlateComment(plateComment);
+        if (plateIssue != null) {
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "rejected",
+                    "error", plateIssue[0],
+                    "first_line", plateIssue[1],
+                    "message", "Plate-comment first line must be a >=4-word summary describing what the global represents.",
+                    "suggestion", "Replace with a one-liner like 'Bitmap of currently-active quests for the player' or 'Pointer to the head of the linked unit list.'"
+            ));
         }
 
         DataType resolvedType = null;
