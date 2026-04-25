@@ -618,6 +618,28 @@ public class SymbolLabelService {
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
+        // Q3/Q4 validator gate (v5.7.0): hard-reject names that fail global
+        // naming rules. Pull the existing data type (if any) so the
+        // Hungarian-vs-type check has the right input.
+        Listing listingForCheck = program.getListing();
+        Data existingData = listingForCheck.getDefinedDataAt(addr);
+        String existingTypeName = (existingData != null && existingData.getDataType() != null)
+                ? existingData.getDataType().getName() : null;
+        NamingConventions.GlobalNameResult quality =
+                NamingConventions.checkGlobalNameQuality(newName, existingTypeName);
+        if (!quality.ok) {
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "rejected",
+                    "error", "name_quality",
+                    "issue", quality.issue,
+                    "rejected_name", newName,
+                    "address", addressStr,
+                    "current_type", existingTypeName != null ? existingTypeName : "",
+                    "message", quality.message,
+                    "suggestion", quality.suggestion
+            ));
+        }
+
         final AtomicBoolean success = new AtomicBoolean(false);
         final AtomicReference<String> errorMsg = new AtomicReference<>();
         final AtomicReference<String> successMsg = new AtomicReference<>();
@@ -681,6 +703,42 @@ public class SymbolLabelService {
             return Response.err("New variable name is required");
         }
 
+        // Q3/Q4 validator gate (v5.7.0): hard-reject names that fail global
+        // naming rules. Look up the symbol's existing data type for the
+        // Hungarian-vs-type check.
+        SymbolTable symTableForCheck = program.getSymbolTable();
+        Namespace globalNsForCheck = program.getGlobalNamespace();
+        List<Symbol> initialSymbols = symTableForCheck.getSymbols(oldName, globalNsForCheck);
+        if (initialSymbols.isEmpty()) {
+            SymbolIterator allSymbols = symTableForCheck.getSymbols(oldName);
+            while (allSymbols.hasNext()) {
+                Symbol s = allSymbols.next();
+                if (s.getSymbolType() != SymbolType.FUNCTION) {
+                    initialSymbols.add(s);
+                    break;
+                }
+            }
+        }
+        String existingTypeName = null;
+        if (!initialSymbols.isEmpty()) {
+            Address sa = initialSymbols.get(0).getAddress();
+            Data d = program.getListing().getDefinedDataAt(sa);
+            if (d != null && d.getDataType() != null) existingTypeName = d.getDataType().getName();
+        }
+        NamingConventions.GlobalNameResult quality =
+                NamingConventions.checkGlobalNameQuality(newName, existingTypeName);
+        if (!quality.ok) {
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "rejected",
+                    "error", "name_quality",
+                    "issue", quality.issue,
+                    "rejected_name", newName,
+                    "current_type", existingTypeName != null ? existingTypeName : "",
+                    "message", quality.message,
+                    "suggestion", quality.suggestion
+            ));
+        }
+
         int txId = program.startTransaction("Rename Global Variable");
         boolean success = false;
         try {
@@ -709,15 +767,8 @@ public class SymbolLabelService {
             symbol.setName(newName, SourceType.USER_DEFINED);
 
             success = true;
-            List<String> globalWarnings = NamingConventions.validateGlobalName(newName);
-            if (globalWarnings.isEmpty()) {
-                return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                        "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr));
-            } else {
-                return Response.ok(JsonHelper.mapOf("status", "success", "message",
-                        "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr,
-                        "warnings", globalWarnings));
-            }
+            return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                    "Renamed global variable '" + oldName + "' to '" + newName + "' at " + symbolAddr));
 
         } catch (Exception e) {
             Msg.error(this, "Error renaming global variable: " + e.getMessage());

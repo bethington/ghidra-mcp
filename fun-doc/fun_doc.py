@@ -3469,6 +3469,7 @@ def build_full_doc_prompt(func_name, address, ghidra_data, program=None):
         "step-classify.md",
         "step-prototype.md",
         "step-type-audit.md",
+        "step-globals.md",
         "step-comments.md",
         "step-verify.md",
     ]:
@@ -3578,8 +3579,9 @@ def build_recovery_prompt(func_name, address, ghidra_data, program=None):
     if completeness and not _is_error_response(completeness):
         _inject_classification_directives(sections, completeness)
 
-    # Only structural steps — no comment steps
-    for step in ["step-classify.md", "step-prototype.md", "step-type-audit.md"]:
+    # Only structural steps — no comment steps. step-globals.md is included
+    # because globals are a structural concern (type + name + bytes).
+    for step in ["step-classify.md", "step-prototype.md", "step-type-audit.md", "step-globals.md"]:
         sections.append(read_module(step))
         sections.append("")
 
