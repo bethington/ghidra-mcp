@@ -7115,8 +7115,27 @@ def process_function(
             "result": result,
         },
     )
+    # Look up the post-rescore name so the dashboard's function-block
+    # footer can show the renamed function (the model often calls
+    # rename_function_by_address during documentation). State has been
+    # synced via _rescore_and_sync above, so it's the source of truth.
+    fresh_name_for_event = func.get("name")
+    try:
+        _fresh_state = load_state()
+        _entry = (_fresh_state.get("functions") or {}).get(func_key)
+        if _entry and _entry.get("name"):
+            fresh_name_for_event = _entry["name"]
+    except Exception:
+        pass
     bus_emit(
-        "function_complete", {"key": func_key, "result": result, "score": new_score}
+        "function_complete",
+        {
+            "key": func_key,
+            "result": result,
+            "score": new_score,
+            "name": fresh_name_for_event,
+            "address": address,
+        },
     )
 
     # Save program to persist changes in Ghidra

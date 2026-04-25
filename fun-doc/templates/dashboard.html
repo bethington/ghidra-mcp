@@ -37,6 +37,12 @@
         .btn.btn-primary { border-color: var(--accent-gold); color: var(--accent-gold); }
         .btn.btn-danger { border-color: var(--accent-red-light); color: var(--accent-red-light); }
         .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn.icon-btn { width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; }
+        .icon-stop { width: 9px; height: 9px; border-radius: 1px; background: currentColor; display: block; }
+        .icon-focus { width: 13px; height: 13px; border: 1px solid currentColor; border-radius: 50%; position: relative; display: block; }
+        .icon-focus::before, .icon-focus::after { content: ""; position: absolute; background: currentColor; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+        .icon-focus::before { width: 15px; height: 1px; }
+        .icon-focus::after { width: 1px; height: 15px; }
 
         /* Stats cards */
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; margin-bottom: 1rem; }
@@ -171,6 +177,16 @@
         .worker-pane-header .wp-alert.active { display: inline-block; }
         .worker-pane-header .wp-actions { margin-left: auto; display: flex; gap: 3px; }
         .worker-pane-output { flex: 1; overflow-y: auto; padding: 0.2rem 0.3rem; font-family: var(--font-mono); font-size: 0.6rem; line-height: 1.25; background: var(--bg-darkest); }
+        /* Per-function block: three-sided gold bracket (top + left + bottom)
+           wrapping the header name, body lines, and footer name. Open right
+           preserves the streaming/log feel. margin-bottom acts as the
+           between-block breathing space (Q4: blank line between functions). */
+        .fn-block { border-top: 1px solid var(--accent-gold); border-left: 1px solid var(--accent-gold); border-bottom: 1px solid var(--accent-gold); border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0; margin: 0 0 0.5rem 0; padding: 0; }
+        .fn-block .fn-name { color: var(--accent-gold); font-weight: 600; padding: 1px 4px 1px 6px; }
+        .fn-block .fn-name.fn-header { border-bottom: 1px dashed rgba(199, 179, 119, 0.18); }
+        .fn-block .fn-name.fn-footer { border-top: 1px dashed rgba(199, 179, 119, 0.18); }
+        .fn-block .fn-body { padding-left: 1rem; }
+        .fn-block .fn-body .activity-entry { padding-left: 0; }
         .settings-popout { max-height: 0; overflow: hidden; background: linear-gradient(180deg, var(--bg-medium), var(--bg-dark)); border-bottom: 1px solid transparent; transition: max-height 0.18s ease, border-color 0.18s ease; }
         .settings-popout.active { max-height: 420px; border-bottom-color: var(--border-dark); }
         .settings-popout-inner { max-width: 1400px; margin: 0 auto; width: 100%; padding: 0 1rem; }
@@ -1182,8 +1198,8 @@
                     <span class="wp-status" id="wp-status-${workerId}">${binary || ''}</span>
                     <span class="wp-alert" id="wp-alert-${workerId}"></span>
                     <div class="wp-actions">
-                        <button class="btn" onclick="focusWorker('${workerId}')" id="wp-focus-${workerId}">Focus</button>
-                        <button class="btn btn-danger" onclick="stopWorker('${workerId}')" id="wp-stop-${workerId}">Stop</button>
+                        <button class="btn icon-btn" onclick="focusWorker('${workerId}')" id="wp-focus-${workerId}" title="Focus worker" aria-label="Focus worker" aria-pressed="false"><span class="icon-focus" aria-hidden="true"></span></button>
+                        <button class="btn btn-danger icon-btn" onclick="stopWorker('${workerId}')" id="wp-stop-${workerId}" title="Stop worker" aria-label="Stop worker"><span class="icon-stop" aria-hidden="true"></span></button>
                         <button class="btn" onclick="dismissPane('${workerId}')" style="display:none" id="wp-dismiss-${workerId}">X</button>
                     </div>
                 </div>
@@ -1237,12 +1253,57 @@
         function appendToPane(workerId, text, type) {
             const pane = workerPanes[workerId];
             if (!pane) return;
+            // Q4: drop blank/whitespace-only lines so within-block output is
+            // continuous with no gaps. Between-block spacing comes from the
+            // .fn-block margin-bottom.
+            if (!text || !String(text).trim()) return;
             const el = document.createElement('div');
             el.className = 'activity-entry activity-' + type;
             el.textContent = text;
-            pane.output.appendChild(el);
-            if (pane.output.children.length > 500) pane.output.removeChild(pane.output.firstChild);
+            // Route into the currently-open function block's body if one
+            // exists; otherwise drop into the bare pane (legacy lines that
+            // arrive outside a function — e.g. worker startup lines).
+            const target = (pane.currentFnBlock && pane.currentFnBlock.body) || pane.output;
+            target.appendChild(el);
+            if (pane.output.children.length > 200) pane.output.removeChild(pane.output.firstChild);
             pane.output.scrollTop = pane.output.scrollHeight;
+        }
+
+        // ---- Function-block lifecycle helpers (Q1-Q5 design) ----
+
+        function _openFnBlock(pane, name, address) {
+            // If a previous block is still open (no Complete: was ever
+            // emitted — e.g. worker died mid-function, then was restored
+            // and started a new one), close it as interrupted so we never
+            // have two adjacent open blocks.
+            if (pane.currentFnBlock) {
+                _closeFnBlock(pane, /* name */ null, /* addr */ null, true /* interrupted */);
+            }
+            const block = document.createElement('div');
+            block.className = 'fn-block';
+            const header = document.createElement('div');
+            header.className = 'fn-name fn-header';
+            header.textContent = `${name} @ 0x${address}`;
+            block.appendChild(header);
+            const body = document.createElement('div');
+            body.className = 'fn-body';
+            block.appendChild(body);
+            pane.output.appendChild(block);
+            pane.currentFnBlock = { block, body };
+            pane.output.scrollTop = pane.output.scrollHeight;
+        }
+
+        function _closeFnBlock(pane, name, address, interrupted) {
+            if (!pane || !pane.currentFnBlock) return;
+            const footer = document.createElement('div');
+            footer.className = 'fn-name fn-footer';
+            const nm = name || pane.currentFuncName || '?';
+            const ad = address || pane.currentFuncAddr || '?';
+            footer.textContent = interrupted
+                ? `${nm} @ 0x${ad} (interrupted)`
+                : `${nm} @ 0x${ad}`;
+            pane.currentFnBlock.block.appendChild(footer);
+            pane.currentFnBlock = null;
         }
 
         function dismissPane(workerId) {
@@ -1335,6 +1396,9 @@
             if (stopAllBtn) stopAllBtn.style.display = '';
         });
         socket.on("worker_stopped", d => {
+            const pane = workerPanes[d.worker_id];
+            // Close any block left open by mid-function abandonment (Q2 C).
+            if (pane) _closeFnBlock(pane, null, null, true /* interrupted */);
             appendToPane(d.worker_id, `Worker ${d.reason}: ${d.progress?.completed || 0} completed`, d.reason === 'finished' ? 'success' : 'neutral');
             markPaneFinished(d.worker_id, d.reason);
             if (_focusedWorkerId === d.worker_id) unfocusWorker();
@@ -1344,10 +1408,9 @@
         // Per-function events — route to worker pane by worker_id
         socket.on("function_started", d => {
             if (d.worker_id) getOrCreatePane(d.worker_id, null, null);
-            appendToPane(d.worker_id, `\n${d.name} @ 0x${d.address}`, 'started');
-            // Track current function on the pane so Focus can read it
             const pane = workerPanes[d.worker_id];
             if (pane) {
+                _openFnBlock(pane, d.name, d.address);
                 pane.currentFuncName = d.name;
                 pane.currentFuncAddr = d.address;
             }
@@ -1373,14 +1436,23 @@
             appendToPane(d.worker_id, `  Score: ${d.score_before}% -> ${d.score_after}% (${sign}${delta}%) | ${d.result}`, delta > 0 ? 'success' : 'neutral');
         });
         socket.on("function_complete", d => {
+            const pane = workerPanes[d.worker_id];
             let line;
             if (d.result === 'skipped') {
-                line = `  SKIP${d.skip_type ? ' (' + d.skip_type + ')' : ''}: ${d.reason || 'no reason given'}\n`;
+                line = `SKIP${d.skip_type ? ' (' + d.skip_type + ')' : ''}: ${d.reason || 'no reason given'}`;
             } else {
-                line = `  Complete: ${d.result}\n`;
+                line = `Complete: ${d.result}`;
             }
             const cls = d.result === 'completed' ? 'success' : (d.result === 'skipped' ? 'neutral' : 'error');
             appendToPane(d.worker_id, line, cls);
+            // Close the block with the post-rescore name (Q3) — d.name is set
+            // by the server-side enrichment; falls back to the start-name
+            // tracked on the pane if the event omitted it (skip paths).
+            if (pane) {
+                _closeFnBlock(pane, d.name, d.address, false);
+                pane.currentFuncName = null;
+                pane.currentFuncAddr = null;
+            }
             refreshStats();
         });
 
@@ -1751,6 +1823,17 @@
                     : w.status === 'stopping' ? 'stopping'
                     : w.status === 'quota_paused' ? 'quota_paused'
                     : 'finished';
+                // Q2 C: detect transition INTO quota_paused so we close any
+                // function block left open by the worker yielding mid-loop —
+                // never leave a header without a matching footer.
+                if (
+                    w.status === 'quota_paused'
+                    && pane.lastStatus !== 'quota_paused'
+                    && pane.currentFnBlock
+                ) {
+                    _closeFnBlock(pane, null, null, true /* interrupted */);
+                }
+                pane.lastStatus = w.status;
                 pane.element.className = `worker-pane ${cls}`;
                 setPaneAlert(w.id, w.last_alert);
                 const done = w.progress.completed + w.progress.skipped + w.progress.failed;
@@ -1899,6 +1982,15 @@
         let _focusedFuncName = null;
         let _focusedWorkerName = null;
 
+        function setFocusButtonState(workerId, focused) {
+            const btn = document.getElementById(`wp-focus-${workerId}`);
+            if (!btn) return;
+            btn.classList.toggle('btn-primary', focused);
+            btn.setAttribute('aria-pressed', focused ? 'true' : 'false');
+            btn.setAttribute('aria-label', focused ? 'Unfocus worker' : 'Focus worker');
+            btn.setAttribute('title', focused ? 'Unfocus worker' : 'Focus worker');
+        }
+
         function focusWorker(workerId) {
             // Toggle off if already focused
             if (_focusedWorkerId === workerId) {
@@ -1909,15 +2001,13 @@
             if (_focusedWorkerId) {
                 const prevPane = workerPanes[_focusedWorkerId];
                 if (prevPane) prevPane.element.classList.remove('focused');
-                const prevBtn = document.getElementById(`wp-focus-${_focusedWorkerId}`);
-                if (prevBtn) { prevBtn.textContent = 'Focus'; prevBtn.classList.remove('btn-primary'); }
+                setFocusButtonState(_focusedWorkerId, false);
             }
             _focusedWorkerId = workerId;
             // Highlight the pane
             const pane = workerPanes[workerId];
             if (pane) pane.element.classList.add('focused');
-            const btn = document.getElementById(`wp-focus-${workerId}`);
-            if (btn) { btn.textContent = 'Focused'; btn.classList.add('btn-primary'); }
+            setFocusButtonState(workerId, true);
             // Update banner with worker name + current function
             const titleEl = pane?.element.querySelector('.wp-title');
             _focusedWorkerName = titleEl ? titleEl.textContent : workerId;
@@ -1939,8 +2029,7 @@
             if (_focusedWorkerId) {
                 const pane = workerPanes[_focusedWorkerId];
                 if (pane) pane.element.classList.remove('focused');
-                const btn = document.getElementById(`wp-focus-${_focusedWorkerId}`);
-                if (btn) { btn.textContent = 'Focus'; btn.classList.remove('btn-primary'); }
+                setFocusButtonState(_focusedWorkerId, false);
             }
             _focusedWorkerId = null;
             _focusedFuncAddr = null;
