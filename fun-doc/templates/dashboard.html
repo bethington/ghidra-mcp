@@ -501,6 +501,34 @@
                     </div>
                 </div>
                 <div class="panel">
+                    <div class="panel-header" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <h2 style="margin: 0;">Inventory (Scoring Coverage)</h2>
+                        <span id="inventoryHeaderState" style="font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono);" title="Background scorer state — enabled, paused, or disabled">disabled</span>
+                        <button class="btn" id="btnInventoryToggle" onclick="toggleInventoryScorer()" style="margin-left: auto; font-size: 0.65rem;">Enable</button>
+                    </div>
+                    <div class="panel-content" id="inventoryPanel" style="max-height: 300px; overflow-y: auto;">
+                        <div id="inventoryTotalsLine" style="padding: 0.25rem 0.5rem; font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); border-bottom: 1px solid var(--border-dark);">Loading…</div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Binary</th>
+                                    <th>Coverage</th>
+                                    <th>Scored</th>
+                                    <th>Total</th>
+                                    <th>Missing</th>
+                                    <th>%</th>
+                                    <th>Status</th>
+                                    <th>Last Scan</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="inventoryTableBody">
+                                <tr><td colspan="9" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">No inventory data yet — enable the scorer.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="panel">
                     <div class="panel-header"><h2>Cross-Binary Progress</h2></div>
                     <div class="panel-content" id="perBinaryPanel" style="max-height: 300px; overflow-y: auto;">
                         <table class="data-table"><thead><tr><th>Binary</th><th>Progress</th><th>Done</th><th>Total</th><th>Avg</th><th>Fixable</th><th></th></tr></thead><tbody>
@@ -541,6 +569,9 @@
                 <span style="color: var(--border-light);">|</span>
                 <span style="color: var(--text-muted);">Audits:</span>
                 <span id="auditCount" style="font-family: var(--font-mono); color: var(--text-secondary);" title="ran / skipped (good enough + low delta)">—</span>
+                <span style="color: var(--border-light);">|</span>
+                <span style="color: var(--text-muted);">Inventory:</span>
+                <span id="inventoryWidget" style="font-family: var(--font-mono); color: var(--text-secondary);" title="Background scorer fills missing completeness scores. Toggle in settings.">disabled</span>
                 <button class="btn" onclick="drainDone()" id="btnDrainDone" title="Batch-score every pinned function and auto-dequeue any that are already above good_enough" style="margin-left: auto;">Drain Done</button>
                 <button class="btn" onclick="manualRefresh()" id="btnRefresh" title="Batch-rescore the top 50 ROI candidates for the active binary">Refresh Top 50</button>
             </div>
@@ -720,6 +751,140 @@
         socket.on("queue_changed", () => {
             if (refreshTimer) clearTimeout(refreshTimer);
             refreshTimer = setTimeout(refreshStats, 300);
+        });
+
+        // ---- Inventory scorer (background completeness scoring) ----
+        let _inventoryRefreshTimer = null;
+        let _inventoryEnabled = false;
+
+        function refreshInventory() {
+            fetch('/api/inventory/status').then(r => r.json()).then(data => {
+                if (!data || data.error) return;
+                _renderInventoryWidget(data.scorer || {}, data.totals || {});
+                _renderInventoryHeader(data.scorer || {});
+                _renderInventoryTable(data.binaries || [], (data.scorer || {}).blacklisted || []);
+            }).catch(() => {});
+        }
+
+        function _renderInventoryWidget(scorer, totals) {
+            const el = document.getElementById('inventoryWidget');
+            if (!el) return;
+            _inventoryEnabled = !!scorer.enabled;
+            if (!scorer.enabled) {
+                el.textContent = 'disabled';
+                el.style.color = 'var(--text-muted)';
+                return;
+            }
+            const scored = totals.scored || 0;
+            const total = totals.total_documentable || 0;
+            const done = totals.binaries_complete || 0;
+            const all = totals.binaries_total || 0;
+            const reason = scorer.paused_reason;
+            const target = scorer.current_target ? scorer.current_target.split('/').pop() : null;
+            let line;
+            if (reason) {
+                line = `${scored.toLocaleString()}/${total.toLocaleString()} • ${done}/${all} done • paused (${escapeHtml(reason)})`;
+            } else if (target) {
+                line = `${scored.toLocaleString()}/${total.toLocaleString()} • ${done}/${all} done • scanning ${escapeHtml(target)}`;
+            } else {
+                line = `${scored.toLocaleString()}/${total.toLocaleString()} • ${done}/${all} done`;
+            }
+            el.innerHTML = line;
+            el.style.color = reason ? 'var(--text-muted)' : 'var(--accent-gold)';
+        }
+
+        function _renderInventoryHeader(scorer) {
+            const el = document.getElementById('inventoryHeaderState');
+            const btn = document.getElementById('btnInventoryToggle');
+            if (!el || !btn) return;
+            if (!scorer.enabled) {
+                el.textContent = 'disabled';
+                el.style.color = 'var(--text-muted)';
+                btn.textContent = 'Enable';
+            } else if (scorer.paused_reason) {
+                el.textContent = `paused (${scorer.paused_reason})`;
+                el.style.color = 'var(--text-muted)';
+                btn.textContent = 'Disable';
+            } else if (scorer.current_target) {
+                el.textContent = 'running';
+                el.style.color = 'var(--accent-gold)';
+                btn.textContent = 'Disable';
+            } else {
+                el.textContent = 'enabled';
+                el.style.color = 'var(--text-secondary)';
+                btn.textContent = 'Disable';
+            }
+        }
+
+        function _renderInventoryTable(binaries, blacklist) {
+            const body = document.getElementById('inventoryTableBody');
+            const totalsLine = document.getElementById('inventoryTotalsLine');
+            if (!body) return;
+            if (!binaries.length) {
+                body.innerHTML = '<tr><td colspan="9" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">No inventory data yet — enable the scorer.</td></tr>';
+                if (totalsLine) totalsLine.textContent = '';
+                return;
+            }
+            const blackset = new Set(blacklist || []);
+            let totalScored = 0;
+            let totalDoc = 0;
+            let totalMiss = 0;
+            let totalDone = 0;
+            const rows = binaries.map(r => {
+                totalScored += r.scored || 0;
+                totalDoc += r.total_documentable || 0;
+                totalMiss += r.missing || 0;
+                if (r.status === 'complete') totalDone++;
+                const pct = r.percent || 0;
+                const barColor = pct >= 99 ? 'var(--color-set)' : pct >= 50 ? 'var(--accent-gold)' : 'var(--color-crafted)';
+                const statusColor = r.status === 'complete' ? 'var(--color-set)'
+                    : r.status === 'blacklisted' ? 'var(--accent-red-light)'
+                    : r.status === 'in_progress' ? 'var(--accent-gold)'
+                    : 'var(--text-muted)';
+                const last = r.last_scan ? r.last_scan.replace('T', ' ').slice(0, 19) : '—';
+                const isBlack = blackset.has(r.path);
+                const actionBtn = isBlack
+                    ? `<button class="btn" onclick="clearInventoryBlacklist('${escapeHtml(r.path)}')" title="Clear session blacklist for this binary">Retry</button>`
+                    : '';
+                return `<tr>
+                    <td style="cursor: pointer; color: var(--accent-gold);" onclick="switchBinaryDirect('${escapeHtml(r.name)}')" title="${escapeHtml(r.path)}">${escapeHtml(r.name)}</td>
+                    <td style="width: 100px;"><div style="width: 100%; height: 8px; background: var(--bg-darkest); border-radius: 2px; overflow: hidden;"><div style="height: 100%; width: ${pct}%; background: ${barColor}; border-radius: 2px;"></div></div></td>
+                    <td class="mono">${(r.scored || 0).toLocaleString()}</td>
+                    <td class="mono">${(r.total_documentable || 0).toLocaleString()}</td>
+                    <td class="mono" style="color: ${(r.missing || 0) > 0 ? 'var(--accent-red-light)' : 'var(--text-muted)'};">${(r.missing || 0).toLocaleString()}</td>
+                    <td class="mono">${pct}%</td>
+                    <td class="mono" style="color: ${statusColor};">${escapeHtml(r.status || '')}</td>
+                    <td class="mono" style="color: var(--text-muted); font-size: 0.6rem;">${escapeHtml(last)}</td>
+                    <td>${actionBtn}</td>
+                </tr>`;
+            }).join('');
+            body.innerHTML = rows;
+            if (totalsLine) {
+                const overall = totalDoc > 0 ? Math.round(1000 * totalScored / totalDoc) / 10 : 0;
+                totalsLine.textContent = `${totalScored.toLocaleString()} / ${totalDoc.toLocaleString()} scored (${overall}%) • ${totalMiss.toLocaleString()} missing • ${totalDone} / ${binaries.length} binaries complete`;
+            }
+        }
+
+        function toggleInventoryScorer() {
+            const next = !_inventoryEnabled;
+            fetch('/api/inventory/toggle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled: next}),
+            }).then(r => r.json()).then(() => refreshInventory());
+        }
+
+        function clearInventoryBlacklist(path) {
+            fetch('/api/inventory/clear_blacklist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path: path}),
+            }).then(r => r.json()).then(() => refreshInventory());
+        }
+
+        socket.on('inventory_status', () => {
+            if (_inventoryRefreshTimer) clearTimeout(_inventoryRefreshTimer);
+            _inventoryRefreshTimer = setTimeout(refreshInventory, 300);
         });
 
         function scoreCellClass(s) {
@@ -1823,6 +1988,13 @@
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape') toggleSettingsPanel(false);
         });
+
+        // Initial inventory load on page open. The widget + table populate
+        // even when the scorer is disabled (showing persisted last-scan data
+        // from any prior session). Live updates flow via the
+        // inventory_status WebSocket event.
+        refreshInventory();
+        setInterval(refreshInventory, 30000);
     </script>
 </body>
 </html>

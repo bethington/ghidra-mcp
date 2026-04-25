@@ -1823,6 +1823,12 @@ DEFAULT_QUEUE_CONFIG = {
         "gemini": 25,
         "minimax": 25,
     },
+    # Background inventory scorer (opt-in, Q9). When True, a single thread runs
+    # `analyze_function_completeness` against every binary in the Ghidra project
+    # tree to fill in missing scores in state.json. Yields MCP bandwidth to doc
+    # workers — only runs when zero workers are active. See inventory_scorer.py
+    # and the Inventory panel on the dashboard.
+    "inventory_enabled": False,
 }
 
 PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"

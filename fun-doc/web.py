@@ -206,6 +206,16 @@ class WorkerManager:
             self._persist_active_workers()
         self._emit_status()
 
+    def has_active_workers(self):
+        """True if any doc worker is starting/running/stopping. Used by the
+        background InventoryScorer to yield MCP bandwidth (Q1 idle-time backfill,
+        Q7 cooperative pause)."""
+        with self._lock:
+            return any(
+                w["status"] in ("starting", "running", "stopping")
+                for w in self._workers.values()
+            )
+
     def get_status(self):
         with self._lock:
             # Prune workers finished > 5 minutes ago
@@ -1307,6 +1317,59 @@ def create_app(state_file, event_bus=None):
         save_queue,
     )
 
+    # --- Background inventory scorer (Q1-Q12 design, opt-in via config) ---
+    from inventory_scorer import (
+        InventoryScorer,
+        load_inventory,
+        save_inventory,
+        compute_per_binary_inventory,
+        status_for,
+    )
+
+    def _project_folder():
+        try:
+            return load_state().get("project_folder")
+        except Exception:
+            return None
+
+    def _emit_inventory_status(status: dict):
+        """Bridge scorer status changes -> WebSocket so the dashboard widget
+        and Inventory panel update without polling."""
+        try:
+            socketio.emit("inventory_status", status or {})
+        except Exception:
+            pass
+
+    def _make_scorer():
+        from fun_doc import (
+            _fetch_programs,
+            _fetch_function_list,
+            _batch_score,
+            load_state as fd_load_state,
+            save_state as fd_save_state,
+        )
+
+        return InventoryScorer(
+            worker_manager=worker_mgr,
+            project_folder_getter=_project_folder,
+            state_dir=Path(__file__).parent,
+            load_state=fd_load_state,
+            save_state=fd_save_state,
+            fetch_programs=_fetch_programs,
+            fetch_function_list=_fetch_function_list,
+            batch_score=_batch_score,
+            on_status_change=_emit_inventory_status,
+        )
+
+    inventory_scorer = _make_scorer()
+
+    # Honor the persisted opt-in flag at startup.
+    try:
+        if (load_queue().get("config") or {}).get("inventory_enabled"):
+            inventory_scorer.set_enabled(True)
+    except Exception as _exc:
+        print(f"  Inventory scorer auto-start skipped: {_exc}")
+
     @socketio.on("request_start_worker")
     def handle_start_worker(data):
         try:
@@ -1643,11 +1706,124 @@ def create_app(state_file, event_bus=None):
                             ] = normalized_name
 
                 cfg["provider_models"] = normalized_models
+            if "inventory_enabled" in data:
+                cfg["inventory_enabled"] = bool(data["inventory_enabled"])
+                # Reflect immediately on the running scorer instance — the
+                # opt-in toggle is the only knob that can flip the daemon
+                # on/off without a dashboard restart.
+                try:
+                    inventory_scorer.set_enabled(cfg["inventory_enabled"])
+                except Exception as _exc:
+                    print(f"  Inventory scorer toggle failed: {_exc}")
             queue["config"] = cfg
             save_queue(queue)
             socketio.emit("queue_changed", {"action": "config", "config": cfg})
             return jsonify({"ok": True, "config": cfg})
         return jsonify({"config": queue.get("config", dict(DEFAULT_QUEUE_CONFIG))})
+
+    @app.route("/api/inventory/status", methods=["GET"])
+    def inventory_status():
+        """Combined snapshot: scorer runtime state + per-binary inventory
+        records. The dashboard widget reads the scorer state for the live
+        line; the Inventory panel reads `binaries` for the table.
+
+        Per-binary records overlay state.json's documentable+scored counts
+        on top of inventory.json's persisted (totals + last_scan)."""
+        try:
+            state = load_state()
+            funcs = state.get("functions") or {}
+            persisted = load_inventory(Path(__file__).parent).get("binaries", {})
+            totals_by_path = {
+                path: rec.get("total_documentable", 0)
+                for path, rec in persisted.items()
+                if rec.get("total_documentable")
+            }
+            inventory = compute_per_binary_inventory(
+                funcs, totals_by_path=totals_by_path
+            )
+            for path, persisted_rec in persisted.items():
+                rec = inventory.setdefault(
+                    path,
+                    {
+                        "name": persisted_rec.get("name") or Path(path).name,
+                        "total_documentable": persisted_rec.get(
+                            "total_documentable", 0
+                        ),
+                        "scored": 0,
+                        "last_scan": persisted_rec.get("last_scan"),
+                    },
+                )
+                rec["last_scan"] = persisted_rec.get("last_scan")
+                rec["name"] = persisted_rec.get("name") or rec.get("name")
+
+            scorer_status = inventory_scorer.get_status()
+            blacklist = set(scorer_status.get("blacklisted") or [])
+
+            binaries = []
+            for path, rec in inventory.items():
+                total = rec.get("total_documentable", 0) or 0
+                scored = rec.get("scored", 0) or 0
+                missing = max(0, total - scored)
+                pct = round(100.0 * scored / total, 1) if total else 0.0
+                row_status = status_for(rec)
+                if path in blacklist:
+                    row_status = "blacklisted"
+                binaries.append(
+                    {
+                        "path": path,
+                        "name": rec.get("name") or Path(path).name,
+                        "total_documentable": total,
+                        "scored": scored,
+                        "missing": missing,
+                        "percent": pct,
+                        "last_scan": rec.get("last_scan"),
+                        "status": row_status,
+                    }
+                )
+            # Most-missing first, reverse-alpha tiebreak (Q4). Two stable
+            # sorts: secondary key first, primary key last.
+            binaries.sort(key=lambda r: r["name"], reverse=True)  # reverse-alpha
+            binaries.sort(key=lambda r: r["missing"], reverse=True)  # missing desc
+            totals = {
+                "total_documentable": sum(r["total_documentable"] for r in binaries),
+                "scored": sum(r["scored"] for r in binaries),
+                "missing": sum(r["missing"] for r in binaries),
+                "binaries_total": len(binaries),
+                "binaries_complete": sum(
+                    1 for r in binaries if r["status"] == "complete"
+                ),
+            }
+            return jsonify(
+                {
+                    "scorer": scorer_status,
+                    "totals": totals,
+                    "binaries": binaries,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+
+    @app.route("/api/inventory/toggle", methods=["POST"])
+    def inventory_toggle():
+        """Enable/disable the scorer. Persists to priority_queue.json so
+        the choice survives dashboard restarts (Q9 opt-in toggle)."""
+        data = request.json or {}
+        enabled = bool(data.get("enabled"))
+        queue = load_queue()
+        cfg = dict(queue.get("config") or {})
+        cfg["inventory_enabled"] = enabled
+        queue["config"] = cfg
+        save_queue(queue)
+        inventory_scorer.set_enabled(enabled)
+        return jsonify({"ok": True, "enabled": enabled})
+
+    @app.route("/api/inventory/clear_blacklist", methods=["POST"])
+    def inventory_clear_blacklist():
+        """Clear the session blacklist for one path or all paths."""
+        data = request.json or {}
+        path = data.get("path")
+        inventory_scorer.clear_blacklist(path)
+        return jsonify({"ok": True})
 
     restored_workers = worker_mgr.restore_workers()
     if restored_workers:
