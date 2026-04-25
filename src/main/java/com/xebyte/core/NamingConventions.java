@@ -45,6 +45,43 @@ public final class NamingConventions {
     private static final Pattern MODULE_PREFIX = Pattern.compile("^[A-Z]+_[A-Z].*");
     private static final int MIN_FUNCTION_NAME_LENGTH = 8;
 
+    // ---- Verb specificity tiers (Q2 design) -------------------------------
+    // Tier 1: highly specific verbs — a single specifier token is enough
+    //         (e.g., AllocateBuffer, ParseHeader, DecodePacket).
+    // Tier 2: medium-specificity verbs — need ≥1 specifier (e.g., GetSize).
+    // Tier 3: vague verbs — require ≥2 specifier tokens after the verb
+    //         (e.g., ProcessNetworkPacket OK, ProcessData NOT OK).
+    // Verbs not in any tier are accepted on the legacy ALLOWED_VERBS path
+    // but treated as Tier 2 for specificity purposes (one-specifier baseline).
+
+    private static final Set<String> VERBS_TIER1 = Set.of(
+            "Allocate", "Append", "Apply", "Calculate", "Compress", "Compile",
+            "Connect", "Decompress", "Decode", "Destroy", "Detect", "Encode",
+            "Encrypt", "Decrypt", "Free", "Generate", "Initialize", "Insert",
+            "Iterate", "Lookup", "Match", "Merge", "Parse", "Render", "Resolve",
+            "Schedule", "Serialize", "Sort", "Subscribe", "Truncate", "Validate"
+    );
+
+    private static final Set<String> VERBS_TIER2 = Set.of(
+            "Add", "Build", "Check", "Clear", "Close", "Compare", "Copy",
+            "Count", "Create", "Delete", "Find", "Format", "Get", "Has", "Is",
+            "Load", "Move", "Open", "Print", "Push", "Pop", "Read", "Receive",
+            "Remove", "Reset", "Save", "Search", "Send", "Set", "Show",
+            "Start", "Stop", "Update", "Write"
+    );
+
+    private static final Set<String> VERBS_TIER3 = Set.of(
+            "Do", "Handle", "Make", "Manage", "Process", "Run", "Use"
+    );
+
+    // ---- Weak-noun denylist (Q2: specifiers must be informative) ----------
+    // These nouns add no semantic information after a verb. "ProcessData"
+    // counts as Tier 3 + 0 specifiers because Data is on this list.
+    private static final Set<String> WEAK_NOUNS = Set.of(
+            "Data", "Info", "Stuff", "Thing", "Item", "Object", "Value",
+            "Result", "State", "Func", "Method", "Action", "Helper", "Util"
+    );
+
     /**
      * Validate a function name against conventions. Returns list of warnings (empty = valid).
      * Thunks/imports with underscores are exempt.
@@ -86,6 +123,253 @@ public final class NamingConventions {
         }
 
         return warnings;
+    }
+
+    // -----------------------------------------------------------------------
+    // Function-name quality check (Q2 verb-tier rule, Q4 hard-reject path)
+    // -----------------------------------------------------------------------
+
+    /**
+     * A structured rejection from {@link #checkFunctionNameQuality(String)}.
+     * Null fields signal "no problem found at this layer." Returned to callers
+     * as JSON via the rename endpoint so the model can act on the feedback
+     * (Q5: reactive rich-feedback).
+     */
+    public static final class NameQualityResult {
+        public final boolean ok;
+        public final String issue;       // short machine-friendly id e.g. "vague_verb"
+        public final String message;     // human-readable explanation
+        public final String suggestion;  // optional concrete fix hint
+
+        private NameQualityResult(boolean ok, String issue, String message, String suggestion) {
+            this.ok = ok;
+            this.issue = issue;
+            this.message = message;
+            this.suggestion = suggestion;
+        }
+
+        public static NameQualityResult ok() {
+            return new NameQualityResult(true, null, null, null);
+        }
+
+        public static NameQualityResult reject(String issue, String message, String suggestion) {
+            return new NameQualityResult(false, issue, message, suggestion);
+        }
+    }
+
+    /** Tier of the given verb (1/2/3); 0 = unknown verb (treated as Tier 2). */
+    public static int getVerbTier(String verb) {
+        if (verb == null) return 0;
+        if (VERBS_TIER1.contains(verb)) return 1;
+        if (VERBS_TIER2.contains(verb)) return 2;
+        if (VERBS_TIER3.contains(verb)) return 3;
+        return 0;
+    }
+
+    /** Whether a token is a "weak noun" that contributes no specificity. */
+    public static boolean isWeakNoun(String token) {
+        return token != null && WEAK_NOUNS.contains(token);
+    }
+
+    /**
+     * Tokenize a PascalCase name into its component words.
+     * "GetPlayerHealth" -> [Get, Player, Health].
+     * "DATATBLS_CompileTxtDataTable" -> [Compile, Txt, Data, Table] (prefix stripped).
+     * Returns an empty list for non-PascalCase, null, or empty inputs. The
+     * main part (after stripping any UPPERCASE_ prefix) must match the
+     * {@link #PASCAL_CASE} pattern — names with internal underscores or
+     * lowercase starts after the prefix would otherwise be mis-tokenized.
+     */
+    public static List<String> tokenizeFunctionName(String name) {
+        if (name == null || name.isEmpty()) return List.of();
+        // Strip module prefix if present.
+        String mainName = name;
+        if (MODULE_PREFIX.matcher(name).matches()) {
+            mainName = name.substring(name.indexOf('_') + 1);
+        }
+        if (mainName.isEmpty() || !PASCAL_CASE.matcher(mainName).matches()) return List.of();
+        List<String> tokens = new ArrayList<>();
+        int start = 0;
+        for (int i = 1; i < mainName.length(); i++) {
+            // New token starts at every uppercase char. Embedded digit
+            // runs (e.g., "UTF8") stay attached to the preceding word.
+            if (Character.isUpperCase(mainName.charAt(i))) {
+                tokens.add(mainName.substring(start, i));
+                start = i;
+            }
+        }
+        tokens.add(mainName.substring(start));
+        return tokens;
+    }
+
+    /**
+     * Count specifier tokens AFTER the verb. A token is a specifier if it is
+     * NOT in the {@link #WEAK_NOUNS} set. Empty/single-token names count as 0.
+     */
+    public static int countSpecifierTokens(String name) {
+        List<String> tokens = tokenizeFunctionName(name);
+        if (tokens.size() < 2) return 0;
+        int count = 0;
+        for (int i = 1; i < tokens.size(); i++) {
+            if (!WEAK_NOUNS.contains(tokens.get(i))) count++;
+        }
+        return count;
+    }
+
+    /**
+     * Check if a function name meets the Q2 verb-tier specificity rule.
+     * Returns ok() when the name passes; reject() with an actionable
+     * message + suggestion when it doesn't. Thunks/auto-generated names
+     * are exempt (callers should screen those before invoking).
+     */
+    public static NameQualityResult checkFunctionNameQuality(String name) {
+        if (name == null || name.isEmpty()) return NameQualityResult.ok();
+        if (ServiceUtils.isAutoGeneratedName(name)) return NameQualityResult.ok();
+
+        List<String> tokens = tokenizeFunctionName(name);
+        if (tokens.isEmpty()) return NameQualityResult.ok();  // not PascalCase — handled by validateFunctionName
+
+        String verb = tokens.get(0);
+        int tier = getVerbTier(verb);
+        int specifiers = countSpecifierTokens(name);
+
+        if (tier == 3 && specifiers < 2) {
+            return NameQualityResult.reject(
+                    "vague_verb",
+                    "Verb '" + verb + "' is Tier 3 (vague). Function names starting with " +
+                    "Tier 3 verbs require at least 2 specifier tokens after the verb. " +
+                    "Got " + specifiers + " specifier(s) in '" + name + "'.",
+                    "Replace '" + verb + "' with a more specific verb (Calculate, Validate, Initialize, Decode, …) " +
+                    "or add 2 concrete specifier tokens describing what is being processed (e.g., 'ProcessNetworkPacket' instead of 'ProcessData')."
+            );
+        }
+        if (specifiers == 0 && tokens.size() < 2) {
+            return NameQualityResult.reject(
+                    "missing_specifier",
+                    "Name '" + name + "' has only one token. Function names need at least one specifier after the verb.",
+                    "Add a specifier describing what the function operates on (e.g., 'Get' alone is not enough — try 'GetSize', 'GetPlayerHealth')."
+            );
+        }
+        // Tier 1/2/0 with weak-only specifiers (e.g., "GetData", "FrobnicateData")
+        // — mid-strength rejection. Tier 0 (unknown verbs) follow Tier 2
+        // semantics per the class comment, so they share this rule.
+        if (tier != 3 && specifiers == 0 && tokens.size() >= 2) {
+            return NameQualityResult.reject(
+                    "weak_noun_only",
+                    "Name '" + name + "' uses only weak nouns (Data, Info, Stuff, ...) after the verb. " +
+                    "These add no semantic information.",
+                    "Replace the weak noun with a concrete domain term (e.g., 'GetItemAttributes' instead of 'GetData')."
+            );
+        }
+        return NameQualityResult.ok();
+    }
+
+    // -----------------------------------------------------------------------
+    // Token-subset near-duplicate detection (Q3, Q4)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Detect whether {@code candidate} is a token-subset near-duplicate of
+     * any existing function name. Returns the conflicting existing name, or
+     * null if no near-duplicate found.
+     *
+     * "Token-subset" means tokenize both names (after stripping module
+     * prefixes); flag when one name's tokens are a strict subset of the
+     * other's. Same module prefix is required — names with different
+     * prefixes are independent namespaces.
+     *
+     * Example: candidate="SendStateUpdate" vs existing="SendStateUpdateCommand"
+     *   tokens(candidate) = {Send, State, Update}
+     *   tokens(existing)  = {Send, State, Update, Command}
+     *   candidate ⊂ existing — flag.
+     */
+    public static String findTokenSubsetCollision(String candidate, Iterable<String> existingNames) {
+        if (candidate == null || candidate.isEmpty()) return null;
+        List<String> candTokens = tokenizeFunctionName(candidate);
+        if (candTokens.isEmpty()) return null;
+        Set<String> candSet = new HashSet<>(candTokens);
+        String candPrefix = extractModulePrefix(candidate);
+
+        for (String existing : existingNames) {
+            if (existing == null || existing.isEmpty() || existing.equals(candidate)) continue;
+            // Different module prefixes operate in separate namespaces.
+            String existingPrefix = extractModulePrefix(existing);
+            if (!Objects.equals(candPrefix, existingPrefix)) continue;
+
+            List<String> exTokens = tokenizeFunctionName(existing);
+            if (exTokens.isEmpty()) continue;
+            Set<String> exSet = new HashSet<>(exTokens);
+
+            // Strict subset in either direction: candidate ⊂ existing or existing ⊂ candidate.
+            if (candSet.size() != exSet.size()) {
+                if (exSet.containsAll(candSet) || candSet.containsAll(exSet)) {
+                    return existing;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Extract the UPPERCASE_ module prefix, or null if the name has none. */
+    public static String extractModulePrefix(String name) {
+        if (name == null || !MODULE_PREFIX.matcher(name).matches()) return null;
+        return name.substring(0, name.indexOf('_'));
+    }
+
+    /**
+     * A function name plus its precomputed tokens and module prefix.
+     * Built once per program-scan via {@link #precomputeTokenized(Iterable)};
+     * lets the per-function collision check avoid re-tokenizing every name
+     * in the program on every scoring call (the O(n²) pattern Copilot flagged
+     * on PR #168).
+     */
+    public static final class TokenizedName {
+        public final String name;
+        public final String modulePrefix; // null if none
+        public final Set<String> tokens;
+
+        public TokenizedName(String name) {
+            this.name = name;
+            this.modulePrefix = extractModulePrefix(name);
+            this.tokens = new HashSet<>(tokenizeFunctionName(name));
+        }
+    }
+
+    /** Tokenize a collection of names once for repeated collision checks. */
+    public static List<TokenizedName> precomputeTokenized(Iterable<String> names) {
+        List<TokenizedName> out = new ArrayList<>();
+        if (names == null) return out;
+        for (String n : names) {
+            if (n != null && !n.isEmpty()) out.add(new TokenizedName(n));
+        }
+        return out;
+    }
+
+    /**
+     * Same semantics as {@link #findTokenSubsetCollision} but skips
+     * re-tokenizing each existing name. Use this in hot paths (per-function
+     * scoring) where the precomputed list can be reused across many calls.
+     */
+    public static String findTokenSubsetCollisionPrecomputed(
+            String candidate, List<TokenizedName> precomputed) {
+        if (candidate == null || candidate.isEmpty()) return null;
+        if (precomputed == null || precomputed.isEmpty()) return null;
+        List<String> candTokens = tokenizeFunctionName(candidate);
+        if (candTokens.isEmpty()) return null;
+        Set<String> candSet = new HashSet<>(candTokens);
+        String candPrefix = extractModulePrefix(candidate);
+
+        for (TokenizedName entry : precomputed) {
+            if (entry.name.equals(candidate)) continue;
+            if (!Objects.equals(candPrefix, entry.modulePrefix)) continue;
+            if (entry.tokens.isEmpty()) continue;
+            if (candSet.size() != entry.tokens.size()) {
+                if (entry.tokens.containsAll(candSet) || candSet.containsAll(entry.tokens)) {
+                    return entry.name;
+                }
+            }
+        }
+        return null;
     }
 
     // -----------------------------------------------------------------------

@@ -69,6 +69,7 @@ Offline analysis:
 
 import argparse
 import contextvars
+import copy
 import json
 import multiprocessing
 import os
@@ -1756,12 +1757,29 @@ def compute_priority(func):
     return base + impact + effort_bonus + fixable_bonus
 
 
+# Per-provider FULL/FIX/VERIFY model defaults. Used to backfill missing
+# providers / modes when normalizing the dashboard config so:
+#   * a fresh priority_queue.json with no provider_models gets every provider
+#     populated with sensible values,
+#   * a partial config (e.g. minimax/gemini/claude set, codex unset) backfills
+#     codex from defaults instead of showing blank dashboard inputs,
+#   * a user-set value always wins (empty strings count as unset).
+# Update these whenever a model is renamed/deprecated upstream — they're the
+# single source of truth for "what model should each provider call by default."
+DEFAULT_PROVIDER_MODELS = {
+    "minimax": {"FULL": "MiniMax-M2.7", "FIX": "MiniMax-M2.7", "VERIFY": "MiniMax-M2.7"},
+    "gemini":  {"FULL": "gemini-2.5-pro", "FIX": "gemini-2.5-flash", "VERIFY": "gemini-2.5-flash"},
+    "claude":  {"FULL": "claude-sonnet-4-6", "FIX": "claude-sonnet-4-6", "VERIFY": "claude-sonnet-4-6"},
+    "codex":   {"FULL": "gpt-5.5", "FIX": "gpt-5.5", "VERIFY": "gpt-5.5"},
+}
+
+
 DEFAULT_QUEUE_CONFIG = {
     "good_enough_score": 80,
     "require_scored": False,
-    # Dashboard-owned provider -> mode -> model mapping. Left empty in code so
-    # model names only come from persisted config or an explicit CLI override.
-    "provider_models": {},
+    # Dashboard-owned provider -> mode -> model mapping. Defaults from
+    # DEFAULT_PROVIDER_MODELS — overridable per-provider/mode via the dashboard.
+    "provider_models": copy.deepcopy(DEFAULT_PROVIDER_MODELS),
     # Auto-handoff: when the active provider's complexity gate fires, swap to
     # this provider for the current function instead of skipping. Off by
     # default so stronger providers are only consumed when explicitly enabled.
@@ -1805,14 +1823,27 @@ DEFAULT_QUEUE_CONFIG = {
         "gemini": 25,
         "minimax": 25,
     },
+    # Background inventory scorer (opt-in, Q9). When True, a single thread runs
+    # `analyze_function_completeness` against every binary in the Ghidra project
+    # tree to fill in missing scores in state.json. Yields MCP bandwidth to doc
+    # workers — only runs when zero workers are active. See inventory_scorer.py
+    # and the Inventory panel on the dashboard.
+    "inventory_enabled": False,
 }
 
 PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"
 
 
 def _normalize_provider_models(raw_models):
-    """Normalize provider->mode->model config from the dashboard."""
-    normalized = {}
+    """Normalize provider->mode->model config, backfilling missing entries
+    from DEFAULT_PROVIDER_MODELS.
+
+    Deep-merge semantics: every supported provider/mode is populated. User
+    values win when present and non-empty; defaults fill the rest. This is
+    what makes a fresh priority_queue.json or a partially-configured one
+    show fully-populated dashboard inputs without manual setup.
+    """
+    normalized = copy.deepcopy(DEFAULT_PROVIDER_MODELS)
     if not isinstance(raw_models, dict):
         return normalized
 
@@ -1833,6 +1864,85 @@ def _normalize_provider_models(raw_models):
     return normalized
 
 
+def build_worker_config_snapshot(queue, primary_provider):
+    """Build a frozen config snapshot for a worker about to start.
+
+    Captures every queue.config field that should remain constant for the
+    worker's lifetime. The snapshot is opaque to the worker thread — it just
+    holds it and passes it to process_function on every iteration. The
+    snapshot's shape is stable across the codebase: tests, the dashboard, the
+    event-log persister, and process_function all agree on what fields exist.
+
+    Includes settings for every provider this worker can actually invoke:
+        * primary_provider (passed in)
+        * audit_provider (if config.audit_provider is set and != primary)
+        * complexity_handoff_provider (if set and != primary)
+
+    Each provider entry holds its `max_turns` and the FULL/FIX/VERIFY model
+    slice from `provider_models`. Providers this worker won't invoke are not
+    snapshotted — keeps the snapshot compact and the run records clean.
+
+    Returns a plain dict suitable for json.dumps. No references back into
+    the queue dict.
+    """
+    cfg = (queue or {}).get("config") or {}
+
+    # Top-level worker policy (Tier 1 + Tier 2 from the design discussion)
+    snapshot = {
+        "good_enough_score": int(cfg.get("good_enough_score", 80)),
+        "audit_provider": cfg.get("audit_provider"),
+        "audit_min_delta": int(cfg.get("audit_min_delta", 5)),
+        "complexity_handoff_provider": cfg.get("complexity_handoff_provider"),
+        "complexity_handoff_max": int(cfg.get("complexity_handoff_max", 0) or 0),
+    }
+
+    # Per-provider slices — only the providers this worker can invoke. The
+    # primary's slice is always present; audit and escalation are added only
+    # when configured (and only if they differ from primary, since the same
+    # provider's slice would just duplicate).
+    pmt = cfg.get("provider_max_turns") or {}
+    pm = cfg.get("provider_models") or {}
+    providers_seen: set[str] = set()
+    providers: dict[str, dict] = {}
+
+    def _add_provider(name):
+        if not name or name in providers_seen:
+            return
+        if name not in SUPPORTED_PROVIDERS:
+            return
+        providers_seen.add(name)
+        # Default max_turns is 25 (matches DEFAULT_QUEUE_CONFIG); coerce to int
+        # so JSON serialization doesn't surface accidental floats.
+        providers[name] = {
+            "max_turns": int(pmt.get(name, 25)),
+            "models": dict(pm.get(name) or {}),
+        }
+
+    _add_provider(primary_provider)
+    _add_provider(snapshot["audit_provider"])
+    _add_provider(snapshot["complexity_handoff_provider"])
+    snapshot["providers"] = providers
+    snapshot["primary_provider"] = primary_provider
+    return snapshot
+
+
+def _normalize_provider_max_turns(raw):
+    """Backfill provider_max_turns with DEFAULT_QUEUE_CONFIG values for any
+    missing provider. Mirrors _normalize_provider_models — partial user
+    config gets the missing keys filled in instead of dropped on the floor."""
+    defaults = DEFAULT_QUEUE_CONFIG.get("provider_max_turns") or {}
+    normalized = dict(defaults)
+    if isinstance(raw, dict):
+        for provider, turns in raw.items():
+            if provider not in SUPPORTED_PROVIDERS:
+                continue
+            try:
+                normalized[provider] = int(turns)
+            except (TypeError, ValueError):
+                continue
+    return normalized
+
+
 def load_priority_queue():
     """Load the priority queue file. Always returns a dict with pinned/config.
 
@@ -1849,9 +1959,10 @@ def load_priority_queue():
     else:
         queue = {}
     queue.setdefault("pinned", [])
-    cfg = dict(DEFAULT_QUEUE_CONFIG)
+    cfg = copy.deepcopy(DEFAULT_QUEUE_CONFIG)
     cfg.update(queue.get("config") or {})
     cfg["provider_models"] = _normalize_provider_models(cfg.get("provider_models"))
+    cfg["provider_max_turns"] = _normalize_provider_max_turns(cfg.get("provider_max_turns"))
     queue["config"] = cfg
     return queue
 
@@ -1909,6 +2020,7 @@ def save_priority_queue(queue):
     if isinstance(queue, dict):
         cfg = dict(queue.get("config") or {})
         cfg["provider_models"] = _normalize_provider_models(cfg.get("provider_models"))
+        cfg["provider_max_turns"] = _normalize_provider_max_turns(cfg.get("provider_max_turns"))
         queue["config"] = cfg
         # Drop any lingering dashboard_active_workers meta — workers no
         # longer auto-restore across restarts, so persisting a snapshot
@@ -2398,6 +2510,37 @@ def _mode_label(mode):
     }.get(mode, mode)
 
 
+def _format_mode_banner(mode, selected_model, effective_provider, score, config_snapshot, prompt):
+    """Build the per-function mode banner string.
+
+    Steady-state output: `FULL/pass1 (types+structs) | score: 13%`. Mode
+    label and score only — the model is in the worker's header sub-line and
+    the prompt char count is debug-only noise that hides important signal.
+
+    Deviation output: `HANDOFF:minimax→gemini | gemini-2.5-pro | score: 13%`.
+    The model token appears only when `selected_model` differs from what the
+    worker's snapshot says it should be using for this provider/mode. That
+    way "the model token is present" is itself the visual signal that this
+    function ran with something other than the worker's default — a
+    deviation worth your attention.
+
+    When no snapshot is present (CLI invocation, legacy callers), we can't
+    detect deviation, so we always show the model — matches pre-snapshot
+    behavior so existing log scrapers still see what they expect.
+    """
+    parts = [_mode_label(mode)]
+    worker_default_model = None
+    if config_snapshot is not None:
+        snap_entry = (config_snapshot.get("providers") or {}).get(effective_provider) or {}
+        snap_models = snap_entry.get("models") or {}
+        lookup_mode = "FULL" if str(mode).startswith("FULL:") else mode
+        worker_default_model = snap_models.get(lookup_mode)
+    if worker_default_model is None or selected_model != worker_default_model:
+        parts.append(str(selected_model))
+    parts.append(f"score: {score}%")
+    return "  " + " | ".join(parts)
+
+
 def _emit_handoff(func_key, from_provider, to_provider, reason, count, score=None):
     """Emit a function_mode event so the dashboard pane shows the handoff."""
     bus_emit(
@@ -2818,17 +2961,36 @@ def determine_mode(score, deductions=None, completeness=None):
     return "FULL"
 
 
-def select_model(mode, user_model=None, provider=None):
-    """Auto-select model based on mode and provider, with user override."""
+def select_model(mode, user_model=None, provider=None, config_snapshot=None):
+    """Auto-select model based on mode and provider, with user override.
+
+    `config_snapshot` is the worker's frozen snapshot. When present, the
+    snapshot's per-provider models slice is consulted first — that means
+    audit / handoff / recovery passes inside a worker all use the same
+    model that was chosen at worker-start, even if the dashboard model
+    dropdown moves mid-run.
+    """
     if user_model:
         return user_model
     # FULL:recovery, FULL:comments, etc. are sub-modes — use FULL for dashboard lookup
     lookup_mode = "FULL" if str(mode).startswith("FULL:") else mode
-    configured_model = get_configured_model(provider or AI_PROVIDER, lookup_mode)
+    target_provider = provider or AI_PROVIDER
+
+    # Snapshot-first lookup. Only a slice covering the requested provider
+    # is captured; if the snapshot doesn't have it (e.g. an unconfigured
+    # handoff fired), fall through to the live config like normal.
+    if config_snapshot is not None:
+        snap_providers = config_snapshot.get("providers") or {}
+        snap_entry = snap_providers.get(target_provider) or {}
+        snap_models = snap_entry.get("models") or {}
+        if snap_models.get(lookup_mode):
+            return snap_models[lookup_mode]
+
+    configured_model = get_configured_model(target_provider, lookup_mode)
     if configured_model:
         return configured_model
     raise ValueError(
-        f"No model configured for provider '{provider or AI_PROVIDER}' mode '{str(mode).upper()}'. Set it in the web dashboard."
+        f"No model configured for provider '{target_provider}' mode '{str(mode).upper()}'. Set it in the web dashboard."
     )
 
 
@@ -3664,15 +3826,74 @@ def _invoke_provider_direct(
 ):
     effective_provider = provider or AI_PROVIDER
     selected_model = _require_model_name(model, effective_provider)
+
+    # Pre-call quota-pause gate (Q1 + Q9): if (provider, model) is currently
+    # walled, short-circuit before hitting the API. Synthesize a quota_paused
+    # result so the caller can log it and the worker can pause.
+    from provider_pause import (
+        detect_quota_wall,
+        get_default_manager,
+        QUOTA_PAUSE_THRESHOLD_SECONDS,
+    )
+
+    pause_mgr = get_default_manager()
+    paused_until = pause_mgr.wait_until(effective_provider, selected_model)
+    if paused_until is not None:
+        reason = pause_mgr.reason(effective_provider, selected_model) or "quota wall"
+        print(
+            f"  [{effective_provider}] quota wall active — paused until "
+            f"{paused_until.isoformat()} ({reason})",
+            flush=True,
+        )
+        return (
+            None,
+            {
+                "tool_calls": 0,
+                "tool_calls_known": True,
+                "provider_error": f"quota_paused: {reason}",
+                "provider_error_type": "QuotaPaused",
+                "quota_paused": True,
+                "quota_paused_until": paused_until.isoformat(),
+                "quota_paused_reason": reason,
+            },
+        )
+
     if effective_provider == "minimax":
-        return _invoke_minimax(
+        result = _invoke_minimax(
             prompt, selected_model, max_turns, complexity_tier=complexity_tier
         )
-    if effective_provider == "codex":
-        return _wrap_result(_invoke_codex(prompt, selected_model, max_turns))
-    if effective_provider == "gemini":
+    elif effective_provider == "codex":
+        result = _wrap_result(_invoke_codex(prompt, selected_model, max_turns))
+    elif effective_provider == "gemini":
+        # Gemini's wrapper already integrates quota-wall detection inline so
+        # it can break out of its retry loop — return its result directly.
         return _invoke_gemini(prompt, selected_model, max_turns)
-    return _wrap_result(_invoke_claude(prompt, selected_model, max_turns))
+    else:
+        result = _wrap_result(_invoke_claude(prompt, selected_model, max_turns))
+
+    # Post-call detection (Q6) for claude/codex/minimax: if the call returned
+    # an error string, run the per-provider detector. Above-threshold matches
+    # install a pause so the next worker on the same model short-circuits.
+    text, meta = result
+    err_str = (meta or {}).get("provider_error") or ""
+    http_status = (meta or {}).get("provider_http_status")
+    if err_str:
+        wall = detect_quota_wall(effective_provider, err_str, http_status=http_status)
+        if wall is not None and wall.raw_seconds >= QUOTA_PAUSE_THRESHOLD_SECONDS:
+            until = pause_mgr.install(effective_provider, selected_model, wall)
+            print(
+                f"  [{effective_provider}] quota wall — paused until "
+                f"{until.isoformat()} ({wall.reason})",
+                flush=True,
+            )
+            meta = dict(meta or {})
+            meta["provider_error_type"] = "QuotaPaused"
+            meta["quota_paused"] = True
+            meta["quota_paused_until"] = until.isoformat()
+            meta["quota_paused_reason"] = wall.reason
+            return (text, meta)
+
+    return result
 
 
 def _restore_debug_context_for_worker(debug_ctx=None, log_dir=None):
@@ -4216,16 +4437,28 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
         return (text, {"tool_calls": tool_call_count, "tool_calls_known": True})
 
     # Retry on transient Gemini capacity/rate-limit errors.
-    # The Gemini CLI has its own internal retries but uses short backoffs that
-    # aren't enough when the model is fully saturated (429 / RESOURCE_EXHAUSTED).
-    # We add longer waits between whole-session retries.
+    # Quota walls (Q9: detect on first failure when unambiguous) skip the
+    # retry chain entirely and install a pause entry — those retries would
+    # just re-discover the same wall in 90s of wasted time.
+    from provider_pause import (
+        detect_quota_wall,
+        get_default_manager,
+        QUOTA_PAUSE_THRESHOLD_SECONDS,
+    )
+
     last_err = None
+    pause_info = None
     for _attempt in range(3):
         try:
             return asyncio.run(run())
         except Exception as e:
             last_err = e
             err_str = str(e)
+            # Q9: unambiguous quota wall -> immediate pause, no retries.
+            wall = detect_quota_wall("gemini", err_str)
+            if wall and wall.raw_seconds >= QUOTA_PAUSE_THRESHOLD_SECONDS:
+                pause_info = wall
+                break
             is_transient = any(
                 k in err_str
                 for k in ("429", "RESOURCE_EXHAUSTED", "capacity", "rateLimitExceeded")
@@ -4240,8 +4473,45 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
                 time.sleep(wait)
             else:
                 break
-    print(f"ERROR: Gemini CLI failed: {last_err}", file=sys.stderr)
-    return (None, {"tool_calls": 0, "tool_calls_known": True})
+
+    # Quota wall reached: install pause so other workers on this model
+    # short-circuit immediately, and surface a "quota_paused" provider_error
+    # so the run record & dashboard explain the silence.
+    if pause_info is not None:
+        until = get_default_manager().install("gemini", model, pause_info)
+        print(
+            f"  [gemini] quota wall — paused until {until.isoformat()} "
+            f"({pause_info.reason})",
+            flush=True,
+        )
+        return (
+            None,
+            {
+                "tool_calls": 0,
+                "tool_calls_known": True,
+                "provider_error": str(last_err)[:500],
+                "provider_error_type": "QuotaPaused",
+                "quota_paused": True,
+                "quota_paused_until": until.isoformat(),
+                "quota_paused_reason": pause_info.reason,
+            },
+        )
+
+    # Non-quota failure — surface the error so the dashboard/runs.jsonl shows
+    # why this run was empty (previously: silent tool_calls=0, output=null).
+    err_str_for_log = str(last_err) if last_err is not None else "unknown"
+    print(f"ERROR: Gemini CLI failed: {err_str_for_log}", file=sys.stderr)
+    return (
+        None,
+        {
+            "tool_calls": 0,
+            "tool_calls_known": True,
+            "provider_error": err_str_for_log[:500],
+            "provider_error_type": (
+                type(last_err).__name__ if last_err is not None else "Unknown"
+            ),
+        },
+    )
 
 
 # Tools MiniMax actually uses for RE documentation (empirically derived from 194
@@ -5620,8 +5890,20 @@ def process_function(
     dry_run=False,
     provider=None,
     stop_flag=None,
+    config_snapshot=None,
 ):
-    """Process a single function: fetch data, build prompt, invoke AI provider."""
+    """Process a single function: fetch data, build prompt, invoke AI provider.
+
+    `config_snapshot` is an optional frozen view of queue.config captured at
+    worker start (see build_worker_config_snapshot). When present, fields that
+    affect this worker's policy — max_turns, audit_provider, audit_min_delta,
+    complexity_handoff_provider, complexity_handoff_max, good_enough_score,
+    and per-provider model/turn slices — are read from the snapshot instead of
+    a live load_priority_queue() call. This makes worker behavior consistent
+    across the worker's lifetime even if someone edits the config dropdown
+    mid-run. CLI invocations and legacy callers that don't have a worker
+    context pass None and fall through to live reads (pre-snapshot behavior).
+    """
     if stop_flag and stop_flag.is_set():
         return "stopped"
 
@@ -5889,9 +6171,16 @@ def process_function(
         # score. State.json scores can drift stale; without this gate, a function
         # the selector picked at (cached) 76% but is live 93% still burns tokens.
         # Pinned functions bypass the gate (user explicitly queued them).
+        # `good_enough_score` is read from the worker's frozen snapshot when one
+        # was supplied, so two workers started at different times under
+        # different thresholds don't get their behavior altered mid-run by
+        # someone moving the slider in the dashboard.
         queue = load_priority_queue()
         cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
-        good_enough = cfg.get("good_enough_score", 80)
+        if config_snapshot is not None:
+            good_enough = int(config_snapshot.get("good_enough_score", 80))
+        else:
+            good_enough = cfg.get("good_enough_score", 80)
         is_pinned = func_key in set(queue.get("pinned", []))
 
         # Pinned functions used to bypass this gate so the user could force
@@ -5958,7 +6247,7 @@ def process_function(
 
     # Select model
     try:
-        selected_model = select_model(mode, model, provider=provider)
+        selected_model = select_model(mode, model, provider=provider, config_snapshot=config_snapshot)
     except ValueError as e:
         reason = str(e)
         print(f"  CONFIG ERROR: {reason}", flush=True)
@@ -6086,22 +6375,46 @@ def process_function(
                 )
                 cap_reached = handoff_max > 0 and handoff_count >= handoff_max
 
+                # Q10: don't hand off to a walled provider — primary keeps
+                # the function. The handoff target's model is what matters
+                # for the wall, so resolve it before the gate check.
+                handoff_target_walled = False
+                if handoff_provider and handoff_provider != effective_provider:
+                    try:
+                        from provider_pause import get_default_manager as _get_pm
+
+                        _handoff_model = select_model(
+                            mode, provider=handoff_provider, config_snapshot=config_snapshot
+                        )
+                        if _handoff_model and _get_pm().is_paused(
+                            handoff_provider, _handoff_model
+                        ):
+                            handoff_target_walled = True
+                            print(
+                                f"  [handoff] skipped — {handoff_provider}/"
+                                f"{_handoff_model} walled; primary continues",
+                                flush=True,
+                            )
+                    except Exception:  # noqa: BLE001 — don't let pause check break handoff
+                        pass
+
                 can_handoff = (
                     handoff_provider
                     and handoff_provider != effective_provider
                     and not cap_reached
+                    and not handoff_target_walled
                 )
 
                 if can_handoff:
                     new_count = _bump_handoff_counter()
                     handoff_reason = f"{detail} — handoff #{new_count}"
-                    score_label = (
-                        f"{live_score}%" if live_score is not None else "unscored"
-                    )
-                    print(
-                        f"  HANDOFF (too complex for {effective_provider}, score: {score_label}): "
-                        f"{effective_provider} -> {handoff_provider} | {detail}"
-                    )
+                    # The mode banner that prints next includes the new
+                    # provider's model when it deviates from the worker's
+                    # snapshot, which IS the handoff signal. The standalone
+                    # banner here was redundant with that — the deviation
+                    # in the mode banner tells you handoff fired and where
+                    # to. We still emit the function_mode bus event so the
+                    # dashboard pane shows HANDOFF:from->to.
                     _emit_handoff(
                         func_key,
                         effective_provider,
@@ -6127,7 +6440,8 @@ def process_function(
                     lookup_mode = "FULL" if str(mode).startswith("FULL:") else mode
                     try:
                         selected_model = select_model(
-                            lookup_mode, model, provider=provider
+                            lookup_mode, model, provider=provider,
+                            config_snapshot=config_snapshot,
                         )
                     except ValueError as e:
                         reason = str(e)
@@ -6144,22 +6458,33 @@ def process_function(
                         )
                     # Fall through to invoke_claude — do NOT return
                 else:
-                    reason = f"Too complex for MiniMax ({detail})"
+                    # Handoff isn't available (none configured / cap reached /
+                    # target walled). Previously this skipped the function and
+                    # bumped consecutive_fails. That's wrong: if the user chose
+                    # not to configure a handoff, or the cap is reached, or the
+                    # target is temporarily walled, the right behavior is to
+                    # let the primary provider try the function with its own
+                    # model. Worst case the score doesn't improve and the
+                    # function naturally moves on; we don't penalize it for
+                    # something that's a deployment / config decision rather
+                    # than a quality signal.
                     if handoff_provider and cap_reached:
-                        reason += f" — handoff cap of {handoff_max} reached"
-                    elif not handoff_provider:
-                        reason += " — handoff disabled, set complexity_handoff_provider to enable"
-                    print(f"  SKIP: {reason}")
-                    func["last_result"] = "skipped_complexity"
-                    func["consecutive_fails"] = func.get("consecutive_fails", 0) + 1
-                    update_function_state(func_key, func)
-                    _emit_skip(func_key, "complexity", reason, live_score)
-                    return _finish(
-                        "skipped",
-                        logged_result="skipped_complexity",
-                        score_after=live_score,
-                        reason=reason,
-                    )
+                        note = (
+                            f"Complex function ({detail}) — handoff cap "
+                            f"{handoff_max} reached, primary continues"
+                        )
+                    elif handoff_target_walled:
+                        note = (
+                            f"Complex function ({detail}) — handoff target "
+                            f"{handoff_provider} walled, primary continues"
+                        )
+                    else:
+                        note = (
+                            f"Complex function ({detail}) — no handoff configured, "
+                            f"primary continues"
+                        )
+                    print(f"  NOTE: {note}", flush=True)
+                    # Intentionally fall through with current provider/model.
 
     # Inject tool block for recovery pass now that the final provider is known.
     # Gemini uses native MCP tool discovery — injecting a tool list into its prompt
@@ -6172,9 +6497,7 @@ def process_function(
         {"key": func_key, "mode": mode, "model": selected_model, "score": live_score},
     )
     _debug_update_context(provider=effective_provider)
-    print(
-        f"  {_mode_label(mode)} | {selected_model} | {len(prompt):,} chars | score: {live_score}%"
-    )
+    print(_format_mode_banner(mode, selected_model, effective_provider, live_score, config_snapshot, prompt))
 
     if dry_run:
         print(
@@ -6223,9 +6546,23 @@ def process_function(
             return _finish("quit", score_after=new_score)
         return _finish("manual_prompt_generated", score_after=new_score)
 
-    # Per-provider max_turns from dashboard config (overrides hardcoded default)
-    _pmt = cfg.get("provider_max_turns") or {}
-    worker_max_turns = int(_pmt.get(effective_provider, 25))
+    # Per-provider max_turns. Snapshot wins when present (frozen for the
+    # worker's life), falling through to live config for legacy/CLI invocations
+    # that don't have a worker context.
+    if config_snapshot is not None:
+        snap_providers = config_snapshot.get("providers") or {}
+        snap_entry = snap_providers.get(effective_provider) or {}
+        if snap_entry:
+            worker_max_turns = int(snap_entry.get("max_turns", 25))
+        else:
+            # Snapshot exists but didn't capture this provider — happens when
+            # an unconfigured-at-start escalation/handoff target gets invoked.
+            # Fall through to live config rather than guessing wrong.
+            _pmt = cfg.get("provider_max_turns") or {}
+            worker_max_turns = int(_pmt.get(effective_provider, 25))
+    else:
+        _pmt = cfg.get("provider_max_turns") or {}
+        worker_max_turns = int(_pmt.get(effective_provider, 25))
 
     # Auto mode: invoke AI (provider based on AI_PROVIDER)
     print()
@@ -6238,6 +6575,31 @@ def process_function(
     )
     tool_calls_made = meta.get("tool_calls", -1)
     tool_calls_known = bool(meta.get("tool_calls_known", tool_calls_made != -1))
+
+    # Quota wall short-circuit (Q2): the provider returned `quota_paused`
+    # because (provider, model) is currently walled. Log the run as
+    # `quota_paused` so it appears in runs.jsonl for diagnostics, but DO
+    # NOT bump consecutive_fails — the wall is an account-wide transient
+    # condition, not a per-function quality signal. The worker loop will
+    # see the pause on its next iteration and yield until reset.
+    if meta.get("quota_paused"):
+        result = "quota_paused"
+        func["last_processed"] = datetime.now().isoformat()
+        func["last_result"] = result
+        # consecutive_fails counter intentionally untouched (Q2).
+        until_iso = meta.get("quota_paused_until")
+        reason = meta.get("quota_paused_reason") or "quota wall"
+        print(
+            f"  Quota wall: {provider}/{selected_model} paused until "
+            f"{until_iso} — function deferred ({reason})",
+            flush=True,
+        )
+        return _finish(
+            "quota_paused",
+            logged_result="quota_paused",
+            score_after=live_score,
+            reason=f"quota_paused until {until_iso}",
+        )
 
     # Two-pass: if recovery pass made tool calls, run pass 2 (comments) with fresh data
     # Don't gate on "DONE:" text — the model may produce think-only output or empty response
@@ -6269,9 +6631,7 @@ def process_function(
         if effective_provider != "gemini":
             prompt2 = _inject_tool_block(prompt2)
         mode = "FULL:comments"
-        print(
-            f"  {_mode_label(mode)} | {selected_model} | {len(prompt2):,} chars | score: {mid_score}%"
-        )
+        print(_format_mode_banner(mode, selected_model, effective_provider, mid_score, config_snapshot, prompt2))
         print()
         output2, meta2 = invoke_claude(
             prompt2,
@@ -6559,13 +6919,20 @@ def process_function(
     audit_outcome = None  # "skipped_good_enough", "skipped_delta", "ran", or None
     audit_tool_calls = None
     audit_tool_calls_known = None
-    audit_cfg = (
-        cfg
-        if "audit_provider" in cfg
-        else ((load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG))
-    )
-    audit_provider = audit_cfg.get("audit_provider")
-    audit_min_delta = audit_cfg.get("audit_min_delta", 5)
+    if config_snapshot is not None:
+        # Frozen snapshot: audit policy was decided at worker start. Even if
+        # the dashboard dropdown moves mid-run, this worker keeps its original
+        # audit configuration for every function it processes.
+        audit_provider = config_snapshot.get("audit_provider")
+        audit_min_delta = int(config_snapshot.get("audit_min_delta", 5))
+    else:
+        audit_cfg = (
+            cfg
+            if "audit_provider" in cfg
+            else ((load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG))
+        )
+        audit_provider = audit_cfg.get("audit_provider")
+        audit_min_delta = audit_cfg.get("audit_min_delta", 5)
 
     if (
         audit_provider
@@ -6575,7 +6942,12 @@ def process_function(
         and mode not in ("VERIFY", "FULL:recovery")
     ):
         worker_diff = new_score - live_score
-        good_enough = audit_cfg.get("good_enough_score", 80)
+        # Use the snapshot's good_enough when present so an audit decision
+        # is consistent with the gate decision earlier in this same function.
+        if config_snapshot is not None:
+            good_enough = int(config_snapshot.get("good_enough_score", 80))
+        else:
+            good_enough = audit_cfg.get("good_enough_score", 80)
 
         if new_score >= good_enough:
             audit_outcome = "skipped_good_enough"
@@ -6616,7 +6988,9 @@ def process_function(
 
             audit_score_before = new_score
             try:
-                audit_model = select_model("FIX", provider=audit_provider)
+                audit_model = select_model(
+                    "FIX", provider=audit_provider, config_snapshot=config_snapshot
+                )
             except ValueError as e:
                 audit_outcome = "config_error"
                 print(f"  [audit] skipped — {e}")
@@ -6641,15 +7015,46 @@ def process_function(
                     provider=audit_provider,
                     max_turns=15,
                 )
-                audit_tool_calls = audit_meta.get("tool_calls", -1)
-                audit_tool_calls_known = bool(
-                    audit_meta.get("tool_calls_known", audit_tool_calls != -1)
-                )
+                # Q10: when audit's provider+model is walled, skip silently.
+                # Audit is a quality second-pass; a missed audit is harmless,
+                # we don't want to log it as a failure or count it against
+                # any threshold. The function keeps the primary worker's
+                # score and moves on.
+                if audit_meta.get("quota_paused"):
+                    audit_outcome = "quota_paused"
+                    audit_score_after = audit_score_before
+                    audit_tool_calls = 0
+                    audit_tool_calls_known = True
+                    print(
+                        f"  [audit] skipped — {audit_provider} walled until "
+                        f"{audit_meta.get('quota_paused_until')}",
+                        flush=True,
+                    )
+                    bus_emit(
+                        "audit_complete",
+                        {
+                            "key": func_key,
+                            "provider": audit_provider,
+                            "score_before": audit_score_before,
+                            "score_after": audit_score_before,
+                            "outcome": "quota_paused",
+                        },
+                    )
+                else:
+                    audit_tool_calls = audit_meta.get("tool_calls", -1)
+                    audit_tool_calls_known = bool(
+                        audit_meta.get("tool_calls_known", audit_tool_calls != -1)
+                    )
 
-                # Rescore after audit
-                audit_new_score, audit_completeness = _rescore_and_sync(
-                    func, address, program
-                )
+                # Skip rescore when audit was quota-paused — the call never
+                # touched Ghidra so the score can't have changed.
+                if audit_outcome == "quota_paused":
+                    audit_new_score, audit_completeness = None, None
+                else:
+                    # Rescore after audit
+                    audit_new_score, audit_completeness = _rescore_and_sync(
+                        func, address, program
+                    )
                 if audit_new_score is not None:
                     audit_score_after = audit_new_score
                     audit_diff = audit_new_score - audit_score_before
@@ -6710,8 +7115,27 @@ def process_function(
             "result": result,
         },
     )
+    # Look up the post-rescore name so the dashboard's function-block
+    # footer can show the renamed function (the model often calls
+    # rename_function_by_address during documentation). State has been
+    # synced via _rescore_and_sync above, so it's the source of truth.
+    fresh_name_for_event = func.get("name")
+    try:
+        _fresh_state = load_state()
+        _entry = (_fresh_state.get("functions") or {}).get(func_key)
+        if _entry and _entry.get("name"):
+            fresh_name_for_event = _entry["name"]
+    except Exception:
+        pass
     bus_emit(
-        "function_complete", {"key": func_key, "result": result, "score": new_score}
+        "function_complete",
+        {
+            "key": func_key,
+            "result": result,
+            "score": new_score,
+            "name": fresh_name_for_event,
+            "address": address,
+        },
     )
 
     # Save program to persist changes in Ghidra

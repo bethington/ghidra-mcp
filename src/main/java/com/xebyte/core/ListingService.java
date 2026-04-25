@@ -297,7 +297,7 @@ public class ListingService {
             Map<String, Object> funcItem = new LinkedHashMap<>();
             funcItem.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
             funcItem.put("name", func.getName());
-            funcItem.put("isThunk", func.isThunk());
+            funcItem.put("isThunk", "thunk".equals(AnalysisService.classifyFunction(func, program)));
             funcItem.put("isExternal", func.isExternal());
             functions.add(funcItem);
             count++;

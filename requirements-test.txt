@@ -20,3 +20,7 @@ pytest-json-report>=1.5.0
 
 # YAML parsing (workflow validation tests)
 pyyaml>=6.0.0
+
+# Benchmark truth extraction (libclang-backed C parser)
+clang>=18.1.8
+libclang>=18.1.1

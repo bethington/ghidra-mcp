@@ -765,7 +765,7 @@ python -m tools.setup deploy --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 python -m tools.setup preflight --strict --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
 # Version bump and tag
-python -m tools.setup bump-version --new 5.6.0 --tag
+python -m tools.setup bump-version --new X.Y.Z --tag
 
 # Run offline Java tests
 python -m tools.setup run-tests

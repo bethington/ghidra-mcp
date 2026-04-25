@@ -17,6 +17,11 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip(
+    "clang.cindex",
+    reason="benchmark truth extraction requires clang/libclang Python packages",
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_DIR = REPO_ROOT / "fun-doc" / "benchmark"

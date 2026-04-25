@@ -35,11 +35,12 @@ public class GhidraMCPPluginTest extends TestCase {
             
         // Check server availability once per test run
         if (!serverAvailabilityChecked) {
-            serverAvailable = checkServerAvailability();
+            serverAvailable = liveTestsEnabled() && checkServerAvailability();
             serverAvailabilityChecked = true;
             if (!serverAvailable) {
-                System.out.println("=== MCP SERVER NOT AVAILABLE ===");
+                System.out.println("=== LIVE MCP SERVER TESTS DISABLED OR NOT AVAILABLE ===");
                 System.out.println("Integration tests will be skipped. To run these tests:");
+                System.out.println("0. Set GHIDRA_MCP_LIVE_TESTS=1");
                 System.out.println("1. Start Ghidra");
                 System.out.println("2. Load a program");
                 System.out.println("3. Enable GhidraMCP plugin");
@@ -48,6 +49,11 @@ public class GhidraMCPPluginTest extends TestCase {
                 System.out.println("===================================");
             }
         }
+    }
+
+    private boolean liveTestsEnabled() {
+        String value = System.getenv("GHIDRA_MCP_LIVE_TESTS");
+        return value != null && (value.equals("1") || value.equalsIgnoreCase("true"));
     }
     
     /**
@@ -64,7 +70,7 @@ public class GhidraMCPPluginTest extends TestCase {
                     .build();
                 
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                if (response.statusCode() == 200) {
+                if (response.statusCode() == 200 && response.body() != null && response.body().contains("5.7.0")) {
                     return true;
                 }
             } catch (Exception e) {
@@ -186,6 +192,7 @@ public class GhidraMCPPluginTest extends TestCase {
      * Test search functionality endpoints
      */
     public void testSearchEndpoints() throws Exception {
+        if (!serverAvailable) return;
         // Test function search with a common term
         HttpResponse<String> response = makeGetRequest("searchFunctions?query=get&limit=5");
         assertEquals("Function search should return 200", 200, response.statusCode());
@@ -200,6 +207,7 @@ public class GhidraMCPPluginTest extends TestCase {
      * Test decompilation endpoints
      */
     public void testDecompilationEndpoints() throws Exception {
+        if (!serverAvailable) return;
         // First get a function name to test with
         HttpResponse<String> methodsResponse = makeGetRequest("methods?limit=1");
         assertEquals("Methods endpoint should work", 200, methodsResponse.statusCode());
@@ -222,6 +230,7 @@ public class GhidraMCPPluginTest extends TestCase {
      * Test cross-reference endpoints
      */
     public void testCrossReferenceEndpoints() throws Exception {
+        if (!serverAvailable) return;
         // Test with a known address format (these should at least not crash)
         String[] xrefEndpoints = {
             "xrefs_to?address=0x034c1000&limit=5",
@@ -239,6 +248,7 @@ public class GhidraMCPPluginTest extends TestCase {
      * Test current state endpoints
      */
     public void testCurrentStateEndpoints() throws Exception {
+        if (!serverAvailable) return;
         String[] stateEndpoints = {
             "get_current_address", "get_current_function"
         };
@@ -254,6 +264,7 @@ public class GhidraMCPPluginTest extends TestCase {
      * Test the problematic endpoints that were failing (404 errors)
      */
     public void testProblematicEndpoints() throws Exception {
+        if (!serverAvailable) return;
         String[] problematicEndpoints = {
             "all_labels", "program_stats", "find_byte_patterns",
             "function_callgraph", "search_labels", "string_references"
@@ -310,6 +321,7 @@ public class GhidraMCPPluginTest extends TestCase {
      * Test error handling for non-existent endpoints
      */
     public void testNonExistentEndpoints() throws Exception {
+        if (!serverAvailable) return;
         String[] fakeEndpoints = {
             "nonexistent", "fake_endpoint", "test123"
         };
@@ -326,6 +338,7 @@ public class GhidraMCPPluginTest extends TestCase {
      * Test HTTP method validation
      */
     public void testHttpMethodValidation() throws Exception {
+        if (!serverAvailable) return;
         // Test GET on POST-only endpoints (like decompile)
         HttpResponse<String> response = makeGetRequest("decompile");
         // Should either work or return method not allowed
@@ -337,6 +350,7 @@ public class GhidraMCPPluginTest extends TestCase {
      * Performance test for basic endpoints
      */
     public void testBasicPerformance() throws Exception {
+        if (!serverAvailable) return;
         long startTime = System.currentTimeMillis();
 
         // Make several quick requests
@@ -356,6 +370,7 @@ public class GhidraMCPPluginTest extends TestCase {
      * Integration test that combines multiple endpoints
      */
     public void testEndpointIntegration() throws Exception {
+        if (!serverAvailable) return;
         // Get function list
         HttpResponse<String> functionsResponse = makeGetRequest("methods?limit=1");
         assertEquals("Should get functions list", 200, functionsResponse.statusCode());
@@ -378,6 +393,7 @@ public class GhidraMCPPluginTest extends TestCase {
      * Test comprehensive endpoint coverage
      */
     public void testEndpointCoverage() throws Exception {
+        if (!serverAvailable) return;
         String[] allExpectedEndpoints = {
             // Basic listings
             "list_functions", "methods", "classes", "segments", "imports", "exports",

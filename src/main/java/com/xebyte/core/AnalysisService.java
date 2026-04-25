@@ -64,6 +64,47 @@ public class AnalysisService {
     }
 
     // ========================================================================
+    // Per-program tokenized-name cache (Copilot review feedback on PR #168)
+    // ========================================================================
+    // The name_collision deduction below would otherwise tokenize every
+    // function name in the program on every scoring call — O(n²) per
+    // binary-wide rescore. We cache the precomputed tokens per Program
+    // with a short TTL so batch scoring amortizes the work. WeakHashMap
+    // lets the entries get GC'd when a Program closes; the synchronized
+    // wrapper makes concurrent access safe.
+
+    private static final Map<Program, ProgramNameCache> NAME_CACHE =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+    private static final long NAME_CACHE_TTL_MS = 30_000L;
+
+    private static final class ProgramNameCache {
+        final List<NamingConventions.TokenizedName> tokenized;
+        final long timestamp;
+        ProgramNameCache(List<NamingConventions.TokenizedName> tokenized, long ts) {
+            this.tokenized = tokenized;
+            this.timestamp = ts;
+        }
+    }
+
+    private static List<NamingConventions.TokenizedName> getProgramTokenizedNames(Program program) {
+        if (program == null) return java.util.Collections.emptyList();
+        long now = System.currentTimeMillis();
+        ProgramNameCache cached = NAME_CACHE.get(program);
+        if (cached != null && (now - cached.timestamp) < NAME_CACHE_TTL_MS) {
+            return cached.tokenized;
+        }
+        List<String> names = new ArrayList<>();
+        for (Function f : program.getFunctionManager().getFunctions(true)) {
+            String n = f.getName();
+            if (n != null && !n.isEmpty()) names.add(n);
+        }
+        List<NamingConventions.TokenizedName> tokenized =
+                NamingConventions.precomputeTokenized(names);
+        NAME_CACHE.put(program, new ProgramNameCache(tokenized, now));
+        return tokenized;
+    }
+
+    // ========================================================================
     // Function classification utility
     // ========================================================================
 
@@ -2451,6 +2492,64 @@ public class AnalysisService {
             fixablePenalty += 20;
             breakdown.add(deductionItem("address_suffix_name", 20.0, true, 1,
                     "Function name ends with address suffix (e.g., _6FD93C30) — strip suffix and verify name"));
+        } else if (!isThunk && !isCompilerHelper) {
+            // Name-quality + collision deductions (Q6 calibration). Only fire
+            // for already-custom names — auto/address-suffix names already
+            // get a heavier deduction above. Thunks and compiler helpers are
+            // exempt: those names aren't model-authored.
+            String name = func.getName();
+            NamingConventions.NameQualityResult q =
+                    NamingConventions.checkFunctionNameQuality(name);
+            if (!q.ok) {
+                fixablePenalty += 8;
+                breakdown.add(deductionItem("low_name_quality", 8.0, true, 1,
+                        "Name '" + name + "' fails verb-tier specificity (" + q.issue + ")"));
+            }
+
+            // Token-subset collision against any other function in this
+            // program (same module-prefix scope). Uses a process-wide
+            // WeakHashMap cache (TTL 30s) of precomputed token-sets so
+            // batch scoring amortizes the per-name tokenization cost
+            // across calls (Copilot review on PR #168 flagged the prior
+            // O(n²) pattern of re-tokenizing every name on every score).
+            Program owner = func.getProgram();
+            List<NamingConventions.TokenizedName> tokenizedNames =
+                    getProgramTokenizedNames(owner);
+            if (!tokenizedNames.isEmpty()) {
+                String collidesWith = NamingConventions.findTokenSubsetCollisionPrecomputed(
+                        name, tokenizedNames);
+                if (collidesWith != null) {
+                    fixablePenalty += 10;
+                    breakdown.add(deductionItem("name_collision", 10.0, true, 1,
+                            "Token-subset collision with '" + collidesWith
+                                    + "' — names need a meaningful distinguisher"));
+                }
+            }
+
+            // Missing module prefix: name lacks UPPERCASE_ prefix AND ≥3 of
+            // its callees share a known prefix. Cheap and high-signal.
+            if (NamingConventions.extractModulePrefix(name) == null) {
+                Map<String, Integer> prefixCounts = new HashMap<>();
+                for (Function callee : func.getCalledFunctions(null)) {
+                    String pfx = NamingConventions.extractModulePrefix(callee.getName());
+                    if (pfx != null) prefixCounts.merge(pfx, 1, Integer::sum);
+                }
+                String dominantPrefix = null;
+                int dominantCount = 0;
+                for (Map.Entry<String, Integer> e : prefixCounts.entrySet()) {
+                    if (e.getValue() > dominantCount) {
+                        dominantCount = e.getValue();
+                        dominantPrefix = e.getKey();
+                    }
+                }
+                if (dominantCount >= 3 && dominantPrefix != null) {
+                    fixablePenalty += 5;
+                    breakdown.add(deductionItem("missing_module_prefix", 5.0, true, 1,
+                            "Name '" + name + "' has no module prefix but " + dominantCount
+                                    + " callees use '" + dominantPrefix
+                                    + "_' — consider prefixing this function the same way"));
+                }
+            }
         }
 
         if (func.getSignature() == null) {

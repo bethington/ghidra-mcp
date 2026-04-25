@@ -20,12 +20,44 @@ public class EndpointRegistrationTest extends TestCase {
     private static final String BASE_URL = "http://127.0.0.1:8089";
     private static final int TIMEOUT_SECONDS = 5;
     private HttpClient httpClient;
+    private static boolean liveCheckDone = false;
+    private static boolean liveServerAvailable = false;
 
     @Override
     protected void setUp() {
         httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(TIMEOUT_SECONDS))
             .build();
+        if (!liveCheckDone) {
+            liveServerAvailable = liveTestsEnabled() && checkServerAvailability();
+            liveCheckDone = true;
+            if (!liveServerAvailable) {
+                System.out.println("Skipping live endpoint registration tests. Set GHIDRA_MCP_LIVE_TESTS=1 with a current server on " + BASE_URL + " to enable.");
+            }
+        }
+    }
+
+    private boolean liveTestsEnabled() {
+        String value = System.getenv("GHIDRA_MCP_LIVE_TESTS");
+        return value != null && (value.equals("1") || value.equalsIgnoreCase("true"));
+    }
+
+    private boolean shouldRunLiveTest() {
+        return liveServerAvailable;
+    }
+
+    private boolean checkServerAvailability() {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/get_version"))
+                .timeout(Duration.ofSeconds(2))
+                .GET()
+                .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            return response.statusCode() == 200 && response.body() != null && response.body().contains("5.7.0");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
@@ -53,6 +85,7 @@ public class EndpointRegistrationTest extends TestCase {
      * Test that all basic CRUD endpoints are registered
      */
     public void testBasicEndpointsRegistered() {
+        if (!shouldRunLiveTest()) return;
         Map<String, String> basicEndpoints = new HashMap<>();
         basicEndpoints.put("list_functions", "List all functions");
         basicEndpoints.put("methods", "List function names");
@@ -74,6 +107,7 @@ public class EndpointRegistrationTest extends TestCase {
      * Test that search and analysis endpoints are registered
      */
     public void testSearchAnalysisEndpointsRegistered() {
+        if (!shouldRunLiveTest()) return;
         Map<String, String> searchEndpoints = new HashMap<>();
         searchEndpoints.put("searchFunctions", "Search functions by name");
         searchEndpoints.put("decompile", "Decompile function");
@@ -90,6 +124,7 @@ public class EndpointRegistrationTest extends TestCase {
      * Test that cross-reference endpoints are registered
      */
     public void testCrossReferenceEndpointsRegistered() {
+        if (!shouldRunLiveTest()) return;
         Map<String, String> xrefEndpoints = new HashMap<>();
         xrefEndpoints.put("xrefs_to", "Get references to address");
         xrefEndpoints.put("xrefs_from", "Get references from address");
@@ -105,6 +140,7 @@ public class EndpointRegistrationTest extends TestCase {
      * Test that current state endpoints are registered
      */
     public void testCurrentStateEndpointsRegistered() {
+        if (!shouldRunLiveTest()) return;
         Map<String, String> stateEndpoints = new HashMap<>();
         stateEndpoints.put("get_current_address", "Get current cursor address");
         stateEndpoints.put("get_current_function", "Get current function");
@@ -120,6 +156,7 @@ public class EndpointRegistrationTest extends TestCase {
      * This test documents which advanced endpoints are missing
      */
     public void testAdvancedEndpointsRegistration() {
+        if (!shouldRunLiveTest()) return;
         Map<String, String> advancedEndpoints = new HashMap<>();
         advancedEndpoints.put("all_labels", "List all labels");
         advancedEndpoints.put("program_stats", "Get program statistics");
@@ -164,6 +201,7 @@ public class EndpointRegistrationTest extends TestCase {
      * Test that the HTTP server responds with proper error codes
      */
     public void testHttpErrorCodes() {
+        if (!shouldRunLiveTest()) return;
         // Test 404 for truly non-existent endpoints
         assertFalse("Non-existent endpoint should return 404",
             isEndpointRegistered("definitely_does_not_exist_123456"));
@@ -178,6 +216,7 @@ public class EndpointRegistrationTest extends TestCase {
      * This test verifies that the createContext() calls in the Java code are working
      */
     public void testJavaSourceEndpointConsistency() {
+        if (!shouldRunLiveTest()) return;
         // These are the endpoints that have createContext() calls in the Java source
         String[] sourceEndpoints = {
             // From startServer() method in GhidraMCPPlugin.java
@@ -221,6 +260,7 @@ public class EndpointRegistrationTest extends TestCase {
      * Test server health and basic functionality
      */
     public void testServerHealth() {
+        if (!shouldRunLiveTest()) return;
         // Test that the server is responding at all
         boolean serverResponding = false;
         try {

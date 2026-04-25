@@ -589,6 +589,10 @@ fun-doc/state.json.corrupt-*
 fun-doc/logs/
 fun-doc/priority_queue.json
 fun-doc/debug/
+fun-doc/inventory.json
+fun-doc/inventory.json.tmp
+fun-doc/provider_pauses.json
+fun-doc/provider_pauses.json.tmp
 
 # fun-doc audit loop runtime state (registry + pending-trigger queue).
 # The subpackage code at fun-doc/audit/*.py IS tracked; only runtime
