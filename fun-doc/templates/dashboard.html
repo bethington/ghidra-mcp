@@ -162,8 +162,9 @@
         .focus-banner .focus-func { color: var(--text-primary); font-weight: 600; }
         .focus-banner .focus-addr { color: var(--text-secondary); }
         .worker-pane-header { padding: 0.25rem 0.5rem; background: linear-gradient(180deg, var(--bg-light), var(--bg-medium)); border-bottom: 1px solid var(--border-dark); border-radius: 6px 6px 0 0; display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; }
-        .worker-pane-header .wp-title { font-family: var(--font-mono); color: var(--accent-gold); font-weight: 600; }
+        .worker-pane-header .wp-title { font-family: var(--font-mono); color: var(--text-primary); font-weight: 600; }
         .worker-pane-header .wp-status { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.6rem; }
+        .worker-pane-header .wp-status .wp-current { color: var(--accent-gold); }
         .worker-pane-header .wp-alert { font-family: var(--font-mono); font-size: 0.55rem; color: var(--accent-red-light); border: 1px solid rgba(201, 48, 48, 0.4); background: rgba(139, 32, 32, 0.18); border-radius: 3px; padding: 1px 4px; display: none; }
         .worker-pane-header .wp-alert.active { display: inline-block; }
         .worker-pane-header .wp-actions { margin-left: auto; display: flex; gap: 3px; }
@@ -1555,7 +1556,8 @@
                     const skipStr = w.progress.skipped > 0 ? ` ${w.progress.skipped}skip` : '';
                     const timeoutStr = w.timeout_count > 0 ? ` | ${w.timeout_count} timeout${w.timeout_count > 1 ? 's' : ''}` : '';
                     const restoredStr = w.restored ? 'restored | ' : '';
-                    status.textContent = `${restoredStr}${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${timeoutStr}${cur ? ' | ' + cur : ''}`;
+                    const prefix = `${restoredStr}${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${timeoutStr}`;
+                    status.innerHTML = escapeHtml(prefix) + (cur ? ' | <span class="wp-current">' + escapeHtml(cur) + '</span>' : '');
                 }
                 // Snapshot sub-line. Frozen at worker start, never changes
                 // for this worker. Hidden when no snapshot present.
