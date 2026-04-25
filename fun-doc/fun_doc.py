@@ -6458,22 +6458,33 @@ def process_function(
                         )
                     # Fall through to invoke_claude — do NOT return
                 else:
-                    reason = f"Too complex for MiniMax ({detail})"
+                    # Handoff isn't available (none configured / cap reached /
+                    # target walled). Previously this skipped the function and
+                    # bumped consecutive_fails. That's wrong: if the user chose
+                    # not to configure a handoff, or the cap is reached, or the
+                    # target is temporarily walled, the right behavior is to
+                    # let the primary provider try the function with its own
+                    # model. Worst case the score doesn't improve and the
+                    # function naturally moves on; we don't penalize it for
+                    # something that's a deployment / config decision rather
+                    # than a quality signal.
                     if handoff_provider and cap_reached:
-                        reason += f" — handoff cap of {handoff_max} reached"
-                    elif not handoff_provider:
-                        reason += " — handoff disabled, set complexity_handoff_provider to enable"
-                    print(f"  SKIP: {reason}")
-                    func["last_result"] = "skipped_complexity"
-                    func["consecutive_fails"] = func.get("consecutive_fails", 0) + 1
-                    update_function_state(func_key, func)
-                    _emit_skip(func_key, "complexity", reason, live_score)
-                    return _finish(
-                        "skipped",
-                        logged_result="skipped_complexity",
-                        score_after=live_score,
-                        reason=reason,
-                    )
+                        note = (
+                            f"Complex function ({detail}) — handoff cap "
+                            f"{handoff_max} reached, primary continues"
+                        )
+                    elif handoff_target_walled:
+                        note = (
+                            f"Complex function ({detail}) — handoff target "
+                            f"{handoff_provider} walled, primary continues"
+                        )
+                    else:
+                        note = (
+                            f"Complex function ({detail}) — no handoff configured, "
+                            f"primary continues"
+                        )
+                    print(f"  NOTE: {note}", flush=True)
+                    # Intentionally fall through with current provider/model.
 
     # Inject tool block for recovery pass now that the final provider is known.
     # Gemini uses native MCP tool discovery — injecting a tool list into its prompt
