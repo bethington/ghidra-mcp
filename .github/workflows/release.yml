@@ -14,14 +14,31 @@ on:
         description: 'Create and push tag for this release'
         type: boolean
         default: true
+      run_live_regression:
+        description: 'Run live Ghidra release regression on a self-hosted Windows runner before publishing'
+        type: boolean
+        default: false
+      ghidra_path:
+        description: 'Ghidra path for live regression self-hosted runner'
+        required: false
+        default: 'F:\ghidra_12.0.4_PUBLIC'
 
 env:
   GHIDRA_VERSION: 12.0.4
   GHIDRA_DATE: 20260303
 
 jobs:
+  release-regression:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_live_regression == 'true'
+    uses: ./.github/workflows/release-regression.yml
+    with:
+      ghidra_path: ${{ github.event.inputs.ghidra_path }}
+      test_tier: release
+
   create-release:
     runs-on: ubuntu-latest
+    needs: [release-regression]
+    if: always() && (needs.release-regression.result == 'success' || needs.release-regression.result == 'skipped')
     permissions:
       contents: write  # Required for creating releases and tags
 

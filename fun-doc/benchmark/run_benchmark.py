@@ -149,7 +149,7 @@ def _get_benchmark_program() -> str:
       2. Common defaults across local projects
       3. Fail with a clear "import Benchmark.dll into Ghidra" message
 
-    The path is a GHIDRA project path (e.g. "/benchmark/Benchmark.dll"),
+    The path is a GHIDRA project path (e.g. "/testing/benchmark/Benchmark.dll"),
     not a filesystem path — Ghidra maps these separately.
     """
     env = os.environ.get("FUNDOC_BENCHMARK_PROGRAM")
@@ -158,7 +158,7 @@ def _get_benchmark_program() -> str:
     # Default convention: a folder named /benchmark/ in whichever
     # Ghidra project is currently active. If the user put it elsewhere
     # they override with the env var.
-    return "/benchmark/Benchmark.dll"
+    return "/testing/benchmark/Benchmark.dll"
 
 
 def _capture_real(fn_name: str, provider: str, model: Optional[str]) -> tuple[dict, list[dict], float]:

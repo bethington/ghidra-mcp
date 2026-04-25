@@ -1133,6 +1133,14 @@ public class EndpointRegistry {
             params(qStr("folder", "Project folder path")),
             (q, b) -> programScriptService.listProjectFiles(str(q, "folder")));
 
+        post("/create_folder", "Create a folder in the project",
+            params(bStr("path"), pProg()),
+            (q, b) -> programScriptService.createFolder(bodyStr(b, "path"), str(q, "program")));
+
+        post("/delete_file", "Delete a file from the project",
+            params(bStr("filePath")),
+            (q, b) -> programScriptService.deleteFile(bodyStr(b, "filePath")));
+
         get("/open_program", "Open a program from the current project",
             params(qStr("path", "Program path in project"), qBool("auto_analyze", false, "Run auto-analysis")),
             (q, b) -> programScriptService.openProgramFromProject(str(q, "path"), bool(q, "auto_analyze")));

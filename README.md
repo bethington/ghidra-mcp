@@ -744,6 +744,12 @@ Common flags accepted by most commands:
 | `--use-debugger-toggle` | Read `INSTALL_DEBUGGER_DEPS` from `.env` to decide whether to install debugger deps. |
 | `--strict` | (`preflight` only) Also check network reachability for Maven Central and PyPI. |
 
+Deploy test tiers are opt-in because benchmark tiers can import/reset
+`Benchmark.dll` in the active Ghidra project. Use `--test release` before
+cutting releases, or set `GHIDRA_MCP_DEPLOY_TESTS=release` in a local `.env`
+when you want every deploy on your machine to run the live benchmark
+regression. See [Testing and Release Regression](docs/TESTING.md).
+
 ```text
 # Standard first-time setup and deploy
 python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
@@ -854,6 +860,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.0.
 ### Core Documentation
 - [Documentation Index](docs/README.md) - Complete documentation navigation
 - [Project Structure](docs/PROJECT_STRUCTURE.md) - Project organization guide
+- [Testing and Release Regression](docs/TESTING.md) - Local tests, CI, live Ghidra regression, and release gates
 - [Naming Conventions](docs/NAMING_CONVENTIONS.md) - Code naming standards
 - [Hungarian Notation](docs/HUNGARIAN_NOTATION.md) - Variable naming guide
 

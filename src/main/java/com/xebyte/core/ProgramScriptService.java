@@ -418,6 +418,85 @@ public class ProgramScriptService {
         ));
     }
 
+    @McpTool(path = "/create_folder", method = "POST", description = "Create a folder in the project", category = "project")
+    public Response createFolder(
+            @Param(value = "path", source = ParamSource.BODY, description = "Project folder path to create") String folderPath,
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        PluginTool tool = getToolFromProvider();
+        if (tool == null) {
+            return Response.err("Folder creation requires GUI mode (PluginTool not available)");
+        }
+        ghidra.framework.model.Project project = tool.getProject();
+        if (project == null) {
+            return Response.err("No project is currently open");
+        }
+        if (folderPath == null || folderPath.trim().isEmpty() || folderPath.equals("/")) {
+            return Response.err("path parameter is required");
+        }
+
+        try {
+            ghidra.framework.model.DomainFolder current = project.getProjectData().getRootFolder();
+            String cleanPath = folderPath.startsWith("/") ? folderPath.substring(1) : folderPath;
+            for (String part : cleanPath.split("/")) {
+                if (part.isEmpty()) continue;
+                ghidra.framework.model.DomainFolder next = current.getFolder(part);
+                if (next == null) {
+                    next = current.createFolder(part);
+                }
+                current = next;
+            }
+            return Response.ok(JsonHelper.mapOf("success", true, "folder", current.getPathname()));
+        } catch (Exception e) {
+            return Response.err("Failed to create folder: " + e.getMessage());
+        }
+    }
+
+    @McpTool(path = "/delete_file", method = "POST", description = "Delete a file from the project", category = "project")
+    public Response deleteFile(
+            @Param(value = "filePath", source = ParamSource.BODY, description = "Project file path to delete") String filePath) {
+        PluginTool tool = getToolFromProvider();
+        if (tool == null) {
+            return Response.err("File deletion requires GUI mode (PluginTool not available)");
+        }
+        ghidra.framework.model.Project project = tool.getProject();
+        if (project == null) {
+            return Response.err("No project is currently open");
+        }
+        if (filePath == null || filePath.trim().isEmpty()) {
+            return Response.err("filePath parameter is required");
+        }
+
+        try {
+            ghidra.framework.model.DomainFile domainFile = project.getProjectData().getFile(filePath);
+            if (domainFile == null) {
+                return Response.ok(JsonHelper.mapOf("success", true, "deleted", false, "filePath", filePath));
+            }
+            closeOpenProgramForFile(tool, filePath);
+            domainFile.delete();
+            return Response.ok(JsonHelper.mapOf("success", true, "deleted", true, "filePath", filePath));
+        } catch (Exception e) {
+            return Response.err("Failed to delete file: " + e.getMessage());
+        }
+    }
+
+    private void closeOpenProgramForFile(PluginTool tool, String filePath) {
+        if (programProvider instanceof MultiToolProgramProvider mtp) {
+            mtp.closeProgramByPath(filePath);
+            return;
+        }
+        ProgramManager pm = findOrCreateProgramManager(tool);
+        if (pm == null) {
+            return;
+        }
+        for (Program prog : programProvider.getAllOpenPrograms()) {
+            if (prog.getDomainFile() != null
+                    && prog.getDomainFile().getPathname().equalsIgnoreCase(filePath)) {
+                pm.closeProgram(prog, false);
+                return;
+            }
+        }
+    }
+
     /**
      * Open a program from the current project by path.
      */
@@ -677,7 +756,7 @@ public class ProgramScriptService {
 
         List<Map<String, Object>> results = new ArrayList<>();
         for (Program prog : allPrograms) {
-            if (programName != null && !programName.isEmpty() && !prog.getName().equals(programName)) {
+            if (programName != null && !programName.isEmpty() && !programMatches(prog, programName)) {
                 continue;
             }
             boolean analyzing = false;
@@ -702,6 +781,21 @@ public class ProgramScriptService {
             return Response.ok(results.get(0));
         }
         return Response.ok(JsonHelper.mapOf("programs", results));
+    }
+
+    private boolean programMatches(Program prog, String programName) {
+        if (prog == null || programName == null || programName.isEmpty()) {
+            return true;
+        }
+        String searchName = programName.trim();
+        if (prog.getName().equalsIgnoreCase(searchName)) {
+            return true;
+        }
+        if (prog.getDomainFile() != null) {
+            String path = prog.getDomainFile().getPathname();
+            return path.equalsIgnoreCase(searchName) || path.toLowerCase().contains(searchName.toLowerCase());
+        }
+        return false;
     }
 
     // ========================================================================
@@ -1867,4 +1961,3 @@ public class ProgramScriptService {
         return resultData.get() != null ? Response.ok(resultData.get()) : Response.err("Unknown failure");
     }
 }
-

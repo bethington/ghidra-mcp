@@ -9,6 +9,7 @@ release notes for Ghidra MCP.
   usage.
 - Read `PROJECT_STRUCTURE.md` for the current layout of the codebase and where
   major subsystems live.
+- Read `TESTING.md` for local, CI, and live Ghidra release-regression testing.
 - Read `NAMING_CONVENTIONS.md` for naming and file-layout guidance.
 - Read `releases/README.md` for version-specific release notes.
 
@@ -39,6 +40,7 @@ docs/
 ### Maintained Guides
 
 - Architecture, structure, and naming guidance
+- Local, CI, and release-regression testing guidance
 - Reverse-engineering workflow notes
 - Versioning and release-process documentation
 

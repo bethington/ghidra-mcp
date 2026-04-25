@@ -2801,6 +2801,68 @@ def _is_error_response(resp):
     return False
 
 
+def _variables_for_prompt(variables):
+    """Return AI-facing variables with phantom locals omitted by default.
+
+    The raw endpoint intentionally reports stack-frame/decompiler artifacts for
+    humans and debugging. Prompting is different: phantom locals are not visible
+    in decompiled source and cannot be targeted by set_local_variable_type, so
+    showing them in the normal work list mostly creates false work.
+    """
+    if not isinstance(variables, dict):
+        return variables, []
+
+    cleaned = dict(variables)
+    locals_in = variables.get("locals")
+    omitted = []
+    if isinstance(locals_in, list):
+        locals_out = []
+        for local in locals_in:
+            if isinstance(local, dict) and local.get("is_phantom"):
+                omitted.append(
+                    {
+                        "name": local.get("name"),
+                        "type": local.get("type"),
+                        "storage": local.get("storage"),
+                    }
+                )
+            else:
+                locals_out.append(local)
+        cleaned["locals"] = locals_out
+        cleaned["total_locals"] = len(locals_out)
+    if omitted:
+        cleaned["omitted_phantom_locals_count"] = len(omitted)
+        cleaned["omitted_phantom_locals"] = omitted[:24]
+    return cleaned, omitted
+
+
+def _append_variables_section(sections, variables, *, refresh_note=True):
+    sections.append("## Variables (pre-fetched)")
+    prompt_vars, omitted = _variables_for_prompt(variables)
+    if omitted:
+        sections.append(
+            f"*Omitted {len(omitted)} phantom local(s) from this AI-facing list. "
+            "They exist only as stack-frame/decompiler artifacts, are not visible "
+            "in decompiled code, and are not API-settable.*"
+        )
+    note = (
+        "*Variable types may already be resolved by decompiler — check `needs_type` "
+        "field before calling `set_local_variable_type`."
+    )
+    if refresh_note:
+        note += " Refresh with `get_function_variables` after any prototype change."
+    note += "*"
+    sections.append(note)
+    sections.append("```json")
+    var_str = (
+        json.dumps(prompt_vars, indent=None)
+        if isinstance(prompt_vars, (dict, list))
+        else str(prompt_vars)
+    )
+    sections.append(var_str)
+    sections.append("```")
+
+
 def _inject_classification_directives(sections, completeness):
     """Inject classification-specific prompt directives to prevent over/under-documentation.
 
@@ -3010,18 +3072,7 @@ def build_fix_prompt(func_name, address, ghidra_data, program=None):
 
     variables = ghidra_data.get("variables")
     if variables and not _is_error_response(variables):
-        sections.append("## Variables (pre-fetched)")
-        sections.append(
-            "*Variable types may already be resolved by decompiler — check `needs_type` field before calling `set_local_variable_type`. Refresh with `get_function_variables` after any prototype change.*"
-        )
-        sections.append("```json")
-        var_str = (
-            json.dumps(variables, indent=None)
-            if isinstance(variables, (dict, list))
-            else str(variables)
-        )
-        sections.append(var_str)
-        sections.append("```")
+        _append_variables_section(sections, variables, refresh_note=True)
     elif variables:
         sections.append(
             f"## Variables: FETCH FAILED — call `get_function_variables` in Step 3"
@@ -3181,18 +3232,7 @@ def build_full_doc_prompt(func_name, address, ghidra_data, program=None):
     # Fix #7: Variable staleness warning
     variables = ghidra_data.get("variables")
     if variables and not _is_error_response(variables):
-        sections.append("## Variables (pre-fetched)")
-        sections.append(
-            "*Variable types may already be resolved by decompiler — check `needs_type` field before calling `set_local_variable_type`. Refresh with `get_function_variables` after any prototype change.*"
-        )
-        sections.append("```json")
-        var_str = (
-            json.dumps(variables, indent=None)
-            if isinstance(variables, (dict, list))
-            else str(variables)
-        )
-        sections.append(var_str)
-        sections.append("```")
+        _append_variables_section(sections, variables, refresh_note=True)
     elif variables:
         sections.append(
             "## Variables: FETCH FAILED — call `get_function_variables` in Step 3"
@@ -3310,18 +3350,7 @@ def build_recovery_prompt(func_name, address, ghidra_data, program=None):
     # Variables
     variables = ghidra_data.get("variables")
     if variables and not _is_error_response(variables):
-        sections.append("## Variables (pre-fetched)")
-        sections.append(
-            "*Variable types may already be resolved — check `needs_type` field before calling `set_local_variable_type`.*"
-        )
-        sections.append("```json")
-        var_str = (
-            json.dumps(variables, indent=None)
-            if isinstance(variables, (dict, list))
-            else str(variables)
-        )
-        sections.append(var_str)
-        sections.append("```")
+        _append_variables_section(sections, variables, refresh_note=False)
     sections.append("")
 
     # Work items
@@ -3558,6 +3587,29 @@ def kill_worker_subprocesses(worker_id):
     return killed
 
 
+def _tool_error_preview(result, limit=500):
+    """Return a compact error string from a tool result, if one is present."""
+    if result is None:
+        return None
+    if isinstance(result, str):
+        result_str = result
+    else:
+        result_str = str(result)
+    try:
+        parsed = json.loads(result_str)
+        if isinstance(parsed, dict):
+            for key in ("error", "message", "status"):
+                value = parsed.get(key)
+                if value and (key == "error" or parsed.get("status") == "error"):
+                    text = str(value)
+                    return text[:limit]
+    except Exception:
+        pass
+    if '"error"' in result_str[:100] or result_str.lower().startswith("error"):
+        return result_str[:limit]
+    return None
+
+
 def _invoke_provider_direct(
     prompt, model=None, max_turns=25, provider=None, complexity_tier=None
 ):
@@ -3603,6 +3655,7 @@ def _provider_worker_entry(
     if events_queue is not None:
         try:
             from event_bus import set_cross_process_queue
+
             set_cross_process_queue(events_queue, worker_id=worker_id)
         except Exception:
             pass
@@ -3679,8 +3732,9 @@ def _invoke_provider_with_watchdog(
         except (queue.Empty, ValueError, OSError):
             pass
 
-    drain_thread = threading.Thread(target=_drain_events, daemon=True,
-                                    name=f"event-drain-{effective_provider}")
+    drain_thread = threading.Thread(
+        target=_drain_events, daemon=True, name=f"event-drain-{effective_provider}"
+    )
     drain_thread.start()
 
     worker = ctx.Process(
@@ -3872,24 +3926,6 @@ def _invoke_codex(prompt, model=None, max_turns=25):
                     server = getattr(item, "server", "")
                     raw_status = getattr(item, "status", "?")
                     status = "error" if raw_status in ("failed", "error") else "success"
-                    print(f"  [mcp] {normalized_tool}: calling", flush=True)
-                    print(f"  [mcp] {normalized_tool}: {status}", flush=True)
-                    bus_emit(
-                        "tool_call",
-                        {
-                            "tool": normalized_tool,
-                            "raw_tool": tool,
-                            "status": "calling",
-                        },
-                    )
-                    bus_emit(
-                        "tool_result",
-                        {
-                            "tool": normalized_tool,
-                            "raw_tool": tool,
-                            "status": status,
-                        },
-                    )
 
                     # Best-effort args/result extraction. Codex SDK item shapes
                     # vary by version, so try a few common attribute names.
@@ -3911,6 +3947,31 @@ def _invoke_codex(prompt, model=None, max_turns=25):
                     )
                     if result_obj is not None and hasattr(result_obj, "content"):
                         result_obj = result_obj.content
+                    error_preview = (
+                        _tool_error_preview(result_obj) if status == "error" else None
+                    )
+                    print(f"  [mcp] {normalized_tool}: calling", flush=True)
+                    print(
+                        f"  [mcp] {normalized_tool}: {status}"
+                        + (f" - {error_preview}" if error_preview else ""),
+                        flush=True,
+                    )
+                    bus_emit(
+                        "tool_call",
+                        {
+                            "tool": normalized_tool,
+                            "raw_tool": tool,
+                            "status": "calling",
+                        },
+                    )
+                    payload = {
+                        "tool": normalized_tool,
+                        "raw_tool": tool,
+                        "status": status,
+                    }
+                    if error_preview:
+                        payload["error"] = error_preview
+                    bus_emit("tool_result", payload)
                     # Codex doesn't expose start/end times on the item, leave duration None
                     _debug_log_tool_call(tool, args, result_obj, status, None)
             elif event_type == "turn.completed":
@@ -3985,6 +4046,7 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
         output_parts = []
         tool_call_count = 0
         event_count = 0
+        fatal_error_message = None
         bus_emit(
             "provider_turn",
             {
@@ -4028,9 +4090,17 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
                 status = "error" if event.is_error else "success"
                 short_name = _normalize_tool_name(event.name)
                 print(f"  [mcp] {short_name}: {status}", flush=True)
+                error_preview = (
+                    _tool_error_preview(event.output) if event.is_error else None
+                )
                 bus_emit(
                     "tool_result",
-                    {"tool": short_name, "raw_tool": event.name, "status": status},
+                    {
+                        "tool": short_name,
+                        "raw_tool": event.name,
+                        "status": status,
+                        **({"error": error_preview} if error_preview else {}),
+                    },
                 )
                 _debug_log_tool_call(event.name, {}, event.output, status, None)
             elif isinstance(event, ErrorEvent):
@@ -4046,6 +4116,7 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
                     },
                 )
                 if event.fatal:
+                    fatal_error_message = str(event.message)
                     break
             elif isinstance(event, ResultEvent):
                 if event.response:
@@ -4091,6 +4162,8 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
                 f"(tool_calls={tool_call_count})",
                 flush=True,
             )
+        if fatal_error_message and tool_call_count == 0 and not text:
+            raise RuntimeError(fatal_error_message)
         return (text, {"tool_calls": tool_call_count, "tool_calls_known": True})
 
     # Retry on transient Gemini capacity/rate-limit errors.
@@ -4129,35 +4202,75 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
 # (debugger, emulation, BSim, project-management, etc.).
 _MINIMAX_DOC_TOOL_ALLOWLIST = {
     # ── Read / analysis ──────────────────────────────────────────────────
-    "decompile_function", "disassemble_function", "disassemble_bytes",
+    "decompile_function",
+    "disassemble_function",
+    "disassemble_bytes",
     "force_decompile",
-    "get_function_variables", "get_function_signature", "get_function_callers",
-    "get_function_callees", "get_function_by_address", "get_function_documentation",
-    "get_function_xrefs", "get_function_jump_targets",
-    "get_plate_comment", "get_assembly_context",
-    "get_xrefs_from", "get_xrefs_to", "get_bulk_xrefs",
-    "get_struct_layout", "get_type_size",
+    "get_function_variables",
+    "get_function_signature",
+    "get_function_callers",
+    "get_function_callees",
+    "get_function_by_address",
+    "get_function_documentation",
+    "get_function_xrefs",
+    "get_function_jump_targets",
+    "get_plate_comment",
+    "get_assembly_context",
+    "get_xrefs_from",
+    "get_xrefs_to",
+    "get_bulk_xrefs",
+    "get_struct_layout",
+    "get_type_size",
     "get_current_program_info",
-    "inspect_memory_content", "read_memory",
-    "search_data_types", "search_functions", "search_strings", "search_byte_patterns",
-    "list_globals", "list_functions", "list_data_types", "list_data_type_categories",
-    "list_calling_conventions", "list_external_locations", "list_bookmarks",
-    "validate_data_type_exists", "get_valid_data_types",
-    "analyze_function_complete", "analyze_function_completeness",
-    "analyze_data_region", "analyze_dataflow", "analyze_struct_field_usage",
+    "inspect_memory_content",
+    "read_memory",
+    "search_data_types",
+    "search_functions",
+    "search_strings",
+    "search_byte_patterns",
+    "list_globals",
+    "list_functions",
+    "list_data_types",
+    "list_data_type_categories",
+    "list_calling_conventions",
+    "list_external_locations",
+    "list_bookmarks",
+    "validate_data_type_exists",
+    "get_valid_data_types",
+    "analyze_function_complete",
+    "analyze_function_completeness",
+    "analyze_data_region",
+    "analyze_dataflow",
+    "analyze_struct_field_usage",
     "analyze_for_documentation",
     # ── Write ─────────────────────────────────────────────────────────────
-    "rename_function_by_address", "rename_variables", "rename_variable",
-    "rename_or_label", "rename_label", "rename_global_variable",
-    "batch_rename_function_components", "batch_create_labels",
-    "set_function_prototype", "set_local_variable_type", "set_parameter_type",
-    "set_variables", "set_plate_comment",
-    "batch_set_comments", "set_disassembly_comment", "set_decompiler_comment",
+    "rename_function_by_address",
+    "rename_variables",
+    "rename_variable",
+    "rename_or_label",
+    "rename_label",
+    "rename_global_variable",
+    "batch_rename_function_components",
+    "batch_create_labels",
+    "set_function_prototype",
+    "set_local_variable_type",
+    "set_parameter_type",
+    "set_variables",
+    "set_plate_comment",
+    "batch_set_comments",
+    "set_disassembly_comment",
+    "set_decompiler_comment",
     "apply_data_type",
     # ── Data types ────────────────────────────────────────────────────────
-    "create_struct", "add_struct_field", "modify_struct_field", "remove_struct_field",
-    "create_array_type", "create_pointer_type", "create_typedef",
-    "create_function_signature", "delete_data_type",
+    "create_struct",
+    "add_struct_field",
+    "modify_struct_field",
+    "remove_struct_field",
+    "create_array_type",
+    "create_pointer_type",
+    "create_typedef",
+    "create_function_signature",
+    "delete_data_type",
 }
 
 
@@ -4305,7 +4418,10 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
                 str(query_params.get("program", "")),
             )
             if cache_key in _decompile_cache:
-                print(f"  [mcp] decompile_function: cache hit ({cache_key[0]})", flush=True)
+                print(
+                    f"  [mcp] decompile_function: cache hit ({cache_key[0]})",
+                    flush=True,
+                )
                 return _decompile_cache[cache_key]
 
         try:
@@ -4372,15 +4488,17 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
     # We keep the last KEEP_RECENT exchanges verbatim and trim older tool
     # *results* to a short stub — the model can still see what calls it made
     # and what actions it took, but not re-read the full Ghidra output again.
-    COMPRESS_AFTER = 8    # start compressing once history exceeds this many exchanges
-    KEEP_RECENT = 6       # always keep these many recent exchanges uncompressed
+    COMPRESS_AFTER = 8  # start compressing once history exceeds this many exchanges
+    KEEP_RECENT = 6  # always keep these many recent exchanges uncompressed
     TRIM_RESULT_TO = 300  # chars to keep from old tool results
 
     def _compress_messages(msgs):
         """Trim old tool-result content to reduce quadratic context growth."""
         # Identify tool-result messages: role=="tool" (OpenAI format)
         tool_result_indices = [
-            i for i, m in enumerate(msgs) if isinstance(m, dict) and m.get("role") == "tool"
+            i
+            for i, m in enumerate(msgs)
+            if isinstance(m, dict) and m.get("role") == "tool"
         ]
         # Keep the most recent KEEP_RECENT result messages uncompressed
         to_trim = tool_result_indices[: max(0, len(tool_result_indices) - KEEP_RECENT)]
@@ -4436,8 +4554,12 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
                             "max_tokens": max_output_tokens,
                         },
                     )
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(client.chat.completions.create, **kwargs)
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=1
+                    ) as executor:
+                        future = executor.submit(
+                            client.chat.completions.create, **kwargs
+                        )
                         last_emit = 0
                         while True:
                             try:
@@ -4474,7 +4596,11 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
                     )
                     break
                 except Exception as api_err:
-                    elapsed_ms = int((time.perf_counter() - started) * 1000) if "started" in locals() else None
+                    elapsed_ms = (
+                        int((time.perf_counter() - started) * 1000)
+                        if "started" in locals()
+                        else None
+                    )
                     bus_emit(
                         "provider_turn",
                         {
@@ -4490,9 +4616,18 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
                     err_str = str(api_err)
                     retryable = any(
                         code in err_str
-                        for code in ("429", "529", "500", "502", "503",
-                                     "Timeout", "timeout", "timed out",
-                                     "ReadTimeout", "ConnectTimeout")
+                        for code in (
+                            "429",
+                            "529",
+                            "500",
+                            "502",
+                            "503",
+                            "Timeout",
+                            "timeout",
+                            "timed out",
+                            "ReadTimeout",
+                            "ConnectTimeout",
+                        )
                     )
                     if retryable and _attempt < 3:
                         wait = (2**_attempt) * 5  # 5s, 10s, 20s
@@ -4565,8 +4700,18 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
                     result_str = result_str[:50000] + "\n... (truncated)"
 
                 status = "error" if '"error"' in result_str[:100] else "success"
+                error_preview = (
+                    _tool_error_preview(result_str) if status == "error" else None
+                )
                 print(f"  [mcp] {fn_name}: {status}", flush=True)
-                bus_emit("tool_result", {"tool": fn_name, "status": status})
+                bus_emit(
+                    "tool_result",
+                    {
+                        "tool": fn_name,
+                        "status": status,
+                        **({"error": error_preview} if error_preview else {}),
+                    },
+                )
                 _debug_log_tool_call(fn_name, fn_args, result_str, status, duration_ms)
 
                 messages.append(
@@ -4763,16 +4908,23 @@ def _invoke_claude(prompt, model=None, max_turns=25):
                             else None
                         )
                         normalized_tool = _normalize_tool_name(tool_name)
-                        print(f"  [mcp] {normalized_tool}: {status}", flush=True)
-                        bus_emit(
-                            "tool_result",
-                            {
-                                "tool": normalized_tool,
-                                "raw_tool": tool_name,
-                                "status": status,
-                                "id": tool_id,
-                            },
+                        error_preview = (
+                            _tool_error_preview(result_text) if is_error else None
                         )
+                        print(
+                            f"  [mcp] {normalized_tool}: {status}"
+                            + (f" - {error_preview}" if error_preview else ""),
+                            flush=True,
+                        )
+                        payload = {
+                            "tool": normalized_tool,
+                            "raw_tool": tool_name,
+                            "status": status,
+                            "id": tool_id,
+                        }
+                        if error_preview:
+                            payload["error"] = error_preview
+                        bus_emit("tool_result", payload)
                         _debug_log_tool_call(
                             tool_name,
                             args,
@@ -5218,6 +5370,7 @@ def _append_run_log(entry):
         # the full row is still in runs.jsonl.
         try:
             from event_log import log_event
+
             log_event(
                 "run.logged",
                 run_id=entry.get("run_id"),
@@ -5249,6 +5402,7 @@ def _append_run_log(entry):
         print(f"  WARNING: Failed to write run log: {e}", flush=True)
         try:
             from event_log import log_event
+
             log_event("run.log_failed", error=str(e), error_type=type(e).__name__)
         except Exception:
             pass
@@ -5279,7 +5433,11 @@ def _update_function_cost_history(entry):
     out_tok = entry.get("output_tokens") or 0
     sb = entry.get("score_before")
     sa = entry.get("score_after")
-    delta = (sa - sb) if isinstance(sa, (int, float)) and isinstance(sb, (int, float)) else 0
+    delta = (
+        (sa - sb)
+        if isinstance(sa, (int, float)) and isinstance(sb, (int, float))
+        else 0
+    )
 
     func_key = f"{program}::{address}"
     # Re-read from state to pick up concurrent updates
@@ -5289,18 +5447,20 @@ def _update_function_cost_history(entry):
         return  # function not yet in state — skip
 
     attempts = list(func.get("attempts") or [])
-    attempts.append({
-        "ts": entry.get("timestamp"),
-        "provider": entry.get("provider"),
-        "mode": entry.get("mode"),
-        "result": result,
-        "input_tokens": in_tok,
-        "output_tokens": out_tok,
-        "tool_calls": entry.get("tool_calls"),
-        "score_before": sb,
-        "score_after": sa,
-        "delta": delta,
-    })
+    attempts.append(
+        {
+            "ts": entry.get("timestamp"),
+            "provider": entry.get("provider"),
+            "mode": entry.get("mode"),
+            "result": result,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+            "tool_calls": entry.get("tool_calls"),
+            "score_before": sb,
+            "score_after": sa,
+            "delta": delta,
+        }
+    )
     # Keep only last 5 to bound state size
     attempts = attempts[-5:]
 
@@ -5310,9 +5470,7 @@ def _update_function_cost_history(entry):
     cost_per_point = (total_input / net_delta) if net_delta > 0 else None
 
     is_thrashing = (
-        len(attempts) >= 2
-        and cost_per_point is not None
-        and cost_per_point > 50_000
+        len(attempts) >= 2 and cost_per_point is not None and cost_per_point > 50_000
     )
 
     func["attempts"] = attempts
@@ -5330,19 +5488,24 @@ def _update_function_cost_history(entry):
     # so they're trivially findable later without joining runs.jsonl to state.
     try:
         from event_log import log_event
+
         if delta < 0:
             log_event(
                 "run.regression",
-                program=program, address=address,
+                program=program,
+                address=address,
                 function=entry.get("function"),
                 provider=entry.get("provider"),
-                delta=delta, input_tokens=in_tok,
-                score_before=sb, score_after=sa,
+                delta=delta,
+                input_tokens=in_tok,
+                score_before=sb,
+                score_after=sa,
             )
         if is_thrashing and not func.get("_thrashing_alerted"):
             log_event(
                 "function.thrashing",
-                program=program, address=address,
+                program=program,
+                address=address,
                 function=entry.get("function"),
                 attempts=len(attempts),
                 total_input_tokens=total_input,
@@ -5512,7 +5675,9 @@ def process_function(
         }
         _append_run_log(entry)
 
-    def _finish(return_value, *, logged_result=None, score_after=None, reason=None, error=None):
+    def _finish(
+        return_value, *, logged_result=None, score_after=None, reason=None, error=None
+    ):
         _log_run_once(
             logged_result or return_value,
             score_after=score_after,

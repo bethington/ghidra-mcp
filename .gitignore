@@ -7,6 +7,7 @@
 # Gradle build cache
 /.gradle/
 *.jar
+!/gradle/wrapper/gradle-wrapper.jar
 *.zip
 *.war
 *.ear
@@ -581,6 +582,8 @@ audit-*.json
 
 fun-doc/state.json
 fun-doc/state.json.bak
+fun-doc/state.json.*_bak
+fun-doc/state.json.*.bak
 fun-doc/state.json.corrupt-*
 fun-doc/logs/
 fun-doc/priority_queue.json
@@ -592,6 +595,7 @@ fun-doc/debug/
 fun-doc/audit/registry.json
 fun-doc/audit/registry.json.tmp
 fun-doc/audit/queue.jsonl
+fun-doc/audit/queue.jsonl.*-archived
 
 # Playwright MCP scratch directory (snapshots, screenshots, console logs)
 .playwright-mcp/
