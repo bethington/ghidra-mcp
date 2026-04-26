@@ -194,6 +194,24 @@ class Repository:
             ).mappings().first()
         return dict(row) if row else None
 
+    def all_function_ids(self) -> dict[tuple[str, str], int]:
+        """Return a (program_path, address) → id index for every workflow row.
+
+        Migration-only helper: streams the whole table once so the runs.jsonl
+        loader can attach foreign keys without N round-trips. Cheap on tens
+        of thousands of rows; for millions use a bounded ``program_path``
+        scan with ``list_functions``.
+        """
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    self.t_workflow.c.id,
+                    self.t_workflow.c.program_path,
+                    self.t_workflow.c.address,
+                )
+            ).all()
+        return {(pp, addr): row_id for row_id, pp, addr in rows}
+
     def list_functions(
         self,
         *,
@@ -488,7 +506,17 @@ class Repository:
                 patch = {k: v for k, v in r.items() if k != "created_at"}
                 to_update.append((row_id, patch))
         if to_insert:
-            conn.execute(insert(self.t_workflow), to_insert)
+            # SQLAlchemy executemany requires every dict to share the same
+            # keys; partial rows raise InvalidRequestError. Normalize by
+            # filling missing keys with None so a heterogeneous batch (the
+            # common case at migration time) inserts cleanly.
+            all_keys: set[str] = set()
+            for r in to_insert:
+                all_keys.update(r.keys())
+            normalized = [
+                {k: r.get(k) for k in all_keys} for r in to_insert
+            ]
+            conn.execute(insert(self.t_workflow), normalized)
         for row_id, patch in to_update:
             conn.execute(
                 update(self.t_workflow)
