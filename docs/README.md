@@ -12,6 +12,10 @@ release notes for Ghidra MCP.
 - Read `TESTING.md` for local, CI, and live Ghidra release-regression testing.
 - Read `NAMING_CONVENTIONS.md` for naming and file-layout guidance.
 - Read `releases/README.md` for version-specific release notes.
+- Read `project-management/GHIDRA_RECOVERY_RFC.md` for the draft
+  community-review proposal for opt-in Ghidra recovery and relaunch.
+- Read `project-management/HEADLESS_PARITY_RFC.md` for the draft
+  community-review proposal for GUI/headless parity.
 
 ## Directory Layout
 
