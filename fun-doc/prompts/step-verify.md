@@ -17,7 +17,8 @@ If any mismatch is found: fix it via `batch_set_comments` (plate comment update)
 
 ## Variable Reconciliation (required before reporting DONE)
 
-Call `get_function_variables()` one final time and check:
+Call `get_function_variables(address=...)` one final time using the function's
+address (not its name — names can race against in-flight renames). Check:
 
 1. **No generic names remaining**: Every variable still named `[a-z]Var[0-9]+` or `local_*` must be renamed via `rename_variables()` or listed in Unresolved with justification.
 2. **Prefix matches type**: Every renamed variable's Hungarian prefix must match its Ghidra type:
@@ -27,7 +28,7 @@ Call `get_function_variables()` one final time and check:
    - `w` prefix → must be `ushort`
    - `sz` prefix → must be `char *`
    If a mismatch exists, fix the type with `set_local_variable_type()` OR fix the name with `rename_variables()`.
-3. **Plate comment references applied**: If your plate comment's Special Cases or Parameters section names a variable differently from what's in `get_function_variables()`, apply the rename. Do not document names you didn't actually set.
+3. **Plate comment references applied**: If your plate comment's Special Cases or Parameters section names a variable differently from what's in the `get_function_variables(address=...)` response, apply the rename. Do not document names you didn't actually set.
 
 ## Report Format
 

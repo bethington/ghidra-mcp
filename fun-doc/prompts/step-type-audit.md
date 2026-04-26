@@ -11,7 +11,7 @@
 
 ## Instructions
 
-**If prototype was changed in Step 2**: Call `get_function_variables` once to refresh. The inline variable list may be stale due to SSA variable creation.
+**If prototype was changed in Step 2**: Call `get_function_variables(address=...)` once to refresh — pass the function's address (not its name; names can race against in-flight renames). The inline variable list may be stale due to SSA variable creation.
 
 **Skip condition**: All variables have custom names AND resolved storage types (no `undefined` in type field) -> skip to Step 4.
 
