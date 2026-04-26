@@ -82,7 +82,7 @@ import time
 import traceback
 import uuid
 from collections import defaultdict
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from pathlib import Path
 
 # Force UTF-8 on stdout/stderr so printing Unicode from LLM responses
@@ -859,16 +859,300 @@ def _default_state():
     }
 
 
+# ---------------------------------------------------------------------------
+# Storage repository (SQL backend) — replaces state.json as the runtime path.
+#
+# The dict-based load_state() / save_state() / update_function_state() API
+# is preserved unchanged so the worker, dashboard, and audit pass don't have
+# to rewrite their callers. Under the hood, those functions read/write the
+# fun_doc.* tables (Postgres or SQLite) via fun-doc/storage/.
+#
+# state.json is read only by scripts/migrate_state_to_sql.py during the
+# one-shot cutover and by scripts/verify_migration.py during gate checks.
+# Once cutover lands, the file becomes a frozen on-disk artifact — never
+# read by the runtime, never written. See
+# ~/.claude/plans/fun-doc-postgres-storage-migration.md for the design.
+# ---------------------------------------------------------------------------
+
+_storage_repo = None
+_storage_repo_failed = False  # cache import-time failure to avoid retry storm
+
+
+def _get_storage_repo():
+    """Return the storage Repository, lazily building it on first use.
+
+    Returns None if the storage layer can't be loaded (missing sqlalchemy,
+    misconfigured URL, etc.). Callers fall back to the legacy state.json
+    path in that case so a partially-installed environment still functions.
+    """
+    global _storage_repo, _storage_repo_failed
+    if _storage_repo is not None:
+        return _storage_repo
+    if _storage_repo_failed:
+        return None
+    try:
+        # Read storage block from priority_queue.json if present.
+        config_block = None
+        try:
+            with open(SCRIPT_DIR / "priority_queue.json", "r", encoding="utf-8") as f:
+                pq = json.load(f)
+            config_block = (pq.get("config") or {}).get("storage")
+        except (FileNotFoundError, json.JSONDecodeError):
+            config_block = None
+        from storage import make_repository, resolve_config
+
+        cfg = resolve_config(config_block)
+        _storage_repo = make_repository(cfg)
+        _storage_repo.bootstrap_schema()
+        return _storage_repo
+    except Exception as e:
+        _storage_repo_failed = True
+        print(
+            f"WARNING: storage backend unavailable ({type(e).__name__}: {e}); "
+            f"falling back to state.json. Install sqlalchemy and run "
+            f"scripts/migrate_state_to_sql.py to enable the SQL backend.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+
+
+# Field mapping between the state.json dict shape and the SQL row.
+# Keep this list in sync with scripts/migrate_state_to_sql.py:_DIRECT_FIELDS.
+_STATE_DIRECT_FIELDS = (
+    "name",
+    "score",
+    "fixable",
+    "has_custom_name",
+    "has_plate_comment",
+    "classification",
+    "consecutive_fails",
+    "partial_runs",
+    "stagnation_runs",
+    "net_delta",
+    "cost_per_point",
+    "total_input_tokens",
+    "total_output_tokens",
+    "audit_count",
+    "escalation_count",
+    "last_audit_provider",
+    "last_audit_delta",
+    "last_escalation_from",
+    "last_escalation_to",
+    "caller_count",
+    "is_leaf",
+    "call_graph_layer",
+    "is_thunk",
+    "is_external",
+    "is_thrashing",
+    "deductions",
+    "callees",
+    "snapshot_provider",
+    "snapshot_model",
+    "snapshot_max_turns",
+)
+
+
+def _parse_state_ts(value):
+    """Parse a state.json ISO timestamp string into a tz-aware datetime.
+
+    SQLAlchemy's SQLite DateTime adapter rejects bare strings; Postgres
+    accepts them but inconsistently. Normalize to datetime objects at the
+    boundary so downstream code never sees a stringly-typed timestamp.
+    """
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value if getattr(value, "tzinfo", None) else value.replace(tzinfo=timezone.utc)
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _state_func_to_row(func_key, rec):
+    """Convert a state.json function entry (dict) to a workflow row dict.
+
+    func_key is the legacy '/path::address' compound key; we don't store it
+    explicitly because (program_path, address) is the unique constraint.
+    """
+    program_path = rec.get("program") or ""
+    if not program_path and "::" in func_key:
+        program_path = func_key.split("::", 1)[0]
+    address = rec.get("address") or ""
+    if not address and "::" in func_key:
+        address = func_key.split("::", 1)[1]
+    out = {
+        "program_path": program_path,
+        "binary_name": rec.get("program_name") or program_path.rsplit("/", 1)[-1],
+        "version": _derive_version(program_path),
+        "address": address,
+    }
+    for k in _STATE_DIRECT_FIELDS:
+        if k in rec:
+            out[k] = rec[k]
+    if "last_processed" in rec:
+        out["last_processed"] = _parse_state_ts(rec["last_processed"])
+    if "last_result" in rec:
+        out["last_result"] = rec["last_result"]
+    if "decompile_timeout_at" in rec:
+        out["decompile_timeout_at"] = _parse_state_ts(rec["decompile_timeout_at"])
+    if "last_audited" in rec:
+        out["last_audited_at"] = _parse_state_ts(rec["last_audited"])
+    if "last_escalated" in rec:
+        out["last_escalated_at"] = _parse_state_ts(rec["last_escalated"])
+    # `attempts` in state.json is the inline run-history list; the workflow
+    # row tracks the count + last-event hot pointers instead. The list
+    # itself goes to the runs table via record_run() at append time.
+    inline = rec.get("attempts")
+    if isinstance(inline, list):
+        out["attempts"] = len(inline)
+        out["run_count"] = len(inline)
+        if inline:
+            last = inline[-1]
+            out["last_run_at"] = _parse_state_ts(last.get("ts"))
+            out["last_run_provider"] = last.get("provider")
+            out["last_run_model"] = last.get("model")
+            out["last_run_delta"] = last.get("delta")
+    elif isinstance(inline, int):
+        out["attempts"] = inline
+    last_result = rec.get("last_result")
+    if last_result == "completed":
+        out["queue_status"] = "done"
+    elif last_result == "scanned" or last_result is None:
+        out["queue_status"] = "queued"
+    else:
+        out["queue_status"] = last_result
+    return out
+
+
+def _row_to_state_func(row):
+    """Inverse: build a state.json-compatible function dict from a workflow row.
+
+    The dict shape includes a few derived/transient fields (`program_name`,
+    `_thrashing_alerted`) that callers expect even though they're not
+    persisted as columns. We supply sensible defaults so legacy code paths
+    don't KeyError.
+    """
+    out = {
+        "program": row.get("program_path"),
+        "program_name": row.get("binary_name"),
+        "address": row.get("address"),
+    }
+    for k in _STATE_DIRECT_FIELDS:
+        if row.get(k) is not None:
+            out[k] = row[k]
+    if row.get("last_processed") is not None:
+        out["last_processed"] = (
+            row["last_processed"].isoformat()
+            if hasattr(row["last_processed"], "isoformat")
+            else row["last_processed"]
+        )
+    if row.get("last_result") is not None:
+        out["last_result"] = row["last_result"]
+    if row.get("decompile_timeout_at") is not None:
+        v = row["decompile_timeout_at"]
+        out["decompile_timeout_at"] = v.isoformat() if hasattr(v, "isoformat") else v
+    if row.get("last_audited_at") is not None:
+        v = row["last_audited_at"]
+        out["last_audited"] = v.isoformat() if hasattr(v, "isoformat") else v
+    if row.get("last_escalated_at") is not None:
+        v = row["last_escalated_at"]
+        out["last_escalated"] = v.isoformat() if hasattr(v, "isoformat") else v
+    # Don't reconstruct the inline `attempts` list from the runs table here —
+    # it's expensive (one query per function) and most callers only need the
+    # count. Provide an empty list as a safe default; consumers that need the
+    # full history go through repo.get_recent_runs() directly.
+    out.setdefault("attempts", [])
+    return out
+
+
+def _derive_version(program_path):
+    if not program_path:
+        return None
+    parts = [p for p in program_path.split("/") if p]
+    if len(parts) >= 2:
+        return parts[-2]
+    return None
+
+
+def _state_dict_from_repo(repo):
+    """Materialize the legacy state dict from the SQL backend.
+
+    Builds the same shape as load_state()'s old return value: project_folder,
+    last_scan, active_binary, current_session at the top level; sessions list;
+    functions dict keyed by '/path::address'.
+
+    This is hot-path code for the dashboard — it gets called whenever the
+    dashboard refreshes its in-memory snapshot. Cost is dominated by the
+    functions table SELECT (one row per function, ~50 columns each, ~40K
+    rows). On SQLite that's ~300 ms; on Postgres locally ~150 ms. Previously
+    the dashboard read the entire state.json (~30 MB) on each refresh, so
+    this is a strict improvement.
+    """
+    meta = repo.get_meta()
+    state = {
+        "project_folder": meta.get("project_folder") or _default_state()["project_folder"],
+        "last_scan": _ts_to_iso(meta.get("last_scan")),
+        "active_binary": meta.get("active_binary"),
+        "current_session": None,  # backfilled below
+        "functions": {},
+        "sessions": [],
+    }
+    # Sessions
+    for s in repo.list_sessions():
+        payload = s.get("payload") or {}
+        if isinstance(payload, dict):
+            state["sessions"].append(payload)
+    # Restore current_session pointer if meta points at a session id
+    cur_id = meta.get("current_session")
+    if cur_id:
+        sess = repo.get_session(cur_id)
+        if sess and isinstance(sess.get("payload"), dict):
+            state["current_session"] = sess["payload"]
+    # Functions
+    for row in repo.list_functions():
+        program_path = row.get("program_path") or ""
+        address = row.get("address") or ""
+        state["functions"][f"{program_path}::{address}"] = _row_to_state_func(row)
+    return state
+
+
+def _ts_to_iso(value):
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
 def load_state():
-    """Load or create fresh state. Retries on partial-read JSONDecodeError so
-    concurrent callers (CLI, web server worker threads, external scripts) don't
-    explode when another writer is mid-flush. Falls back to state.json.bak if
-    the main file is unrecoverably corrupt."""
+    """Load state from the SQL backend, with a state.json fallback.
+
+    SQL backend is the runtime path (see Q4-A in the storage migration plan).
+    Returns the same dict shape callers have always expected:
+        {project_folder, last_scan, active_binary, current_session,
+         sessions: list, functions: {key: record}}
+
+    Falls back to reading state.json directly only if the storage layer
+    can't be loaded (missing sqlalchemy, misconfigured URL). This keeps a
+    half-installed environment functional during the cutover window.
+    """
+    repo = _get_storage_repo()
+    if repo is not None:
+        with _state_lock:
+            return _state_dict_from_repo(repo)
+
+    # ---- Legacy state.json fallback ------------------------------------
+    # Kept verbatim from the pre-migration implementation. Reached only
+    # when the storage layer is unavailable; safe to delete after the
+    # cutover soak window (~1 release).
     if not STATE_FILE.exists():
         return _default_state()
-
-    # Retry up to 5 times with a short sleep — covers the common case of
-    # another worker mid-write (now atomic via os.replace, so this is rare).
     last_err = None
     for attempt in range(5):
         try:
@@ -879,8 +1163,6 @@ def load_state():
             last_err = e
             if attempt < 4:
                 time.sleep(0.2)
-
-    # Main file is unrecoverably bad — try the backup
     bak = STATE_FILE.with_suffix(".json.bak")
     if bak.exists():
         try:
@@ -893,9 +1175,6 @@ def load_state():
             return data
         except (json.JSONDecodeError, ValueError):
             pass
-
-    # Both files are corrupt. Don't silently start fresh — raise so the operator
-    # can run the recovery script. Starting fresh would silently lose all scoring.
     raise RuntimeError(
         f"state.json is corrupt and backup is missing or corrupt: {last_err}. "
         f"Run the recovery logic in fun_doc.py to truncate at the last clean "
@@ -944,20 +1223,75 @@ def _atomic_write_state(state):
 
 
 def save_state(state):
-    """Persist state to disk atomically.
+    """Persist state to the SQL backend (or state.json fallback).
 
-    Writes to state.json.tmp, fsyncs it, renames atomically over state.json,
-    and keeps state.json.bak as a rolling one-generation backup. This prevents
-    the 'truncated mid-write' corruption that happens when a process is killed
-    or crashes during a direct-write save.
+    The legacy contract was 'rewrite the entire state.json from this dict.'
+    Under the SQL backend that maps to:
+      * meta singleton ← project_folder, last_scan, active_binary, current_session id
+      * sessions table ← sessions list (one row per entry)
+      * functions_workflow ← bulk-upsert of every function record
 
-    For per-function updates during worker iteration, prefer
-    update_function_state() — it re-reads from disk before writing, avoiding
-    the lost-update race where one worker's save clobbers another's.
+    Bulk-upsert of ~40K rows is the cost of the legacy 'pass me everything'
+    contract; in practice save_state is called only at scan boundaries and
+    drain checkpoints, where this cost is acceptable. Per-function writes
+    during worker iteration go through update_function_state() instead and
+    avoid the bulk path entirely.
     """
+    repo = _get_storage_repo()
+    if repo is not None:
+        with _state_lock:
+            _persist_state_to_repo(repo, state)
+        bus_emit("state_changed")
+        return
+
     with _state_lock:
         _atomic_write_state(state)
     bus_emit("state_changed")
+
+
+def _persist_state_to_repo(repo, state):
+    """Write the legacy state dict back into the SQL backend.
+
+    Meta singleton + sessions are full overwrites. Functions are bulk-upserted
+    (preserving columns the dict didn't touch — see Repository.upsert_function).
+    """
+    # Meta + current_session pointer (we store the session id, not the dict).
+    cur = state.get("current_session")
+    cur_id = None
+    if isinstance(cur, dict):
+        cur_id = cur.get("id") or cur.get("started")
+        if cur_id:
+            cur_id = str(cur_id)
+            repo.upsert_session(
+                cur_id,
+                started_at=_parse_state_ts(cur.get("started")),
+                ended_at=_parse_state_ts(cur.get("ended")),
+                payload=cur,
+            )
+    repo.set_meta(
+        project_folder=state.get("project_folder"),
+        last_scan=_parse_state_ts(state.get("last_scan")),
+        current_session=cur_id,
+        active_binary=state.get("active_binary"),
+    )
+    # Archived sessions
+    for sess in state.get("sessions") or []:
+        if not isinstance(sess, dict):
+            continue
+        sid = sess.get("id") or sess.get("started") or sess.get("date")
+        if not sid:
+            continue
+        repo.upsert_session(
+            str(sid),
+            started_at=_parse_state_ts(sess.get("started")),
+            ended_at=_parse_state_ts(sess.get("ended")),
+            payload=sess,
+        )
+    # Functions: bulk upsert. Convert each record dict to a row dict.
+    funcs = state.get("functions") or {}
+    if funcs:
+        rows = (_state_func_to_row(k, v) for k, v in funcs.items())
+        repo.bulk_upsert_functions(rows, chunk_size=500)
 
 
 _ACCUMULATOR_FIELDS = (
@@ -978,23 +1312,30 @@ _ACCUMULATOR_FIELDS = (
 def update_function_state(func_key, updated_func):
     """Atomically update a single function's state entry.
 
-    Read-modify-write within `_state_lock`: re-reads state.json from disk to
-    pick up any concurrent updates, overwrites only `state["functions"][func_key]`,
-    writes atomically. Prevents the lost-update race where two workers each
-    load state, modify different functions, and their full-state saves clobber
-    each other's unrelated changes.
+    SQL backend path: reads the existing row, merges `updated_func` over it
+    while preserving accumulator fields (attempts, cost_per_point, etc.) the
+    caller didn't explicitly set, writes back through the repository. This
+    preserves the 'mid-run history append survives the post-run save'
+    invariant that the state.json RMW path enforced.
 
-    Preserves accumulator fields (attempts, cost_per_point, etc.) from the
-    on-disk version when the caller does not explicitly set them. This lets
-    `_update_function_cost_history` append to history mid-run without being
-    overwritten by the process_function post-run state save that uses the
-    locally-cached func dict loaded before the history append.
+    Per-function append of an inline run record is also routed into the
+    runs table via record_run() when `updated_func['attempts']` is a list
+    that's grown by exactly one entry — that's the worker's standard
+    "I just finished a run" signal. Other shapes fall back to the workflow
+    UPDATE alone.
 
-    Use this in per-function code paths (skip handlers, completion handlers,
-    _sync_func_state calls) instead of save_state(state).
+    Falls back to the legacy state.json RMW when the storage layer isn't
+    available.
     """
+    repo = _get_storage_repo()
+    if repo is not None:
+        with _state_lock:
+            _update_function_via_repo(repo, func_key, updated_func)
+        bus_emit("state_changed")
+        return
+
+    # ---- Legacy state.json RMW fallback --------------------------------
     with _state_lock:
-        # Re-read latest state from disk. Retry on mid-write partial reads.
         latest = None
         for _ in range(5):
             try:
@@ -1005,23 +1346,87 @@ def update_function_state(func_key, updated_func):
             except (json.JSONDecodeError, ValueError):
                 time.sleep(0.1)
         if latest is None:
-            # Nothing readable — fall back to a fresh state scaffold
             latest = _default_state()
-
         funcs = latest.setdefault("functions", {})
         merged = dict(updated_func)
-        # Preserve accumulator fields from on-disk version when the caller
-        # didn't explicitly provide them. This is the key invariant that
-        # prevents the post-run state save from wiping mid-run history.
         on_disk = funcs.get(func_key)
         if isinstance(on_disk, dict):
             for field in _ACCUMULATOR_FIELDS:
                 if field not in updated_func and field in on_disk:
                     merged[field] = on_disk[field]
         funcs[func_key] = merged
-
         _atomic_write_state(latest)
     bus_emit("state_changed")
+
+
+def _update_function_via_repo(repo, func_key, updated_func):
+    """Repo-backed implementation of update_function_state.
+
+    Splits the work in two:
+      1. Detect a single-entry growth in the inline `attempts` list and
+         route the new entry into the runs table via record_run() (which
+         atomically bumps run_count + last_run_* on the workflow row).
+      2. Upsert the workflow row with the rest of the patch, preserving
+         accumulator fields from the existing row when not explicitly set.
+    """
+    # Decompose key into (program_path, address) — both forms are accepted.
+    program_path = updated_func.get("program") or ""
+    address = updated_func.get("address") or ""
+    if (not program_path or not address) and "::" in func_key:
+        pp, addr = func_key.split("::", 1)
+        program_path = program_path or pp
+        address = address or addr
+    if not program_path or not address:
+        # Defensive: if we can't decompose the key, do nothing rather than
+        # write a malformed row.
+        return
+
+    existing = repo.get_function(program_path, address)
+    new_inline = updated_func.get("attempts")
+    new_run_entry = None
+    if isinstance(new_inline, list) and new_inline:
+        existing_count = (existing or {}).get("run_count", 0) or 0
+        if len(new_inline) == existing_count + 1:
+            # Exactly one new entry — append it as a run.
+            new_run_entry = new_inline[-1]
+        elif existing is None and len(new_inline) >= 1:
+            # First write for this function with one or more inline entries —
+            # treat the latest as the new run; older entries (if any) are
+            # historical and migrate on first save via the workflow row.
+            new_run_entry = new_inline[-1]
+
+    # Build the workflow patch. Drop accumulator fields the caller didn't
+    # explicitly set so the existing values survive.
+    row = _state_func_to_row(func_key, updated_func)
+    if existing is not None:
+        for field in _ACCUMULATOR_FIELDS:
+            if field == "attempts":
+                # Already handled — attempts maps to int count + run_count.
+                continue
+            if field not in updated_func and field in existing:
+                row[field] = existing[field]
+
+    # Upsert the workflow row first so record_run() finds a parent.
+    repo.upsert_function(row)
+
+    # Now record the run if we detected an append.
+    if new_run_entry and isinstance(new_run_entry, dict):
+        repo.record_run(
+            program_path,
+            address,
+            {
+                "run_kind": "doc",
+                "ts": _parse_state_ts(new_run_entry.get("ts")),
+                "mode": new_run_entry.get("mode"),
+                "provider": new_run_entry.get("provider") or "unknown",
+                "model": new_run_entry.get("model") or "unknown",
+                "score_before": new_run_entry.get("score_before"),
+                "score_after": new_run_entry.get("score_after"),
+                "delta": new_run_entry.get("delta"),
+                "tool_calls": new_run_entry.get("tool_calls"),
+                "outcome": new_run_entry.get("result"),
+            },
+        )
 
 
 def start_session(state):
@@ -1070,29 +1475,43 @@ def finalize_worker_session(session, *, active_binary=_SESSION_UPDATE_MISSING):
     `active_binary` uses a sentinel: pass a string to set, pass None to
     clear (pop the key), or omit to leave whatever is on disk alone.
     """
-    with _state_lock:
-        # Re-read latest state from disk using the same backup/raise behavior
-        # as normal loads, so a transient worker finish cannot overwrite a
-        # recoverable corrupt state file with a fresh default state.
-        latest = load_state()
+    repo = _get_storage_repo()
+    if repo is not None:
+        with _state_lock:
+            if session:
+                session["ended"] = datetime.now().isoformat()
+                sid = session.get("id") or session.get("started")
+                if sid:
+                    sid = str(sid)
+                    repo.upsert_session(
+                        sid,
+                        started_at=_parse_state_ts(session.get("started")),
+                        ended_at=_parse_state_ts(session.get("ended")),
+                        payload=session,
+                    )
+                # Clear current_session pointer if it matches this worker.
+                meta = repo.get_meta()
+                if meta.get("current_session") == sid:
+                    repo.set_meta(current_session=None)
+            if active_binary is not _SESSION_UPDATE_MISSING:
+                repo.set_meta(active_binary=active_binary)
+        bus_emit("state_changed")
+        return
 
+    # ---- Legacy state.json fallback ------------------------------------
+    with _state_lock:
+        latest = load_state()
         if session:
             session["ended"] = datetime.now().isoformat()
             latest.setdefault("sessions", []).append(session)
-            # Only clear current_session if it still references this worker's
-            # session (match on the "started" timestamp, which is unique per
-            # start_session call). Another worker's concurrent session should
-            # stay untouched.
             cur = latest.get("current_session")
             if isinstance(cur, dict) and cur.get("started") == session.get("started"):
                 latest["current_session"] = None
-
         if active_binary is not _SESSION_UPDATE_MISSING:
             if active_binary is None:
                 latest.pop("active_binary", None)
             else:
                 latest["active_binary"] = active_binary
-
         _atomic_write_state(latest)
     bus_emit("state_changed")
 
