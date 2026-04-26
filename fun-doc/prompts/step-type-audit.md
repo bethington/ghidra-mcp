@@ -15,7 +15,7 @@
 
 **Skip condition**: All variables have custom names AND resolved storage types (no `undefined` in type field) -> skip to Step 4.
 
-**Preferred approach**: Use `set_variables` to set type + name atomically in one call. This eliminates SSA churn between separate type-set and rename calls.
+**Preferred approach**: Use `set_variables` to set type + name atomically in one call. This eliminates SSA churn between separate type-set and rename calls. **Skip the call entirely if you have no type changes AND no renames** — calling `set_variables` with an empty `variables` map is a wasted round-trip even though the server treats it as a no-op success.
 
 **Type audit** -- walk EVERY parameter and local variable:
 

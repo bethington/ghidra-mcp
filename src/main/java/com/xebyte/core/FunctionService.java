@@ -2746,7 +2746,18 @@ public class FunctionService {
                     + ". Expected: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}}");
         }
 
-        if (variables.isEmpty()) return Response.err("No variables specified");
+        // Empty variables map is a no-op success — matches set_global's convention.
+        // Workers reach this state when their analysis concludes nothing needs
+        // changing; rejecting forces error-handling that the worker can't recover
+        // from. Returning a success-shaped no-op lets the worker move on.
+        if (variables.isEmpty()) {
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "types_set", 0,
+                "names_set", 0,
+                "failed", 0,
+                "message", "No variables to set (empty payload)"));
+        }
 
         final AtomicInteger typesSet = new AtomicInteger(0);
         final AtomicInteger namesSet = new AtomicInteger(0);
