@@ -2696,9 +2696,16 @@ def _debug_summarize_args(args):
     return ", ".join(parts)
 
 
-def _debug_log_tool_call(tool, args, result, status, duration_ms=None):
+def _debug_log_tool_call(tool, args, result, status, duration_ms=None, call_id=None):
     """Log a single tool call to the per-function JSONL file and verbose console.
-    No-op when debug_mode is off. Safe to call from any provider."""
+    No-op when debug_mode is off. Safe to call from any provider.
+
+    `call_id` correlates the calling-side and result-side JSONL entries for
+    providers that emit them as separate events (Gemini, Claude SDK). Sync
+    providers (Codex, MiniMax) only ever write the result entry, so call_id
+    is None there. The console [debug] print only fires on the result entry
+    (status != "calling") so debug mode stays one console line per tool —
+    the JSONL keeps both entries for forensic correlation."""
     ctx = _debug_ctx.get()
     if not ctx.get("enabled", False):
         return
@@ -2723,6 +2730,7 @@ def _debug_log_tool_call(tool, args, result, status, duration_ms=None):
         "provider": ctx.get("provider"),
         "requested_provider": ctx.get("requested_provider"),
         "iteration": iteration,
+        "call_id": call_id,
         "tool": normalized_tool,
         "tool_raw": tool,
         "args": args,
@@ -2740,6 +2748,9 @@ def _debug_log_tool_call(tool, args, result, status, duration_ms=None):
                     f.write(json.dumps(entry, default=str) + "\n")
         except Exception as e:
             print(f"  [debug log error] {e}", flush=True)
+
+    if status == "calling":
+        return  # Q5 (B): only the result entry prints to the console.
 
     args_summary = _debug_summarize_args(args)
     duration_str = f", {duration_ms}ms" if duration_ms is not None else ""
@@ -4227,29 +4238,24 @@ def _invoke_codex(prompt, model=None, max_turns=25):
                     error_preview = (
                         _tool_error_preview(result_obj) if status == "error" else None
                     )
-                    print(f"  [mcp] {normalized_tool}: calling", flush=True)
+                    # Codex doesn't expose start/end times on the item.
+                    result_size = len(str(result_obj)) if result_obj is not None else 0
                     print(
-                        f"  [mcp] {normalized_tool}: {status}"
-                        + (f" - {error_preview}" if error_preview else ""),
+                        f"  [mcp] {normalized_tool} → {status}"
+                        + (f" - {error_preview}" if error_preview else "")
+                        + f" ({result_size}b)",
                         flush=True,
-                    )
-                    bus_emit(
-                        "tool_call",
-                        {
-                            "tool": normalized_tool,
-                            "raw_tool": tool,
-                            "status": "calling",
-                        },
                     )
                     payload = {
                         "tool": normalized_tool,
                         "raw_tool": tool,
                         "status": status,
+                        "duration_ms": None,
+                        "bytes": result_size,
                     }
                     if error_preview:
                         payload["error"] = error_preview
                     bus_emit("tool_result", payload)
-                    # Codex doesn't expose start/end times on the item, leave duration None
                     _debug_log_tool_call(tool, args, result_obj, status, None)
             elif event_type == "turn.completed":
                 usage = getattr(event, "usage", None)
@@ -4324,6 +4330,16 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
         tool_call_count = 0
         event_count = 0
         fatal_error_message = None
+        # Gemini fires ToolUseEvent and ToolResultEvent as separate events,
+        # so we need to thread a correlation id from one to the other to
+        # join the two JSONL entries (Q4 / A1) and to compute duration.
+        # Tool calls are serial in current Gemini; FIFO-by-tool-name handles
+        # the rare "two calls to the same tool" case without adding a
+        # general queue per provider.
+        from collections import defaultdict, deque
+        import uuid as _uuid
+        pending_tool_calls = defaultdict(deque)  # tool_name -> deque[(call_id, t0)]
+
         bus_emit(
             "provider_turn",
             {
@@ -4357,18 +4373,35 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
             elif isinstance(event, ToolUseEvent):
                 tool_call_count += 1
                 short_name = _normalize_tool_name(event.name)
-                print(f"  [mcp] {short_name}: calling", flush=True)
-                bus_emit(
-                    "tool_call",
-                    {"tool": short_name, "raw_tool": event.name, "status": "calling"},
+                # Stamp a correlation id and start timestamp so the result
+                # event can compute duration_ms and tie back to this entry.
+                call_id = _uuid.uuid4().hex[:8]
+                pending_tool_calls[event.name].append((call_id, time.perf_counter()))
+                _debug_log_tool_call(
+                    event.name, event.arguments, None, "calling", None,
+                    call_id=call_id,
                 )
-                _debug_log_tool_call(event.name, event.arguments, None, "calling", None)
             elif isinstance(event, ToolResultEvent):
                 status = "error" if event.is_error else "success"
                 short_name = _normalize_tool_name(event.name)
-                print(f"  [mcp] {short_name}: {status}", flush=True)
+                # FIFO-pop the matching pending entry. Empty deque means we
+                # never saw a calling event (shouldn't happen — defensive).
+                queue = pending_tool_calls.get(event.name)
+                if queue:
+                    call_id, t0 = queue.popleft()
+                    duration_ms = int((time.perf_counter() - t0) * 1000)
+                else:
+                    call_id, duration_ms = None, None
+                output_size = len(str(event.output)) if event.output is not None else 0
                 error_preview = (
                     _tool_error_preview(event.output) if event.is_error else None
+                )
+                duration_str = f", {duration_ms}ms" if duration_ms is not None else ""
+                print(
+                    f"  [mcp] {short_name} → {status}"
+                    + (f" - {error_preview}" if error_preview else "")
+                    + f" ({output_size}b{duration_str})",
+                    flush=True,
                 )
                 bus_emit(
                     "tool_result",
@@ -4376,10 +4409,15 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
                         "tool": short_name,
                         "raw_tool": event.name,
                         "status": status,
+                        "duration_ms": duration_ms,
+                        "bytes": output_size,
                         **({"error": error_preview} if error_preview else {}),
                     },
                 )
-                _debug_log_tool_call(event.name, {}, event.output, status, None)
+                _debug_log_tool_call(
+                    event.name, {}, event.output, status, duration_ms,
+                    call_id=call_id,
+                )
             elif isinstance(event, ErrorEvent):
                 print(f"  [gemini error] {event.message}", flush=True)
                 bus_emit(
@@ -5015,8 +5053,6 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
                         f"BLOCKED: Tool call cap reached after {tool_call_count} calls"
                     )
                     break
-                print(f"  [mcp] {fn_name}: calling", flush=True)
-                bus_emit("tool_call", {"tool": fn_name, "status": "calling"})
                 _t0 = time.perf_counter()
                 result_str = execute_tool_call(fn_name, fn_args)
                 duration_ms = int((time.perf_counter() - _t0) * 1000)
@@ -5029,12 +5065,20 @@ def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
                 error_preview = (
                     _tool_error_preview(result_str) if status == "error" else None
                 )
-                print(f"  [mcp] {fn_name}: {status}", flush=True)
+                result_size = len(result_str)
+                print(
+                    f"  [mcp] {fn_name} → {status}"
+                    + (f" - {error_preview}" if error_preview else "")
+                    + f" ({result_size}b, {duration_ms}ms)",
+                    flush=True,
+                )
                 bus_emit(
                     "tool_result",
                     {
                         "tool": fn_name,
                         "status": status,
+                        "duration_ms": duration_ms,
+                        "bytes": result_size,
                         **({"error": error_preview} if error_preview else {}),
                     },
                 )
@@ -5189,24 +5233,18 @@ def _invoke_claude(prompt, model=None, max_turns=25):
                         tool_id = getattr(block, "id", "")
                         tool_input = getattr(block, "input", None) or {}
                         tool_id_to_name[tool_id] = tool_name
+                        # Use the SDK's tool_id (truncated) as the call_id —
+                        # already unique per call, so no extra uuid needed.
+                        call_id = (tool_id[:8] if tool_id else None)
                         pending_calls[tool_id] = {
                             "name": tool_name,
                             "input": tool_input,
                             "start_time": time.perf_counter(),
+                            "call_id": call_id,
                         }
-                        normalized_tool = _normalize_tool_name(tool_name)
-                        print(
-                            f"  [mcp] {normalized_tool}: calling",
-                            flush=True,
-                        )
-                        bus_emit(
-                            "tool_call",
-                            {
-                                "tool": normalized_tool,
-                                "raw_tool": tool_name,
-                                "status": "calling",
-                                "id": tool_id,
-                            },
+                        _debug_log_tool_call(
+                            tool_name, tool_input, None, "calling", None,
+                            call_id=call_id,
                         )
 
                     elif block_type == "ToolResultBlock":
@@ -5228,6 +5266,7 @@ def _invoke_claude(prompt, model=None, max_turns=25):
                         # Correlate with pending call for args + duration
                         call_info = pending_calls.pop(tool_id, None)
                         args = call_info.get("input", {}) if call_info else {}
+                        call_id = call_info.get("call_id") if call_info else None
                         duration_ms = (
                             int((time.perf_counter() - call_info["start_time"]) * 1000)
                             if call_info
@@ -5237,9 +5276,14 @@ def _invoke_claude(prompt, model=None, max_turns=25):
                         error_preview = (
                             _tool_error_preview(result_text) if is_error else None
                         )
+                        result_size = len(result_text) if result_text else 0
+                        duration_str = (
+                            f", {duration_ms}ms" if duration_ms is not None else ""
+                        )
                         print(
-                            f"  [mcp] {normalized_tool}: {status}"
-                            + (f" - {error_preview}" if error_preview else ""),
+                            f"  [mcp] {normalized_tool} → {status}"
+                            + (f" - {error_preview}" if error_preview else "")
+                            + f" ({result_size}b{duration_str})",
                             flush=True,
                         )
                         payload = {
@@ -5247,6 +5291,8 @@ def _invoke_claude(prompt, model=None, max_turns=25):
                             "raw_tool": tool_name,
                             "status": status,
                             "id": tool_id,
+                            "duration_ms": duration_ms,
+                            "bytes": result_size,
                         }
                         if error_preview:
                             payload["error"] = error_preview
@@ -5257,6 +5303,7 @@ def _invoke_claude(prompt, model=None, max_turns=25):
                             result_text,
                             status,
                             duration_ms,
+                            call_id=call_id,
                         )
 
                         # Detect MCP init failure: the claude_agent_sdk sometimes
@@ -6743,6 +6790,17 @@ def process_function(
 
     # Sync point 2: re-score after auto-mode completion
     new_score, post_completeness = _rescore_and_sync(func, address, program)
+    # Stamp the primary run's tool-call cost onto the per-function state.
+    # Mirrors the runs.jsonl shape: keep the integer (may be -1 when the
+    # provider didn't expose a count) plus a separate known flag so the
+    # dashboard can distinguish "0 tools confirmed" from "unmeasured".
+    # Audit fields are reset here so a prior audit's count doesn't bleed
+    # into this run's record; the audit block below overwrites them when
+    # an audit actually fires.
+    func["tool_calls"] = tool_calls_made if tool_calls_made is not None else -1
+    func["tool_calls_known"] = bool(tool_calls_known) if tool_calls_known is not None else False
+    func["audit_tool_calls"] = None
+    func["audit_tool_calls_known"] = None
     missing_artifacts = []  # Track what the model failed to deliver
     if new_score is not None:
         delta = ""
@@ -7102,6 +7160,17 @@ def process_function(
                 func["last_audit_provider"] = audit_provider
                 func["last_audit_delta"] = (
                     audit_diff if audit_new_score is not None else 0
+                )
+                # Audit pass tool-call cost — separate from the primary
+                # field per design Q3 (B), so the column can distinguish
+                # "primary did the work" from "audit had to clean up".
+                func["audit_tool_calls"] = (
+                    audit_tool_calls if audit_tool_calls is not None else -1
+                )
+                func["audit_tool_calls_known"] = (
+                    bool(audit_tool_calls_known)
+                    if audit_tool_calls_known is not None
+                    else False
                 )
                 update_function_state(func_key, func)
 

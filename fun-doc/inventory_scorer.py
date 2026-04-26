@@ -148,30 +148,44 @@ def status_for(rec: dict) -> str:
     return "in_progress"
 
 
+def _missing_for(rec: dict) -> int:
+    """Returns the number of unscored documentable functions for one
+    inventory record. Unfetched binaries get a small positive sentinel so
+    they sort above fully-complete ones."""
+    total = rec.get("total_documentable", 0) or 0
+    scored = rec.get("scored", 0) or 0
+    if total == 0 and rec.get("last_scan") is None:
+        return 1
+    return max(0, total - scored)
+
+
 def pick_next_binary(
     inventory: dict,
     candidate_paths: list,
     blacklist: set,
+    current_path: Optional[str] = None,
 ) -> Optional[str]:
-    """Q4 ordering: among candidate_paths, pick the binary with the most
+    """Pick the next binary to score.
+
+    When `current_path` is set and that path is in `candidate_paths`, not
+    blacklisted, and still has missing scores, it wins unconditionally —
+    the user's focused binary always gets backfilled first. Otherwise,
+    Q4 ordering: among candidate_paths, pick the binary with the most
     missing scores; tiebreak reverse-alphabetical (later in alphabet wins).
     Skip paths in blacklist. None when nothing eligible.
     """
+    if current_path and current_path in candidate_paths and current_path not in blacklist:
+        rec = inventory.get(current_path) or {}
+        if _missing_for(rec) > 0:
+            return current_path
+
     best_path = None
     best_key = None  # (missing, name) — bigger missing wins; bigger name wins on tie
     for path in candidate_paths:
         if path in blacklist:
             continue
         rec = inventory.get(path) or {}
-        total = rec.get("total_documentable", 0) or 0
-        scored = rec.get("scored", 0) or 0
-        # Treat unfetched binaries (total=0, last_scan=None) as having
-        # unknown-but-likely-positive missing — score them ahead of "complete"
-        # binaries but behind known-large-deficit ones.
-        if total == 0 and rec.get("last_scan") is None:
-            missing = 1  # tiny positive sentinel — gets picked over complete
-        else:
-            missing = max(0, total - scored)
+        missing = _missing_for(rec)
         if missing <= 0:
             continue
         name = rec.get("name") or Path(path).name
@@ -252,6 +266,7 @@ class InventoryScorer:
         fetch_function_list,
         batch_score,
         on_status_change=None,
+        current_binary_name_getter=None,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         fail_strikes: int = DEFAULT_FAIL_STRIKES,
         idle_sleep: float = IDLE_SLEEP_SECONDS,
@@ -265,6 +280,7 @@ class InventoryScorer:
         self._fetch_function_list = fetch_function_list
         self._batch_score = batch_score
         self._on_status_change = on_status_change
+        self._current_binary_name_getter = current_binary_name_getter
         self._chunk_size = chunk_size
         self._fail_strikes = fail_strikes
         self._idle_sleep = idle_sleep
@@ -377,6 +393,7 @@ class InventoryScorer:
                     inventory,
                     [p["path"] for p in programs],
                     blacklist,
+                    current_path=self._resolve_current_path(programs),
                 )
                 if target is None:
                     self._set_paused("inventory complete")
@@ -434,6 +451,25 @@ class InventoryScorer:
             self._on_status_change(self.get_status())
         except Exception:  # noqa: BLE001 — callbacks must not break the loop
             pass
+
+    def _resolve_current_path(self, programs: list) -> Optional[str]:
+        """Map the dashboard's `active_binary` (a name like 'D2Common.dll')
+        to a project path so it can be passed to pick_next_binary. Returns
+        None if no current binary is set or it doesn't match any program
+        in the project tree."""
+        getter = self._current_binary_name_getter
+        if getter is None:
+            return None
+        try:
+            name = getter()
+        except Exception:  # noqa: BLE001 — getter must not break the loop
+            return None
+        if not name:
+            return None
+        for prog in programs:
+            if prog.get("name") == name:
+                return prog.get("path")
+        return None
 
     def _get_programs(self) -> list:
         now = time.time()

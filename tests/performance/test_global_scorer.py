@@ -90,6 +90,72 @@ def test_pick_next_binary_unfetched_sentinel():
     assert gs.pick_next_binary(inv, ["/done", "/new"], blacklist=set()) == "/new"
 
 
+# ---------- current-binary preference ----------
+
+
+def test_pick_next_binary_prefers_current_binary_over_larger_deficit():
+    """When the user has a focused binary, it wins even if another binary
+    has more globals with issues."""
+    inv = {
+        "/big": {"name": "big", "total_documentable": 1000, "fully_documented": 0, "last_scan": "x"},
+        "/focused": {"name": "focused", "total_documentable": 100, "fully_documented": 90, "last_scan": "x"},
+    }
+    picked = gs.pick_next_binary(
+        inv, ["/big", "/focused"], blacklist=set(), current_path="/focused"
+    )
+    assert picked == "/focused"
+
+
+def test_pick_next_binary_falls_back_when_current_binary_complete():
+    """A current binary with zero pending should not block the queue —
+    fall through to standard ordering."""
+    inv = {
+        "/done": {"name": "done", "total_documentable": 100, "fully_documented": 100, "last_scan": "x"},
+        "/wip": {"name": "wip", "total_documentable": 100, "fully_documented": 50, "last_scan": "x"},
+    }
+    picked = gs.pick_next_binary(
+        inv, ["/done", "/wip"], blacklist=set(), current_path="/done"
+    )
+    assert picked == "/wip"
+
+
+def test_pick_next_binary_ignores_current_when_blacklisted():
+    """If the focused binary has hit its session strike count, skip it
+    and use standard ordering."""
+    inv = {
+        "/focused": {"name": "focused", "total_documentable": 100, "fully_documented": 0, "last_scan": "x"},
+        "/wip": {"name": "wip", "total_documentable": 100, "fully_documented": 50, "last_scan": "x"},
+    }
+    picked = gs.pick_next_binary(
+        inv, ["/focused", "/wip"], blacklist={"/focused"}, current_path="/focused"
+    )
+    assert picked == "/wip"
+
+
+def test_pick_next_binary_ignores_current_when_not_in_candidates():
+    """If the focused binary isn't in the project tree, fall through."""
+    inv = {
+        "/wip": {"name": "wip", "total_documentable": 100, "fully_documented": 50, "last_scan": "x"},
+    }
+    picked = gs.pick_next_binary(
+        inv, ["/wip"], blacklist=set(), current_path="/missing"
+    )
+    assert picked == "/wip"
+
+
+def test_pick_next_binary_picks_current_when_unfetched():
+    """Sentinel logic still applies when the current binary has never been
+    walked — a focused, unfetched binary still wins."""
+    inv = {
+        "/big": {"name": "big", "total_documentable": 1000, "fully_documented": 0, "last_scan": "x"},
+        "/focused": {"name": "focused", "total_documentable": 0, "fully_documented": 0, "last_scan": None},
+    }
+    picked = gs.pick_next_binary(
+        inv, ["/big", "/focused"], blacklist=set(), current_path="/focused"
+    )
+    assert picked == "/focused"
+
+
 # ---------- status_for ----------
 
 
@@ -163,6 +229,7 @@ def _make_scorer(
     audit_returns=None,
     state_dir=None,
     fail_strikes=3,
+    current_binary_name_getter=None,
 ):
     scorer = gs.GlobalScorer(
         worker_manager=wm or _FakeWM(),
@@ -173,6 +240,7 @@ def _make_scorer(
         audit_global=lambda path, addr: (audit_returns or {}).get((path, addr)),
         on_status_change=None,
         fail_strikes=fail_strikes,
+        current_binary_name_getter=current_binary_name_getter,
     )
     return scorer
 
@@ -283,3 +351,43 @@ def test_set_enabled_idempotent(tmp_path):
     scorer.set_enabled(True)
     assert scorer._thread is not None
     scorer.set_enabled(False)
+
+
+# ---------- _resolve_current_path ----------
+
+
+def test_resolve_current_path_returns_none_without_getter(tmp_path):
+    scorer = _make_scorer(state_dir=tmp_path)
+    assert scorer._resolve_current_path([{"name": "a.dll", "path": "/a"}]) is None
+
+
+def test_resolve_current_path_returns_none_when_getter_returns_none(tmp_path):
+    scorer = _make_scorer(state_dir=tmp_path, current_binary_name_getter=lambda: None)
+    assert scorer._resolve_current_path([{"name": "a.dll", "path": "/a"}]) is None
+
+
+def test_resolve_current_path_maps_name_to_path(tmp_path):
+    scorer = _make_scorer(
+        state_dir=tmp_path, current_binary_name_getter=lambda: "D2Common.dll"
+    )
+    programs = [
+        {"name": "D2Game.dll", "path": "/Vanilla/1.13d/D2Game.dll"},
+        {"name": "D2Common.dll", "path": "/Vanilla/1.13d/D2Common.dll"},
+    ]
+    assert scorer._resolve_current_path(programs) == "/Vanilla/1.13d/D2Common.dll"
+
+
+def test_resolve_current_path_returns_none_for_unknown_name(tmp_path):
+    scorer = _make_scorer(
+        state_dir=tmp_path, current_binary_name_getter=lambda: "Ghost.dll"
+    )
+    programs = [{"name": "D2Common.dll", "path": "/Vanilla/1.13d/D2Common.dll"}]
+    assert scorer._resolve_current_path(programs) is None
+
+
+def test_resolve_current_path_swallows_getter_exceptions(tmp_path):
+    def _broken():
+        raise RuntimeError("state read failed")
+
+    scorer = _make_scorer(state_dir=tmp_path, current_binary_name_getter=_broken)
+    assert scorer._resolve_current_path([{"name": "a.dll", "path": "/a"}]) is None

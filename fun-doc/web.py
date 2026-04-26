@@ -877,7 +877,6 @@ def create_app(state_file, event_bus=None):
         "function_started",
         "function_mode",
         "function_complete",
-        "tool_call",
         "tool_result",
         "model_text",
         "score_update",
@@ -1432,6 +1431,8 @@ def create_app(state_file, event_bus=None):
                     # True when state.json has never had analyze_function_completeness
                     # run for this entry — score=0 here means "unknown", not "0% done"
                     "unscored": not func.get("last_processed"),
+                    "tool_calls": func.get("tool_calls"),
+                    "tool_calls_known": func.get("tool_calls_known"),
                 }
             )
         func_list.sort(key=lambda x: x["score"])
@@ -1523,6 +1524,16 @@ def create_app(state_file, event_bus=None):
         except Exception:
             return None
 
+    def _current_binary_name():
+        """Returns the dashboard's currently-focused binary name (e.g.
+        'D2Common.dll'), or None. Used by the inventory + global scorers
+        to backfill the user's active binary first before walking the
+        rest of the project tree."""
+        try:
+            return load_state().get("active_binary")
+        except Exception:
+            return None
+
     def _emit_inventory_status(status: dict):
         """Bridge scorer status changes -> WebSocket so the dashboard widget
         and Inventory panel update without polling."""
@@ -1550,6 +1561,7 @@ def create_app(state_file, event_bus=None):
             fetch_function_list=_fetch_function_list,
             batch_score=_batch_score,
             on_status_change=_emit_inventory_status,
+            current_binary_name_getter=_current_binary_name,
         )
 
     inventory_scorer = _make_scorer()
@@ -1625,6 +1637,7 @@ def create_app(state_file, event_bus=None):
             list_globals_for_program=_list_globals_for_program,
             audit_global=_audit_global_via_mcp,
             on_status_change=_emit_global_inventory_status,
+            current_binary_name_getter=_current_binary_name,
         )
 
     global_scorer = _make_global_scorer()
@@ -2337,6 +2350,8 @@ def create_app(state_file, event_bus=None):
                     "last_result": func.get("last_result"),
                     "pinned": key in pinned,
                     "unscored": not func.get("last_processed"),
+                    "tool_calls": func.get("tool_calls"),
+                    "tool_calls_known": func.get("tool_calls_known"),
                 }
             )
         if sort == "name":
@@ -2394,6 +2409,23 @@ def create_app(state_file, event_bus=None):
                     r["score"],
                 )
             )
+        elif sort == "tools":
+            # Most tool calls first; unmeasured (-1 / None) sort to bottom.
+            def _tools_key(r):
+                tc = r.get("tool_calls")
+                if tc is None or tc < 0:
+                    return (1, 0)
+                return (0, -tc)
+
+            results.sort(key=_tools_key)
+        elif sort == "tools_desc":
+            def _tools_key_desc(r):
+                tc = r.get("tool_calls")
+                if tc is None or tc < 0:
+                    return (1, 0)
+                return (0, tc)
+
+            results.sort(key=_tools_key_desc)
         elif sort == "layer_desc":
             results.sort(
                 key=lambda r: (

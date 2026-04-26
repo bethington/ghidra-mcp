@@ -737,6 +737,7 @@
                         <th class="sortable-header" onclick="toggleSort('score')">Score <span id="sort-ind-score"></span></th>
                         <th class="sortable-header" onclick="toggleSort('deps')">Deps <span id="sort-ind-deps"></span></th>
                         <th class="sortable-header" onclick="toggleSort('fixable')">Fixable <span id="sort-ind-fixable"></span></th>
+                        <th class="sortable-header" onclick="toggleSort('tools')" title="Tool calls used in the most recent primary run for this function. Audit pass not included.">Tools <span id="sort-ind-tools"></span></th>
                         <th class="sortable-header" onclick="toggleSort('layer')">Layer <span id="sort-ind-layer"></span></th>
                         <th class="sortable-header" onclick="toggleSort('status')">Status <span id="sort-ind-status"></span></th>
                     </tr></thead>
@@ -756,6 +757,7 @@
                         {% endif %}
                         <td class="mono">{% if f.is_leaf %}<span class="badge badge-leaf">Leaf</span>{% elif f.callers == 0 %}<span style="color: var(--color-set);">Ready</span>{% else %}<span style="color: var(--color-rare);">{{ f.callers }} dep{{ 's' if f.callers > 1 }}</span>{% endif %}</td>
                         <td class="mono">{{ f.fixable }}</td>
+                        <td class="mono" style="color: var(--text-secondary);">{% if f.tool_calls is none or f.tool_calls < 0 %}<span style="color: var(--text-muted);" title="Provider didn't expose a tool-call count">&mdash;</span>{% else %}{{ f.tool_calls }}{% endif %}</td>
                         <td class="mono" style="font-size: 0.6rem; color: var(--text-secondary);">{% if f.is_leaf %}Leaf{% else %}—{% endif %}</td>
                         <td>
                         {% if f.unscored %}<span class="badge badge-new" title="Never scored — click Queue to score on demand">UNSCORED</span>
@@ -1558,8 +1560,16 @@
             updateFocusedFunction(d.worker_id, d.name, d.address);
         });
         socket.on("function_mode", d => appendToPane(d.worker_id, `  ${d.mode} | ${d.model} | score: ${d.score}%`, 'neutral'));
-        socket.on("tool_call", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, 'tool'));
-        socket.on("tool_result", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, d.status === 'failed' ? 'error' : 'tool'));
+        socket.on("tool_result", d => {
+            // Single-line render matching the console: [mcp] tool → status (Nb, Nms)
+            const sizeStr = (d.bytes != null) ? `${d.bytes}b` : '';
+            const durStr = (d.duration_ms != null) ? `${d.duration_ms}ms` : '';
+            const meta = [sizeStr, durStr].filter(Boolean).join(', ');
+            const errPart = d.error ? ` - ${d.error}` : '';
+            const metaPart = meta ? ` (${meta})` : '';
+            const klass = (d.status === 'failed' || d.status === 'error') ? 'error' : 'tool';
+            appendToPane(d.worker_id, `  [mcp] ${d.tool} → ${d.status}${errPart}${metaPart}`, klass);
+        });
         socket.on("provider_timeout", d => {
             if (d.worker_id) {
                 getOrCreatePane(d.worker_id, d.provider, null);
@@ -1858,6 +1868,9 @@
                 } else {
                     layerLabel = 'Cyc';
                 }
+                const toolCallsCell = (f.tool_calls == null || f.tool_calls < 0)
+                    ? `<td class="mono" style="color: var(--text-muted);" title="Provider didn't expose a tool-call count">&mdash;</td>`
+                    : `<td class="mono" style="color: var(--text-secondary);">${f.tool_calls}</td>`;
                 return `<tr class="func-row" data-score="${f.score}" data-name="${escapeHtml((f.name||'').toLowerCase())}" data-key="${escapeHtml(f.key)}">
                     <td>${queueBtn}</td>
                     <td>${queuedBadge}${escapeHtml(f.name)}</td>
@@ -1865,6 +1878,7 @@
                     ${scoreCell}
                     <td>${depsLabel}</td>
                     <td class="mono">${f.fixable}</td>
+                    ${toolCallsCell}
                     <td class="mono" style="font-size: 0.6rem; color: var(--text-secondary);">${layerLabel}</td>
                     <td>${statusBadge}</td>
                 </tr>`;
