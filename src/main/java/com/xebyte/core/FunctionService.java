@@ -1270,6 +1270,28 @@ public class FunctionService {
                                     .append(". ");
                         }
 
+                        // SSA churn hint: when the failed name follows the
+                        // <prefix><digit>+ pattern of a Ghidra SSA temporary
+                        // (iVar5, psVar7, puVar2, ...) and there is a similar
+                        // name in the available list with a *different* digit,
+                        // the most likely cause is that a previous
+                        // set_local_variable_type call retyped a variable in
+                        // the same function and re-decompilation renumbered
+                        // SSA temporaries. Recommend the atomic batch tool
+                        // explicitly rather than leaving the worker to guess.
+                        if (variableName.matches("^[a-z]+Var\\d+$")) {
+                            String prefix = variableName.replaceAll("\\d+$", "");
+                            boolean hasSamePrefix = availableNames.stream()
+                                    .anyMatch(n -> n.startsWith(prefix) && n.matches("^[a-z]+Var\\d+$"));
+                            if (hasSamePrefix) {
+                                resultMsg.append("Hint: this looks like SSA-renumber drift from a previous ")
+                                        .append("set_local_variable_type call in the same function. ")
+                                        .append("Use set_variables for ALL variable type+rename changes in one ")
+                                        .append("atomic call to avoid this — individual set_local_variable_type ")
+                                        .append("calls trigger re-decompilation that renumbers SSA temporaries. ");
+                            }
+                        }
+
                         // Check if variable exists in low-level API but not high-level (phantom variable)
                         Variable[] lowLevelVars = func.getLocalVariables();
                         boolean isPhantomVariable = false;
@@ -2730,8 +2752,7 @@ public class FunctionService {
         // Parse the variables JSON into a map of oldName -> {name?, type?}
         Map<String, Map<String, String>> variables;
         try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> raw = (Map<String, Object>) JsonHelper.parseJson(variablesJson);
+            Map<String, Object> raw = JsonHelper.parseJson(variablesJson);
             variables = new LinkedHashMap<>();
             for (Map.Entry<String, Object> entry : raw.entrySet()) {
                 @SuppressWarnings("unchecked")
