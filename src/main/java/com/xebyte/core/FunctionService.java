@@ -804,6 +804,9 @@ public class FunctionService {
             return Response.err("No function found for " + functionAddrStr);
         }
 
+        boolean enforceStrictFunctionNames = NamingPolicy.getInstance().isStrictFunctionNames();
+        List<String> enforcementWarnings = new ArrayList<>();
+
         // ---- Q1-Q5 validator gate (defense in depth) ----------------------
         // Hard-reject names that fail verb-tier specificity (Q2/Q4) or
         // collide via token-subset with another function in this program
@@ -813,14 +816,11 @@ public class FunctionService {
             NamingConventions.NameQualityResult quality =
                     NamingConventions.checkFunctionNameQuality(newName);
             if (!quality.ok) {
-                return Response.ok(JsonHelper.mapOf(
-                        "status", "rejected",
-                        "error", "name_quality",
-                        "issue", quality.issue,
-                        "rejected_name", newName,
-                        "message", quality.message,
-                        "suggestion", quality.suggestion
-                ));
+                Map<String, Object> rejection = nameQualityRejection(newName, quality);
+                if (enforceStrictFunctionNames) {
+                    return Response.ok(rejection);
+                }
+                enforcementWarnings.add(disabledEnforcementWarning(rejection));
             }
             // Token-subset collision check against every function in the
             // program. Iteration is read-only and fast enough for in-line
@@ -834,21 +834,11 @@ public class FunctionService {
             String collidesWith =
                     NamingConventions.findTokenSubsetCollision(newName, existingNames);
             if (collidesWith != null) {
-                return Response.ok(JsonHelper.mapOf(
-                        "status", "rejected",
-                        "error", "name_collision",
-                        "issue", "token_subset_duplicate",
-                        "rejected_name", newName,
-                        "conflicts_with", collidesWith,
-                        "message", "Token-subset collision: '" + newName + "' shares the same token set "
-                                + "as existing function '" + collidesWith + "' in this program. "
-                                + "Names that differ only by an added/removed trailing token are usually "
-                                + "a sign that the function needs a more meaningful distinguisher.",
-                        "suggestion", "Pick a name with a distinguishing token that captures *why* this "
-                                + "function differs from '" + collidesWith + "' (e.g., add 'Broadcast', "
-                                + "'Local', 'ByIndex', 'ForPlayer', 'WithRetry', ...) rather than just "
-                                + "trimming/extending '" + collidesWith + "'."
-                ));
+                Map<String, Object> rejection = tokenSubsetCollisionRejection(newName, collidesWith);
+                if (enforceStrictFunctionNames) {
+                    return Response.ok(rejection);
+                }
+                enforcementWarnings.add(disabledEnforcementWarning(rejection));
             }
         }
 
@@ -871,19 +861,56 @@ public class FunctionService {
 
         String text = resultMsg.length() > 0 ? resultMsg.toString() : "Error: Unknown failure";
         if (success.get()) {
-            List<String> nameWarnings = NamingConventions.validateFunctionName(newName, false);
-            if (nameWarnings.isEmpty()) {
-                return Response.ok(JsonHelper.mapOf("status", "success", "message", text));
-            } else {
-                return Response.ok(JsonHelper.mapOf("status", "success", "message", text,
-                        "warnings", nameWarnings));
+            List<String> nameWarnings = new ArrayList<>(NamingConventions.validateFunctionName(newName, false));
+            nameWarnings.addAll(enforcementWarnings);
+            Map<String, Object> data = JsonHelper.mapOf("status", "success", "message", text);
+            if (!nameWarnings.isEmpty()) {
+                data.put("warnings", nameWarnings);
             }
+            return Response.ok(data);
         }
         return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
     }
 
     public Response renameFunctionByAddress(String functionAddrStr, String newName) {
         return renameFunctionByAddress(functionAddrStr, newName, null);
+    }
+
+    private static Map<String, Object> nameQualityRejection(
+            String rejectedName, NamingConventions.NameQualityResult quality) {
+        return JsonHelper.mapOf(
+                "status", "rejected",
+                "error", "name_quality",
+                "issue", quality.issue,
+                "rejected_name", rejectedName,
+                "message", quality.message,
+                "suggestion", quality.suggestion
+        );
+    }
+
+    private static Map<String, Object> tokenSubsetCollisionRejection(
+            String rejectedName, String collidesWith) {
+        return JsonHelper.mapOf(
+                "status", "rejected",
+                "error", "name_collision",
+                "issue", "token_subset_duplicate",
+                "rejected_name", rejectedName,
+                "conflicts_with", collidesWith,
+                "message", "Token-subset collision: '" + rejectedName + "' shares the same token set "
+                        + "as existing function '" + collidesWith + "' in this program. "
+                        + "Names that differ only by an added/removed trailing token are usually "
+                        + "a sign that the function needs a more meaningful distinguisher.",
+                "suggestion", "Pick a name with a distinguishing token that captures *why* this "
+                        + "function differs from '" + collidesWith + "' (e.g., add 'Broadcast', "
+                        + "'Local', 'ByIndex', 'ForPlayer', 'WithRetry', ...) rather than just "
+                        + "trimming/extending '" + collidesWith + "'."
+        );
+    }
+
+    private static String disabledEnforcementWarning(Map<String, Object> rejection) {
+        return "Strict function-name enforcement disabled: would have rejected "
+                + rejection.get("error") + "/" + rejection.get("issue") + " - "
+                + rejection.get("message");
     }
 
     // ========================================================================
