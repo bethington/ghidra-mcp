@@ -667,8 +667,15 @@ public class SymbolLabelService {
                         SymbolTable symTable = program.getSymbolTable();
                         Symbol symbol = symTable.getPrimarySymbol(addr);
                         if (symbol != null) {
-                            symbol.setName(newName, SourceType.USER_DEFINED);
-                            successMsg.set("Renamed defined data at " + addressStr + " to '" + newName + "'");
+                            // Idempotent on name: if the address already has the
+                            // requested name, skip setName (Ghidra throws
+                            // DuplicateNameException for same-name reassignment).
+                            if (newName.equals(symbol.getName())) {
+                                successMsg.set("Defined data at " + addressStr + " is already named '" + newName + "' (no-op)");
+                            } else {
+                                symbol.setName(newName, SourceType.USER_DEFINED);
+                                successMsg.set("Renamed defined data at " + addressStr + " to '" + newName + "'");
+                            }
                             success.set(true);
                         } else {
                             symTable.createLabel(addr, newName, SourceType.USER_DEFINED);
@@ -785,6 +792,14 @@ public class SymbolLabelService {
 
             Symbol symbol = symbols.get(0);
             Address symbolAddr = symbol.getAddress();
+            // Idempotent: oldName == newName is a no-op success rather than
+            // a DuplicateNameException. Workers re-running rename_global_variable
+            // after a successful prior call hit this; treat as already-applied.
+            if (newName.equals(symbol.getName())) {
+                success = true;
+                return Response.ok(JsonHelper.mapOf("status", "success", "message",
+                        "Global variable already named '" + newName + "' at " + symbolAddr + " (no-op)"));
+            }
             symbol.setName(newName, SourceType.USER_DEFINED);
 
             success = true;
