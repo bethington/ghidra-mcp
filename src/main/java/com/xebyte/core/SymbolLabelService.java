@@ -628,6 +628,18 @@ public class SymbolLabelService {
         NamingConventions.GlobalNameResult quality =
                 NamingConventions.checkGlobalNameQuality(newName, existingTypeName);
         if (!quality.ok) {
+            // Append a structural hint nudging the worker toward set_global.
+            // Workers that hit name_quality repeatedly are usually mid-chain
+            // (apply_data_type then rename_or_label then batch_set_comments)
+            // and would have a higher success rate doing the whole write
+            // atomically through set_global instead. quality.suggestion
+            // already names the specific fix; this adds the workflow nudge.
+            String enrichedSuggestion = quality.suggestion
+                    + " For globals, prefer set_global("
+                    + "address=\"" + addressStr + "\", "
+                    + "type_name=..., name=..., plate_comment=...) — "
+                    + "single-transaction write that validates name + type "
+                    + "consistency before applying anything.";
             return Response.ok(JsonHelper.mapOf(
                     "status", "rejected",
                     "error", "name_quality",
@@ -636,7 +648,7 @@ public class SymbolLabelService {
                     "address", addressStr,
                     "current_type", existingTypeName != null ? existingTypeName : "",
                     "message", quality.message,
-                    "suggestion", quality.suggestion
+                    "suggestion", enrichedSuggestion
             ));
         }
 
@@ -728,6 +740,15 @@ public class SymbolLabelService {
         NamingConventions.GlobalNameResult quality =
                 NamingConventions.checkGlobalNameQuality(newName, existingTypeName);
         if (!quality.ok) {
+            String addrHint = !initialSymbols.isEmpty()
+                    ? "0x" + initialSymbols.get(0).getAddress().toString()
+                    : "<global address>";
+            String enrichedSuggestion = quality.suggestion
+                    + " For globals, prefer set_global("
+                    + "address=\"" + addrHint + "\", "
+                    + "type_name=..., name=..., plate_comment=...) — "
+                    + "single-transaction write that validates name + type "
+                    + "consistency before applying anything.";
             return Response.ok(JsonHelper.mapOf(
                     "status", "rejected",
                     "error", "name_quality",
@@ -735,7 +756,7 @@ public class SymbolLabelService {
                     "rejected_name", newName,
                     "current_type", existingTypeName != null ? existingTypeName : "",
                     "message", quality.message,
-                    "suggestion", quality.suggestion
+                    "suggestion", enrichedSuggestion
             ));
         }
 
