@@ -651,7 +651,11 @@ public class ProgramScriptService {
             mtp.closeProgramByPath(filePath);
             return;
         }
-        ProgramManager pm = findOrCreateProgramManager(tool);
+        // Close paths must NEVER spawn a CodeBrowser — there is nothing useful
+        // we can close in a fresh tool. findExistingProgramManager returns null
+        // if no CodeBrowser is running, in which case there is also nothing
+        // open to close, so we just return.
+        ProgramManager pm = findExistingProgramManager(tool);
         if (pm == null) {
             return;
         }
@@ -1023,22 +1027,55 @@ public class ProgramScriptService {
     }
 
     /**
-     * Find an existing ProgramManager or launch a new CodeBrowser to get one.
+     * Find an existing ProgramManager without spawning a new CodeBrowser.
+     * Returns null when no CodeBrowser is currently running and exposing
+     * ProgramManager. Use this from close paths and other operations that
+     * have nothing useful to do in a freshly-spawned empty tool.
      */
-    private ProgramManager findOrCreateProgramManager(PluginTool tool) {
-        // 1. Try the tool directly (works if it's a CodeBrowser)
+    private ProgramManager findExistingProgramManager(PluginTool tool) {
         ProgramManager pm = tool.getService(ProgramManager.class);
         if (pm != null) return pm;
 
-        // 2. Try MultiToolProgramProvider which searches across all running tools
         if (programProvider instanceof MultiToolProgramProvider mtp) {
             pm = mtp.findProgramManager();
             if (pm != null) return pm;
         }
 
-        // 3. Launch a new CodeBrowser via the workspace
+        ghidra.framework.model.Project project = tool.getProject();
+        if (project == null) return null;
+        ghidra.framework.model.ToolManager tm = project.getToolManager();
+        if (tm == null) return null;
         try {
-            ghidra.framework.model.Project project = tool.getProject();
+            for (PluginTool running : tm.getRunningTools()) {
+                if (running == tool) continue;
+                ProgramManager rpm = running.getService(ProgramManager.class);
+                if (rpm != null) return rpm;
+            }
+        } catch (Exception e) {
+            Msg.warn(this, "Error scanning running tools for ProgramManager: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Find an existing ProgramManager or launch a new CodeBrowser to get one.
+     *
+     * <p>Resolution order matters for window hygiene: when GhidraMCPPlugin lives
+     * in the FrontEnd tool, the FrontEnd has no ProgramManager and the
+     * MultiToolProgramProvider check is only relevant to that provider — never
+     * the case under FrontEndProgramProvider. Without scanning running tools
+     * first, every /open_program and /import_file call would fall through to
+     * ws.runTool and accumulate a fresh CodeBrowser per call. The scan reuses
+     * any existing CodeBrowser so additional programs open as tabs in it.
+     */
+    private ProgramManager findOrCreateProgramManager(PluginTool tool) {
+        ProgramManager pm = findExistingProgramManager(tool);
+        if (pm != null) return pm;
+
+        // No CodeBrowser is up — spawn one. This should be rare in practice;
+        // it covers genuinely-headless-style sessions where no GUI tool is up.
+        ghidra.framework.model.Project project = tool.getProject();
+        try {
             if (project != null) {
                 ghidra.framework.model.ToolManager tm = project.getToolManager();
                 if (tm != null) {

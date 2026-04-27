@@ -9,7 +9,18 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.6.0 (Latest) — release regression + fun-doc workflow
+### v5.7.0 (Latest) — global variable documentation enforcement
+
+- **Four-axis "documented global" bar** — globals must have a meaningful name (`g_` + Hungarian + descriptor), a real type (not `undefined*`), bytes formatted to that type's expected length, and a plate comment with a meaningful one-line summary.
+- **`rename_data` / `rename_global_variable` validator gate** — hard-rejects names that fail `NamingConventions.checkGlobalNameQuality(name, type)` with a structured error including the conflicting issue, current type, and a concrete suggestion.
+- **New `audit_global` MCP endpoint** — read-only inspector returning the global's full state plus a structured `issues` list. Use before any write to know exactly what to fix.
+- **New `set_global` MCP endpoint** — atomic single-transaction write that applies type, optional `array_length`, name, and plate comment as a unit. Pre-flight validation rejects on naming/type/format failures with no partial write. Replaces the four-tool chain (`apply_data_type` → `rename_data` → `batch_set_comments` → `create_label`) that was prone to partial-application bugs.
+- **`prompts/step-globals.md`** — new step module loaded by FULL and recovery prompts. Documents the four-axis bar, Hungarian-vs-type rules, the canonical `audit_global` → `set_global` workflow, and how to handle structured rejections.
+- **Deferred to v5.8**: `audit_globals_in_function` (bulk per-function auditor), `global_scorer.py` (binary-wide idle-time backfill mirroring `inventory_scorer.py`), per-function scorer deductions for global quality, and a dashboard panel for global inventory. Validator + canonical write tool ship now; the bulk surface gets its own PR.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.6.0 — release regression + fun-doc workflow
 
 Deploy / regression / debugger:
 

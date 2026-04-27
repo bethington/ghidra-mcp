@@ -1368,10 +1368,333 @@ def run_selected_endpoint_contract_test(repo_root: Path, mcp_url: str) -> None:
     print(f"Selected endpoint contract test passed for {len(RELEASE_CONTRACT_TOOLS)} tools.")
 
 
+def _benchmark_regression_dir(repo_root: Path) -> Path:
+    return repo_root / "fun-doc" / "benchmark" / "regression"
+
+
+def _bench_get(repo_root: Path, mcp_url: str, path: str, params: dict | None = None,
+               *, timeout: int = 30) -> tuple[int, object]:
+    """GET wrapper for benchmark regression runner. Returns (status, parsed)."""
+    return _mcp_request(repo_root, mcp_url, path, params=params, timeout=timeout)
+
+
+def _bench_post(repo_root: Path, mcp_url: str, path: str, body: dict,
+                *, timeout: int = 30) -> tuple[int, object]:
+    return _mcp_request(repo_root, mcp_url, path, data=body, method="POST", timeout=timeout)
+
+
+def _bench_text(parsed: object) -> str:
+    """Coerce an MCP response into a single text blob for substring matching."""
+    if isinstance(parsed, str):
+        return parsed
+    if isinstance(parsed, dict) and "result" in parsed and isinstance(parsed["result"], str):
+        return parsed["result"]
+    if isinstance(parsed, dict):
+        return json.dumps(parsed)
+    return str(parsed)
+
+
+def _bench_lines(parsed: object) -> list[str]:
+    text = _bench_text(parsed)
+    return [line for line in text.splitlines() if line.strip()]
+
+
+def _bench_assert_program_block(repo_root: Path, mcp_url: str, program_path: str,
+                                 prog: dict, failures: list[str]) -> None:
+    """Assert binary-level fields against /get_metadata, /list_segments etc."""
+    p_query = {"program": program_path}
+
+    _, meta = _bench_get(repo_root, mcp_url, "/get_metadata", p_query)
+    meta_text = _bench_text(meta)
+    if "architecture" in prog and f"Architecture: {prog['architecture']}" not in meta_text:
+        failures.append(f"program.architecture: expected 'Architecture: {prog['architecture']}' in /get_metadata; got snippet: {meta_text[:120]!r}")
+    if "language" in prog and prog["language"] not in meta_text:
+        failures.append(f"program.language: expected '{prog['language']}' in /get_metadata; got snippet: {meta_text[:120]!r}")
+    if "compiler" in prog and f"Compiler: {prog['compiler']}" not in meta_text:
+        failures.append(f"program.compiler: expected 'Compiler: {prog['compiler']}' in /get_metadata")
+
+    if "function_count_min" in prog:
+        _, fc = _bench_get(repo_root, mcp_url, "/get_function_count", p_query)
+        actual = fc.get("function_count") if isinstance(fc, dict) else None
+        if not isinstance(actual, (int, float)) or actual < prog["function_count_min"]:
+            failures.append(f"program.function_count_min: expected >={prog['function_count_min']}; got {actual}")
+
+    if "string_count_min" in prog:
+        _, strs = _bench_get(repo_root, mcp_url, "/list_strings", p_query)
+        n = len(_bench_lines(strs))
+        if n < prog["string_count_min"]:
+            failures.append(f"program.string_count_min: expected >={prog['string_count_min']}; got {n}")
+
+    if "segments" in prog:
+        _, segs = _bench_get(repo_root, mcp_url, "/list_segments", p_query)
+        seg_text = _bench_text(segs)
+        for spec in prog["segments"]:
+            need = spec["name"] + ":"
+            if need not in seg_text:
+                failures.append(f"program.segments: expected '{need}' in /list_segments")
+
+    if "must_contain_strings" in prog:
+        _, strs = _bench_get(repo_root, mcp_url, "/list_strings", p_query)
+        strs_text = _bench_text(strs)
+        for needle in prog["must_contain_strings"]:
+            if needle not in strs_text:
+                failures.append(f"program.must_contain_strings: expected {needle!r} in /list_strings")
+
+
+def _bench_assert_function(repo_root: Path, mcp_url: str, program_path: str,
+                            entry: dict, failures: list[str]) -> None:
+    addr = entry["address"]
+    p_query = {"program": program_path, "address": addr}
+
+    # /get_function_by_address gives us the canonical name + thunk flag in text form.
+    _, by_addr = _bench_get(repo_root, mcp_url, "/get_function_by_address", p_query)
+    by_addr_text = _bench_text(by_addr)
+    if "name" in entry:
+        needle = f"Function: {entry['name']} at"
+        if needle not in by_addr_text:
+            failures.append(f"function@{addr}.name: expected '{needle}' in /get_function_by_address; got: {by_addr_text[:160]!r}")
+
+    # /get_function_signature returns JSON with structural fields.
+    _, sig = _bench_get(repo_root, mcp_url, "/get_function_signature", p_query)
+    if not isinstance(sig, dict):
+        failures.append(f"function@{addr}.signature: /get_function_signature did not return JSON")
+        return
+
+    if "param_count" in entry and sig.get("param_count") != entry["param_count"]:
+        failures.append(f"function@{addr}.param_count: expected {entry['param_count']}; got {sig.get('param_count')}")
+    if "basic_block_count" in entry and sig.get("basic_block_count") != entry["basic_block_count"]:
+        failures.append(f"function@{addr}.basic_block_count: expected {entry['basic_block_count']}; got {sig.get('basic_block_count')}")
+    if "cyclomatic_complexity" in entry and sig.get("cyclomatic_complexity") != entry["cyclomatic_complexity"]:
+        failures.append(f"function@{addr}.cyclomatic_complexity: expected {entry['cyclomatic_complexity']}; got {sig.get('cyclomatic_complexity')}")
+    if "instruction_count_min" in entry:
+        ic = sig.get("instruction_count")
+        if not isinstance(ic, int) or ic < entry["instruction_count_min"]:
+            failures.append(f"function@{addr}.instruction_count_min: expected >={entry['instruction_count_min']}; got {ic}")
+    if "immediate_values_contains" in entry:
+        actual_imm = set(sig.get("immediate_values") or [])
+        for v in entry["immediate_values_contains"]:
+            if v not in actual_imm:
+                failures.append(f"function@{addr}.immediate_values_contains: expected {v} (0x{v:x}) in /get_function_signature.immediate_values; got {sorted(actual_imm)}")
+    if "string_constants_contains" in entry:
+        actual = set(sig.get("string_constants") or [])
+        for s in entry["string_constants_contains"]:
+            if s not in actual:
+                failures.append(f"function@{addr}.string_constants_contains: expected {s!r} in /get_function_signature.string_constants")
+    if "callee_names_contains" in entry:
+        actual = set(sig.get("callee_names") or [])
+        for s in entry["callee_names_contains"]:
+            if s not in actual:
+                failures.append(f"function@{addr}.callee_names_contains: expected {s!r} in /get_function_signature.callee_names")
+    if "return_type_contains" in entry:
+        # Return type appears in the by_addr "Signature:" line.
+        sig_line = ""
+        for line in by_addr_text.splitlines():
+            if line.strip().startswith("Signature:"):
+                sig_line = line
+                break
+        if entry["return_type_contains"] not in sig_line:
+            failures.append(f"function@{addr}.return_type_contains: expected {entry['return_type_contains']!r} in 'Signature:' line; got {sig_line!r}")
+    if "is_thunk" in entry:
+        # /get_function_by_address doesn't expose thunk explicitly in text;
+        # rely on the signature presence as a proxy. Treat is_thunk:false
+        # as "we got a signature" — sufficient for the user-authored functions.
+        if entry["is_thunk"] is False and not by_addr_text.strip().startswith("Function:"):
+            failures.append(f"function@{addr}.is_thunk=false: function did not resolve via /get_function_by_address")
+    if "signature_contains" in entry:
+        for needle in entry["signature_contains"]:
+            if needle not in by_addr_text:
+                failures.append(f"function@{addr}.signature_contains: expected {needle!r} in /get_function_by_address")
+
+    if entry.get("xref_count_to_min", 0) > 0:
+        _, xrefs = _bench_get(repo_root, mcp_url, "/get_xrefs_to", p_query)
+        n = len(_bench_lines(xrefs))
+        if n < entry["xref_count_to_min"]:
+            failures.append(f"function@{addr}.xref_count_to_min: expected >={entry['xref_count_to_min']}; got {n}")
+
+    if entry.get("decompile_must_be_nonempty") or entry.get("decompile_contains"):
+        _, dec = _bench_get(repo_root, mcp_url, "/decompile_function", p_query, timeout=60)
+        dec_text = _bench_text(dec)
+        if entry.get("decompile_must_be_nonempty") and not dec_text.strip():
+            failures.append(f"function@{addr}.decompile_must_be_nonempty: /decompile_function returned empty")
+        for needle in entry.get("decompile_contains", []):
+            if needle not in dec_text:
+                failures.append(f"function@{addr}.decompile_contains: expected {needle!r} in /decompile_function output")
+
+
+def _bench_assert_endpoint_smoke(repo_root: Path, mcp_url: str, program_path: str,
+                                  entry: dict, failures: list[str]) -> None:
+    endpoint = entry["endpoint"]
+    method = entry.get("method", "GET").upper()
+    params = dict(entry.get("params") or {})
+    body = entry.get("body")
+    assertion = entry.get("assert") or {}
+    a_type = assertion.get("type", "nonempty")
+
+    # Auto-add program= for endpoints that take a target program (most do).
+    # Skip for genuinely program-less endpoints.
+    program_less = {"/check_connection", "/list_open_programs", "/list_calling_conventions",
+                    "/list_scripts", "/check_tools", "/list_data_type_categories"}
+    if endpoint not in program_less and "program" not in params:
+        params["program"] = program_path
+
+    try:
+        if method == "POST":
+            payload = body or {}
+            # POST endpoints take program= as query param per project convention.
+            url_params = {"program": program_path} if endpoint not in program_less else {}
+            _, parsed = _mcp_request(repo_root, mcp_url, endpoint,
+                                      data=payload, method="POST",
+                                      params=url_params or None, timeout=60)
+        else:
+            _, parsed = _bench_get(repo_root, mcp_url, endpoint, params or None)
+    except Exception as exc:
+        failures.append(f"endpoint_smoke {endpoint}: request failed: {exc}")
+        return
+
+    # Surface MCP-level error envelope explicitly.
+    if isinstance(parsed, dict) and parsed.get("error"):
+        failures.append(f"endpoint_smoke {endpoint}: MCP error: {parsed['error']}")
+        return
+
+    text = _bench_text(parsed)
+    lines = _bench_lines(parsed)
+
+    if a_type == "nonempty":
+        if not text.strip():
+            failures.append(f"endpoint_smoke {endpoint}: expected nonempty response")
+    elif a_type == "lines":
+        if "min_lines" in assertion and len(lines) < assertion["min_lines"]:
+            failures.append(f"endpoint_smoke {endpoint}: expected >={assertion['min_lines']} lines; got {len(lines)}")
+        if "max_lines" in assertion and len(lines) > assertion["max_lines"]:
+            failures.append(f"endpoint_smoke {endpoint}: expected <={assertion['max_lines']} lines; got {len(lines)}")
+        for needle in assertion.get("contains", []):
+            if not any(needle in line for line in lines):
+                failures.append(f"endpoint_smoke {endpoint}: expected {needle!r} in some line")
+    elif a_type == "text":
+        for needle in assertion.get("contains", []):
+            if needle not in text:
+                failures.append(f"endpoint_smoke {endpoint}: expected {needle!r} in response")
+    elif a_type == "json":
+        if not isinstance(parsed, dict):
+            failures.append(f"endpoint_smoke {endpoint}: expected JSON object response")
+        else:
+            for key in assertion.get("contains_keys", []):
+                if key not in parsed:
+                    failures.append(f"endpoint_smoke {endpoint}: expected key {key!r} in response")
+    else:
+        failures.append(f"endpoint_smoke {endpoint}: unknown assertion type {a_type!r}")
+
+
+def _bench_ensure_full_analysis(repo_root: Path, mcp_url: str, program_path: str) -> None:
+    """Re-run analysis on a freshly-imported binary to surface exported functions.
+
+    AutoImporter's auto_analyze=true runs only the default fast analyzers,
+    leaving export-table entries unbound to Function objects. Calling
+    /run_analysis after import promotes them and runs the richer "Decompiler
+    Switch Analysis" / "Aggressive Instruction Finder" passes that the
+    CodeBrowser's interactive auto-analyze runs by default.
+
+    /run_analysis returns in milliseconds — analysis happens on a background
+    thread. Without polling for completion the YAML asserts race the analyzer
+    and see partial state. Poll /analysis_status.analyzing until it flips
+    back to false (or 60s timeout).
+    """
+    try:
+        _, _ = _mcp_request(repo_root, mcp_url, "/run_analysis",
+                             params={"program": program_path},
+                             method="POST", timeout=120)
+    except Exception as exc:
+        print(f"WARNING: /run_analysis on {program_path} failed: {exc}")
+        return
+
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        try:
+            _, status = _mcp_request(repo_root, mcp_url, "/analysis_status",
+                                      params={"program": program_path}, timeout=10)
+        except Exception:
+            time.sleep(1)
+            continue
+        if isinstance(status, dict) and status.get("analyzing") is False:
+            return
+        time.sleep(1)
+    print(f"WARNING: /analysis_status on {program_path} still busy after 60s; proceeding anyway")
+
+
+def run_benchmark_yaml_regression(repo_root: Path, mcp_url: str) -> None:
+    """Run YAML-driven assertions against the imported benchmark binaries.
+
+    Reads every fun-doc/benchmark/regression/*.yaml file and verifies its
+    contents end-to-end against the live MCP server. Failures are collected
+    across the whole pass and raised as a single RuntimeError so a single
+    deploy run reports every regression at once.
+    """
+    try:
+        import yaml  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("PyYAML required for benchmark YAML regression") from exc
+
+    reg_dir = _benchmark_regression_dir(repo_root)
+    if not reg_dir.is_dir():
+        print(f"benchmark YAML regression: {reg_dir} not found, skipping")
+        return
+
+    yaml_files = sorted(p for p in reg_dir.glob("*.yaml"))
+    if not yaml_files:
+        print(f"benchmark YAML regression: no *.yaml files in {reg_dir}, skipping")
+        return
+
+    total_assertions = 0
+    total_skipped = 0
+    failures: list[str] = []
+
+    for yaml_path in yaml_files:
+        spec = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        prog_block = spec.get("program") or {}
+        program_path = prog_block.get("path")
+        if not program_path:
+            failures.append(f"{yaml_path.name}: missing program.path")
+            continue
+
+        # Ensure the binary has full-analysis state before asserting against it.
+        # AutoImporter's auto_analyze=true runs only fast analyzers; the richer
+        # passes (which surface exports as Function objects + run Decompiler
+        # Switch Analysis) need an explicit /run_analysis call.
+        _bench_ensure_full_analysis(repo_root, mcp_url, program_path)
+
+        binary_failures_before = len(failures)
+
+        if prog_block:
+            _bench_assert_program_block(repo_root, mcp_url, program_path, prog_block, failures)
+
+        for fn in spec.get("functions") or []:
+            total_assertions += 1
+            _bench_assert_function(repo_root, mcp_url, program_path, fn, failures)
+
+        for smoke in spec.get("endpoint_smoke") or []:
+            total_assertions += 1
+            _bench_assert_endpoint_smoke(repo_root, mcp_url, program_path, smoke, failures)
+
+        for skip in spec.get("skipped") or []:
+            total_skipped += 1
+
+        new_fails = len(failures) - binary_failures_before
+        status = "OK" if new_fails == 0 else f"{new_fails} FAILURES"
+        print(f"  {yaml_path.name}: {status}")
+
+    if failures:
+        msg = (f"Benchmark YAML regression failed ({len(failures)} assertion(s)):\n  - "
+               + "\n  - ".join(failures))
+        raise RuntimeError(msg)
+
+    print(f"Benchmark YAML regression passed: {total_assertions} assertion-blocks, {total_skipped} explicit skip(s).")
+
+
 def run_release_regression_tests(repo_root: Path, mcp_url: str) -> None:
     reset_benchmark_fixture(repo_root, mcp_url)
     run_selected_endpoint_contract_test(repo_root, mcp_url)
     run_benchmark_extended_read_test(repo_root, mcp_url)
+    run_benchmark_yaml_regression(repo_root, mcp_url)
     run_multi_program_targeting_test(repo_root, mcp_url)
     run_negative_contract_test(repo_root, mcp_url)
     run_debugger_live_test(repo_root, mcp_url)

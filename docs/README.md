@@ -12,6 +12,20 @@ release notes for Ghidra MCP.
 - Read `TESTING.md` for local, CI, and live Ghidra release-regression testing.
 - Read `NAMING_CONVENTIONS.md` for naming and file-layout guidance.
 - Read `releases/README.md` for version-specific release notes.
+- Read `project-management/FUNDABLE_ROADMAP.md` for the draft community
+  roadmap of large RFC-sized efforts and sponsorship-priority signals.
+- Read `project-management/GHIDRA_RECOVERY_RFC.md` for the draft
+  community-review proposal for opt-in Ghidra recovery and relaunch.
+- Read `project-management/HEADLESS_PARITY_RFC.md` for the draft
+  community-review proposal for GUI/headless parity.
+- Read `project-management/BSIM_CORPUS_RFC.md` for the draft
+  community-review proposal for BSim-backed large corpus similarity search.
+- Read `project-management/FUNCTION_DOCUMENTATION_SCALE_RFC.md` for the draft
+  community-review proposal for large-scale AI function documentation.
+- Read `project-management/DYNAMIC_KNOWLEDGE_VALIDATION_RFC.md` for the draft
+  community-review proposal for debugger-backed runtime evidence workflows.
+- Read `project-management/NATIVE_MCP_RUNTIME_RFC.md` for the draft
+  community-review proposal for native Java MCP support in headless and GUI modes.
 
 ## Directory Layout
 
