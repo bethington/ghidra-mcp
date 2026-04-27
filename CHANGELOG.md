@@ -4,6 +4,17 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **GUI-configurable function-name enforcement** — the **Strict Function Name
+  Enforcement** Ghidra Tool Option controls whether
+  `rename_function_by_address` hard-rejects names that fail the verb-tier or
+  token-subset gates. The default remains strict. When disabled, the rename
+  proceeds while returning the same issues as warnings. No endpoint schema
+  change is required.
+
 ## v5.6.0 - 2026-04-25 (release regression + fun-doc workflow)
 
 Release covering deploy/regression safety, live benchmark coverage, debugger
