@@ -2550,6 +2550,85 @@ public class AnalysisService {
                                     + "_' — consider prefixing this function the same way"));
                 }
             }
+
+            // Q1-Q6 v5.7.0: per-function global-quality deductions. Walks the
+            // function's instructions, collects unique data-reference targets,
+            // audits each via DataTypeService.auditGlobalAt, and aggregates
+            // failures into a small set of deduction categories. Capped at
+            // -20 total so 20 broken globals don't dominate the score.
+            Program scoringProgram = func.getProgram();
+            if (scoringProgram != null) {
+                Set<Address> globalAddrs = new java.util.LinkedHashSet<>();
+                ReferenceManager refMgr = scoringProgram.getReferenceManager();
+                Listing scoringListing = scoringProgram.getListing();
+                InstructionIterator instrIter = scoringListing.getInstructions(func.getBody(), true);
+                while (instrIter.hasNext()) {
+                    Instruction instr = instrIter.next();
+                    for (Reference ref : refMgr.getReferencesFrom(instr.getAddress())) {
+                        if (ref.getReferenceType().isFlow()) continue;
+                        if (ref.getReferenceType().isCall()) continue;
+                        if (ref.getReferenceType().isJump()) continue;
+                        Address target = ref.getToAddress();
+                        if (target == null) continue;
+                        if (scoringProgram.getFunctionManager().getFunctionAt(target) != null) continue;
+                        if (!scoringProgram.getMemory().contains(target)) continue;
+                        if (func.getBody().contains(target)) continue;
+                        globalAddrs.add(target);
+                    }
+                }
+                if (!globalAddrs.isEmpty()) {
+                    int untypedCount = 0;
+                    int unformattedCount = 0;
+                    int genericNameCount = 0;
+                    int missingPlateCount = 0;
+                    for (Address gAddr : globalAddrs) {
+                        Map<String, Object> audit = DataTypeService.auditGlobalAt(scoringProgram, gAddr);
+                        @SuppressWarnings("unchecked")
+                        List<String> issues = (List<String>) audit.get("issues");
+                        if (issues == null) continue;
+                        if (issues.contains("untyped")) untypedCount++;
+                        if (issues.contains("unformatted_bytes_length_mismatch")
+                                || issues.contains("unformatted_bytes_should_be_string")) unformattedCount++;
+                        if (issues.contains("generic_name")
+                                || issues.stream().anyMatch(s -> s.startsWith("name_"))) genericNameCount++;
+                        if (issues.contains("missing_plate_comment")
+                                || issues.contains("plate_comment_too_short")) missingPlateCount++;
+                    }
+                    // Per-issue weights (Q6 design):
+                    //   untyped_global -8, unformatted -5, generic_name -5,
+                    //   missing_plate_comment -3.
+                    double globalDeductions = 0.0;
+                    if (untypedCount > 0) {
+                        double pts = Math.min(8.0 * untypedCount, 8.0);
+                        globalDeductions += pts;
+                        breakdown.add(deductionItem("untyped_global", pts, true, untypedCount,
+                                untypedCount + " referenced global(s) have undefined* type"));
+                    }
+                    if (unformattedCount > 0) {
+                        double pts = Math.min(5.0 * unformattedCount, 5.0);
+                        globalDeductions += pts;
+                        breakdown.add(deductionItem("unformatted_global_bytes", pts, true, unformattedCount,
+                                unformattedCount + " referenced global(s) have wrong byte layout (length mismatch or string-as-char)"));
+                    }
+                    if (genericNameCount > 0) {
+                        double pts = Math.min(5.0 * genericNameCount, 5.0);
+                        globalDeductions += pts;
+                        breakdown.add(deductionItem("generic_global_name", pts, true, genericNameCount,
+                                genericNameCount + " referenced global(s) have generic/auto-gen names"));
+                    }
+                    if (missingPlateCount > 0) {
+                        double pts = Math.min(3.0 * missingPlateCount, 3.0);
+                        globalDeductions += pts;
+                        breakdown.add(deductionItem("missing_global_plate_comment", pts, true, missingPlateCount,
+                                missingPlateCount + " referenced global(s) lack a meaningful plate comment"));
+                    }
+                    // Cap aggregate global-related deductions at 20 pts so
+                    // a function calling 20 broken globals doesn't dominate
+                    // the overall score.
+                    if (globalDeductions > 20.0) globalDeductions = 20.0;
+                    fixablePenalty += globalDeductions;
+                }
+            }
         }
 
         if (func.getSignature() == null) {

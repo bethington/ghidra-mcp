@@ -1,0 +1,91 @@
+# Tool-output regression baseline for BenchmarkDebug.exe.
+# Schema: fun-doc/benchmark/regression/__schema__.md
+#
+# BenchmarkDebug.exe is a stripped EXE (no user symbols) - it exists primarily
+# to drive the debugger-live test under run_debugger_live_test. Per-function
+# assertions are minimal here on purpose; the live-debugger assertions cover
+# the runtime side.
+
+program:
+  name: "BenchmarkDebug.exe"
+  path: "/testing/benchmark/BenchmarkDebug.exe"
+  architecture: "x86"
+  language: "x86:LE:32:default"
+  compiler: "windows"
+  # Stripped EXE — only one function gets identified by Ghidra's analyzers
+  # without symbols. The rest of the binary is reachable via /list_exports
+  # and /get_entry_points but not as Function objects.
+  function_count_min: 1
+  symbol_count_min: 1000
+  string_count_min: 30
+  segments:
+    - name: "Headers"
+    - name: ".text"
+    - name: ".rdata"
+    - name: ".data"
+
+functions:
+  - address: "0x004019e8"
+    name: "guard_check_icall"
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+endpoint_smoke:
+  - endpoint: "/get_function_count"
+    assert:
+      type: "json"
+      contains_keys: ["function_count", "program"]
+
+  - endpoint: "/list_segments"
+    assert:
+      type: "lines"
+      min_lines: 4
+      contains: [".text:", ".rdata:", ".data:"]
+
+  - endpoint: "/get_metadata"
+    assert:
+      type: "text"
+      contains: ["Architecture: x86", "Function Count:", "Total Memory Size:"]
+
+  - endpoint: "/get_entry_points"
+    assert:
+      type: "text"
+      contains: ["entry"]
+
+  - endpoint: "/list_strings"
+    assert:
+      type: "lines"
+      min_lines: 50
+
+  - endpoint: "/list_imports"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/list_namespaces"
+    assert:
+      type: "lines"
+      min_lines: 1
+
+  - endpoint: "/list_data_items"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/analysis_status"
+    assert:
+      type: "json"
+      contains_keys: ["analyzed", "analyzing"]
+
+  - endpoint: "/get_xrefs_to"
+    params: { address: "0x004019e8" }
+    assert:
+      type: "nonempty"
+
+skipped:
+  - endpoint: "/list_exports"
+    reason: "Stripped EXE: no exports to assert"
+  - endpoint: "/find_dead_code"
+    reason: "Per-function endpoint; no clean per-binary smoke variant"
+  - endpoint: "/check_tools"
+    reason: "Bridge-side static tool, not an HTTP endpoint"
+  - endpoint: "/bsim_query_function_match"
+    reason: "BSim DB empty in dev environment"

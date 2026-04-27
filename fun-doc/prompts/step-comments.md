@@ -2,8 +2,8 @@
 
 ## Allowed Tools
 - `batch_set_comments` (plate + PRE + EOL in ONE call)
-- `rename_or_label` (for DAT_*/s_* globals, with g_ prefix)
-- `apply_data_type` (to set type on globals)
+- `set_global` (for DAT_*/s_* globals — atomic name+type+plate-comment in ONE call; see `step-globals.md`)
+- `audit_globals_in_function` (one call lists every global the function references with per-global issues)
 
 **IMPORTANT**: This step must be AFTER all naming/prototype/type changes are complete.
 
@@ -20,7 +20,11 @@
   ]
 }
 ```
-- `address`: Function entry address for the plate comment target and batch anchor.
+- `address`: **A single hex string** (the function's entry address), not an array.
+  This is the plate-comment target AND the batch anchor. Per-line PRE/EOL
+  addresses go inside `decompiler_comments` / `disassembly_comments`, not
+  here. If you have a list of addresses to comment, do NOT collect them into
+  `address`; put them in the inner arrays as `{address, comment}` objects.
 - `plate_comment`: Full plate text. Omit to leave existing plate untouched. Empty string clears it.
 - `decompiler_comments`: Array of `{address, comment}` objects for PRE_COMMENTs.
 - `disassembly_comments`: Array of `{address, comment}` objects for EOL_COMMENTs.
@@ -29,9 +33,16 @@
 
 ## Instructions
 
-1. **Rename globals**: Any DAT_*/s_* references visible in decompiled code -- `apply_data_type` to set type, `rename_or_label` with g_ prefix + Hungarian notation.
+1. **Document globals**: Any DAT_*/s_* references visible in decompiled code — call
+   `audit_globals_in_function` once, then one `set_global` call per global with
+   `name` + `type_name` + `plate_comment`. **Do not** use the broken-up
+   `apply_data_type` → `rename_or_label` → `batch_set_comments` chain — the v5.7.0
+   validator hard-rejects most names sent through `rename_or_label` (missing `g_`,
+   prefix mismatch, short descriptor, auto-gen remnant), and the chain is not
+   atomic. See `step-globals.md` for the full naming + plate-comment rules.
 
-2. **Use `batch_set_comments`** with `plate_comment` parameter to set everything in ONE call:
+2. **Use `batch_set_comments`** with `plate_comment` parameter for the function's
+   own plate + PRE/EOL comments in ONE call:
 
 ### Plate Comment Format (plain text only)
 

@@ -1,0 +1,279 @@
+# Tool-output regression baseline for Benchmark.dll.
+# Schema: fun-doc/benchmark/regression/__schema__.md
+# Runner: tools.setup.ghidra.run_benchmark_regression
+#
+# Every assertion that fails fails the regression. Use `skipped:` for known
+# coverage gaps and add a reason. Auto-analyzer drift is tolerated by using
+# *_min fields (>=) rather than exact matches.
+
+program:
+  name: "Benchmark.dll"
+  path: "/testing/benchmark/Benchmark.dll"
+  architecture: "x86"
+  language: "x86:LE:32:default"
+  compiler: "windows"
+  # Counts assume /run_analysis has been called on the imported binary.
+  # The runner does this in _bench_ensure_full_analysis before assertions.
+  function_count_min: 250              # observed 319 post-analysis
+  symbol_count_min: 1500               # observed 2357 post-analysis
+  string_count_min: 50
+  segments:
+    - name: "Headers"
+    - name: ".text"
+    - name: ".rdata"
+    - name: ".data"
+
+# User-authored functions in src/*.c. Names use the C-style export-mangling
+# Ghidra applies after /run_analysis (compiled as __stdcall, so the @N suffix
+# is the byte count of args). CRT-runtime helpers (FUN_*, ___scrt_*) are
+# intentionally not asserted — they vary across compilers/versions.
+functions:
+  - address: "0x10001000"
+    name: "calc_crc16"
+    return_type_contains: "ushort"
+    param_count: 2
+    basic_block_count: 5
+    cyclomatic_complexity: 3
+    instruction_count_min: 80
+    xref_count_to_min: 3
+    is_thunk: false
+    decompile_must_be_nonempty: true
+    decompile_contains: ["0x1021", "0xffff"]
+    immediate_values_contains: [4129, 65535]   # 0x1021, 0xFFFF — CRC-16/CCITT signatures
+
+  - address: "0x10001130"
+    name: "compute_gcd"
+    param_count: 2
+    is_thunk: false
+    decompile_must_be_nonempty: true
+    decompile_contains: ["%"]                  # Euclidean modulo
+
+  - address: "0x10001150"
+    name: "get_stat_list_flags"
+    param_count: 1
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x10001170"
+    name: "get_stat_list_layer"
+    param_count: 1
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x10001180"
+    name: "get_stat_list_owner_guid"
+    param_count: 1
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x100011a0"
+    name: "get_stat_list_prev_link"
+    param_count: 1
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x100011c0"
+    name: "stat_list_add"
+    param_count: 4                              # captures the four-arg add-with-flags variant
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x10001210"
+    name: "advance_parser_state"
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+  - address: "0x100012a0"
+    name: "compute_str_len"
+    param_count: 1
+    is_thunk: false
+    decompile_must_be_nonempty: true
+    decompile_contains: ["while", "!="]        # null-terminator scan
+
+  - address: "0x100012bb"
+    name: "dllmain_crt_dispatch"               # Ghidra-canonical CRT helper name
+    is_thunk: false
+    decompile_must_be_nonempty: true
+
+# Endpoint connectivity + structural checks for categories without a clear
+# per-function or per-data home. One assertion per category at minimum.
+endpoint_smoke:
+  # listing
+  - endpoint: "/get_function_count"
+    assert:
+      type: "json"
+      contains_keys: ["function_count", "program"]
+
+  - endpoint: "/list_segments"
+    assert:
+      type: "lines"
+      min_lines: 4
+      contains: [".text:", ".rdata:", ".data:"]
+
+  - endpoint: "/list_strings"
+    assert:
+      type: "lines"
+      min_lines: 50
+
+  - endpoint: "/list_imports"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/list_exports"
+    assert:
+      type: "lines"
+      contains: ["calc_crc16", "compute_gcd", "entry"]
+
+  - endpoint: "/list_namespaces"
+    assert:
+      type: "lines"
+      min_lines: 1
+
+  - endpoint: "/list_data_items"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/list_data_types"
+    assert:
+      type: "lines"
+      min_lines: 10
+
+  - endpoint: "/list_data_type_categories"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/list_calling_conventions"
+    assert:
+      type: "lines"
+      min_lines: 5
+      contains: ["__cdecl", "__stdcall", "__fastcall"]
+
+  - endpoint: "/list_classes"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/list_methods"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/list_external_locations"
+    assert:
+      type: "nonempty"
+
+  # getter
+  - endpoint: "/get_metadata"
+    assert:
+      type: "text"
+      contains: ["Architecture: x86", "Function Count:", "Compiler: windows"]
+
+  - endpoint: "/get_address_spaces"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/get_entry_points"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/get_current_program_info"
+    assert:
+      type: "json"
+      contains_keys: ["name"]
+
+  # decompile (per-function covers most)
+  - endpoint: "/batch_decompile"
+    params: { functions: "0x10001000,0x10001130" }
+    assert:
+      type: "nonempty"
+
+  # search
+  - endpoint: "/search_functions"
+    params: { name_pattern: "compute" }
+    assert:
+      type: "lines"
+      contains: ["compute_gcd", "compute_str_len"]
+
+  - endpoint: "/search_strings"
+    params: { search_term: "stdcall" }
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/search_data_types"
+    params: { query: "int" }
+    assert:
+      type: "nonempty"
+
+  # xref
+  - endpoint: "/get_xrefs_to"
+    params: { address: "0x10001000" }
+    assert:
+      type: "lines"
+      min_lines: 1
+
+  - endpoint: "/get_xrefs_from"
+    params: { address: "0x10001210" }
+    assert:
+      type: "nonempty"
+
+  # analysis
+  - endpoint: "/list_analyzers"
+    assert:
+      type: "nonempty"
+
+  - endpoint: "/analysis_status"
+    assert:
+      type: "json"
+      contains_keys: ["analyzed", "analyzing"]
+
+  # function
+  - endpoint: "/get_function_callees"
+    params: { address: "0x10001210" }
+    assert:
+      type: "nonempty"
+
+  # script
+  - endpoint: "/list_scripts"
+    assert:
+      type: "nonempty"
+
+  # system / utility
+  - endpoint: "/check_connection"
+    assert:
+      type: "text"
+      contains: ["GhidraMCP plugin running"]
+
+  - endpoint: "/list_open_programs"
+    assert:
+      type: "json"
+      contains_keys: ["programs"]
+
+# Explicit skips. Each entry must include `endpoint` and `reason`. The runner
+# logs these at the end of the regression so they're visible in CI output.
+skipped:
+  - endpoint: "/find_dead_code"
+    reason: "Per-function endpoint; no clean per-binary smoke variant"
+  - endpoint: "/check_tools"
+    reason: "Bridge-side static tool, not an HTTP endpoint"
+  - endpoint: "/bsim_query_function_match"
+    reason: "BSim DB empty in dev environment"
+  - endpoint: "/debugger_set_breakpoint_2"
+    reason: "Duplicate-class endpoint; covered by /debugger_set_breakpoint in run_debugger_live_test"
+  - endpoint: "/debugger_status_2"
+    reason: "Duplicate-class endpoint; covered by /debugger_status"
+  - endpoint: "/import_data_types"
+    reason: "Mutating endpoint; would corrupt baseline state for subsequent assertions"
+  - endpoint: "/import_file"
+    reason: "Already exercised by reset_benchmark_fixture"
+  - endpoint: "/run_ghidra_script"
+    reason: "Requires GHIDRA_MCP_ALLOW_SCRIPTS=1 and a script file; out of scope for read-only baseline"
+  - endpoint: "/run_script_inline"
+    reason: "Requires GHIDRA_MCP_ALLOW_SCRIPTS=1 and inline script; out of scope for read-only baseline"
+  - endpoint: "/emulate_function"
+    reason: "Emulation needs careful seed state; covered by dedicated emulation tests"
+  - endpoint: "/emulate_hash_batch"
+    reason: "Emulation needs careful seed state; covered by dedicated emulation tests"
+  - endpoint: "/save_program"
+    reason: "Persists changes; would dirty the baseline for subsequent runs"
+  - endpoint: "/exit_ghidra"
+    reason: "Terminates Ghidra; obviously cannot run during a regression"
+  - endpoint: "/reanalyze"
+    reason: "Mutating; covered by reset_benchmark_fixture's auto_analyze=true"

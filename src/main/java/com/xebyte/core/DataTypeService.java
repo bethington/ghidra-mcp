@@ -1228,6 +1228,40 @@ public class DataTypeService {
                 return Response.text("Address is not in program memory: " + addressStr);
             }
 
+            // Hungarian-vs-name cross-check (option A enforcement gate).
+            // When the address already has a `g_*` named symbol, applying a
+            // type that contradicts the name's Hungarian prefix produces a
+            // silently-lying global (e.g., `g_dwActiveQuestState` typed as
+            // `byte`). This is the only escape hatch around `set_global`'s
+            // upfront validation, so we close it here too. Only fires on
+            // the type-mismatch issue — other name issues (missing g_,
+            // short descriptor, etc.) belong to the rename path's gate
+            // and would be over-zealous to re-check on type writes against
+            // grandfathered names.
+            SymbolTable preCheckSymTable = program.getSymbolTable();
+            Symbol preCheckSym = preCheckSymTable.getPrimarySymbol(address);
+            if (preCheckSym != null) {
+                String existingName = preCheckSym.getName();
+                if (existingName != null && existingName.startsWith("g_")) {
+                    NamingConventions.GlobalNameResult preCheckResult =
+                            NamingConventions.checkGlobalNameQuality(existingName, typeName);
+                    if (!preCheckResult.ok && "prefix_type_mismatch".equals(preCheckResult.issue)) {
+                        return Response.ok(JsonHelper.mapOf(
+                                "status", "rejected",
+                                "error", "prefix_type_mismatch",
+                                "address", addressStr,
+                                "current_name", existingName,
+                                "rejected_type", typeName,
+                                "message", preCheckResult.message,
+                                "suggestion", "Either rename the global to match '" + typeName
+                                        + "' first (use rename_data / rename_global_variable), "
+                                        + "or apply the type+name change atomically with set_global "
+                                        + "to avoid the silently-lying-name state."
+                        ));
+                    }
+                }
+            }
+
             int txId = program.startTransaction("Apply Data Type: " + typeName);
             boolean txSuccess = false;
             try {
@@ -2917,5 +2951,629 @@ public class DataTypeService {
     private String capitalizeFirst(String str) {
         if (str == null || str.isEmpty()) return str;
         return Character.toUpperCase(str.charAt(0)) + str.substring(1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Global Variable Documentation Tools (v5.7.0)
+    // -----------------------------------------------------------------------
+    //
+    // Per the Q1-Q8 design conversation 2026-04-25, "properly documented
+    // global" means:
+    //   1. Has a meaningful name (g_ prefix + Hungarian + descriptor)
+    //   2. Has a real type (not undefined1/2/4/8)
+    //   3. Bytes at the address are formatted as that type (length matches;
+    //      ASCII null-terminated runs are string types, not raw char[])
+    //   4. Has a non-empty plate comment with a meaningful one-line summary
+    //
+    // audit_global is the read-only inspector — returns the global's current
+    // state and the list of issues blocking it from being "fully documented."
+    //
+    // set_global is the canonical atomic writer — applies type, sets array
+    // length when applicable, renames, and writes the plate comment in one
+    // transaction. Replaces the 4-tool chain (apply_data_type → rename_data
+    // → batch_set_comments → maybe create_label) so partial application is
+    // structurally impossible.
+
+    /**
+     * Audit a single global at the given address — public static helper
+     * shared by audit_global (per-address) and audit_globals_in_function
+     * (per-function bulk auditor). Returns the same map shape from both
+     * call sites so the model can union-process results.
+     */
+    public static Map<String, Object> auditGlobalAt(Program program, Address addr) {
+        Listing listing = program.getListing();
+        SymbolTable symTable = program.getSymbolTable();
+
+        Symbol primary = symTable.getPrimarySymbol(addr);
+        String name = primary != null ? primary.getName() : "";
+        Data data = listing.getDefinedDataAt(addr);
+        String typeName = "";
+        int length = 0;
+        boolean hasUndefinedType = false;
+        boolean lengthMismatch = false;
+        if (data != null) {
+            DataType dt = data.getDataType();
+            if (dt != null) {
+                typeName = dt.getName();
+                hasUndefinedType = typeName.startsWith("undefined");
+                int declared = dt.getLength();
+                length = data.getLength();
+                if (declared > 0 && length != declared) lengthMismatch = true;
+            }
+        }
+        String plateComment = listing.getComment(ghidra.program.model.listing.CodeUnit.PLATE_COMMENT, addr);
+        if (plateComment == null) plateComment = "";
+
+        ReferenceManager refMgr = program.getReferenceManager();
+        int xrefCount = 0;
+        ReferenceIterator iter = refMgr.getReferencesTo(addr);
+        while (iter.hasNext()) { iter.next(); xrefCount++; }
+
+        List<String> issues = new ArrayList<>();
+
+        // Code-address guard: any address that is code (has an Instruction
+        // at it, OR has a Function defined at it) is not a data global.
+        // /list_globals iterates symbols and skips SymbolType.FUNCTION,
+        // but two patterns slip through:
+        //   1. A LABEL on the same address as a function entry
+        //      (function_entry case — getFunctionAt(addr) != null)
+        //   2. A LABEL on a code address where Ghidra has NOT created a
+        //      Function yet — FLIRT/FID matches like "FID_conflict:__time32"
+        //      are the canonical example. getFunctionAt(addr) returns null
+        //      here because there's no Function symbol, only a label sitting
+        //      on top of an Instruction.
+        // Without this guard, audit_global reports `untyped` (no defined
+        // data) on every code address and the worker burns a turn
+        // confirming-and-skipping. Production log showed CRT helpers
+        // (AcquireStreamLock, ConvertFileTimeToUnixTime32, FID_conflict:*,
+        // etc.) eating the entire run.
+        boolean hasFunction = program.getFunctionManager().getFunctionAt(addr) != null;
+        boolean hasInstruction = listing.getInstructionAt(addr) != null;
+        if (hasFunction || hasInstruction) {
+            return JsonHelper.mapOf(
+                    "address", addr.toString(),
+                    "name", name,
+                    "type", typeName,
+                    "length", length,
+                    "plate_comment", plateComment,
+                    "xref_count", xrefCount,
+                    "issues", issues,
+                    "fully_documented", true,
+                    "is_code_address", true,
+                    "is_function_entry", hasFunction
+            );
+        }
+
+        // OS-canonical labels (TIB/PEB/KUSER) are fully exempt from the
+        // audit — the Microsoft name + the OS-applied type are canonical,
+        // and asking the user to write a plate comment for "ExceptionList"
+        // is wrong. Mark the response so callers (worker, scorer) know
+        // why the issue list is empty.
+        boolean osCanonical = NamingConventions.isOsCanonicalGlobalName(name);
+        if (osCanonical) {
+            return JsonHelper.mapOf(
+                    "address", addr.toString(),
+                    "name", name,
+                    "type", typeName,
+                    "length", length,
+                    "plate_comment", plateComment,
+                    "xref_count", xrefCount,
+                    "issues", issues,
+                    "fully_documented", true,
+                    "os_canonical", true
+            );
+        }
+
+        // Per-issue severity tracker. Hard + medium count toward
+        // `fully_documented`; soft are surfaced for human review but
+        // don't block "completion." Mirrors the function-side rubric
+        // where structural deductions are forgiven in `effective_score`.
+        Map<String, String> severityByIssue = new java.util.LinkedHashMap<>();
+
+        boolean autoGen = NamingConventions.isAutoGeneratedGlobalName(name) || name.isEmpty();
+        if (autoGen) {
+            issues.add("generic_name");
+            severityByIssue.put("generic_name", "hard");
+        } else {
+            // IDA reserved prefix (sub_, loc_, byte_, etc.) — hard issue,
+            // breaks downstream tools that rely on these as "untouched"
+            // sentinels.
+            if (NamingConventions.hasIdaReservedPrefix(name)) {
+                issues.add("ida_reserved_prefix");
+                severityByIssue.put("ida_reserved_prefix", "hard");
+            }
+            NamingConventions.GlobalNameResult q =
+                    NamingConventions.checkGlobalNameQuality(name, typeName.isEmpty() ? null : typeName);
+            if (!q.ok) {
+                String code = "name_" + q.issue;
+                issues.add(code);
+                // missing_g_prefix / prefix_type_mismatch / etc. are all
+                // hard — they violate the project naming convention and
+                // were already gated by checkGlobalNameQuality at write
+                // time (set_global rejects them).
+                severityByIssue.put(code, "hard");
+            } else {
+                // Name passed the quality check. Check the descriptor
+                // portion for low-information generic words.
+                // Strip g_ + Hungarian prefix to isolate the descriptor.
+                String descriptor = extractDescriptorPart(name);
+                if (descriptor != null && NamingConventions.isGenericDescriptor(descriptor)) {
+                    issues.add("generic_descriptor");
+                    severityByIssue.put("generic_descriptor", "soft");
+                }
+            }
+        }
+
+        if (data == null || hasUndefinedType) {
+            issues.add("untyped");
+            severityByIssue.put("untyped", "hard");
+        }
+
+        if (data != null) {
+            if (lengthMismatch) {
+                issues.add("unformatted_bytes_length_mismatch");
+                severityByIssue.put("unformatted_bytes_length_mismatch", "medium");
+            }
+            if (!typeName.isEmpty() && (typeName.equals("char") || typeName.equals("byte"))) {
+                if (looksLikeUnappliedStringAt(program, addr)) {
+                    issues.add("unformatted_bytes_should_be_string");
+                    severityByIssue.put("unformatted_bytes_should_be_string", "medium");
+                }
+            }
+            // Array with no documented length AND > 1 xref → soft signal
+            // ("you typed it as an array but didn't say how many elements").
+            DataType dt = data.getDataType();
+            if (dt instanceof ghidra.program.model.data.Array
+                    && ((ghidra.program.model.data.Array) dt).getNumElements() <= 1
+                    && xrefCount > 1) {
+                issues.add("bytes_size_unknown");
+                severityByIssue.put("bytes_size_unknown", "soft");
+            }
+        }
+
+        String trimmedComment = plateComment.trim();
+        if (trimmedComment.isEmpty()) {
+            issues.add("missing_plate_comment");
+            severityByIssue.put("missing_plate_comment", "hard");
+        } else {
+            String[] plateIssue = NamingConventions.checkGlobalPlateComment(plateComment);
+            if (plateIssue != null) {
+                issues.add(plateIssue[0]);
+                severityByIssue.put(plateIssue[0], "medium");
+            }
+            // Xref-summary missing — when xref_count > 5, we expect the
+            // plate to mention writers/readers somehow. Heuristic: look
+            // for "Set by", "Read by", "Used by", or "Modified by".
+            // Medium severity — community treats this as the substance
+            // of global doc, but it's not always required for terse globals.
+            if (xrefCount > 5) {
+                String lowerPlate = plateComment.toLowerCase();
+                boolean hasXrefSummary = lowerPlate.contains("set by")
+                        || lowerPlate.contains("read by")
+                        || lowerPlate.contains("used by")
+                        || lowerPlate.contains("modified by")
+                        || lowerPlate.contains("written by")
+                        || lowerPlate.contains("called by");
+                if (!hasXrefSummary) {
+                    issues.add("xref_summary_missing");
+                    severityByIssue.put("xref_summary_missing", "medium");
+                }
+            }
+            // Bitfield decomposition expected — name pattern signal:
+            // descriptors containing Flags/Bits/Mask/State/Mode + integer
+            // type → plate should have a Bitfield: section or bit-list.
+            if (!typeName.isEmpty() && isIntegerLikeType(typeName)) {
+                String lowerName = name.toLowerCase();
+                boolean looksBitfieldy = lowerName.contains("flags")
+                        || lowerName.contains("bits")
+                        || lowerName.contains("mask")
+                        || lowerName.contains("state")
+                        || lowerName.contains("mode");
+                if (looksBitfieldy) {
+                    String lowerPlate = plateComment.toLowerCase();
+                    boolean hasBitfieldSection = lowerPlate.contains("bitfield")
+                            || lowerPlate.contains("0x0001")
+                            || lowerPlate.contains("0x01")
+                            || lowerPlate.contains("bit ");
+                    if (!hasBitfieldSection) {
+                        issues.add("bitfield_undocumented");
+                        severityByIssue.put("bitfield_undocumented", "medium");
+                    }
+                }
+            }
+            // Callback signature missing — pfn-prefixed globals or
+            // function-pointer types should have plate text describing
+            // the callback signature / call sites.
+            boolean isFunctionPointer = name.startsWith("g_pfn")
+                    || name.toLowerCase().contains("callback")
+                    || (typeName.contains("(*") && typeName.contains(")"));
+            if (isFunctionPointer) {
+                String lowerPlate = plateComment.toLowerCase();
+                boolean hasCallSig = lowerPlate.contains("called by")
+                        || lowerPlate.contains("invoked")
+                        || lowerPlate.contains("signature")
+                        || lowerPlate.contains("callback")
+                        || lowerPlate.contains("returns")
+                        || lowerPlate.contains("(") /* arg list in plate */;
+                if (!hasCallSig) {
+                    issues.add("callback_signature_missing");
+                    severityByIssue.put("callback_signature_missing", "medium");
+                }
+            }
+        }
+
+        // Severity-aware completion check (Q1=A): soft issues never block
+        // `fully_documented`. The worker treats anything with no hard +
+        // medium issues as "completed", letting it move on while the
+        // soft warnings remain visible to a human reviewer. Mirrors the
+        // function rubric where structural deductions are forgiven in
+        // `effective_score`.
+        int hardCount = 0, mediumCount = 0, softCount = 0;
+        for (String code : issues) {
+            String sev = severityByIssue.get(code);
+            if ("hard".equals(sev)) hardCount++;
+            else if ("medium".equals(sev)) mediumCount++;
+            else if ("soft".equals(sev)) softCount++;
+        }
+        boolean fullyDocumented = (hardCount == 0 && mediumCount == 0);
+
+        // Applicable-axes hint — tells the worker which axes are
+        // semantically relevant for THIS global so the model knows
+        // which sections to write in the plate. Helps avoid the
+        // "filler N/A" anti-pattern: skip axes flagged false.
+        Map<String, Boolean> applicableAxes = new java.util.LinkedHashMap<>();
+        applicableAxes.put("xref_summary", xrefCount > 5);
+        boolean isIntType = !typeName.isEmpty() && isIntegerLikeType(typeName);
+        String lowerName = name.toLowerCase();
+        applicableAxes.put("bitfield_decomp",
+                isIntType && (lowerName.contains("flags") || lowerName.contains("bits")
+                        || lowerName.contains("mask") || lowerName.contains("state")
+                        || lowerName.contains("mode")));
+        applicableAxes.put("callback_sig",
+                name.startsWith("g_pfn") || lowerName.contains("callback")
+                        || (typeName.contains("(*") && typeName.contains(")")));
+        applicableAxes.put("value_semantics",
+                isIntType || (!typeName.isEmpty() && typeName.contains("*")));
+
+        return JsonHelper.mapOf(
+                "address", addr.toString(),
+                "name", name,
+                "type", typeName,
+                "length", length,
+                "plate_comment", plateComment,
+                "xref_count", xrefCount,
+                "issues", issues,
+                "severity_summary", JsonHelper.mapOf(
+                        "hard", hardCount,
+                        "medium", mediumCount,
+                        "soft", softCount
+                ),
+                "applicable_axes", applicableAxes,
+                "fully_documented", fullyDocumented
+        );
+    }
+
+    /** Strip g_ + Hungarian prefix off a global name to isolate the
+     *  descriptor portion for `generic_descriptor` checking. Returns
+     *  null when the name doesn't follow the project convention well
+     *  enough to safely identify the descriptor. */
+    private static String extractDescriptorPart(String name) {
+        if (name == null || !name.startsWith("g_") || name.length() < 4) return null;
+        String afterG = name.substring(2);
+        // Strip a 1-4 char lowercase Hungarian prefix that ends at the
+        // first uppercase letter (where the descriptor starts).
+        int i = 0;
+        while (i < afterG.length() && i < 5 && Character.isLowerCase(afterG.charAt(i))) {
+            i++;
+        }
+        if (i == 0 || i >= afterG.length()) return null;
+        return afterG.substring(i);
+    }
+
+    /** Whether {@code typeName} represents an integer-like type that
+     *  could plausibly be a bitfield. Used by the bitfield-undocumented
+     *  heuristic. */
+    private static boolean isIntegerLikeType(String typeName) {
+        if (typeName == null || typeName.isEmpty()) return false;
+        String t = typeName.toLowerCase();
+        return t.equals("uint") || t.equals("int") || t.equals("dword")
+                || t.equals("word") || t.equals("ushort") || t.equals("short")
+                || t.equals("byte") || t.equals("uchar") || t.equals("char")
+                || t.equals("ulong") || t.equals("long")
+                || t.equals("uint32_t") || t.equals("int32_t")
+                || t.equals("uint16_t") || t.equals("int16_t")
+                || t.equals("uint8_t") || t.equals("int8_t");
+    }
+
+    /** Static variant of looksLikeUnappliedString — package-visible for the
+     * static auditGlobalAt helper to reuse. */
+    static boolean looksLikeUnappliedStringAt(Program program, Address addr) {
+        try {
+            Memory mem = program.getMemory();
+            int printable = 0;
+            for (int i = 0; i < 64; i++) {
+                byte b = mem.getByte(addr.add(i));
+                if (b == 0) {
+                    return printable >= 4;
+                }
+                if (b < 0x20 || b > 0x7E) return false;
+                printable++;
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    @McpTool(path = "/audit_global", method = "GET",
+            description = "Audit a global variable's documentation state. Returns name, type, length, plate comment, xref count, and list of issues. Use this before set_global so you know exactly what's missing.",
+            category = "datatype")
+    public Response auditGlobal(
+            @Param(value = "address", paramType = "address",
+                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return Response.err("address is required");
+        }
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        return Response.ok(auditGlobalAt(program, addr));
+    }
+
+    @McpTool(path = "/audit_globals_in_function", method = "GET",
+            description = "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs.",
+            category = "datatype")
+    public Response auditGlobalsInFunction(
+            @Param(value = "address", paramType = "address",
+                   description = "Address of the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (addressStr == null || addressStr.isEmpty()) {
+            return Response.err("address is required");
+        }
+        Address funcAddr = ServiceUtils.parseAddress(program, addressStr);
+        if (funcAddr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        Function func = ServiceUtils.resolveFunction(program, addressStr);
+        if (func == null) {
+            return Response.err("No function found at " + addressStr);
+        }
+
+        // Walk instructions, gather unique data-reference targets.
+        // Skip targets that resolve to other functions (those are call/jump
+        // refs to code, not data globals).
+        Listing listing = program.getListing();
+        ReferenceManager refMgr = program.getReferenceManager();
+        InstructionIterator instrIter = listing.getInstructions(func.getBody(), true);
+
+        Set<Address> globalAddrs = new java.util.LinkedHashSet<>();
+        while (instrIter.hasNext()) {
+            Instruction instr = instrIter.next();
+            for (Reference ref : refMgr.getReferencesFrom(instr.getAddress())) {
+                if (ref.getReferenceType().isFlow()) continue;
+                if (ref.getReferenceType().isCall()) continue;
+                if (ref.getReferenceType().isJump()) continue;
+                Address target = ref.getToAddress();
+                if (target == null) continue;
+                // Skip if the target is a function entry — those are imports
+                // / external calls already covered by call refs but with a
+                // data-style ref type.
+                if (program.getFunctionManager().getFunctionAt(target) != null) continue;
+                // Only include targets that live in the program's memory and
+                // sit outside the function's own body (locals are stack refs,
+                // not globals).
+                if (!program.getMemory().contains(target)) continue;
+                if (func.getBody().contains(target)) continue;
+                globalAddrs.add(target);
+            }
+        }
+
+        List<Map<String, Object>> globals = new ArrayList<>();
+        int fullyDocumented = 0;
+        int withIssues = 0;
+        Map<String, Integer> issueHistogram = new java.util.LinkedHashMap<>();
+        for (Address gAddr : globalAddrs) {
+            Map<String, Object> audit = auditGlobalAt(program, gAddr);
+            globals.add(audit);
+            @SuppressWarnings("unchecked")
+            List<String> auditIssues = (List<String>) audit.get("issues");
+            if (auditIssues == null || auditIssues.isEmpty()) {
+                fullyDocumented++;
+            } else {
+                withIssues++;
+                for (String issue : auditIssues) {
+                    issueHistogram.merge(issue, 1, Integer::sum);
+                }
+            }
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+                "function", JsonHelper.mapOf(
+                        "address", funcAddr.toString(),
+                        "name", func.getName()
+                ),
+                "globals", globals,
+                "summary", JsonHelper.mapOf(
+                        "total", globalAddrs.size(),
+                        "fully_documented", fullyDocumented,
+                        "with_issues", withIssues,
+                        "issue_histogram", issueHistogram
+                )
+        ));
+    }
+
+    @McpTool(path = "/set_global", method = "POST",
+            description = "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type → rename_data → batch_set_comments → create_label).",
+            category = "datatype")
+    public Response setGlobal(
+            @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   description = "Address of the global. Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+            @Param(value = "name", source = ParamSource.BODY,
+                   description = "New name. Must follow g_ + Hungarian + descriptor convention (e.g., g_dwActiveQuestState, g_pUnitList).") String newName,
+            @Param(value = "type_name", source = ParamSource.BODY,
+                   description = "Ghidra data type to apply (e.g., uint, byte, UnitAny *, char *, MyStruct). Use create_struct/create_array_type first if the type doesn't exist. Pass empty to leave type unchanged.") String typeName,
+            @Param(value = "array_length", source = ParamSource.BODY, defaultValue = "0",
+                   description = "If >0, applied as an array of array_length elements of type_name. Required when documenting an array of fixed length (e.g., a 100-entry data table).") int arrayLength,
+            @Param(value = "plate_comment", source = ParamSource.BODY,
+                   description = "Plate comment for the address. First line must be a meaningful one-line summary (≥4 words). Optional sectioned details (Used by:, Layout:, Source:, Bitfield:) follow when applicable. Pass empty to leave plate comment unchanged.") String plateComment,
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (addressStr == null || addressStr.isEmpty()) return Response.err("address is required");
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        // Pre-flight validation. If anything fails, return structured error
+        // and DO NOT touch the program.
+        if (newName != null && !newName.isEmpty()) {
+            String typeForCheck = (typeName != null && !typeName.isEmpty()) ? typeName : null;
+            // If type isn't being set, fall back to whatever's already at the address.
+            if (typeForCheck == null) {
+                Data existing = program.getListing().getDefinedDataAt(addr);
+                if (existing != null && existing.getDataType() != null) {
+                    typeForCheck = existing.getDataType().getName();
+                }
+            }
+            NamingConventions.GlobalNameResult quality =
+                    NamingConventions.checkGlobalNameQuality(newName, typeForCheck);
+            if (!quality.ok) {
+                return Response.ok(JsonHelper.mapOf(
+                        "status", "rejected",
+                        "error", "name_quality",
+                        "issue", quality.issue,
+                        "rejected_name", newName,
+                        "address", addressStr,
+                        "message", quality.message,
+                        "suggestion", quality.suggestion
+                ));
+            }
+        }
+
+        // Use the shared helper so audit_global and set_global agree on rule.
+        String[] plateIssue = NamingConventions.checkGlobalPlateComment(plateComment);
+        if (plateIssue != null) {
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "rejected",
+                    "error", plateIssue[0],
+                    "first_line", plateIssue[1],
+                    "message", "Plate-comment first line must be a >=4-word summary describing what the global represents.",
+                    "suggestion", "Replace with a one-liner like 'Bitmap of currently-active quests for the player' or 'Pointer to the head of the linked unit list.'"
+            ));
+        }
+
+        DataType resolvedType = null;
+        if (typeName != null && !typeName.isEmpty()) {
+            DataTypeManager dtm = program.getDataTypeManager();
+            resolvedType = ServiceUtils.resolveDataType(dtm, typeName);
+            if (resolvedType == null) {
+                return Response.ok(JsonHelper.mapOf(
+                        "status", "rejected",
+                        "error", "unknown_type",
+                        "type_name", typeName,
+                        "message", "Type '" + typeName + "' is not in the program's data type manager.",
+                        "suggestion", "Use create_struct, create_enum, or create_array_type to define the type first; or use an existing builtin (uint, byte, char *, etc.)."
+                ));
+            }
+            if (resolvedType.getName().startsWith("undefined")) {
+                return Response.ok(JsonHelper.mapOf(
+                        "status", "rejected",
+                        "error", "undefined_type_rejected",
+                        "type_name", typeName,
+                        "message", "set_global rejects undefined* types — globals must have a real type.",
+                        "suggestion", "Pick a concrete type (uint/byte/ushort for primitives, a struct or pointer-to-struct for composite data)."
+                ));
+            }
+        }
+
+        // Single transaction: type → array → name → plate comment.
+        final List<String> applied = new ArrayList<>();
+        final AtomicReference<String> errorMsg = new AtomicReference<>();
+        final AtomicBoolean success = new AtomicBoolean(false);
+        final DataType finalType = resolvedType;
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("set_global at " + addressStr);
+                try {
+                    Listing listing = program.getListing();
+
+                    if (finalType != null) {
+                        // Clear existing data at the address before re-applying.
+                        int totalLen = arrayLength > 0
+                                ? finalType.getLength() * arrayLength
+                                : finalType.getLength();
+                        if (totalLen > 0) {
+                            try {
+                                listing.clearCodeUnits(addr, addr.add(totalLen - 1), false);
+                            } catch (Exception ignored) {
+                                // best-effort clear; createData below will surface a real error
+                            }
+                        }
+                        if (arrayLength > 0) {
+                            ArrayDataType arrayType = new ArrayDataType(finalType, arrayLength, finalType.getLength());
+                            listing.createData(addr, arrayType);
+                        } else {
+                            listing.createData(addr, finalType);
+                        }
+                        applied.add("type");
+                        if (arrayLength > 0) applied.add("array_length=" + arrayLength);
+                    }
+
+                    if (newName != null && !newName.isEmpty()) {
+                        SymbolTable symTable = program.getSymbolTable();
+                        Symbol existing = symTable.getPrimarySymbol(addr);
+                        if (existing != null) {
+                            // Idempotent on name: if the address already has the
+                            // requested name, skip setName (Ghidra throws
+                            // DuplicateNameException for same-name reassignment).
+                            // Workers re-running set_global on a partially-applied
+                            // global hit this when the name landed in a previous
+                            // attempt but the type or plate comment didn't.
+                            if (newName.equals(existing.getName())) {
+                                applied.add("name=already_set");
+                            } else {
+                                existing.setName(newName, SourceType.USER_DEFINED);
+                                applied.add("name");
+                            }
+                        } else {
+                            symTable.createLabel(addr, newName, SourceType.USER_DEFINED);
+                            applied.add("name");
+                        }
+                    }
+
+                    if (plateComment != null && !plateComment.trim().isEmpty()) {
+                        listing.setComment(addr, ghidra.program.model.listing.CodeUnit.PLATE_COMMENT, plateComment);
+                        applied.add("plate_comment");
+                    }
+
+                    success.set(true);
+                } catch (Exception e) {
+                    errorMsg.set(e.getMessage() != null ? e.getMessage() : e.getClass().getName());
+                    Msg.error(this, "set_global error", e);
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (Exception e) {
+            return Response.err("Failed to execute set_global on Swing thread: " + e.getMessage());
+        }
+
+        if (success.get()) {
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "success",
+                    "address", addr.toString(),
+                    "applied", applied
+            ));
+        }
+        return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
     }
 }

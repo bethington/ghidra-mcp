@@ -5,8 +5,9 @@
 
 ## Allowed Tools
 - `get_function_variables`
-- `set_local_variable_type`
-- `set_parameter_type`
+- `set_variables` (atomic type + rename — **strongly preferred** for any change touching ≥2 variables)
+- `set_local_variable_type` (single-variable fallback only)
+- `set_parameter_type` (single-parameter fallback only)
 - `rename_variables`
 
 ## Recipe
@@ -19,9 +20,8 @@
    - `undefined2` -> `ushort` or `short`
    - `undefined1` -> `byte` or `bool`
    - `undefined8` -> `longlong` or `double`
-3. **Apply types**: `set_local_variable_type` for each variable. Batch where possible.
-4. **Rename**: After ALL types are set, single `rename_variables` call with Hungarian-prefixed names matching the resolved types
-5. Scoring is handled externally -- do not call `analyze_function_completeness`.
+3. **Apply types AND renames in ONE atomic `set_variables` call** when touching ≥2 variables. Each individual `set_local_variable_type` call triggers re-decompilation that renumbers SSA variables (`iVar3` → `iVar4`, `psVar5` → `psVar4`), invalidating names you planned from the earlier decompile snapshot — subsequent calls fail with `Variable '<name>' not found`. `set_variables` does the entire batch in one transaction before re-decompiling, so it is immune to that race.
+4. Scoring is handled externally -- do not call `analyze_function_completeness`.
 
 ## Skip Conditions
 - Phantom variables (`is_phantom: true`, `extraout_*`, `in_*`, stack-frame-only `local_*`): do not attempt type-setting. Document in plate comment if relevant.

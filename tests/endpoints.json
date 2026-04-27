@@ -1,7 +1,7 @@
 {
-  "version": "5.6.0",
+  "version": "5.7.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 225,
+  "total_endpoints": 228,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -200,6 +200,26 @@
         "program"
       ],
       "description": "Apply function documentation"
+    },
+    {
+      "path": "/audit_global",
+      "method": "GET",
+      "category": "datatype",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Audit a global variable's documentation state. Returns name, type, length, plate comment, xref count, and list of issues. Use this before set_global so you know exactly what's missing."
+    },
+    {
+      "path": "/audit_globals_in_function",
+      "method": "GET",
+      "category": "datatype",
+      "params": [
+        "address",
+        "program"
+      ],
+      "description": "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs."
     },
     {
       "path": "/batch_analyze_completeness",
@@ -601,15 +621,6 @@
       "description": "Interrupt (break into) the running target"
     },
     {
-      "path": "/debugger/launch_offers",
-      "method": "GET",
-      "category": "debugger",
-      "params": [
-        "program"
-      ],
-      "description": "List available debugger launch/attach options for the current program"
-    },
-    {
       "path": "/debugger/launch",
       "method": "POST",
       "category": "debugger",
@@ -623,6 +634,15 @@
         "python_executable"
       ],
       "description": "Launch an executable through Ghidra's Trace RMI debugger launcher"
+    },
+    {
+      "path": "/debugger/launch_offers",
+      "method": "GET",
+      "category": "debugger",
+      "params": [
+        "program"
+      ],
+      "description": "List available debugger launch/attach options for the current program"
     },
     {
       "path": "/debugger/list_breakpoints",
@@ -1936,6 +1956,13 @@
       "description": "Run inline script code"
     },
     {
+      "path": "/save_all_programs",
+      "method": "GET",
+      "category": "program",
+      "params": [],
+      "description": "Save all open programs"
+    },
+    {
       "path": "/save_program",
       "method": "GET",
       "category": "program",
@@ -1943,13 +1970,6 @@
         "program"
       ],
       "description": "Save current program"
-    },
-    {
-      "path": "/save_all_programs",
-      "method": "GET",
-      "category": "program",
-      "params": [],
-      "description": "Save all open programs"
     },
     {
       "path": "/search_byte_patterns",
@@ -2243,6 +2263,20 @@
         "program"
       ],
       "description": "Set function prototype (return type, param types, calling convention). NOTE: the function name in the prototype string does NOT rename the function — call rename_function_by_address separately if needed."
+    },
+    {
+      "path": "/set_global",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "address",
+        "name",
+        "type_name",
+        "array_length",
+        "plate_comment",
+        "program"
+      ],
+      "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type → rename_data → batch_set_comments → create_label)."
     },
     {
       "path": "/set_image_base",

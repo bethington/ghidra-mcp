@@ -6,7 +6,7 @@
     <groupId>com.xebyte</groupId>
     <artifactId>GhidraMCP</artifactId>
     <packaging>jar</packaging>
-    <version>5.6.0</version>
+    <version>5.7.0</version>
     <name>Ghidra MCP Server</name>
     <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.6.0 release: live deploy regression tiers, BenchmarkDebug debugger fixture, scoped prompt-policy automation, safer Ghidra deploy lifecycle, benchmark project reset improvements, and fun-doc workflow hardening on top of the v5.5.x maintenance baseline.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>

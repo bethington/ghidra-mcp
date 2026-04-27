@@ -358,7 +358,10 @@ public class DebuggerService {
                     description = "Optional Python executable for Python-backed debugger launchers") String pythonExecutable) {
         PluginTool tool;
         try {
-            tool = getOrStartDebuggerTool(20);
+            // Cold-start of the Debugger tool template takes longer than 20s
+            // when its plugin set hasn't been instantiated yet in this process.
+            // Subsequent /debugger/launch calls hit the cached tool instantly.
+            tool = getOrStartDebuggerTool(60);
         } catch (TimeoutException e) {
             return Response.err("Timed out while auto-starting Ghidra's Debugger tool. " +
                     "Open the Debugger tool manually, then retry debugger_launch.");

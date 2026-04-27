@@ -1270,6 +1270,28 @@ public class FunctionService {
                                     .append(". ");
                         }
 
+                        // SSA churn hint: when the failed name follows the
+                        // <prefix><digit>+ pattern of a Ghidra SSA temporary
+                        // (iVar5, psVar7, puVar2, ...) and there is a similar
+                        // name in the available list with a *different* digit,
+                        // the most likely cause is that a previous
+                        // set_local_variable_type call retyped a variable in
+                        // the same function and re-decompilation renumbered
+                        // SSA temporaries. Recommend the atomic batch tool
+                        // explicitly rather than leaving the worker to guess.
+                        if (variableName.matches("^[a-z]+Var\\d+$")) {
+                            String prefix = variableName.replaceAll("\\d+$", "");
+                            boolean hasSamePrefix = availableNames.stream()
+                                    .anyMatch(n -> n.startsWith(prefix) && n.matches("^[a-z]+Var\\d+$"));
+                            if (hasSamePrefix) {
+                                resultMsg.append("Hint: this looks like SSA-renumber drift from a previous ")
+                                        .append("set_local_variable_type call in the same function. ")
+                                        .append("Use set_variables for ALL variable type+rename changes in one ")
+                                        .append("atomic call to avoid this — individual set_local_variable_type ")
+                                        .append("calls trigger re-decompilation that renumbers SSA temporaries. ");
+                            }
+                        }
+
                         // Check if variable exists in low-level API but not high-level (phantom variable)
                         Variable[] lowLevelVars = func.getLocalVariables();
                         boolean isPhantomVariable = false;
@@ -2730,8 +2752,7 @@ public class FunctionService {
         // Parse the variables JSON into a map of oldName -> {name?, type?}
         Map<String, Map<String, String>> variables;
         try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> raw = (Map<String, Object>) JsonHelper.parseJson(variablesJson);
+            Map<String, Object> raw = JsonHelper.parseJson(variablesJson);
             variables = new LinkedHashMap<>();
             for (Map.Entry<String, Object> entry : raw.entrySet()) {
                 @SuppressWarnings("unchecked")
@@ -2746,7 +2767,18 @@ public class FunctionService {
                     + ". Expected: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}}");
         }
 
-        if (variables.isEmpty()) return Response.err("No variables specified");
+        // Empty variables map is a no-op success — matches set_global's convention.
+        // Workers reach this state when their analysis concludes nothing needs
+        // changing; rejecting forces error-handling that the worker can't recover
+        // from. Returning a success-shaped no-op lets the worker move on.
+        if (variables.isEmpty()) {
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "types_set", 0,
+                "names_set", 0,
+                "failed", 0,
+                "message", "No variables to set (empty payload)"));
+        }
 
         final AtomicInteger typesSet = new AtomicInteger(0);
         final AtomicInteger namesSet = new AtomicInteger(0);
@@ -2837,7 +2869,10 @@ public class FunctionService {
                             }
                         }
 
-                        // Phase 3: Rename with Hungarian validation
+                        // Phase 3a: Rename via HighSymbol (decompiler-visible variables).
+                        // This is the primary path for SSA temporaries (iVar*, psVar*, etc.)
+                        // and for register-backed parameters/locals.
+                        Set<String> renamedHere = new HashSet<>();
                         Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
                         while (symbols.hasNext()) {
                             HighSymbol symbol = symbols.next();
@@ -2858,8 +2893,53 @@ public class FunctionService {
                             try {
                                 HighFunctionDBUtil.updateDBVariable(symbol, newName, null, SourceType.USER_DEFINED);
                                 namesSet.incrementAndGet();
+                                renamedHere.add(currentName);
                             } catch (Exception e) {
                                 errors.add("Failed to rename " + currentName + " -> " + newName + ": " + e.getMessage());
+                                failed.incrementAndGet();
+                            }
+                        }
+
+                        // Phase 3b: Storage-based fallback. Stack-frame-only variables
+                        // (local_4, local_148, etc.) are not promoted to HighSymbol
+                        // form — they live only in func.getAllVariables(). Without
+                        // this fallback, a worker calling set_variables with
+                        // {local_4: {name: nStackDepth, ...}} sees types_set++ but
+                        // names_set silently stays at zero, then fails subsequent
+                        // calls with "Variable not found: nStackDepth".
+                        try {
+                            for (Variable lowVar : func.getAllVariables()) {
+                                String oldName = lowVar.getName();
+                                if (renamedHere.contains(oldName)) continue;
+                                Map<String, String> spec = variables.get(oldName);
+                                if (spec == null || !spec.containsKey("name")) continue;
+                                String newName = spec.get("name");
+                                if (newName == null || newName.isEmpty() || newName.equals(oldName)) continue;
+                                try {
+                                    lowVar.setName(newName, SourceType.USER_DEFINED);
+                                    namesSet.incrementAndGet();
+                                    renamedHere.add(oldName);
+                                } catch (Exception e) {
+                                    errors.add("Failed to rename storage variable " + oldName + " -> " + newName + ": " + e.getMessage());
+                                    failed.incrementAndGet();
+                                }
+                            }
+                        } catch (Exception e) {
+                            Msg.warn(this, "set_variables storage-rename fallback encountered error: " + e.getMessage());
+                        }
+
+                        // Phase 3c: Caller-visibility — surface any rename specs
+                        // that matched neither path so workers can tell at a
+                        // glance that part of their request didn't apply.
+                        for (Map.Entry<String, Map<String, String>> e : variables.entrySet()) {
+                            String oldName = e.getKey();
+                            Map<String, String> spec = e.getValue();
+                            if (!spec.containsKey("name")) continue;
+                            String requestedNew = spec.get("name");
+                            if (requestedNew == null || requestedNew.isEmpty() || requestedNew.equals(oldName)) continue;
+                            if (!renamedHere.contains(oldName)) {
+                                errors.add("Rename spec for '" + oldName + "' matched no high-level or storage variable; "
+                                        + "name unchanged. Re-fetch with get_function_variables before retrying.");
                                 failed.incrementAndGet();
                             }
                         }
