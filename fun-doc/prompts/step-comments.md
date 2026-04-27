@@ -20,7 +20,11 @@
   ]
 }
 ```
-- `address`: Function entry address for the plate comment target and batch anchor.
+- `address`: **A single hex string** (the function's entry address), not an array.
+  This is the plate-comment target AND the batch anchor. Per-line PRE/EOL
+  addresses go inside `decompiler_comments` / `disassembly_comments`, not
+  here. If you have a list of addresses to comment, do NOT collect them into
+  `address`; put them in the inner arrays as `{address, comment}` objects.
 - `plate_comment`: Full plate text. Omit to leave existing plate untouched. Empty string clears it.
 - `decompiler_comments`: Array of `{address, comment}` objects for PRE_COMMENTs.
 - `disassembly_comments`: Array of `{address, comment}` objects for EOL_COMMENTs.
