@@ -3475,12 +3475,44 @@ public class DataTypeService {
             DataTypeManager dtm = program.getDataTypeManager();
             resolvedType = ServiceUtils.resolveDataType(dtm, typeName);
             if (resolvedType == null) {
+                // Build a more actionable suggestion based on the shape of
+                // the type the worker passed. Two common patterns hit
+                // unknown_type frequently in production logs:
+                //   1. Array shorthand baked into type_name ("double[0x100]")
+                //      — should be split into type_name="double" + array_length=256.
+                //   2. Function-pointer literal ("void (__cdecl **)()")
+                //      — needs a typedef created via create_typedef first,
+                //      or use a simpler "void *" for opaque pointers.
+                String suggestion = "Use create_struct, create_enum, or "
+                        + "create_array_type to define the type first; or use an "
+                        + "existing builtin (uint, byte, char *, etc.).";
+                if (typeName.matches(".+\\[\\s*0?[xX]?[0-9a-fA-F]+\\s*\\]")) {
+                    int lb = typeName.indexOf('[');
+                    int rb = typeName.indexOf(']', lb);
+                    String elemType = typeName.substring(0, lb).trim();
+                    String lenStr = typeName.substring(lb + 1, rb).trim();
+                    suggestion = "Type '" + typeName + "' looks like an array shorthand. "
+                            + "Split it into type_name=\"" + elemType + "\" and "
+                            + "array_length=" + lenStr + " (decimal); set_global will "
+                            + "build the array for you. The DataTypeManager doesn't "
+                            + "store array shorthand as named types.";
+                } else if (typeName.contains("(") && typeName.contains(")")
+                        && (typeName.contains("*") || typeName.contains("__cdecl")
+                            || typeName.contains("__stdcall") || typeName.contains("__fastcall"))) {
+                    suggestion = "Type '" + typeName + "' looks like a function-pointer "
+                            + "literal. The DataTypeManager doesn't accept inline function "
+                            + "signatures; create a named typedef first via "
+                            + "create_typedef(name=\"PFnSomething\", base_type=\"void *\") "
+                            + "(or a more specific signature via create_function_signature), "
+                            + "then pass that name as type_name. For opaque function "
+                            + "pointers, \"void *\" is acceptable.";
+                }
                 return Response.ok(JsonHelper.mapOf(
                         "status", "rejected",
                         "error", "unknown_type",
                         "type_name", typeName,
                         "message", "Type '" + typeName + "' is not in the program's data type manager.",
-                        "suggestion", "Use create_struct, create_enum, or create_array_type to define the type first; or use an existing builtin (uint, byte, char *, etc.)."
+                        "suggestion", suggestion
                 ));
             }
             if (resolvedType.getName().startsWith("undefined")) {

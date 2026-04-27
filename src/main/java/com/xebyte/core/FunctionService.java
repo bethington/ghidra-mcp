@@ -2749,17 +2749,58 @@ public class FunctionService {
         Address addr = ServiceUtils.parseAddress(program, functionAddress);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        // Parse the variables JSON into a map of oldName -> {name?, type?}
+        // Parse the variables JSON into a map of oldName -> {name?, type?}.
+        // Tolerant of three worker shapes:
+        //   1. {"local_8": {"name": "dwFlags", "type": "uint"}}  (canonical)
+        //   2. {"local_8": "dwFlags"}                              (rename-only)
+        //   3. {"local_8": ["dwFlags", "uint"]}                    (positional)
+        // Anything else gets a structured error explaining the canonical shape
+        // — workers in production logs hit the cast at oldName→ArrayList /
+        //   oldName→String paths and the cryptic "cannot be cast" message
+        //   was unrecoverable.
         Map<String, Map<String, String>> variables;
         try {
-            Map<String, Object> raw = JsonHelper.parseJson(variablesJson);
+            Object rawParsed;
+            // variablesJson can arrive as either a JSON-encoded string OR an
+            // already-parsed object/array. parseJson handles the string case;
+            // for non-string raw input we already have it.
+            try {
+                rawParsed = JsonHelper.parseJson(variablesJson);
+            } catch (Exception ignored) {
+                rawParsed = variablesJson;
+            }
+            if (!(rawParsed instanceof Map)) {
+                return Response.err("variables must be a JSON object mapping oldName to "
+                        + "{name?, type?}. Got: " + rawParsed.getClass().getSimpleName()
+                        + ". Example: {\"local_8\": {\"name\": \"dwFlags\", \"type\": \"uint\"}, "
+                        + "\"local_c\": {\"type\": \"int\"}}");
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> raw = (Map<String, Object>) rawParsed;
             variables = new LinkedHashMap<>();
             for (Map.Entry<String, Object> entry : raw.entrySet()) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> val = (Map<String, Object>) entry.getValue();
+                Object value = entry.getValue();
                 Map<String, String> spec = new LinkedHashMap<>();
-                if (val.containsKey("name")) spec.put("name", String.valueOf(val.get("name")));
-                if (val.containsKey("type")) spec.put("type", String.valueOf(val.get("type")));
+                if (value instanceof Map<?, ?> mapVal) {
+                    if (mapVal.containsKey("name")) spec.put("name", String.valueOf(mapVal.get("name")));
+                    if (mapVal.containsKey("type")) spec.put("type", String.valueOf(mapVal.get("type")));
+                } else if (value instanceof String strVal) {
+                    // Shape 2: {"local_8": "dwFlags"} — rename-only shorthand.
+                    if (!strVal.isEmpty()) spec.put("name", strVal);
+                } else if (value instanceof List<?> listVal) {
+                    // Shape 3: {"local_8": ["dwFlags", "uint"]} — positional.
+                    if (listVal.size() >= 1 && listVal.get(0) != null) {
+                        spec.put("name", String.valueOf(listVal.get(0)));
+                    }
+                    if (listVal.size() >= 2 && listVal.get(1) != null) {
+                        spec.put("type", String.valueOf(listVal.get(1)));
+                    }
+                } else if (value != null) {
+                    return Response.err("variables['" + entry.getKey() + "'] must be an object "
+                            + "({\"name\": ..., \"type\": ...}), a string (rename-only), or a "
+                            + "[name, type] array. Got: " + value.getClass().getSimpleName()
+                            + ". Example: {\"" + entry.getKey() + "\": {\"name\": \"dwFlags\", \"type\": \"uint\"}}");
+                }
                 variables.put(entry.getKey(), spec);
             }
         } catch (Exception e) {
