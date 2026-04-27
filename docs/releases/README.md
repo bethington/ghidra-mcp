@@ -7,6 +7,14 @@ For the full version history, see [CHANGELOG.md](../../CHANGELOG.md) in the proj
 For the release preparation runbook, see
 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
+## Unreleased
+
+- **GUI-configurable function-name enforcement** — the **Strict Function Name
+  Enforcement** Ghidra Tool Option controls whether
+  `rename_function_by_address` hard-rejects names that fail the verb-tier or
+  token-subset gates. The default remains strict; disabling the option lets
+  noncompliant names proceed while returning the same issues as warnings.
+
 ## Current Releases
 
 ### v5.6.0 (Latest) — release regression + fun-doc workflow

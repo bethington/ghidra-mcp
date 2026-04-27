@@ -66,6 +66,7 @@ import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.EndpointDef;
 import com.xebyte.core.FrontEndProgramProvider;
 import com.xebyte.core.JsonHelper;
+import com.xebyte.core.NamingPolicy;
 import com.xebyte.core.ServerManager;
 
 import ghidra.framework.main.ApplicationLevelPlugin;
@@ -187,6 +188,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private static final int DEFAULT_PORT = 8089;
     private static final String UDS_ENABLED_OPTION = "Enable UDS Transport";
     private static final String TCP_ENABLED_OPTION = "Enable TCP Transport";
+    private static final String STRICT_FUNCTION_NAMES_OPTION = "Strict Function Name Enforcement";
     private static final boolean DEFAULT_UDS_ENABLED = !System.getProperty("os.name", "").toLowerCase().contains("win");
     private static final boolean DEFAULT_TCP_ENABLED = System.getProperty("os.name", "").toLowerCase().contains("win");
 
@@ -291,6 +293,13 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             "Enable Unix Domain Socket transport for local multi-instance support.");
         options.registerOption(TCP_ENABLED_OPTION, DEFAULT_TCP_ENABLED, null,
             "Enable TCP transport for remote/network access.");
+        options.registerOption(STRICT_FUNCTION_NAMES_OPTION,
+            NamingPolicy.defaultStrictFunctionNames(), null,
+            "Reject rename_function_by_address names that fail the built-in " +
+            "function-name quality checks. Disable when your naming convention " +
+            "does not match the built-in heuristic; convention warnings are still returned. " +
+            "Takes effect when the MCP server starts or restarts.");
+        refreshNamingPolicyFromOptions();
 
         boolean udsEnabled = options.getBoolean(UDS_ENABLED_OPTION, DEFAULT_UDS_ENABLED);
         boolean tcpEnabled = options.getBoolean(TCP_ENABLED_OPTION, DEFAULT_TCP_ENABLED);
@@ -340,6 +349,14 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         return server != null;
     }
 
+    private void refreshNamingPolicyFromOptions() {
+        Options options = tool.getOptions(OPTION_CATEGORY_NAME);
+        boolean strict = options.getBoolean(STRICT_FUNCTION_NAMES_OPTION,
+            NamingPolicy.defaultStrictFunctionNames());
+        NamingPolicy.getInstance().setStrictFunctionNames(strict, "tool_options");
+        Msg.info(this, "GhidraMCP strict function-name enforcement: " + strict);
+    }
+
     private void stopServer() {
         if (server != null) {
             Msg.info(this, "Stopping GhidraMCP HTTP server...");
@@ -366,6 +383,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             @Override
             public void actionPerformed(ActionContext context) {
                 Options opts = tool.getOptions(OPTION_CATEGORY_NAME);
+                refreshNamingPolicyFromOptions();
                 boolean uds = opts.getBoolean(UDS_ENABLED_OPTION, DEFAULT_UDS_ENABLED);
                 boolean tcp = opts.getBoolean(TCP_ENABLED_OPTION, DEFAULT_TCP_ENABLED);
                 StringBuilder started = new StringBuilder();
@@ -433,6 +451,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 String message = "GhidraMCP Server Status\n\n" +
                     "UDS: " + udsStatus + "\n" +
                     "TCP: " + tcpStatus + "\n" +
+                    "Strict function names: " + NamingPolicy.getInstance().isStrictFunctionNames() + "\n" +
                     "Version: " + VersionInfo.getFullVersion() + "\n" +
                     "Endpoints: " + VersionInfo.getEndpointCount();
                 Msg.showInfo(getClass(), null, "GhidraMCP", message);
@@ -451,6 +470,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private void startServer() throws IOException {
         // Read the configured port
         Options options = tool.getOptions(OPTION_CATEGORY_NAME);
+        refreshNamingPolicyFromOptions();
         int port = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
 
         // Stop existing server if running (e.g., if plugin is reloaded)
