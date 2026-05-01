@@ -106,8 +106,10 @@ def candidate_maven_commands() -> list[Path]:
 
     m2_home = os.environ.get("M2_HOME")
     if m2_home:
-        candidates.append(Path(m2_home) / "bin" / "mvn")
-        candidates.append(Path(m2_home) / "bin" / "mvn.cmd")
+        if sys.platform == "win32":
+            candidates.append(Path(m2_home) / "bin" / "mvn.cmd")
+        else:
+            candidates.append(Path(m2_home) / "bin" / "mvn")
 
     candidates.extend(
         [
