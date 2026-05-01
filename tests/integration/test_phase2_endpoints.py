@@ -80,15 +80,20 @@ class TestSearchFunctionsEnhanced:
 
     @pytest.mark.requires_program
     def test_search_functions_enhanced_basic(self, http_client):
-        """Test basic enhanced search."""
+        """Test basic enhanced search and verify isThunk/isExternal fields."""
         response = http_client.get("/search_functions_enhanced", params={
             "name_pattern": "FUN_",
             "limit": 10
         })
         assert response.status_code == 200
-        # Should return JSON with total and results
-        text = response.text
-        assert "total" in text or "results" in text or "error" in text.lower()
+        data = response.json()
+        assert "total" in data
+        assert "results" in data
+        for item in data["results"]:
+            assert "isThunk" in item, f"missing isThunk: {item}"
+            assert "isExternal" in item, f"missing isExternal: {item}"
+            assert isinstance(item["isThunk"], bool)
+            assert isinstance(item["isExternal"], bool)
 
     @pytest.mark.requires_program
     def test_search_functions_enhanced_with_filters(self, http_client):
@@ -110,6 +115,70 @@ class TestSearchFunctionsEnhanced:
             "limit": 5
         })
         assert response.status_code == 200
+
+    @pytest.mark.requires_program
+    def test_search_functions_enhanced_filter_is_thunk_true(self, http_client):
+        """is_thunk=true should return only thunks."""
+        response = http_client.get("/search_functions_enhanced", params={
+            "is_thunk": "true",
+            "limit": 50
+        })
+        assert response.status_code == 200
+        data = response.json()
+        for item in data["results"]:
+            assert item["isThunk"] is True, f"non-thunk leaked through is_thunk=true: {item}"
+
+    @pytest.mark.requires_program
+    def test_search_functions_enhanced_filter_is_thunk_false(self, http_client):
+        """is_thunk=false should exclude thunks."""
+        response = http_client.get("/search_functions_enhanced", params={
+            "is_thunk": "false",
+            "limit": 50
+        })
+        assert response.status_code == 200
+        data = response.json()
+        for item in data["results"]:
+            assert item["isThunk"] is False, f"thunk leaked through is_thunk=false: {item}"
+
+    @pytest.mark.requires_program
+    def test_search_functions_enhanced_filter_is_external_true(self, http_client):
+        """is_external=true should return only externals (or nothing if fixture has none)."""
+        response = http_client.get("/search_functions_enhanced", params={
+            "is_external": "true",
+            "limit": 50
+        })
+        assert response.status_code == 200
+        data = response.json()
+        for item in data["results"]:
+            assert item["isExternal"] is True, f"non-external leaked through is_external=true: {item}"
+
+    @pytest.mark.requires_program
+    def test_search_functions_enhanced_filter_is_external_false(self, http_client):
+        """is_external=false should exclude externals."""
+        response = http_client.get("/search_functions_enhanced", params={
+            "is_external": "false",
+            "limit": 50
+        })
+        assert response.status_code == 200
+        data = response.json()
+        for item in data["results"]:
+            assert item["isExternal"] is False, f"external leaked through is_external=false: {item}"
+
+    @pytest.mark.requires_program
+    def test_search_functions_enhanced_filter_combined(self, http_client):
+        """Combined is_thunk=false + is_external=false + min_xrefs filter composes correctly."""
+        response = http_client.get("/search_functions_enhanced", params={
+            "is_thunk": "false",
+            "is_external": "false",
+            "min_xrefs": 1,
+            "limit": 25
+        })
+        assert response.status_code == 200
+        data = response.json()
+        for item in data["results"]:
+            assert item["isThunk"] is False
+            assert item["isExternal"] is False
+            assert item["xref_count"] >= 1
 
 
 class TestAnalyzeFunctionComplete:
