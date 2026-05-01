@@ -1,0 +1,22 @@
+{
+  "description": "Typical fun-doc output on get_stat_list_layer — recognizes the raw unvalidated field-read pattern, names appropriately, plate calls out the lack of validation.",
+  "wall_time_sec": 9.4,
+  "captured": {
+    "name": "GetStatListLayer",
+    "return_type": "uint",
+    "parameters": [
+      {"name": "pStatList", "type": "byte *"}
+    ],
+    "locals": [],
+    "plate": "Raw field read: returns the DWORD at offset +0x04 of a StatList structure. Unvalidated — no null check and no magic number validation. Callers must ensure the pointer is valid before calling."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001170"}, "status": "ok"},
+    {"tool": "get_function_signature", "args": {"address": "0x10001170"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001170"}, "status": "ok"},
+    {"tool": "set_function_prototype", "args": {"address": "0x10001170", "prototype": "uint GetStatListLayer(byte *pStatList)"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001170", "name": "GetStatListLayer"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001170", "comment": "Raw field read..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001170"}, "status": "ok"}
+  ]
+}

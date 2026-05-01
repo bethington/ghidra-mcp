@@ -11,7 +11,9 @@ Features:
 """
 
 import json
+import os
 import threading
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -27,22 +29,183 @@ import uuid
 # even with multiple concurrent workers hitting the threshold simultaneously.
 _adaptive_refresh_lock = threading.Lock()
 
+HEARTBEAT_INTERVAL_SEC = float(os.environ.get("FUNDOC_HEARTBEAT_INTERVAL_SEC", "30"))
+STALL_KILL_THRESHOLD_SEC = float(os.environ.get("FUNDOC_STALL_KILL_THRESHOLD_SEC", "900"))
+
 
 class WorkerManager:
     """Manages concurrent documentation worker threads (max 3)."""
 
     MAX_WORKERS = 12
+    RESTORE_META_KEY = "dashboard_active_workers"
 
-    def __init__(self, state_file, bus, socketio):
+    def __init__(self, state_file, bus, socketio, load_queue, save_queue):
         self._workers = {}
         self._lock = threading.Lock()
         self._state_file = state_file
         self._bus = bus
         self._socketio = socketio
         self._in_progress_keys = set()
+        self._load_queue = load_queue
+        self._save_queue = save_queue
+        self._bus.on("provider_timeout", self._handle_provider_timeout)
+        self._watchdog_stop = threading.Event()
+        self._watchdog_thread = threading.Thread(
+            target=self._watchdog_loop,
+            name="fun-doc-worker-watchdog",
+            daemon=True,
+        )
+        self._watchdog_thread.start()
+
+    def _set_phase(self, worker_id, phase):
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if not worker:
+                return
+            worker["phase"] = phase
+            worker["phase_since"] = datetime.now().isoformat()
+
+    def _watchdog_loop(self):
+        from event_log import log_event
+
+        while not self._watchdog_stop.wait(HEARTBEAT_INTERVAL_SEC):
+            now = datetime.now()
+            heartbeats = []
+            kill_requests = []
+            with self._lock:
+                for worker_id, worker in self._workers.items():
+                    if worker.get("status") not in ("starting", "running", "stopping", "quota_paused"):
+                        continue
+                    last_raw = worker.get("last_heartbeat_at") or worker.get("started_at")
+                    try:
+                        last_dt = datetime.fromisoformat(last_raw)
+                    except (TypeError, ValueError):
+                        last_dt = now
+                    stale_sec = max(0.0, (now - last_dt).total_seconds())
+                    phase = worker.get("phase", "unknown")
+                    if stale_sec > STALL_KILL_THRESHOLD_SEC and not worker.get("stall_kill_fired", False):
+                        worker["stall_kill_fired"] = True
+                        worker["stop_flag"].set()
+                        worker["status"] = "stopping"
+                        worker["restore_on_restart"] = False
+                        worker["last_alert"] = {
+                            "type": "stalled_kill",
+                            "message": f"Worker stalled for {int(stale_sec)}s in phase {phase}",
+                            "phase": phase,
+                            "stale_sec": stale_sec,
+                            "at": now.isoformat(),
+                        }
+                        kill_requests.append((worker_id, phase, stale_sec))
+                        continue
+                    worker["last_heartbeat_at"] = now.isoformat()
+                    heartbeats.append({
+                        "worker_id": worker_id,
+                        "provider": worker.get("provider"),
+                        "status": worker.get("status"),
+                        "phase": phase,
+                        "stale_sec": stale_sec,
+                    })
+
+            for hb in heartbeats:
+                log_event("worker.heartbeat", **hb)
+
+            for worker_id, phase, stale_sec in kill_requests:
+                subprocesses_killed = 0
+                try:
+                    from fun_doc import kill_worker_subprocesses
+                    subprocesses_killed = kill_worker_subprocesses(worker_id)
+                except Exception:
+                    subprocesses_killed = 0
+                log_event(
+                    "worker.stalled_kill",
+                    worker_id=worker_id,
+                    phase=phase,
+                    stale_sec=stale_sec,
+                    threshold_sec=int(STALL_KILL_THRESHOLD_SEC),
+                    subprocesses_killed=subprocesses_killed,
+                )
+
+            if heartbeats or kill_requests:
+                self._emit_status()
+
+    def _serialize_worker(self, worker):
+        return {
+            "provider": worker["provider"],
+            "count": worker["count"],
+            "continuous": bool(worker.get("continuous", False)),
+            "model": worker.get("model"),
+            "binary": worker.get("binary"),
+        }
+
+    def _persist_active_workers(self):
+        try:
+            queue = self._load_queue()
+            meta = dict(queue.get("meta") or {})
+            meta[self.RESTORE_META_KEY] = [
+                self._serialize_worker(w)
+                for w in self._workers.values()
+                if w.get("restore_on_restart", True)
+                and w["status"] in ("starting", "running")
+            ]
+            queue["meta"] = meta
+            self._save_queue(queue)
+        except Exception as e:
+            print(f"  Worker restore-state persist failed: {e}")
+
+    def restore_workers(self):
+        try:
+            queue = self._load_queue()
+            specs = list((queue.get("meta") or {}).get(self.RESTORE_META_KEY) or [])
+        except Exception as e:
+            print(f"  Worker restore-state load failed: {e}")
+            return []
+
+        restored = []
+        for spec in specs[: self.MAX_WORKERS]:
+            try:
+                restored.append(
+                    self.start_worker(
+                        provider=spec.get("provider", "minimax"),
+                        count=spec.get("count", 5),
+                        model=spec.get("model"),
+                        binary=spec.get("binary"),
+                        continuous=bool(spec.get("continuous", False)),
+                        restored=True,
+                    )
+                )
+            except Exception as e:
+                print(f"  Worker restore skipped: {e}")
+        return restored
+
+    def _handle_provider_timeout(self, data):
+        if not isinstance(data, dict):
+            return
+        worker_id = data.get("worker_id")
+        if not worker_id:
+            return
+
+        with self._lock:
+            worker = self._workers.get(worker_id)
+            if not worker:
+                return
+            worker["timeout_count"] = worker.get("timeout_count", 0) + 1
+            worker["last_alert"] = {
+                "type": "provider_timeout",
+                "provider": data.get("provider"),
+                "timeout_secs": data.get("timeout_secs"),
+                "message": data.get("message") or "Provider timeout",
+                "at": datetime.now().isoformat(),
+            }
+        self._emit_status()
 
     def start_worker(
-        self, provider="minimax", count=5, model=None, binary=None, continuous=False
+        self,
+        provider="minimax",
+        count=5,
+        model=None,
+        binary=None,
+        continuous=False,
+        restored=False,
     ):
         with self._lock:
             active = {
@@ -60,6 +223,27 @@ class WorkerManager:
 
             worker_id = str(uuid.uuid4())[:8]
             stop_flag = threading.Event()
+
+            # Capture a frozen snapshot of every queue.config field that
+            # should remain constant for this worker's lifetime. See
+            # fun_doc.build_worker_config_snapshot for the schema. The
+            # snapshot is opaque to WorkerManager — _run_worker passes
+            # it through to process_function on every iteration. Nothing
+            # mutates the snapshot after this point; live config edits via
+            # the dashboard apply only to workers started AFTER the edit.
+            try:
+                from fun_doc import build_worker_config_snapshot, load_priority_queue
+                config_snapshot = build_worker_config_snapshot(
+                    load_priority_queue(), provider
+                )
+            except Exception as e:
+                # Snapshot is best-effort. If we can't build one (rare —
+                # corrupt queue file etc.), fall back to None and the
+                # worker will use live config reads, matching pre-snapshot
+                # behavior.
+                print(f"  WARNING: config snapshot build failed: {e}")
+                config_snapshot = None
+
             worker = {
                 "id": worker_id,
                 "provider": provider,
@@ -71,6 +255,15 @@ class WorkerManager:
                 "stop_flag": stop_flag,
                 "started_at": datetime.now().isoformat(),
                 "status": "starting",
+                "restored": bool(restored),
+                "restore_on_restart": True,
+                "timeout_count": 0,
+                "last_alert": None,
+                "config_snapshot": config_snapshot,
+                "phase": "starting",
+                "phase_since": datetime.now().isoformat(),
+                "stall_kill_fired": False,
+                "last_heartbeat_at": datetime.now().isoformat(),
                 "progress": {
                     "completed": 0,
                     "skipped": 0,
@@ -79,6 +272,7 @@ class WorkerManager:
                 },
             }
             self._workers[worker_id] = worker
+            self._persist_active_workers()
 
         thread = threading.Thread(
             target=self._run_worker, args=(worker_id,), daemon=True
@@ -95,7 +289,19 @@ class WorkerManager:
                 raise ValueError(f"Unknown worker: {worker_id}")
             worker["stop_flag"].set()
             worker["status"] = "stopping"
+            worker["restore_on_restart"] = False
+            self._persist_active_workers()
         self._emit_status()
+
+    def has_active_workers(self):
+        """True if any doc worker is starting/running/stopping. Used by the
+        background InventoryScorer to yield MCP bandwidth (Q1 idle-time backfill,
+        Q7 cooperative pause)."""
+        with self._lock:
+            return any(
+                w["status"] in ("starting", "running", "stopping")
+                for w in self._workers.values()
+            )
 
     def get_status(self):
         with self._lock:
@@ -113,8 +319,25 @@ class WorkerManager:
             for wid in stale:
                 del self._workers[wid]
 
-            return [
-                {
+            rows = []
+            for w in self._workers.values():
+                try:
+                    phase_since_dt = (
+                        datetime.fromisoformat(w["phase_since"])
+                        if w.get("phase_since")
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    phase_since_dt = None
+                try:
+                    heartbeat_dt = datetime.fromisoformat(
+                        w.get("last_heartbeat_at") or w.get("started_at")
+                    )
+                    heartbeat_age = (now - heartbeat_dt).total_seconds()
+                except (TypeError, ValueError):
+                    heartbeat_age = 0.0
+                rows.append(
+                    {
                     "id": w["id"],
                     "provider": w["provider"],
                     "count": w["count"],
@@ -122,11 +345,35 @@ class WorkerManager:
                     "model": w["model"],
                     "binary": w["binary"],
                     "status": w["status"],
+                    "restored": bool(w.get("restored", False)),
+                    "timeout_count": int(w.get("timeout_count", 0) or 0),
+                    "last_alert": (
+                        dict(w["last_alert"]) if w.get("last_alert") else None
+                    ),
                     "progress": dict(w["progress"]),
                     "started_at": w["started_at"],
-                }
-                for w in self._workers.values()
-            ]
+                    # Snapshot is what the dashboard renders in the per-worker
+                    # config sub-line. Unconditionally emitted so the dashboard
+                    # can detect drift vs current live config and show the
+                    # save-time toast (Q5). None for legacy/CLI workers; the
+                    # dashboard renders no sub-line in that case.
+                    "config_snapshot": w.get("config_snapshot"),
+                    # Quota-pause fields populated when status == "quota_paused".
+                    "paused_until": w.get("paused_until"),
+                    "paused_reason": w.get("paused_reason"),
+                    "phase": w.get("phase"),
+                    "phase_since": w.get("phase_since"),
+                    "phase_age_sec": (
+                        max(0.0, (now - phase_since_dt).total_seconds())
+                        if phase_since_dt
+                        else None
+                    ),
+                    "last_heartbeat_at": w.get("last_heartbeat_at"),
+                    "stall_kill_fired": bool(w.get("stall_kill_fired", False)),
+                    "is_stale": heartbeat_age > STALL_KILL_THRESHOLD_SEC,
+                    }
+                )
+            return rows
 
     def _run_worker(self, worker_id):
         """Worker loop — fetches one function at a time to avoid conflicts with other workers."""
@@ -139,19 +386,20 @@ class WorkerManager:
         try:
             from fun_doc import (
                 load_state,
-                save_state,
                 get_next_functions,
                 start_session,
-                end_session,
+                finalize_worker_session,
                 process_function,
                 refresh_candidate_scores,
                 load_priority_queue,
                 reset_handoff_counter,
                 _bump_handoff_counter,
+                get_auto_escalation_provider,
                 update_function_state,
             )
 
             worker["status"] = "running"
+            self._set_phase(worker_id, "starting")
             self._emit_status()
             self._bus.emit(
                 "worker_started",
@@ -160,8 +408,33 @@ class WorkerManager:
                     "provider": worker["provider"],
                     "count": worker["count"],
                     "continuous": worker.get("continuous", False),
+                    "restored": worker.get("restored", False),
                 },
             )
+
+            # Persist worker.started to events.jsonl with the frozen config
+            # snapshot. This is the durable record that lets a future analysis
+            # of runs.jsonl join on worker_id to see the exact config under
+            # which each function was processed. Snapshot is None on workers
+            # that started before the snapshot field existed (legacy/CLI),
+            # which is fine — the field is just absent in those records.
+            try:
+                from event_log import log_event as _log_event
+                _log_event(
+                    "worker.started",
+                    worker_id=worker_id,
+                    provider=worker["provider"],
+                    count=worker["count"],
+                    continuous=bool(worker.get("continuous", False)),
+                    binary=worker.get("binary"),
+                    model=worker.get("model"),
+                    restored=bool(worker.get("restored", False)),
+                    config_snapshot=worker.get("config_snapshot"),
+                )
+            except Exception:
+                # Event-log failures must not abort worker startup; the worker
+                # is still functional, just less observable.
+                pass
 
             state = load_state()
             original_binary = state.get("active_binary")
@@ -183,6 +456,7 @@ class WorkerManager:
             #   4. Short timeout (60s) + no individual fallback — fail fast
             #   5. Count clamped to 20 (was 50)
             try:
+                self._set_phase(worker_id, "pre_refresh")
                 pre_queue = load_priority_queue()
                 pre_cfg = pre_queue.get("config") or {}
                 pre_meta = pre_queue.get("meta") or {}
@@ -241,6 +515,7 @@ class WorkerManager:
             except Exception as e:
                 print(f"  Pre-refresh failed (continuing with stale state): {e}")
 
+            self._set_phase(worker_id, "session_start")
             session = start_session(state)
             processed = 0
             # Threshold for adaptive refresh — this worker reads the shared
@@ -253,10 +528,77 @@ class WorkerManager:
                 load_priority_queue().get("config", {}).get("good_enough_score", 80)
             )
 
+            # Resolve the worker's primary FULL model from the frozen snapshot.
+            # The quota-pause gate keys on (provider, model); we check the
+            # FULL-mode model since that's the dominant call on most functions.
+            # Audit/handoff models on the same provider get their own pause
+            # treatment via the Q10 skip-silently path inside process_function.
+            def _worker_primary_model():
+                snap = worker.get("config_snapshot") or {}
+                providers = snap.get("providers") or {}
+                p_entry = providers.get(worker["provider"]) or {}
+                return (
+                    (p_entry.get("models") or {}).get("FULL")
+                    or worker.get("model")
+                )
+
+            def _yield_for_quota_pause():
+                """If our (provider, FULL-model) is walled, set status to
+                quota_paused and sleep until the pause clears or stop fires.
+                Returns True if we yielded (caller should `continue` the loop)."""
+                from provider_pause import get_default_manager as _get_pm
+
+                primary_model = _worker_primary_model()
+                if not primary_model:
+                    return False
+                pm = _get_pm()
+                paused_until = pm.wait_until(worker["provider"], primary_model)
+                if paused_until is None:
+                    return False
+                # Enter quota_paused state and sleep with periodic re-check.
+                worker["status"] = "quota_paused"
+                worker["paused_until"] = paused_until.isoformat()
+                worker["paused_reason"] = (
+                    pm.reason(worker["provider"], primary_model) or "quota wall"
+                )
+                self._emit_status()
+                while not worker["stop_flag"].is_set():
+                    now = datetime.now()
+                    remaining = (paused_until - now).total_seconds()
+                    if remaining <= 0:
+                        break
+                    # Re-check pause status every 30s so manual clears and
+                    # external pause-set mutations get picked up promptly.
+                    if worker["stop_flag"].wait(timeout=min(remaining, 30.0)):
+                        break  # stop requested mid-pause
+                    paused_until = pm.wait_until(worker["provider"], primary_model)
+                    if paused_until is None:
+                        break
+                if not worker["stop_flag"].is_set():
+                    worker["status"] = "running"
+                    worker.pop("paused_until", None)
+                    worker.pop("paused_reason", None)
+                    self._emit_status()
+                return True
+
+            # Q8: manual start during a pause — yield immediately at loop entry
+            # so the worker enters quota_paused without burning a redundant API
+            # call to discover the wall.
+            _yield_for_quota_pause()
+
             while not worker["stop_flag"].is_set() and (
                 worker["continuous"] or processed < worker["count"]
             ):
+                # Per-iteration pause check (Q1): another worker may have
+                # discovered the wall while we were idle/processing. Yield
+                # before picking the next function.
+                if _yield_for_quota_pause():
+                    if worker["stop_flag"].is_set():
+                        break
+                    continue
+
                 # Reload state each iteration to get fresh scores/queue
+                self._set_phase(worker_id, "select_function")
                 state = load_state()
                 if worker["binary"]:
                     state["active_binary"] = worker["binary"]
@@ -294,6 +636,7 @@ class WorkerManager:
                     },
                 )
 
+                self._set_phase(worker_id, "process_function")
                 result = process_function(
                     key,
                     func,
@@ -301,19 +644,11 @@ class WorkerManager:
                     model=worker["model"],
                     provider=worker["provider"],
                     stop_flag=worker["stop_flag"],
+                    config_snapshot=worker.get("config_snapshot"),
                 )
 
-                # Auto-escalation: if the function didn't reach good_enough
-                # (either it made progress but not enough, or it failed
-                # outright), immediately retry with a stronger model before
-                # releasing the key. The escalation order is:
-                # minimax → claude → codex → (give up).
-                ESCALATION_ORDER = {
-                    "minimax": "claude",
-                    "claude": "codex",
-                    "codex": None,  # no further escalation
-                    "gemini": "claude",
-                }
+                # Optional immediate retry: only use an explicitly configured
+                # provider. Do not silently fall back to a stronger provider.
                 if (
                     result in ("completed", "partial", "failed", "needs_redo")
                     and not worker["stop_flag"].is_set()
@@ -323,7 +658,9 @@ class WorkerManager:
                     fresh_func = fresh.get("functions", {}).get(key)
                     if fresh_func:
                         current_score = fresh_func.get("score", 0)
-                        escalate_to = ESCALATION_ORDER.get(worker["provider"])
+                        escalate_to = get_auto_escalation_provider(
+                            worker["provider"], queue=load_priority_queue()
+                        )
                         if (
                             current_score < good_enough
                             and current_score > 0
@@ -350,6 +687,7 @@ class WorkerManager:
                             fresh_func["last_escalation_from"] = worker["provider"]
                             fresh_func["last_escalation_to"] = escalate_to
                             update_function_state(key, fresh_func)
+                            self._set_phase(worker_id, "auto_escalate")
                             escalate_result = process_function(
                                 key,
                                 fresh_func,
@@ -357,6 +695,7 @@ class WorkerManager:
                                 model=None,  # auto-select for the escalation provider
                                 provider=escalate_to,
                                 stop_flag=worker["stop_flag"],
+                                config_snapshot=worker.get("config_snapshot"),
                             )
                             # Use the escalation result for stats
                             if escalate_result in ("completed", "partial"):
@@ -444,6 +783,7 @@ class WorkerManager:
                                 except (ValueError, TypeError):
                                     pass
                             if count >= STALE_STREAK_THRESHOLD and cooldown_ok:
+                                self._set_phase(worker_id, "adaptive_refresh")
                                 print(
                                     f"  Detected {count} stale skips — batch refreshing..."
                                 )
@@ -471,13 +811,16 @@ class WorkerManager:
 
                 self._emit_status()
 
-            end_session(state)
+            # Persist session + optional active_binary restore via a
+            # read-modify-write that leaves state["functions"] alone. A
+            # full-state save here would write the functions snapshot this
+            # worker loaded, clobbering per-function updates written
+            # concurrently by other workers via update_function_state().
+            self._set_phase(worker_id, "finalize_session")
             if worker["binary"] and original_binary != worker["binary"]:
-                if original_binary:
-                    state["active_binary"] = original_binary
-                else:
-                    state.pop("active_binary", None)
-            save_state(state)
+                finalize_worker_session(session, active_binary=original_binary)
+            else:
+                finalize_worker_session(session)
 
         except Exception as e:
             self._bus.emit(
@@ -487,11 +830,13 @@ class WorkerManager:
             worker["status"] = (
                 "finished" if not worker["stop_flag"].is_set() else "stopped"
             )
+            worker["restore_on_restart"] = False
             worker["finished_at"] = datetime.now().isoformat()
             worker["progress"]["current"] = None
             with self._lock:
                 if current_key:
                     self._in_progress_keys.discard(current_key)
+                self._persist_active_workers()
             self._emit_status()
             self._bus.emit(
                 "worker_stopped",
@@ -542,6 +887,7 @@ def create_app(state_file, event_bus=None):
         "worker_started",
         "worker_progress",
         "worker_stopped",
+        "provider_timeout",
     ]:
         bus.on(evt, bridge(evt))
 
@@ -708,6 +1054,7 @@ def create_app(state_file, event_bus=None):
             "avg_delta": 0,
             "success_rate": 0,
             "by_provider": {},
+            "handoffs": {"total": 0, "top_pairs": [], "top_chains": []},
             "stuck_functions": [],
             "failure_modes": {},
             "regressions": 0,
@@ -743,13 +1090,16 @@ def create_app(state_file, event_bus=None):
                 "deltas": [],
                 "success": 0,
                 "failed": 0,
-                "tool_calls": [],
+                "known_tool_calls": [],
+                "unknown_tool_runs": 0,
                 "today_runs": 0,
                 "today_deltas": [],
                 "today_success": 0,
             }
         )
         func_results = defaultdict(lambda: {"fails": 0, "name": "", "address": ""})
+        handoff_pairs = defaultdict(int)
+        handoff_chains = defaultdict(int)
 
         # Audit tracking
         audit_ran = 0
@@ -771,11 +1121,25 @@ def create_app(state_file, event_bus=None):
             after = l.get("score_after")
             result = l.get("result", "")
             provider = l.get("provider", "unknown")
+            requested_provider = l.get("requested_provider") or provider
+            provider_chain = l.get("provider_chain") or [requested_provider]
             delta = l.get("score_delta")
             tc = l.get("tool_calls")
+            tc_known = bool(l.get("tool_calls_known", tc is not None and tc >= 0))
             l_today = l.get("timestamp", "").startswith(today)
 
             bp = by_provider[provider]
+
+            if not isinstance(provider_chain, list) or not provider_chain:
+                provider_chain = (
+                    [requested_provider, provider]
+                    if requested_provider != provider
+                    else [provider]
+                )
+            chain_label = " -> ".join(str(x) for x in provider_chain)
+            if requested_provider != provider or len(provider_chain) > 1:
+                handoff_chains[chain_label] += 1
+                handoff_pairs[f"{requested_provider} -> {provider}"] += 1
 
             if before is not None and after is not None:
                 d = delta if delta is not None else (after - before)
@@ -792,8 +1156,10 @@ def create_app(state_file, event_bus=None):
             if l_today:
                 bp["today_runs"] += 1
 
-            if tc is not None:
-                bp["tool_calls"].append(tc)
+            if tc_known and isinstance(tc, (int, float)) and tc >= 0:
+                bp["known_tool_calls"].append(tc)
+            else:
+                bp["unknown_tool_runs"] += 1
 
             if result == "completed":
                 success += 1
@@ -842,13 +1208,15 @@ def create_app(state_file, event_bus=None):
             d = data["deltas"]
             r = data["runs"]
             td = data["today_deltas"]
-            tc = data["tool_calls"]
+            tc = data["known_tool_calls"]
             provider_stats[p] = {
                 "runs": r,
                 "avg_delta": round(sum(d) / len(d), 1) if d else 0,
                 "success_rate": round(data["success"] / r * 100, 1) if r else 0,
                 "fail_rate": round(data["failed"] / r * 100, 1) if r else 0,
                 "avg_tools": round(sum(tc) / len(tc), 1) if tc else 0,
+                "known_tool_runs": len(tc),
+                "unknown_tool_runs": data["unknown_tool_runs"],
                 "today_runs": data["today_runs"],
                 "today_avg_delta": round(sum(td) / len(td), 1) if td else 0,
                 "today_success_rate": (
@@ -893,6 +1261,25 @@ def create_app(state_file, event_bus=None):
             "avg_delta": round(sum(deltas) / len(deltas), 1) if deltas else 0,
             "success_rate": round(success / len(logs) * 100, 1) if logs else 0,
             "by_provider": provider_stats,
+            "handoffs": {
+                "total": sum(handoff_chains.values()),
+                "top_pairs": sorted(
+                    (
+                        {"pair": pair, "count": count}
+                        for pair, count in handoff_pairs.items()
+                    ),
+                    key=lambda x: x["count"],
+                    reverse=True,
+                )[:5],
+                "top_chains": sorted(
+                    (
+                        {"chain": chain, "count": count}
+                        for chain, count in handoff_chains.items()
+                    ),
+                    key=lambda x: x["count"],
+                    reverse=True,
+                )[:5],
+            },
             "stuck_functions": stuck,
             "failure_modes": dict(failure_modes),
             "regressions": regressions,
@@ -1113,7 +1500,66 @@ def create_app(state_file, event_bus=None):
         sio_emit("scan_acknowledged", {"refresh": refresh, "program": program_filter})
 
     # --- Worker management ---
-    worker_mgr = WorkerManager(app.config["STATE_FILE"], bus, socketio)
+    worker_mgr = WorkerManager(
+        app.config["STATE_FILE"],
+        bus,
+        socketio,
+        load_queue,
+        save_queue,
+    )
+
+    # --- Background inventory scorer (Q1-Q12 design, opt-in via config) ---
+    from inventory_scorer import (
+        InventoryScorer,
+        load_inventory,
+        save_inventory,
+        compute_per_binary_inventory,
+        status_for,
+    )
+
+    def _project_folder():
+        try:
+            return load_state().get("project_folder")
+        except Exception:
+            return None
+
+    def _emit_inventory_status(status: dict):
+        """Bridge scorer status changes -> WebSocket so the dashboard widget
+        and Inventory panel update without polling."""
+        try:
+            socketio.emit("inventory_status", status or {})
+        except Exception:
+            pass
+
+    def _make_scorer():
+        from fun_doc import (
+            _fetch_programs,
+            _fetch_function_list,
+            _batch_score,
+            load_state as fd_load_state,
+            save_state as fd_save_state,
+        )
+
+        return InventoryScorer(
+            worker_manager=worker_mgr,
+            project_folder_getter=_project_folder,
+            state_dir=Path(__file__).parent,
+            load_state=fd_load_state,
+            save_state=fd_save_state,
+            fetch_programs=_fetch_programs,
+            fetch_function_list=_fetch_function_list,
+            batch_score=_batch_score,
+            on_status_change=_emit_inventory_status,
+        )
+
+    inventory_scorer = _make_scorer()
+
+    # Honor the persisted opt-in flag at startup.
+    try:
+        if (load_queue().get("config") or {}).get("inventory_enabled"):
+            inventory_scorer.set_enabled(True)
+    except Exception as _exc:
+        print(f"  Inventory scorer auto-start skipped: {_exc}")
 
     @socketio.on("request_start_worker")
     def handle_start_worker(data):
@@ -1306,6 +1752,8 @@ def create_app(state_file, event_bus=None):
     def queue_config():
         from fun_doc import DEFAULT_QUEUE_CONFIG
 
+        supported_providers = ("claude", "codex", "minimax", "gemini")
+
         queue = load_queue()
         if request.method == "POST":
             data = request.json or {}
@@ -1374,11 +1822,250 @@ def create_app(state_file, event_bus=None):
                         jsonify({"error": "audit_min_delta must be int 0-100"}),
                         400,
                     )
+            if "provider_max_turns" in data:
+                provider_max_turns = data["provider_max_turns"]
+                if not isinstance(provider_max_turns, dict):
+                    return (
+                        jsonify({"error": "provider_max_turns must be an object"}),
+                        400,
+                    )
+
+                normalized_turns = {}
+                for provider, turn_value in provider_max_turns.items():
+                    if provider not in supported_providers:
+                        return (
+                            jsonify(
+                                {
+                                    "error": f"unsupported provider in provider_max_turns: {provider}"
+                                }
+                            ),
+                            400,
+                        )
+                    try:
+                        normalized_turns[provider] = max(1, int(turn_value))
+                    except (TypeError, ValueError):
+                        return (
+                            jsonify(
+                                {
+                                    "error": f"provider_max_turns.{provider} must be int >= 1"
+                                }
+                            ),
+                            400,
+                        )
+
+                cfg["provider_max_turns"] = normalized_turns
+            if "provider_models" in data:
+                provider_models = data["provider_models"]
+                if not isinstance(provider_models, dict):
+                    return jsonify({"error": "provider_models must be an object"}), 400
+
+                normalized_models = {}
+                for provider, mode_map in provider_models.items():
+                    if provider not in supported_providers:
+                        return (
+                            jsonify(
+                                {
+                                    "error": f"unsupported provider in provider_models: {provider}"
+                                }
+                            ),
+                            400,
+                        )
+                    if not isinstance(mode_map, dict):
+                        return (
+                            jsonify(
+                                {
+                                    "error": f"provider_models.{provider} must be an object"
+                                }
+                            ),
+                            400,
+                        )
+                    for mode, model_name in mode_map.items():
+                        normalized_mode = str(mode).upper()
+                        if normalized_mode not in ("FULL", "FIX", "VERIFY"):
+                            return (
+                                jsonify(
+                                    {
+                                        "error": f"unsupported mode in provider_models.{provider}: {mode}"
+                                    }
+                                ),
+                                400,
+                            )
+                        normalized_name = str(model_name or "").strip()
+                        if normalized_name:
+                            normalized_models.setdefault(provider, {})[
+                                normalized_mode
+                            ] = normalized_name
+
+                cfg["provider_models"] = normalized_models
+            if "inventory_enabled" in data:
+                cfg["inventory_enabled"] = bool(data["inventory_enabled"])
+                # Reflect immediately on the running scorer instance — the
+                # opt-in toggle is the only knob that can flip the daemon
+                # on/off without a dashboard restart.
+                try:
+                    inventory_scorer.set_enabled(cfg["inventory_enabled"])
+                except Exception as _exc:
+                    print(f"  Inventory scorer toggle failed: {_exc}")
             queue["config"] = cfg
             save_queue(queue)
             socketio.emit("queue_changed", {"action": "config", "config": cfg})
             return jsonify({"ok": True, "config": cfg})
         return jsonify({"config": queue.get("config", dict(DEFAULT_QUEUE_CONFIG))})
+
+    @app.route("/api/inventory/status", methods=["GET"])
+    def inventory_status():
+        """Combined snapshot: scorer runtime state + per-binary inventory
+        records. The dashboard widget reads the scorer state for the live
+        line; the Inventory panel reads `binaries` for the table.
+
+        Per-binary records overlay state.json's documentable+scored counts
+        on top of inventory.json's persisted (totals + last_scan)."""
+        try:
+            state = load_state()
+            funcs = state.get("functions") or {}
+            persisted = load_inventory(Path(__file__).parent).get("binaries", {})
+            totals_by_path = {
+                path: rec.get("total_documentable", 0)
+                for path, rec in persisted.items()
+                if rec.get("total_documentable")
+            }
+            inventory = compute_per_binary_inventory(
+                funcs, totals_by_path=totals_by_path
+            )
+            for path, persisted_rec in persisted.items():
+                rec = inventory.setdefault(
+                    path,
+                    {
+                        "name": persisted_rec.get("name") or Path(path).name,
+                        "total_documentable": persisted_rec.get(
+                            "total_documentable", 0
+                        ),
+                        "scored": 0,
+                        "last_scan": persisted_rec.get("last_scan"),
+                    },
+                )
+                rec["last_scan"] = persisted_rec.get("last_scan")
+                rec["name"] = persisted_rec.get("name") or rec.get("name")
+
+            scorer_status = inventory_scorer.get_status()
+            blacklist = set(scorer_status.get("blacklisted") or [])
+
+            binaries = []
+            for path, rec in inventory.items():
+                total = rec.get("total_documentable", 0) or 0
+                scored = rec.get("scored", 0) or 0
+                missing = max(0, total - scored)
+                pct = round(100.0 * scored / total, 1) if total else 0.0
+                row_status = status_for(rec)
+                if path in blacklist:
+                    row_status = "blacklisted"
+                binaries.append(
+                    {
+                        "path": path,
+                        "name": rec.get("name") or Path(path).name,
+                        "total_documentable": total,
+                        "scored": scored,
+                        "missing": missing,
+                        "percent": pct,
+                        "last_scan": rec.get("last_scan"),
+                        "status": row_status,
+                    }
+                )
+            # Most-missing first, reverse-alpha tiebreak (Q4). Two stable
+            # sorts: secondary key first, primary key last.
+            binaries.sort(key=lambda r: r["name"], reverse=True)  # reverse-alpha
+            binaries.sort(key=lambda r: r["missing"], reverse=True)  # missing desc
+            totals = {
+                "total_documentable": sum(r["total_documentable"] for r in binaries),
+                "scored": sum(r["scored"] for r in binaries),
+                "missing": sum(r["missing"] for r in binaries),
+                "binaries_total": len(binaries),
+                "binaries_complete": sum(
+                    1 for r in binaries if r["status"] == "complete"
+                ),
+            }
+            return jsonify(
+                {
+                    "scorer": scorer_status,
+                    "totals": totals,
+                    "binaries": binaries,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+
+    @app.route("/api/inventory/toggle", methods=["POST"])
+    def inventory_toggle():
+        """Enable/disable the scorer. Persists to priority_queue.json so
+        the choice survives dashboard restarts (Q9 opt-in toggle)."""
+        data = request.json or {}
+        enabled = bool(data.get("enabled"))
+        queue = load_queue()
+        cfg = dict(queue.get("config") or {})
+        cfg["inventory_enabled"] = enabled
+        queue["config"] = cfg
+        save_queue(queue)
+        inventory_scorer.set_enabled(enabled)
+        return jsonify({"ok": True, "enabled": enabled})
+
+    @app.route("/api/inventory/clear_blacklist", methods=["POST"])
+    def inventory_clear_blacklist():
+        """Clear the session blacklist for one path or all paths."""
+        data = request.json or {}
+        path = data.get("path")
+        inventory_scorer.clear_blacklist(path)
+        return jsonify({"ok": True})
+
+    # --- Provider quota pauses (Q1-Q11) ---
+    from provider_pause import get_default_manager as _get_pause_mgr
+
+    def _emit_provider_pauses(active=None):
+        try:
+            socketio.emit(
+                "provider_pauses",
+                {"active": active if active is not None else _get_pause_mgr().all_active()},
+            )
+        except Exception:
+            pass
+
+    _get_pause_mgr().set_on_change(_emit_provider_pauses)
+
+    @app.route("/api/provider_pauses", methods=["GET"])
+    def provider_pauses_list():
+        """Active per-(provider, model) pauses with paused_until + reason."""
+        active = _get_pause_mgr().all_active()
+        return jsonify(
+            {
+                "active": [
+                    {
+                        "provider": p,
+                        "model": m,
+                        "paused_until": until,
+                        "reason": reason,
+                    }
+                    for p, m, until, reason in active
+                ]
+            }
+        )
+
+    @app.route("/api/provider_pauses/clear", methods=["POST"])
+    def provider_pauses_clear():
+        """Manually clear a pause. POST {provider, model} clears one;
+        empty body clears all. Use this if the API recovered before the
+        parsed reset window (rare but possible)."""
+        data = request.json or {}
+        provider = data.get("provider")
+        model = data.get("model")
+        mgr = _get_pause_mgr()
+        if provider and model:
+            mgr.clear(provider, model)
+        else:
+            mgr.clear_all()
+        return jsonify({"ok": True})
+
+    restored_workers = worker_mgr.restore_workers()
+    if restored_workers:
+        print(f"  Restored {len(restored_workers)} dashboard worker(s) after restart")
 
     @app.route("/api/functions/search", methods=["GET"])
     def search_functions():

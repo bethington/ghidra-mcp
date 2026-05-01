@@ -5,9 +5,9 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 ## Project Context
 
 - **Repo**: https://github.com/bethington/ghidra-mcp
-- **Version**: 5.3.2
+- **Version**: 5.6.0
 - **Language**: Java (Ghidra extension) + Python (MCP bridge)
-- **Key feature**: 199 MCP tools for binary analysis, knowledge database, BSim integration, headless server support, AI documentation workflows
+- **Key feature**: 225 MCP tools for binary analysis, knowledge database, BSim integration, headless server support, AI documentation workflows
 
 ## Directory Structure
 
@@ -32,12 +32,13 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 - Follow existing code style
 - Update CHANGELOG.md for user-facing changes
 - Create PRs for review (don't push directly to main)
-- Use `bump-version.ps1 -New X.Y.Z` to bump version across all files atomically
+- Use `python -m tools.setup bump-version --new X.Y.Z` to bump version across all maintained files atomically
 
 ## Commands
 
 - Build: `mvn clean package assembly:single -DskipTests`
 - Quick compile: `mvn clean compile -q`
 - Test (Python): `pytest tests/unit/ -v --no-cov`
-- Deploy: `.\ghidra-mcp-setup.ps1`
-- Version bump: `.\bump-version.ps1 -New X.Y.Z`
+- Preflight: `python -m tools.setup preflight --ghidra-path F:\ghidra_12.0.4_PUBLIC`
+- Deploy: `python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.0.4_PUBLIC` then `python -m tools.setup build` then `python -m tools.setup deploy --ghidra-path F:\ghidra_12.0.4_PUBLIC`
+- Version bump: `python -m tools.setup bump-version --new X.Y.Z`

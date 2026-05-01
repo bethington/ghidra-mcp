@@ -18,13 +18,10 @@ This directory contains scripts that run **directly inside Ghidra** (not via MCP
 5. Click **Refresh** in Script Manager
 6. Scripts will appear in the list - double-click to run
 
-### Method 2: Copy to Ghidra Installation
-```powershell
-# Copy scripts to Ghidra's user scripts directory
-Copy-Item ".\ghidra_scripts\*.java" "$env:USERPROFILE\ghidra_scripts\" -Force
-```
+### Method 2: Copy to Ghidra's User Script Directory
 
-Then refresh the Script Manager in Ghidra.
+Copy the `.java` files from this directory into your Ghidra user script
+directory, then refresh the Script Manager in Ghidra.
 
 ## Script Annotations
 
@@ -53,7 +50,7 @@ from ghidra.app.script import GhidraScript
 ## Difference from /scripts Directory
 
 - **`/ghidra_scripts`** - Run inside Ghidra GUI (this directory)
-- **`/scripts`** - Run via MCP bridge from external Python/PowerShell
+- **repo utilities / MCP bridge** - Run externally from Python-based repo tools
 
 ## Resources
 

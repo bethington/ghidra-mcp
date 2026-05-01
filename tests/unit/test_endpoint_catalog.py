@@ -125,6 +125,28 @@ class TestEndpointsJson(unittest.TestCase):
             self.assertIn("path", ep, f"Missing 'path' in endpoint: {ep}")
             self.assertIn("method", ep, f"Missing 'method' in endpoint: {ep}")
 
+    @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
+    def test_catalog_tool_names_are_capi_safe_after_bridge_parsing(self):
+        """The generated endpoint catalog should produce valid exposed MCP names."""
+        from bridge_mcp_ghidra import _parse_schema
+
+        data = json.loads(ENDPOINTS_JSON.read_text())
+        raw_schema = {
+            "tools": [
+                {
+                    "path": ep["path"],
+                    "method": ep.get("method", "GET"),
+                    "params": [],
+                }
+                for ep in data.get("endpoints", [])
+            ]
+        }
+        invalid = [
+            tool["name"] for tool in _parse_schema(raw_schema)
+            if not re.fullmatch(r"^[a-zA-Z0-9_-]+$", tool["name"])
+        ]
+        self.assertEqual(invalid, [])
+
 
 class TestBridgeIsDynamic(unittest.TestCase):
     """Verify the bridge uses dynamic registration, not hardcoded tools."""

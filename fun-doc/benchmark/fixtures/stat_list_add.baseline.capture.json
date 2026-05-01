@@ -1,0 +1,34 @@
+{
+  "description": "Typical fun-doc output on stat_list_add — identifies the struct pattern, defines a StatList type, gets the signature right, plate mentions magic number validation and bounded capacity.",
+  "wall_time_sec": 38.5,
+  "captured": {
+    "name": "AddStatToList",
+    "return_type": "int",
+    "parameters": [
+      {"name": "pStatList", "type": "StatList *"},
+      {"name": "wStatId", "type": "ushort"},
+      {"name": "wFlags", "type": "ushort"},
+      {"name": "iValue", "type": "int"}
+    ],
+    "locals": [
+      {"name": "dwSlotIndex", "type": "uint"},
+      {"name": "pSlot", "type": "StatEntry *"}
+    ],
+    "plate": "Appends a stat entry to a StatList struct. Validates the list pointer and checks the magic number; rejects on corruption or when entry_count is at capacity. On success, writes the new entry at the next free slot, bumps entry_count, returns 1. Returns 0 on overflow or validation failure."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "get_function_signature", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "get_function_variables", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "create_struct", "args": {"name": "StatEntry", "size": 8, "fields": "..."}, "status": "ok"},
+    {"tool": "create_struct", "args": {"name": "StatList", "size": 140, "fields": "..."}, "status": "ok"},
+    {"tool": "set_function_prototype", "args": {"address": "0x10001150", "prototype": "int AddStatToList(StatList *pStatList, ushort wStatId, ushort wFlags, int iValue)"}, "status": "ok"},
+    {"tool": "rename_variables", "args": {"function": "0x10001150", "renames": {"local_4": "dwSlotIndex", "local_8": "pSlot"}}, "status": "ok"},
+    {"tool": "set_local_variable_type", "args": {"function": "0x10001150", "variable": "dwSlotIndex", "type": "uint"}, "status": "ok"},
+    {"tool": "set_local_variable_type", "args": {"function": "0x10001150", "variable": "pSlot", "type": "StatEntry *"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001150", "name": "AddStatToList"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001150", "comment": "Appends a stat entry..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001150"}, "status": "ok"}
+  ]
+}

@@ -57,6 +57,14 @@ public class GuiProgramProvider implements ProgramProvider {
         Program[] programs = pm.getAllOpenPrograms();
         String searchName = name.trim();
 
+        // Try exact project-path match first (supports /folder/program.dll)
+        for (Program prog : programs) {
+            if (prog.getDomainFile() != null
+                    && prog.getDomainFile().getPathname().equalsIgnoreCase(searchName)) {
+                return prog;
+            }
+        }
+
         // Try exact name match first (case-insensitive)
         for (Program prog : programs) {
             if (prog.getName().equalsIgnoreCase(searchName)) {
@@ -64,8 +72,12 @@ public class GuiProgramProvider implements ProgramProvider {
             }
         }
 
-        // Try partial match (name contains search term)
+        // Try partial match (project path or name contains search term)
         for (Program prog : programs) {
+            if (prog.getDomainFile() != null
+                    && prog.getDomainFile().getPathname().toLowerCase().contains(searchName.toLowerCase())) {
+                return prog;
+            }
             if (prog.getName().toLowerCase().contains(searchName.toLowerCase())) {
                 return prog;
             }

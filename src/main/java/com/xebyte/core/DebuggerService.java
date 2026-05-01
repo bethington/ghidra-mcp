@@ -5,11 +5,19 @@ import ghidra.app.services.DebuggerStaticMappingService;
 import ghidra.app.services.DebuggerTargetService;
 import ghidra.app.services.DebuggerTraceManagerService;
 import ghidra.app.services.TraceRmiLauncherService;
+import ghidra.debug.api.ValStr;
 import ghidra.debug.api.target.ActionName;
 import ghidra.debug.api.target.Target;
+import ghidra.debug.api.tracermi.LaunchParameter;
+import ghidra.debug.api.tracermi.TraceRmiLaunchOffer;
+import ghidra.debug.api.tracermi.TraceRmiLaunchOffer.LaunchConfigurator;
+import ghidra.debug.api.tracermi.TraceRmiLaunchOffer.LaunchResult;
+import ghidra.debug.api.tracermi.TraceRmiLaunchOffer.RelPrompt;
 import ghidra.debug.api.tracemgr.DebuggerCoordinates;
 import ghidra.framework.model.Project;
 import ghidra.framework.model.ToolManager;
+import ghidra.framework.model.ToolTemplate;
+import ghidra.framework.model.Workspace;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressFactory;
@@ -33,11 +41,14 @@ import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.TaskMonitor;
 
+import javax.swing.SwingUtilities;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
@@ -98,6 +109,53 @@ public class DebuggerService {
         return null;
     }
 
+    private PluginTool startDebuggerTool() {
+        Project project = frontEndTool.getProject();
+        if (project == null) return null;
+        ToolManager tm = project.getToolManager();
+        if (tm == null) return null;
+        try {
+            Workspace workspace = tm.getActiveWorkspace();
+            if (workspace == null) return null;
+            for (String templateName : List.of("Debugger", "CodeBrowser")) {
+                ToolTemplate template = project.getLocalToolChest().getToolTemplate(templateName);
+                if (template == null) {
+                    continue;
+                }
+                AtomicReference<PluginTool> launched = new AtomicReference<>();
+                AtomicReference<Exception> launchError = new AtomicReference<>();
+                Runnable launcher = () -> {
+                    try {
+                        launched.set(workspace.runTool(template));
+                    } catch (Exception e) {
+                        launchError.set(e);
+                    }
+                };
+                if (SwingUtilities.isEventDispatchThread()) {
+                    launcher.run();
+                } else {
+                    SwingUtilities.invokeAndWait(launcher);
+                }
+                if (launchError.get() != null) {
+                    throw launchError.get();
+                }
+                PluginTool tool = launched.get();
+                if (tool == null) {
+                    continue;
+                }
+                for (int i = 0; i < 20; i++) {
+                    if (tool.getService(DebuggerTraceManagerService.class) != null) {
+                        return tool;
+                    }
+                    Thread.sleep(250);
+                }
+            }
+        } catch (Exception e) {
+            Msg.warn(this, "Failed to launch debugger tool: " + e.getMessage());
+        }
+        return null;
+    }
+
     private PluginTool getDebuggerTool() {
         PluginTool cached = cachedDebuggerTool;
         if (cached != null) {
@@ -115,6 +173,25 @@ public class DebuggerService {
         return found;
     }
 
+    private PluginTool getOrStartDebuggerTool(int timeoutSeconds) throws TimeoutException {
+        PluginTool tool = getDebuggerTool();
+        if (tool != null) {
+            return tool;
+        }
+        CompletableFuture<PluginTool> future = CompletableFuture.supplyAsync(this::startDebuggerTool);
+        try {
+            tool = future.get(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw e;
+        } catch (Exception e) {
+            Msg.warn(this, "Failed to auto-start debugger tool: " + e.getMessage());
+            return null;
+        }
+        cachedDebuggerTool = tool;
+        return tool;
+    }
+
     private <T> T getService(Class<T> serviceClass) {
         PluginTool tool = getDebuggerTool();
         if (tool == null) return null;
@@ -122,8 +199,9 @@ public class DebuggerService {
     }
 
     private Response noDebugger() {
-        return Response.err("Debugger not active. Open a CodeBrowser and enable the Debugger " +
-                "(Window > Debugger), then attach to your target process.");
+        return Response.err("Debugger not active and GhidraMCP could not auto-start a " +
+                "Debugger tool. Open the Debugger tool or enable Window > Debugger in CodeBrowser, " +
+                "then attach to your target process.");
     }
 
     private Response noTrace() {
@@ -185,6 +263,201 @@ public class DebuggerService {
     // ========================================================================
     // Session management
     // ========================================================================
+
+    private TraceRmiLaunchOffer selectLaunchOffer(Collection<TraceRmiLaunchOffer> offers,
+                                                  String preferredOffer) {
+        List<TraceRmiLaunchOffer> candidates = offers.stream()
+                .filter(TraceRmiLaunchOffer::supportsImage)
+                .toList();
+        if (candidates.isEmpty()) {
+            candidates = List.copyOf(offers);
+        }
+        if (preferredOffer != null && !preferredOffer.isBlank()) {
+            String needle = preferredOffer.trim().toLowerCase(Locale.ROOT);
+            for (TraceRmiLaunchOffer offer : candidates) {
+                if (offer.getTitle().equalsIgnoreCase(preferredOffer) ||
+                        offer.getConfigName().equalsIgnoreCase(preferredOffer)) {
+                    return offer;
+                }
+            }
+            for (TraceRmiLaunchOffer offer : candidates) {
+                if (offer.getTitle().toLowerCase(Locale.ROOT).contains(needle) ||
+                        offer.getConfigName().toLowerCase(Locale.ROOT).contains(needle)) {
+                    return offer;
+                }
+            }
+        }
+        for (TraceRmiLaunchOffer offer : candidates) {
+            if ("dbgeng".equalsIgnoreCase(offer.getTitle()) ||
+                    offer.getConfigName().toLowerCase(Locale.ROOT).contains("local-dbgeng")) {
+                return offer;
+            }
+        }
+        return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    private ValStr<?> decodeLaunchValue(LaunchParameter<?> param, String value) {
+        return param.decode(value);
+    }
+
+    private void setLaunchArgument(Map<String, ValStr<?>> args,
+                                   Map<String, LaunchParameter<?>> parameters,
+                                   String name,
+                                   String value) {
+        LaunchParameter<?> param = parameters.get(name);
+        if (param != null) {
+            args.put(name, decodeLaunchValue(param, value));
+        }
+    }
+
+    private List<Map<String, Object>> describeLaunchParameters(TraceRmiLaunchOffer offer) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map.Entry<String, LaunchParameter<?>> entry : offer.getParameters().entrySet()) {
+            LaunchParameter<?> param = entry.getValue();
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("name", entry.getKey());
+            info.put("display", param.display());
+            info.put("type", param.type().getSimpleName());
+            info.put("required", param.required());
+            info.put("default", param.defaultValue() != null ? param.defaultValue().str() : null);
+            result.add(info);
+        }
+        return result;
+    }
+
+    private Map<String, Target.ActionEntry> collectTargetActions(Target target,
+                                                                 ActionName actionName) {
+        return target.collectActions(actionName, null,
+                Target.ObjectArgumentPolicy.CURRENT_AND_RELATED);
+    }
+
+    private void invokeTargetAction(Target.ActionEntry action) throws Exception {
+        if (action.requiresPrompt()) {
+            throw new IllegalStateException("Action requires a Ghidra UI prompt: " +
+                    action.display());
+        }
+        action.invokeAsync(false).get(ACTION_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+    }
+
+    @McpTool(path = "/debugger/launch", method = "POST",
+            description = "Launch an executable through Ghidra's Trace RMI debugger launcher")
+    public Response launch(
+            @Param(value = "executable_path", source = ParamSource.BODY,
+                    description = "Absolute path to the executable to launch") String executablePath,
+            @Param(value = "args", source = ParamSource.BODY, defaultValue = "",
+                    description = "Command-line arguments to pass to the executable") String args,
+            @Param(value = "cwd", source = ParamSource.BODY, defaultValue = "",
+                    description = "Working directory hint for launchers that expose one") String cwd,
+            @Param(value = "timeout_seconds", source = ParamSource.BODY, defaultValue = "60",
+                    description = "Maximum seconds to wait for the debugger trace") int timeoutSeconds,
+            @Param(value = "program", source = ParamSource.BODY, defaultValue = "",
+                    description = "Program path/name to use for static mapping") String programName,
+            @Param(value = "offer", source = ParamSource.BODY, defaultValue = "",
+                    description = "Optional launcher title or config name, e.g. dbgeng") String preferredOffer,
+            @Param(value = "python_executable", source = ParamSource.BODY, defaultValue = "",
+                    description = "Optional Python executable for Python-backed debugger launchers") String pythonExecutable) {
+        PluginTool tool;
+        try {
+            tool = getOrStartDebuggerTool(20);
+        } catch (TimeoutException e) {
+            return Response.err("Timed out while auto-starting Ghidra's Debugger tool. " +
+                    "Open the Debugger tool manually, then retry debugger_launch.");
+        }
+        if (tool == null) return noDebugger();
+
+        TraceRmiLauncherService launcherSvc =
+                tool.getService(TraceRmiLauncherService.class);
+        if (launcherSvc == null) {
+            return Response.err("Trace RMI launcher service not available. Open CodeBrowser, " +
+                    "enable Window > Debugger, and make sure the debugger launcher plugins are loaded.");
+        }
+
+        try {
+            ghidra.program.model.listing.Program program =
+                    programProvider.resolveProgram(programName);
+            Collection<TraceRmiLaunchOffer> offers = launcherSvc.getOffers(program);
+            if (offers.isEmpty()) {
+                return Response.err("No debugger launch offers are available for " +
+                        (program != null ? program.getName() : "the current program") +
+                        ". Install/enable a backend such as Ghidra's dbgeng agent and " +
+                        "open the executable in CodeBrowser first.");
+            }
+
+            TraceRmiLaunchOffer offer = selectLaunchOffer(offers, preferredOffer);
+            if (offer == null) {
+                return Response.err("No debugger launch offer could be selected. Available offers: " +
+                        offers.stream().map(TraceRmiLaunchOffer::getTitle).collect(Collectors.joining(", ")));
+            }
+
+            LaunchParameter<?> imageParam = offer.imageParameter();
+            if (imageParam == null) {
+                return Response.err("Selected launcher '" + offer.getTitle() +
+                        "' does not expose an image/executable parameter. Available parameters: " +
+                        offer.getParameters().keySet());
+            }
+
+            int waitSeconds = Math.max(1, timeoutSeconds);
+            ConsoleTaskMonitor monitor = new ConsoleTaskMonitor();
+            CompletableFuture<LaunchResult> future = CompletableFuture.supplyAsync(() ->
+                    offer.launchProgram(monitor, new LaunchConfigurator() {
+                        @Override
+                        public Map<String, ValStr<?>> configureLauncher(
+                                TraceRmiLaunchOffer launchOffer,
+                                Map<String, ValStr<?>> launchArgs,
+                                RelPrompt relPrompt) {
+                            Map<String, ValStr<?>> configured = new LinkedHashMap<>(launchArgs);
+                            configured.put(imageParam.name(), decodeLaunchValue(imageParam, executablePath));
+                            if (args != null && !args.isBlank()) {
+                                setLaunchArgument(configured, launchOffer.getParameters(), "args", args);
+                                setLaunchArgument(configured, launchOffer.getParameters(), "env:OPT_TARGET_ARGS", args);
+                            }
+                            if (cwd != null && !cwd.isBlank()) {
+                                setLaunchArgument(configured, launchOffer.getParameters(), "cwd", cwd);
+                                setLaunchArgument(configured, launchOffer.getParameters(), "env:CWD", cwd);
+                                setLaunchArgument(configured, launchOffer.getParameters(), "env:OPT_CWD", cwd);
+                                setLaunchArgument(configured, launchOffer.getParameters(), "env:OPT_TARGET_DIR", cwd);
+                            }
+                            if (pythonExecutable != null && !pythonExecutable.isBlank()) {
+                                setLaunchArgument(configured, launchOffer.getParameters(),
+                                        "env:OPT_PYTHON_EXE", pythonExecutable);
+                            }
+                            return configured;
+                        }
+                    }));
+
+            LaunchResult result;
+            try {
+                result = future.get(waitSeconds, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                monitor.cancel();
+                return Response.err("Debugger launch timed out after " + waitSeconds +
+                        "s waiting for a Trace RMI connection. Check the launcher terminal, " +
+                        "Python debugger dependencies, and dbgeng/WinDbg installation.");
+            }
+
+            if (result.exception() != null) {
+                return Response.err("Debugger launch failed using '" + offer.getTitle() + "': " +
+                        result.exception().getMessage() +
+                        ". Check Ghidra's launcher terminal and debugger backend setup.");
+            }
+            if (result.trace() == null) {
+                return Response.err("Debugger launch did not produce an active trace using '" +
+                        offer.getTitle() + "'. Check Ghidra's launcher terminal for backend errors.");
+            }
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("status", "launched");
+            response.put("offer_title", offer.getTitle());
+            response.put("offer_config_name", offer.getConfigName());
+            response.put("trace_name", result.trace().getName());
+            response.put("executable_path", executablePath);
+            response.put("args", args);
+            response.put("program", program != null ? program.getName() : null);
+            return Response.ok(response);
+        } catch (Exception e) {
+            return Response.err("Debugger launch failed: " + e.getMessage());
+        }
+    }
 
     @McpTool(path = "/debugger/status",
             description = "Get debugger status: active trace, thread, execution state, module count")
@@ -292,13 +565,13 @@ public class DebuggerService {
 
         try {
             Map<String, Target.ActionEntry> actions =
-                    target.collectActions(ActionName.RESUME, null, null);
+                    collectTargetActions(target, ActionName.RESUME);
             if (actions.isEmpty()) {
                 return Response.err("Resume action not available in current state");
             }
             // Execute the first available resume action
             Target.ActionEntry action = actions.values().iterator().next();
-            action.run(true);
+            invokeTargetAction(action);
             return Response.ok(Map.of("status", "resumed"));
         } catch (Exception e) {
             return Response.err("Resume failed: " + e.getMessage());
@@ -315,12 +588,12 @@ public class DebuggerService {
 
         try {
             Map<String, Target.ActionEntry> actions =
-                    target.collectActions(ActionName.INTERRUPT, null, null);
+                    collectTargetActions(target, ActionName.INTERRUPT);
             if (actions.isEmpty()) {
                 return Response.err("Interrupt action not available in current state");
             }
             Target.ActionEntry action = actions.values().iterator().next();
-            action.run(true);
+            invokeTargetAction(action);
             return Response.ok(Map.of("status", "interrupted"));
         } catch (Exception e) {
             return Response.err("Interrupt failed: " + e.getMessage());
@@ -337,12 +610,12 @@ public class DebuggerService {
 
         try {
             Map<String, Target.ActionEntry> actions =
-                    target.collectActions(ActionName.STEP_INTO, null, null);
+                    collectTargetActions(target, ActionName.STEP_INTO);
             if (actions.isEmpty()) {
                 return Response.err("Step into not available in current state");
             }
             Target.ActionEntry action = actions.values().iterator().next();
-            action.run(true);
+            invokeTargetAction(action);
             return Response.ok(Map.of("status", "stepped"));
         } catch (Exception e) {
             return Response.err("Step into failed: " + e.getMessage());
@@ -359,12 +632,12 @@ public class DebuggerService {
 
         try {
             Map<String, Target.ActionEntry> actions =
-                    target.collectActions(ActionName.STEP_OVER, null, null);
+                    collectTargetActions(target, ActionName.STEP_OVER);
             if (actions.isEmpty()) {
                 return Response.err("Step over not available in current state");
             }
             Target.ActionEntry action = actions.values().iterator().next();
-            action.run(true);
+            invokeTargetAction(action);
             return Response.ok(Map.of("status", "stepped"));
         } catch (Exception e) {
             return Response.err("Step over failed: " + e.getMessage());
@@ -381,12 +654,12 @@ public class DebuggerService {
 
         try {
             Map<String, Target.ActionEntry> actions =
-                    target.collectActions(ActionName.STEP_OUT, null, null);
+                    collectTargetActions(target, ActionName.STEP_OUT);
             if (actions.isEmpty()) {
                 return Response.err("Step out not available in current state");
             }
             Target.ActionEntry action = actions.values().iterator().next();
-            action.run(true);
+            invokeTargetAction(action);
             return Response.ok(Map.of("status", "stepped_out"));
         } catch (Exception e) {
             return Response.err("Step out failed: " + e.getMessage());
@@ -849,6 +1122,10 @@ public class DebuggerService {
                 info.put("description", offer.getDescription());
                 info.put("icon", offer.getIcon() != null
                         ? offer.getIcon().toString() : null);
+                info.put("config_name", offer.getConfigName());
+                info.put("supports_image", offer.supportsImage());
+                info.put("requires_image", offer.requiresImage());
+                info.put("parameters", describeLaunchParameters(offer));
                 result.add(info);
             }
             return Response.ok(result);

@@ -1,6 +1,6 @@
 # GhidraMCP Deployment Script
 # Automatically builds, installs, and configures the GhidraMCP plugin
-# Target: Ghidra 12.0.3
+# Target: Ghidra 12.0.4
 
 <#
 .SYNOPSIS
@@ -18,10 +18,10 @@ Version safety checks enforce consistency between:
 - version inferred from -GhidraPath (if present)
 
 .EXAMPLE
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "F:\ghidra_12.0.4_PUBLIC"
 
 .EXAMPLE
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "F:\ghidra_12.0.4_PUBLIC"
 
 .EXAMPLE
 .\ghidra-mcp-setup.ps1 -BuildOnly
@@ -58,7 +58,7 @@ function Write-LogWarning { param($msg) Write-Host "[WARNING] $msg" -ForegroundC
 function Write-LogError { param($msg) Write-Host "[ERROR] $msg" -ForegroundColor Red }
 
 # Configuration
-$DefaultGhidraVersion = "12.0.3"
+$DefaultGhidraVersion = "12.0.4"
 $PluginVersion = "5.2.0"
 
 function Show-Usage {
@@ -73,7 +73,7 @@ function Show-Usage {
     Write-Host "  -Preflight       Validate environment and prerequisites without making changes"
     Write-Host ""
     Write-Host "Common options:"
-    Write-Host "  -GhidraPath      Path to Ghidra install (e.g., C:\ghidra_12.0.3_PUBLIC)"
+    Write-Host "  -GhidraPath      Path to Ghidra install (e.g., F:\ghidra_12.0.4_PUBLIC)"
     Write-Host "  -GhidraVersion   Explicit Ghidra version (must match pom.xml/path version)"
     Write-Host "  -StrictPreflight Fail preflight on network checks (Maven Central/PyPI reachability)"
     Write-Host "  -NoAutoPrereqs   Disable automatic prerequisite setup during deploy"
@@ -89,9 +89,9 @@ function Show-Usage {
     Write-Host "  -Help            Show this help text"
     Write-Host ""
     Write-Host "Examples:"
-    Write-Host "  .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath 'C:\ghidra_12.0.3_PUBLIC'"
-    Write-Host "  .\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath 'C:\ghidra_12.0.3_PUBLIC'"
-    Write-Host "  .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath 'C:\ghidra_12.0.3_PUBLIC'"
+    Write-Host "  .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath 'F:\ghidra_12.0.4_PUBLIC'"
+    Write-Host "  .\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath 'F:\ghidra_12.0.4_PUBLIC'"
+    Write-Host "  .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath 'F:\ghidra_12.0.4_PUBLIC'"
     Write-Host "  .\ghidra-mcp-setup.ps1 -BuildOnly"
     Write-Host "  .\ghidra-mcp-setup.ps1 -Clean"
     Write-Host ""
@@ -176,6 +176,12 @@ if (Test-Path $envFile) {
         }
     }
 }
+
+$installDebuggerDepsValue = [System.Environment]::GetEnvironmentVariable("INSTALL_DEBUGGER_DEPS", "Process")
+if (-not $installDebuggerDepsValue) {
+    $installDebuggerDepsValue = ""
+}
+$InstallDebuggerDeps = @("1", "true", "yes", "on") -contains $installDebuggerDepsValue.Trim().ToLowerInvariant()
 
 $pomGhidraVersion = Get-PomGhidraVersion
 if (-not $GhidraVersion) {
@@ -542,6 +548,33 @@ function Get-PythonCommand {
     throw "Python executable not found on PATH"
 }
 
+function Test-TruthyValue {
+    param([string]$Value)
+
+    if (-not $Value) { return $false }
+    return @("1", "true", "yes", "on") -contains $Value.Trim().ToLowerInvariant()
+}
+
+function Install-PythonRequirementsFile {
+    param(
+        [Parameter(Mandatory = $true)]$PythonCommand,
+        [Parameter(Mandatory = $true)][string]$RequirementsPath,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    if (-not (Test-Path $RequirementsPath)) {
+        Write-LogWarning "$RequirementsPath not found, skipping $Description."
+        return
+    }
+
+    $pipParameters = @($PythonCommand.PrefixParameters) + @("-m", "pip", "install")
+    if ($VerbosePreference -ne 'Continue') {
+        $pipParameters += @("-q", "--disable-pip-version-check")
+    }
+    $pipParameters += @("-r", $RequirementsPath)
+    Invoke-CommandChecked -Command $PythonCommand.Command -Arguments $pipParameters -Description $Description
+}
+
 function Install-PythonPackages {
     $requirementsPath = Join-Path $PSScriptRoot "requirements.txt"
     if (-not (Test-Path $requirementsPath)) {
@@ -550,12 +583,12 @@ function Install-PythonPackages {
     }
 
     $py = Get-PythonCommand
-    $pipParameters = @($py.PrefixParameters) + @("-m", "pip", "install")
-    if ($VerbosePreference -ne 'Continue') {
-        $pipParameters += @("-q", "--disable-pip-version-check")
+    Install-PythonRequirementsFile -PythonCommand $py -RequirementsPath $requirementsPath -Description "Ensuring Python dependencies"
+    if ($InstallDebuggerDeps) {
+        $debuggerRequirementsPath = Join-Path $PSScriptRoot "requirements-debugger.txt"
+        Install-PythonRequirementsFile -PythonCommand $py -RequirementsPath $debuggerRequirementsPath -Description "Ensuring debugger Python dependencies"
+        Write-LogSuccess "Debugger Python dependencies are ready."
     }
-    $pipParameters += @("-r", $requirementsPath)
-    Invoke-CommandChecked -Command $py.Command -Arguments $pipParameters -Description "Ensuring Python dependencies"
     Write-LogSuccess "Python dependencies are ready."
 }
 
@@ -642,6 +675,15 @@ function Invoke-PreflightChecks {
             if (-not (Test-Path $full)) {
                 $issues.Add("Missing required Ghidra dependency: $full")
             }
+        }
+    }
+
+    if ($InstallDebuggerDeps) {
+        $debuggerRequirementsPath = Join-Path $PSScriptRoot "requirements-debugger.txt"
+        if (-not (Test-Path $debuggerRequirementsPath)) {
+            $issues.Add("Debugger requirements file not found: $debuggerRequirementsPath")
+        } else {
+            Write-LogSuccess "Debugger requirements file found."
         }
     }
 
@@ -889,7 +931,7 @@ $ghidraVersionDir = $null
 $ghidraUserBase = "$env:USERPROFILE\AppData\Roaming\ghidra"
 
 if (Test-Path $ghidraUserBase) {
-    # Extract version from GhidraPath (e.g., "F:\ghidra_12.0.3_PUBLIC" -> "12.0.3")
+    # Extract version from GhidraPath (e.g., "F:\ghidra_12.0.4_PUBLIC" -> "12.0.4")
     $targetVersion = $null
     if ($GhidraPath -match "ghidra_([0-9.]+)") {
         $targetVersion = $Matches[1]
@@ -929,7 +971,7 @@ if (-not $ghidraVersionDir) {
     if ($GhidraPath -match "ghidra_([0-9.]+)") {
         $ghidraVersionDir = "ghidra_$($Matches[1])_PUBLIC"
     } else {
-        $ghidraVersionDir = "ghidra_12.0.3_PUBLIC"
+        $ghidraVersionDir = "ghidra_12.0.4_PUBLIC"
     }
     Write-LogInfo "Using Ghidra version dir: $ghidraVersionDir"
 }
@@ -1127,8 +1169,14 @@ Write-Host ""
 Write-LogInfo "Next Steps:"
 if ($NoAutoPrereqs) {
     Write-Host "1. If needed (first time only), install Python dependencies: pip install -r requirements.txt"
+    if ($InstallDebuggerDeps) {
+        Write-Host "   Debugger deps enabled: pip install -r requirements-debugger.txt"
+    }
 } else {
     Write-Host "1. Python dependencies were auto-checked/installed."
+    if ($InstallDebuggerDeps) {
+        Write-Host "   Optional debugger dependencies were auto-checked/installed."
+    }
 }
 Write-Host "2. Start Ghidra (plugin is auto-activated in CodeBrowser)"
 Write-Host "3. If plugin isn't loaded after a fresh Ghidra install:"
@@ -1140,6 +1188,9 @@ Write-Host ""
 Write-LogInfo "Usage:"
 Write-Host "   Ghidra: Tools > GhidraMCP > Start MCP Server"
 Write-Host "   Python: python bridge_mcp_ghidra.py (from project root or Ghidra directory)"
+if ($InstallDebuggerDeps) {
+    Write-Host "   Debugger: python -m debugger (from project root)"
+}
 Write-Host ""
 Write-LogInfo "Default Server: http://127.0.0.1:8089/"
 Write-Host ""
@@ -1148,7 +1199,7 @@ Write-Host ""
 if ($version -match "^2\.") {
     Write-LogInfo "New in v2.0.0 - Major Release:"
     Write-Host "   + 133 total endpoints (was 132)"
-    Write-Host "   + Ghidra 12.0.3 support"
+    Write-Host "   + Ghidra 12.0.4 support"
     Write-Host "   + Malware analysis: IOC extraction, behavior detection, anti-analysis detection"
     Write-Host "   + Function similarity analysis with CFG comparison"
     Write-Host "   + Control flow complexity analysis (cyclomatic complexity)"

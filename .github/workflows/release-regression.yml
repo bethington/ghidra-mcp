@@ -1,0 +1,95 @@
+name: Release Regression
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+  workflow_dispatch:
+    inputs:
+      ghidra_path:
+        description: "Path to the Ghidra install on the self-hosted runner"
+        required: true
+        default: "F:\\ghidra_12.0.4_PUBLIC"
+      test_tier:
+        description: "Deploy regression tier to run"
+        required: true
+        type: choice
+        default: "release"
+        options:
+          - release
+          - selected-contract
+          - benchmark-read
+          - benchmark-write
+          - multi-program
+          - negative-contract
+          - endpoint-catalog
+  workflow_call:
+    inputs:
+      ghidra_path:
+        description: "Path to the Ghidra install on the self-hosted runner"
+        required: true
+        type: string
+      test_tier:
+        description: "Deploy regression tier to run"
+        required: false
+        type: string
+        default: "release"
+
+jobs:
+  live-ghidra-regression:
+    name: Live Ghidra Release Regression
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'live-ghidra-regression')
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 30
+    env:
+      GHIDRA_REGRESSION_PATH: ${{ inputs.ghidra_path || vars.GHIDRA_PATH || 'F:\ghidra_12.0.4_PUBLIC' }}
+      GHIDRA_REGRESSION_TIER: ${{ inputs.test_tier || 'release' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python dependencies
+        shell: powershell
+        run: |
+          python -m pip install --upgrade pip
+          if (Test-Path requirements.txt) { pip install -r requirements.txt }
+          if (Test-Path requirements-test.txt) { pip install -r requirements-test.txt }
+
+      - name: Build Benchmark.dll
+        shell: powershell
+        run: python fun-doc\benchmark\build.py
+
+      - name: Install Ghidra jars
+        shell: powershell
+        run: python -m tools.setup install-ghidra-deps --ghidra-path "$env:GHIDRA_REGRESSION_PATH"
+
+      - name: Build extension
+        shell: powershell
+        run: python -m tools.setup build
+
+      - name: Deploy and run release regression
+        shell: powershell
+        run: python -m tools.setup deploy --ghidra-path "$env:GHIDRA_REGRESSION_PATH" --test "$env:GHIDRA_REGRESSION_TIER"
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-regression-artifacts
+          path: |
+            tests/junit.xml
+            target/*.zip
+            deploy-debug.log
+          if-no-files-found: ignore

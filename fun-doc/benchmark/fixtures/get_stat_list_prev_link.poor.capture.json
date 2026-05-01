@@ -1,0 +1,22 @@
+{
+  "description": "Poor fun-doc output on get_stat_list_prev_link — generic name, missed the linked-list traversal pattern, plate doesn't mention the prev-link semantics.",
+  "wall_time_sec": 21.5,
+  "captured": {
+    "name": "ReadOffset34",
+    "return_type": "undefined4",
+    "parameters": [
+      {"name": "param_1", "type": "undefined4 *"}
+    ],
+    "locals": [],
+    "plate": "Reads a value at offset 0x34 from a structure, after checking the pointer is valid."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x100011A0"}, "status": "ok"},
+    {"tool": "decompile_function", "args": {"address": "0x100011A0"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x100011A0"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x100011A0"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x100011A0", "name": "ReadOffset34"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x100011A0", "comment": "Reads a value..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x100011A0"}, "status": "ok"}
+  ]
+}

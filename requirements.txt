@@ -16,3 +16,5 @@ requests>=2.32.0,<3.0.0
 
 # For development and testing, install additional requirements:
 # pip install -r requirements-test.txt
+# For the standalone debugger server on Windows, also install:
+# pip install -r requirements-debugger.txt

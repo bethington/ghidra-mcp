@@ -1,0 +1,32 @@
+{
+  "description": "Typical fun-doc output on calc_crc16 — hits algorithm, gets the signature right, names are in the CalcCrc16 family but not exact, plate identifies CRC-16-CCITT with the polynomial.",
+  "wall_time_sec": 24.7,
+  "captured": {
+    "name": "CalcCrc16Ccitt",
+    "return_type": "ushort",
+    "parameters": [
+      {"name": "pbBuffer", "type": "byte *"},
+      {"name": "dwLength", "type": "uint"}
+    ],
+    "locals": [
+      {"name": "wCrc", "type": "ushort"},
+      {"name": "iByte", "type": "uint"},
+      {"name": "iBit", "type": "uint"}
+    ],
+    "plate": "Computes a CRC-16-CCITT checksum over a buffer of bytes. Uses polynomial 0x1021 and an initial value of 0xFFFF. Processes one byte at a time with 8 bit-shifts per byte. No input or output reflection. Classic CRC used in XMODEM and many network protocols."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001010"}, "status": "ok"},
+    {"tool": "get_function_signature", "args": {"address": "0x10001010"}, "status": "ok"},
+    {"tool": "get_function_variables", "args": {"address": "0x10001010"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001010"}, "status": "ok"},
+    {"tool": "set_function_prototype", "args": {"address": "0x10001010", "prototype": "ushort CalcCrc16Ccitt(byte *pbBuffer, uint dwLength)"}, "status": "ok"},
+    {"tool": "rename_variables", "args": {"function": "0x10001010", "renames": {"local_4": "wCrc", "local_8": "iByte", "local_c": "iBit"}}, "status": "ok"},
+    {"tool": "set_local_variable_type", "args": {"function": "0x10001010", "variable": "wCrc", "type": "ushort"}, "status": "ok"},
+    {"tool": "set_local_variable_type", "args": {"function": "0x10001010", "variable": "iByte", "type": "uint"}, "status": "ok"},
+    {"tool": "set_local_variable_type", "args": {"function": "0x10001010", "variable": "iBit", "type": "uint"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001010", "name": "CalcCrc16Ccitt"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001010", "comment": "CRC-16-CCITT..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001010"}, "status": "ok"}
+  ]
+}

@@ -78,60 +78,59 @@ public class AutoTypeAudit extends GhidraScript {
         println("=== Auto Type Audit: " + func.getName() + " @ 0x" + addrStr + " ===");
 
         // Decompile to get high-level variables
-        DecompInterface decomp = new DecompInterface();
-        decomp.openProgram(currentProgram);
-        DecompileResults results = decomp.decompileFunction(func, 30, monitor);
-
-        if (results == null || !results.decompileCompleted()) {
-            println("Error: Decompilation failed");
-            decomp.dispose();
-            return;
-        }
-
-        HighFunction hf = results.getHighFunction();
-        if (hf == null) {
-            println("Error: No high function");
-            decomp.dispose();
-            return;
-        }
-
-        // Collect variables that need type changes
         List<String[]> changes = new ArrayList<>(); // [varName, currentType, newType]
         List<String> skipped = new ArrayList<>();
+        DecompInterface decomp = new DecompInterface();
 
-        Iterator<HighSymbol> symbols = hf.getLocalSymbolMap().getSymbols();
-        while (symbols.hasNext()) {
-            HighSymbol sym = symbols.next();
-            String varName = sym.getName();
-            DataType currentType = sym.getDataType();
-            String currentTypeName = currentType != null ? currentType.getName() : "undefined";
+        try {
+            decomp.openProgram(currentProgram);
+            DecompileResults results = decomp.decompileFunction(func, 30, monitor);
 
-            // Skip phantoms
-            if (varName.startsWith("extraout_") || varName.startsWith("in_") ||
-                varName.startsWith("CONCAT") || varName.startsWith("Multiequal")) {
-                skipped.add(varName + " (phantom)");
-                continue;
+            if (results == null || !results.decompileCompleted()) {
+                println("Error: Decompilation failed");
+                return;
             }
 
-            // Skip SSA-only variables (can't be retyped)
-            if (varName.matches("[a-z]+Var\\d+")) {
-                skipped.add(varName + " (register-only SSA)");
-                continue;
+            HighFunction hf = results.getHighFunction();
+            if (hf == null) {
+                println("Error: No high function");
+                return;
             }
 
-            // Only process if current type is undefined or generic
-            if (!isUndefinedType(currentTypeName)) {
-                continue;
-            }
+            Iterator<HighSymbol> symbols = hf.getLocalSymbolMap().getSymbols();
+            while (symbols.hasNext()) {
+                HighSymbol sym = symbols.next();
+                String varName = sym.getName();
+                DataType currentType = sym.getDataType();
+                String currentTypeName = currentType != null ? currentType.getName() : "undefined";
 
-            // Determine target type from Hungarian prefix
-            String targetType = resolveTypeFromPrefix(varName);
-            if (targetType != null && !targetType.equals(currentTypeName)) {
-                changes.add(new String[]{varName, currentTypeName, targetType});
+                // Skip phantoms
+                if (varName.startsWith("extraout_") || varName.startsWith("in_") ||
+                    varName.startsWith("CONCAT") || varName.startsWith("Multiequal")) {
+                    skipped.add(varName + " (phantom)");
+                    continue;
+                }
+
+                // Skip SSA-only variables (can't be retyped)
+                if (varName.matches("[a-z]+Var\\d+")) {
+                    skipped.add(varName + " (register-only SSA)");
+                    continue;
+                }
+
+                // Only process if current type is undefined or generic
+                if (!isUndefinedType(currentTypeName)) {
+                    continue;
+                }
+
+                // Determine target type from Hungarian prefix
+                String targetType = resolveTypeFromPrefix(varName);
+                if (targetType != null && !targetType.equals(currentTypeName)) {
+                    changes.add(new String[]{varName, currentTypeName, targetType});
+                }
             }
+        } finally {
+            decomp.dispose();
         }
-
-        decomp.dispose();
 
         // Apply type changes
         int successCount = 0;
@@ -146,47 +145,50 @@ public class AutoTypeAudit extends GhidraScript {
             try {
                 // Re-decompile for each change (type changes trigger re-decompilation)
                 DecompInterface decomp2 = new DecompInterface();
-                decomp2.openProgram(currentProgram);
+                try {
+                    decomp2.openProgram(currentProgram);
 
-                for (String[] change : changes) {
-                    String varName = change[0];
-                    String newTypeName = change[2];
+                    for (String[] change : changes) {
+                        String varName = change[0];
+                        String newTypeName = change[2];
 
-                    try {
-                        DataType newType = resolveDataType(dtm, newTypeName);
-                        if (newType == null) {
-                            errors.add(varName + ": cannot resolve type '" + newTypeName + "'");
+                        try {
+                            DataType newType = resolveDataType(dtm, newTypeName);
+                            if (newType == null) {
+                                errors.add(varName + ": cannot resolve type '" + newTypeName + "'");
+                                failCount++;
+                                continue;
+                            }
+
+                            // Re-decompile to get fresh variable references
+                            DecompileResults freshResults = decomp2.decompileFunction(func, 15, monitor);
+                            if (freshResults == null || !freshResults.decompileCompleted()) {
+                                errors.add(varName + ": re-decompilation failed");
+                                failCount++;
+                                continue;
+                            }
+
+                            HighFunction freshHf = freshResults.getHighFunction();
+                            HighSymbol freshSym = findSymbol(freshHf, varName);
+                            if (freshSym == null) {
+                                errors.add(varName + ": symbol not found after re-decompile");
+                                failCount++;
+                                continue;
+                            }
+
+                            // Apply the type change
+                            HighFunctionDBUtil.updateDBVariable(freshSym, varName, newType, SourceType.USER_DEFINED);
+                            successCount++;
+                            println("  Set " + varName + ": " + change[1] + " -> " + newTypeName);
+                        } catch (Exception e) {
+                            errors.add(varName + ": " + e.getMessage());
                             failCount++;
-                            continue;
                         }
-
-                        // Re-decompile to get fresh variable references
-                        DecompileResults freshResults = decomp2.decompileFunction(func, 15, monitor);
-                        if (freshResults == null || !freshResults.decompileCompleted()) {
-                            errors.add(varName + ": re-decompilation failed");
-                            failCount++;
-                            continue;
-                        }
-
-                        HighFunction freshHf = freshResults.getHighFunction();
-                        HighSymbol freshSym = findSymbol(freshHf, varName);
-                        if (freshSym == null) {
-                            errors.add(varName + ": symbol not found after re-decompile");
-                            failCount++;
-                            continue;
-                        }
-
-                        // Apply the type change
-                        HighFunctionDBUtil.updateDBVariable(freshSym, varName, newType, SourceType.USER_DEFINED);
-                        successCount++;
-                        println("  Set " + varName + ": " + change[1] + " -> " + newTypeName);
-                    } catch (Exception e) {
-                        errors.add(varName + ": " + e.getMessage());
-                        failCount++;
                     }
+                } finally {
+                    decomp2.dispose();
                 }
 
-                decomp2.dispose();
                 success = true;
             } finally {
                 currentProgram.endTransaction(txId, success);

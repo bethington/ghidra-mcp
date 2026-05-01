@@ -37,6 +37,12 @@
         .btn.btn-primary { border-color: var(--accent-gold); color: var(--accent-gold); }
         .btn.btn-danger { border-color: var(--accent-red-light); color: var(--accent-red-light); }
         .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn.icon-btn { width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; }
+        .icon-stop { width: 9px; height: 9px; border-radius: 1px; background: currentColor; display: block; }
+        .icon-focus { width: 13px; height: 13px; border: 1px solid currentColor; border-radius: 50%; position: relative; display: block; }
+        .icon-focus::before, .icon-focus::after { content: ""; position: absolute; background: currentColor; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+        .icon-focus::before { width: 15px; height: 1px; }
+        .icon-focus::after { width: 1px; height: 15px; }
 
         /* Stats cards */
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; margin-bottom: 1rem; }
@@ -150,9 +156,12 @@
         .worker-card .btn-stop { position: absolute; top: 0.4rem; right: 0.4rem; }
         .worker-pane { background: var(--bg-dark); border: 1px solid var(--border-dark); border-radius: 6px; display: flex; flex-direction: column; min-height: 100px; max-height: 180px; }
         .worker-pane.running { border-color: var(--color-set); }
+        .worker-pane.timeout { border-color: var(--accent-red-light); box-shadow: 0 0 8px rgba(201, 48, 48, 0.2); }
         .worker-pane.focused { border-color: var(--accent-gold); border-width: 2px; box-shadow: 0 0 8px rgba(199, 179, 119, 0.3); }
         .worker-pane.stopping { border-color: var(--color-rare); }
         .worker-pane.finished { border-color: var(--text-muted); opacity: 0.85; }
+        .worker-pane.quota_paused { border-color: #c9a747; box-shadow: 0 0 6px rgba(201, 167, 71, 0.18); }
+        .worker-pane.quota_paused .wp-status { color: #c9a747; }
         .sortable-header { cursor: pointer; user-select: none; white-space: nowrap; }
         .sortable-header:hover { color: var(--accent-gold); }
         .sortable-header span { font-size: 0.6rem; color: var(--accent-gold); }
@@ -161,10 +170,35 @@
         .focus-banner .focus-func { color: var(--text-primary); font-weight: 600; }
         .focus-banner .focus-addr { color: var(--text-secondary); }
         .worker-pane-header { padding: 0.25rem 0.5rem; background: linear-gradient(180deg, var(--bg-light), var(--bg-medium)); border-bottom: 1px solid var(--border-dark); border-radius: 6px 6px 0 0; display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; }
-        .worker-pane-header .wp-title { font-family: var(--font-mono); color: var(--accent-gold); font-weight: 600; }
+        .worker-pane-header .wp-title { font-family: var(--font-mono); color: var(--text-primary); font-weight: 600; }
         .worker-pane-header .wp-status { font-family: var(--font-mono); color: var(--text-muted); font-size: 0.6rem; }
+        .worker-pane-header .wp-status .wp-current { color: var(--accent-gold); }
+        .worker-pane-header .wp-alert { font-family: var(--font-mono); font-size: 0.55rem; color: var(--accent-red-light); border: 1px solid rgba(201, 48, 48, 0.4); background: rgba(139, 32, 32, 0.18); border-radius: 3px; padding: 1px 4px; display: none; }
+        .worker-pane-header .wp-alert.active { display: inline-block; }
         .worker-pane-header .wp-actions { margin-left: auto; display: flex; gap: 3px; }
         .worker-pane-output { flex: 1; overflow-y: auto; padding: 0.2rem 0.3rem; font-family: var(--font-mono); font-size: 0.6rem; line-height: 1.25; background: var(--bg-darkest); }
+        /* Per-function block: three-sided gold bracket (top + left + bottom)
+           wrapping the header name, body lines, and footer name. Open right
+           preserves the streaming/log feel. margin-bottom acts as the
+           between-block breathing space (Q4: blank line between functions). */
+        .fn-block { border-top: 1px solid var(--accent-gold); border-left: 1px solid var(--accent-gold); border-bottom: 1px solid var(--accent-gold); border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0; margin: 0 0 0.5rem 0; padding: 0; }
+        .fn-block .fn-name { color: var(--accent-gold); font-weight: 600; padding: 1px 4px 1px 6px; }
+        .fn-block .fn-name.fn-header { border-bottom: 1px dashed rgba(199, 179, 119, 0.18); }
+        .fn-block .fn-name.fn-footer { border-top: 1px dashed rgba(199, 179, 119, 0.18); }
+        .fn-block .fn-body { padding-left: 1rem; }
+        .fn-block .fn-body .activity-entry { padding-left: 0; }
+        .settings-popout { max-height: 0; overflow: hidden; background: linear-gradient(180deg, var(--bg-medium), var(--bg-dark)); border-bottom: 1px solid transparent; transition: max-height 0.18s ease, border-color 0.18s ease; }
+        .settings-popout.active { max-height: 420px; border-bottom-color: var(--border-dark); }
+        .settings-popout-inner { max-width: 1400px; margin: 0 auto; width: 100%; padding: 0 1rem; }
+        .settings-popout-panel { margin: 0 0 0.75rem; border-top: none; border-radius: 0 0 6px 6px; }
+        .settings-popout-panel .panel-header { border-radius: 0; }
+        .settings-bar { display: flex; flex-wrap: wrap; gap: 0.6rem 0.9rem; align-items: center; }
+        .settings-group { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+        .settings-label { font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px; }
+        .models-grid { display: grid; grid-template-columns: 64px repeat(3, minmax(110px, 1fr)) minmax(70px, 90px); gap: 4px 6px; align-items: center; width: 100%; }
+        .models-grid-header { color: var(--text-muted); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.6px; }
+        .models-provider { color: var(--accent-gold); font-family: var(--font-mono); font-size: 0.65rem; }
+        .settings-divider { width: 1px; align-self: stretch; background: var(--border-dark); }
         .footer { background: var(--bg-dark); border-top: 1px solid var(--border-dark); padding: 0.4rem; text-align: center; color: var(--text-muted); font-size: 0.65rem; }
     </style>
 </head>
@@ -197,53 +231,89 @@
                 <input type="checkbox" id="workerContinuous" style="margin: 0;"> <span style="line-height: 1;">Auto</span>
             </label>
             <button class="btn btn-primary" id="btnRunWorker" onclick="startWorker()">Run Worker</button>
-            <span class="header-sep"></span>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="Functions at or above this score are excluded from the queue (unless pinned)">
-                <span>Good@</span>
-                <input type="number" class="worker-input" id="goodEnoughInput" value="{{ stats.queue_config.good_enough_score|default(80) }}" min="0" max="100" onchange="saveQueueConfig()">
-            </label>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 3px;" title="Surface unscored functions to the worker so they get scored on first contact">
-                <input type="checkbox" id="requireScoredInput" {% if stats.queue_config.require_scored %}checked{% endif %} onchange="saveQueueConfig()" style="margin: 0;">
-                <span style="line-height: 1;">Score Cold</span>
-            </label>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="When the active provider's complexity gate fires, hand the function off to this provider instead of skipping. Set to Off to disable.">
-                <span>Handoff→</span>
-                <select class="header-select" id="handoffProviderInput" onchange="saveQueueConfig()">
-                    <option value="off" {% if not stats.queue_config.complexity_handoff_provider %}selected{% endif %}>Off</option>
-                    <option value="claude" {% if stats.queue_config.complexity_handoff_provider == 'claude' %}selected{% endif %}>Claude</option>
-                    <option value="codex" {% if stats.queue_config.complexity_handoff_provider == 'codex' %}selected{% endif %}>Codex</option>
-                    <option value="gemini" {% if stats.queue_config.complexity_handoff_provider == 'gemini' %}selected{% endif %}>Gemini</option>
-                </select>
-            </label>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="Maximum handoffs per worker session. 0 = unlimited.">
-                <span>Max</span>
-                <input type="number" class="worker-input" id="handoffMaxInput" value="{{ stats.queue_config.complexity_handoff_max|default(0) }}" min="0" max="999" onchange="saveQueueConfig()" style="width: 38px;">
-            </label>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; gap: 3px;" title="Write detailed per-tool-call JSONL logs to logs/debug/{date}/. Use analyze_debug.py to inspect patterns.">
-                <input type="checkbox" id="debugModeInput" {% if stats.queue_config.debug_mode %}checked{% endif %} onchange="saveQueueConfig()" style="margin: 0;">
-                <span style="line-height: 1;">Debug Logs</span>
-            </label>
-            <span class="header-sep"></span>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="After the worker finishes, a second provider reviews and fixes gaps. Off = no audit pass.">
-                <span>Audit→</span>
-                <select class="header-select" id="auditProviderInput" onchange="saveQueueConfig()">
-                    <option value="off" {% if not stats.queue_config.audit_provider %}selected{% endif %}>Off</option>
-                    <option value="claude" {% if stats.queue_config.audit_provider == 'claude' %}selected{% endif %}>Claude</option>
-                    <option value="codex" {% if stats.queue_config.audit_provider == 'codex' %}selected{% endif %}>Codex</option>
-                    <option value="minimax" {% if stats.queue_config.audit_provider == 'minimax' %}selected{% endif %}>MiniMax</option>
-                    <option value="gemini" {% if stats.queue_config.audit_provider == 'gemini' %}selected{% endif %}>Gemini</option>
-                </select>
-            </label>
-            <label style="font-size: 0.65rem; color: var(--text-secondary); display: flex; align-items: center; gap: 3px;" title="Skip audit if worker's score gain >= this value. Lower = more audits.">
-                <span>MinΔ</span>
-                <input type="number" class="worker-input" id="auditMinDeltaInput" value="{{ stats.queue_config.audit_min_delta|default(5) }}" min="0" max="100" onchange="saveQueueConfig()" style="width: 38px;">
-            </label>
+            <button class="btn" id="btnToggleSettings" onclick="toggleSettingsPanel()" aria-expanded="false" aria-controls="settingsPopout">Settings</button>
         </div>
         <span class="header-info">
             <span class="live-dot" id="liveDot"></span>
             <span id="connStatus">Connecting...</span> | {{ stats.project_folder }}
         </span>
     </header>
+
+    <div class="settings-popout" id="settingsPopout">
+        <div class="settings-popout-inner">
+            <div class="panel settings-popout-panel">
+                <div class="panel-header"><h2>Settings</h2></div>
+                <div class="panel-content">
+                    <div class="settings-bar">
+                        <div class="settings-group">
+                            <label class="settings-label" title="Functions at or above this score are excluded from the queue (unless pinned)">
+                                <span>Good@</span>
+                                <input type="number" class="worker-input" id="goodEnoughInput" value="{{ stats.queue_config.good_enough_score|default(80) }}" min="0" max="100" onchange="saveQueueConfig()">
+                            </label>
+                            <label class="settings-label" title="Surface unscored functions to the worker so they get scored on first contact">
+                                <input type="checkbox" id="requireScoredInput" {% if stats.queue_config.require_scored %}checked{% endif %} onchange="saveQueueConfig()" style="margin: 0;">
+                                <span>Score Cold</span>
+                            </label>
+                            <label class="settings-label" title="Write detailed per-tool-call JSONL logs to logs/debug/{date}/. Use analyze_debug.py to inspect patterns.">
+                                <input type="checkbox" id="debugModeInput" {% if stats.queue_config.debug_mode %}checked{% endif %} onchange="saveQueueConfig()" style="margin: 0;">
+                                <span>Debug Logs</span>
+                            </label>
+                        </div>
+                        <div class="settings-divider"></div>
+                        <div class="settings-group">
+                            <label class="settings-label" title="When the active provider's complexity gate fires, hand the function off to this provider instead of skipping. Set to Off to disable.">
+                                <span>Handoff→</span>
+                                <select class="header-select" id="handoffProviderInput" onchange="saveQueueConfig()">
+                                    <option value="off" {% if not stats.queue_config.complexity_handoff_provider %}selected{% endif %}>Off</option>
+                                    <option value="claude" {% if stats.queue_config.complexity_handoff_provider == 'claude' %}selected{% endif %}>Claude</option>
+                                    <option value="codex" {% if stats.queue_config.complexity_handoff_provider == 'codex' %}selected{% endif %}>Codex</option>
+                                    <option value="gemini" {% if stats.queue_config.complexity_handoff_provider == 'gemini' %}selected{% endif %}>Gemini</option>
+                                </select>
+                            </label>
+                            <label class="settings-label" title="Maximum handoffs per worker session. 0 = unlimited.">
+                                <span>Max</span>
+                                <input type="number" class="worker-input" id="handoffMaxInput" value="{{ stats.queue_config.complexity_handoff_max|default(0) }}" min="0" max="999" onchange="saveQueueConfig()" style="width: 48px;">
+                            </label>
+                        </div>
+                        <div class="settings-divider"></div>
+                        <div class="settings-group">
+                            <label class="settings-label" title="After the worker finishes, a second provider reviews and fixes gaps. Off = no audit pass.">
+                                <span>Audit→</span>
+                                <select class="header-select" id="auditProviderInput" onchange="saveQueueConfig()">
+                                    <option value="off" {% if not stats.queue_config.audit_provider %}selected{% endif %}>Off</option>
+                                    <option value="claude" {% if stats.queue_config.audit_provider == 'claude' %}selected{% endif %}>Claude</option>
+                                    <option value="codex" {% if stats.queue_config.audit_provider == 'codex' %}selected{% endif %}>Codex</option>
+                                    <option value="minimax" {% if stats.queue_config.audit_provider == 'minimax' %}selected{% endif %}>MiniMax</option>
+                                    <option value="gemini" {% if stats.queue_config.audit_provider == 'gemini' %}selected{% endif %}>Gemini</option>
+                                </select>
+                            </label>
+                            <label class="settings-label" title="Skip audit if worker's score gain >= this value. Lower = more audits.">
+                                <span>MinΔ</span>
+                                <input type="number" class="worker-input" id="auditMinDeltaInput" value="{{ stats.queue_config.audit_min_delta|default(5) }}" min="0" max="100" onchange="saveQueueConfig()" style="width: 48px;">
+                            </label>
+                        </div>
+                    </div>
+                    <div style="margin-top: 0.75rem;">
+                        <div style="font-size: 0.65rem; color: var(--text-secondary); margin-bottom: 0.35rem;" title="Dashboard-owned model config. These values are the default source for provider/model selection. Max Turns sets the per-provider tool-call cap.">Provider Models</div>
+                        <div class="models-grid">
+                            <div></div>
+                            <div class="models-grid-header">Full</div>
+                            <div class="models-grid-header">Fix</div>
+                            <div class="models-grid-header">Verify</div>
+                            <div class="models-grid-header" title="Maximum tool-call turns per provider.">Max Turns</div>
+                            {% for provider in ['minimax', 'gemini', 'claude', 'codex'] %}
+                            <div class="models-provider">{{ provider }}</div>
+                            <input type="text" class="worker-input" id="model-{{ provider }}-FULL" value="{{ stats.queue_config.provider_models.get(provider, {}).get('FULL', '') }}" placeholder="full" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
+                            <input type="text" class="worker-input" id="model-{{ provider }}-FIX" value="{{ stats.queue_config.provider_models.get(provider, {}).get('FIX', '') }}" placeholder="fix" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
+                            <input type="text" class="worker-input" id="model-{{ provider }}-VERIFY" value="{{ stats.queue_config.provider_models.get(provider, {}).get('VERIFY', '') }}" placeholder="verify" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
+                            <input type="number" class="worker-input" id="turns-{{ provider }}" value="{{ stats.queue_config.provider_max_turns.get(provider, 25) }}" min="1" max="999" onchange="saveQueueConfig()" style="width: 100%; text-align: left;">
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <main class="main-container">
         <!-- Status banner -->
@@ -317,7 +387,7 @@
             <span style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);" id="workerGridCount"></span>
             <button class="btn btn-danger" onclick="stopAllWorkers()" id="btnStopAll" style="display: none; margin-left: auto;">Stop All Workers</button>
         </div>
-        <div id="workerGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem; margin-bottom: 0.5rem;">
+        <div id="workerGrid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.35rem; margin-bottom: 0.5rem;">
             <!-- Worker panes are dynamically created by JavaScript -->
         </div>
 
@@ -388,14 +458,28 @@
                             <span class="provider-stat">{{ pstats.runs }} runs</span>
                             <span class="provider-stat" style="color: {% if pstats.avg_delta > 0 %}var(--color-set){% elif pstats.avg_delta < 0 %}var(--accent-red-light){% else %}var(--text-muted){% endif %};">avg {{ pstats.avg_delta }}%</span>
                             <span class="provider-stat" style="color: {% if pstats.success_rate >= 80 %}var(--color-set){% elif pstats.success_rate >= 50 %}var(--accent-gold){% else %}var(--accent-red-light){% endif %};">{{ pstats.success_rate }}% ok</span>
-                            {% if pstats.avg_tools > 0 %}
+                            {% if pstats.known_tool_runs > 0 %}
                             <span class="provider-stat" style="color: var(--text-muted);">{{ pstats.avg_tools }} tools</span>
+                            <span class="provider-stat" style="color: var(--text-muted); font-size: 0.6rem;">{{ pstats.known_tool_runs }} known</span>
+                            {% endif %}
+                            {% if pstats.unknown_tool_runs > 0 %}
+                            <span class="provider-stat" style="color: var(--accent-gold); font-size: 0.6rem;">{{ pstats.unknown_tool_runs }} unknown tc</span>
                             {% endif %}
                             {% if pstats.today_runs > 0 %}
                             <span class="provider-stat" style="color: var(--color-magic); font-size: 0.6rem;">today: {{ pstats.today_runs }} · {{ pstats.today_avg_delta }}%Δ</span>
                             {% endif %}
                         </div>
                         {% endfor %}
+
+                        {% if stats.run_stats.handoffs.total > 0 %}
+                        <div style="margin-top: 0.4rem; padding: 0.3rem 0.5rem; background: var(--bg-light); border-radius: 4px; font-size: 0.65rem;">
+                            <strong style="color: var(--color-magic);">Handoffs:</strong>
+                            <span class="mono" style="color: var(--text-primary);">{{ stats.run_stats.handoffs.total }}</span> total
+                            {% for item in stats.run_stats.handoffs.top_pairs[:3] %}
+                            <span style="color: var(--text-muted);">· {{ item.pair }} <span class="mono">{{ item.count }}</span></span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
 
                         <!-- Failure modes breakdown -->
                         {% if stats.run_stats.failure_modes %}
@@ -432,6 +516,34 @@
                             {% endfor %}
                         </div>
                         {% endif %}
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-header" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <h2 style="margin: 0;">Inventory (Scoring Coverage)</h2>
+                        <span id="inventoryHeaderState" style="font-size: 0.6rem; color: var(--text-muted); font-family: var(--font-mono);" title="Background scorer state — enabled, paused, or disabled">disabled</span>
+                        <button class="btn" id="btnInventoryToggle" onclick="toggleInventoryScorer()" style="margin-left: auto; font-size: 0.65rem;">Enable</button>
+                    </div>
+                    <div class="panel-content" id="inventoryPanel" style="max-height: 300px; overflow-y: auto;">
+                        <div id="inventoryTotalsLine" style="padding: 0.25rem 0.5rem; font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); border-bottom: 1px solid var(--border-dark);">Loading…</div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Binary</th>
+                                    <th>Coverage</th>
+                                    <th>Scored</th>
+                                    <th>Total</th>
+                                    <th>Missing</th>
+                                    <th>%</th>
+                                    <th>Status</th>
+                                    <th>Last Scan</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="inventoryTableBody">
+                                <tr><td colspan="9" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">No inventory data yet — enable the scorer.</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
                 <div class="panel">
@@ -475,6 +587,9 @@
                 <span style="color: var(--border-light);">|</span>
                 <span style="color: var(--text-muted);">Audits:</span>
                 <span id="auditCount" style="font-family: var(--font-mono); color: var(--text-secondary);" title="ran / skipped (good enough + low delta)">—</span>
+                <span style="color: var(--border-light);">|</span>
+                <span style="color: var(--text-muted);">Inventory:</span>
+                <span id="inventoryWidget" style="font-family: var(--font-mono); color: var(--text-secondary);" title="Background scorer fills missing completeness scores. Toggle in settings.">disabled</span>
                 <button class="btn" onclick="drainDone()" id="btnDrainDone" title="Batch-score every pinned function and auto-dequeue any that are already above good_enough" style="margin-left: auto;">Drain Done</button>
                 <button class="btn" onclick="manualRefresh()" id="btnRefresh" title="Batch-rescore the top 50 ROI candidates for the active binary">Refresh Top 50</button>
             </div>
@@ -655,6 +770,175 @@
             if (refreshTimer) clearTimeout(refreshTimer);
             refreshTimer = setTimeout(refreshStats, 300);
         });
+
+        // ---- Inventory scorer (background completeness scoring) ----
+        let _inventoryRefreshTimer = null;
+        let _inventoryEnabled = false;
+
+        function refreshInventory() {
+            fetch('/api/inventory/status').then(r => r.json()).then(data => {
+                if (!data || data.error) return;
+                _renderInventoryWidget(data.scorer || {}, data.totals || {});
+                _renderInventoryHeader(data.scorer || {});
+                _renderInventoryTable(data.binaries || [], (data.scorer || {}).blacklisted || []);
+            }).catch(() => {});
+        }
+
+        function _renderInventoryWidget(scorer, totals) {
+            const el = document.getElementById('inventoryWidget');
+            if (!el) return;
+            _inventoryEnabled = !!scorer.enabled;
+            if (!scorer.enabled) {
+                el.textContent = 'disabled';
+                el.style.color = 'var(--text-muted)';
+                return;
+            }
+            const scored = totals.scored || 0;
+            const total = totals.total_documentable || 0;
+            const done = totals.binaries_complete || 0;
+            const all = totals.binaries_total || 0;
+            const reason = scorer.paused_reason;
+            const target = scorer.current_target ? scorer.current_target.split('/').pop() : null;
+            let line;
+            if (reason) {
+                line = `${scored.toLocaleString()}/${total.toLocaleString()} • ${done}/${all} done • paused (${escapeHtml(reason)})`;
+            } else if (target) {
+                line = `${scored.toLocaleString()}/${total.toLocaleString()} • ${done}/${all} done • scanning ${escapeHtml(target)}`;
+            } else {
+                line = `${scored.toLocaleString()}/${total.toLocaleString()} • ${done}/${all} done`;
+            }
+            el.innerHTML = line;
+            el.style.color = reason ? 'var(--text-muted)' : 'var(--accent-gold)';
+        }
+
+        function _renderInventoryHeader(scorer) {
+            const el = document.getElementById('inventoryHeaderState');
+            const btn = document.getElementById('btnInventoryToggle');
+            if (!el || !btn) return;
+            if (!scorer.enabled) {
+                el.textContent = 'disabled';
+                el.style.color = 'var(--text-muted)';
+                btn.textContent = 'Enable';
+            } else if (scorer.paused_reason) {
+                el.textContent = `paused (${scorer.paused_reason})`;
+                el.style.color = 'var(--text-muted)';
+                btn.textContent = 'Disable';
+            } else if (scorer.current_target) {
+                el.textContent = 'running';
+                el.style.color = 'var(--accent-gold)';
+                btn.textContent = 'Disable';
+            } else {
+                el.textContent = 'enabled';
+                el.style.color = 'var(--text-secondary)';
+                btn.textContent = 'Disable';
+            }
+        }
+
+        function _renderInventoryTable(binaries, blacklist) {
+            const body = document.getElementById('inventoryTableBody');
+            const totalsLine = document.getElementById('inventoryTotalsLine');
+            if (!body) return;
+            if (!binaries.length) {
+                body.innerHTML = '<tr><td colspan="9" style="color: var(--text-muted); text-align: center; padding: 0.6rem;">No inventory data yet — enable the scorer.</td></tr>';
+                if (totalsLine) totalsLine.textContent = '';
+                return;
+            }
+            const blackset = new Set(blacklist || []);
+            let totalScored = 0;
+            let totalDoc = 0;
+            let totalMiss = 0;
+            let totalDone = 0;
+            const rows = binaries.map(r => {
+                totalScored += r.scored || 0;
+                totalDoc += r.total_documentable || 0;
+                totalMiss += r.missing || 0;
+                if (r.status === 'complete') totalDone++;
+                const pct = r.percent || 0;
+                const barColor = pct >= 99 ? 'var(--color-set)' : pct >= 50 ? 'var(--accent-gold)' : 'var(--color-crafted)';
+                const statusColor = r.status === 'complete' ? 'var(--color-set)'
+                    : r.status === 'blacklisted' ? 'var(--accent-red-light)'
+                    : r.status === 'in_progress' ? 'var(--accent-gold)'
+                    : 'var(--text-muted)';
+                const last = r.last_scan ? r.last_scan.replace('T', ' ').slice(0, 19) : '—';
+                const isBlack = blackset.has(r.path);
+                const actionBtn = isBlack
+                    ? `<button class="btn" onclick="clearInventoryBlacklist('${escapeHtml(r.path)}')" title="Clear session blacklist for this binary">Retry</button>`
+                    : '';
+                return `<tr>
+                    <td style="cursor: pointer; color: var(--accent-gold);" onclick="switchBinaryDirect('${escapeHtml(r.name)}')" title="${escapeHtml(r.path)}">${escapeHtml(r.name)}</td>
+                    <td style="width: 100px;"><div style="width: 100%; height: 8px; background: var(--bg-darkest); border-radius: 2px; overflow: hidden;"><div style="height: 100%; width: ${pct}%; background: ${barColor}; border-radius: 2px;"></div></div></td>
+                    <td class="mono">${(r.scored || 0).toLocaleString()}</td>
+                    <td class="mono">${(r.total_documentable || 0).toLocaleString()}</td>
+                    <td class="mono" style="color: ${(r.missing || 0) > 0 ? 'var(--accent-red-light)' : 'var(--text-muted)'};">${(r.missing || 0).toLocaleString()}</td>
+                    <td class="mono">${pct}%</td>
+                    <td class="mono" style="color: ${statusColor};">${escapeHtml(r.status || '')}</td>
+                    <td class="mono" style="color: var(--text-muted); font-size: 0.6rem;">${escapeHtml(last)}</td>
+                    <td>${actionBtn}</td>
+                </tr>`;
+            }).join('');
+            body.innerHTML = rows;
+            if (totalsLine) {
+                const overall = totalDoc > 0 ? Math.round(1000 * totalScored / totalDoc) / 10 : 0;
+                totalsLine.textContent = `${totalScored.toLocaleString()} / ${totalDoc.toLocaleString()} scored (${overall}%) • ${totalMiss.toLocaleString()} missing • ${totalDone} / ${binaries.length} binaries complete`;
+            }
+        }
+
+        function toggleInventoryScorer() {
+            const next = !_inventoryEnabled;
+            fetch('/api/inventory/toggle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({enabled: next}),
+            }).then(r => r.json()).then(() => refreshInventory());
+        }
+
+        function clearInventoryBlacklist(path) {
+            fetch('/api/inventory/clear_blacklist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({path: path}),
+            }).then(r => r.json()).then(() => refreshInventory());
+        }
+
+        socket.on('inventory_status', () => {
+            if (_inventoryRefreshTimer) clearTimeout(_inventoryRefreshTimer);
+            _inventoryRefreshTimer = setTimeout(refreshInventory, 300);
+        });
+
+        // ---- Quota-pause wake countdown ----
+        function _formatQuotaCountdown(isoStr) {
+            try {
+                const until = new Date(isoStr);
+                const now = new Date();
+                let secs = Math.max(0, Math.floor((until - now) / 1000));
+                if (secs <= 0) return 'resuming…';
+                const h = Math.floor(secs / 3600); secs -= h * 3600;
+                const m = Math.floor(secs / 60); secs -= m * 60;
+                if (h > 0) return `${h}h ${m}m`;
+                if (m > 0) return `${m}m ${secs}s`;
+                return `${secs}s`;
+            } catch { return ''; }
+        }
+
+        // Repaint paused workers every 30s so the countdown visibly ticks
+        // down without waiting for a full worker_status push. We rely on
+        // the cached __lastWorkerStatus the worker handler stashes.
+        setInterval(() => {
+            const workers = window.__lastWorkerStatus || [];
+            workers.forEach(w => {
+                if (w.status !== 'quota_paused' || !w.paused_until) return;
+                const status = document.getElementById(`wp-status-${w.id}`);
+                if (!status) return;
+                const remaining = _formatQuotaCountdown(w.paused_until);
+                const reason = w.paused_reason ? ` — ${escapeHtml(w.paused_reason).slice(0,60)}` : '';
+                status.innerHTML = `<span class="wp-current">paused</span> until ${escapeHtml(w.paused_until.replace('T',' ').slice(0,19))} (${remaining})${reason}`;
+            });
+        }, 30000);
+
+        // Backend may push provider_pauses on install/clear; we don't render
+        // a separate panel (Q7 = no banner) but the worker_status path picks
+        // up the new paused_until field naturally on the next status emit.
+        socket.on('provider_pauses', () => {});
 
         function scoreCellClass(s) {
             if (s >= 100) return 'score-100';
@@ -845,6 +1129,8 @@
                     const ho = document.getElementById('handoffProviderInput');
                     const hm = document.getElementById('handoffMaxInput');
                     const dm = document.getElementById('debugModeInput');
+                    const providerMaxTurns = stats.queue_config.provider_max_turns || {};
+                    const providerModels = stats.queue_config.provider_models || {};
                     if (ge && document.activeElement !== ge) ge.value = stats.queue_config.good_enough_score;
                     if (rs) rs.checked = !!stats.queue_config.require_scored;
                     if (ho && document.activeElement !== ho) {
@@ -854,6 +1140,18 @@
                         hm.value = stats.queue_config.complexity_handoff_max || 0;
                     }
                     if (dm) dm.checked = !!stats.queue_config.debug_mode;
+                    ['minimax', 'gemini', 'claude', 'codex'].forEach(provider => {
+                        const input = document.getElementById(`turns-${provider}`);
+                        if (!input || document.activeElement === input) return;
+                        input.value = providerMaxTurns[provider] || 25;
+                    });
+                    ['minimax', 'gemini', 'claude', 'codex'].forEach(provider => {
+                        ['FULL', 'FIX', 'VERIFY'].forEach(mode => {
+                            const input = document.getElementById(`model-${provider}-${mode}`);
+                            if (!input || document.activeElement === input) return;
+                            input.value = ((providerModels[provider] || {})[mode]) || '';
+                        });
+                    });
                 }
                 if (stats.queue_meta) repaintRefreshStatus(stats.queue_meta, stats.run_stats);
                 if (stats.roi_queue) repaintQueue(stats.roi_queue);
@@ -898,12 +1196,14 @@
                 <div class="worker-pane-header">
                     <span class="wp-title">${provider || '?'} #${workerId}</span>
                     <span class="wp-status" id="wp-status-${workerId}">${binary || ''}</span>
+                    <span class="wp-alert" id="wp-alert-${workerId}"></span>
                     <div class="wp-actions">
-                        <button class="btn" onclick="focusWorker('${workerId}')" id="wp-focus-${workerId}">Focus</button>
-                        <button class="btn btn-danger" onclick="stopWorker('${workerId}')" id="wp-stop-${workerId}">Stop</button>
+                        <button class="btn icon-btn" onclick="focusWorker('${workerId}')" id="wp-focus-${workerId}" title="Focus worker" aria-label="Focus worker" aria-pressed="false"><span class="icon-focus" aria-hidden="true"></span></button>
+                        <button class="btn btn-danger icon-btn" onclick="stopWorker('${workerId}')" id="wp-stop-${workerId}" title="Stop worker" aria-label="Stop worker"><span class="icon-stop" aria-hidden="true"></span></button>
                         <button class="btn" onclick="dismissPane('${workerId}')" style="display:none" id="wp-dismiss-${workerId}">X</button>
                     </div>
                 </div>
+                <div class="wp-config" id="wp-config-${workerId}" style="display:none; padding:0.15rem 0.5rem; font-family: var(--font-mono); font-size: 0.58rem; color: var(--text-secondary); border-bottom: 1px solid var(--border-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
                 <div class="worker-pane-output" id="wp-out-${workerId}"></div>
             `;
             grid.appendChild(pane);
@@ -911,20 +1211,134 @@
             return workerPanes[workerId];
         }
 
+        // Render the per-worker frozen-config sub-line. Called from the
+        // worker_status handler whenever a worker's config_snapshot field
+        // updates. Sub-line is hidden when the worker has no snapshot
+        // (legacy/CLI workers — pre-snapshot behavior).
+        function renderWorkerConfig(workerId, snap) {
+            const el = document.getElementById(`wp-config-${workerId}`);
+            if (!el) return;
+            if (!snap || typeof snap !== 'object') {
+                el.style.display = 'none';
+                el.textContent = '';
+                return;
+            }
+            const provs = snap.providers || {};
+            const primary = snap.primary_provider;
+            const primaryEntry = provs[primary] || {};
+            const tokens = [];
+            // Model from FULL mode for the primary provider — what the worker
+            // actually uses unless it switches to FIX/VERIFY mid-run.
+            const fullModel = (primaryEntry.models || {}).FULL;
+            if (fullModel) tokens.push(fullModel);
+            if (primaryEntry.max_turns !== undefined) tokens.push(`t:${primaryEntry.max_turns}`);
+            // Audit policy. "off" if null/undefined, otherwise show provider + min-delta.
+            if (snap.audit_provider) {
+                tokens.push(`audit:${snap.audit_provider} Δ${snap.audit_min_delta}`);
+            } else {
+                tokens.push('audit:off');
+            }
+            // Escalation target.
+            if (snap.complexity_handoff_provider) {
+                tokens.push(`esc:${snap.complexity_handoff_provider}`);
+            } else {
+                tokens.push('esc:off');
+            }
+            // good_enough is a numeric threshold; show as good@N.
+            if (snap.good_enough_score !== undefined) tokens.push(`good@${snap.good_enough_score}`);
+            el.textContent = tokens.join(' · ');
+            el.style.display = '';
+        }
+
+        // Cap the number of body lines per function block so a verbose run
+        // (e.g., 200+ tool calls) can't accumulate unbounded DOM nodes inside
+        // one .fn-block.body. Older entries get trimmed once the cap is hit.
+        // Copilot review feedback on PR #168 flagged the prior pruning logic
+        // as only counting top-level blocks — one block could blow up alone.
+        const FN_BLOCK_BODY_MAX_LINES = 300;
+
         function appendToPane(workerId, text, type) {
             const pane = workerPanes[workerId];
             if (!pane) return;
+            // Q4: drop blank/whitespace-only lines so within-block output is
+            // continuous with no gaps. Between-block spacing comes from the
+            // .fn-block margin-bottom.
+            if (!text || !String(text).trim()) return;
             const el = document.createElement('div');
             el.className = 'activity-entry activity-' + type;
             el.textContent = text;
-            pane.output.appendChild(el);
-            if (pane.output.children.length > 500) pane.output.removeChild(pane.output.firstChild);
+            // Route into the currently-open function block's body if one
+            // exists; otherwise drop into the bare pane (legacy lines that
+            // arrive outside a function — e.g. worker startup lines).
+            const target = (pane.currentFnBlock && pane.currentFnBlock.body) || pane.output;
+            target.appendChild(el);
+            // Per-block trim (within the active fn-block.body).
+            if (pane.currentFnBlock && pane.currentFnBlock.body
+                    && pane.currentFnBlock.body.children.length > FN_BLOCK_BODY_MAX_LINES) {
+                pane.currentFnBlock.body.removeChild(pane.currentFnBlock.body.firstChild);
+            }
+            // Top-level trim (bare pane lines + total fn-blocks).
+            if (pane.output.children.length > 200) pane.output.removeChild(pane.output.firstChild);
             pane.output.scrollTop = pane.output.scrollHeight;
+        }
+
+        // ---- Function-block lifecycle helpers (Q1-Q5 design) ----
+
+        function _openFnBlock(pane, name, address) {
+            // If a previous block is still open (no Complete: was ever
+            // emitted — e.g. worker died mid-function, then was restored
+            // and started a new one), close it as interrupted so we never
+            // have two adjacent open blocks.
+            if (pane.currentFnBlock) {
+                _closeFnBlock(pane, /* name */ null, /* addr */ null, true /* interrupted */);
+            }
+            const block = document.createElement('div');
+            block.className = 'fn-block';
+            const header = document.createElement('div');
+            header.className = 'fn-name fn-header';
+            header.textContent = `${name} @ 0x${address}`;
+            block.appendChild(header);
+            const body = document.createElement('div');
+            body.className = 'fn-body';
+            block.appendChild(body);
+            pane.output.appendChild(block);
+            pane.currentFnBlock = { block, body };
+            pane.output.scrollTop = pane.output.scrollHeight;
+        }
+
+        function _closeFnBlock(pane, name, address, interrupted) {
+            if (!pane || !pane.currentFnBlock) return;
+            const footer = document.createElement('div');
+            footer.className = 'fn-name fn-footer';
+            const nm = name || pane.currentFuncName || '?';
+            const ad = address || pane.currentFuncAddr || '?';
+            footer.textContent = interrupted
+                ? `${nm} @ 0x${ad} (interrupted)`
+                : `${nm} @ 0x${ad}`;
+            pane.currentFnBlock.block.appendChild(footer);
+            pane.currentFnBlock = null;
         }
 
         function dismissPane(workerId) {
             const pane = workerPanes[workerId];
             if (pane) { pane.element.remove(); delete workerPanes[workerId]; }
+        }
+
+        function setPaneAlert(workerId, alert) {
+            const pane = workerPanes[workerId];
+            const badge = document.getElementById(`wp-alert-${workerId}`);
+            if (!pane || !badge) return;
+            if (alert && alert.type === 'provider_timeout') {
+                badge.textContent = `TIMEOUT${alert.timeout_secs ? ' ' + alert.timeout_secs + 's' : ''}`;
+                badge.title = alert.message || 'Provider timeout';
+                badge.classList.add('active');
+                pane.element.classList.add('timeout');
+            } else {
+                badge.textContent = '';
+                badge.title = '';
+                badge.classList.remove('active');
+                pane.element.classList.remove('timeout');
+            }
         }
 
         function markPaneFinished(workerId, reason) {
@@ -983,12 +1397,21 @@
         // Worker lifecycle events
         socket.on("worker_started", d => {
             getOrCreatePane(d.worker_id, d.provider, d.binary || '');
-            appendToPane(d.worker_id, `Worker started: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`, 'scan');
+            appendToPane(
+                d.worker_id,
+                d.restored
+                    ? `Worker restored after restart: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`
+                    : `Worker started: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`,
+                'scan'
+            );
             // Show Stop All button when any worker is running
             const stopAllBtn = document.getElementById('btnStopAll');
             if (stopAllBtn) stopAllBtn.style.display = '';
         });
         socket.on("worker_stopped", d => {
+            const pane = workerPanes[d.worker_id];
+            // Close any block left open by mid-function abandonment (Q2 C).
+            if (pane) _closeFnBlock(pane, null, null, true /* interrupted */);
             appendToPane(d.worker_id, `Worker ${d.reason}: ${d.progress?.completed || 0} completed`, d.reason === 'finished' ? 'success' : 'neutral');
             markPaneFinished(d.worker_id, d.reason);
             if (_focusedWorkerId === d.worker_id) unfocusWorker();
@@ -998,10 +1421,9 @@
         // Per-function events — route to worker pane by worker_id
         socket.on("function_started", d => {
             if (d.worker_id) getOrCreatePane(d.worker_id, null, null);
-            appendToPane(d.worker_id, `\n${d.name} @ 0x${d.address}`, 'started');
-            // Track current function on the pane so Focus can read it
             const pane = workerPanes[d.worker_id];
             if (pane) {
+                _openFnBlock(pane, d.name, d.address);
                 pane.currentFuncName = d.name;
                 pane.currentFuncAddr = d.address;
             }
@@ -1011,6 +1433,15 @@
         socket.on("function_mode", d => appendToPane(d.worker_id, `  ${d.mode} | ${d.model} | score: ${d.score}%`, 'neutral'));
         socket.on("tool_call", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, 'tool'));
         socket.on("tool_result", d => appendToPane(d.worker_id, `  [mcp] ${d.tool}: ${d.status}`, d.status === 'failed' ? 'error' : 'tool'));
+        socket.on("provider_timeout", d => {
+            if (d.worker_id) {
+                getOrCreatePane(d.worker_id, d.provider, null);
+                appendToPane(d.worker_id, `  [watchdog] ${d.message || 'provider timeout'} — killed stalled session`, 'error');
+                setPaneAlert(d.worker_id, d);
+            }
+            showBanner(`Provider timeout: ${d.message || 'stalled provider session killed'}`);
+            setTimeout(hideBanner, 5000);
+        });
         socket.on("model_text", d => { if (d.text) appendToPane(d.worker_id, d.text.substring(0, 300), 'text'); });
         socket.on("score_update", d => {
             const delta = (d.score_after||0) - (d.score_before||0);
@@ -1018,14 +1449,23 @@
             appendToPane(d.worker_id, `  Score: ${d.score_before}% -> ${d.score_after}% (${sign}${delta}%) | ${d.result}`, delta > 0 ? 'success' : 'neutral');
         });
         socket.on("function_complete", d => {
+            const pane = workerPanes[d.worker_id];
             let line;
             if (d.result === 'skipped') {
-                line = `  SKIP${d.skip_type ? ' (' + d.skip_type + ')' : ''}: ${d.reason || 'no reason given'}\n`;
+                line = `SKIP${d.skip_type ? ' (' + d.skip_type + ')' : ''}: ${d.reason || 'no reason given'}`;
             } else {
-                line = `  Complete: ${d.result}\n`;
+                line = `Complete: ${d.result}`;
             }
             const cls = d.result === 'completed' ? 'success' : (d.result === 'skipped' ? 'neutral' : 'error');
             appendToPane(d.worker_id, line, cls);
+            // Close the block with the post-rescore name (Q3) — d.name is set
+            // by the server-side enrichment; falls back to the start-name
+            // tracked on the pane if the event omitted it (skip paths).
+            if (pane) {
+                _closeFnBlock(pane, d.name, d.address, false);
+                pane.currentFuncName = null;
+                pane.currentFuncAddr = null;
+            }
             refreshStats();
         });
 
@@ -1126,20 +1566,90 @@
             const audit = auditSel ? auditSel.value : 'off';
             const auditDeltaEl = document.getElementById('auditMinDeltaInput');
             const auditDelta = auditDeltaEl ? (parseInt(auditDeltaEl.value) || 5) : 5;
+            const providerMaxTurns = collectProviderMaxTurns();
+            const providerModels = collectProviderModels();
+            const newConfig = {
+                good_enough_score: good,
+                require_scored: cold,
+                complexity_handoff_provider: handoff === 'off' ? null : handoff,
+                complexity_handoff_max: handoffMax,
+                debug_mode: debug,
+                audit_provider: audit === 'off' ? null : audit,
+                audit_min_delta: auditDelta,
+                provider_max_turns: providerMaxTurns,
+                provider_models: providerModels,
+            };
             await fetch('/api/queue/config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    good_enough_score: good,
-                    require_scored: cold,
-                    complexity_handoff_provider: handoff === 'off' ? null : handoff,
-                    complexity_handoff_max: handoffMax,
-                    debug_mode: debug,
-                    audit_provider: audit === 'off' ? null : audit,
-                    audit_min_delta: auditDelta,
-                }),
+                body: JSON.stringify(newConfig),
             });
+            // Toast informing the user that running workers keep their
+            // frozen snapshots — the new config applies to NEXT workers.
+            // Only fires when at least one running worker's snapshot
+            // diverges from what was just saved; if every running worker
+            // already matches (or there are no running workers), the save
+            // was a no-op for everyone and the toast would just be noise.
+            const drifted = countDriftedWorkers(newConfig);
+            if (drifted > 0) {
+                showBanner(
+                    `Config saved. ${drifted} running worker${drifted === 1 ? '' : 's'} ` +
+                    `will keep ${drifted === 1 ? 'its' : 'their'} current settings until ` +
+                    `restarted. New workers will use the updated config.`
+                );
+                setTimeout(hideBanner, 6000);
+            }
             // queue_changed event will trigger a refreshStats which repaints the queue
+        }
+
+        // Compare each running worker's frozen snapshot against the config
+        // the user just saved. Returns the count of workers whose snapshot
+        // differs from the new config in any of the snapshotted fields.
+        // The cached worker_status payload (stamped by the worker_status
+        // socket handler) is the source of truth for current snapshots.
+        function countDriftedWorkers(newConfig) {
+            const workers = window.__lastWorkerStatus || [];
+            let count = 0;
+            for (const w of workers) {
+                if (!w || (w.status !== 'running' && w.status !== 'starting')) continue;
+                const snap = w.config_snapshot;
+                if (!snap) continue;  // legacy worker, no snapshot to drift
+                if (snapshotDiffersFromConfig(snap, newConfig)) count++;
+            }
+            return count;
+        }
+
+        function snapshotDiffersFromConfig(snap, cfg) {
+            if (snap.good_enough_score !== cfg.good_enough_score) return true;
+            if ((snap.audit_provider || null) !== (cfg.audit_provider || null)) return true;
+            if (snap.audit_min_delta !== cfg.audit_min_delta) return true;
+            if ((snap.complexity_handoff_provider || null) !==
+                (cfg.complexity_handoff_provider || null)) return true;
+            if (snap.complexity_handoff_max !== cfg.complexity_handoff_max) return true;
+            // Per-provider drift: if the snapshot captured a provider that
+            // appears in the new config with a different max_turns or model
+            // slice, that's drift the user might want to know about.
+            const snapProvs = snap.providers || {};
+            for (const provName of Object.keys(snapProvs)) {
+                const snapEntry = snapProvs[provName] || {};
+                const cfgTurns = (cfg.provider_max_turns || {})[provName];
+                if (cfgTurns !== undefined && cfgTurns !== snapEntry.max_turns) return true;
+                const cfgModels = (cfg.provider_models || {})[provName] || {};
+                const snapModels = snapEntry.models || {};
+                for (const mode of ['FULL', 'FIX', 'VERIFY']) {
+                    if ((cfgModels[mode] || '') !== (snapModels[mode] || '')) return true;
+                }
+            }
+            return false;
+        }
+
+        function collectProviderMaxTurns() {
+            const providerMaxTurns = {};
+            ['minimax', 'gemini', 'claude', 'codex'].forEach(provider => {
+                const input = document.getElementById(`turns-${provider}`);
+                providerMaxTurns[provider] = input ? (parseInt(input.value) || 25) : 25;
+            });
+            return providerMaxTurns;
         }
 
         // --- All Functions: server-side search + filter ---
@@ -1247,6 +1757,30 @@
             btn.disabled = true;
             setTimeout(() => { btn.disabled = false; }, 2000);
         }
+        function toggleSettingsPanel(forceOpen) {
+            const popout = document.getElementById('settingsPopout');
+            const button = document.getElementById('btnToggleSettings');
+            if (!popout || !button) return;
+            const open = forceOpen === undefined ? !popout.classList.contains('active') : !!forceOpen;
+            popout.classList.toggle('active', open);
+            button.classList.toggle('btn-primary', open);
+            button.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+        function collectProviderModels() {
+            const providers = ['minimax', 'gemini', 'claude', 'codex'];
+            const modes = ['FULL', 'FIX', 'VERIFY'];
+            const providerModels = {};
+            providers.forEach(provider => {
+                modes.forEach(mode => {
+                    const input = document.getElementById(`model-${provider}-${mode}`);
+                    const value = input ? input.value.trim() : '';
+                    if (!value) return;
+                    if (!providerModels[provider]) providerModels[provider] = {};
+                    providerModels[provider][mode] = value;
+                });
+            });
+            return providerModels;
+        }
         function stopWorker(wid) { socket.emit('request_stop_worker', {worker_id: wid}); }
         function stopAllWorkers() {
             // Stop every worker that has a visible pane
@@ -1261,7 +1795,7 @@
         socket.on('worker_started_ack', d => { /* pane created by worker_started event */ });
         socket.on('worker_error', d => { showBanner(`Worker error: ${d.error}`); setTimeout(hideBanner, 5000); });
         socket.on('worker_stop_ack', d => { /* stop handled by worker_status update */ });
-        socket.on('worker_started', d => addActivity(`Worker ${d.worker_id}: ${d.provider} ${d.continuous ? 'Auto' : 'x' + d.count}`, 'scan'));
+        socket.on('worker_started', d => addActivity(`Worker ${d.worker_id}: ${d.provider} ${d.restored ? 'restored ' : ''}${d.continuous ? 'Auto' : 'x' + d.count}`, 'scan'));
         socket.on('worker_progress', d => {
             if (d.current) addActivity(`Worker ${d.worker_id}: ${d.current.name} (${d.completed+1}/${d.total})`, 'scan');
         });
@@ -1269,6 +1803,7 @@
             addActivity(`Worker ${d.worker_id} ${d.reason}`, d.reason === 'finished' ? 'success' : 'neutral');
             refreshStats();
         });
+        socket.on('provider_timeout', d => addActivity(`Worker ${d.worker_id}: timeout ${d.provider || 'provider'} (${d.timeout_secs || '?'}s)`, 'error'));
         socket.on('worker_status', workers => {
             // Update pane borders and status text based on worker status.
             // On page refresh the local workerPanes map starts empty but the
@@ -1297,17 +1832,50 @@
                         titleEl.textContent = titleText;
                     }
                 }
-                const cls = w.status === 'running' ? 'running' : w.status === 'stopping' ? 'stopping' : 'finished';
+                const cls = w.status === 'running' ? 'running'
+                    : w.status === 'stopping' ? 'stopping'
+                    : w.status === 'quota_paused' ? 'quota_paused'
+                    : 'finished';
+                // Q2 C: detect transition INTO quota_paused so we close any
+                // function block left open by the worker yielding mid-loop —
+                // never leave a header without a matching footer.
+                if (
+                    w.status === 'quota_paused'
+                    && pane.lastStatus !== 'quota_paused'
+                    && pane.currentFnBlock
+                ) {
+                    _closeFnBlock(pane, null, null, true /* interrupted */);
+                }
+                pane.lastStatus = w.status;
                 pane.element.className = `worker-pane ${cls}`;
+                setPaneAlert(w.id, w.last_alert);
                 const done = w.progress.completed + w.progress.skipped + w.progress.failed;
                 const status = document.getElementById(`wp-status-${w.id}`);
                 if (status) {
-                    const countStr = w.continuous ? 'auto' : `${done}/${w.count}`;
-                    const cur = w.progress.current ? w.progress.current.name : '';
-                    const skipStr = w.progress.skipped > 0 ? ` ${w.progress.skipped}skip` : '';
-                    status.textContent = `${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${cur ? ' | ' + cur : ''}`;
+                    if (w.status === 'quota_paused' && w.paused_until) {
+                        // Quota wall: replace the status line with a wake-time
+                        // countdown so the operator can see when work resumes.
+                        const remaining = _formatQuotaCountdown(w.paused_until);
+                        const reason = w.paused_reason ? ` — ${escapeHtml(w.paused_reason).slice(0, 60)}` : '';
+                        status.innerHTML = `<span class="wp-current">paused</span> until ${escapeHtml(w.paused_until.replace('T',' ').slice(0,19))} (${remaining})${reason}`;
+                    } else {
+                        const countStr = w.continuous ? 'auto' : `${done}/${w.count}`;
+                        const cur = w.progress.current ? w.progress.current.name : '';
+                        const skipStr = w.progress.skipped > 0 ? ` ${w.progress.skipped}skip` : '';
+                        const timeoutStr = w.timeout_count > 0 ? ` | ${w.timeout_count} timeout${w.timeout_count > 1 ? 's' : ''}` : '';
+                        const restoredStr = w.restored ? 'restored | ' : '';
+                        const prefix = `${restoredStr}${countStr} | ${w.progress.completed}ok ${w.progress.failed}fail${skipStr}${timeoutStr}`;
+                        status.innerHTML = escapeHtml(prefix) + (cur ? ' | <span class="wp-current">' + escapeHtml(cur) + '</span>' : '');
+                    }
                 }
+                // Snapshot sub-line. Frozen at worker start, never changes
+                // for this worker. Hidden when no snapshot present.
+                renderWorkerConfig(w.id, w.config_snapshot);
             });
+            // Cache the latest worker_status payload so the config-save
+            // toast (Q5) can compare current snapshots against the new
+            // queue config without an extra round-trip.
+            window.__lastWorkerStatus = workers;
             // Show/hide Stop All button based on active workers
             const activeCount = workers.filter(w => w.status === 'running' || w.status === 'stopping').length;
             const stopAllBtn = document.getElementById('btnStopAll');
@@ -1427,6 +1995,15 @@
         let _focusedFuncName = null;
         let _focusedWorkerName = null;
 
+        function setFocusButtonState(workerId, focused) {
+            const btn = document.getElementById(`wp-focus-${workerId}`);
+            if (!btn) return;
+            btn.classList.toggle('btn-primary', focused);
+            btn.setAttribute('aria-pressed', focused ? 'true' : 'false');
+            btn.setAttribute('aria-label', focused ? 'Unfocus worker' : 'Focus worker');
+            btn.setAttribute('title', focused ? 'Unfocus worker' : 'Focus worker');
+        }
+
         function focusWorker(workerId) {
             // Toggle off if already focused
             if (_focusedWorkerId === workerId) {
@@ -1437,15 +2014,13 @@
             if (_focusedWorkerId) {
                 const prevPane = workerPanes[_focusedWorkerId];
                 if (prevPane) prevPane.element.classList.remove('focused');
-                const prevBtn = document.getElementById(`wp-focus-${_focusedWorkerId}`);
-                if (prevBtn) { prevBtn.textContent = 'Focus'; prevBtn.classList.remove('btn-primary'); }
+                setFocusButtonState(_focusedWorkerId, false);
             }
             _focusedWorkerId = workerId;
             // Highlight the pane
             const pane = workerPanes[workerId];
             if (pane) pane.element.classList.add('focused');
-            const btn = document.getElementById(`wp-focus-${workerId}`);
-            if (btn) { btn.textContent = 'Focused'; btn.classList.add('btn-primary'); }
+            setFocusButtonState(workerId, true);
             // Update banner with worker name + current function
             const titleEl = pane?.element.querySelector('.wp-title');
             _focusedWorkerName = titleEl ? titleEl.textContent : workerId;
@@ -1467,8 +2042,7 @@
             if (_focusedWorkerId) {
                 const pane = workerPanes[_focusedWorkerId];
                 if (pane) pane.element.classList.remove('focused');
-                const btn = document.getElementById(`wp-focus-${_focusedWorkerId}`);
-                if (btn) { btn.textContent = 'Focus'; btn.classList.remove('btn-primary'); }
+                setFocusButtonState(_focusedWorkerId, false);
             }
             _focusedWorkerId = null;
             _focusedFuncAddr = null;
@@ -1560,6 +2134,17 @@
                 el.innerHTML = `<div style="color: var(--accent-red-light); padding: 0.5rem;">Error loading call graph: ${e.message}</div>`;
             }
         }
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') toggleSettingsPanel(false);
+        });
+
+        // Initial inventory load on page open. The widget + table populate
+        // even when the scorer is disabled (showing persisted last-scan data
+        // from any prior session). Live updates flow via the
+        // inventory_status WebSocket event.
+        refreshInventory();
+        setInterval(refreshInventory, 30000);
     </script>
 </body>
 </html>

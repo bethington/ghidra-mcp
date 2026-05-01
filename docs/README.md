@@ -1,76 +1,78 @@
-# Documentation Organization
+# Documentation
 
-This directory contains all project documentation organized by category for easy navigation and maintenance.
+This directory contains the maintained project guides, reference material, and
+release notes for Ghidra MCP.
 
-## Directory Structure
+## What To Read First
+
+- Start in the repo root `README.md` for installation, build, and day-to-day
+  usage.
+- Read `PROJECT_STRUCTURE.md` for the current layout of the codebase and where
+  major subsystems live.
+- Read `TESTING.md` for local, CI, and live Ghidra release-regression testing.
+- Read `NAMING_CONVENTIONS.md` for naming and file-layout guidance.
+- Read `releases/README.md` for version-specific release notes.
+
+## Directory Layout
 
 ```text
 docs/
-├── project-management/     # Project administration and reports
-│   ├── CLAUDE.md          # Claude AI interaction notes
-│   └── CLEANUP_FINAL_REPORT.md  # Project cleanup documentation
-│
-├── prompts/               # AI prompting workflows and guides
-│   ├── README.md         # Overview of prompting system
-│   ├── FUNCTION_DOC_WORKFLOW_V*.md  # Function documentation workflows
-│   ├── PLATE_COMMENT_*.md # Plate comment formatting guides
-│   └── *.md              # Various specialized prompts
-│
-├── releases/              # Version-specific release documentation
-│   ├── v1.4.0/           # Release 1.4.0 documentation
-│   ├── v1.5.0/           # Release 1.5.0 documentation
-│   ├── v1.5.1/           # Release 1.5.1 documentation
-│   ├── v1.6.0/           # Release 1.6.0 documentation
-│   ├── v1.7.0/           # Release 1.7.0 documentation
-│   ├── v1.7.2/           # Release 1.7.2 documentation
-│   ├── v1.7.3/           # Release 1.7.3 documentation
-│   └── v1.9.3/           # Release 1.9.2 documentation
-│
-├── GHIDRA_VARIABLE_APIS_EXPLAINED.md  # Ghidra variable API documentation
-├── MARKDOWN_NAMING.md                 # Markdown naming conventions
-├── MAVEN_VERSION_MANAGEMENT.md        # Maven version management guide
-├── NAMING_CONVENTIONS.md              # General naming conventions
-├── ORGANIZATION_SUMMARY.md            # Project organization overview
-├── PLATE_COMMENT_BEST_PRACTICES.md    # Plate comment guidelines
-└── PROJECT_STRUCTURE.md               # Project structure documentation
+├── README.md
+├── PROJECT_STRUCTURE.md
+├── NAMING_CONVENTIONS.md
+├── HUNGARIAN_NOTATION.md
+├── PLATE_COMMENT_BEST_PRACTICES.md
+├── GHIDRA_VARIABLE_APIS_EXPLAINED.md
+├── JAVA_HANDLER_REFACTORING.md
+├── MAVEN_VERSION_MANAGEMENT.md
+├── MULTI_PROGRAM_SUPPORT_ANALYSIS.md
+├── QUICK_REFERENCE_SCRIPTS.md
+├── SESSION_SUMMARY_DOCUMENTATION_SYSTEM.md
+├── WORKFLOW_DOCUMENTATION_PROPAGATION.md
+├── ORGANIZATION_SUMMARY.md
+├── project-management/
+├── prompts/
+└── releases/
 ```
 
-## Documentation Categories
+## Categories
 
-### Core Documentation (Root Level)
+### Maintained Guides
 
-- **Technical guides**: Ghidra APIs, naming conventions, project structure
-- **Development standards**: Code organization, best practices
+- Architecture, structure, and naming guidance
+- Local, CI, and release-regression testing guidance
+- Reverse-engineering workflow notes
+- Versioning and release-process documentation
 
-### Project Management
+### Prompting Workflows
 
-- Administrative documentation
-- Project reports and cleanup notes
-- AI interaction logs and notes
+- Operator prompt docs for function documentation, data typing, and MCP tool use
 
-### Prompts
+### Release Notes
 
-- AI prompting workflows for function documentation
-- Template prompts for various analysis tasks
-- Formatting guides for comments and documentation
+- Historical release-specific notes and summaries under `releases/`
 
-### Releases
+### Project History
 
-- Version-specific release notes
-- Implementation summaries
-- Feature status reports
-- Bug fix documentation
+- Older organization and project-management notes kept for context
 
-## Navigation Guidelines
+## Current Command Surface
 
-1. **For developers**: Start with `PROJECT_STRUCTURE.md` and `NAMING_CONVENTIONS.md`
-2. **For AI prompting**: Check `prompts/README.md` for workflow overview
-3. **For release information**: Browse `releases/` by version
-4. **For project history**: See `project-management/` for administrative docs
+The supported operator workflow is Python-first:
 
-## Maintenance
+- `python -m tools.setup preflight`
+- `python -m tools.setup ensure-prereqs`
+- `python -m tools.setup build`
+- `python -m tools.setup deploy`
+- `python -m tools.setup start-ghidra`
+- `python -m tools.setup bump-version --new X.Y.Z`
 
-- Keep this README updated when adding new documentation categories
-- Follow naming conventions defined in `MARKDOWN_NAMING.md`
-- Version-specific docs go in `releases/vX.Y.Z/`
-- General guides stay at the top level
+Documentation in this directory should prefer that command surface and should
+not point readers at removed wrapper-script workflows.
+
+## Maintenance Rules
+
+- Keep setup/build/deploy guidance aligned with the root `README.md`.
+- Put release-specific material under `releases/vX.Y.Z/`.
+- Keep historical notes clearly separated from current operator guidance.
+- Do not reintroduce references to removed wrapper-script workflows.

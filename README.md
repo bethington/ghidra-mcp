@@ -7,7 +7,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Java](https://img.shields.io/badge/Java-21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
-[![Ghidra](https://img.shields.io/badge/Ghidra-12.0.3-brightgreen?style=for-the-badge&logoColor=white)](https://ghidra-sre.org/)
+[![Ghidra](https://img.shields.io/badge/Ghidra-12.0.4-brightgreen?style=for-the-badge&logoColor=white)](https://ghidra-sre.org/)
 [![MCP](https://img.shields.io/badge/MCP-Model%20Context%20Protocol-6C5CE7?style=for-the-badge&logoColor=white)](https://modelcontextprotocol.io/)
 
 [![Stars](https://img.shields.io/github/stars/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=yellow)](https://github.com/bethington/ghidra-mcp/stargazers)
@@ -16,14 +16,16 @@
 [![Issues](https://img.shields.io/github/issues/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=orange)](https://github.com/bethington/ghidra-mcp/issues)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
+>
+> If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **222 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **225 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **222 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
+- **225 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -53,9 +55,15 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Core MCP Integration
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **222 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
+- **225 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
+
+> **Compatibility note:** MCP tool names are normalized for GitHub Copilot CLI
+> and CAPI validation. Exposed tool names use lowercase letters, digits,
+> underscores, and hyphens only; nested HTTP paths such as `/debugger/status`
+> are advertised as names like `debugger_status_2` when needed to avoid
+> collisions with static bridge tools.
 
 ### Binary Analysis Capabilities
 - **Function Analysis** — Decompilation, call graphs, cross-references, completeness scoring
@@ -91,16 +99,15 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 - **Java 21 LTS** (OpenJDK recommended)
 - **Apache Maven 3.9+**
-- **Ghidra 12.0.3** (or compatible version)
-- **Python 3.8+** with pip
+- **Ghidra 12.0.4** (or compatible version)
+- **Python 3.10+** with pip
 
 ### Installation
 
-> Recommended for Windows: use `ghidra-mcp-setup.ps1` as the primary entry point.
-> It handles prerequisite setup + build + deployment in one command.
+> Recommended for all platforms: use `python -m tools.setup` directly.
 >
-> **Important:** `-SetupDeps` installs Maven/Ghidra JAR dependencies only.
-> `-Deploy` is the end-user command and (by default) also ensures Python requirements before build/deploy.
+> `ensure-prereqs` installs runtime Python requirements plus the Ghidra JARs needed in the local Maven repository.
+> `deploy` copies the build output, installs the user-profile extension, and patches Ghidra user config.
 
 1. **Clone the repository:**
    ```bash
@@ -109,33 +116,39 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    ```
 
 2. **Recommended: run environment preflight first:**
-   ```powershell
-   .\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+   ```text
+   python -m tools.setup preflight --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
    ```
 
-3. **Build and deploy to Ghidra (single command):**
-   ```powershell
-   .\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+3. **Build and deploy to Ghidra:**
+   ```text
+   python -m tools.setup ensure-prereqs --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
+   python -m tools.setup build
+   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
    ```
+
+   `deploy` saves/closes an already-running matching Ghidra instance when
+   needed, installs the extension, starts Ghidra, waits for MCP health, and runs
+   schema smoke checks.
 
 4. **Optional strict/manual mode** (advanced):
-   ```powershell
+   ```text
    # Skip automatic prerequisite setup
-   .\ghidra-mcp-setup.ps1 -Deploy -NoAutoPrereqs -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+   python -m tools.setup build
+   python -m tools.setup deploy --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
    ```
 
-5. **Show script help**:
-   ```powershell
-   .\ghidra-mcp-setup.ps1 -Help
-   # or
-   Get-Help .\ghidra-mcp-setup.ps1 -Detailed
+5. **Show command help**:
+   ```text
+   python -m tools.setup --help
    ```
 
 6. **Optional build-only mode** (advanced/troubleshooting):
-   ```powershell
-   # Preferred: script-managed build-only
-   .\ghidra-mcp-setup.ps1 -BuildOnly
+   ```text
+   python -m tools.setup build
    ```
+
+   Supported build path: `python -m tools.setup build` uses Maven under the hood and is the canonical workflow used by the repo tasks and docs.
 
    ```bash
    # Manual Maven build (requires Ghidra deps already installed in local .m2)
@@ -143,14 +156,11 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    ```
 
    ```bash
-   # Manual Gradle build (requires GHIDRA_INSTALL_DIR)
+   # Secondary/manual Gradle build path only (not used by tools.setup or VS Code tasks)
    GHIDRA_INSTALL_DIR=/path/to/ghidra gradle buildExtension
    ```
 
 ### Installation (Linux — Ubuntu/Debian)
-
-> Use `ghidra-mcp-setup.sh` as the primary entry point on Linux.
-> It handles prerequisite setup, Maven dependency installation, building, and deployment.
 
 1. **Clone the repository:**
    ```bash
@@ -165,12 +175,14 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 3. **Run environment preflight:**
    ```bash
-   ./ghidra-mcp-setup.sh --preflight --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   python -m tools.setup preflight --ghidra-path ~/ghidra_12.0.4_PUBLIC
    ```
 
 4. **Build and deploy to Ghidra (single command):**
    ```bash
-   ./ghidra-mcp-setup.sh --deploy --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   python -m tools.setup ensure-prereqs --ghidra-path ~/ghidra_12.0.4_PUBLIC
+   python -m tools.setup build
+   python -m tools.setup deploy --ghidra-path ~/ghidra_12.0.4_PUBLIC
    ```
 
    This will:
@@ -182,20 +194,65 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 5. **Optional: setup only Maven dependencies:**
    ```bash
-   ./ghidra-mcp-setup.sh --setup-deps --ghidra-path ~/ghidra_12.0.3_PUBLIC
+   python -m tools.setup install-ghidra-deps --ghidra-path ~/ghidra_12.0.4_PUBLIC
    ```
 
-6. **Show script help:**
+6. **Show command help:**
    ```bash
-   ./ghidra-mcp-setup.sh --help
+   python -m tools.setup --help
    ```
 
 > **Linux paths:** The extension is installed to `$HOME/.config/ghidra/ghidra_<version>_PUBLIC/Extensions/GhidraMCP/`.
 > Ghidra config files are in `$HOME/.config/ghidra/ghidra_<version>_PUBLIC/`.
 
-> **Additional helper scripts** (Linux equivalents of the PowerShell utilities):
-> - `functions-extract.sh` — Extract functions via Ghidra REST API (uses `curl`/`jq`)
-> - `functions-process.sh` — Parallel function processing with Claude CLI
+### Installation (macOS — Homebrew)
+
+1. **Install prerequisites:**
+   ```bash
+   brew install openjdk@21 maven python ghidra
+   ```
+
+2. **Clone the repository:**
+   ```bash
+   git clone https://github.com/bethington/ghidra-mcp.git
+   cd ghidra-mcp
+   ```
+
+3. **Install Ghidra JARs into local Maven:**
+   ```bash
+    python -m tools.setup install-ghidra-deps \
+       --ghidra-path /opt/homebrew/opt/ghidra/libexec
+   ```
+
+4. **Build and deploy:**
+   ```bash
+    python -m tools.setup ensure-prereqs \
+       --ghidra-path /opt/homebrew/opt/ghidra/libexec
+    python -m tools.setup build
+    python -m tools.setup deploy \
+       --ghidra-path /opt/homebrew/opt/ghidra/libexec
+   ```
+   The extension is installed to `~/Library/ghidra/ghidra_12.0.4_PUBLIC/Extensions/GhidraMCP/`.
+
+   > **Note:** `--ghidra-version` is required when using the Homebrew path because the path contains no version string.
+
+5. **Start Ghidra and enable the plugin:**
+   ```bash
+   /opt/homebrew/opt/ghidra/libexec/ghidraRun
+   ```
+   In the main project window: **Tools > GhidraMCP > Start MCP Server**
+
+6. **Configure Cursor/Claude MCP** (`~/.cursor/mcp.json`):
+   ```json
+   {
+     "mcpServers": {
+       "ghidra": {
+         "command": "uv",
+         "args": ["run", "--script", "/path/to/ghidra-mcp/bridge_mcp_ghidra.py"]
+       }
+     }
+   }
+   ```
 
 ### Basic Usage
 
@@ -209,10 +266,52 @@ python bridge_mcp_ghidra.py
 python bridge_mcp_ghidra.py --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 8081
 ```
 
+MCP client config for the HTTP transport (add to your client's MCP config file):
+```json
+{
+  "mcpServers": {
+    "ghidra-mcp-http": {
+      "url": "http://127.0.0.1:8081/mcp"
+    }
+  }
+}
+```
+
 #### Option 3: SSE Transport (Deprecated — use streamable-http instead)
 ```bash
 python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 ```
+
+#### Bridge advanced flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--transport` | `stdio` | `stdio` (AI tools), `streamable-http` (web clients), `sse` (deprecated) |
+| `--mcp-host` | `127.0.0.1` | Bind host for HTTP transports |
+| `--mcp-port` | — | Port for HTTP transports |
+| `--lazy` | off | Load only the default tool groups on connect. Faster startup, but MCP clients that don't support `tools/list_changed` will see an incomplete tool list. Not recommended for Claude Code. |
+| `--no-lazy` | (default) | Load all tool groups immediately on connect. Required for most AI clients. |
+| `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect when `--lazy` is set. |
+
+#### Optional: Start the standalone debugger server
+```bash
+python -m pip install -r requirements-debugger.txt
+python -m debugger
+```
+
+The debugger server listens on `http://127.0.0.1:8099/` by default and is
+required for the `debugger_*` proxy tools exposed by the MCP bridge.
+
+Debugger server flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `8099` | HTTP server port |
+| `--host` | `127.0.0.1` | Bind address (`0.0.0.0` to expose on LAN) |
+| `--exports-dir` | — | Path to a `dll_exports/` directory for ordinal-to-name resolution |
+| `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
+
+Set `GHIDRA_DEBUGGER_URL` in `.env` if you change the default port or host so the bridge can find it.
 
 #### In Ghidra
 1. Start Ghidra and open a **CodeBrowser** window
@@ -230,6 +329,14 @@ curl http://127.0.0.1:8089/check_connection
 # Get version info
 curl http://127.0.0.1:8089/get_version
 ```
+
+## Support This Project
+
+If Ghidra MCP saves you engineering or reverse-engineering time, consider [sponsoring the project](https://github.com/sponsors/bethington).
+
+- One-time sponsorship helps fund fixes, compatibility updates, and release work.
+- Recurring sponsorship helps keep maintenance, docs, and production hardening moving.
+- Company support helps prioritize long-term reliability for the bridge, headless server, debugger integration, and workflow tooling.
 
 ## 🔒 Security
 
@@ -252,6 +359,18 @@ export GHIDRA_MCP_FILE_ROOT=/srv/ghidra/inputs
 
 java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 ```
+
+### Ghidra Server authentication
+
+When connecting to a shared Ghidra Server, GhidraMCP can suppress the password dialog automatically. It resolves credentials in this order (first non-empty value wins):
+
+1. `GHIDRA_SERVER_PASSWORD` environment variable (or `.env` file in the Ghidra install directory or `~`)
+2. `~/.ghidra-cred` — single-line password file in your home directory
+3. `<ghidra-install-dir>/.ghidra-cred`
+
+Username resolves similarly: `GHIDRA_SERVER_USER` env var → `user.name` system property.
+
+If no password is found, Ghidra shows its normal GUI prompt. Set these in `.env` (see `.env.template` for the full block) to enable silent auth.
 
 ### Migration from v5.4.0 → v5.4.1
 
@@ -285,6 +404,20 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
    ```
 4. Look for errors in Ghidra console: **Window > Console**
 
+### `python -m debugger` fails with `ModuleNotFoundError` for `pybag` or `comtypes`
+
+**Cause:** The standalone debugger server uses optional Windows-only Python
+dependencies that are not installed by the base requirements file.
+
+**Solution:**
+```text
+python -m pip install -r requirements-debugger.txt
+python -m debugger
+```
+
+If you have both a global Python and a project venv, make sure you install
+into and run from the same interpreter.
+
 ### 500 Internal Server Errors
 
 **Cause:** Server-side exception, often due to missing program data.
@@ -309,7 +442,7 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 **Cause:** JAR file in wrong location.
 
 **Solution:**
-1. Manual install location: `~/.ghidra/ghidra_12.0.3_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
+1. Manual install location: `~/.ghidra/ghidra_12.0.4_PUBLIC/Extensions/GhidraMCP/lib/GhidraMCP.jar`
 2. Or use: **File > Install Extensions > Add** and select the ZIP file
 3. Ensure JAR/ZIP was built for your Ghidra version
 
@@ -318,16 +451,14 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 **Cause:** Ghidra JARs not installed in local Maven repository.
 
 **Solution:**
-```powershell
+```text
 # Windows (recommended)
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
-
-# Or manual install (see install-ghidra-deps.sh)
+python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 ```
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 222 tools fully implemented
+- **MCP Tools**: 225 tools fully implemented
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -551,13 +682,6 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 - `list_server_users` - List all users on the Ghidra Server
 - `set_user_permissions` - Set a user's repository access level
 
-### Knowledge Database (bridge-only, requires PostgreSQL)
-- `store_function_knowledge` - Store documented function data to knowledge DB
-- `query_knowledge_context` - Search documented functions by keyword (ILIKE + tsvector)
-- `store_ordinal_mapping` - Store ordinal-to-name mapping per binary version
-- `get_ordinal_mapping` - Look up known ordinal name by binary, version, ordinal
-- `export_system_knowledge` - Export documented functions as markdown by game system
-
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## 🏗️ Architecture
@@ -575,7 +699,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Components
 
-- **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (222 tools)
+- **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (225 catalog entries)
 - **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (175 GUI endpoints)
 - **GhidraMCPHeadlessServer** — Standalone headless server — 183 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
@@ -584,76 +708,94 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Building from Source
 ```bash
-# Recommended: one command does setup + build + deploy
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+# Recommended: direct Python-first workflow
+python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
+python -m tools.setup build
+python -m tools.setup deploy --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
-# Optional: build only (no deploy)
-.\ghidra-mcp-setup.ps1 -BuildOnly
-
-# Version bump (updates all 7 project files atomically)
-.\bump-version.ps1 -New X.Y.Z
+# Version bump (updates all maintained version references atomically)
+python -m tools.setup bump-version --new X.Y.Z
 ```
 
-### Script Command Reference
+The authoritative build system today is Maven. `tools.setup`, the VS Code tasks, and the documented deploy flow all build through `pom.xml` and write artifacts to `target/`. `build.gradle` remains in the repo as a manual fallback for direct Ghidra/Gradle users, but it is not the primary path.
 
-Primary actions (choose one):
-- `-Deploy` (default): auto-setup prereqs, build, deploy
-- `-SetupDeps`: install Ghidra JARs into local `.m2` (Maven deps only; no Python package install)
-- `-BuildOnly`: build artifacts only
-- `-Clean`: remove build/cache artifacts and local Ghidra dependency folders in `.m2` for the active Ghidra version
-- `-Preflight`: validate tools, paths, required Ghidra jars, and write access without making changes
+### Command Reference
 
-Useful options:
-- `-GhidraPath "C:\ghidra_12.0.3_PUBLIC"`
-- `-GhidraVersion "12.0.3"`
-- `-StrictPreflight`
-- `-NoAutoPrereqs`
-- `-SkipBuild`
-- `-SkipRestart`
-- `-DryRun`
-- `-Force`
-- `-Verbose`
-- `-Help`
+| Command | What it does |
+|---------|-------------|
+| `ensure-prereqs` | Install Python deps + Ghidra Maven JARs in one shot. Start here on a new machine. |
+| `preflight` | Validate Python, build tool, Ghidra path, and JAR availability without making changes. Add `--strict` to also check network reachability. |
+| `build` | Build the plugin JAR and extension ZIP via Maven (or Gradle when `TOOLS_SETUP_BACKEND=gradle`). |
+| `deploy` | Copy the built extension into the Ghidra profile and patch `FrontEndTool.xml` for auto-activation. |
+| `start-ghidra` | Launch the configured Ghidra installation. |
+| `clean` | Remove Maven/Gradle build outputs (`target/`, `build/`). |
+| `clean-all` | Remove build outputs plus local cache artifacts (`.m2` Ghidra JARs, etc.). |
+| `install-ghidra-deps` | Install only the Ghidra JARs into `~/.m2`. Useful when the build environment changes. |
+| `install-python-deps` | Install only the Python requirements files. |
+| `run-tests` | Run the Java offline test suite (no live Ghidra needed). |
+| `verify-version` | Check that version strings are consistent across `pom.xml`, `CHANGELOG.md`, and `README.md`. |
+| `bump-version --new X.Y.Z` | Atomically update all version references. Pass `--tag` to create a git tag. |
 
-Quick examples:
+Common flags accepted by most commands:
 
-```powershell
-# Standard deploy (recommended)
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+| Flag | Description |
+|------|-------------|
+| `--ghidra-path PATH` | Ghidra installation directory. Defaults to `GHIDRA_PATH` from `.env`. |
+| `--dry-run` | Print actions without executing them. |
+| `--force` | Reinstall Ghidra JARs even if already present (`install-ghidra-deps`, `ensure-prereqs`). |
+| `--with-debugger` | Force-install debugger Python requirements (Windows only). |
+| `--use-debugger-toggle` | Read `INSTALL_DEBUGGER_DEPS` from `.env` to decide whether to install debugger deps. |
+| `--test TIER` | (`deploy` only) Opt into live deploy regression tiers such as `release` or `debugger-live`. |
+| `--strict` | (`preflight` only) Also check network reachability for Maven Central and PyPI. |
 
-# First-time dependency setup only
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+Deploy test tiers are opt-in because benchmark tiers can import/reset
+`Benchmark.dll` and `BenchmarkDebug.exe` in the active Ghidra project. Use
+`--test release` before cutting releases, or set
+`GHIDRA_MCP_DEPLOY_TESTS=release` in a local `.env` when you want every deploy
+on your machine to run the live benchmark regression. See
+[Testing and Release Regression](docs/TESTING.md).
 
-# Build only
-.\ghidra-mcp-setup.ps1 -BuildOnly
+```text
+# Standard first-time setup and deploy
+python -m tools.setup ensure-prereqs --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
+python -m tools.setup build
+python -m tools.setup deploy --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
-# Preflight checks only
-.\ghidra-mcp-setup.ps1 -Preflight -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+# Preflight check before deploying
+python -m tools.setup preflight --strict --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 
-# Strict preflight (fails on warnings)
-.\ghidra-mcp-setup.ps1 -Preflight -StrictPreflight -GhidraPath "C:\ghidra_12.0.3_PUBLIC"
+# Version bump and tag
+python -m tools.setup bump-version --new X.Y.Z --tag
 
-# Show command help
-.\ghidra-mcp-setup.ps1 -Help
+# Run offline Java tests
+python -m tools.setup run-tests
+
+# Show full help
+python -m tools.setup --help
 ```
 
 ### Project Structure
 ```
 ghidra-mcp/
-├── bridge_mcp_ghidra.py     # MCP server (Python, 222 tools)
+├── bridge_mcp_ghidra.py     # MCP server (Python, 225 catalog entries)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
-│       ├── GhidraMCPPlugin.java         # GUI plugin (175 endpoints)
+│       ├── GhidraMCPPlugin.java         # GUI plugin (177 endpoints)
 │       ├── headless/                    # Headless server (183 endpoints)
 │       └── core/                        # Shared service layer (12 services)
-├── ghidra_scripts/          # Automation scripts
+├── debugger/                # Optional standalone debugger server (port 8099)
+├── ghidra_scripts/          # Automation scripts for batch workflows
 ├── tests/                   # Python unit tests + endpoint catalog
 │   ├── unit/               # Catalog consistency, schema, tool function tests
-│   └── endpoints.json      # Endpoint specification (199 entries)
+│   └── endpoints.json      # Endpoint specification (225 entries)
 ├── docs/                    # Documentation
-│   ├── prompts/            # AI workflow prompts
+│   ├── prompts/            # AI workflow prompts (V5 documentation workflows)
 │   ├── releases/           # Version release notes
-│   └── project-management/ # Project docs
+│   └── project-management/ # Contributor planning docs (Gradle migration, etc.)
+├── tools/setup/             # Build and deployment CLI (python -m tools.setup)
+├── fun-doc/                 # Internal RE curation tool — not part of the MCP plugin
+│                            #   Priority-queue worker, LLM scoring, web dashboard.
+│                            #   See fun-doc/README.md for details.
 └── .github/workflows/      # CI/CD pipelines
 ```
 
@@ -665,30 +807,25 @@ This is a one-time setup per machine, and again when your Ghidra version changes
 
 The tool enforces version consistency between:
 - `pom.xml` (`ghidra.version`)
-- `-GhidraVersion` (if provided)
-- `-GhidraPath` version segment (e.g., `ghidra_12.0.3_PUBLIC`)
+- `--ghidra-path` version segment (e.g., `ghidra_12.0.4_PUBLIC`)
 
 If these do not match, deployment fails fast with a clear error.
 
 ### Troubleshooting: Version Mismatch
 
-If you see a version mismatch error, align all three values:
+If you see a version mismatch error, align both values:
 1. `pom.xml` → `ghidra.version`
-2. `-GhidraVersion` (if used)
-3. `-GhidraPath` version segment (`ghidra_X.Y.Z_PUBLIC`)
+2. `--ghidra-path` version segment (`ghidra_X.Y.Z_PUBLIC`)
 
 Then rerun:
 
-```powershell
-.\ghidra-mcp-setup.ps1 -Deploy -GhidraPath "C:\ghidra_12.0.3_PUBLIC" -GhidraVersion "12.0.3"
+```text
+python -m tools.setup preflight --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 ```
 
-```powershell
+```text
 # Windows
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.3_PUBLIC"
-
-# Optional version override
-.\ghidra-mcp-setup.ps1 -SetupDeps -GhidraPath "C:\path\to\ghidra_12.0.3_PUBLIC" -GhidraVersion "12.0.3"
+python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.0.4_PUBLIC"
 ```
 
 **Required Libraries (14 JARs, ~37MB):**
@@ -712,10 +849,10 @@ Then rerun:
 
 > **Note**: Libraries are NOT included in the repository (see `.gitignore`). You must install them from your Ghidra installation before building.
 
-> **Script roles**:
-> - `ghidra-mcp-setup.ps1`: unified automation script (`-SetupDeps`, `-BuildOnly`, `-Deploy`, `-Clean`)
-> - default `-Deploy` behavior: auto-setup prerequisites, then build and deploy
-> - use `-NoAutoPrereqs` for strict/manual prerequisite management
+> **Automation entry point**:
+> - `python -m tools.setup` is the supported setup/build/deploy/versioning interface
+> - use `ensure-prereqs`, `build`, `deploy`, `preflight`, `clean-all`, and `bump-version` directly
+> - these commands currently use Maven as the canonical Java build backend
 
 ### Development Features
 - **Automated Deployment**: Version-aware deployment script
@@ -728,6 +865,7 @@ Then rerun:
 ### Core Documentation
 - [Documentation Index](docs/README.md) - Complete documentation navigation
 - [Project Structure](docs/PROJECT_STRUCTURE.md) - Project organization guide
+- [Testing and Release Regression](docs/TESTING.md) - Local tests, CI, live Ghidra regression, and release gates
 - [Naming Conventions](docs/NAMING_CONVENTIONS.md) - Code naming standards
 - [Hungarian Notation](docs/HUNGARIAN_NOTATION.md) - Variable naming guide
 
@@ -756,7 +894,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v5.4.1
+# Connection OK - GhidraMCP Headless Server v5.6.0
 ```
 
 ### Headless API Workflow
@@ -822,9 +960,9 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 5.4.1 |
-| **MCP Tools** | 222 fully implemented |
-| **GUI Endpoints** | 198 (GhidraMCPPlugin) |
+| **Version** | 5.6.0 |
+| **MCP Tools** | 225 fully implemented |
+| **GUI Endpoints** | 177 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |
 | **Batch Efficiency** | 93% API call reduction |

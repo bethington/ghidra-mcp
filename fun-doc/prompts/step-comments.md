@@ -10,7 +10,7 @@
 ### `batch_set_comments` exact schema
 ```json
 {
-  "function_address": "0x6fd6e920",
+  "address": "0x6fd6e920",
   "plate_comment": "Full plate text here...",
   "decompiler_comments": [
     {"address": "0x6fd6e920", "comment": "PRE comment text"}
@@ -20,9 +20,11 @@
   ]
 }
 ```
+- `address`: Function entry address for the plate comment target and batch anchor.
 - `plate_comment`: Full plate text. Omit to leave existing plate untouched. Empty string clears it.
 - `decompiler_comments`: Array of `{address, comment}` objects for PRE_COMMENTs.
 - `disassembly_comments`: Array of `{address, comment}` objects for EOL_COMMENTs.
+- Pass real arrays/objects for comment lists. Do not JSON-stringify nested comment payloads.
 - `program`: Pass as query parameter, NOT in JSON body.
 
 ## Instructions

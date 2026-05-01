@@ -1,0 +1,482 @@
+{
+	"version": "2.0.0",
+	"inputs": [
+		{
+			"id": "ghidraPath",
+			"description": "Path to Ghidra installation directory",
+			"default": "F:\\ghidra_12.0.4_PUBLIC",
+			"type": "promptString"
+		},
+		{
+			"id": "autoOpen",
+			"description": "AutoOpen path (e.g. F:\\GhidraProjects\\diablo2|/Vanilla/1.00/D2Common.dll)",
+			"default": "",
+			"type": "promptString"
+		}
+	],
+	"tasks": [
+		{
+			"label": "Build Ghidra Plugin",
+			"type": "shell",
+			"command": "${env:USERPROFILE}\\tools\\apache-maven-3.9.6\\bin\\mvn.cmd",
+			"args": [
+				"clean",
+				"package",
+				"assembly:single"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": false,
+				"panel": "shared",
+				"clear": false
+			},
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Clean Build",
+			"type": "shell",
+			"command": "${env:USERPROFILE}\\tools\\apache-maven-3.9.6\\bin\\mvn.cmd",
+			"args": [
+				"clean"
+			],
+			"group": "build",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": false,
+				"panel": "shared",
+				"clear": false
+			},
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Run Offline Tests (Java)",
+			"type": "shell",
+			"command": "${env:USERPROFILE}\\tools\\apache-maven-3.9.6\\bin\\mvn.cmd",
+			"args": [
+				"test",
+				"-Dtest=com.xebyte.offline.*Test"
+			],
+			"group": "test",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": false,
+				"panel": "shared",
+				"clear": false
+			},
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Run All Java Tests",
+			"type": "shell",
+			"command": "${env:USERPROFILE}\\tools\\apache-maven-3.9.6\\bin\\mvn.cmd",
+			"args": [
+				"test"
+			],
+			"group": "test",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": false,
+				"panel": "shared",
+				"clear": false
+			},
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Run Python Unit Tests",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"pytest",
+				"tests/unit/",
+				"-v"
+			],
+			"group": "test",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": true,
+				"panel": "shared",
+				"clear": false
+			},
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Run Python Tests with Coverage",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"pytest",
+				"tests/",
+				"--cov=.",
+				"--cov-report=html",
+				"--ignore=tests/integration/"
+			],
+			"group": "test",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": true,
+				"panel": "shared",
+				"clear": false
+			},
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Run MCP Server (Stdio)",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"bridge_mcp_ghidra.py"
+			],
+			"group": "test",
+			"isBackground": true,
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": true,
+				"panel": "new",
+				"clear": true
+			},
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": {
+				"owner": "mcp",
+				"pattern": [
+					{
+						"regexp": "^(.*)$",
+						"file": 1,
+						"line": 1,
+						"column": 1,
+						"message": 1
+					}
+				],
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": ".*Starting.*",
+					"endsPattern": ".*ready.*"
+				}
+			}
+		},
+		{
+			"label": "Run MCP Server (SSE)",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"bridge_mcp_ghidra.py",
+				"--transport",
+				"sse",
+				"--mcp-host",
+				"127.0.0.1",
+				"--mcp-port",
+				"8081",
+				"--ghidra-server",
+				"http://127.0.0.1:8089/"
+			],
+			"group": "test",
+			"isBackground": true,
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": true,
+				"panel": "new",
+				"clear": true
+			},
+			"options": {
+				"cwd": "${workspaceFolder}"
+			},
+			"problemMatcher": {
+				"owner": "mcp",
+				"pattern": [
+					{
+						"regexp": "^(.*)$",
+						"file": 1,
+						"line": 1,
+						"column": 1,
+						"message": 1
+					}
+				],
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": ".*Starting.*",
+					"endsPattern": ".*ready.*"
+				}
+			}
+		},
+		{
+			"label": "Deploy to Ghidra",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\ghidra-mcp-setup.ps1",
+				"-Deploy"
+			],
+			"group": "build",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": true,
+				"panel": "shared",
+				"clear": false
+			},
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Deploy to Ghidra + AutoOpen",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\ghidra-mcp-setup.ps1",
+				"-Deploy",
+				"-AutoOpen",
+				"${input:autoOpen}"
+			],
+			"group": "build",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": true,
+				"panel": "shared",
+				"clear": false
+			},
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Setup Python Environment",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"venv",
+				".venv"
+			],
+			"group": "build",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": false,
+				"panel": "shared",
+				"clear": false
+			},
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Install Python Dependencies",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}\\scripts\\install-python-dependencies.ps1"
+			],
+			"group": "build",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": false,
+				"panel": "shared",
+				"clear": false
+			},
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Start Ghidra",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-Command",
+				"Start-Process '${input:ghidraPath}\\ghidraRun.bat' -WorkingDirectory '${input:ghidraPath}'"
+			],
+			"group": "test",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": false,
+				"panel": "shared",
+				"clear": false
+			},
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Clean All",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-Command",
+				"Remove-Item -Recurse -Force -ErrorAction SilentlyContinue target, .pytest_cache, __pycache__, logs/*.log; Write-Host 'Cleanup completed'"
+			],
+			"group": "build",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": false,
+				"panel": "shared",
+				"clear": false
+			},
+			"options": {
+				"cwd": "${workspaceFolder}"
+			}
+		},
+		{
+			"label": "Release Compile Check",
+			"type": "shell",
+			"command": "C:\\Users\\benam\\tools\\apache-maven-3.9.6\\bin\\mvn.cmd",
+			"args": [
+				"clean",
+				"compile",
+				"-q"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Release Ghidra Health Check",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"scripts\\ghidra_server_health_check.py"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "Release HTTP Probe",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-Command",
+				"try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8089/check_connection' -UseBasicParsing -TimeoutSec 5; Write-Host ('STATUS=' + $r.StatusCode); Write-Host $r.Content } catch { Write-Host ('ERROR=' + $_.Exception.Message); exit 1 }"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "Release HTTP Probe Python",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-c",
+				"import urllib.request,sys; url='http://127.0.0.1:8089/check_connection';\ntry:\n    resp=urllib.request.urlopen(url,timeout=5)\n    body=resp.read(200).decode('utf-8','replace')\n    print('STATUS=%s' % resp.status)\n    print(body)\nexcept Exception as exc:\n    print('ERROR=%s' % exc)\n    sys.exit(1)"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "Release Artifact Build",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"tools.setup",
+				"build"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Release Artifact Build Retry",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"tools.setup",
+				"build"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Release Preflight",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-m",
+				"tools.setup",
+				"preflight"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Run provider selection tests",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"tests/performance/test_provider_selection.py",
+				"-q"
+			],
+			"isBackground": false,
+			"group": "test"
+		},
+		{
+			"label": "Run provider selection tests",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"tests/performance/test_provider_selection.py",
+				"-q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Focused provider selection pytest",
+			"type": "shell",
+			"command": ".\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"tests/performance/test_provider_selection.py",
+				"-q"
+			],
+			"isBackground": false,
+			"group": "test"
+		}
+	]
+}

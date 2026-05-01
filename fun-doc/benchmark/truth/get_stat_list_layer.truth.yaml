@@ -1,0 +1,38 @@
+# Semantic ground truth for src/get_stat_list_layer.c::get_stat_list_layer.
+#
+# D2-derived reconstruction: /Mods/PD2-S12/D2Common.dll @ 6fd68240
+# (unvalidated raw +0x04 reader; Ghidra misnames it GetStatListOwnerType)
+
+function: get_stat_list_layer
+
+name_synonyms:
+  - get_stat_list_layer
+  - GetStatListLayer
+  - getStatListLayer
+  - StatListLayer
+  - stat_list_layer
+  - ReadStatListLayer
+  - StatList_GetLayer
+  - GetLayer
+
+canonical_plate: |
+  Reads the layer index (DWORD at offset +0x04) from a D2 StatList
+  structure. Unvalidated — directly dereferences the pointer with
+  no null-check and no magic-number validation. Callers must
+  ensure pStatList points at a well-formed StatList before
+  invocation. Returns the raw 32-bit value at +0x04.
+
+algorithm_tag: raw field read
+algorithm_synonyms:
+  - raw field read
+  - struct accessor
+  - direct read
+  - unvalidated accessor
+  - offset accessor
+
+weights:
+  name: 0.25
+  signature: 0.25
+  plate: 0.20
+  algorithm: 0.15
+  locals: 0.15

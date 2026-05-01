@@ -1,12 +1,15 @@
 {
-    "mcpServers": {
-        "ghidra-mcp": {
-            "command": "python",
-            "args": [
-                "bridge_mcp_ghidra.py"
-            ],
-            "cwd": "c:\\Users\\benam\\source\\mcp\\ghidra-mcp",
-            "trust": true
-        }
+  "mcpServers": {
+    "ghidra-mcp": {
+      "command": "python",
+      "args": [
+        "bridge_mcp_ghidra.py"
+      ],
+      "cwd": "c:\\Users\\benam\\source\\mcp\\ghidra-mcp",
+      "env": {
+        "GHIDRA_SERVER_URL": "http://127.0.0.1:8089/"
+      },
+      "trust": true
     }
+  }
 }

@@ -85,7 +85,7 @@ class TestPostToolDispatch(unittest.TestCase):
         result = fn(address="0x401000", name="main")
 
         mock_post.assert_called_once_with(
-            "/rename_function", data={"address": "0x401000", "name": "main"}
+            "/rename_function", data={"address": "0x401000", "name": "main"}, query_params=None
         )
 
     @patch("bridge_mcp_ghidra.dispatch_post")
@@ -104,7 +104,7 @@ class TestPostToolDispatch(unittest.TestCase):
         fn(address="0x401000", program=None)
 
         mock_post.assert_called_once_with(
-            "/rename_function", data={"address": "0x401000"}
+            "/rename_function", data={"address": "0x401000"}, query_params=None
         )
 
     @patch("bridge_mcp_ghidra.dispatch_post")
@@ -123,7 +123,7 @@ class TestPostToolDispatch(unittest.TestCase):
         fn(offset=0, limit=50)
 
         # POST sends native types, not strings
-        mock_post.assert_called_once_with("/search", data={"offset": 0, "limit": 50})
+        mock_post.assert_called_once_with("/search", data={"offset": 0, "limit": 50}, query_params=None)
 
 
 class TestSchemaEdgeCases(unittest.TestCase):

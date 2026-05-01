@@ -95,17 +95,24 @@ public class FunctionService {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        DecompInterface decomp = new DecompInterface();
-        decomp.openProgram(program);
-        for (Function func : program.getFunctionManager().getFunctions(true)) {
-            if (func.getName().equals(name)) {
-                DecompileResults result =
-                    decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                if (result != null && result.decompileCompleted()) {
-                    return Response.text(result.getDecompiledFunction().getC());
-                } else {
-                    return Response.text("Decompilation failed");
+        DecompInterface decomp = null;
+        try {
+            decomp = new DecompInterface();
+            decomp.openProgram(program);
+            for (Function func : program.getFunctionManager().getFunctions(true)) {
+                if (func.getName().equals(name)) {
+                    DecompileResults result =
+                        decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                    if (result != null && result.decompileCompleted()) {
+                        return Response.text(result.getDecompiledFunction().getC());
+                    } else {
+                        return Response.text("Decompilation failed");
+                    }
                 }
+            }
+        } finally {
+            if (decomp != null) {
+                try { decomp.dispose(); } catch (Exception ignored) {}
             }
         }
         return Response.text("Function not found");
@@ -134,11 +141,12 @@ public class FunctionService {
         Program program = pe.program();
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address or function name is required");
 
+        DecompInterface decomp = null;
         try {
             Function func = ServiceUtils.resolveFunction(program, addressStr);
             if (func == null) return Response.err("No function found for " + addressStr);
 
-            DecompInterface decomp = new DecompInterface();
+            decomp = new DecompInterface();
             decomp.openProgram(program);
             DecompileResults decompResult = decomp.decompileFunction(func, timeoutSeconds, new ConsoleTaskMonitor());
 
@@ -160,6 +168,10 @@ public class FunctionService {
         } catch (Throwable e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.toString();
             return Response.err("Error decompiling function: " + msg);
+        } finally {
+            if (decomp != null) {
+                try { decomp.dispose(); } catch (Exception ignored) {}
+            }
         }
     }
 
@@ -276,9 +288,9 @@ public class FunctionService {
     /**
      * Batch decompile multiple functions by name.
      */
-    @McpTool(path = "/batch_decompile", description = "Decompile multiple functions at once", category = "function")
+        @McpTool(path = "/batch_decompile", description = "Decompile multiple functions at once. Accepts comma-separated function names or addresses.", category = "function")
     public Response batchDecompileFunctions(
-            @Param(value = "functions", description = "Comma-separated function names") String functionsParam,
+            @Param(value = "functions", description = "Comma-separated function references (names or addresses)") String functionsParam,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -289,50 +301,40 @@ public class FunctionService {
         }
 
         try {
-            String[] functionNames = functionsParam.split(",");
+            String[] functionRefs = functionsParam.split(",");
             Map<String, Object> resultMap = new LinkedHashMap<>();
-
-            FunctionManager funcManager = program.getFunctionManager();
             final int MAX_FUNCTIONS = 20; // Limit to prevent overload
 
-            for (int i = 0; i < functionNames.length && i < MAX_FUNCTIONS; i++) {
-                String funcName = functionNames[i].trim();
-                if (funcName.isEmpty()) continue;
+            for (int i = 0; i < functionRefs.length && i < MAX_FUNCTIONS; i++) {
+                String funcRef = functionRefs[i].trim();
+                if (funcRef.isEmpty()) continue;
 
-                // Find function by name
-                Function function = null;
-                SymbolTable symbolTable = program.getSymbolTable();
-                SymbolIterator symbols = symbolTable.getSymbols(funcName);
-
-                while (symbols.hasNext()) {
-                    Symbol symbol = symbols.next();
-                    if (symbol.getSymbolType() == SymbolType.FUNCTION) {
-                        function = funcManager.getFunctionAt(symbol.getAddress());
-                        break;
-                    }
-                }
+                Function function = ServiceUtils.resolveFunction(program, funcRef);
 
                 if (function == null) {
-                    resultMap.put(funcName, "Error: Function not found");
+                    resultMap.put(funcRef, "Error: Function not found");
                     continue;
                 }
 
                 // Decompile the function
+                DecompInterface decompiler = null;
                 try {
-                    DecompInterface decompiler = new DecompInterface();
+                    decompiler = new DecompInterface();
                     decompiler.openProgram(program);
                     DecompileResults decompResults = decompiler.decompileFunction(function, 30, null);
 
                     if (decompResults != null && decompResults.decompileCompleted()) {
                         String decompCode = decompResults.getDecompiledFunction().getC();
-                        resultMap.put(funcName, decompCode);
+                        resultMap.put(funcRef, decompCode);
                     } else {
-                        resultMap.put(funcName, "Error: Decompilation failed");
+                        resultMap.put(funcRef, "Error: Decompilation failed");
                     }
-
-                    decompiler.dispose();
                 } catch (Exception e) {
-                    resultMap.put(funcName, "Error: " + e.getMessage());
+                    resultMap.put(funcRef, "Error: " + e.getMessage());
+                } finally {
+                    if (decompiler != null) {
+                        try { decompiler.dispose(); } catch (Exception ignored) {}
+                    }
                 }
             }
 
@@ -630,9 +632,10 @@ public class FunctionService {
     /**
      * Rename a variable in a function.
      */
-    @McpTool(path = "/rename_variable", method = "POST", description = "Rename a variable in a function", category = "function")
+    @McpTool(path = "/rename_variable", method = "POST", description = "Rename a variable in a function. Accepts functionName or function_address; address is more stable after recent renames.", category = "function")
     public Response renameVariableInFunction(
-            @Param(value = "functionName", source = ParamSource.BODY) String functionName,
+            @Param(value = "functionName", source = ParamSource.BODY, defaultValue = "") String functionName,
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY, defaultValue = "") String functionAddress,
             @Param(value = "oldName", source = ParamSource.BODY) String oldVarName,
             @Param(value = "newName", source = ParamSource.BODY) String newVarName,
             @Param(value = "program", defaultValue = "") String programName) {
@@ -640,62 +643,60 @@ public class FunctionService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        if ((functionName == null || functionName.isEmpty()) && (functionAddress == null || functionAddress.isEmpty())) {
+            return Response.err("Function name or address is required");
+        }
+
         DecompInterface decomp = new DecompInterface();
-        decomp.openProgram(program);
-
-        Function func = null;
-        for (Function f : program.getFunctionManager().getFunctions(true)) {
-            if (f.getName().equals(functionName)) {
-                func = f;
-                break;
-            }
-        }
-
-        if (func == null) {
-            return Response.text("Function not found");
-        }
-
-        DecompileResults result = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-        if (result == null || !result.decompileCompleted()) {
-            return Response.text("Decompilation failed");
-        }
-
-        HighFunction highFunction = result.getHighFunction();
-        if (highFunction == null) {
-            return Response.text("Decompilation failed (no high function)");
-        }
-
-        LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
-        if (localSymbolMap == null) {
-            return Response.text("Decompilation failed (no local symbol map)");
-        }
-
-        HighSymbol highSymbol = null;
-        Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
-        while (symbols.hasNext()) {
-            HighSymbol symbol = symbols.next();
-            String symbolName = symbol.getName();
-
-            if (symbolName.equals(oldVarName)) {
-                highSymbol = symbol;
-            }
-            if (symbolName.equals(newVarName)) {
-                return Response.err("A variable with name '" + newVarName + "' already exists in this function");
-            }
-        }
-
-        if (highSymbol == null) {
-            return Response.text("Variable not found");
-        }
-
-        boolean commitRequired = checkFullCommit(highSymbol, highFunction);
-
-        final HighSymbol finalHighSymbol = highSymbol;
-        final HighFunction finalHighFunction = highFunction;
-        final Function finalFunction = func;
-        AtomicBoolean successFlag = new AtomicBoolean(false);
-
         try {
+            decomp.openProgram(program);
+
+            String functionRef = (functionAddress != null && !functionAddress.isEmpty()) ? functionAddress : functionName;
+            Function func = ServiceUtils.resolveFunction(program, functionRef);
+            if (func == null) {
+                return Response.err("Function not found: " + functionRef);
+            }
+
+            DecompileResults result = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+            if (result == null || !result.decompileCompleted()) {
+                return Response.err("Decompilation failed");
+            }
+
+            HighFunction highFunction = result.getHighFunction();
+            if (highFunction == null) {
+                return Response.err("Decompilation failed (no high function)");
+            }
+
+            LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
+            if (localSymbolMap == null) {
+                return Response.err("Decompilation failed (no local symbol map)");
+            }
+
+            HighSymbol highSymbol = null;
+            Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
+            while (symbols.hasNext()) {
+                HighSymbol symbol = symbols.next();
+                String symbolName = symbol.getName();
+
+                if (symbolName.equals(oldVarName)) {
+                    highSymbol = symbol;
+                }
+                if (symbolName.equals(newVarName)) {
+                    return Response.err("A variable with name '" + newVarName + "' already exists in this function");
+                }
+            }
+
+            if (highSymbol == null) {
+                return Response.err("Variable not found: " + oldVarName);
+            }
+
+            boolean commitRequired = checkFullCommit(highSymbol, highFunction);
+
+            final HighSymbol finalHighSymbol = highSymbol;
+            final HighFunction finalHighFunction = highFunction;
+            final Function finalFunction = func;
+            AtomicBoolean successFlag = new AtomicBoolean(false);
+
             threadingStrategy.executeWrite(program, "Rename variable", () -> {
                 if (commitRequired) {
                     HighFunctionDBUtil.commitParamsToDatabase(finalHighFunction, false,
@@ -710,24 +711,31 @@ public class FunctionService {
                 successFlag.set(true);
                 return null;
             });
+
+            if (successFlag.get()) {
+                String varType = finalHighSymbol.getDataType().getName();
+                String hungarianWarning = NamingConventions.validateHungarianPrefix(newVarName, varType);
+                if (hungarianWarning != null) {
+                    return Response.ok(JsonHelper.mapOf("status", "success", "message", "Variable renamed", "warnings", List.of(hungarianWarning)));
+                }
+                return Response.text("Variable renamed");
+            }
         } catch (Exception e) {
             String errorMsg = "Failed to execute rename on Swing thread: " + e.getMessage();
             Msg.error(this, errorMsg, e);
-            return Response.text(errorMsg);
-        }
-        if (successFlag.get()) {
-            String varType = finalHighSymbol.getDataType().getName();
-            String hungarianWarning = NamingConventions.validateHungarianPrefix(newVarName, varType);
-            if (hungarianWarning != null) {
-                return Response.ok(JsonHelper.mapOf("status", "success", "message", "Variable renamed", "warnings", List.of(hungarianWarning)));
-            }
-            return Response.text("Variable renamed");
+            return Response.err(errorMsg);
+        } finally {
+            decomp.dispose();
         }
         return Response.text("Failed to rename variable");
     }
 
     public Response renameVariableInFunction(String functionName, String oldVarName, String newVarName) {
-        return renameVariableInFunction(functionName, oldVarName, newVarName, null);
+        return renameVariableInFunction(functionName, null, oldVarName, newVarName, null);
+    }
+
+    public Response renameVariableInFunction(String functionName, String oldVarName, String newVarName, String programName) {
+        return renameVariableInFunction(functionName, null, oldVarName, newVarName, programName);
     }
 
     /**
@@ -791,19 +799,66 @@ public class FunctionService {
             return Response.err("New function name is required");
         }
 
+        Function targetFunc = ServiceUtils.resolveFunction(program, functionAddrStr);
+        if (targetFunc == null) {
+            return Response.err("No function found for " + functionAddrStr);
+        }
+
+        // ---- Q1-Q5 validator gate (defense in depth) ----------------------
+        // Hard-reject names that fail verb-tier specificity (Q2/Q4) or
+        // collide via token-subset with another function in this program
+        // (Q3/Q4). Auto-generated names are exempt — the model may
+        // legitimately restore one in rare recovery flows.
+        if (!ServiceUtils.isAutoGeneratedName(newName)) {
+            NamingConventions.NameQualityResult quality =
+                    NamingConventions.checkFunctionNameQuality(newName);
+            if (!quality.ok) {
+                return Response.ok(JsonHelper.mapOf(
+                        "status", "rejected",
+                        "error", "name_quality",
+                        "issue", quality.issue,
+                        "rejected_name", newName,
+                        "message", quality.message,
+                        "suggestion", quality.suggestion
+                ));
+            }
+            // Token-subset collision check against every function in the
+            // program. Iteration is read-only and fast enough for in-line
+            // execution even on 5k-function binaries.
+            List<String> existingNames = new ArrayList<>();
+            for (Function f : program.getFunctionManager().getFunctions(true)) {
+                if (f == targetFunc) continue;
+                String n = f.getName();
+                if (n != null && !n.isEmpty()) existingNames.add(n);
+            }
+            String collidesWith =
+                    NamingConventions.findTokenSubsetCollision(newName, existingNames);
+            if (collidesWith != null) {
+                return Response.ok(JsonHelper.mapOf(
+                        "status", "rejected",
+                        "error", "name_collision",
+                        "issue", "token_subset_duplicate",
+                        "rejected_name", newName,
+                        "conflicts_with", collidesWith,
+                        "message", "Token-subset collision: '" + newName + "' shares the same token set "
+                                + "as existing function '" + collidesWith + "' in this program. "
+                                + "Names that differ only by an added/removed trailing token are usually "
+                                + "a sign that the function needs a more meaningful distinguisher.",
+                        "suggestion", "Pick a name with a distinguishing token that captures *why* this "
+                                + "function differs from '" + collidesWith + "' (e.g., add 'Broadcast', "
+                                + "'Local', 'ByIndex', 'ForPlayer', 'WithRetry', ...) rather than just "
+                                + "trimming/extending '" + collidesWith + "'."
+                ));
+            }
+        }
+
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean success = new AtomicBoolean(false);
 
         try {
             threadingStrategy.executeWrite(program, "Rename function by address", () -> {
-                Function func = ServiceUtils.resolveFunction(program, functionAddrStr);
-                if (func == null) {
-                    resultMsg.append("Error: No function found for ").append(functionAddrStr);
-                    return null;
-                }
-
-                String oldName = func.getName();
-                func.setName(newName, SourceType.USER_DEFINED);
+                String oldName = targetFunc.getName();
+                targetFunc.setName(newName, SourceType.USER_DEFINED);
                 success.set(true);
                 resultMsg.append("Success: Renamed function at ").append(functionAddrStr)
                         .append(" from '").append(oldName).append("' to '").append(newName).append("'");
@@ -902,7 +957,7 @@ public class FunctionService {
     /**
      * Endpoint wrapper for setFunctionPrototype that converts PrototypeResult to Response.
      */
-    @McpTool(path = "/set_function_prototype", method = "POST", description = "Set function prototype with calling convention. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/set_function_prototype", method = "POST", description = "Set function prototype (return type, parameter types, calling convention) by address. NOTE: the function name in the prototype string is used only for parsing — it does NOT rename the function. To rename, call rename_function_by_address separately. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response setFunctionPrototypeEndpoint(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -1713,9 +1768,10 @@ public class FunctionService {
     /**
      * Get detailed information about a function's variables (parameters and locals).
      */
-    @McpTool(path = "/get_function_variables", description = "List all variables in a function", category = "function")
+    @McpTool(path = "/get_function_variables", description = "List all variables in a function. Accepts function_name (by name) or address (by address). If both are given, address takes precedence. Useful when the function was recently renamed — use address to avoid name-lookup race conditions.", category = "function")
     public Response getFunctionVariables(
-            @Param(value = "function_name", description = "Function name") String functionName,
+            @Param(value = "function_name", description = "Function name (ignored if address is provided)", defaultValue = "") String functionName,
+            @Param(value = "address", description = "Function address (hex, e.g. 6fc583f0). If provided, overrides function_name lookup.", defaultValue = "") String address,
             @Param(value = "program", defaultValue = "") String programName,
             @Param(value = "limit", description = "Max local variables to return (default 200, 0 = unlimited)", defaultValue = "200") String limitStr,
             @Param(value = "filter", description = "Filter locals: 'all' (default), 'needs_work' (only needs_type or needs_rename), 'named' (only non-generic names)", defaultValue = "all") String filter) {
@@ -1723,8 +1779,8 @@ public class FunctionService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        if (functionName == null || functionName.isEmpty()) {
-            return Response.err("Function name is required");
+        if ((functionName == null || functionName.isEmpty()) && (address == null || address.isEmpty())) {
+            return Response.err("Either function_name or address is required");
         }
 
         final int limit = (limitStr != null && !limitStr.isEmpty()) ? Integer.parseInt(limitStr) : 200;
@@ -1737,12 +1793,23 @@ public class FunctionService {
         try {
             threadingStrategy.executeRead(() -> {
                 try {
-                    // Find function by name
+                    // Find function — address lookup takes precedence over name scan
                     Function func = null;
-                    for (Function f : finalProgram.getFunctionManager().getFunctions(true)) {
-                        if (f.getName().equals(functionName)) {
-                            func = f;
-                            break;
+                    if (address != null && !address.isEmpty()) {
+                        Address addr = ServiceUtils.parseAddress(finalProgram, address);
+                        if (addr != null) {
+                            func = ServiceUtils.getFunctionForAddress(finalProgram, addr);
+                        }
+                        if (func == null) {
+                            errorMsg.set("No function at address: " + address);
+                            return null;
+                        }
+                    } else {
+                        for (Function f : finalProgram.getFunctionManager().getFunctions(true)) {
+                            if (f.getName().equals(functionName)) {
+                                func = f;
+                                break;
+                            }
                         }
                     }
 
@@ -1874,7 +1941,7 @@ public class FunctionService {
 
     // Backward compatibility overload
     public Response getFunctionVariables(String functionName) {
-        return getFunctionVariables(functionName, null, null, null);
+        return getFunctionVariables(functionName, null, null, null, null);
     }
 
     /** Suggest a concrete type for an undefined Ghidra type based on size. */
@@ -2459,106 +2526,111 @@ public class FunctionService {
 
                     if (variableRenames != null && !variableRenames.isEmpty()) {
                         // Use decompiler to access SSA variables (the ones that appear in decompiled code)
-                        DecompInterface decomp = new DecompInterface();
-                        decomp.openProgram(program);
+                        DecompInterface decomp = null;
+                        try {
+                            decomp = new DecompInterface();
+                            decomp.openProgram(program);
 
-                        DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                        if (decompResult != null && decompResult.decompileCompleted()) {
-                            HighFunction highFunction = decompResult.getHighFunction();
-                            if (highFunction != null) {
-                                LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
-                                if (localSymbolMap != null) {
-                                    // Check for name conflicts first
-                                    Set<String> existingNames = new HashSet<>();
-                                    Iterator<HighSymbol> checkSymbols = localSymbolMap.getSymbols();
-                                    while (checkSymbols.hasNext()) {
-                                        existingNames.add(checkSymbols.next().getName());
-                                    }
-
-                                    // Validate no conflicts
-                                    for (Map.Entry<String, String> entry : variableRenames.entrySet()) {
-                                        String newName = entry.getValue();
-                                        if (!entry.getKey().equals(newName) && existingNames.contains(newName)) {
-                                            variablesFailed.incrementAndGet();
-                                            errors.add("Variable name '" + newName + "' already exists in function");
+                            DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                            if (decompResult != null && decompResult.decompileCompleted()) {
+                                HighFunction highFunction = decompResult.getHighFunction();
+                                if (highFunction != null) {
+                                    LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
+                                    if (localSymbolMap != null) {
+                                        // Check for name conflicts first
+                                        Set<String> existingNames = new HashSet<>();
+                                        Iterator<HighSymbol> checkSymbols = localSymbolMap.getSymbols();
+                                        while (checkSymbols.hasNext()) {
+                                            existingNames.add(checkSymbols.next().getName());
                                         }
-                                    }
 
-                                    // Commit parameters if needed
-                                    boolean commitRequired = false;
-                                    Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
-                                    if (symbols.hasNext()) {
-                                        HighSymbol firstSymbol = symbols.next();
-                                        commitRequired = checkFullCommit(firstSymbol, highFunction);
-                                    }
-
-                                    if (commitRequired) {
-                                        HighFunctionDBUtil.commitParamsToDatabase(highFunction, false,
-                                            ReturnCommitOption.NO_COMMIT, func.getSignatureSource());
-                                    }
-
-                                    // PATH 1: Rename SSA variables from LocalSymbolMap (decompiler variables)
-                                    Set<String> renamedVars = new HashSet<>();
-                                    // hungarianWarnings collected into shared 'warnings' list
-                                    Iterator<HighSymbol> renameSymbols = localSymbolMap.getSymbols();
-                                    while (renameSymbols.hasNext()) {
-                                        HighSymbol symbol = renameSymbols.next();
-                                        String oldName = symbol.getName();
-                                        String newName = variableRenames.get(oldName);
-
-                                        if (newName != null && !newName.isEmpty() && !oldName.equals(newName)) {
-                                            try {
-                                                HighFunctionDBUtil.updateDBVariable(
-                                                    symbol,
-                                                    newName,
-                                                    null,
-                                                    SourceType.USER_DEFINED
-                                                );
-                                                variablesRenamed.incrementAndGet();
-                                                renamedVars.add(oldName);
-                                                // Validate Hungarian prefix against type
-                                                String varType = symbol.getDataType().getName();
-                                                String hw = NamingConventions.validateHungarianPrefix(newName, varType);
-                                                if (hw != null) warnings.add(hw);
-                                            } catch (Exception e) {
+                                        // Validate no conflicts
+                                        for (Map.Entry<String, String> entry : variableRenames.entrySet()) {
+                                            String newName = entry.getValue();
+                                            if (!entry.getKey().equals(newName) && existingNames.contains(newName)) {
                                                 variablesFailed.incrementAndGet();
-                                                errors.add("Failed to rename SSA variable " + oldName + " to " + newName + ": " + e.getMessage());
+                                                errors.add("Variable name '" + newName + "' already exists in function");
                                             }
                                         }
-                                    }
 
-                                    // PATH 2: Rename storage-based variables from Function.getAllVariables()
-                                    try {
-                                        Variable[] allVars = func.getAllVariables();
-                                        for (Variable var : allVars) {
-                                            String oldName = var.getName();
+                                        // Commit parameters if needed
+                                        boolean commitRequired = false;
+                                        Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
+                                        if (symbols.hasNext()) {
+                                            HighSymbol firstSymbol = symbols.next();
+                                            commitRequired = checkFullCommit(firstSymbol, highFunction);
+                                        }
+
+                                        if (commitRequired) {
+                                            HighFunctionDBUtil.commitParamsToDatabase(highFunction, false,
+                                                ReturnCommitOption.NO_COMMIT, func.getSignatureSource());
+                                        }
+
+                                        // PATH 1: Rename SSA variables from LocalSymbolMap (decompiler variables)
+                                        Set<String> renamedVars = new HashSet<>();
+                                        // hungarianWarnings collected into shared 'warnings' list
+                                        Iterator<HighSymbol> renameSymbols = localSymbolMap.getSymbols();
+                                        while (renameSymbols.hasNext()) {
+                                            HighSymbol symbol = renameSymbols.next();
+                                            String oldName = symbol.getName();
                                             String newName = variableRenames.get(oldName);
 
-                                            if (newName != null && !newName.isEmpty() && !oldName.equals(newName) && !renamedVars.contains(oldName)) {
+                                            if (newName != null && !newName.isEmpty() && !oldName.equals(newName)) {
                                                 try {
-                                                    var.setName(newName, SourceType.USER_DEFINED);
+                                                    HighFunctionDBUtil.updateDBVariable(
+                                                        symbol,
+                                                        newName,
+                                                        null,
+                                                        SourceType.USER_DEFINED
+                                                    );
                                                     variablesRenamed.incrementAndGet();
                                                     renamedVars.add(oldName);
+                                                    // Validate Hungarian prefix against type
+                                                    String varType = symbol.getDataType().getName();
+                                                    String hw = NamingConventions.validateHungarianPrefix(newName, varType);
+                                                    if (hw != null) warnings.add(hw);
                                                 } catch (Exception e) {
                                                     variablesFailed.incrementAndGet();
-                                                    errors.add("Failed to rename storage variable " + oldName + " to " + newName + ": " + e.getMessage());
+                                                    errors.add("Failed to rename SSA variable " + oldName + " to " + newName + ": " + e.getMessage());
                                                 }
                                             }
                                         }
-                                    } catch (Exception e) {
-                                        Msg.warn(this, "Storage variable rename encountered error: " + e.getMessage());
+
+                                        // PATH 2: Rename storage-based variables from Function.getAllVariables()
+                                        try {
+                                            Variable[] allVars = func.getAllVariables();
+                                            for (Variable var : allVars) {
+                                                String oldName = var.getName();
+                                                String newName = variableRenames.get(oldName);
+
+                                                if (newName != null && !newName.isEmpty() && !oldName.equals(newName) && !renamedVars.contains(oldName)) {
+                                                    try {
+                                                        var.setName(newName, SourceType.USER_DEFINED);
+                                                        variablesRenamed.incrementAndGet();
+                                                        renamedVars.add(oldName);
+                                                    } catch (Exception e) {
+                                                        variablesFailed.incrementAndGet();
+                                                        errors.add("Failed to rename storage variable " + oldName + " to " + newName + ": " + e.getMessage());
+                                                    }
+                                                }
+                                            }
+                                        } catch (Exception e) {
+                                            Msg.warn(this, "Storage variable rename encountered error: " + e.getMessage());
+                                        }
+                                    } else {
+                                        errors.add("Failed to get LocalSymbolMap from decompiler");
                                     }
                                 } else {
-                                    errors.add("Failed to get LocalSymbolMap from decompiler");
+                                    errors.add("Failed to get HighFunction from decompiler");
                                 }
                             } else {
-                                errors.add("Failed to get HighFunction from decompiler");
+                                errors.add("Decompilation failed or did not complete");
                             }
-                        } else {
-                            errors.add("Decompilation failed or did not complete");
+                        } finally {
+                            if (decomp != null) {
+                                try { decomp.dispose(); } catch (Exception ignored) {}
+                            }
                         }
-
-                        decomp.dispose();
                     }
 
                     success.set(true);
@@ -2582,11 +2654,17 @@ public class FunctionService {
                     // Invalidate decompiler cache after successful renames
                     if (success.get() && variablesRenamed.get() > 0 && funcRef.get() != null) {
                         try {
-                            DecompInterface tempDecomp = new DecompInterface();
-                            tempDecomp.openProgram(program);
-                            tempDecomp.flushCache();
-                            tempDecomp.decompileFunction(funcRef.get(), DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                            tempDecomp.dispose();
+                            DecompInterface tempDecomp = null;
+                            try {
+                                tempDecomp = new DecompInterface();
+                                tempDecomp.openProgram(program);
+                                tempDecomp.flushCache();
+                                tempDecomp.decompileFunction(funcRef.get(), DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                            } finally {
+                                if (tempDecomp != null) {
+                                    try { tempDecomp.dispose(); } catch (Exception ignored) {}
+                                }
+                            }
                             Msg.info(this, "Invalidated decompiler cache after renaming " + variablesRenamed.get() + " variables");
                         } catch (Exception cacheEx) {
                             Msg.warn(this, "Failed to invalidate decompiler cache: " + cacheEx.getMessage());
@@ -2618,11 +2696,11 @@ public class FunctionService {
                 }
                 return Response.ok(resultMap);
             }
+
+            return Response.err("Unknown failure");
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
-
-        return Response.err("Unknown failure");
     }
 
     public Response batchRenameVariables(String functionAddress, Map<String, String> variableRenames, boolean forceIndividual) {
@@ -2733,60 +2811,63 @@ public class FunctionService {
                     }
 
                     // Phase 2: Decompile to get fresh SSA variables for renaming
-                    DecompInterface decomp = new DecompInterface();
-                    decomp.openProgram(program);
-                    DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
-                    if (decompResult == null || !decompResult.decompileCompleted()) {
-                        errors.add("Decompilation failed after type changes; renames skipped");
-                        decomp.dispose();
-                        return;
-                    }
-                    HighFunction highFunction = decompResult.getHighFunction();
-                    if (highFunction == null) {
-                        errors.add("No HighFunction after decompile; renames skipped");
-                        decomp.dispose();
-                        return;
-                    }
-
-                    // Commit params if needed
-                    LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
-                    Iterator<HighSymbol> checkSymbols = localSymbolMap.getSymbols();
-                    if (checkSymbols.hasNext()) {
-                        HighSymbol first = checkSymbols.next();
-                        if (checkFullCommit(first, highFunction)) {
-                            HighFunctionDBUtil.commitParamsToDatabase(highFunction, false,
-                                    ReturnCommitOption.NO_COMMIT, func.getSignatureSource());
+                    DecompInterface decomp = null;
+                    try {
+                        decomp = new DecompInterface();
+                        decomp.openProgram(program);
+                        DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
+                        if (decompResult == null || !decompResult.decompileCompleted()) {
+                            errors.add("Decompilation failed after type changes; renames skipped");
+                            return;
                         }
-                    }
-
-                    // Phase 3: Rename with Hungarian validation
-                    Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
-                    while (symbols.hasNext()) {
-                        HighSymbol symbol = symbols.next();
-                        String currentName = symbol.getName();
-                        Map<String, String> spec = variables.get(currentName);
-                        if (spec == null || !spec.containsKey("name")) continue;
-
-                        String newName = spec.get("name");
-                        if (newName == null || newName.isEmpty() || newName.equals(currentName)) continue;
-
-                        // Validate Hungarian prefix against actual type
-                        String actualType = symbol.getDataType().getName();
-                        String hungarianWarning = NamingConventions.validateHungarianPrefix(newName, actualType);
-                        if (hungarianWarning != null) {
-                            warnings.add(hungarianWarning);
+                        HighFunction highFunction = decompResult.getHighFunction();
+                        if (highFunction == null) {
+                            errors.add("No HighFunction after decompile; renames skipped");
+                            return;
                         }
 
-                        try {
-                            HighFunctionDBUtil.updateDBVariable(symbol, newName, null, SourceType.USER_DEFINED);
-                            namesSet.incrementAndGet();
-                        } catch (Exception e) {
-                            errors.add("Failed to rename " + currentName + " -> " + newName + ": " + e.getMessage());
-                            failed.incrementAndGet();
+                        // Commit params if needed
+                        LocalSymbolMap localSymbolMap = highFunction.getLocalSymbolMap();
+                        Iterator<HighSymbol> checkSymbols = localSymbolMap.getSymbols();
+                        if (checkSymbols.hasNext()) {
+                            HighSymbol first = checkSymbols.next();
+                            if (checkFullCommit(first, highFunction)) {
+                                HighFunctionDBUtil.commitParamsToDatabase(highFunction, false,
+                                        ReturnCommitOption.NO_COMMIT, func.getSignatureSource());
+                            }
+                        }
+
+                        // Phase 3: Rename with Hungarian validation
+                        Iterator<HighSymbol> symbols = localSymbolMap.getSymbols();
+                        while (symbols.hasNext()) {
+                            HighSymbol symbol = symbols.next();
+                            String currentName = symbol.getName();
+                            Map<String, String> spec = variables.get(currentName);
+                            if (spec == null || !spec.containsKey("name")) continue;
+
+                            String newName = spec.get("name");
+                            if (newName == null || newName.isEmpty() || newName.equals(currentName)) continue;
+
+                            // Validate Hungarian prefix against actual type
+                            String actualType = symbol.getDataType().getName();
+                            String hungarianWarning = NamingConventions.validateHungarianPrefix(newName, actualType);
+                            if (hungarianWarning != null) {
+                                warnings.add(hungarianWarning);
+                            }
+
+                            try {
+                                HighFunctionDBUtil.updateDBVariable(symbol, newName, null, SourceType.USER_DEFINED);
+                                namesSet.incrementAndGet();
+                            } catch (Exception e) {
+                                errors.add("Failed to rename " + currentName + " -> " + newName + ": " + e.getMessage());
+                                failed.incrementAndGet();
+                            }
+                        }
+                    } finally {
+                        if (decomp != null) {
+                            try { decomp.dispose(); } catch (Exception ignored) {}
                         }
                     }
-
-                    decomp.dispose();
                 } catch (Exception e) {
                     errorRef.set(e.getMessage());
                 } finally {

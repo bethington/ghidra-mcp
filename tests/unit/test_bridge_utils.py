@@ -8,6 +8,7 @@ They test transport utilities, timeout logic, and discovery functions.
 import json
 import os
 import inspect
+import re
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -36,8 +37,9 @@ class TestGetSocketDir(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
         env["TMPDIR"] = "/custom/tmp"
         env["USER"] = "testuser"
-        with patch.dict(os.environ, env, clear=True), \
-             patch("os.getuid", return_value=9_999_999, create=True):
+        with patch.dict(os.environ, env, clear=True), patch(
+            "os.getuid", return_value=9_999_999, create=True
+        ):
             from bridge_mcp_ghidra import get_socket_dir
 
             result = get_socket_dir()
@@ -174,6 +176,175 @@ class TestBuildToolFunction(unittest.TestCase):
         fn = _build_tool_function("/test", "GET", schema)
         sig = inspect.signature(fn)
         self.assertEqual(len(sig.parameters), 0)
+
+    def test_post_query_params_are_not_sent_in_body(self):
+        from bridge_mcp_ghidra import _build_tool_function
+
+        schema = {
+            "properties": {
+                "function_address": {
+                    "type": "string",
+                    "source": "body",
+                    "param_type": "address",
+                },
+                "prototype": {"type": "string", "source": "body"},
+                "program": {"type": "string", "source": "query", "default": ""},
+            },
+            "required": ["function_address", "prototype"],
+        }
+        fn = _build_tool_function("/set_function_prototype", "POST", schema)
+
+        with patch("bridge_mcp_ghidra.dispatch_post") as mock_dispatch_post:
+            mock_dispatch_post.return_value = "ok"
+            result = fn(
+                function_address="6FA26FD0",
+                prototype="undefined4 __fastcall FUN_6fa26fd0(int param_1, uint param_2)",
+                program="/Vanilla/1.13d/D2MCPClient.dll",
+            )
+
+        self.assertEqual(result, "ok")
+        mock_dispatch_post.assert_called_once_with(
+            "/set_function_prototype",
+            data={
+                "function_address": "0x6fa26fd0",
+                "prototype": "undefined4 __fastcall FUN_6fa26fd0(int param_1, uint param_2)",
+            },
+            query_params={"program": "/Vanilla/1.13d/D2MCPClient.dll"},
+        )
+
+
+class TestToolNameSanitization(unittest.TestCase):
+    """Test MCP tool name normalization for strict clients."""
+
+    def test_sanitize_tool_name_replaces_invalid_separators(self):
+        from bridge_mcp_ghidra import sanitize_tool_name
+
+        self.assertEqual(sanitize_tool_name("/Debugger.Status "), "debugger_status")
+        self.assertEqual(sanitize_tool_name("server/status"), "server_status")
+        self.assertEqual(sanitize_tool_name("A::B...C"), "a_b_c")
+
+    def test_sanitize_tool_name_truncates_to_claude_limit(self):
+        from bridge_mcp_ghidra import MAX_TOOL_NAME_LENGTH, sanitize_tool_name
+
+        raw = "/" + ("VeryLongToolNameSegment_" * 6)
+        sanitized = sanitize_tool_name(raw)
+
+        self.assertLessEqual(len(sanitized), MAX_TOOL_NAME_LENGTH)
+        self.assertRegex(sanitized, r"^[a-zA-Z0-9_-]{1,64}$")
+
+    def test_sanitize_tool_name_rejects_empty_names(self):
+        from bridge_mcp_ghidra import sanitize_tool_name
+
+        with self.assertRaises(ValueError):
+            sanitize_tool_name("///")
+
+    def test_parse_schema_normalizes_nested_endpoint_paths(self):
+        from bridge_mcp_ghidra import _parse_schema
+
+        schema = _parse_schema(
+            {
+                "tools": [
+                    {
+                        "path": "/server/status",
+                        "method": "GET",
+                        "params": [],
+                    }
+                ]
+            }
+        )
+        self.assertEqual(schema[0]["name"], "server_status")
+        self.assertEqual(schema[0]["endpoint"], "/server/status")
+
+    def test_parse_schema_suffixes_static_name_collisions(self):
+        from bridge_mcp_ghidra import _parse_schema
+
+        schema = _parse_schema(
+            {
+                "tools": [
+                    {
+                        "path": "/debugger/status",
+                        "method": "GET",
+                        "params": [],
+                    }
+                ]
+            }
+        )
+        self.assertEqual(schema[0]["name"], "debugger_status_2")
+        self.assertEqual(schema[0]["sanitized_name"], "debugger_status")
+        self.assertTrue(schema[0]["name_collided"])
+
+    def test_parse_schema_suffixes_dynamic_name_collisions(self):
+        from bridge_mcp_ghidra import _parse_schema
+
+        schema = _parse_schema(
+            {
+                "tools": [
+                    {"path": "/foo.bar", "method": "GET", "params": []},
+                    {"path": "/foo/bar", "method": "GET", "params": []},
+                ]
+            }
+        )
+        self.assertEqual([tool["name"] for tool in schema], ["foo_bar", "foo_bar_2"])
+
+    def test_parse_schema_suffixes_truncated_name_collisions_within_limit(self):
+        from bridge_mcp_ghidra import MAX_TOOL_NAME_LENGTH, _parse_schema
+
+        raw = "/" + ("LongEndpointSegment_" * 5)
+        schema = _parse_schema(
+            {
+                "tools": [
+                    {"path": raw, "method": "GET", "params": []},
+                    {"path": raw + "/v2", "method": "GET", "params": []},
+                ]
+            }
+        )
+
+        self.assertLessEqual(len(schema[0]["name"]), MAX_TOOL_NAME_LENGTH)
+        self.assertLessEqual(len(schema[1]["name"]), MAX_TOOL_NAME_LENGTH)
+        self.assertNotEqual(schema[0]["name"], schema[1]["name"])
+        self.assertRegex(schema[0]["name"], r"^[a-zA-Z0-9_-]{1,64}$")
+        self.assertRegex(schema[1]["name"], r"^[a-zA-Z0-9_-]{1,64}$")
+
+    def test_active_registry_tool_names_are_valid(self):
+        import bridge_mcp_ghidra as bridge
+
+        pattern = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+        invalid = [
+            name
+            for name in bridge.mcp._tool_manager._tools
+            if not pattern.fullmatch(name)
+        ]
+        self.assertEqual(invalid, [])
+
+    def test_registered_dynamic_tool_names_are_valid(self):
+        import bridge_mcp_ghidra as bridge
+
+        schema = bridge._parse_schema(
+            {
+                "tools": [
+                    {"path": "/server/status", "method": "GET", "params": []},
+                    {"path": "/debugger/status", "method": "GET", "params": []},
+                    {"path": "/foo.bar", "method": "GET", "params": []},
+                    {"path": "/foo/bar", "method": "GET", "params": []},
+                ]
+            }
+        )
+
+        bridge.register_tools_from_schema(schema, groups=None)
+        pattern = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+        try:
+            invalid = [
+                name
+                for name in bridge.mcp._tool_manager._tools
+                if not pattern.fullmatch(name)
+            ]
+            self.assertEqual(invalid, [])
+            self.assertIn("server_status", bridge.mcp._tool_manager._tools)
+            self.assertIn("debugger_status_2", bridge.mcp._tool_manager._tools)
+            self.assertIn("foo_bar", bridge.mcp._tool_manager._tools)
+            self.assertIn("foo_bar_2", bridge.mcp._tool_manager._tools)
+        finally:
+            bridge.register_tools_from_schema([], groups=None)
 
 
 class TestRegisterToolsFromSchema(unittest.TestCase):

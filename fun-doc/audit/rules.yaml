@@ -1,0 +1,82 @@
+# fun-doc audit rules — Phase 1 seed set
+#
+# All rules start at mode: report. No agent code runs in Phase 1; the watcher
+# evaluates rules and writes `audit.triggered` / `audit.skipped` events to
+# events.jsonl and fire records to audit/queue.jsonl. Agent wiring is Phase 3.
+#
+# Rule schema:
+#   id          — stable identifier, referenced in audit.* event fields
+#   description — one-line rationale (also shown in dashboard panel later)
+#   kind        — evaluator dispatch key. See watcher.py for implementations.
+#   mode        — report | pr | auto. Phase 1: all rules pinned at report.
+#   signature   — template, filled from match context. Drives dedup/cooldown.
+#   condition   — kind-specific parameters
+#
+# Changing thresholds here is a soft tuning operation. Changing `mode` is
+# graduation on the promotion ladder — in Phase 5+ the ladder logic will
+# propose mode changes via PRs, but for Phase 1 the mode is frozen.
+
+rules:
+  - id: bridge_counter_stall
+    description: >
+      A bus→bridge event type sits at zero while workers are active. This is
+      the fingerprint of a silent delivery bug (the NameError class fixed in
+      78ba6cd): something emits but nothing reaches the dashboard.
+    kind: bridge_counter_stall
+    mode: report
+    signature: "bridge_stall:{event_type}"
+    condition:
+      event_types: [tool_call, tool_result, model_text]
+      value: 0
+      duration_seconds: 1800   # 30 min
+      workers_active_min: 1
+
+  - id: worker_crashed
+    description: >
+      Worker terminated with a reason other than normal completion or user
+      stop. Covers crashloops, timeouts, and unhandled exceptions inside
+      _run_worker.
+    kind: worker_stopped_unexpectedly
+    mode: report
+    signature: "worker_crash:{reason}"
+    condition:
+      unexpected_reasons_include: [crashed, error, timeout, exception]
+      acceptable_reasons: [finished, stopped_by_user, stopped]
+
+  - id: ghidra_offline_sustained
+    description: >
+      Ghidra health probe has reported offline for more than 5 minutes. Most
+      fixes for this rule will stay at `pr` forever — the remedy is usually
+      external (restart Ghidra). Still worth recording signature history so
+      recurrence is visible.
+    kind: ghidra_offline_sustained
+    mode: report
+    signature: "ghidra_offline"
+    condition:
+      duration_seconds: 300   # 5 min
+
+  - id: provider_timeout_cluster
+    description: >
+      Three or more provider_timeout events from the same provider within
+      one hour. Points to quota exhaustion, API degradation, or a hang
+      pattern the watchdog is repeatedly tripping.
+    kind: event_count_in_window
+    mode: report
+    signature: "provider_timeout_cluster:{provider}"
+    condition:
+      event: provider_timeout
+      count_min: 3
+      window_seconds: 3600   # 1h
+      group_by_field: provider
+
+  - id: run_failure_rate_spike
+    description: >
+      Rolling last-30 run failure rate exceeds 60%. Trend-based detector for
+      "the workers are running but nothing is getting better." Likely to
+      stay at `pr` forever — root cause could be anywhere.
+    kind: run_failure_rate
+    mode: report
+    signature: "run_failure_spike"
+    condition:
+      window_runs: 30
+      threshold: 0.6

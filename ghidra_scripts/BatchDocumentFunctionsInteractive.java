@@ -22,9 +22,12 @@ import ghidra.program.model.pcode.*;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.*;
 
 public class BatchDocumentFunctionsInteractive extends GhidraScript {
+
+    private static final long CLAUDE_PROCESS_TIMEOUT_SECONDS = 600;
 
     // User-configurable options (set via prompts)
     private int maxFunctions = 0;
@@ -108,55 +111,60 @@ public class BatchDocumentFunctionsInteractive extends GhidraScript {
 
         // Initialize decompiler
         decompiler = new DecompInterface();
-        decompiler.openProgram(currentProgram);
 
-        FunctionManager funcManager = currentProgram.getFunctionManager();
+        try {
+            decompiler.openProgram(currentProgram);
 
-        // Count functions
-        FunctionIterator countIter = funcManager.getFunctions(true);
-        while (countIter.hasNext()) {
-            countIter.next();
-            totalFunctions++;
+            FunctionManager funcManager = currentProgram.getFunctionManager();
+
+            // Count functions
+            FunctionIterator countIter = funcManager.getFunctions(true);
+            while (countIter.hasNext()) {
+                countIter.next();
+                totalFunctions++;
+            }
+            println("Total functions to analyze: " + totalFunctions);
+            println("");
+
+            // Process functions
+            FunctionIterator funcIter = funcManager.getFunctions(true);
+            while (funcIter.hasNext()) {
+                if (monitor.isCancelled()) {
+                    println("Cancelled by user.");
+                    break;
+                }
+
+                Function func = funcIter.next();
+                processedFunctions++;
+
+                if (processedFunctions % 100 == 0) {
+                    monitor.setMessage("Analyzing " + processedFunctions + "/" + totalFunctions);
+                    println("Progress: " + processedFunctions + "/" + totalFunctions +
+                           " (Needs work: " + needsWorkFunctions + ", Skipped: " + skippedFunctions + ")");
+                }
+
+                List<String> issues = new ArrayList<>();
+                int score = analyzeFunction(func, issues);
+
+                String addrHex = func.getEntryPoint().toString().replace("0x", "");
+                functionScores.add(new FunctionScore(func.getName(), addrHex, score, issues));
+
+                if (score >= minScore && score <= maxScore) {
+                    needsWorkFunctions++;
+                } else {
+                    skippedFunctions++;
+                }
+
+                if (maxFunctions > 0 && needsWorkFunctions >= maxFunctions) {
+                    println("Reached max functions limit (" + maxFunctions + ")");
+                    break;
+                }
+            }
+        } finally {
+            if (decompiler != null) {
+                decompiler.dispose();
+            }
         }
-        println("Total functions to analyze: " + totalFunctions);
-        println("");
-
-        // Process functions
-        FunctionIterator funcIter = funcManager.getFunctions(true);
-        while (funcIter.hasNext()) {
-            if (monitor.isCancelled()) {
-                println("Cancelled by user.");
-                break;
-            }
-
-            Function func = funcIter.next();
-            processedFunctions++;
-
-            if (processedFunctions % 100 == 0) {
-                monitor.setMessage("Analyzing " + processedFunctions + "/" + totalFunctions);
-                println("Progress: " + processedFunctions + "/" + totalFunctions +
-                       " (Needs work: " + needsWorkFunctions + ", Skipped: " + skippedFunctions + ")");
-            }
-
-            List<String> issues = new ArrayList<>();
-            int score = analyzeFunction(func, issues);
-
-            String addrHex = func.getEntryPoint().toString().replace("0x", "");
-            functionScores.add(new FunctionScore(func.getName(), addrHex, score, issues));
-
-            if (score >= minScore && score <= maxScore) {
-                needsWorkFunctions++;
-            } else {
-                skippedFunctions++;
-            }
-
-            if (maxFunctions > 0 && needsWorkFunctions >= maxFunctions) {
-                println("Reached max functions limit (" + maxFunctions + ")");
-                break;
-            }
-        }
-
-        decompiler.dispose();
 
         println("");
         println("=== Analysis Complete ===");
@@ -180,7 +188,7 @@ public class BatchDocumentFunctionsInteractive extends GhidraScript {
 
     private boolean configureOptions() throws Exception {
         // Mode selection
-        String modeAnalyze = "Analyze Only (generate todo file for functions-process.ps1)";
+        String modeAnalyze = "Analyze Only (generate todo file for an external processor)";
         String modeClaude = "Analyze and Invoke Claude (process directly)";
         String modeQuick = "Quick Analysis (dry run, no output files)";
 
@@ -498,16 +506,29 @@ public class BatchDocumentFunctionsInteractive extends GhidraScript {
                     writer.flush();
                 }
 
-                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 StringBuilder output = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        output.append(line).append("\n");
+                    }
                 }
 
-                if (process.waitFor() == 0 && output.toString().contains("DONE:")) {
+                if (!process.waitFor(CLAUDE_PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    println("  ERROR: Claude timed out after " + CLAUDE_PROCESS_TIMEOUT_SECONDS + "s; terminating process");
+                    process.destroy();
+                    if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                        process.destroyForcibly();
+                        process.waitFor(5, TimeUnit.SECONDS);
+                    }
+                    continue;
+                }
+
+                if (process.exitValue() == 0 && output.toString().contains("DONE:")) {
                     println("  SUCCESS");
                     successful++;
+                } else if (process.exitValue() != 0) {
+                    println("  ERROR: Claude exited with code " + process.exitValue());
                 }
             } catch (Exception e) {
                 println("  ERROR: " + e.getMessage());
@@ -535,8 +556,8 @@ public class BatchDocumentFunctionsInteractive extends GhidraScript {
 
     private String findMcpConfig(String userHome) {
         String[] paths = {
-            userHome + "\\source\\mcp\\ghidra-mcp\\mcp-config.json",
-            "mcp-config.json"
+            userHome + "\\source\\mcp\\ghidra-mcp\\.mcp.json",
+            ".mcp.json"
         };
         for (String p : paths) {
             if (new File(p).exists()) return p;

@@ -3,7 +3,7 @@
 //@category Diablo 2
 //@keybinding
 //@menupath Tools.MCP.Verify Thiscall Conventions
-//@toolbar 
+//@toolbar
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.sourcemap.*;
@@ -25,8 +25,11 @@ import ghidra.program.model.listing.*;
 import ghidra.program.model.symbol.*;
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 public class VerifyThiscallConventionsClaude extends GhidraScript {
+
+    private static final long CLAUDE_PROCESS_TIMEOUT_SECONDS = 600;
 
     @Override
     public void run() throws Exception {
@@ -46,7 +49,7 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
         List<Function> thiscallFunctions = new ArrayList<>();
         FunctionManager functionManager = currentProgram.getFunctionManager();
         FunctionIterator functions = functionManager.getFunctions(true);
-        
+
         while (functions.hasNext() && !monitor.isCancelled()) {
             Function func = functions.next();
             String callingConvention = func.getCallingConventionName();
@@ -61,10 +64,10 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
         }
 
         printf("Found %d functions with __thiscall calling convention\n", thiscallFunctions.size());
-        
+
         // Ask user if they want to proceed
-        if (!askYesNo("Verify Thiscall Conventions", 
-                String.format("Found %d functions with __thiscall. Process them with Claude?", 
+        if (!askYesNo("Verify Thiscall Conventions",
+                String.format("Found %d functions with __thiscall. Process them with Claude?",
                 thiscallFunctions.size()))) {
             return;
         }
@@ -72,24 +75,24 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
         // Process each function
         monitor.initialize(thiscallFunctions.size());
         monitor.setMessage("Verifying calling conventions with Claude...");
-        
+
         int processed = 0;
         int verified = 0;
         int failed = 0;
-        
+
         for (Function func : thiscallFunctions) {
             if (monitor.isCancelled()) {
                 printf("Cancelled by user after processing %d functions\n", processed);
                 break;
             }
-            
+
             monitor.setProgress(processed);
             monitor.setMessage(String.format("Processing %s...", func.getName()));
-            
+
             try {
                 // Navigate to the function and select it
                 goTo(func.getEntryPoint());
-                
+
                 // Build detailed prompt with function context
                 StringBuilder promptBuilder = new StringBuilder();
                 promptBuilder.append("Analyze the function '").append(func.getName())
@@ -97,7 +100,7 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
 
                 String prompt = promptBuilder.toString();
                 String result = callClaude(claudeCmd, prompt);
-                
+
                 if (result != null && !result.isEmpty()) {
                     printf("\n========================================\n");
                     printf("Function: %s @ %s\n", func.getName(), func.getEntryPoint());
@@ -110,18 +113,18 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
                     printf("WARNING: No response from Claude for function %s\n", func.getName());
                     failed++;
                 }
-                
+
                 processed++;
-                
+
                 // Small delay to avoid overwhelming the API
                 Thread.sleep(2000);
-                
+
             } catch (Exception e) {
                 printf("ERROR processing function %s: %s\n", func.getName(), e.getMessage());
                 failed++;
             }
         }
-        
+
         printf("\n========================================\n");
         printf("SUMMARY:\n");
         printf("Total functions: %d\n", thiscallFunctions.size());
@@ -129,8 +132,8 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
         printf("Verified: %d\n", verified);
         printf("Failed: %d\n", failed);
         printf("========================================\n");
-        
-        popup(String.format("Verification complete!\nProcessed: %d\nVerified: %d\nFailed: %d", 
+
+        popup(String.format("Verification complete!\nProcessed: %d\nVerified: %d\nFailed: %d",
             processed, verified, failed));
     }
 
@@ -139,7 +142,7 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
      */
     private String findClaudeCommand() {
         String os = System.getProperty("os.name").toLowerCase();
-        
+
         if (os.contains("win")) {
             // Windows: Try npm global installation path
             String appData = System.getenv("APPDATA");
@@ -149,7 +152,7 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
                     return claudeCmd.getAbsolutePath();
                 }
             }
-            
+
             // Try ProgramFiles
             String programFiles = System.getenv("ProgramFiles");
             if (programFiles != null) {
@@ -165,7 +168,7 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
                 "/usr/bin/claude",
                 System.getProperty("user.home") + "/.local/bin/claude"
             };
-            
+
             for (String path : paths) {
                 File claudeCmd = new File(path);
                 if (claudeCmd.exists() && claudeCmd.canExecute()) {
@@ -173,7 +176,7 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
                 }
             }
         }
-        
+
         return null;
     }
 
@@ -182,43 +185,54 @@ public class VerifyThiscallConventionsClaude extends GhidraScript {
      */
     private String callClaude(String claudeCmd, String prompt) {
         StringBuilder output = new StringBuilder();
-        
+
         try {
             // Create command: claude --dangerously-skip-permissions (read from stdin)
             List<String> command = new ArrayList<>();
             command.add(claudeCmd);
             command.add("--dangerously-skip-permissions");
-            
+
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
-            
+
             Process process = pb.start();
-            
+
             // Write prompt to stdin
             try (BufferedWriter writer = new BufferedWriter(
                     new OutputStreamWriter(process.getOutputStream()))) {
                 writer.write(prompt);
                 writer.flush();
             }
-            
+
             // Read output
-            BufferedReader reader = new BufferedReader(
-                new InputStreamReader(process.getInputStream()));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append("\n");
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
             }
-            
-            int exitCode = process.waitFor();
+
+            if (!process.waitFor(CLAUDE_PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                printf("WARNING: Claude process timed out after %d seconds; terminating\n", CLAUDE_PROCESS_TIMEOUT_SECONDS);
+                process.destroy();
+                if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                    process.waitFor(5, TimeUnit.SECONDS);
+                }
+                return null;
+            }
+
+            int exitCode = process.exitValue();
             if (exitCode != 0) {
                 printf("WARNING: Claude process exited with code %d\n", exitCode);
             }
-            
+
         } catch (IOException | InterruptedException e) {
             printf("ERROR calling Claude: %s\n", e.getMessage());
             return null;
         }
-        
+
         return output.toString().trim();
     }
 }

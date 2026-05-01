@@ -1,0 +1,29 @@
+{
+  "description": "Bad fun-doc output — worker misnamed the function, didn't identify the algorithm, plate is generic, signature left as undefined, and spammed duplicate tool calls.",
+  "wall_time_sec": 41.2,
+  "captured": {
+    "name": "ProcessBuffer",
+    "return_type": "undefined4",
+    "parameters": [
+      {"name": "param_1", "type": "undefined4"},
+      {"name": "param_2", "type": "undefined4"}
+    ],
+    "locals": [
+      {"name": "iVar1", "type": "int"},
+      {"name": "iVar2", "type": "int"},
+      {"name": "iVar3", "type": "int"}
+    ],
+    "plate": "This function processes a buffer and computes a value. It iterates over the input and updates an internal state. Returns the final state value."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001010"}, "status": "ok"},
+    {"tool": "decompile_function", "args": {"address": "0x10001010"}, "status": "ok"},
+    {"tool": "decompile_function", "args": {"address": "0x10001010"}, "status": "ok"},
+    {"tool": "get_function_signature", "args": {"address": "0x10001010"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001010"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001010"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001010", "name": "ProcessBuffer"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001010", "comment": "This function processes a buffer..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001010"}, "status": "ok"}
+  ]
+}

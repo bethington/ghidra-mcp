@@ -1,0 +1,22 @@
+{
+  "description": "Poor fun-doc output on get_stat_list_flags — didn't identify the StatList pattern, generic naming, types left as undefined, plate misses the magic validation and the offset meaning.",
+  "wall_time_sec": 23.7,
+  "captured": {
+    "name": "ValidateAndFetch",
+    "return_type": "undefined4",
+    "parameters": [
+      {"name": "param_1", "type": "undefined4 *"}
+    ],
+    "locals": [],
+    "plate": "Validates a pointer and returns a value from memory if validation passes. Returns 0 otherwise."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "decompile_function", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001150", "name": "ValidateAndFetch"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001150", "comment": "Validates a pointer..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001150"}, "status": "ok"}
+  ]
+}

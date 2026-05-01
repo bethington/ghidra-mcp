@@ -45,8 +45,6 @@ public class SurveyUndocumentedFunctions extends GhidraScript {
 
         // Set up decompiler for classification
         DecompInterface decomp = new DecompInterface();
-        decomp.openProgram(currentProgram);
-        decomp.setSimplificationStyle("decompile");
 
         // Build manifest entries
         StringBuilder json = new StringBuilder();
@@ -60,98 +58,105 @@ public class SurveyUndocumentedFunctions extends GhidraScript {
         int count = 0;
         int thunks = 0, leaves = 0, workers = 0, apis = 0;
 
-        for (Function func : undocumented) {
-            if (monitor.isCancelled()) break;
+        try {
+            decomp.openProgram(currentProgram);
+            decomp.setSimplificationStyle("decompile");
 
-            if (count > 0) json.append(",\n");
+            for (Function func : undocumented) {
+                if (monitor.isCancelled()) break;
 
-            String addr = func.getEntryPoint().toString();
-            String name = func.getName();
-            boolean isExport = func.isExternal() || isExported(func, st);
+                if (count > 0) json.append(",\n");
 
-            // Count xrefs TO this function
-            int xrefCount = 0;
-            for (Reference ref : rm.getReferencesTo(func.getEntryPoint())) {
-                if (ref.getReferenceType().isCall() || ref.getReferenceType().isJump()) {
-                    xrefCount++;
-                }
-            }
+                String addr = func.getEntryPoint().toString();
+                String name = func.getName();
+                boolean isExport = func.isExternal() || isExported(func, st);
 
-            // Count callees and callers
-            Set<Function> callees = func.getCalledFunctions(monitor);
-            int calleeCount = callees.size();
-            int undocCalleeCount = 0;
-            for (Function callee : callees) {
-                if (isUndocumented(callee.getName())) undocCalleeCount++;
-            }
-
-            Set<Function> callers = func.getCallingFunctions(monitor);
-            int callerCount = callers.size();
-
-            // Classify function
-            String classification;
-            String bodyAddress = null;
-            long bodySize = func.getBody().getNumAddresses();
-
-            if (func.isThunk()) {
-                classification = "thunk";
-                thunks++;
-                Function thunkedFunc = func.getThunkedFunction(false);
-                if (thunkedFunc != null) {
-                    bodyAddress = thunkedFunc.getEntryPoint().toString();
-                }
-            } else if (bodySize <= 10 && isSimpleThunk(func)) {
-                classification = "thunk";
-                thunks++;
-                bodyAddress = findThunkTarget(func);
-            } else if (calleeCount == 0) {
-                classification = "leaf";
-                leaves++;
-            } else if (isExport) {
-                classification = "api";
-                apis++;
-            } else {
-                classification = "worker";
-                workers++;
-            }
-
-            // Check for register-only SSA (quick heuristic: decompile and check local names)
-            boolean hasRenameableVars = true;
-            if (!classification.equals("thunk")) {
-                try {
-                    DecompileResults results = decomp.decompileFunction(func, 5, monitor);
-                    if (results != null && results.decompileCompleted()) {
-                        HighFunction hf = results.getHighFunction();
-                        if (hf != null) {
-                            hasRenameableVars = hasRenameableLocals(hf);
-                        }
+                // Count xrefs TO this function
+                int xrefCount = 0;
+                for (Reference ref : rm.getReferencesTo(func.getEntryPoint())) {
+                    if (ref.getReferenceType().isCall() || ref.getReferenceType().isJump()) {
+                        xrefCount++;
                     }
-                } catch (Exception e) {
-                    // Decompile failed — assume has renameable vars
+                }
+
+                // Count callees and callers
+                Set<Function> callees = func.getCalledFunctions(monitor);
+                int calleeCount = callees.size();
+                int undocCalleeCount = 0;
+                for (Function callee : callees) {
+                    if (isUndocumented(callee.getName())) undocCalleeCount++;
+                }
+
+                Set<Function> callers = func.getCallingFunctions(monitor);
+                int callerCount = callers.size();
+
+                // Classify function
+                String classification;
+                String bodyAddress = null;
+                long bodySize = func.getBody().getNumAddresses();
+
+                if (func.isThunk()) {
+                    classification = "thunk";
+                    thunks++;
+                    Function thunkedFunc = func.getThunkedFunction(false);
+                    if (thunkedFunc != null) {
+                        bodyAddress = thunkedFunc.getEntryPoint().toString();
+                    }
+                } else if (bodySize <= 10 && isSimpleThunk(func)) {
+                    classification = "thunk";
+                    thunks++;
+                    bodyAddress = findThunkTarget(func);
+                } else if (calleeCount == 0) {
+                    classification = "leaf";
+                    leaves++;
+                } else if (isExport) {
+                    classification = "api";
+                    apis++;
+                } else {
+                    classification = "worker";
+                    workers++;
+                }
+
+                // Check for register-only SSA (quick heuristic: decompile and check local names)
+                boolean hasRenameableVars = true;
+                if (!classification.equals("thunk")) {
+                    try {
+                        DecompileResults results = decomp.decompileFunction(func, 5, monitor);
+                        if (results != null && results.decompileCompleted()) {
+                            HighFunction hf = results.getHighFunction();
+                            if (hf != null) {
+                                hasRenameableVars = hasRenameableLocals(hf);
+                            }
+                        }
+                    } catch (Exception e) {
+                        // Decompile failed — assume has renameable vars
+                    }
+                }
+
+                // Build JSON entry
+                json.append("    {");
+                json.append("\"address\": \"0x").append(addr).append("\"");
+                json.append(", \"name\": \"").append(escJson(name)).append("\"");
+                json.append(", \"classification\": \"").append(classification).append("\"");
+                json.append(", \"xref_count\": ").append(xrefCount);
+                json.append(", \"callee_count\": ").append(calleeCount);
+                json.append(", \"undoc_callee_count\": ").append(undocCalleeCount);
+                json.append(", \"caller_count\": ").append(callerCount);
+                json.append(", \"body_size\": ").append(bodySize);
+                json.append(", \"is_export\": ").append(isExport);
+                json.append(", \"has_renameable_vars\": ").append(hasRenameableVars);
+                if (bodyAddress != null) {
+                    json.append(", \"body_address\": \"0x").append(bodyAddress).append("\"");
+                }
+                json.append("}");
+
+                count++;
+                if (count % 100 == 0) {
+                    println("  Processed " + count + "/" + undocumented.size() + "...");
                 }
             }
-
-            // Build JSON entry
-            json.append("    {");
-            json.append("\"address\": \"0x").append(addr).append("\"");
-            json.append(", \"name\": \"").append(escJson(name)).append("\"");
-            json.append(", \"classification\": \"").append(classification).append("\"");
-            json.append(", \"xref_count\": ").append(xrefCount);
-            json.append(", \"callee_count\": ").append(calleeCount);
-            json.append(", \"undoc_callee_count\": ").append(undocCalleeCount);
-            json.append(", \"caller_count\": ").append(callerCount);
-            json.append(", \"body_size\": ").append(bodySize);
-            json.append(", \"is_export\": ").append(isExport);
-            json.append(", \"has_renameable_vars\": ").append(hasRenameableVars);
-            if (bodyAddress != null) {
-                json.append(", \"body_address\": \"0x").append(bodyAddress).append("\"");
-            }
-            json.append("}");
-
-            count++;
-            if (count % 100 == 0) {
-                println("  Processed " + count + "/" + undocumented.size() + "...");
-            }
+        } finally {
+            decomp.dispose();
         }
 
         json.append("\n  ],\n");
@@ -162,8 +167,6 @@ public class SurveyUndocumentedFunctions extends GhidraScript {
         json.append(", \"api\": ").append(apis);
         json.append("}\n");
         json.append("}\n");
-
-        decomp.dispose();
 
         // Write manifest file
         String projectRoot = System.getProperty("user.dir");

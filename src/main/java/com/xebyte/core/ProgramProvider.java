@@ -55,6 +55,19 @@ public interface ProgramProvider {
     void setCurrentProgram(Program program);
 
     /**
+     * Close a program when the provider owns the program lifecycle.
+     *
+     * <p>GUI providers usually close through Ghidra's ProgramManager, so the
+     * default is a no-op. Headless providers should override this.
+     *
+     * @param program The program to close
+     * @return true if the provider closed the program
+     */
+    default boolean closeProgram(Program program) {
+        return false;
+    }
+
+    /**
      * Check if any program is currently open.
      *
      * @return true if at least one program is open

@@ -4,6 +4,197 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.6.0 - 2026-04-25 (release regression + fun-doc workflow)
+
+Release covering deploy/regression safety, live benchmark coverage, debugger
+endpoint validation, and a substantial fun-doc workflow upgrade: per-worker
+config freezing, quota-aware provider pause/resume, a continuously-running
+background inventory scorer, and verb-tier function-name quality
+enforcement at the rename layer.
+
+### Added
+
+#### Deploy / regression / debugger
+
+- **Live deploy release regression** — deploy can opt into benchmark-backed
+  read/write, multi-program, negative-contract, and debugger-live regression
+  tiers via `--test ...` or local `GHIDRA_MCP_DEPLOY_TESTS`.
+- **Benchmark debugger fixture** — `fun-doc/benchmark` now builds
+  `BenchmarkDebug.exe` alongside `Benchmark.dll` so debugger MCP endpoints
+  can be exercised against a real launched process.
+- **Scoped prompt policy endpoint** — `/prompt_policy` temporarily handles a
+  narrow allow-list of known Ghidra automation dialogs during
+  deploy/regression runs while leaving normal interactive prompts
+  untouched.
+
+#### fun-doc workflow
+
+- **Worker config snapshot** — workers freeze the dashboard's policy fields
+  (`good_enough_score`, `audit_provider`, `audit_min_delta`,
+  `complexity_handoff_provider`, `complexity_handoff_max`, per-provider
+  `provider_max_turns` + `provider_models`) at start and read from the
+  snapshot for the rest of their life. Mid-run live-config edits no longer
+  affect a running worker — restart-to-change semantics. Snapshot is
+  persisted to `events.jsonl` via a `worker.started` event so post-hoc log
+  analysis can join run records to the exact config under which they ran.
+  Dashboard shows a per-worker config sub-line and fires a toast when
+  saving the queue config diverges from any running worker's snapshot.
+- **Provider model + max-turns defaults backfill** — `priority_queue.json`
+  now backfills missing per-provider entries from a module-level
+  `DEFAULT_PROVIDER_MODELS` (gemini, claude, codex, minimax). Fresh
+  installs and partial configs get fully populated dashboard inputs
+  without manual setup.
+- **Background inventory scorer** — opt-in daemon that fills missing
+  `analyze_function_completeness` scores across every binary in the Ghidra
+  project tree. Idle-time backfill (yields when any doc worker is active),
+  most-missing-first ordering with reverse-alpha tiebreak, single-thread,
+  cooperative pause at chunk boundaries, session blacklist after 3
+  strikes, dedicated `fun-doc/inventory.json` persistence. Dashboard
+  widget plus an Inventory panel with sortable per-binary table (coverage
+  bar, scored, total, missing, %, status, last scan).
+- **Quota-aware provider pause/resume** — when a provider returns a quota-
+  wall error (gemini's "exhausted your capacity", claude's "credit balance
+  is too low", codex's "insufficient_quota", minimax's quota messages),
+  fun-doc parses the reset duration, installs a per-(provider, model)
+  pause in `fun-doc/provider_pauses.json`, and parks every worker on that
+  model until the timer fires. Soft rate limits (<5 min) stay in retry
+  logic; hard walls (≥5 min) install a pause. Dashboard surfaces a
+  `quota_paused` worker state with a live wake-time countdown. Manual
+  override via `POST /api/provider_pauses/clear`.
+- **Function-block visual** — per-function worker output is wrapped in a
+  three-sided gold bracket (top + left + bottom, open right). Header is
+  the function's start name; footer is the post-rescore name (so renames
+  are visible). Body indented; blank lines stripped within a block; one
+  blank line of breathing room between blocks. Worker abandon mid-function
+  emits a synthetic `(interrupted)` footer so headers never go orphaned.
+- **Three-column worker grid** — dashboard now shows 3 worker panes per
+  row instead of 2, fitting ~50% more workers without scrolling.
+
+#### Naming-quality enforcement
+
+- **Verb-tier function-name quality** — `NamingConventions` gains Tier 1 /
+  Tier 2 / Tier 3 verb classification, a weak-noun denylist, PascalCase
+  tokenization, and a `checkFunctionNameQuality` API returning structured
+  rejection (`vague_verb`, `weak_noun_only`, `missing_specifier`). Tier 3
+  verbs (`Process`, `Handle`, `Manage`, …) require ≥2 specifier tokens
+  after the verb; weak nouns (`Data`, `Info`, `Stuff`, …) don't count as
+  specifiers.
+- **Token-subset duplicate detection** —
+  `NamingConventions.findTokenSubsetCollision` flags function-name
+  collisions where one name's tokens are a strict subset of another's
+  within the same module-prefix scope (e.g., `SendStateUpdate` ⊂
+  `SendStateUpdateCommand`).
+- **Three new completeness deductions** — `low_name_quality` (-8),
+  `name_collision` (-10), `missing_module_prefix` (-5; fires when name has
+  no `UPPERCASE_` prefix and ≥3 callees share one). Surfaces existing bad
+  legacy names in the work queue with point pressure to fix them.
+
+#### New endpoints
+
+- `GET /api/inventory/status`, `POST /api/inventory/toggle`,
+  `POST /api/inventory/clear_blacklist` — background scorer surface.
+- `GET /api/provider_pauses`, `POST /api/provider_pauses/clear` —
+  quota-pause surface.
+
+### Changed
+
+- **Deploy lifecycle** — deploy now saves all open programs, attempts
+  graceful Ghidra exit, force-kills matching leftovers when needed,
+  installs the extension, starts Ghidra, waits for MCP/project readiness,
+  and runs schema smoke checks.
+- **Benchmark project reset** — benchmark tiers reset `/testing/benchmark`
+  in the active project, import both benchmark binaries, auto-analyze
+  them, and clear restored benchmark tool state before startup.
+- **`rename_function_by_address` validator gate** — hard-rejects names
+  failing the verb-tier rules or token-subset uniqueness with a structured
+  error: `{"status": "rejected", "error": …, "issue": …,
+  "rejected_name": …, "conflicts_with": …, "message": …, "suggestion": …}`.
+  Function is unchanged on rejection; the model retries with a better
+  name. Auto-generated names are exempt. `step-prototype.md` documents the
+  verb tiers, weak-noun list, a worked-example pass/fail table, and a
+  rejection round-trip guide.
+- **Complexity-handoff fall-through** — when handoff can't fire (no
+  provider configured, cap reached, or target walled), the worker now
+  continues with primary instead of skipping the function. Removes a
+  silent `consecutive_fails` increment on healthy functions for
+  config/transient reasons.
+- **Worker title color treatment** — provider/id token in the worker pane
+  header is now white (`text-primary`); the active function name is gold
+  (`accent-gold`) so the eye lands on what you're tracking.
+- **Audit / handoff under quota wall** — when the target provider+model is
+  walled, audits log `audit_outcome: quota_paused` and skip; handoffs
+  pre-empt and stick with primary. No `consecutive_fails` bump.
+
+### Fixed
+
+- **`list_functions_enhanced` thunk parity** — `isThunk` now uses the same
+  `AnalysisService.classifyFunction` path as
+  `analyze_function_completeness`, so single-jump thunk heuristics agree
+  across both tools. Thanks to PR #165 by c8rri3r.
+- **`create_struct` tool guidance** — MCP schema/catalog descriptions now
+  spell out the expected `fields` JSON array format, optional decimal
+  `offset`, accepted alternate field keys, and valid type sources so agents
+  stop trying C-like struct strings or CSV bodies.
+- **Gemini quota errors silently swallowed** — `_invoke_gemini`'s retry-
+  exhaust path now propagates `provider_error` / `provider_error_type`
+  into the run record so the dashboard and `runs.jsonl` show the actual
+  message ("exhausted your capacity, quota will reset after Xh") instead
+  of `output: null` / `error: null`.
+- **State lock reentrancy** — `_state_lock` switched from `Lock` to
+  `RLock` so `load_state` can be called from within a `with _state_lock:`
+  block without deadlocking.
+
+### Tests
+
+- 28 offline tests for the inventory scorer (ordering, blacklist,
+  pause-gate, scored definition, JSON shape stability).
+- 34 offline tests for the provider-pause module (parser, per-provider
+  detectors, threshold, manager round-trip, callback semantics).
+- 13 offline tests for the worker config snapshot (shape, freeze
+  guarantees, fall-through, conditional banner).
+- 31 offline tests for `NamingConventions` (tokenize, verb tiers,
+  specifier counting, all rejection codes, token-subset collision in
+  both directions, module-prefix scoping, exact-match exemption).
+- Updated `test_provider_selection.py` to cover the new
+  `DEFAULT_PROVIDER_MODELS` backfill behavior.
+
+## v5.5.0 - 2026-04-23 (maintenance)
+
+Maintenance release focused on cleanup and release readiness after the
+v5.4.1 security hardening work.
+
+### Fixed
+
+- **`FunctionService` decompiler lifetime handling** — closes owned
+  `DecompInterface` instances on all relevant success, early-return, and
+  exception paths to avoid leaking decompiler subprocesses during
+  decompilation and variable-update workflows.
+- **Claude/CAPI tool-name compatibility in the Python bridge** —
+  `bridge_mcp_ghidra.py` now enforces the stricter `^[a-zA-Z0-9_-]{1,64}$`
+  constraint when sanitizing and collision-suffixing tool names, matching
+  client expectations instead of emitting overlong names.
+- **Bundled Ghidra script resource ownership** — script-side
+  `DecompInterface` usage now follows scoped `try/finally` disposal in the
+  affected batch, export, survey, and audit helpers.
+- **Claude subprocess lifetime in bundled scripts** — the Claude-invoking
+  scripts now drain and close readers with try-with-resources and use
+  bounded `waitFor(timeout, TimeUnit.SECONDS)` handling with terminate/kill
+  fallback instead of unbounded waits.
+
+- **fun-doc logging diagnostics** - provider watchdog workers now inherit
+  per-run debug context, early exits are recorded in `runs.jsonl`, Ghidra
+  HTTP failures write structured diagnostics, and debug analyzers count
+  normalized provider error statuses.
+
+### Docs
+
+- **Release metadata refreshed to `5.5.0`** across Maven, plugin/headless
+  fallbacks, manifest metadata, endpoint catalog, operator docs, and the
+  release index.
+- **`CONTRIBUTING.md`** — added a concise resource-ownership checklist for
+  services and bundled scripts, covering disposable helpers,
+  transactions, child-process lifecycle, and timeout expectations.
+
 ## v5.4.1 - 2026-04-18 (security)
 
 Security + operational-readiness release on top of v5.4.0. Addresses the
@@ -59,6 +250,21 @@ New [`com.xebyte.core.SecurityConfig`](src/main/java/com/xebyte/core/SecurityCon
   parity tests (~3 s) were previously only run on developer machines;
   they now gate every push/PR on `main` and `develop`. Integration
   tests (which require live Ghidra on port 8089) remain excluded.
+
+### Fixed
+
+- **Python debugger startup + target query flow on Windows** — the
+  debugger backend now validates `WINDBG_DIR` before importing `pybag`,
+  falls back to a Microsoft Store WinDbg cache when the Windows Kits
+  debugger directory is incomplete, stops double-waiting after
+  `AttachProcess`, parses `pybag` module tuples correctly, and reads
+  x64 register sets (`RAX`-`R15`/`RIP`) instead of returning empty
+  register output on 64-bit targets.
+- **WOW64 register context** — when attached to 32-bit processes under
+  WOW64, debugger register reads now switch dbgeng's effective
+  processor to x86 so the API returns `EAX`/`ECX`/`ESP`/`EIP` instead of
+  the host-side 64-bit `R*` context. The same x86 view is used for
+  stack-context reads that depend on those registers.
 
 ### Docs
 
@@ -193,7 +399,7 @@ count rises from 199 → 219 on main.
   scan the headless-only service so catalog drift in these endpoints
   now fails at `mvn test` time.
 
-- **`--use-venv` flag for Linux setup** (#120) — `ghidra-mcp-setup.sh`
+- **`--use-venv` flag for Linux setup** (#120) — the legacy Linux setup flow
   can now install Python deps into a local `.venv` instead of the
   system Python, required on Ubuntu 24.04+ where system Python is
   externally-managed.
@@ -451,6 +657,8 @@ Deadlocks:   0 since test start
 
 #### Fixed
 
+- **fun-doc run/debug log provenance** — `runs.jsonl` now records `run_id`, requested vs effective provider, provider chain, `tool_calls_known`, prompt size, token metadata, and the concrete debug log path. Debug traces are now one file per run attempt instead of co-mingling multiple providers in a single per-function file, and tool names are normalized across Gemini/Claude/Codex/MiniMax while preserving the raw provider-specific name.
+- **fun-doc dashboard + handoff analysis follow-up** — provider cards now compute average tool counts from known samples only, explicitly count unknown tool-call runs, surface handoff/provider-chain summaries, ship a dedicated `fun-doc/analyze_runs.py` CLI for requested→effective provider analysis, and move the live complexity handoff target from Codex to Gemini.
 - **Cold-start lane infinite re-processing loop** — `_sync_func_state` didn't stamp `last_processed`, so the selector kept re-picking already-scored functions. Worst seen: SafeDelete stuck at 83% across hundreds of iterations.
 - **"Stale at X%" misleading message** — The cached score was captured after `_sync_func_state` had already overwritten it, so the log always showed the live value. Captures `original_cached_score` before sync now.
 - **`RETRY_SIZE` vs client timeout math** — Retry batch was 10 × 90 s = 900 s > 600 s client budget. Reduced to `RETRY_SIZE = 3` (270 s, fits with 330 s margin).
@@ -642,8 +850,8 @@ This is a contract change. If you have scripts or prompts built against earlier 
 
 - **Fixed POST endpoint data format** (#66): `safe_post()` was sending form-urlencoded data while the Java server expected JSON. Changed to send `json=data` instead of `data=data`, fixing `rename_function_by_address` and all other POST-based endpoints.
 - **Added segment:offset address support** (#65): Bridge now accepts segment-prefixed addresses (e.g., `mem:20de`, `code:00169d`) used by non-x86/segmented architectures. Updated `sanitize_address()`, `validate_hex_address()`, and `normalize_address()` to pass through segment-qualified addresses without incorrect `0x` prefixing.
-- **Relaxed Ghidra version compatibility check** (#64): Setup scripts (`ghidra-mcp-setup.ps1` and `ghidra-mcp-setup.sh`) now warn instead of error when deploying to a Ghidra installation with a different patch version (e.g., building with 12.0.3 and deploying to 12.0.4). Major.minor mismatches still block deployment.
-- **Fixed Linux phantom process detection** (#63): Tightened `get_ghidra_pids()` regex in `ghidra-mcp-setup.sh` to match only the Java class name pattern (`ghidra.GhidraRun`/`ghidra.GhidraLauncher`), removing overly broad alternatives that caused false positives.
+- **Relaxed Ghidra version compatibility check** (#64): The legacy setup flow now warns instead of error when deploying to a Ghidra installation with a different patch version (e.g., building with 12.0.3 and deploying to 12.0.4). Major.minor mismatches still block deployment.
+- **Fixed Linux phantom process detection** (#63): Tightened the legacy Linux setup process detection regex to match only the Java class name pattern (`ghidra.GhidraRun`/`ghidra.GhidraLauncher`), removing overly broad alternatives that caused false positives.
 - **Fixed FrontEndProgramProvider multi-version bugs**: Fixed consumer reference leak on cache overwrite, `pathToName` not cleared in `releaseAll()`, and `getAllOpenPrograms()` deduplicating by name instead of identity (hiding same-named programs from different versions).
 - **Reduced MCP response token usage ~30-40%**: Optimized JSON response payloads across service endpoints.
 
@@ -793,8 +1001,8 @@ This is a contract change. If you have scripts or prompts built against earlier 
 #### Infrastructure
 - **Fixed ENDPOINT_COUNT** -- Corrected from 146 to 149 to match actual `createContext` registration count
 - **Centralized version in extension.properties** -- Description now uses `${project.version}` Maven filtering instead of hardcoded version string
-- **Expanded bump-version.ps1** -- Now covers 11 files (up from 7): added README badge, AGENTS.md, docs/releases/README.md. Extension.properties is now Maven-dynamic.
-- **Version consistency audit** -- Fixed stale 3.0.0 references across ghidra-mcp-setup.ps1, tests/endpoints.json, README.md, AGENTS.md, and docs/releases/README.md
+- **Expanded version bump workflow** -- Now covers 11 files (up from 7): added README badge, AGENTS.md, docs/releases/README.md. Extension.properties is now Maven-dynamic.
+- **Version consistency audit** -- Fixed stale 3.0.0 references across setup/config files, tests/endpoints.json, README.md, AGENTS.md, and docs/releases/README.md
 
 ---
 
@@ -862,7 +1070,7 @@ This is a contract change. If you have scripts or prompts built against earlier 
 - `run_analysis` Ã¢â‚¬â€ trigger analysis programmatically
 
 #### Ã°Å¸â€Â§ Infrastructure
-- **`bump-version.ps1`**: Single-command version bump across all 7 project files
+- **Version bump workflow**: Single-command version bump across all 7 project files
 - **`tests/unit/`**: New unit test suite Ã¢â‚¬â€ endpoint catalog consistency, MCP tool functions, response schemas
 - **`.markdownlintrc`**: Markdown lint config for CI quality gate
 - **`mcp-config.json`**: Fixed env key to match bridge (`GHIDRA_SERVER_URL`)
@@ -914,7 +1122,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 
 ## v2.0.1 - 2026-02-19
 
-### Patch Release - CI Fixes, Documentation, PowerShell Improvements
+### Patch Release - CI Fixes, Documentation, Setup Workflow Improvements
 
 #### Ã°Å¸â€Â§ CI/Build Fixes
 - **Fixed CI workflow**: Ghidra JARs now properly installed to Maven repository instead of just copied to lib/ (PR #23)
@@ -927,7 +1135,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 - **Verification steps**: Added curl commands to verify server is working
 - **Better error guidance**: Covers 500 errors, 404s, missing menus, and installation issues
 
-#### Ã°Å¸â€“Â¥Ã¯Â¸Â PowerShell Setup Script
+#### Ã°Å¸â€“Â¥Ã¯Â¸Â Setup Workflow
 - **Fixed version sorting bug**: Now uses semantic version sorting instead of string sorting (PR #21)
 - **Correct Ghidra detection**: Properly selects `ghidra_12.0.2_PUBLIC` over `ghidra_12.0_PUBLIC`
 - Fixes issue #19
@@ -1291,7 +1499,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - `ClearCallReturnOverrides.java` - Clean orphaned flow overrides
 - Ã¢Å“â€¦ **mcp-config.json** - Claude MCP configuration template
 - Ã¢Å“â€¦ **mcp_function_processor.py** - Batch function processing automation
-- Ã¢Å“â€¦ **scripts/hybrid-function-processor.ps1** - Automated analysis workflows
+- Ã¢Å“â€¦ **hybrid function processor workflow** - Automated analysis workflows
 
 ### Enhanced Documentation
 - Ã¢Å“â€¦ **examples/punit/** - Complete UnitAny structure case study (8 files)
@@ -1344,7 +1552,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
   - create_d2_typedefs.py - Type definition generation
   - populate_d2_structs.py - Structure population automation
   - test_data_xrefs_tool.py - Unit tests for xref tools
-  - data-extract.ps1, data-process.ps1, function-process.ps1, functions-extract.ps1 - PowerShell automation
+  - data extraction and function-processing helpers - automation utilities used during that release cycle
 
 ### Project Organization
 - Ã¢Å“â€¦ **Restructured Documentation**

@@ -1,0 +1,22 @@
+{
+  "description": "Typical fun-doc output on get_stat_list_owner_guid — identifies the validated-accessor pattern, names accordingly, plate mentions magic + offset 0x20.",
+  "wall_time_sec": 15.8,
+  "captured": {
+    "name": "ReadStatListOwnerGuid",
+    "return_type": "int",
+    "parameters": [
+      {"name": "pStatList", "type": "int *"}
+    ],
+    "locals": [],
+    "plate": "Reads the owner GUID from a StatList structure at offset +0x20. Validates the list pointer is non-null and the magic signature at offset 0 matches 0x01020304 (StatList tag). Returns 0 on null-pointer or magic-mismatch as a corruption guard."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001180"}, "status": "ok"},
+    {"tool": "get_function_signature", "args": {"address": "0x10001180"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001180"}, "status": "ok"},
+    {"tool": "set_function_prototype", "args": {"address": "0x10001180", "prototype": "int ReadStatListOwnerGuid(int *pStatList)"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001180", "name": "ReadStatListOwnerGuid"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001180", "comment": "Reads the owner GUID..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001180"}, "status": "ok"}
+  ]
+}

@@ -6,14 +6,14 @@
     <groupId>com.xebyte</groupId>
     <artifactId>GhidraMCP</artifactId>
     <packaging>jar</packaging>
-    <version>5.4.1</version>
+    <version>5.6.0</version>
     <name>Ghidra MCP Server</name>
-    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.4.1 security release: opt-in HTTP bearer-token authentication (GHIDRA_MCP_AUTH_TOKEN), non-loopback bind refusal without auth, script-endpoint gate (GHIDRA_MCP_ALLOW_SCRIPTS, default off), filesystem path-root allow-list mechanism (GHIDRA_MCP_FILE_ROOT), CI fixes, docs refresh, and the v5.4.0 emulation / debugger / data-flow feature set.</description>
+    <description>Production-ready Model Context Protocol server for Ghidra reverse engineering platform. v5.6.0 release: live deploy regression tiers, BenchmarkDebug debugger fixture, scoped prompt-policy automation, safer Ghidra deploy lifecycle, benchmark project reset improvements, and fun-doc workflow hardening on top of the v5.5.x maintenance baseline.</description>
     <url>https://github.com/bethington/ghidra-mcp</url>
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <ghidra.version>12.0.3</ghidra.version>
+        <ghidra.version>12.0.4</ghidra.version>
         <!-- Build timestamp generated at compile time (format: yyyyMMdd-HHmmss) -->
         <build.timestamp>${maven.build.timestamp}</build.timestamp>
         <maven.build.timestamp.format>yyyyMMdd-HHmmss</maven.build.timestamp.format>

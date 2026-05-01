@@ -8,6 +8,7 @@ import ghidra.program.model.listing.Program;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.*;
@@ -126,6 +127,29 @@ public class ServiceUtilsAddressTest {
         Address result = ServiceUtils.parseAddress(program, "Code:0XFF00");
         assertNotNull("0X (uppercase X) prefix must also be stripped", result);
         assertNull(ServiceUtils.getLastParseError());
+    }
+
+    @Test
+    public void convertToMapList_acceptsStringifiedArrayPayload() {
+        List<Map<String, String>> result = ServiceUtils.convertToMapList(
+            "[{\"address\":\"0x401000\",\"comment\":\"alpha\"},{\"address\":\"0x401004\",\"comment\":\"beta\"}]"
+        );
+
+        assertNotNull(result);
+        assertEquals(2, result.size());
+        assertEquals("0x401000", result.get(0).get("address"));
+        assertEquals("alpha", result.get(0).get("comment"));
+        assertEquals("0x401004", result.get(1).get("address"));
+        assertEquals("beta", result.get(1).get("comment"));
+    }
+
+    @Test
+    public void convertToMapList_rejectsNonArrayJsonString() {
+        List<Map<String, String>> result = ServiceUtils.convertToMapList(
+            "{\"address\":\"0x401000\",\"comment\":\"alpha\"}"
+        );
+
+        assertNull(result);
     }
 
     // --- addressToJson ---

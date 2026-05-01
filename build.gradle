@@ -1,117 +1,480 @@
-import groovy.xml.XmlSlurper
+// Canonical Gradle build for the GhidraMCP Ghidra extension.
+// Replaces Maven as the primary Java/plugin build backend.
+// See docs/project-management/GRADLE_MIGRATION_CHECKLIST.md for the full migration plan.
+//
+// Phase 1 transition: version metadata still read from pom.xml. After pom.xml is retired,
+// move group/version/description to gradle.properties and delete the XmlSlurper block.
 
 plugins {
     id 'java'
 }
 
-def pom = new XmlSlurper().parse(file('pom.xml'))
-group = pom.groupId.text()
-version = pom.version.text()
-description = pom.description.text()
+// ---------------------------------------------------------------------------
+// Version — Phase 1 transition: read from pom.xml via standard Java XML.
+// After pom.xml is retired, move these to gradle.properties and delete this block.
+// ---------------------------------------------------------------------------
+def pomXml = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+                 .newDocumentBuilder().parse(file('pom.xml'))
+def pomText = { String tag ->
+    def node = pomXml.getElementsByTagName(tag).item(0)
+    node ? node.textContent.trim() : ''
+}
 
-def ghidraInstallDir = providers.gradleProperty('GHIDRA_INSTALL_DIR')
+group       = pomText('groupId')
+version     = pomText('version')
+description = pomText('description')
+// ghidra.version element name contains a literal dot — getElementsByTagName matches it verbatim.
+def pomGhidraVersion = pomText('ghidra.version')
+
+// ---------------------------------------------------------------------------
+// Ghidra installation resolution (nullable — tasks validate at execution time)
+// Pass via: -PGHIDRA_INSTALL_DIR=<path>  or  GHIDRA_INSTALL_DIR env var.
+// ---------------------------------------------------------------------------
+def ghidraInstallDirValue = providers.gradleProperty('GHIDRA_INSTALL_DIR')
     .orElse(providers.environmentVariable('GHIDRA_INSTALL_DIR'))
     .orNull
 
-if (!ghidraInstallDir) {
-    throw new GradleException('GHIDRA_INSTALL_DIR is not defined')
-}
+def ghidraRoot  = ghidraInstallDirValue ? file(ghidraInstallDirValue) : null
+def ghidraDir   = ghidraRoot
+    ? (new File(ghidraRoot, 'Ghidra').exists() ? new File(ghidraRoot, 'Ghidra') : ghidraRoot)
+    : null
 
-def ghidraRoot = file(ghidraInstallDir)
-def ghidraDir = new File(ghidraRoot, 'Ghidra').exists() ? new File(ghidraRoot, 'Ghidra') : ghidraRoot
-def ghidraProperties = new Properties()
-def applicationProperties = new File(ghidraDir, 'application.properties')
-
-if (!applicationProperties.exists()) {
-    throw new GradleException("Unable to find application.properties under ${ghidraRoot}")
-}
-
-applicationProperties.withReader { reader ->
-    ghidraProperties.load(reader)
-}
-
-def ghidraVersion = ghidraProperties.getProperty('application.version')
+def ghidraVersion  = null
 def buildTimestamp = new Date().format('yyyyMMdd-HHmmss')
 
+if (ghidraDir) {
+    def appProps = new File(ghidraDir, 'application.properties')
+    if (appProps.exists()) {
+        def props = new Properties()
+        appProps.withReader { props.load(it) }
+        ghidraVersion = props.getProperty('application.version')
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Java toolchain
+// ---------------------------------------------------------------------------
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Repositories
+// ---------------------------------------------------------------------------
 repositories {
     mavenCentral()
 }
 
-dependencies {
-    implementation fileTree(dir: new File(ghidraDir, 'Framework'), include: '**/*.jar')
-    implementation fileTree(dir: new File(ghidraDir, 'Features'), include: '**/*.jar')
-    implementation fileTree(dir: new File(ghidraDir, 'Debug'), include: '**/*.jar')
-    implementation fileTree(dir: new File(ghidraDir, 'Processors'), include: '**/*.jar')
+// ---------------------------------------------------------------------------
+// Dependencies
+// Ghidra jars consumed directly from the installation via fileTree — no
+// `mvn install:install-file` step needed. Compilation fails with a clear
+// missing-class error if GHIDRA_INSTALL_DIR is not set, which is expected.
+// ---------------------------------------------------------------------------
+if (ghidraDir) {
+    dependencies {
+        implementation fileTree(dir: new File(ghidraDir, 'Framework'),  include: '**/*.jar')
+        implementation fileTree(dir: new File(ghidraDir, 'Features'),   include: '**/*.jar')
+        implementation fileTree(dir: new File(ghidraDir, 'Debug'),      include: '**/*.jar')
+        implementation fileTree(dir: new File(ghidraDir, 'Processors'), include: '**/*.jar')
+    }
+}
 
+dependencies {
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.mockito:mockito-core:5.8.0'
 }
 
+// Byte Buddy experimental mode required for Mockito to instrument sealed
+// classes under Java 21 — mirrors the maven-surefire argLine in pom.xml.
+test {
+    jvmArgs '-Dnet.bytebuddy.experimental=true'
+}
+
+// ---------------------------------------------------------------------------
+// processResources — substitute version/build tokens
+// ---------------------------------------------------------------------------
 processResources {
     filteringCharset = 'UTF-8'
-
-    filesMatching(['version.properties', 'extension.properties']) {
+    filesMatching(['**/version.properties', 'extension.properties']) {
         filter { line ->
             line
-                .replace('${project.version}', project.version.toString())
-                .replace('${ghidra.version}', ghidraVersion)
-                .replace('${build.timestamp}', buildTimestamp)
-                .replace('${build.number}', buildTimestamp)
+                .replace('${project.version}',  project.version.toString())
+                .replace('${ghidra.version}',   ghidraVersion ?: 'unknown')
+                .replace('${build.timestamp}',  buildTimestamp)
+                .replace('${build.number}',     buildTimestamp)
         }
     }
 }
 
+// ---------------------------------------------------------------------------
+// jar
+// Gradle's manifest block is the authoritative source; the static
+// src/main/resources/META-INF/MANIFEST.MF is excluded from the jar contents
+// to avoid having two copies. Update MANIFEST.MF via bump-version if it must
+// remain a static reference for other tooling.
+// ---------------------------------------------------------------------------
 jar {
     archiveBaseName = 'GhidraMCP'
-
+    exclude 'META-INF/MANIFEST.MF'
+    exclude '**/App.class'
     manifest {
         attributes(
-            'Manifest-Version': '1.0',
-            'Plugin-Class': 'com.xebyte.GhidraMCPPlugin',
-            'Plugin-Name': 'GhidraMCP',
-            'Plugin-Version': project.version.toString(),
-            'Plugin-Author': 'Ben Ethington',
-            'Plugin-Description': 'GhidraMCP - HTTP server plugin with 195+ MCP tools for reverse engineering automation',
+            'Manifest-Version':    '1.0',
+            'Plugin-Class':        'com.xebyte.GhidraMCPPlugin',
+            'Plugin-Name':         'GhidraMCP',
+            'Plugin-Version':      project.version.toString(),
+            'Plugin-Author':       'Ben Ethington',
+            'Plugin-Description':  'GhidraMCP - HTTP server plugin with 222 MCP tools for reverse engineering automation',
         )
     }
 }
 
+// ---------------------------------------------------------------------------
+// buildExtension — canonical extension archive (Phase 1)
+//
+// Produces:  build/distributions/GhidraMCP-{version}.zip
+//
+// Zip payload mirrors the Maven ghidra-extension.xml assembly descriptor:
+//   GhidraMCP/extension.properties   (processResources-filtered copy)
+//   GhidraMCP/Module.manifest         (unfiltered)
+//   GhidraMCP/lib/GhidraMCP-{v}.jar  (plugin jar)
+//
+// No extra runtime jars — all non-test deps are Ghidra-provided (fileTree)
+// and are stripped by the exclusion predicate below.
+// ---------------------------------------------------------------------------
 tasks.register('buildExtension', Zip) {
-    group = 'build'
-    description = 'Builds the Ghidra extension ZIP.'
+    group       = 'build'
+    description = 'Builds the Ghidra extension ZIP (canonical artifact, mirrors Maven assembly output).'
+    dependsOn tasks.jar, tasks.processResources
 
-    dependsOn(tasks.jar, tasks.processResources)
-
-    archiveBaseName = 'GhidraMCP'
-    archiveVersion = project.version.toString()
-    destinationDirectory = layout.projectDirectory.dir('dist')
+    archiveBaseName  = 'GhidraMCP'
+    archiveVersion   = project.version.toString()
+    destinationDirectory = layout.buildDirectory.dir('distributions')
 
     from(layout.buildDirectory.dir('resources/main')) {
         include 'extension.properties'
         into 'GhidraMCP'
     }
-
     from('src/main/resources') {
         include 'Module.manifest'
         into 'GhidraMCP'
     }
-
     from(tasks.jar) {
         into 'GhidraMCP/lib'
     }
-
     from(configurations.runtimeClasspath) {
         exclude { element ->
-            element.file.canonicalPath.startsWith(ghidraDir.canonicalPath)
+            ghidraDir && element.file.canonicalPath.startsWith(ghidraDir.canonicalPath)
         }
         into 'GhidraMCP/lib'
     }
 }
 
-assemble.dependsOn(tasks.named('buildExtension'))
+assemble.dependsOn tasks.named('buildExtension')
+
+// ===========================================================================
+// Shared utilities
+// ===========================================================================
+
+// Throws at task execution time when GHIDRA_INSTALL_DIR is absent or missing.
+def requireGhidraInstallDir = {
+    if (!ghidraInstallDirValue) {
+        throw new RuntimeException(
+            'GHIDRA_INSTALL_DIR is not set. ' +
+            'Pass -PGHIDRA_INSTALL_DIR=<path> or export the environment variable.'
+        )
+    }
+    if (!ghidraDir?.exists()) {
+        throw new RuntimeException("Ghidra directory not found: ${ghidraInstallDirValue}")
+    }
+}
+
+// Required Ghidra jars (mirrors REQUIRED_GHIDRA_JARS in tools/setup/ghidra.py).
+def requiredGhidraJarPaths = [
+    'Features/Base/lib/Base.jar',
+    'Features/Decompiler/lib/Decompiler.jar',
+    'Framework/Docking/lib/Docking.jar',
+    'Framework/Generic/lib/Generic.jar',
+    'Framework/Project/lib/Project.jar',
+    'Framework/SoftwareModeling/lib/SoftwareModeling.jar',
+    'Framework/Utility/lib/Utility.jar',
+    'Framework/Gui/lib/Gui.jar',
+    'Framework/FileSystem/lib/FileSystem.jar',
+    'Framework/Graph/lib/Graph.jar',
+    'Framework/DB/lib/DB.jar',
+    'Framework/Emulation/lib/Emulation.jar',
+    'Features/PDB/lib/PDB.jar',
+    'Features/FunctionID/lib/FunctionID.jar',
+    'Framework/Help/lib/Help.jar',
+    'Debug/Debugger-api/lib/Debugger-api.jar',
+    'Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar',
+    'Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar',
+]
+
+// Resolves the versioned Ghidra user-profile directory (cross-platform).
+def resolveGhidraUserDir = {
+    def os = org.gradle.internal.os.OperatingSystem.current()
+    File base
+    if (os.isMacOsX()) {
+        base = new File(System.getProperty('user.home'), 'Library/ghidra')
+    } else if (os.isWindows()) {
+        def appData = System.getenv('APPDATA')
+        base = appData ? new File(appData, 'ghidra')
+                       : new File(System.getProperty('user.home'), 'AppData/Roaming/ghidra')
+    } else {
+        def xdg = System.getenv('XDG_CONFIG_HOME')
+        base = xdg ? new File(xdg, 'ghidra')
+                   : new File(System.getProperty('user.home'), '.config/ghidra')
+    }
+    if (base.isDirectory() && ghidraVersion) {
+        def matches = base.listFiles({ f ->
+            f.isDirectory() && f.name.startsWith("ghidra_${ghidraVersion}")
+        } as FileFilter)?.toList()?.sort()
+        if (matches) return (matches.find { it.name.contains('PUBLIC') } ?: matches.last())
+    }
+    return new File(base, ghidraVersion ? "ghidra_${ghidraVersion}_PUBLIC" : 'ghidra_unknown_PUBLIC')
+}
+
+def pluginClass = 'com.xebyte.GhidraMCPPlugin'
+
+// Returns [patchedContent, wasModified]. Mirrors patch_frontend_tool_config() in ghidra.py.
+def patchFrontEndXml = { String content ->
+    def updated = content
+    for (pkg in ['Developer', 'GhidraMCP']) {
+        updated = updated.replaceAll(/(?s)\s*<PACKAGE NAME="${pkg}"\s*\/>/, '\n')
+        updated = updated.replaceAll(/(?s)\s*<PACKAGE NAME="${pkg}">.*?<\/PACKAGE>/, '\n')
+    }
+    if (updated.contains(pluginClass)) return [updated, updated != content]
+    def include = """<INCLUDE CLASS="${pluginClass}" />"""
+    if (updated.contains('<PACKAGE NAME="Utility" />')) {
+        updated = updated.replace('<PACKAGE NAME="Utility" />',
+            '<PACKAGE NAME="Utility">\n                ' + include + '\n            </PACKAGE>')
+        return [updated, true]
+    }
+    if (updated.contains('<PACKAGE NAME="Utility">')) {
+        updated = updated.replace('<PACKAGE NAME="Utility">',
+            '<PACKAGE NAME="Utility">\n                ' + include)
+        return [updated, true]
+    }
+    if (updated.contains('<ROOT_NODE')) {
+        updated = updated.replace('<ROOT_NODE',
+            '<PACKAGE NAME="Utility">\n                ' + include + '\n            </PACKAGE>\n<ROOT_NODE')
+        return [updated, true]
+    }
+    return [updated, updated != content]
+}
+
+// Returns [patchedContent, wasModified]. Mirrors patch_codebrowser_tcd() in ghidra.py.
+def patchCodeBrowserTcd = { String content ->
+    def escaped = java.util.regex.Pattern.quote(pluginClass)
+    def updated = content.replaceAll(
+        /(?s)\s*<PACKAGE NAME="GhidraMCP">\s*<INCLUDE CLASS="${escaped}"\s*\/>\s*<\/PACKAGE>/,
+        ''
+    )
+    return [updated, updated != content]
+}
+
+// ===========================================================================
+// Phase 3: Ghidra classpath validation (replaces `mvn install:install-file`)
+// ===========================================================================
+
+tasks.register('prepareGhidraClasspath') {
+    group       = 'build setup'
+    description = 'Validates required Ghidra jars exist under GHIDRA_INSTALL_DIR. ' +
+                  'No Maven local-repo install required — Gradle uses fileTree directly.'
+    doLast {
+        requireGhidraInstallDir()
+        def missing = requiredGhidraJarPaths
+            .collect { new File(ghidraDir, it) }
+            .findAll  { !it.exists() }
+        if (missing) {
+            missing.each { println "MISSING: ${it}" }
+            throw new RuntimeException(
+                "${missing.size()} required Ghidra jar(s) not found under ${ghidraDir}. " +
+                'Verify GHIDRA_INSTALL_DIR points at the correct Ghidra installation.'
+            )
+        }
+        println "Ghidra classpath: ${requiredGhidraJarPaths.size()} required jars verified under ${ghidraDir}"
+    }
+}
+
+// ===========================================================================
+// Phase 4: Version verification and preflight
+// ===========================================================================
+
+tasks.register('verifyVersion') {
+    group       = 'verification'
+    description = 'Verifies project version is consistent with the configured Ghidra installation.'
+    doLast {
+        println "Project version         : ${project.version}"
+        println "Ghidra version (pom.xml): ${pomGhidraVersion}"
+        if (!ghidraInstallDirValue) {
+            println 'GHIDRA_INSTALL_DIR not set — Ghidra path check skipped.'
+            return
+        }
+        requireGhidraInstallDir()
+        println "Ghidra install dir      : ${ghidraInstallDirValue}"
+        println "Ghidra version (install): ${ghidraVersion ?: '(could not read application.properties)'}"
+        if (ghidraVersion && pomGhidraVersion && ghidraVersion != pomGhidraVersion) {
+            throw new RuntimeException(
+                "Ghidra version mismatch: pom.xml expects ${pomGhidraVersion} " +
+                "but GHIDRA_INSTALL_DIR is ${ghidraVersion}."
+            )
+        }
+        println 'Version check passed.'
+    }
+}
+
+tasks.register('preflight') {
+    group       = 'verification'
+    description = 'Validates Java availability, Ghidra layout, required jars, and filesystem write access.'
+    dependsOn 'verifyVersion'
+    doLast {
+        requireGhidraInstallDir()
+
+        def javaCheck = ['java', '-version'].execute()
+        javaCheck.waitFor()
+        if (javaCheck.exitValue() != 0) throw new RuntimeException('java not found on PATH.')
+        println 'Java: available'
+
+        def missing = requiredGhidraJarPaths
+            .collect { new File(ghidraDir, it) }
+            .findAll  { !it.exists() }
+        if (missing) {
+            missing.each { println "MISSING: ${it}" }
+            throw new RuntimeException("${missing.size()} required Ghidra jar(s) missing under ${ghidraDir}.")
+        }
+        println "Ghidra jars: all ${requiredGhidraJarPaths.size()} present"
+
+        def writeCheck = { File dir, String label ->
+            dir.mkdirs()
+            def probe = new File(dir, '.ghidra-mcp-write-probe')
+            try { probe.text = 'ok'; probe.delete() }
+            catch (IOException e) { throw new RuntimeException("No write access to ${label} (${dir}): ${e.message}") }
+            println "Write access: ${label} OK"
+        }
+        writeCheck(new File(ghidraRoot, 'Extensions/Ghidra'), 'Ghidra install extensions dir')
+        writeCheck(new File(resolveGhidraUserDir(), 'Extensions'), 'user extensions dir')
+
+        println 'Preflight passed.'
+    }
+}
+
+// ===========================================================================
+// Phase 5: Deploy and launch
+// ===========================================================================
+
+tasks.register('deployExtension') {
+    group       = 'deploy'
+    description = 'Copies the extension archive into GHIDRA_INSTALL_DIR/Extensions/Ghidra/.'
+    dependsOn 'buildExtension'
+    doLast {
+        requireGhidraInstallDir()
+        def archive = tasks.named('buildExtension').get().outputs.files.singleFile
+        def extDir  = new File(ghidraRoot, 'Extensions/Ghidra')
+        extDir.mkdirs()
+        extDir.listFiles({ f ->
+            f.name.startsWith('GhidraMCP') && f.name.endsWith('.zip')
+        } as FileFilter)?.each { it.delete(); println "Removed stale archive: ${it.name}" }
+        def dest = new File(extDir, archive.name)
+        java.nio.file.Files.copy(archive.toPath(), dest.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        println "Deployed extension archive: ${dest}"
+    }
+}
+
+tasks.register('installUserExtension') {
+    group       = 'deploy'
+    description = 'Extracts the extension archive into the Ghidra user-profile Extensions directory.'
+    dependsOn 'buildExtension'
+    doLast {
+        requireGhidraInstallDir()
+        def archive      = tasks.named('buildExtension').get().outputs.files.singleFile
+        def userExtBase  = new File(resolveGhidraUserDir(), 'Extensions')
+        def userLibDir   = new File(userExtBase, 'GhidraMCP/lib')
+        userExtBase.mkdirs()
+        userLibDir.mkdirs()
+        userLibDir.listFiles({ f ->
+            f.name.startsWith('GhidraMCP') && f.name.endsWith('.jar')
+        } as FileFilter)?.each { it.delete(); println "Removed stale jar: ${it.name}" }
+        ant.unzip(src: archive.absolutePath, dest: userExtBase.absolutePath, overwrite: 'true')
+        println "Installed user extension to ${new File(userExtBase, 'GhidraMCP')}"
+    }
+}
+
+tasks.register('patchGhidraUserConfig') {
+    group       = 'deploy'
+    description = 'Patches FrontEndTool.xml to activate GhidraMCPPlugin; removes plugin from _code_browser.tcd.'
+    doLast {
+        requireGhidraInstallDir()
+        def userBase = resolveGhidraUserDir().parentFile
+        if (!userBase?.isDirectory()) {
+            println "Ghidra user base dir not found (${userBase}) — skipping config patch"
+            return
+        }
+        def pycacheDirs = []
+        userBase.eachFileRecurse { f ->
+            if (f.name == 'FrontEndTool.xml') {
+                def (updated, modified) = patchFrontEndXml(f.text)
+                if (modified) { f.text = updated; println "Patched FrontEnd config: ${f}" }
+            }
+            if (f.name == '_code_browser.tcd') {
+                def (updated, modified) = patchCodeBrowserTcd(f.text)
+                if (modified) { f.text = updated; println "Cleaned CodeBrowser config: ${f}" }
+            }
+        }
+    }
+}
+
+tasks.register('deploy') {
+    group       = 'deploy'
+    description = 'Full deploy: build extension, install to Ghidra install tree and user profile, patch configs.'
+    dependsOn 'deployExtension', 'installUserExtension', 'patchGhidraUserConfig'
+}
+
+tasks.register('startGhidra') {
+    group       = 'application'
+    description = 'Launches the configured Ghidra installation (non-blocking).'
+    doLast {
+        requireGhidraInstallDir()
+        def os = org.gradle.internal.os.OperatingSystem.current()
+        List<String> command
+        if (os.isWindows()) {
+            def launcher = new File(ghidraRoot, 'ghidraRun.bat')
+            if (!launcher.exists()) throw new RuntimeException("Ghidra launcher not found: ${launcher}")
+            command = ['cmd', '/c', launcher.absolutePath]
+        } else {
+            def launcher = ['ghidraRun', 'ghidra']
+                .collect { new File(ghidraRoot, it) }
+                .find    { it.exists() }
+            if (!launcher) throw new RuntimeException("Ghidra launcher not found under ${ghidraRoot}")
+            command = [launcher.absolutePath]
+        }
+        new ProcessBuilder(command).directory(ghidraRoot).start()
+        println "Started Ghidra from ${ghidraRoot}"
+    }
+}
+
+// ===========================================================================
+// cleanAll — extends `clean` with Python and legacy output artifacts
+// ===========================================================================
+
+tasks.register('cleanAll') {
+    group       = 'build'
+    description = 'Removes Gradle build outputs, dist/, pytest cache, and Python __pycache__ directories.'
+    dependsOn 'clean'
+    doLast {
+        ['dist', '.pytest_cache'].each { name ->
+            def dir = file(name)
+            if (dir.exists()) { dir.deleteDir(); println "Removed: ${dir}" }
+        }
+        def pycacheDirs = []
+        projectDir.eachFileRecurse(groovy.io.FileType.DIRECTORIES) {
+            if (it.name == '__pycache__') pycacheDirs << it
+        }
+        pycacheDirs.each { it.deleteDir(); println "Removed: ${it}" }
+        println 'cleanAll complete.'
+    }
+}

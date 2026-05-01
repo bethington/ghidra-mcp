@@ -776,7 +776,6 @@ public class BatchDocumentFunctionsAllBinaries extends GhidraScript {
         println("Processing order (per BINARY_DOCUMENTATION_ORDER.md):");
         println("  Storm.dll -> Fog.dll -> D2Lang.dll -> D2CMP.dll -> D2Common.dll -> ...");
         println("");
-        println("Use with functions-process.ps1:");
-        println("  .\\functions-process.ps1 -todoFile FunctionsTodo.txt -w 4");
+        println("Use FunctionsTodo.txt with your external processing workflow.");
     }
 }

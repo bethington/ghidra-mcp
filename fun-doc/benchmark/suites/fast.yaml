@@ -1,0 +1,40 @@
+# Fast tier — smoke coverage across 5 archetype patterns.
+#
+# Target runtime: ≤ 3 min against a real Ghidra + minimax loop.
+# Runs frequently during iterative work. Five solo functions (each is
+# its own suite, reset between them) exercising the major pattern
+# spectrum.
+#
+# Suites are the unit of Ghidra-state reset (Q7: suite-level reset via
+# .gzf restore). Inside a suite, struct / name propagation between
+# functions is allowed; between suites, Ghidra is reset to pristine.
+# For the fast tier each suite is one function so there is no state
+# bleed.
+
+tier: fast
+suites:
+
+  - name: crc16_solo
+    description: CRC-16 / bit-twiddling / loop archetype
+    functions:
+      - calc_crc16
+
+  - name: state_machine_solo
+    description: Switch-ladder state transition archetype
+    functions:
+      - advance_parser_state
+
+  - name: str_len_solo
+    description: Null-terminated string walk / pointer arithmetic archetype
+    functions:
+      - compute_str_len
+
+  - name: stat_list_solo
+    description: Struct-pointer mutator with capacity check archetype
+    functions:
+      - stat_list_add
+
+  - name: gcd_solo
+    description: Recursion archetype (Euclidean GCD)
+    functions:
+      - compute_gcd

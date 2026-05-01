@@ -1,0 +1,8 @@
+# Optional dependencies for the standalone debugger server.
+# Install with: pip install -r requirements-debugger.txt
+
+# dbgeng wrapper used by debugger/engine.py (Windows-only)
+pybag==2.2.16
+
+# COM bindings required by pybag on Windows
+comtypes==1.4.16

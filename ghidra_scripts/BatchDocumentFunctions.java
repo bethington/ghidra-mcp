@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.*;
 
 import javax.swing.*;
@@ -45,9 +46,10 @@ public class BatchDocumentFunctions extends GhidraScript {
     private static final int MAX_FUNCTIONS = 0;           // 0 = unlimited
     private static final int DEFAULT_THRESHOLD = 80;      // Default minimum completeness threshold
     private static final boolean DRY_RUN = false;         // If true, only generate list without invoking Claude
-    private static final boolean GENERATE_TODO_FILE = true; // Generate FunctionsTodo.txt for PowerShell script
+    private static final boolean GENERATE_TODO_FILE = true; // Generate FunctionsTodo.txt for an external processor
     private static final boolean INVOKE_CLAUDE_DIRECTLY = false; // Invoke Claude from Java (slower)
     private static final int DELAY_BETWEEN_FUNCTIONS_MS = 2000;   // Delay between Claude calls
+    private static final long CLAUDE_PROCESS_TIMEOUT_SECONDS = 600;
 
     // Runtime configuration (set by dialog)
     private int minThreshold = 0;                         // Functions BELOW this need work
@@ -224,60 +226,65 @@ public class BatchDocumentFunctions extends GhidraScript {
 
         // Initialize decompiler for variable analysis
         decompiler = new DecompInterface();
-        decompiler.openProgram(currentProgram);
 
-        FunctionManager funcManager = currentProgram.getFunctionManager();
+        try {
+            decompiler.openProgram(currentProgram);
 
-        // Count total functions
-        FunctionIterator countIter = funcManager.getFunctions(true);
-        while (countIter.hasNext()) {
-            countIter.next();
-            totalFunctions++;
+            FunctionManager funcManager = currentProgram.getFunctionManager();
+
+            // Count total functions
+            FunctionIterator countIter = funcManager.getFunctions(true);
+            while (countIter.hasNext()) {
+                countIter.next();
+                totalFunctions++;
+            }
+            println("Total functions to analyze: " + totalFunctions);
+            println("");
+
+            // Process all functions
+            FunctionIterator funcIter = funcManager.getFunctions(true);
+            while (funcIter.hasNext()) {
+                if (monitor.isCancelled()) {
+                    println("Cancelled by user.");
+                    break;
+                }
+
+                Function func = funcIter.next();
+                processedFunctions++;
+
+                // Progress update
+                if (processedFunctions % 100 == 0) {
+                    monitor.setMessage("Analyzing " + processedFunctions + "/" + totalFunctions);
+                    println("Progress: " + processedFunctions + "/" + totalFunctions +
+                           " (Needs work: " + needsWorkFunctions + ", Skipped: " + skippedFunctions + ")");
+                }
+
+                // Analyze function completeness
+                List<String> issues = new ArrayList<>();
+                int score = analyzeFunction(func, issues);
+
+                // Store for reporting
+                String addrHex = func.getEntryPoint().toString().replace("0x", "");
+                functionScores.add(new FunctionScore(func.getName(), addrHex, score, issues));
+
+                // Check if function needs work (below threshold)
+                if (score >= minThreshold && score <= maxScore) {
+                    needsWorkFunctions++;
+                } else {
+                    skippedFunctions++;
+                }
+
+                // Check max functions limit
+                if (MAX_FUNCTIONS > 0 && needsWorkFunctions >= MAX_FUNCTIONS) {
+                    println("Reached MAX_FUNCTIONS limit (" + MAX_FUNCTIONS + ")");
+                    break;
+                }
+            }
+        } finally {
+            if (decompiler != null) {
+                decompiler.dispose();
+            }
         }
-        println("Total functions to analyze: " + totalFunctions);
-        println("");
-
-        // Process all functions
-        FunctionIterator funcIter = funcManager.getFunctions(true);
-        while (funcIter.hasNext()) {
-            if (monitor.isCancelled()) {
-                println("Cancelled by user.");
-                break;
-            }
-
-            Function func = funcIter.next();
-            processedFunctions++;
-
-            // Progress update
-            if (processedFunctions % 100 == 0) {
-                monitor.setMessage("Analyzing " + processedFunctions + "/" + totalFunctions);
-                println("Progress: " + processedFunctions + "/" + totalFunctions +
-                       " (Needs work: " + needsWorkFunctions + ", Skipped: " + skippedFunctions + ")");
-            }
-
-            // Analyze function completeness
-            List<String> issues = new ArrayList<>();
-            int score = analyzeFunction(func, issues);
-
-            // Store for reporting
-            String addrHex = func.getEntryPoint().toString().replace("0x", "");
-            functionScores.add(new FunctionScore(func.getName(), addrHex, score, issues));
-
-            // Check if function needs work (below threshold)
-            if (score >= minThreshold && score <= maxScore) {
-                needsWorkFunctions++;
-            } else {
-                skippedFunctions++;
-            }
-
-            // Check max functions limit
-            if (MAX_FUNCTIONS > 0 && needsWorkFunctions >= MAX_FUNCTIONS) {
-                println("Reached MAX_FUNCTIONS limit (" + MAX_FUNCTIONS + ")");
-                break;
-            }
-        }
-
-        decompiler.dispose();
 
         // Generate output
         println("");
@@ -459,7 +466,7 @@ public class BatchDocumentFunctions extends GhidraScript {
     }
 
     /**
-     * Generate FunctionsTodo.txt for use with functions-process.ps1
+    * Generate FunctionsTodo.txt for use with an external processing workflow.
      */
     private void generateTodoFile() throws Exception {
         File todoFile = new File(getScriptArgs().length > 0 ? getScriptArgs()[0] : "FunctionsTodo.txt");
@@ -564,14 +571,26 @@ public class BatchDocumentFunctions extends GhidraScript {
                 }
 
                 // Read output
-                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 StringBuilder output = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        output.append(line).append("\n");
+                    }
                 }
 
-                int exitCode = process.waitFor();
+                if (!process.waitFor(CLAUDE_PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    println("  FAILED: Claude timed out after " + CLAUDE_PROCESS_TIMEOUT_SECONDS + "s; terminating process");
+                    process.destroy();
+                    if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                        process.destroyForcibly();
+                        process.waitFor(5, TimeUnit.SECONDS);
+                    }
+                    failed++;
+                    continue;
+                }
+
+                int exitCode = process.exitValue();
 
                 if (exitCode == 0) {
                     // Check for DONE in output
@@ -665,9 +684,9 @@ public class BatchDocumentFunctions extends GhidraScript {
 
     private String findMcpConfig(String userHome) {
         String[] possiblePaths = {
-            userHome + "\\source\\mcp\\ghidra-mcp\\mcp-config.json",
-            System.getProperty("user.dir") + "\\mcp-config.json",
-            "..\\mcp-config.json"
+            userHome + "\\source\\mcp\\ghidra-mcp\\.mcp.json",
+            System.getProperty("user.dir") + "\\.mcp.json",
+            "..\\.mcp.json"
         };
 
         for (String path : possiblePaths) {

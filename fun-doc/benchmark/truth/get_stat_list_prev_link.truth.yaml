@@ -1,0 +1,45 @@
+# Semantic ground truth for src/get_stat_list_prev_link.c::get_stat_list_prev_link.
+#
+# D2-derived reconstruction: /Mods/PD2-S12/D2Common.dll @ 6fd6dd20
+# (validated accessor; reads offset +0x34 which is the prev-link
+# pointer in a linked-list traversal pattern)
+
+function: get_stat_list_prev_link
+
+name_synonyms:
+  - get_stat_list_prev_link
+  - GetStatListPrevLink
+  - getStatListPrevLink
+  - StatListPrevLink
+  - ReadStatListPrevLink
+  - StatList_GetPrevLink
+  - GetPrevLink
+  - get_prev
+  - StatListGetPrev
+  - GetPrevStatList
+
+canonical_plate: |
+  Read the prev-link pointer from a D2 StatList structure.
+  Validates the list pointer is non-null and the magic signature
+  at offset 0 matches 0x01020304. On success returns the 32-bit
+  pointer at offset +0x34 — this is the reverse traversal link in
+  a doubly-linked StatList chain. Following it repeatedly walks
+  backwards through the chain. Returns 0 on null-pointer or
+  magic-mismatch.
+
+algorithm_tag: linked-list traversal
+algorithm_synonyms:
+  - linked list
+  - linked-list traversal
+  - doubly linked list
+  - prev pointer
+  - prev link
+  - struct accessor
+  - validated accessor
+
+weights:
+  name: 0.25
+  signature: 0.25
+  plate: 0.20
+  algorithm: 0.15
+  locals: 0.15

@@ -1,0 +1,55 @@
+# Semantic ground truth for src/{FUNCTION_NAME}.c::{FUNCTION_NAME}.
+#
+# Reconstructed from D2 {PROGRAM} @ {ADDRESS}
+# (via add_core_function.py on {GENERATED_AT})
+#
+# FILL OUT THE TODOs BEFORE COMMITTING. Structural fields (return
+# type, param types, local names) are parsed from the .c source by
+# libclang — do NOT duplicate them here.
+
+function: {FUNCTION_NAME}
+
+# === TODO: accepted name synonyms ===
+# List 5-10 names a human reviewer would accept as "obviously correct"
+# for this function. Include: snake_case, PascalCase, the original D2
+# name if you know it (from memory or obsidian), and any abbreviations.
+name_synonyms:
+  - {FUNCTION_NAME}
+  # - AlternateName
+  # - ShortName
+  # - OriginalD2Name
+
+# === TODO: canonical plate ===
+# 3-8 lines describing precisely what the function does. The LLM-judge
+# compares the worker's plate to this. Wording does not need to match;
+# meaning does. Include:
+#   - what the function computes / mutates
+#   - key algorithm name or identifying constant
+#   - input/output contract (preconditions, return semantics)
+# The EXISTING PLATE block in src/{FUNCTION_NAME}.c is a good starting
+# point if the prior plate was accurate.
+canonical_plate: |
+  TODO: describe what this function does, how, and under what
+  preconditions. Include the algorithm name and any characteristic
+  constants (polynomial, magic number, state machine tag, etc.).
+
+# === TODO: algorithm tag ===
+# Structured binary-check ("does the worker's plate mention this
+# algorithm?"). Pick one short canonical tag + 3-5 synonyms readers
+# would use interchangeably. If there's no single named algorithm,
+# tag the pattern (e.g. "struct mutator", "state machine", "hash").
+algorithm_tag: TODO
+algorithm_synonyms:
+  # - alias 1
+  # - alias 2
+
+# Per-dimension weights. Defaults are fine for most functions;
+# override only if this function is unusually weighted toward one
+# axis (e.g. a pure struct-access function weights signature +
+# locals higher than plate).
+weights:
+  name: 0.25
+  signature: 0.25
+  plate: 0.20
+  algorithm: 0.15
+  locals: 0.15

@@ -16,8 +16,8 @@ Architecture:
     * logs/debug/{date}/      — per-function tool-call traces (when debug_mode on)
     * select_candidates()     — single source of truth for worker pick order
     * update_function_state() — atomic per-function RMW (no lost-update races)
-    * Providers: minimax (default, cheap), claude (auto-handoff on complexity),
-                 codex (optional). Set via --provider or AI_PROVIDER constant.
+    * Providers: dashboard-configurable provider routing with per-run override
+                 support via --provider.
 
 Usage:
     python fun_doc.py                         # Dashboard + idle (primary entry point)
@@ -37,13 +37,18 @@ Usage:
 Dashboard config (edit via header controls or priority_queue.json):
     good_enough_score           — functions at/above this are considered done (80)
     require_scored              — surface unscored entries to cold-start lane (false)
-    complexity_handoff_provider — "claude" | "codex" | null. Swap provider mid-flight
+    complexity_handoff_provider — "claude" | "codex" | "gemini" | null. Swap provider mid-flight
                                   when minimax's complexity gate fires.
     complexity_handoff_max      — cap handoffs per worker session (default 5,
                                   0 = unlimited). After the cap is hit, massive
                                   functions stay with the primary provider.
+    auto_escalate_provider      — optional provider for one immediate retry when
+                                  a worker finishes below good_enough_score.
+    pre_escalate_retry          — enable/disable that immediate retry.
     debug_mode                  — write per-tool-call JSONL to logs/debug/
     pre_refresh_on_start        — batch-rescore top 20 before worker loop begins
+    provider_max_turns          — dict of per-provider tool-call turn limits, e.g.
+                                  {"claude": 30, "minimax": 20, "codex": 15, "gemini": 25}
 
 Recovery-pass one-shot (automatic, no config):
     Functions that finish a complexity-forced recovery pass ("COMPLEXITY: massive
@@ -64,20 +69,45 @@ Offline analysis:
 
 import argparse
 import contextvars
+import copy
 import json
+import multiprocessing
 import os
+import queue
 import subprocess
 import sys
 import threading
 import time
+import traceback
+import uuid
 from collections import defaultdict
 from datetime import datetime, date
 from pathlib import Path
 
-from event_bus import emit as bus_emit
+# Force UTF-8 on stdout/stderr so printing Unicode from LLM responses
+# (smart quotes, em-dashes, non-ASCII identifiers) doesn't crash worker
+# threads with 'charmap' codec errors on Windows legacy consoles. A crashed
+# print inside a worker thread silently kills the worker — runs stop
+# appearing in runs.jsonl and dashboard_active_workers drifts out of sync.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):
+    pass
 
-# Thread safety for state.json access across concurrent workers
-_state_lock = threading.Lock()
+from event_bus import emit as bus_emit, get_bus, get_worker_id
+
+# Thread safety for state.json access across concurrent workers.
+# RLock (reentrant) is required because the common read-modify-write
+# pattern holds the lock while calling load_state(), which also takes
+# it internally for its own mid-write retry protection. With a plain
+# Lock that self-acquire deadlocks the holding thread forever and
+# every other worker piles up behind it — confirmed via py-spy when
+# four workers wedged in refresh_candidate_scores on 2026-04-24.
+_state_lock = threading.RLock()
+
+# Thread safety for priority_queue.json access across concurrent workers
+_queue_lock = threading.RLock()
 
 # Per-thread tracker for the last Ghidra HTTP call's error kind. Used by
 # fetch_function_data to detect when a decompile-heavy endpoint hit a read
@@ -90,10 +120,15 @@ _ghidra_call_state = threading.local()
 
 def _reset_ghidra_call_state():
     _ghidra_call_state.last_was_timeout = False
+    _ghidra_call_state.last_was_offline = False
 
 
 def _mark_ghidra_call_timeout():
     _ghidra_call_state.last_was_timeout = True
+
+
+def _mark_ghidra_call_offline():
+    _ghidra_call_state.last_was_offline = True
 
 
 def ghidra_last_call_timed_out():
@@ -101,6 +136,13 @@ def ghidra_last_call_timed_out():
     raised a requests read timeout. Caller must inspect immediately — the
     flag resets on the next call."""
     return getattr(_ghidra_call_state, "last_was_timeout", False)
+
+
+def ghidra_last_call_offline():
+    """True if the most recent ghidra_get/ghidra_post call on this thread
+    raised a connection error (server not running / actively refused).
+    Caller must inspect immediately — the flag resets on the next call."""
+    return getattr(_ghidra_call_state, "last_was_offline", False)
 
 
 # Force unbuffered output so redirected stdout shows progress
@@ -120,6 +162,8 @@ MODULE_DIR = SCRIPT_DIR / "prompts"
 STATE_FILE = SCRIPT_DIR / "state.json"
 LOG_DIR = SCRIPT_DIR / "logs"
 LOG_FILE = LOG_DIR / "runs.jsonl"
+GHIDRA_HTTP_LOG_FILE = LOG_DIR / "ghidra_http.jsonl"
+_http_log_lock = threading.Lock()
 
 # Load .env from repo root (API keys, server URLs, etc.)
 try:
@@ -134,33 +178,12 @@ GHIDRA_URL = os.environ.get("GHIDRA_SERVER_URL", "http://127.0.0.1:8089").rstrip
 # ---------------------------------------------------------------------------
 # AI Provider Configuration
 # ---------------------------------------------------------------------------
-# Switch between "claude" and "codex" here.
-# Each provider maps mode -> model name.
+# Model names are intentionally not hard-coded here. The web dashboard owns
+# provider/mode model selection and persists it in priority_queue.json.
 
-AI_PROVIDER = "minimax"  # "claude", "codex", or "minimax" — minimax is the cheapest default; complex functions auto-handoff to claude when complexity_handoff_provider is set
-
-AI_MODELS = {
-    "claude": {
-        "FULL": "opus",
-        "FIX": "sonnet",
-        "VERIFY": "sonnet",
-    },
-    "codex": {
-        "FULL": "gpt-5.3-codex",
-        "FIX": "gpt-5.3-codex",
-        "VERIFY": "gpt-5.3-codex",
-    },
-    "minimax": {
-        "FULL": "MiniMax-M2.7",
-        "FIX": "MiniMax-M2.7",
-        "VERIFY": "MiniMax-M2.7-highspeed",
-    },
-    "gemini": {
-        "FULL": "gemini-2.5-pro",
-        "FIX": "gemini-2.5-flash",
-        "VERIFY": "gemini-2.5-flash",
-    },
-}
+AI_PROVIDER = "minimax"  # Primary provider when no per-run override is given.
+SUPPORTED_PROVIDERS = ("claude", "codex", "minimax", "gemini")
+SUPPORTED_MODEL_MODES = ("FULL", "FIX", "VERIFY")
 
 
 def _read_single_key():
@@ -243,6 +266,25 @@ ALL_FIX_MODULES = sorted(set(CATEGORY_TO_MODULE.values()))
 import requests
 
 
+def _short_jsonish(value, limit=1000):
+    try:
+        text = json.dumps(value, default=str)
+    except Exception:
+        text = str(value)
+    return text[:limit] + ("..." if len(text) > limit else "")
+
+
+def _log_ghidra_http_event(entry):
+    """Persist detailed Ghidra HTTP diagnostics without cluttering stdout."""
+    try:
+        LOG_DIR.mkdir(exist_ok=True)
+        with _http_log_lock:
+            with open(GHIDRA_HTTP_LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
+    except Exception:
+        pass
+
+
 def _parse_response(r):
     """Parse response, trying JSON first then falling back to text."""
     text = r.text
@@ -255,18 +297,85 @@ def _parse_response(r):
 def ghidra_get(path, params=None, timeout=60):
     """GET request to Ghidra HTTP server."""
     _reset_ghidra_call_state()
+    started = time.perf_counter()
     try:
         r = requests.get(f"{GHIDRA_URL}{path}", params=params, timeout=timeout)
         r.raise_for_status()
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        _log_ghidra_http_event(
+            {
+                "ts": datetime.now().isoformat(),
+                "method": "GET",
+                "path": path,
+                "params": params or {},
+                "timeout": timeout,
+                "elapsed_ms": elapsed_ms,
+                "status_code": r.status_code,
+                "ok": True,
+                "response_preview": r.text[:500],
+            }
+        )
         return _parse_response(r)
-    except requests.exceptions.ReadTimeout:
+    except requests.exceptions.ReadTimeout as e:
         _mark_ghidra_call_timeout()
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        _log_ghidra_http_event(
+            {
+                "ts": datetime.now().isoformat(),
+                "method": "GET",
+                "path": path,
+                "params": params or {},
+                "timeout": timeout,
+                "elapsed_ms": elapsed_ms,
+                "ok": False,
+                "error_type": type(e).__name__,
+                "error": str(e),
+            }
+        )
         print(
             f"  WARNING: Ghidra GET {path} failed: read timeout after {timeout}s",
             file=sys.stderr,
         )
         return None
+    except requests.exceptions.ConnectionError as e:
+        _mark_ghidra_call_offline()
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        _log_ghidra_http_event(
+            {
+                "ts": datetime.now().isoformat(),
+                "method": "GET",
+                "path": path,
+                "params": params or {},
+                "timeout": timeout,
+                "elapsed_ms": elapsed_ms,
+                "ok": False,
+                "error_type": type(e).__name__,
+                "error": str(e),
+            }
+        )
+        print(
+            f"  WARNING: Ghidra GET {path} failed: server not reachable at {GHIDRA_URL}",
+            file=sys.stderr,
+        )
+        return None
     except requests.RequestException as e:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        response = getattr(e, "response", None)
+        _log_ghidra_http_event(
+            {
+                "ts": datetime.now().isoformat(),
+                "method": "GET",
+                "path": path,
+                "params": params or {},
+                "timeout": timeout,
+                "elapsed_ms": elapsed_ms,
+                "status_code": getattr(response, "status_code", None),
+                "ok": False,
+                "error_type": type(e).__name__,
+                "error": str(e),
+                "response_preview": (getattr(response, "text", "") or "")[:500],
+            }
+        )
         print(f"  WARNING: Ghidra GET {path} failed: {e}", file=sys.stderr)
         return None
 
@@ -274,22 +383,179 @@ def ghidra_get(path, params=None, timeout=60):
 def ghidra_post(path, data=None, params=None, timeout=60):
     """POST request to Ghidra HTTP server."""
     _reset_ghidra_call_state()
+    started = time.perf_counter()
     try:
         r = requests.post(
             f"{GHIDRA_URL}{path}", json=data, params=params, timeout=timeout
         )
         r.raise_for_status()
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        _log_ghidra_http_event(
+            {
+                "ts": datetime.now().isoformat(),
+                "method": "POST",
+                "path": path,
+                "params": params or {},
+                "data_preview": _short_jsonish(data),
+                "timeout": timeout,
+                "elapsed_ms": elapsed_ms,
+                "status_code": r.status_code,
+                "ok": True,
+                "response_preview": r.text[:500],
+            }
+        )
         return _parse_response(r)
-    except requests.exceptions.ReadTimeout:
+    except requests.exceptions.ReadTimeout as e:
         _mark_ghidra_call_timeout()
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        _log_ghidra_http_event(
+            {
+                "ts": datetime.now().isoformat(),
+                "method": "POST",
+                "path": path,
+                "params": params or {},
+                "data_preview": _short_jsonish(data),
+                "timeout": timeout,
+                "elapsed_ms": elapsed_ms,
+                "ok": False,
+                "error_type": type(e).__name__,
+                "error": str(e),
+            }
+        )
         print(
             f"  WARNING: Ghidra POST {path} failed: read timeout after {timeout}s",
             file=sys.stderr,
         )
         return None
+    except requests.exceptions.ConnectionError as e:
+        _mark_ghidra_call_offline()
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        _log_ghidra_http_event(
+            {
+                "ts": datetime.now().isoformat(),
+                "method": "POST",
+                "path": path,
+                "params": params or {},
+                "data_preview": _short_jsonish(data),
+                "timeout": timeout,
+                "elapsed_ms": elapsed_ms,
+                "ok": False,
+                "error_type": type(e).__name__,
+                "error": str(e),
+            }
+        )
+        print(
+            f"  WARNING: Ghidra POST {path} failed: server not reachable at {GHIDRA_URL}",
+            file=sys.stderr,
+        )
+        return None
     except requests.RequestException as e:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        response = getattr(e, "response", None)
+        _log_ghidra_http_event(
+            {
+                "ts": datetime.now().isoformat(),
+                "method": "POST",
+                "path": path,
+                "params": params or {},
+                "data_preview": _short_jsonish(data),
+                "timeout": timeout,
+                "elapsed_ms": elapsed_ms,
+                "status_code": getattr(response, "status_code", None),
+                "ok": False,
+                "error_type": type(e).__name__,
+                "error": str(e),
+                "response_preview": (getattr(response, "text", "") or "")[:500],
+            }
+        )
         print(f"  WARNING: Ghidra POST {path} failed: {e}", file=sys.stderr)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Ghidra health check and auto-launch
+# ---------------------------------------------------------------------------
+
+# Tracks whether we've already attempted a Ghidra launch in this process
+# so we only try once per worker run rather than every function.
+_ghidra_launch_attempted = False
+_ghidra_launch_lock = threading.Lock()
+
+
+def check_ghidra_online(timeout=3):
+    """Return True if the Ghidra HTTP server is reachable."""
+    try:
+        r = requests.get(f"{GHIDRA_URL}/mcp/schema", timeout=timeout)
+        return r.status_code < 500
+    except requests.RequestException:
+        return False
+
+
+def try_launch_ghidra():
+    """Attempt to start Ghidra using GHIDRA_INSTALL_DIR env var or common paths.
+
+    Returns True if a launch was attempted (not necessarily successful yet).
+    Returns False if no Ghidra installation could be found.
+    """
+    global _ghidra_launch_attempted
+    with _ghidra_launch_lock:
+        if _ghidra_launch_attempted:
+            return False
+        _ghidra_launch_attempted = True
+
+    candidates = []
+    env_dir = os.environ.get("GHIDRA_INSTALL_DIR") or os.environ.get("GHIDRA_HOME")
+    if env_dir:
+        candidates.append(Path(env_dir))
+    # Common install locations
+    candidates += [
+        Path("F:/ghidra_12.0.4_PUBLIC"),
+        Path("C:/ghidra_12.0.4_PUBLIC"),
+        Path("C:/Program Files/ghidra"),
+        Path(os.path.expanduser("~/ghidra")),
+    ]
+
+    for ghidra_dir in candidates:
+        bat = ghidra_dir / "ghidraRun.bat"
+        if bat.exists():
+            print(
+                f"  GHIDRA OFFLINE — attempting to launch Ghidra from {ghidra_dir} ...",
+                flush=True,
+            )
+            try:
+                subprocess.Popen(
+                    [str(bat)],
+                    cwd=str(ghidra_dir),
+                    creationflags=(
+                        subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+                    ),
+                )
+                return True
+            except Exception as exc:
+                print(f"  WARNING: Failed to launch Ghidra: {exc}", file=sys.stderr)
+                return False
+
+    print(
+        "  GHIDRA OFFLINE — no Ghidra installation found. "
+        "Set GHIDRA_INSTALL_DIR env var to enable auto-launch.",
+        file=sys.stderr,
+    )
+    return False
+
+
+def wait_for_ghidra(timeout_secs=120, poll_interval=5):
+    """Block until Ghidra comes online or timeout expires.
+
+    Returns True if Ghidra became reachable within the timeout.
+    """
+    deadline = time.time() + timeout_secs
+    while time.time() < deadline:
+        if check_ghidra_online():
+            return True
+        remaining = int(deadline - time.time())
+        print(f"  Waiting for Ghidra to start... ({remaining}s remaining)", flush=True)
+        time.sleep(poll_interval)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +637,24 @@ def _atomic_write_state(state):
         except OSError:
             pass  # best-effort backup rotation
 
-    os.replace(tmp_path, STATE_FILE)
+    # On Windows, os.replace can transiently fail with PermissionError (WinError 5)
+    # when another thread has state.json open for reading. Retry with backoff so
+    # a transient lock doesn't propagate up and kill the worker.
+    last_err = None
+    for attempt in range(5):
+        try:
+            os.replace(tmp_path, STATE_FILE)
+            return
+        except PermissionError as e:
+            last_err = e
+            if attempt < 4:
+                time.sleep(0.05 * (2**attempt))  # 50ms, 100ms, 200ms, 400ms
+    print(
+        f"  WARNING: could not replace state.json after 5 attempts: {last_err}. "
+        f"State is preserved in {tmp_path} and will be written on next save.",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def save_state(state):
@@ -391,6 +674,21 @@ def save_state(state):
     bus_emit("state_changed")
 
 
+_ACCUMULATOR_FIELDS = (
+    # Per-function accumulator fields maintained by _update_function_cost_history.
+    # Callers that do not explicitly set these should not wipe them — otherwise
+    # the cost-tracking history gets clobbered by every post-run state sync that
+    # passes its locally-loaded func (which predates the mid-run history append).
+    "attempts",
+    "total_input_tokens",
+    "total_output_tokens",
+    "net_delta",
+    "cost_per_point",
+    "is_thrashing",
+    "_thrashing_alerted",
+)
+
+
 def update_function_state(func_key, updated_func):
     """Atomically update a single function's state entry.
 
@@ -399,6 +697,12 @@ def update_function_state(func_key, updated_func):
     writes atomically. Prevents the lost-update race where two workers each
     load state, modify different functions, and their full-state saves clobber
     each other's unrelated changes.
+
+    Preserves accumulator fields (attempts, cost_per_point, etc.) from the
+    on-disk version when the caller does not explicitly set them. This lets
+    `_update_function_cost_history` append to history mid-run without being
+    overwritten by the process_function post-run state save that uses the
+    locally-cached func dict loaded before the history append.
 
     Use this in per-function code paths (skip handlers, completion handlers,
     _sync_func_state calls) instead of save_state(state).
@@ -419,8 +723,16 @@ def update_function_state(func_key, updated_func):
             latest = _default_state()
 
         funcs = latest.setdefault("functions", {})
-        # Write a shallow copy so later in-memory mutation doesn't leak through
-        funcs[func_key] = dict(updated_func)
+        merged = dict(updated_func)
+        # Preserve accumulator fields from on-disk version when the caller
+        # didn't explicitly provide them. This is the key invariant that
+        # prevents the post-run state save from wiping mid-run history.
+        on_disk = funcs.get(func_key)
+        if isinstance(on_disk, dict):
+            for field in _ACCUMULATOR_FIELDS:
+                if field not in updated_func and field in on_disk:
+                    merged[field] = on_disk[field]
+        funcs[func_key] = merged
 
         _atomic_write_state(latest)
     bus_emit("state_changed")
@@ -448,6 +760,55 @@ def end_session(state):
         session["ended"] = datetime.now().isoformat()
         state.setdefault("sessions", []).append(session)
         state["current_session"] = None
+
+
+_SESSION_UPDATE_MISSING = object()
+
+
+def finalize_worker_session(session, *, active_binary=_SESSION_UPDATE_MISSING):
+    """Atomically merge a worker's finished session into the latest on-disk state.
+
+    Read-modify-write under `_state_lock`: re-reads state.json, sets
+    `session["ended"]`, appends to `state["sessions"]`, clears
+    `state["current_session"]` when it still points at this session, and
+    optionally updates `state["active_binary"]`. Writes atomically.
+
+    Replaces the `end_session(state); save_state(state)` pattern in worker
+    loops. A full-state save there would write the functions dict that was
+    loaded at iteration start, clobbering per-function updates made
+    concurrently by other workers through update_function_state().
+
+    `session` is the worker's local session dict (as returned by
+    start_session). If None or falsy, only active_binary handling runs.
+
+    `active_binary` uses a sentinel: pass a string to set, pass None to
+    clear (pop the key), or omit to leave whatever is on disk alone.
+    """
+    with _state_lock:
+        # Re-read latest state from disk using the same backup/raise behavior
+        # as normal loads, so a transient worker finish cannot overwrite a
+        # recoverable corrupt state file with a fresh default state.
+        latest = load_state()
+
+        if session:
+            session["ended"] = datetime.now().isoformat()
+            latest.setdefault("sessions", []).append(session)
+            # Only clear current_session if it still references this worker's
+            # session (match on the "started" timestamp, which is unique per
+            # start_session call). Another worker's concurrent session should
+            # stay untouched.
+            cur = latest.get("current_session")
+            if isinstance(cur, dict) and cur.get("started") == session.get("started"):
+                latest["current_session"] = None
+
+        if active_binary is not _SESSION_UPDATE_MISSING:
+            if active_binary is None:
+                latest.pop("active_binary", None)
+            else:
+                latest["active_binary"] = active_binary
+
+        _atomic_write_state(latest)
+    bus_emit("state_changed")
 
 
 # ---------------------------------------------------------------------------
@@ -1126,6 +1487,7 @@ def fetch_function_data(program, address, mode="FIX"):
         "deductions": [],
         "fixable_categories": [],
         "decompile_timeout": False,
+        "ghidra_offline": False,
     }
 
     # Navigation removed — was calling /tool/goto_address on every function,
@@ -1138,6 +1500,9 @@ def fetch_function_data(program, address, mode="FIX"):
     )
     if ghidra_last_call_timed_out():
         data["decompile_timeout"] = True
+        return data
+    if ghidra_last_call_offline():
+        data["ghidra_offline"] = True
         return data
 
     # Completeness
@@ -1392,18 +1757,39 @@ def compute_priority(func):
     return base + impact + effort_bonus + fixable_bonus
 
 
+# Per-provider FULL/FIX/VERIFY model defaults. Used to backfill missing
+# providers / modes when normalizing the dashboard config so:
+#   * a fresh priority_queue.json with no provider_models gets every provider
+#     populated with sensible values,
+#   * a partial config (e.g. minimax/gemini/claude set, codex unset) backfills
+#     codex from defaults instead of showing blank dashboard inputs,
+#   * a user-set value always wins (empty strings count as unset).
+# Update these whenever a model is renamed/deprecated upstream — they're the
+# single source of truth for "what model should each provider call by default."
+DEFAULT_PROVIDER_MODELS = {
+    "minimax": {"FULL": "MiniMax-M2.7", "FIX": "MiniMax-M2.7", "VERIFY": "MiniMax-M2.7"},
+    "gemini":  {"FULL": "gemini-2.5-pro", "FIX": "gemini-2.5-flash", "VERIFY": "gemini-2.5-flash"},
+    "claude":  {"FULL": "claude-sonnet-4-6", "FIX": "claude-sonnet-4-6", "VERIFY": "claude-sonnet-4-6"},
+    "codex":   {"FULL": "gpt-5.5", "FIX": "gpt-5.5", "VERIFY": "gpt-5.5"},
+}
+
+
 DEFAULT_QUEUE_CONFIG = {
     "good_enough_score": 80,
     "require_scored": False,
+    # Dashboard-owned provider -> mode -> model mapping. Defaults from
+    # DEFAULT_PROVIDER_MODELS — overridable per-provider/mode via the dashboard.
+    "provider_models": copy.deepcopy(DEFAULT_PROVIDER_MODELS),
     # Auto-handoff: when the active provider's complexity gate fires, swap to
-    # this provider for the current function instead of skipping. Set to None
-    # (or empty string) to disable and preserve the original skip-and-warn.
-    "complexity_handoff_provider": "claude",
-    # Cap handoffs per worker session to limit opus/claude spend. 0 = unlimited.
+    # this provider for the current function instead of skipping. Off by
+    # default so stronger providers are only consumed when explicitly enabled.
+    "complexity_handoff_provider": None,
+    # Cap handoffs per worker session to limit expensive-provider spend.
+    # 0 = unlimited.
     # Default 5: after five handoffs, massive functions stay with the primary
     # provider (typically minimax) and accept lower per-function quality.
     # Reset via the dashboard's Reset Handoffs button or by restarting the
-    # worker. Raise if you're willing to pay for more opus coverage.
+    # worker. Raise it only if you want more stronger-provider coverage.
     "complexity_handoff_max": 5,
     # Detailed tool-call logging: writes per-function JSONL files under
     # logs/debug/{date}/ and prints verbose console lines. Use analyze_debug.py
@@ -1413,6 +1799,10 @@ DEFAULT_QUEUE_CONFIG = {
     # result and fixes gaps (missing plate sections, unrenamed variables, etc.).
     # Set to None / "off" to disable. Only fires when score gain < audit_min_delta.
     "audit_provider": None,
+    # Optional immediate retry after a below-threshold run. Off by default so
+    # the dashboard worker does not silently escalate to a more expensive model.
+    "auto_escalate_provider": None,
+    "pre_escalate_retry": False,
     # Minimum score delta to skip audit. If the worker gained >= this many
     # points, audit is skipped (the worker did well enough). Lower = more audits.
     "audit_min_delta": 5,
@@ -1424,9 +1814,133 @@ DEFAULT_QUEUE_CONFIG = {
     # Minutes of freshness to honor: if the last refresh is newer than this,
     # skip pre-refresh entirely. Multiple workers starting together share one.
     "pre_refresh_freshness_min": 5,
+    # Per-provider max tool-call turns. Edit via dashboard or priority_queue.json.
+    # Lower values prevent over-analysis loops; higher values give the model more
+    # room to complete complex functions in one session.
+    "provider_max_turns": {
+        "claude": 25,
+        "codex": 25,
+        "gemini": 25,
+        "minimax": 25,
+    },
+    # Background inventory scorer (opt-in, Q9). When True, a single thread runs
+    # `analyze_function_completeness` against every binary in the Ghidra project
+    # tree to fill in missing scores in state.json. Yields MCP bandwidth to doc
+    # workers — only runs when zero workers are active. See inventory_scorer.py
+    # and the Inventory panel on the dashboard.
+    "inventory_enabled": False,
 }
 
 PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"
+
+
+def _normalize_provider_models(raw_models):
+    """Normalize provider->mode->model config, backfilling missing entries
+    from DEFAULT_PROVIDER_MODELS.
+
+    Deep-merge semantics: every supported provider/mode is populated. User
+    values win when present and non-empty; defaults fill the rest. This is
+    what makes a fresh priority_queue.json or a partially-configured one
+    show fully-populated dashboard inputs without manual setup.
+    """
+    normalized = copy.deepcopy(DEFAULT_PROVIDER_MODELS)
+    if not isinstance(raw_models, dict):
+        return normalized
+
+    for provider, mode_map in raw_models.items():
+        if provider not in SUPPORTED_PROVIDERS or not isinstance(mode_map, dict):
+            continue
+        for mode, model_name in mode_map.items():
+            normalized_mode = str(mode).upper()
+            if normalized_mode not in SUPPORTED_MODEL_MODES:
+                continue
+            if model_name is None:
+                continue
+            normalized_model = str(model_name).strip()
+            if not normalized_model:
+                continue
+            normalized.setdefault(provider, {})[normalized_mode] = normalized_model
+
+    return normalized
+
+
+def build_worker_config_snapshot(queue, primary_provider):
+    """Build a frozen config snapshot for a worker about to start.
+
+    Captures every queue.config field that should remain constant for the
+    worker's lifetime. The snapshot is opaque to the worker thread — it just
+    holds it and passes it to process_function on every iteration. The
+    snapshot's shape is stable across the codebase: tests, the dashboard, the
+    event-log persister, and process_function all agree on what fields exist.
+
+    Includes settings for every provider this worker can actually invoke:
+        * primary_provider (passed in)
+        * audit_provider (if config.audit_provider is set and != primary)
+        * complexity_handoff_provider (if set and != primary)
+
+    Each provider entry holds its `max_turns` and the FULL/FIX/VERIFY model
+    slice from `provider_models`. Providers this worker won't invoke are not
+    snapshotted — keeps the snapshot compact and the run records clean.
+
+    Returns a plain dict suitable for json.dumps. No references back into
+    the queue dict.
+    """
+    cfg = (queue or {}).get("config") or {}
+
+    # Top-level worker policy (Tier 1 + Tier 2 from the design discussion)
+    snapshot = {
+        "good_enough_score": int(cfg.get("good_enough_score", 80)),
+        "audit_provider": cfg.get("audit_provider"),
+        "audit_min_delta": int(cfg.get("audit_min_delta", 5)),
+        "complexity_handoff_provider": cfg.get("complexity_handoff_provider"),
+        "complexity_handoff_max": int(cfg.get("complexity_handoff_max", 0) or 0),
+    }
+
+    # Per-provider slices — only the providers this worker can invoke. The
+    # primary's slice is always present; audit and escalation are added only
+    # when configured (and only if they differ from primary, since the same
+    # provider's slice would just duplicate).
+    pmt = cfg.get("provider_max_turns") or {}
+    pm = cfg.get("provider_models") or {}
+    providers_seen: set[str] = set()
+    providers: dict[str, dict] = {}
+
+    def _add_provider(name):
+        if not name or name in providers_seen:
+            return
+        if name not in SUPPORTED_PROVIDERS:
+            return
+        providers_seen.add(name)
+        # Default max_turns is 25 (matches DEFAULT_QUEUE_CONFIG); coerce to int
+        # so JSON serialization doesn't surface accidental floats.
+        providers[name] = {
+            "max_turns": int(pmt.get(name, 25)),
+            "models": dict(pm.get(name) or {}),
+        }
+
+    _add_provider(primary_provider)
+    _add_provider(snapshot["audit_provider"])
+    _add_provider(snapshot["complexity_handoff_provider"])
+    snapshot["providers"] = providers
+    snapshot["primary_provider"] = primary_provider
+    return snapshot
+
+
+def _normalize_provider_max_turns(raw):
+    """Backfill provider_max_turns with DEFAULT_QUEUE_CONFIG values for any
+    missing provider. Mirrors _normalize_provider_models — partial user
+    config gets the missing keys filled in instead of dropped on the floor."""
+    defaults = DEFAULT_QUEUE_CONFIG.get("provider_max_turns") or {}
+    normalized = dict(defaults)
+    if isinstance(raw, dict):
+        for provider, turns in raw.items():
+            if provider not in SUPPORTED_PROVIDERS:
+                continue
+            try:
+                normalized[provider] = int(turns)
+            except (TypeError, ValueError):
+                continue
+    return normalized
 
 
 def load_priority_queue():
@@ -1445,10 +1959,56 @@ def load_priority_queue():
     else:
         queue = {}
     queue.setdefault("pinned", [])
-    cfg = dict(DEFAULT_QUEUE_CONFIG)
+    cfg = copy.deepcopy(DEFAULT_QUEUE_CONFIG)
     cfg.update(queue.get("config") or {})
+    cfg["provider_models"] = _normalize_provider_models(cfg.get("provider_models"))
+    cfg["provider_max_turns"] = _normalize_provider_max_turns(cfg.get("provider_max_turns"))
     queue["config"] = cfg
     return queue
+
+
+def get_auto_escalation_provider(current_provider, queue=None):
+    """Return the explicitly configured retry provider for dashboard workers.
+
+    This intentionally has no implicit fallback ladder. If the user did not
+    opt into escalation, we do not consume a stronger provider.
+    """
+    queue = queue or load_priority_queue()
+    cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
+    if not cfg.get("pre_escalate_retry", False):
+        return None
+
+    target = cfg.get("auto_escalate_provider")
+    if not target or target in ("off", current_provider):
+        return None
+    if target not in SUPPORTED_PROVIDERS:
+        return None
+    return target
+
+
+def get_configured_model(provider, mode, queue=None):
+    """Return the dashboard-configured model for a provider/mode pair."""
+    effective_provider = provider or AI_PROVIDER
+    normalized_mode = str(mode).upper()
+
+    if effective_provider not in SUPPORTED_PROVIDERS:
+        raise ValueError(f"Unsupported provider: {effective_provider}")
+    if normalized_mode not in SUPPORTED_MODEL_MODES:
+        raise ValueError(f"Unsupported model mode: {normalized_mode}")
+
+    queue = queue or load_priority_queue()
+    cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
+    provider_models = _normalize_provider_models(cfg.get("provider_models"))
+    return provider_models.get(effective_provider, {}).get(normalized_mode)
+
+
+def _require_model_name(model, provider):
+    normalized_model = (model or "").strip()
+    if normalized_model:
+        return normalized_model
+    raise ValueError(
+        f"No model configured for provider '{provider}'. Set it in the web dashboard."
+    )
 
 
 # Backwards-compat alias for any external callers
@@ -1456,8 +2016,28 @@ _load_priority_queue = load_priority_queue
 
 
 def save_priority_queue(queue):
-    with open(PRIORITY_QUEUE_FILE, "w") as f:
-        json.dump(queue, f, indent=2)
+    """Persist priority_queue.json atomically."""
+    if isinstance(queue, dict):
+        cfg = dict(queue.get("config") or {})
+        cfg["provider_models"] = _normalize_provider_models(cfg.get("provider_models"))
+        cfg["provider_max_turns"] = _normalize_provider_max_turns(cfg.get("provider_max_turns"))
+        queue["config"] = cfg
+        # Drop any lingering dashboard_active_workers meta — workers no
+        # longer auto-restore across restarts, so persisting a snapshot
+        # only serves to confuse future readers.
+        meta = queue.get("meta")
+        if isinstance(meta, dict) and "dashboard_active_workers" in meta:
+            meta.pop("dashboard_active_workers", None)
+    tmp_path = PRIORITY_QUEUE_FILE.with_suffix(".json.tmp")
+    with _queue_lock:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(queue, f, indent=2)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except (OSError, AttributeError):
+                pass
+        tmp_path.replace(PRIORITY_QUEUE_FILE)
 
 
 def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=None):
@@ -1528,7 +2108,7 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         # complexity-forced recovery pass; after that they stay out of the
         # selector until the user explicitly refreshes or pins them. This
         # stops the "re-queue forever below good_enough" loop that burns
-        # opus/minimax tokens for marginal score improvement. Cleared by
+        # extra provider budget for marginal score improvement. Cleared by
         # --scan --refresh (full rescan) or the dashboard's Refresh Top N.
         if func.get("recovery_pass_done") and not is_pinned:
             continue
@@ -1698,7 +2278,26 @@ def refresh_candidate_scores(
             by_program_stats[prog] = {"refreshed": prog_refreshed, "stale": prog_stale}
 
     if save and refreshed > 0:
-        save_state(state)
+        # Read-modify-write: re-read the latest state from disk before saving
+        # so we don't clobber functions that were added (e.g. by a concurrent
+        # state merge) between when this refresh started and now. Only the
+        # specific function entries we scored get overwritten.
+        refreshed_funcs = {
+            c["key"]: c["func"]
+            for prog_items in by_prog.values()
+            for c in prog_items
+            if c["func"].get("score") is not None
+        }
+        with _state_lock:
+            latest = load_state()
+            latest_funcs = latest.setdefault("functions", {})
+            for key, func in refreshed_funcs.items():
+                if key in latest_funcs:
+                    latest_funcs[key].update(func)
+                else:
+                    latest_funcs[key] = func
+            _atomic_write_state(latest)
+        bus_emit("state_changed")
 
     # Record refresh metadata on the queue so the dashboard can display it
     queue = load_priority_queue()
@@ -1900,7 +2499,49 @@ def auto_dequeue_if_done(func_key, score, source="completed"):
         return False
 
 
-def _emit_handoff(func_key, from_provider, to_provider, reason, count):
+def _mode_label(mode):
+    """Human-readable label for internal mode strings used in console output."""
+    return {
+        "FULL": "FULL",
+        "FULL:recovery": "FULL/pass1 (types+structs)",
+        "FULL:comments": "FULL/pass2 (documentation)",
+        "FIX": "FIX",
+        "VERIFY": "VERIFY",
+    }.get(mode, mode)
+
+
+def _format_mode_banner(mode, selected_model, effective_provider, score, config_snapshot, prompt):
+    """Build the per-function mode banner string.
+
+    Steady-state output: `FULL/pass1 (types+structs) | score: 13%`. Mode
+    label and score only — the model is in the worker's header sub-line and
+    the prompt char count is debug-only noise that hides important signal.
+
+    Deviation output: `HANDOFF:minimax→gemini | gemini-2.5-pro | score: 13%`.
+    The model token appears only when `selected_model` differs from what the
+    worker's snapshot says it should be using for this provider/mode. That
+    way "the model token is present" is itself the visual signal that this
+    function ran with something other than the worker's default — a
+    deviation worth your attention.
+
+    When no snapshot is present (CLI invocation, legacy callers), we can't
+    detect deviation, so we always show the model — matches pre-snapshot
+    behavior so existing log scrapers still see what they expect.
+    """
+    parts = [_mode_label(mode)]
+    worker_default_model = None
+    if config_snapshot is not None:
+        snap_entry = (config_snapshot.get("providers") or {}).get(effective_provider) or {}
+        snap_models = snap_entry.get("models") or {}
+        lookup_mode = "FULL" if str(mode).startswith("FULL:") else mode
+        worker_default_model = snap_models.get(lookup_mode)
+    if worker_default_model is None or selected_model != worker_default_model:
+        parts.append(str(selected_model))
+    parts.append(f"score: {score}%")
+    return "  " + " | ".join(parts)
+
+
+def _emit_handoff(func_key, from_provider, to_provider, reason, count, score=None):
     """Emit a function_mode event so the dashboard pane shows the handoff."""
     bus_emit(
         "function_mode",
@@ -1908,7 +2549,7 @@ def _emit_handoff(func_key, from_provider, to_provider, reason, count):
             "key": func_key,
             "mode": f"HANDOFF:{from_provider}->{to_provider}",
             "model": to_provider,
-            "score": None,
+            "score": score,
         },
     )
     bus_emit(
@@ -1942,7 +2583,36 @@ _debug_ctx: "contextvars.ContextVar[dict]" = contextvars.ContextVar(
 _debug_log_lock = threading.Lock()
 
 
-def _debug_set_context(func_key, func_name, program, address, provider):
+def _normalize_tool_name(tool_name):
+    """Normalize provider-specific tool names to a common short name."""
+    if not tool_name:
+        return ""
+    normalized = str(tool_name)
+    for prefix in ("mcp_ghidra-mcp_", "mcp__ghidra-mcp__"):
+        if normalized.startswith(prefix):
+            return normalized.removeprefix(prefix)
+    return normalized
+
+
+def _normalize_debug_status(status):
+    """Keep debug JSONL statuses comparable across provider SDKs."""
+    normalized = str(status or "").lower()
+    if normalized in ("failed", "failure"):
+        return "error"
+    if normalized in ("ok", "complete", "completed"):
+        return "success"
+    return normalized or "unknown"
+
+
+def _debug_set_context(
+    func_key,
+    func_name,
+    program,
+    address,
+    provider,
+    run_id,
+    requested_provider=None,
+):
     """Set the current function context for debug logging. Called once per
     function at the start of process_function so all tool calls in subsequent
     provider invocations get tagged with the same metadata. Re-reads queue
@@ -1952,7 +2622,9 @@ def _debug_set_context(func_key, func_name, program, address, provider):
         "func_name": func_name,
         "program": program,
         "address": address,
+        "run_id": run_id,
         "provider": provider,
+        "requested_provider": requested_provider or provider,
         "iteration": 0,
         "log_path": None,
     }
@@ -1962,6 +2634,15 @@ def _debug_set_context(func_key, func_name, program, address, provider):
         ctx["enabled"] = bool(cfg.get("debug_mode", False))
     except Exception:
         ctx["enabled"] = False
+    _debug_ctx.set(ctx)
+
+
+def _debug_update_context(**fields):
+    """Update the active debug context in-place for provider/model handoffs."""
+    ctx = dict(_debug_ctx.get())
+    if not ctx:
+        return
+    ctx.update(fields)
     _debug_ctx.set(ctx)
 
 
@@ -1977,7 +2658,9 @@ def _debug_get_log_path():
         prog = ctx.get("program") or "unknown"
         prog = prog.replace("/", "_").replace("\\", "_").strip("_") or "unknown"
         addr = ctx.get("address") or "unknown"
-        path = date_dir / f"{prog}__{addr}.jsonl"
+        provider = ctx.get("requested_provider") or ctx.get("provider") or "unknown"
+        run_id = ctx.get("run_id") or "unknown"
+        path = date_dir / f"{prog}__{addr}__{provider}__{run_id}.jsonl"
         # ContextVar values are shallow-immutable by convention — rebuild the
         # dict with the cached path so subsequent calls in this context skip
         # the mkdir overhead.
@@ -2024,14 +2707,19 @@ def _debug_log_tool_call(tool, args, result, status, duration_ms=None):
     result_str = "" if result is None else str(result)
     result_full_size = len(result_str)
     result_preview = result_str[:500]
+    normalized_tool = _normalize_tool_name(tool)
+    status = _normalize_debug_status(status)
 
     entry = {
         "ts": datetime.now().isoformat(),
+        "run_id": ctx.get("run_id"),
         "function_key": ctx.get("func_key"),
         "function_name": ctx.get("func_name"),
         "provider": ctx.get("provider"),
+        "requested_provider": ctx.get("requested_provider"),
         "iteration": iteration,
-        "tool": tool,
+        "tool": normalized_tool,
+        "tool_raw": tool,
         "args": args,
         "result_preview": result_preview,
         "result_full_size": result_full_size,
@@ -2051,7 +2739,7 @@ def _debug_log_tool_call(tool, args, result, status, duration_ms=None):
     args_summary = _debug_summarize_args(args)
     duration_str = f", {duration_ms}ms" if duration_ms is not None else ""
     print(
-        f"  [debug] #{iteration} {tool}({args_summary}) -> {status} "
+        f"  [debug] #{iteration} {normalized_tool}({args_summary}) -> {status} "
         f"({result_full_size}b{duration_str})",
         flush=True,
     )
@@ -2273,13 +2961,37 @@ def determine_mode(score, deductions=None, completeness=None):
     return "FULL"
 
 
-def select_model(mode, user_model=None, provider=None):
-    """Auto-select model based on mode and provider, with user override."""
+def select_model(mode, user_model=None, provider=None, config_snapshot=None):
+    """Auto-select model based on mode and provider, with user override.
+
+    `config_snapshot` is the worker's frozen snapshot. When present, the
+    snapshot's per-provider models slice is consulted first — that means
+    audit / handoff / recovery passes inside a worker all use the same
+    model that was chosen at worker-start, even if the dashboard model
+    dropdown moves mid-run.
+    """
     if user_model:
         return user_model
-    effective_provider = provider or AI_PROVIDER
-    provider_models = AI_MODELS.get(effective_provider, AI_MODELS["claude"])
-    return provider_models.get(mode, list(provider_models.values())[0])
+    # FULL:recovery, FULL:comments, etc. are sub-modes — use FULL for dashboard lookup
+    lookup_mode = "FULL" if str(mode).startswith("FULL:") else mode
+    target_provider = provider or AI_PROVIDER
+
+    # Snapshot-first lookup. Only a slice covering the requested provider
+    # is captured; if the snapshot doesn't have it (e.g. an unconfigured
+    # handoff fired), fall through to the live config like normal.
+    if config_snapshot is not None:
+        snap_providers = config_snapshot.get("providers") or {}
+        snap_entry = snap_providers.get(target_provider) or {}
+        snap_models = snap_entry.get("models") or {}
+        if snap_models.get(lookup_mode):
+            return snap_models[lookup_mode]
+
+    configured_model = get_configured_model(target_provider, lookup_mode)
+    if configured_model:
+        return configured_model
+    raise ValueError(
+        f"No model configured for provider '{target_provider}' mode '{str(mode).upper()}'. Set it in the web dashboard."
+    )
 
 
 def _truncate(text, max_chars, label="content"):
@@ -2298,6 +3010,68 @@ def _is_error_response(resp):
     if isinstance(resp, str) and resp.startswith("Error"):
         return True
     return False
+
+
+def _variables_for_prompt(variables):
+    """Return AI-facing variables with phantom locals omitted by default.
+
+    The raw endpoint intentionally reports stack-frame/decompiler artifacts for
+    humans and debugging. Prompting is different: phantom locals are not visible
+    in decompiled source and cannot be targeted by set_local_variable_type, so
+    showing them in the normal work list mostly creates false work.
+    """
+    if not isinstance(variables, dict):
+        return variables, []
+
+    cleaned = dict(variables)
+    locals_in = variables.get("locals")
+    omitted = []
+    if isinstance(locals_in, list):
+        locals_out = []
+        for local in locals_in:
+            if isinstance(local, dict) and local.get("is_phantom"):
+                omitted.append(
+                    {
+                        "name": local.get("name"),
+                        "type": local.get("type"),
+                        "storage": local.get("storage"),
+                    }
+                )
+            else:
+                locals_out.append(local)
+        cleaned["locals"] = locals_out
+        cleaned["total_locals"] = len(locals_out)
+    if omitted:
+        cleaned["omitted_phantom_locals_count"] = len(omitted)
+        cleaned["omitted_phantom_locals"] = omitted[:24]
+    return cleaned, omitted
+
+
+def _append_variables_section(sections, variables, *, refresh_note=True):
+    sections.append("## Variables (pre-fetched)")
+    prompt_vars, omitted = _variables_for_prompt(variables)
+    if omitted:
+        sections.append(
+            f"*Omitted {len(omitted)} phantom local(s) from this AI-facing list. "
+            "They exist only as stack-frame/decompiler artifacts, are not visible "
+            "in decompiled code, and are not API-settable.*"
+        )
+    note = (
+        "*Variable types may already be resolved by decompiler — check `needs_type` "
+        "field before calling `set_local_variable_type`."
+    )
+    if refresh_note:
+        note += " Refresh with `get_function_variables` after any prototype change."
+    note += "*"
+    sections.append(note)
+    sections.append("```json")
+    var_str = (
+        json.dumps(prompt_vars, indent=None)
+        if isinstance(prompt_vars, (dict, list))
+        else str(prompt_vars)
+    )
+    sections.append(var_str)
+    sections.append("```")
 
 
 def _inject_classification_directives(sections, completeness):
@@ -2413,6 +3187,11 @@ def _extract_work_items(completeness):
             items.append(
                 "*Group by meaning: sentinels, type IDs, flags, sizes. Struct offsets → document in plate comment Structure Layout.*"
             )
+            items.append(
+                "**BATCH RULE**: Collect ALL addresses below, then submit them in ONE `batch_set_comments` call "
+                "with `comment_type='EOL_COMMENT'`. Do NOT call `set_disassembly_comment` individually — "
+                "each call wastes a full API turn."
+            )
             for c in constants[:20]:
                 items.append(f"- `{c}`")
         if struct_offsets:
@@ -2504,18 +3283,7 @@ def build_fix_prompt(func_name, address, ghidra_data, program=None):
 
     variables = ghidra_data.get("variables")
     if variables and not _is_error_response(variables):
-        sections.append("## Variables (pre-fetched)")
-        sections.append(
-            "*Variable types may already be resolved by decompiler — check `needs_type` field before calling `set_local_variable_type`. Refresh with `get_function_variables` after any prototype change.*"
-        )
-        sections.append("```json")
-        var_str = (
-            json.dumps(variables, indent=None)
-            if isinstance(variables, (dict, list))
-            else str(variables)
-        )
-        sections.append(var_str)
-        sections.append("```")
+        _append_variables_section(sections, variables, refresh_note=True)
     elif variables:
         sections.append(
             f"## Variables: FETCH FAILED — call `get_function_variables` in Step 3"
@@ -2675,18 +3443,7 @@ def build_full_doc_prompt(func_name, address, ghidra_data, program=None):
     # Fix #7: Variable staleness warning
     variables = ghidra_data.get("variables")
     if variables and not _is_error_response(variables):
-        sections.append("## Variables (pre-fetched)")
-        sections.append(
-            "*Variable types may already be resolved by decompiler — check `needs_type` field before calling `set_local_variable_type`. Refresh with `get_function_variables` after any prototype change.*"
-        )
-        sections.append("```json")
-        var_str = (
-            json.dumps(variables, indent=None)
-            if isinstance(variables, (dict, list))
-            else str(variables)
-        )
-        sections.append(var_str)
-        sections.append("```")
+        _append_variables_section(sections, variables, refresh_note=True)
     elif variables:
         sections.append(
             "## Variables: FETCH FAILED — call `get_function_variables` in Step 3"
@@ -2804,18 +3561,7 @@ def build_recovery_prompt(func_name, address, ghidra_data, program=None):
     # Variables
     variables = ghidra_data.get("variables")
     if variables and not _is_error_response(variables):
-        sections.append("## Variables (pre-fetched)")
-        sections.append(
-            "*Variable types may already be resolved — check `needs_type` field before calling `set_local_variable_type`.*"
-        )
-        sections.append("```json")
-        var_str = (
-            json.dumps(variables, indent=None)
-            if isinstance(variables, (dict, list))
-            else str(variables)
-        )
-        sections.append(var_str)
-        sections.append("```")
+        _append_variables_section(sections, variables, refresh_note=False)
     sections.append("")
 
     # Work items
@@ -2961,29 +3707,442 @@ def _wrap_result(result):
     """Normalize AI provider return to (text, metadata) tuple."""
     if isinstance(result, tuple):
         return result
-    return (result, {"tool_calls": -1})  # -1 = unknown (provider doesn't track)
+    return (
+        result,
+        {"tool_calls": -1, "tool_calls_known": False},
+    )  # -1 = unknown (provider doesn't track)
+
+
+def _provider_timeout_seconds(provider, complexity_tier=None):
+    env_key = f"FUNDOC_{str(provider or AI_PROVIDER).upper()}_TIMEOUT_SECS"
+    raw_timeout = os.environ.get(env_key) or os.environ.get(
+        "FUNDOC_PROVIDER_TIMEOUT_SECS", "900"
+    )
+    try:
+        timeout_secs = max(60, int(raw_timeout))
+    except (TypeError, ValueError):
+        timeout_secs = 900
+
+    if complexity_tier == "massive":
+        timeout_secs += 600
+    elif complexity_tier == "complex":
+        timeout_secs += 300
+    return timeout_secs
+
+
+def _terminate_process_tree(pid):
+    if not pid:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
+
+    try:
+        import signal
+
+        os.kill(pid, signal.SIGKILL)
+    except Exception:
+        pass
+
+
+# Registry mapping worker_id -> set of live multiprocessing.Process objects.
+# The stall watchdog in WorkerManager uses this to kill the actual spawned
+# provider subprocesses when a worker thread has been wedged past the stall
+# threshold. Without this, setting stop_flag alone cannot unwedge a thread
+# blocked inside _invoke_provider_with_watchdog's result_queue.get().
+_subprocess_registry_lock = threading.Lock()
+_subprocess_registry: dict = {}
+
+
+def register_worker_subprocess(worker_id, proc):
+    if not worker_id or proc is None:
+        return
+    with _subprocess_registry_lock:
+        _subprocess_registry.setdefault(worker_id, set()).add(proc)
+
+
+def unregister_worker_subprocess(worker_id, proc):
+    if not worker_id or proc is None:
+        return
+    with _subprocess_registry_lock:
+        procs = _subprocess_registry.get(worker_id)
+        if procs is not None:
+            procs.discard(proc)
+            if not procs:
+                _subprocess_registry.pop(worker_id, None)
+
+
+def kill_worker_subprocesses(worker_id):
+    """Force-terminate every live subprocess tied to worker_id.
+
+    Returns the count of processes killed. Safe to call even if the
+    worker has no live subprocesses.
+    """
+    if not worker_id:
+        return 0
+    with _subprocess_registry_lock:
+        procs = list(_subprocess_registry.get(worker_id, []))
+    killed = 0
+    for p in procs:
+        try:
+            if p.is_alive():
+                _terminate_process_tree(p.pid)
+                killed += 1
+        except Exception:
+            pass
+    return killed
+
+
+def _tool_error_preview(result, limit=500):
+    """Return a compact error string from a tool result, if one is present."""
+    if result is None:
+        return None
+    if isinstance(result, str):
+        result_str = result
+    else:
+        result_str = str(result)
+    try:
+        parsed = json.loads(result_str)
+        if isinstance(parsed, dict):
+            for key in ("error", "message", "status"):
+                value = parsed.get(key)
+                if value and (key == "error" or parsed.get("status") == "error"):
+                    text = str(value)
+                    return text[:limit]
+    except Exception:
+        pass
+    if '"error"' in result_str[:100] or result_str.lower().startswith("error"):
+        return result_str[:limit]
+    return None
+
+
+def _invoke_provider_direct(
+    prompt, model=None, max_turns=25, provider=None, complexity_tier=None
+):
+    effective_provider = provider or AI_PROVIDER
+    selected_model = _require_model_name(model, effective_provider)
+
+    # Pre-call quota-pause gate (Q1 + Q9): if (provider, model) is currently
+    # walled, short-circuit before hitting the API. Synthesize a quota_paused
+    # result so the caller can log it and the worker can pause.
+    from provider_pause import (
+        detect_quota_wall,
+        get_default_manager,
+        QUOTA_PAUSE_THRESHOLD_SECONDS,
+    )
+
+    pause_mgr = get_default_manager()
+    paused_until = pause_mgr.wait_until(effective_provider, selected_model)
+    if paused_until is not None:
+        reason = pause_mgr.reason(effective_provider, selected_model) or "quota wall"
+        print(
+            f"  [{effective_provider}] quota wall active — paused until "
+            f"{paused_until.isoformat()} ({reason})",
+            flush=True,
+        )
+        return (
+            None,
+            {
+                "tool_calls": 0,
+                "tool_calls_known": True,
+                "provider_error": f"quota_paused: {reason}",
+                "provider_error_type": "QuotaPaused",
+                "quota_paused": True,
+                "quota_paused_until": paused_until.isoformat(),
+                "quota_paused_reason": reason,
+            },
+        )
+
+    if effective_provider == "minimax":
+        result = _invoke_minimax(
+            prompt, selected_model, max_turns, complexity_tier=complexity_tier
+        )
+    elif effective_provider == "codex":
+        result = _wrap_result(_invoke_codex(prompt, selected_model, max_turns))
+    elif effective_provider == "gemini":
+        # Gemini's wrapper already integrates quota-wall detection inline so
+        # it can break out of its retry loop — return its result directly.
+        return _invoke_gemini(prompt, selected_model, max_turns)
+    else:
+        result = _wrap_result(_invoke_claude(prompt, selected_model, max_turns))
+
+    # Post-call detection (Q6) for claude/codex/minimax: if the call returned
+    # an error string, run the per-provider detector. Above-threshold matches
+    # install a pause so the next worker on the same model short-circuits.
+    text, meta = result
+    err_str = (meta or {}).get("provider_error") or ""
+    http_status = (meta or {}).get("provider_http_status")
+    if err_str:
+        wall = detect_quota_wall(effective_provider, err_str, http_status=http_status)
+        if wall is not None and wall.raw_seconds >= QUOTA_PAUSE_THRESHOLD_SECONDS:
+            until = pause_mgr.install(effective_provider, selected_model, wall)
+            print(
+                f"  [{effective_provider}] quota wall — paused until "
+                f"{until.isoformat()} ({wall.reason})",
+                flush=True,
+            )
+            meta = dict(meta or {})
+            meta["provider_error_type"] = "QuotaPaused"
+            meta["quota_paused"] = True
+            meta["quota_paused_until"] = until.isoformat()
+            meta["quota_paused_reason"] = wall.reason
+            return (text, meta)
+
+    return result
+
+
+def _restore_debug_context_for_worker(debug_ctx=None, log_dir=None):
+    """Restore parent debug logging state inside a spawned provider worker."""
+    global LOG_DIR
+    if log_dir:
+        LOG_DIR = Path(log_dir)
+    if debug_ctx:
+        _debug_ctx.set(dict(debug_ctx))
+
+
+def _provider_worker_entry(
+    result_queue,
+    prompt,
+    model,
+    max_turns,
+    provider,
+    complexity_tier,
+    debug_ctx=None,
+    log_dir=None,
+    events_queue=None,
+    worker_id=None,
+):
+    _restore_debug_context_for_worker(debug_ctx, log_dir)
+    # Wire up cross-process event propagation. Every bus_emit in this
+    # subprocess will now be put on events_queue; the parent drains
+    # and re-emits on its own bus so the dashboard bridge forwards
+    # tool_call/tool_result to SocketIO.
+    if events_queue is not None:
+        try:
+            from event_bus import set_cross_process_queue
+
+            set_cross_process_queue(events_queue, worker_id=worker_id)
+        except Exception:
+            pass
+    try:
+        result_queue.put(
+            {
+                "ok": True,
+                "result": _invoke_provider_direct(
+                    prompt,
+                    model=model,
+                    max_turns=max_turns,
+                    provider=provider,
+                    complexity_tier=complexity_tier,
+                ),
+            }
+        )
+    except Exception as exc:
+        result_queue.put(
+            {
+                "ok": False,
+                "error": repr(exc),
+                "error_type": type(exc).__name__,
+                "traceback": traceback.format_exc(),
+            }
+        )
+
+
+def _invoke_provider_with_watchdog(
+    prompt, model=None, max_turns=25, provider=None, complexity_tier=None
+):
+    effective_provider = provider or AI_PROVIDER
+    timeout_secs = _provider_timeout_seconds(effective_provider, complexity_tier)
+    debug_ctx = dict(_debug_ctx.get())
+    ctx = multiprocessing.get_context("spawn")
+    result_queue = ctx.Queue(maxsize=1)
+
+    # Cross-process event queue: the subprocess's bus_emit pushes events
+    # here; a drain thread in this (parent) process reads and re-emits
+    # them on the parent bus. Bounded size prevents memory blow-up if
+    # the drain thread can't keep up with a chatty provider; put_nowait
+    # drops on full so the subprocess never blocks.
+    events_queue = ctx.Queue(maxsize=10000)
+    drain_stop = threading.Event()
+    parent_worker_id = get_worker_id()
+
+    def _drain_events():
+        # Stops when the stop flag is set AND the queue is fully drained.
+        # Emits on the parent's bus so the dashboard bridge forwards to
+        # SocketIO. Each event from the subprocess already carries
+        # worker_id (pinned via set_cross_process_queue), so the event
+        # shape matches what in-process emits produce.
+        while not drain_stop.is_set():
+            try:
+                event = events_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            except (ValueError, OSError):
+                # Queue was closed under us — nothing more to drain.
+                return
+            try:
+                event_type, data = event
+                get_bus().emit(event_type, data)
+            except Exception:
+                pass  # never let one bad event kill the drain loop
+        # Final drain after stop signal — flush whatever the subprocess
+        # emitted right before exit.
+        try:
+            while True:
+                event_type, data = events_queue.get_nowait()
+                try:
+                    get_bus().emit(event_type, data)
+                except Exception:
+                    pass
+        except (queue.Empty, ValueError, OSError):
+            pass
+
+    drain_thread = threading.Thread(
+        target=_drain_events, daemon=True, name=f"event-drain-{effective_provider}"
+    )
+    drain_thread.start()
+
+    worker = ctx.Process(
+        target=_provider_worker_entry,
+        args=(
+            result_queue,
+            prompt,
+            model,
+            max_turns,
+            effective_provider,
+            complexity_tier,
+            debug_ctx,
+            str(LOG_DIR),
+            events_queue,
+            parent_worker_id,
+        ),
+    )
+    worker.start()
+    # Register with the stall-watchdog so it can force-kill this subprocess
+    # when the parent worker thread has been wedged past the threshold.
+    register_worker_subprocess(parent_worker_id, worker)
+
+    result_msg = None
+    deadline = time.time() + timeout_secs
+    try:
+        while time.time() < deadline:
+            try:
+                result_msg = result_queue.get(timeout=1)
+                break
+            except queue.Empty:
+                if not worker.is_alive():
+                    break
+
+        if result_msg is None and worker.is_alive():
+            timeout_message = (
+                f"{effective_provider} session hard timeout after {timeout_secs}s"
+            )
+            print(
+                f"  [{effective_provider}] hard timeout after {timeout_secs}s — terminating stalled session",
+                flush=True,
+            )
+            bus_emit(
+                "provider_timeout",
+                {
+                    "provider": effective_provider,
+                    "timeout_secs": timeout_secs,
+                    "message": timeout_message,
+                    "session_killed": True,
+                },
+            )
+            _terminate_process_tree(worker.pid)
+            worker.join(timeout=10)
+            if worker.is_alive():
+                worker.kill()
+                worker.join(timeout=5)
+            return (
+                f"BLOCKED: {timeout_message}",
+                {
+                    "tool_calls": 0,
+                    "tool_calls_known": True,
+                    "timed_out": True,
+                    "timeout_provider": effective_provider,
+                    "timeout_secs": timeout_secs,
+                },
+            )
+
+        worker.join(timeout=5)
+        if result_msg is None:
+            if worker.exitcode not in (0, None):
+                print(
+                    f"ERROR: {effective_provider} worker exited with code {worker.exitcode}",
+                    flush=True,
+                )
+            return (None, {"tool_calls": 0, "tool_calls_known": True})
+
+        if not result_msg.get("ok"):
+            tb = result_msg.get("traceback")
+            print(
+                f"ERROR: {effective_provider} worker failed: {result_msg.get('error')}",
+                flush=True,
+            )
+            if tb:
+                print(tb.rstrip(), flush=True)
+            return (
+                None,
+                {
+                    "tool_calls": 0,
+                    "tool_calls_known": True,
+                    "provider_error": result_msg.get("error"),
+                    "provider_error_type": result_msg.get("error_type"),
+                    "provider_traceback": tb,
+                },
+            )
+
+        return _wrap_result(result_msg.get("result"))
+    finally:
+        try:
+            result_queue.close()
+            result_queue.join_thread()
+        except Exception:
+            pass
+        if worker.is_alive():
+            _terminate_process_tree(worker.pid)
+            worker.join(timeout=5)
+        unregister_worker_subprocess(parent_worker_id, worker)
+        # Stop the drain thread and close the events queue. The drain
+        # loop does a final flush before exiting so no events-on-the-wire
+        # get dropped between the subprocess's last emit and shutdown.
+        # Order matters: join the drain thread BEFORE closing the queue,
+        # otherwise the final get_nowait() flush races with close() and
+        # raises ValueError: Queue is closed.
+        drain_stop.set()
+        drain_thread.join(timeout=2)
+        try:
+            events_queue.close()
+            events_queue.join_thread()
+        except Exception:
+            pass
 
 
 def invoke_claude(
-    prompt, model="sonnet", max_turns=25, provider=None, complexity_tier=None
+    prompt, model=None, max_turns=25, provider=None, complexity_tier=None
 ):
     """Invoke the configured AI provider."""
-    effective_provider = provider or AI_PROVIDER
-    if effective_provider == "minimax":
-        return _invoke_minimax(
-            prompt, model, max_turns, complexity_tier=complexity_tier
-        )
-    if effective_provider == "codex":
-        return _wrap_result(_invoke_codex(prompt, model, max_turns))
-    if effective_provider == "gemini":
-        return _invoke_gemini(prompt, model, max_turns)
-
-    return _wrap_result(_invoke_claude(prompt, model, max_turns))
+    return _invoke_provider_with_watchdog(
+        prompt,
+        model=model,
+        max_turns=max_turns,
+        provider=provider,
+        complexity_tier=complexity_tier,
+    )
 
 
-def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
+def _invoke_codex(prompt, model=None, max_turns=25):
     """Invoke Codex via the Python SDK with MCP tool support."""
     import asyncio
+
+    model = _require_model_name(model, "codex")
 
     try:
         from openai_codex_sdk import Codex
@@ -3016,6 +4175,7 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
         # Use streamed mode to show progress
         streamed = await thread.run_streamed(prompt)
         output_parts = []
+        tool_call_count = 0
         async for event in streamed.events:
             event_type = getattr(event, "type", "")
             if event_type == "item.completed":
@@ -3026,18 +4186,16 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
                     print(text)
                     output_parts.append(str(text))
                 elif item_type == "McpToolCallItem":
+                    tool_call_count += 1
                     tool = getattr(
                         item,
                         "tool",
                         getattr(item, "tool_name", getattr(item, "name", "?")),
                     )
+                    normalized_tool = _normalize_tool_name(tool)
                     server = getattr(item, "server", "")
                     raw_status = getattr(item, "status", "?")
                     status = "error" if raw_status in ("failed", "error") else "success"
-                    print(f"  [mcp] {tool}: calling", flush=True)
-                    print(f"  [mcp] {tool}: {status}", flush=True)
-                    bus_emit("tool_call", {"tool": tool, "status": "calling"})
-                    bus_emit("tool_result", {"tool": tool, "status": status})
 
                     # Best-effort args/result extraction. Codex SDK item shapes
                     # vary by version, so try a few common attribute names.
@@ -3059,6 +4217,31 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
                     )
                     if result_obj is not None and hasattr(result_obj, "content"):
                         result_obj = result_obj.content
+                    error_preview = (
+                        _tool_error_preview(result_obj) if status == "error" else None
+                    )
+                    print(f"  [mcp] {normalized_tool}: calling", flush=True)
+                    print(
+                        f"  [mcp] {normalized_tool}: {status}"
+                        + (f" - {error_preview}" if error_preview else ""),
+                        flush=True,
+                    )
+                    bus_emit(
+                        "tool_call",
+                        {
+                            "tool": normalized_tool,
+                            "raw_tool": tool,
+                            "status": "calling",
+                        },
+                    )
+                    payload = {
+                        "tool": normalized_tool,
+                        "raw_tool": tool,
+                        "status": status,
+                    }
+                    if error_preview:
+                        payload["error"] = error_preview
+                    bus_emit("tool_result", payload)
                     # Codex doesn't expose start/end times on the item, leave duration None
                     _debug_log_tool_call(tool, args, result_obj, status, None)
             elif event_type == "turn.completed":
@@ -3067,7 +4250,10 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
                     tokens = getattr(usage, "total_tokens", "?")
                     print(f"  [tokens: {tokens}]", flush=True)
 
-        return "\n".join(output_parts) if output_parts else None
+        return (
+            "\n".join(output_parts) if output_parts else None,
+            {"tool_calls": tool_call_count, "tool_calls_known": True},
+        )
 
     # Retry transient Codex CLI crashes (exit code 1 with "Reading prompt from stdin")
     last_err = None
@@ -3091,9 +4277,11 @@ def _invoke_codex(prompt, model="gpt-5.3-codex", max_turns=25):
     return None
 
 
-def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
+def _invoke_gemini(prompt, model=None, max_turns=25):
     """Invoke Gemini via the gemini-cli-sdk with native MCP tool support."""
     import asyncio
+
+    model = _require_model_name(model, "gemini")
 
     try:
         from gemini_cli_sdk import GeminiCli, GeminiOptions
@@ -3120,7 +4308,7 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
             model=model,
             approval_mode="yolo",
             allowed_mcp_servers=["ghidra-mcp"],
-            cwd=str(REPO_ROOT),
+            cwd=str(SCRIPT_DIR),
             timeout=600.0,
         )
         cli = GeminiCli(options)
@@ -3128,6 +4316,16 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
         output_parts = []
         tool_call_count = 0
         event_count = 0
+        fatal_error_message = None
+        bus_emit(
+            "provider_turn",
+            {
+                "provider": "gemini",
+                "model": model,
+                "status": "request_start",
+                "max_turns": max_turns,
+            },
+        )
 
         async for event in cli.run(prompt):
             event_count += 1
@@ -3136,29 +4334,59 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
                     f"  [gemini] session={event.session_id} model={event.model}",
                     flush=True,
                 )
+                bus_emit(
+                    "provider_turn",
+                    {
+                        "provider": "gemini",
+                        "model": event.model,
+                        "status": "session_start",
+                        "session_id": event.session_id,
+                    },
+                )
             elif isinstance(event, MessageEvent):
                 if event.role == "assistant" and event.content:
                     print(event.content)
                     output_parts.append(event.content)
             elif isinstance(event, ToolUseEvent):
                 tool_call_count += 1
-                short_name = (
-                    event.name.removeprefix("mcp_ghidra-mcp_") if event.name else ""
-                )
+                short_name = _normalize_tool_name(event.name)
                 print(f"  [mcp] {short_name}: calling", flush=True)
-                bus_emit("tool_call", {"tool": event.name, "status": "calling"})
+                bus_emit(
+                    "tool_call",
+                    {"tool": short_name, "raw_tool": event.name, "status": "calling"},
+                )
                 _debug_log_tool_call(event.name, event.arguments, None, "calling", None)
             elif isinstance(event, ToolResultEvent):
                 status = "error" if event.is_error else "success"
-                short_name = (
-                    event.name.removeprefix("mcp_ghidra-mcp_") if event.name else ""
-                )
+                short_name = _normalize_tool_name(event.name)
                 print(f"  [mcp] {short_name}: {status}", flush=True)
-                bus_emit("tool_result", {"tool": event.name, "status": status})
+                error_preview = (
+                    _tool_error_preview(event.output) if event.is_error else None
+                )
+                bus_emit(
+                    "tool_result",
+                    {
+                        "tool": short_name,
+                        "raw_tool": event.name,
+                        "status": status,
+                        **({"error": error_preview} if error_preview else {}),
+                    },
+                )
                 _debug_log_tool_call(event.name, {}, event.output, status, None)
             elif isinstance(event, ErrorEvent):
                 print(f"  [gemini error] {event.message}", flush=True)
+                bus_emit(
+                    "provider_turn",
+                    {
+                        "provider": "gemini",
+                        "model": model,
+                        "status": "error",
+                        "fatal": bool(event.fatal),
+                        "error": str(event.message)[:300],
+                    },
+                )
                 if event.fatal:
+                    fatal_error_message = str(event.message)
                     break
             elif isinstance(event, ResultEvent):
                 if event.response:
@@ -3168,8 +4396,30 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
                         f"  [tokens: in={event.input_tokens} out={event.output_tokens}]",
                         flush=True,
                     )
+                bus_emit(
+                    "provider_turn",
+                    {
+                        "provider": "gemini",
+                        "model": model,
+                        "status": "result",
+                        "tool_calls_so_far": tool_call_count,
+                        "input_tokens": event.input_tokens,
+                        "output_tokens": event.output_tokens,
+                    },
+                )
 
         text = "\n".join(output_parts) if output_parts else None
+        bus_emit(
+            "provider_turn",
+            {
+                "provider": "gemini",
+                "model": model,
+                "status": "complete",
+                "events": event_count,
+                "tool_calls": tool_call_count,
+                "has_output": bool(text),
+            },
+        )
         if not text and event_count == 0:
             print(
                 "  [gemini] WARNING: CLI produced 0 events — session may have "
@@ -3182,19 +4432,33 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
                 f"(tool_calls={tool_call_count})",
                 flush=True,
             )
-        return (text, {"tool_calls": tool_call_count})
+        if fatal_error_message and tool_call_count == 0 and not text:
+            raise RuntimeError(fatal_error_message)
+        return (text, {"tool_calls": tool_call_count, "tool_calls_known": True})
 
     # Retry on transient Gemini capacity/rate-limit errors.
-    # The Gemini CLI has its own internal retries but uses short backoffs that
-    # aren't enough when the model is fully saturated (429 / RESOURCE_EXHAUSTED).
-    # We add longer waits between whole-session retries.
+    # Quota walls (Q9: detect on first failure when unambiguous) skip the
+    # retry chain entirely and install a pause entry — those retries would
+    # just re-discover the same wall in 90s of wasted time.
+    from provider_pause import (
+        detect_quota_wall,
+        get_default_manager,
+        QUOTA_PAUSE_THRESHOLD_SECONDS,
+    )
+
     last_err = None
+    pause_info = None
     for _attempt in range(3):
         try:
             return asyncio.run(run())
         except Exception as e:
             last_err = e
             err_str = str(e)
+            # Q9: unambiguous quota wall -> immediate pause, no retries.
+            wall = detect_quota_wall("gemini", err_str)
+            if wall and wall.raw_seconds >= QUOTA_PAUSE_THRESHOLD_SECONDS:
+                pause_info = wall
+                break
             is_transient = any(
                 k in err_str
                 for k in ("429", "RESOURCE_EXHAUSTED", "capacity", "rateLimitExceeded")
@@ -3209,11 +4473,127 @@ def _invoke_gemini(prompt, model="gemini-2.5-pro", max_turns=25):
                 time.sleep(wait)
             else:
                 break
-    print(f"ERROR: Gemini CLI failed: {last_err}", file=sys.stderr)
-    return (None, {"tool_calls": 0})
+
+    # Quota wall reached: install pause so other workers on this model
+    # short-circuit immediately, and surface a "quota_paused" provider_error
+    # so the run record & dashboard explain the silence.
+    if pause_info is not None:
+        until = get_default_manager().install("gemini", model, pause_info)
+        print(
+            f"  [gemini] quota wall — paused until {until.isoformat()} "
+            f"({pause_info.reason})",
+            flush=True,
+        )
+        return (
+            None,
+            {
+                "tool_calls": 0,
+                "tool_calls_known": True,
+                "provider_error": str(last_err)[:500],
+                "provider_error_type": "QuotaPaused",
+                "quota_paused": True,
+                "quota_paused_until": until.isoformat(),
+                "quota_paused_reason": pause_info.reason,
+            },
+        )
+
+    # Non-quota failure — surface the error so the dashboard/runs.jsonl shows
+    # why this run was empty (previously: silent tool_calls=0, output=null).
+    err_str_for_log = str(last_err) if last_err is not None else "unknown"
+    print(f"ERROR: Gemini CLI failed: {err_str_for_log}", file=sys.stderr)
+    return (
+        None,
+        {
+            "tool_calls": 0,
+            "tool_calls_known": True,
+            "provider_error": err_str_for_log[:500],
+            "provider_error_type": (
+                type(last_err).__name__ if last_err is not None else "Unknown"
+            ),
+        },
+    )
 
 
-def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=None):
+# Tools MiniMax actually uses for RE documentation (empirically derived from 194
+# runs / 8,134 tool calls). Filtering from 171 → 62 tools cuts schema payload
+# by ~60%, saving ~20k tokens × every API turn = hundreds of thousands of tokens
+# per run. Tools not in this set exist in the Ghidra schema but are never called
+# (debugger, emulation, BSim, project-management, etc.).
+_MINIMAX_DOC_TOOL_ALLOWLIST = {
+    # ── Read / analysis ──────────────────────────────────────────────────
+    "decompile_function",
+    "disassemble_function",
+    "disassemble_bytes",
+    "force_decompile",
+    "get_function_variables",
+    "get_function_signature",
+    "get_function_callers",
+    "get_function_callees",
+    "get_function_by_address",
+    "get_function_documentation",
+    "get_function_xrefs",
+    "get_function_jump_targets",
+    "get_plate_comment",
+    "get_assembly_context",
+    "get_xrefs_from",
+    "get_xrefs_to",
+    "get_bulk_xrefs",
+    "get_struct_layout",
+    "get_type_size",
+    "get_current_program_info",
+    "inspect_memory_content",
+    "read_memory",
+    "search_data_types",
+    "search_functions",
+    "search_strings",
+    "search_byte_patterns",
+    "list_globals",
+    "list_functions",
+    "list_data_types",
+    "list_data_type_categories",
+    "list_calling_conventions",
+    "list_external_locations",
+    "list_bookmarks",
+    "validate_data_type_exists",
+    "get_valid_data_types",
+    "analyze_function_complete",
+    "analyze_function_completeness",
+    "analyze_data_region",
+    "analyze_dataflow",
+    "analyze_struct_field_usage",
+    "analyze_for_documentation",
+    # ── Write ─────────────────────────────────────────────────────────────
+    "rename_function_by_address",
+    "rename_variables",
+    "rename_variable",
+    "rename_or_label",
+    "rename_label",
+    "rename_global_variable",
+    "batch_rename_function_components",
+    "batch_create_labels",
+    "set_function_prototype",
+    "set_local_variable_type",
+    "set_parameter_type",
+    "set_variables",
+    "set_plate_comment",
+    "batch_set_comments",
+    "set_disassembly_comment",
+    "set_decompiler_comment",
+    "apply_data_type",
+    # ── Data types ────────────────────────────────────────────────────────
+    "create_struct",
+    "add_struct_field",
+    "modify_struct_field",
+    "remove_struct_field",
+    "create_array_type",
+    "create_pointer_type",
+    "create_typedef",
+    "create_function_signature",
+    "delete_data_type",
+}
+
+
+def _invoke_minimax(prompt, model=None, max_turns=25, complexity_tier=None):
     """Invoke MiniMax via OpenAI-compatible API with tool-calling agent loop.
 
     Fetches Ghidra MCP tool schemas, converts them to OpenAI function definitions,
@@ -3228,6 +4608,8 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
             file=sys.stderr,
         )
         return None
+
+    model = _require_model_name(model, "minimax")
 
     api_key = os.environ.get("MINIMAX_API_KEY")
     if not api_key:
@@ -3252,11 +4634,20 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
             name = path.lstrip("/")
             if not name:
                 continue
+            # Skip tools outside the documentation allowlist. This reduces schema
+            # payload from ~171 tools (130 kB) to ~62 tools (~47 kB), saving
+            # tens of thousands of tokens on every API turn.
+            if name not in _MINIMAX_DOC_TOOL_ALLOWLIST:
+                continue
             method = ep.get("method", "GET").upper()
             description = ep.get("description", name)
             params = ep.get("params", [])
 
-            # Build JSON schema for parameters
+            # Build JSON schema for parameters.
+            # Parameter descriptions are omitted — they add ~14kB to an already
+            # 60kB schema and models infer param meaning from the name + tool
+            # description. Dropping them saves ~5,900 tokens per API turn
+            # (~41k tokens per 7-turn run).
             properties = {}
             required = []
             for p in params:
@@ -3274,9 +4665,7 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
                     "float": "number",
                 }.get(ptype, "string")
                 prop = {"type": json_type}
-                pdesc = p.get("description", "")
-                if pdesc:
-                    prop["description"] = pdesc
+                # Omit param descriptions to keep schema compact
                 properties[pname] = prop
                 if p.get("required", False) and pname != "program":
                     required.append(pname)
@@ -3304,6 +4693,13 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
 
     if not tools_openai:
         print("  WARNING: No tools from /mcp/schema, running without tools", flush=True)
+
+    # Per-session decompile cache. decompile_function is called 3.2× per run on
+    # average; subsequent calls for the same address return the same pseudocode.
+    # Caching saves Ghidra HTTP round-trips (~280 ms each) and prevents duplicate
+    # decompile results from being appended to the conversation history, which
+    # would grow context size quadratically.
+    _decompile_cache: dict[str, str] = {}
 
     # --- Execute tool calls against Ghidra HTTP API ---
     def execute_tool_call(name, arguments):
@@ -3333,6 +4729,20 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
             query_params["program"] = arguments["program"]
             body_params.pop("program", None)
 
+        # Decompile cache: keyed by (address, program) so multi-binary sessions
+        # don't collide. Returns cached result immediately without hitting Ghidra.
+        if name == "decompile_function":
+            cache_key = (
+                str(query_params.get("address", "")),
+                str(query_params.get("program", "")),
+            )
+            if cache_key in _decompile_cache:
+                print(
+                    f"  [mcp] decompile_function: cache hit ({cache_key[0]})",
+                    flush=True,
+                )
+                return _decompile_cache[cache_key]
+
         try:
             if method == "POST":
                 result = ghidra_post(
@@ -3345,21 +4755,38 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
             if result is None:
                 return json.dumps({"error": f"Ghidra {method} {path} returned no data"})
             if isinstance(result, (dict, list)):
-                return json.dumps(result, default=str)
-            return str(result)
+                result_str = json.dumps(result, default=str)
+            else:
+                result_str = str(result)
+
+            # Populate decompile cache on first successful call
+            if name == "decompile_function" and '"error"' not in result_str[:100]:
+                _decompile_cache[cache_key] = result_str
+
+            return result_str
         except Exception as e:
             return json.dumps({"error": f"Tool execution failed: {str(e)}"})
 
     # --- Conversation loop ---
+    # 180s timeout: MiniMax occasionally hangs indefinitely under load (6 concurrent
+    # workers). Without a timeout the thread blocks forever with no output or retry.
     client = OpenAI(
         api_key=api_key,
         base_url="https://api.minimax.io/v1",
+        timeout=180.0,
     )
 
     messages = [
         {
             "role": "system",
-            "content": "You are a reverse engineering assistant with access to Ghidra MCP tools. Call tools to analyze and document functions. Be thorough and precise.",
+            "content": (
+                "You are a reverse engineering assistant with access to Ghidra MCP tools. "
+                "Call tools to analyze and document functions. Be thorough and precise.\n\n"
+                "CRITICAL EFFICIENCY RULE: Never call `set_disassembly_comment` more than once. "
+                "Always batch ALL disassembly/EOL comments into a SINGLE `batch_set_comments` call "
+                "with comment_type='EOL_COMMENT'. Each separate API call costs a full round-trip. "
+                "Collect all addresses that need EOL comments first, then submit them together."
+            ),
         },
         {"role": "user", "content": prompt},
     ]
@@ -3375,7 +4802,37 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
     else:
         max_output_tokens = 16384
 
+    # Context compression constants. After COMPRESS_AFTER tool exchanges the
+    # conversation history balloons (each Ghidra response can be 5-20 kB).
+    # We keep the last KEEP_RECENT exchanges verbatim and trim older tool
+    # *results* to a short stub — the model can still see what calls it made
+    # and what actions it took, but not re-read the full Ghidra output again.
+    COMPRESS_AFTER = 8  # start compressing once history exceeds this many exchanges
+    KEEP_RECENT = 6  # always keep these many recent exchanges uncompressed
+    TRIM_RESULT_TO = 300  # chars to keep from old tool results
+
+    def _compress_messages(msgs):
+        """Trim old tool-result content to reduce quadratic context growth."""
+        # Identify tool-result messages: role=="tool" (OpenAI format)
+        tool_result_indices = [
+            i
+            for i, m in enumerate(msgs)
+            if isinstance(m, dict) and m.get("role") == "tool"
+        ]
+        # Keep the most recent KEEP_RECENT result messages uncompressed
+        to_trim = tool_result_indices[: max(0, len(tool_result_indices) - KEEP_RECENT)]
+        for i in to_trim:
+            m = msgs[i]
+            content = m.get("content", "")
+            if isinstance(content, str) and len(content) > TRIM_RESULT_TO:
+                msgs[i] = dict(m, content=content[:TRIM_RESULT_TO] + "…[trimmed]")
+        return msgs
+
     for turn in range(max_turns):
+        # Compress history before building the next API request
+        if tool_call_count >= COMPRESS_AFTER:
+            messages = _compress_messages(messages)
+
         try:
             kwargs = {
                 "model": model,
@@ -3385,17 +4842,111 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
             }
             if tools_openai:
                 kwargs["tools"] = tools_openai
+                # Sequential tool calls: prevents the model from issuing parallel
+                # reads before processing earlier results, which causes it to miss
+                # context from tool responses and repeat the same calls.
+                kwargs["parallel_tool_calls"] = False
 
-            # Retry transient errors (429 rate limit, 529 overloaded, 5xx server)
+            # Retry transient errors (429 rate limit, 529 overloaded, 5xx server,
+            # and read/connect timeouts from the 180s client timeout above).
+            #
+            # The OpenAI-compatible MiniMax call is non-streaming, so no tool-call
+            # events can be emitted until the API returns an assistant message.
+            # Emit provider_turn wait events while the request is in flight so a
+            # quiet dashboard means "waiting on MiniMax", not "worker lost".
             response = None
             for _attempt in range(4):
                 try:
-                    response = client.chat.completions.create(**kwargs)
+                    import concurrent.futures
+
+                    started = time.perf_counter()
+                    bus_emit(
+                        "provider_turn",
+                        {
+                            "provider": "minimax",
+                            "model": model,
+                            "turn": turn + 1,
+                            "attempt": _attempt + 1,
+                            "status": "request_start",
+                            "tool_calls_so_far": tool_call_count,
+                            "messages": len(messages),
+                            "max_tokens": max_output_tokens,
+                        },
+                    )
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=1
+                    ) as executor:
+                        future = executor.submit(
+                            client.chat.completions.create, **kwargs
+                        )
+                        last_emit = 0
+                        while True:
+                            try:
+                                response = future.result(timeout=5)
+                                break
+                            except concurrent.futures.TimeoutError:
+                                elapsed = int(time.perf_counter() - started)
+                                if elapsed - last_emit >= 15:
+                                    last_emit = elapsed
+                                    bus_emit(
+                                        "provider_turn",
+                                        {
+                                            "provider": "minimax",
+                                            "model": model,
+                                            "turn": turn + 1,
+                                            "attempt": _attempt + 1,
+                                            "status": "waiting",
+                                            "elapsed_sec": elapsed,
+                                            "tool_calls_so_far": tool_call_count,
+                                        },
+                                    )
+                    elapsed_ms = int((time.perf_counter() - started) * 1000)
+                    bus_emit(
+                        "provider_turn",
+                        {
+                            "provider": "minimax",
+                            "model": model,
+                            "turn": turn + 1,
+                            "attempt": _attempt + 1,
+                            "status": "response",
+                            "elapsed_ms": elapsed_ms,
+                            "tool_calls_so_far": tool_call_count,
+                        },
+                    )
                     break
                 except Exception as api_err:
+                    elapsed_ms = (
+                        int((time.perf_counter() - started) * 1000)
+                        if "started" in locals()
+                        else None
+                    )
+                    bus_emit(
+                        "provider_turn",
+                        {
+                            "provider": "minimax",
+                            "model": model,
+                            "turn": turn + 1,
+                            "attempt": _attempt + 1,
+                            "status": "error",
+                            "elapsed_ms": elapsed_ms,
+                            "error": str(api_err)[:300],
+                        },
+                    )
                     err_str = str(api_err)
                     retryable = any(
-                        code in err_str for code in ("429", "529", "500", "502", "503")
+                        code in err_str
+                        for code in (
+                            "429",
+                            "529",
+                            "500",
+                            "502",
+                            "503",
+                            "Timeout",
+                            "timeout",
+                            "timed out",
+                            "ReadTimeout",
+                            "ConnectTimeout",
+                        )
                     )
                     if retryable and _attempt < 3:
                         wait = (2**_attempt) * 5  # 5s, 10s, 20s
@@ -3468,8 +5019,18 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
                     result_str = result_str[:50000] + "\n... (truncated)"
 
                 status = "error" if '"error"' in result_str[:100] else "success"
+                error_preview = (
+                    _tool_error_preview(result_str) if status == "error" else None
+                )
                 print(f"  [mcp] {fn_name}: {status}", flush=True)
-                bus_emit("tool_result", {"tool": fn_name, "status": status})
+                bus_emit(
+                    "tool_result",
+                    {
+                        "tool": fn_name,
+                        "status": status,
+                        **({"error": error_preview} if error_preview else {}),
+                    },
+                )
                 _debug_log_tool_call(fn_name, fn_args, result_str, status, duration_ms)
 
                 messages.append(
@@ -3521,9 +5082,11 @@ def _invoke_minimax(prompt, model="MiniMax-M2.7", max_turns=25, complexity_tier=
     )
 
 
-def _invoke_claude(prompt, model="sonnet", max_turns=25):
+def _invoke_claude(prompt, model=None, max_turns=25):
     """Invoke Claude Code via the Python SDK with MCP tool support."""
     import asyncio
+
+    model = _require_model_name(model, "claude")
 
     try:
         from claude_agent_sdk import query, ClaudeAgentOptions
@@ -3558,13 +5121,18 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                     "`get_function_variables`, `set_function_prototype`, "
                     "`decompile_function`) or the fully-qualified form "
                     "`mcp__ghidra-mcp__<tool_name>`. Do NOT use ToolSearch "
-                    "to look them up — they are not deferred tools."
+                    "to look them up — they are not deferred tools.\n\n"
+                    "EFFICIENCY RULE: When adding disassembly/EOL comments, "
+                    "batch ALL of them into ONE `batch_set_comments` call with "
+                    "comment_type='EOL_COMMENT'. Never call `set_disassembly_comment` "
+                    "more than once per run."
                 ),
             },
         )
 
         output_parts = []
         tool_id_to_name = {}
+        tool_call_count = 0
         # Pending tool-use info awaiting its matching tool-result block. Claude
         # Agent SDK delivers ToolUseBlock in AssistantMessage.content and the
         # corresponding ToolResultBlock in UserMessage.content (per the
@@ -3610,6 +5178,7 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
 
                     elif block_type == "ToolUseBlock":
                         tool_name = getattr(block, "name", "?")
+                        tool_call_count += 1
                         tool_id = getattr(block, "id", "")
                         tool_input = getattr(block, "input", None) or {}
                         tool_id_to_name[tool_id] = tool_name
@@ -3618,14 +5187,16 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                             "input": tool_input,
                             "start_time": time.perf_counter(),
                         }
+                        normalized_tool = _normalize_tool_name(tool_name)
                         print(
-                            f"  [mcp] {tool_name.removeprefix('mcp__ghidra-mcp__')}: calling",
+                            f"  [mcp] {normalized_tool}: calling",
                             flush=True,
                         )
                         bus_emit(
                             "tool_call",
                             {
-                                "tool": tool_name,
+                                "tool": normalized_tool,
+                                "raw_tool": tool_name,
                                 "status": "calling",
                                 "id": tool_id,
                             },
@@ -3655,18 +5226,24 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
                             if call_info
                             else None
                         )
+                        normalized_tool = _normalize_tool_name(tool_name)
+                        error_preview = (
+                            _tool_error_preview(result_text) if is_error else None
+                        )
                         print(
-                            f"  [mcp] {tool_name.removeprefix('mcp__ghidra-mcp__')}: {status}",
+                            f"  [mcp] {normalized_tool}: {status}"
+                            + (f" - {error_preview}" if error_preview else ""),
                             flush=True,
                         )
-                        bus_emit(
-                            "tool_result",
-                            {
-                                "tool": tool_name,
-                                "status": status,
-                                "id": tool_id,
-                            },
-                        )
+                        payload = {
+                            "tool": normalized_tool,
+                            "raw_tool": tool_name,
+                            "status": status,
+                            "id": tool_id,
+                        }
+                        if error_preview:
+                            payload["error"] = error_preview
+                        bus_emit("tool_result", payload)
                         _debug_log_tool_call(
                             tool_name,
                             args,
@@ -3705,13 +5282,16 @@ def _invoke_claude(prompt, model="sonnet", max_turns=25):
             err_str = str(e)
             if "not found" in err_str.lower():
                 raise
-            # Print all errors to stdout (stderr may not display in PowerShell)
+            # Print all errors to stdout because some host terminals may hide stderr.
             print(f"  [claude sdk error] {err_str}", flush=True)
 
         if mcp_init_failed:
             return "__MCP_INIT_FAILED__"
 
-        return "\n".join(output_parts) if output_parts else None
+        return (
+            "\n".join(output_parts) if output_parts else None,
+            {"tool_calls": tool_call_count, "tool_calls_known": True},
+        )
 
     # Retry on transient errors:
     #   - "not found": intermittent when previous Claude Code process is still exiting
@@ -4104,8 +5684,158 @@ def _append_run_log(entry):
             with open(LOG_FILE, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
         bus_emit("run_logged", entry)
+        # Also emit a structured event so the canonical audit trail
+        # captures every run attempt. Mirrors the key fields only —
+        # the full row is still in runs.jsonl.
+        try:
+            from event_log import log_event
+
+            log_event(
+                "run.logged",
+                run_id=entry.get("run_id"),
+                worker_id=entry.get("worker_id"),
+                program=entry.get("program"),
+                address=entry.get("address"),
+                function=entry.get("function"),
+                provider=entry.get("provider"),
+                mode=entry.get("mode"),
+                result=entry.get("result"),
+                score_before=entry.get("score_before"),
+                score_after=entry.get("score_after"),
+                score_delta=entry.get("score_delta"),
+                tool_calls=entry.get("tool_calls"),
+                input_tokens=entry.get("input_tokens"),
+                output_tokens=entry.get("output_tokens"),
+                missing_artifacts=entry.get("missing_artifacts"),
+            )
+        except Exception:
+            pass  # never let event logging break run logging
+
+        # Update per-function cost history for thrashing detection.
+        # Best-effort — failures do not block run logging.
+        try:
+            _update_function_cost_history(entry)
+        except Exception:
+            pass
     except Exception as e:
         print(f"  WARNING: Failed to write run log: {e}", flush=True)
+        try:
+            from event_log import log_event
+
+            log_event("run.log_failed", error=str(e), error_type=type(e).__name__)
+        except Exception:
+            pass
+
+
+def _update_function_cost_history(entry):
+    """Append run metrics to the per-function attempts[] history.
+
+    Maintains cumulative cost counters per function so the dashboard can
+    surface thrashing (high spend, low delta). Keeps only the last 5
+    attempts to bound state.json growth. Uses update_function_state for
+    atomic RMW — safe under concurrent workers.
+
+    Thrashing criteria (is_thrashing=True when both hold):
+        - >= 2 attempts
+        - cost_per_point > 50_000 input tokens per +1 score_delta
+    """
+    program = entry.get("program")
+    address = entry.get("address")
+    if not program or not address:
+        return
+    result = entry.get("result")
+    # Only count runs that actually ran the model. Skipped/timed-out
+    # runs have no meaningful cost or delta and would skew the ratio.
+    if result not in ("completed", "partial", "failed", "needs_redo"):
+        return
+    in_tok = entry.get("input_tokens") or 0
+    out_tok = entry.get("output_tokens") or 0
+    sb = entry.get("score_before")
+    sa = entry.get("score_after")
+    delta = (
+        (sa - sb)
+        if isinstance(sa, (int, float)) and isinstance(sb, (int, float))
+        else 0
+    )
+
+    func_key = f"{program}::{address}"
+    # Re-read from state to pick up concurrent updates
+    latest = load_state()
+    func = (latest.get("functions") or {}).get(func_key)
+    if not func:
+        return  # function not yet in state — skip
+
+    attempts = list(func.get("attempts") or [])
+    attempts.append(
+        {
+            "ts": entry.get("timestamp"),
+            "provider": entry.get("provider"),
+            "mode": entry.get("mode"),
+            "result": result,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+            "tool_calls": entry.get("tool_calls"),
+            "score_before": sb,
+            "score_after": sa,
+            "delta": delta,
+        }
+    )
+    # Keep only last 5 to bound state size
+    attempts = attempts[-5:]
+
+    total_input = sum(a.get("input_tokens", 0) or 0 for a in attempts)
+    total_output = sum(a.get("output_tokens", 0) or 0 for a in attempts)
+    net_delta = sum(a.get("delta", 0) or 0 for a in attempts)
+    cost_per_point = (total_input / net_delta) if net_delta > 0 else None
+
+    is_thrashing = (
+        len(attempts) >= 2 and cost_per_point is not None and cost_per_point > 50_000
+    )
+
+    func["attempts"] = attempts
+    func["total_input_tokens"] = total_input
+    func["total_output_tokens"] = total_output
+    func["net_delta"] = net_delta
+    func["cost_per_point"] = (
+        round(cost_per_point, 0) if cost_per_point is not None else None
+    )
+    func["is_thrashing"] = is_thrashing
+
+    update_function_state(func_key, func)
+
+    # Emit structured event on the regression+thrashing inflection points
+    # so they're trivially findable later without joining runs.jsonl to state.
+    try:
+        from event_log import log_event
+
+        if delta < 0:
+            log_event(
+                "run.regression",
+                program=program,
+                address=address,
+                function=entry.get("function"),
+                provider=entry.get("provider"),
+                delta=delta,
+                input_tokens=in_tok,
+                score_before=sb,
+                score_after=sa,
+            )
+        if is_thrashing and not func.get("_thrashing_alerted"):
+            log_event(
+                "function.thrashing",
+                program=program,
+                address=address,
+                function=entry.get("function"),
+                attempts=len(attempts),
+                total_input_tokens=total_input,
+                net_delta=net_delta,
+                cost_per_point=int(cost_per_point or 0),
+            )
+            # Mark alerted so we don't spam on every subsequent attempt
+            func["_thrashing_alerted"] = True
+            update_function_state(func_key, func)
+    except Exception:
+        pass
 
 
 def _inject_tool_block(prompt):
@@ -4143,7 +5873,11 @@ def _inject_tool_block(prompt):
     tool_block += ", ".join(f"`{t}`" for t in sorted(registered))
     if missing:
         tool_block += f"\n\n**NOT registered** (do NOT call): {', '.join(f'`{t}`' for t in sorted(missing))}"
-    tool_block += "\n"
+    tool_block += (
+        "\n\n**Batching rule**: Use `batch_set_comments` with `comment_type='EOL_COMMENT'` "
+        "for ALL disassembly comments in a single call. Never call `set_disassembly_comment` "
+        "more than once per run — batch every address together.\n"
+    )
     return prompt + "\n" + tool_block
 
 
@@ -4156,18 +5890,132 @@ def process_function(
     dry_run=False,
     provider=None,
     stop_flag=None,
+    config_snapshot=None,
 ):
-    """Process a single function: fetch data, build prompt, invoke AI provider."""
+    """Process a single function: fetch data, build prompt, invoke AI provider.
+
+    `config_snapshot` is an optional frozen view of queue.config captured at
+    worker start (see build_worker_config_snapshot). When present, fields that
+    affect this worker's policy — max_turns, audit_provider, audit_min_delta,
+    complexity_handoff_provider, complexity_handoff_max, good_enough_score,
+    and per-provider model/turn slices — are read from the snapshot instead of
+    a live load_priority_queue() call. This makes worker behavior consistent
+    across the worker's lifetime even if someone edits the config dropdown
+    mid-run. CLI invocations and legacy callers that don't have a worker
+    context pass None and fall through to live reads (pre-snapshot behavior).
+    """
     if stop_flag and stop_flag.is_set():
         return "stopped"
 
     address = func["address"]
     program = func["program"]
     name = func["name"]
+    requested_provider = provider or AI_PROVIDER
+    requested_model = model
+    effective_provider = requested_provider
+    provider_chain = [requested_provider]
+    run_id = uuid.uuid4().hex[:12]
 
     # Set debug-logging context for any tool calls in this function's processing.
     # No-op when debug_mode is off; otherwise tool calls go to logs/debug/...
-    _debug_set_context(func_key, name, program, address, provider or AI_PROVIDER)
+    _debug_set_context(
+        func_key,
+        name,
+        program,
+        address,
+        requested_provider,
+        run_id,
+        requested_provider=requested_provider,
+    )
+
+    mode = None
+    selected_model = None
+    func_name = name
+    live_score = None
+    new_score = None
+    prompt = ""
+    output = None
+    meta = {}
+    tool_calls_made = None
+    tool_calls_known = None
+    complexity_tier = None
+    missing_artifacts = []
+    audit_provider = None
+    audit_outcome = None
+    audit_score_before = None
+    audit_score_after = None
+    audit_tool_calls = None
+    audit_tool_calls_known = None
+    run_log_written = False
+
+    def _log_run_once(logged_result, *, score_after=None, reason=None, error=None):
+        nonlocal run_log_written
+        if run_log_written:
+            return
+        run_log_written = True
+        final_score = new_score if score_after is None else score_after
+        score_delta = (
+            (final_score - live_score)
+            if (final_score is not None and live_score is not None)
+            else None
+        )
+        debug_path = None
+        if _debug_ctx.get().get("enabled", False):
+            path = _debug_get_log_path()
+            debug_path = str(path) if path else None
+        entry = {
+            "run_id": run_id,
+            "timestamp": datetime.now().isoformat(),
+            "program": program,
+            "address": address,
+            "function": func_name,
+            "mode": mode,
+            "model": selected_model,
+            "provider": effective_provider,
+            "requested_provider": requested_provider,
+            "requested_model": requested_model,
+            "provider_chain": provider_chain,
+            "score_before": live_score,
+            "score_after": final_score,
+            "score_delta": score_delta,
+            "result": logged_result,
+            "tool_calls": tool_calls_made,
+            "tool_calls_known": tool_calls_known,
+            "complexity_tier": complexity_tier,
+            "prompt_chars": len(prompt) if prompt else 0,
+            "debug_log": debug_path,
+            "missing_artifacts": missing_artifacts if missing_artifacts else None,
+            "audit_provider": (
+                audit_provider
+                if (audit_provider and logged_result in ("completed", "partial"))
+                else None
+            ),
+            "audit_outcome": audit_outcome,
+            "audit_score_before": audit_score_before,
+            "audit_score_after": audit_score_after,
+            "audit_tool_calls": audit_tool_calls,
+            "audit_tool_calls_known": audit_tool_calls_known,
+            "input_tokens": meta.get("input_tokens"),
+            "output_tokens": meta.get("output_tokens"),
+            "output": output[:5000] if output else None,
+            "reason": reason,
+            "error": error,
+            "provider_error": meta.get("provider_error"),
+            "provider_error_type": meta.get("provider_error_type"),
+            "provider_traceback": meta.get("provider_traceback"),
+        }
+        _append_run_log(entry)
+
+    def _finish(
+        return_value, *, logged_result=None, score_after=None, reason=None, error=None
+    ):
+        _log_run_once(
+            logged_result or return_value,
+            score_after=score_after,
+            reason=reason,
+            error=error,
+        )
+        return return_value
 
     bus_emit(
         "function_started",
@@ -4180,6 +6028,49 @@ def process_function(
     )
     print(f"\n  {name} @ 0x{address} ({func['program_name']})")
     print(f"  {'-' * 50}")
+
+    # Pre-flight: verify Ghidra is reachable before burning model tokens.
+    # On first offline detection, attempt to auto-launch Ghidra and wait for
+    # it to come back. If it stays offline, skip immediately.
+    if not check_ghidra_online():
+        print(
+            f"  GHIDRA OFFLINE \u2014 server not reachable at {GHIDRA_URL}", flush=True
+        )
+        launched = try_launch_ghidra()
+        if launched:
+            came_online = wait_for_ghidra(timeout_secs=120, poll_interval=5)
+            if came_online:
+                print("  Ghidra is back online. Resuming...", flush=True)
+            else:
+                print(
+                    "  Ghidra did not come online within 120s. Skipping function.",
+                    flush=True,
+                )
+                func["last_result"] = "ghidra_offline"
+                func["last_processed"] = datetime.now().isoformat()
+                update_function_state(func_key, func)
+                bus_emit(
+                    "function_complete",
+                    {"key": func_key, "result": "ghidra_offline", "score": None},
+                )
+                return _finish(
+                    "failed",
+                    logged_result="ghidra_offline",
+                    reason="Ghidra did not come online within 120s",
+                )
+        else:
+            func["last_result"] = "ghidra_offline"
+            func["last_processed"] = datetime.now().isoformat()
+            update_function_state(func_key, func)
+            bus_emit(
+                "function_complete",
+                {"key": func_key, "result": "ghidra_offline", "score": None},
+            )
+            return _finish(
+                "failed",
+                logged_result="ghidra_offline",
+                reason=f"server not reachable at {GHIDRA_URL}",
+            )
 
     # Determine mode from current score (with smart promotion from cached state)
     mode = determine_mode(func.get("score"), func.get("deductions"), func)
@@ -4195,6 +6086,29 @@ def process_function(
     # takes longer than the scoring path allows). Mark it and bail so the
     # selector stops re-picking it. Cleared by explicit refresh, same as
     # recovery_pass_done.
+    if data.get("ghidra_offline"):
+        print(
+            f"  GHIDRA OFFLINE — cannot fetch function data. Skipping until Ghidra is reachable.",
+            flush=True,
+        )
+        func["last_result"] = "ghidra_offline"
+        func["last_processed"] = datetime.now().isoformat()
+        update_function_state(func_key, func)
+        bus_emit(
+            "function_complete",
+            {
+                "key": func_key,
+                "result": "ghidra_offline",
+                "score": live_score,
+            },
+        )
+        return _finish(
+            "failed",
+            logged_result="ghidra_offline",
+            score_after=live_score,
+            reason="cannot fetch function data",
+        )
+
     if data.get("decompile_timeout"):
         func["decompile_timeout"] = True
         func["decompile_timeout_at"] = datetime.now().isoformat()
@@ -4215,7 +6129,11 @@ def process_function(
                 "score": live_score,
             },
         )
-        return "decompile_timeout"
+        return _finish(
+            "decompile_timeout",
+            score_after=live_score,
+            reason="decompile-heavy endpoint hit read timeout",
+        )
 
     # Refine mode based on live score and completeness context
     mode = determine_mode(live_score, data.get("deductions"), data.get("completeness"))
@@ -4253,9 +6171,16 @@ def process_function(
         # score. State.json scores can drift stale; without this gate, a function
         # the selector picked at (cached) 76% but is live 93% still burns tokens.
         # Pinned functions bypass the gate (user explicitly queued them).
+        # `good_enough_score` is read from the worker's frozen snapshot when one
+        # was supplied, so two workers started at different times under
+        # different thresholds don't get their behavior altered mid-run by
+        # someone moving the slider in the dashboard.
         queue = load_priority_queue()
         cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
-        good_enough = cfg.get("good_enough_score", 80)
+        if config_snapshot is not None:
+            good_enough = int(config_snapshot.get("good_enough_score", 80))
+        else:
+            good_enough = cfg.get("good_enough_score", 80)
         is_pinned = func_key in set(queue.get("pinned", []))
 
         # Pinned functions used to bypass this gate so the user could force
@@ -4282,7 +6207,12 @@ def process_function(
                 _increment_stale_skip_counter()
             auto_dequeue_if_done(func_key, live_score, source="skipped_above_threshold")
             _emit_skip(func_key, "above_threshold", reason, live_score)
-            return "skipped"
+            return _finish(
+                "skipped",
+                logged_result="skipped_above_threshold",
+                score_after=live_score,
+                reason=reason,
+            )
 
         # FIX mode only: skip if there's almost nothing fixable regardless of score
         if mode == "FIX" and fixable_pts < 3:
@@ -4293,7 +6223,12 @@ def process_function(
             update_function_state(func_key, func)
             auto_dequeue_if_done(func_key, live_score, source="skipped_no_fixable")
             _emit_skip(func_key, "no_fixable", reason, live_score)
-            return "skipped"
+            return _finish(
+                "skipped",
+                logged_result="skipped_complete",
+                score_after=live_score,
+                reason=reason,
+            )
 
         if mode == "VERIFY":
             reason = "100% complete"
@@ -4303,10 +6238,37 @@ def process_function(
             update_function_state(func_key, func)
             auto_dequeue_if_done(func_key, live_score, source="skipped_verify")
             _emit_skip(func_key, "verify_complete", reason, live_score)
-            return "skipped"
+            return _finish(
+                "skipped",
+                logged_result="skipped_complete",
+                score_after=live_score,
+                reason=reason,
+            )
 
     # Select model
-    selected_model = select_model(mode, model, provider=provider)
+    try:
+        selected_model = select_model(mode, model, provider=provider, config_snapshot=config_snapshot)
+    except ValueError as e:
+        reason = str(e)
+        print(f"  CONFIG ERROR: {reason}", flush=True)
+        func["last_result"] = "config_error"
+        func["last_processed"] = datetime.now().isoformat()
+        update_function_state(func_key, func)
+        bus_emit(
+            "function_complete",
+            {
+                "key": func_key,
+                "result": "config_error",
+                "score": live_score,
+                "error": reason,
+            },
+        )
+        return _finish(
+            "failed",
+            logged_result="config_error",
+            score_after=live_score,
+            error=reason,
+        )
 
     # Build prompt
     func_name = (
@@ -4336,7 +6298,7 @@ def process_function(
         prompt = build_full_doc_prompt(func_name, address, data, program=program)
 
     # Gemini has native MCP discovery — skip injecting tool block
-    effective_provider_for_tools = provider or AI_PROVIDER
+    effective_provider_for_tools = effective_provider
     if effective_provider_for_tools != "gemini":
         prompt = _inject_tool_block(prompt)
 
@@ -4379,13 +6341,14 @@ def process_function(
         recovery_prompt = build_recovery_prompt(
             func_name, address, data, program=program
         )
-        recovery_prompt = _inject_tool_block(recovery_prompt)
+        # Tool block injection is deferred until after provider finalization (handoff
+        # may switch effective_provider to gemini, which uses native MCP discovery
+        # and must NOT receive an injected tool block — doing so causes 0 tool calls).
         # Swap: run recovery prompt first, then re-fetch and build FIX prompt for pass 2
         prompt = recovery_prompt
         mode = "FULL:recovery"
 
     # Complexity gate: skip functions too complex for MiniMax
-    effective_provider = provider or AI_PROVIDER
     if effective_provider == "minimax" and mode in ("FULL", "FULL:recovery"):
         completeness = data.get("completeness")
         if completeness and isinstance(completeness, dict):
@@ -4412,25 +6375,53 @@ def process_function(
                 )
                 cap_reached = handoff_max > 0 and handoff_count >= handoff_max
 
+                # Q10: don't hand off to a walled provider — primary keeps
+                # the function. The handoff target's model is what matters
+                # for the wall, so resolve it before the gate check.
+                handoff_target_walled = False
+                if handoff_provider and handoff_provider != effective_provider:
+                    try:
+                        from provider_pause import get_default_manager as _get_pm
+
+                        _handoff_model = select_model(
+                            mode, provider=handoff_provider, config_snapshot=config_snapshot
+                        )
+                        if _handoff_model and _get_pm().is_paused(
+                            handoff_provider, _handoff_model
+                        ):
+                            handoff_target_walled = True
+                            print(
+                                f"  [handoff] skipped — {handoff_provider}/"
+                                f"{_handoff_model} walled; primary continues",
+                                flush=True,
+                            )
+                    except Exception:  # noqa: BLE001 — don't let pause check break handoff
+                        pass
+
                 can_handoff = (
                     handoff_provider
                     and handoff_provider != effective_provider
                     and not cap_reached
+                    and not handoff_target_walled
                 )
 
                 if can_handoff:
                     new_count = _bump_handoff_counter()
                     handoff_reason = f"{detail} — handoff #{new_count}"
-                    print(
-                        f"  HANDOFF: {effective_provider} -> {handoff_provider} "
-                        f"({handoff_reason})"
-                    )
+                    # The mode banner that prints next includes the new
+                    # provider's model when it deviates from the worker's
+                    # snapshot, which IS the handoff signal. The standalone
+                    # banner here was redundant with that — the deviation
+                    # in the mode banner tells you handoff fired and where
+                    # to. We still emit the function_mode bus event so the
+                    # dashboard pane shows HANDOFF:from->to.
                     _emit_handoff(
                         func_key,
                         effective_provider,
                         handoff_provider,
                         handoff_reason,
                         new_count,
+                        score=live_score,
                     )
                     # Stamp per-function escalation tracking
                     func["escalation_count"] = func.get("escalation_count", 0) + 1
@@ -4441,33 +6432,78 @@ def process_function(
                     # Swap provider for the rest of this function's processing
                     provider = handoff_provider
                     effective_provider = handoff_provider
-                    # Re-select the model for the new provider (mode hasn't changed)
-                    selected_model = select_model(mode, model, provider=provider)
+                    provider_chain.append(handoff_provider)
+                    _debug_update_context(provider=effective_provider)
+                    # Re-select the model for the new provider.
+                    # FULL:recovery and FULL:comments are sub-modes of FULL — use the
+                    # FULL dashboard config for model lookup after a handoff.
+                    lookup_mode = "FULL" if str(mode).startswith("FULL:") else mode
+                    try:
+                        selected_model = select_model(
+                            lookup_mode, model, provider=provider,
+                            config_snapshot=config_snapshot,
+                        )
+                    except ValueError as e:
+                        reason = str(e)
+                        print(f"  CONFIG ERROR: {reason}", flush=True)
+                        func["last_result"] = "config_error"
+                        func["last_processed"] = datetime.now().isoformat()
+                        update_function_state(func_key, func)
+                        _emit_skip(func_key, "config_error", reason, live_score)
+                        return _finish(
+                            "failed",
+                            logged_result="config_error",
+                            score_after=live_score,
+                            error=reason,
+                        )
                     # Fall through to invoke_claude — do NOT return
                 else:
-                    reason = f"Too complex for MiniMax ({detail})"
+                    # Handoff isn't available (none configured / cap reached /
+                    # target walled). Previously this skipped the function and
+                    # bumped consecutive_fails. That's wrong: if the user chose
+                    # not to configure a handoff, or the cap is reached, or the
+                    # target is temporarily walled, the right behavior is to
+                    # let the primary provider try the function with its own
+                    # model. Worst case the score doesn't improve and the
+                    # function naturally moves on; we don't penalize it for
+                    # something that's a deployment / config decision rather
+                    # than a quality signal.
                     if handoff_provider and cap_reached:
-                        reason += f" — handoff cap of {handoff_max} reached"
-                    elif not handoff_provider:
-                        reason += " — handoff disabled, set complexity_handoff_provider to enable"
-                    print(f"  SKIP: {reason}")
-                    func["last_result"] = "skipped_complexity"
-                    func["consecutive_fails"] = func.get("consecutive_fails", 0) + 1
-                    update_function_state(func_key, func)
-                    _emit_skip(func_key, "complexity", reason, live_score)
-                    return "skipped"
+                        note = (
+                            f"Complex function ({detail}) — handoff cap "
+                            f"{handoff_max} reached, primary continues"
+                        )
+                    elif handoff_target_walled:
+                        note = (
+                            f"Complex function ({detail}) — handoff target "
+                            f"{handoff_provider} walled, primary continues"
+                        )
+                    else:
+                        note = (
+                            f"Complex function ({detail}) — no handoff configured, "
+                            f"primary continues"
+                        )
+                    print(f"  NOTE: {note}", flush=True)
+                    # Intentionally fall through with current provider/model.
+
+    # Inject tool block for recovery pass now that the final provider is known.
+    # Gemini uses native MCP tool discovery — injecting a tool list into its prompt
+    # causes it to make 0 tool calls. All other providers need the injection.
+    if use_two_pass and effective_provider != "gemini":
+        prompt = _inject_tool_block(prompt)
 
     bus_emit(
         "function_mode",
         {"key": func_key, "mode": mode, "model": selected_model, "score": live_score},
     )
-    print(f"  {mode} | {selected_model} | {len(prompt):,} chars | score: {live_score}%")
+    _debug_update_context(provider=effective_provider)
+    print(_format_mode_banner(mode, selected_model, effective_provider, live_score, config_snapshot, prompt))
 
     if dry_run:
         print(
             f"  DRY RUN: Would invoke {'pass 1 (recovery)' if use_two_pass else 'Claude'}"
         )
-        return "dry_run"
+        return _finish("dry_run", score_after=live_score)
 
     # Manual mode
     if manual:
@@ -4507,15 +6543,63 @@ def process_function(
             print(f"  Score after: {new_score}%{delta}")
         update_function_state(func_key, func)
         if key == "q":
-            return "quit"
-        return "manual_prompt_generated"
+            return _finish("quit", score_after=new_score)
+        return _finish("manual_prompt_generated", score_after=new_score)
+
+    # Per-provider max_turns. Snapshot wins when present (frozen for the
+    # worker's life), falling through to live config for legacy/CLI invocations
+    # that don't have a worker context.
+    if config_snapshot is not None:
+        snap_providers = config_snapshot.get("providers") or {}
+        snap_entry = snap_providers.get(effective_provider) or {}
+        if snap_entry:
+            worker_max_turns = int(snap_entry.get("max_turns", 25))
+        else:
+            # Snapshot exists but didn't capture this provider — happens when
+            # an unconfigured-at-start escalation/handoff target gets invoked.
+            # Fall through to live config rather than guessing wrong.
+            _pmt = cfg.get("provider_max_turns") or {}
+            worker_max_turns = int(_pmt.get(effective_provider, 25))
+    else:
+        _pmt = cfg.get("provider_max_turns") or {}
+        worker_max_turns = int(_pmt.get(effective_provider, 25))
 
     # Auto mode: invoke AI (provider based on AI_PROVIDER)
     print()
     output, meta = invoke_claude(
-        prompt, model=selected_model, provider=provider, complexity_tier=complexity_tier
+        prompt,
+        model=selected_model,
+        provider=provider,
+        complexity_tier=complexity_tier,
+        max_turns=worker_max_turns,
     )
     tool_calls_made = meta.get("tool_calls", -1)
+    tool_calls_known = bool(meta.get("tool_calls_known", tool_calls_made != -1))
+
+    # Quota wall short-circuit (Q2): the provider returned `quota_paused`
+    # because (provider, model) is currently walled. Log the run as
+    # `quota_paused` so it appears in runs.jsonl for diagnostics, but DO
+    # NOT bump consecutive_fails — the wall is an account-wide transient
+    # condition, not a per-function quality signal. The worker loop will
+    # see the pause on its next iteration and yield until reset.
+    if meta.get("quota_paused"):
+        result = "quota_paused"
+        func["last_processed"] = datetime.now().isoformat()
+        func["last_result"] = result
+        # consecutive_fails counter intentionally untouched (Q2).
+        until_iso = meta.get("quota_paused_until")
+        reason = meta.get("quota_paused_reason") or "quota wall"
+        print(
+            f"  Quota wall: {provider}/{selected_model} paused until "
+            f"{until_iso} — function deferred ({reason})",
+            flush=True,
+        )
+        return _finish(
+            "quota_paused",
+            logged_result="quota_paused",
+            score_after=live_score,
+            reason=f"quota_paused until {until_iso}",
+        )
 
     # Two-pass: if recovery pass made tool calls, run pass 2 (comments) with fresh data
     # Don't gate on "DONE:" text — the model may produce think-only output or empty response
@@ -4544,18 +6628,17 @@ def process_function(
             else func_name
         )
         prompt2 = build_fix_prompt(func_name2, address, data2, program=program)
-        if effective_provider_for_tools != "gemini":
+        if effective_provider != "gemini":
             prompt2 = _inject_tool_block(prompt2)
         mode = "FULL:comments"
-        print(
-            f"  {mode} | {selected_model} | {len(prompt2):,} chars | score: {mid_score}%"
-        )
+        print(_format_mode_banner(mode, selected_model, effective_provider, mid_score, config_snapshot, prompt2))
         print()
         output2, meta2 = invoke_claude(
             prompt2,
             model=selected_model,
             provider=provider,
             complexity_tier=complexity_tier,
+            max_turns=worker_max_turns,
         )
         # Merge results: use pass 2 output for final parsing, sum tool calls.
         # Sentinel -1 means "unknown" — don't let -1 + -1 = -2 break
@@ -4563,12 +6646,14 @@ def process_function(
         if output2:
             output = output2
         tc2 = meta2.get("tool_calls", 0)
+        tc2_known = bool(meta2.get("tool_calls_known", tc2 != -1))
         if tool_calls_made == -1 and tc2 == -1:
             tool_calls_made = -1  # still unknown
         elif tool_calls_made == -1:
             tool_calls_made = tc2  # use the known value
         elif tc2 != -1:
             tool_calls_made += tc2  # both known, sum normally
+        tool_calls_known = tool_calls_known or tc2_known
 
     # Parse result
     result = "completed"
@@ -4832,13 +6917,22 @@ def process_function(
     audit_score_before = None
     audit_score_after = None
     audit_outcome = None  # "skipped_good_enough", "skipped_delta", "ran", or None
-    audit_cfg = (
-        cfg
-        if "audit_provider" in cfg
-        else ((load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG))
-    )
-    audit_provider = audit_cfg.get("audit_provider")
-    audit_min_delta = audit_cfg.get("audit_min_delta", 5)
+    audit_tool_calls = None
+    audit_tool_calls_known = None
+    if config_snapshot is not None:
+        # Frozen snapshot: audit policy was decided at worker start. Even if
+        # the dashboard dropdown moves mid-run, this worker keeps its original
+        # audit configuration for every function it processes.
+        audit_provider = config_snapshot.get("audit_provider")
+        audit_min_delta = int(config_snapshot.get("audit_min_delta", 5))
+    else:
+        audit_cfg = (
+            cfg
+            if "audit_provider" in cfg
+            else ((load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG))
+        )
+        audit_provider = audit_cfg.get("audit_provider")
+        audit_min_delta = audit_cfg.get("audit_min_delta", 5)
 
     if (
         audit_provider
@@ -4848,7 +6942,12 @@ def process_function(
         and mode not in ("VERIFY", "FULL:recovery")
     ):
         worker_diff = new_score - live_score
-        good_enough = audit_cfg.get("good_enough_score", 80)
+        # Use the snapshot's good_enough when present so an audit decision
+        # is consistent with the gate decision earlier in this same function.
+        if config_snapshot is not None:
+            good_enough = int(config_snapshot.get("good_enough_score", 80))
+        else:
+            good_enough = audit_cfg.get("good_enough_score", 80)
 
         if new_score >= good_enough:
             audit_outcome = "skipped_good_enough"
@@ -4887,101 +6986,125 @@ def process_function(
             if audit_provider != "gemini":
                 audit_prompt = _inject_tool_block(audit_prompt)
 
-            audit_outcome = "ran"
             audit_score_before = new_score
-            print(
-                f"  [audit] FIX | {audit_provider} | {len(audit_prompt):,} chars | score: {new_score}%"
-            )
-            print()
-            audit_output, audit_meta = invoke_claude(
-                audit_prompt,
-                model="sonnet",
-                provider=audit_provider,
-                max_turns=15,
-            )
-            audit_tool_calls = audit_meta.get("tool_calls", -1)
-
-            # Rescore after audit
-            audit_new_score, audit_completeness = _rescore_and_sync(
-                func, address, program
-            )
-            if audit_new_score is not None:
-                audit_score_after = audit_new_score
-                audit_diff = audit_new_score - audit_score_before
-                print(
-                    f"\n  [audit] {audit_provider}: done — "
-                    f"{audit_score_before}% -> {audit_new_score}% "
-                    f"({'+' if audit_diff >= 0 else ''}{audit_diff:.0f}%), "
-                    f"{audit_tool_calls} tool calls"
+            try:
+                audit_model = select_model(
+                    "FIX", provider=audit_provider, config_snapshot=config_snapshot
                 )
-                # Update tracked values for downstream logging
-                new_score = audit_new_score
-                post_completeness = audit_completeness
-                tool_calls_made += audit_tool_calls if audit_tool_calls > 0 else 0
-                # Upgrade partial to completed if audit pushed past issues
-                if result == "partial" and audit_diff > 0:
-                    result = "completed"
-                    func["last_result"] = result
+            except ValueError as e:
+                audit_outcome = "config_error"
+                print(f"  [audit] skipped — {e}")
+                bus_emit(
+                    "audit_complete",
+                    {
+                        "key": func_key,
+                        "provider": audit_provider,
+                        "score_before": audit_score_before,
+                        "score_after": None,
+                    },
+                )
             else:
-                print(f"\n  [audit] {audit_provider}: done — score unavailable")
+                audit_outcome = "ran"
+                print(
+                    f"  [audit] FIX | {audit_provider} | {len(audit_prompt):,} chars | score: {new_score}%"
+                )
+                print()
+                audit_output, audit_meta = invoke_claude(
+                    audit_prompt,
+                    model=audit_model,
+                    provider=audit_provider,
+                    max_turns=15,
+                )
+                # Q10: when audit's provider+model is walled, skip silently.
+                # Audit is a quality second-pass; a missed audit is harmless,
+                # we don't want to log it as a failure or count it against
+                # any threshold. The function keeps the primary worker's
+                # score and moves on.
+                if audit_meta.get("quota_paused"):
+                    audit_outcome = "quota_paused"
+                    audit_score_after = audit_score_before
+                    audit_tool_calls = 0
+                    audit_tool_calls_known = True
+                    print(
+                        f"  [audit] skipped — {audit_provider} walled until "
+                        f"{audit_meta.get('quota_paused_until')}",
+                        flush=True,
+                    )
+                    bus_emit(
+                        "audit_complete",
+                        {
+                            "key": func_key,
+                            "provider": audit_provider,
+                            "score_before": audit_score_before,
+                            "score_after": audit_score_before,
+                            "outcome": "quota_paused",
+                        },
+                    )
+                else:
+                    audit_tool_calls = audit_meta.get("tool_calls", -1)
+                    audit_tool_calls_known = bool(
+                        audit_meta.get("tool_calls_known", audit_tool_calls != -1)
+                    )
 
-            bus_emit(
-                "audit_complete",
-                {
-                    "key": func_key,
-                    "provider": audit_provider,
-                    "score_before": audit_score_before,
-                    "score_after": audit_new_score,
-                },
-            )
+                # Skip rescore when audit was quota-paused — the call never
+                # touched Ghidra so the score can't have changed.
+                if audit_outcome == "quota_paused":
+                    audit_new_score, audit_completeness = None, None
+                else:
+                    # Rescore after audit
+                    audit_new_score, audit_completeness = _rescore_and_sync(
+                        func, address, program
+                    )
+                if audit_new_score is not None:
+                    audit_score_after = audit_new_score
+                    audit_diff = audit_new_score - audit_score_before
+                    print(
+                        f"\n  [audit] {audit_provider}: done — "
+                        f"{audit_score_before}% -> {audit_new_score}% "
+                        f"({'+' if audit_diff >= 0 else ''}{audit_diff:.0f}%), "
+                        f"{audit_tool_calls} tool calls"
+                    )
+                    # Update tracked values for downstream logging
+                    new_score = audit_new_score
+                    post_completeness = audit_completeness
+                    tool_calls_made += audit_tool_calls if audit_tool_calls > 0 else 0
+                    # Upgrade partial to completed if audit pushed past issues
+                    if result == "partial" and audit_diff > 0:
+                        result = "completed"
+                        func["last_result"] = result
+                else:
+                    print(f"\n  [audit] {audit_provider}: done — score unavailable")
 
-            # Save program after audit writes
-            if audit_tool_calls != 0:
-                ghidra_post("/save_program", params={"program": program})
+                bus_emit(
+                    "audit_complete",
+                    {
+                        "key": func_key,
+                        "provider": audit_provider,
+                        "score_before": audit_score_before,
+                        "score_after": audit_new_score,
+                    },
+                )
 
-            # Stamp per-function audit tracking
-            func["audit_count"] = func.get("audit_count", 0) + 1
-            func["last_audited"] = datetime.now().isoformat()
-            func["last_audit_provider"] = audit_provider
-            func["last_audit_delta"] = audit_diff if audit_new_score is not None else 0
-            update_function_state(func_key, func)
+                # Save program after audit writes
+                if audit_tool_calls != 0:
+                    ghidra_post("/save_program", params={"program": program})
+
+                # Stamp per-function audit tracking
+                func["audit_count"] = func.get("audit_count", 0) + 1
+                func["last_audited"] = datetime.now().isoformat()
+                func["last_audit_provider"] = audit_provider
+                func["last_audit_delta"] = (
+                    audit_diff if audit_new_score is not None else 0
+                )
+                update_function_state(func_key, func)
 
     # Track partial_runs for requeue deprioritization
     if result == "partial":
         func["partial_runs"] = func.get("partial_runs", 0) + 1
 
-    # Log this run for audit trail
-    _append_run_log(
-        {
-            "timestamp": datetime.now().isoformat(),
-            "program": program,
-            "address": address,
-            "function": func_name,
-            "mode": mode,
-            "model": selected_model,
-            "provider": provider or AI_PROVIDER,
-            "score_before": live_score,
-            "score_after": new_score,
-            "score_delta": (
-                (new_score - live_score)
-                if (new_score is not None and live_score is not None)
-                else None
-            ),
-            "result": result,
-            "tool_calls": tool_calls_made,
-            "complexity_tier": complexity_tier,
-            "missing_artifacts": missing_artifacts if missing_artifacts else None,
-            "audit_provider": (
-                audit_provider
-                if (audit_provider and result in ("completed", "partial"))
-                else None
-            ),
-            "audit_outcome": audit_outcome,
-            "audit_score_before": audit_score_before,
-            "audit_score_after": audit_score_after,
-            "output": output[:5000] if output else None,
-        }
-    )
+    # Log this run for audit trail. Early exits use the same helper so
+    # runs.jsonl explains skips/config/offline failures too.
+    _log_run_once(result)
 
     bus_emit(
         "score_update",
@@ -4992,8 +7115,27 @@ def process_function(
             "result": result,
         },
     )
+    # Look up the post-rescore name so the dashboard's function-block
+    # footer can show the renamed function (the model often calls
+    # rename_function_by_address during documentation). State has been
+    # synced via _rescore_and_sync above, so it's the source of truth.
+    fresh_name_for_event = func.get("name")
+    try:
+        _fresh_state = load_state()
+        _entry = (_fresh_state.get("functions") or {}).get(func_key)
+        if _entry and _entry.get("name"):
+            fresh_name_for_event = _entry["name"]
+    except Exception:
+        pass
     bus_emit(
-        "function_complete", {"key": func_key, "result": result, "score": new_score}
+        "function_complete",
+        {
+            "key": func_key,
+            "result": result,
+            "score": new_score,
+            "name": fresh_name_for_event,
+            "address": address,
+        },
     )
 
     # Save program to persist changes in Ghidra
@@ -5008,7 +7150,7 @@ def process_function(
     # Recovery-pass one-shot: mark functions that finished a complexity-forced
     # recovery pass so the selector doesn't re-pick them on every cycle. These
     # massive functions legitimately can't reach good_enough_score in one pass
-    # — re-queuing burns opus/minimax tokens for marginal improvement. The
+    # — re-queuing burns extra provider budget for marginal improvement. The
     # flag clears on `--scan --refresh` or `refresh_candidate_scores`, or can
     # be bypassed by pinning the function explicitly.
     # Don't flag leaf functions — they're self-contained and should always
@@ -5117,12 +7259,12 @@ def main():
         "--provider",
         choices=["claude", "codex", "minimax", "gemini"],
         default=None,
-        help="AI provider (default: use AI_PROVIDER constant in script)",
+        help="AI provider override (default: use dashboard/default provider selection)",
     )
     parser.add_argument(
         "--model",
         default=None,
-        help="Override model selection (e.g., opus, sonnet, MiniMax-M2.7)",
+        help="Override model selection for this run",
     )
     parser.add_argument(
         "--max-turns", type=int, default=25, help="Max Claude turns (default: 25)"
@@ -5151,13 +7293,23 @@ def main():
         action="store_true",
         help="Disable auto-start of web dashboard (default: dashboard starts in background)",
     )
+    parser.add_argument(
+        "--state-file",
+        default=None,
+        help="Path to state JSON file (default: state.json next to this script)",
+    )
 
     args = parser.parse_args()
 
     # Override AI provider if specified via CLI
-    global AI_PROVIDER
+    global AI_PROVIDER, STATE_FILE
     if args.provider:
         AI_PROVIDER = args.provider
+
+    if args.state_file:
+        STATE_FILE = Path(args.state_file)
+        if not STATE_FILE.is_absolute():
+            STATE_FILE = Path.cwd() / STATE_FILE
 
     state = load_state()
 
@@ -5201,13 +7353,35 @@ def main():
         import tempfile
         import socket
 
+        dash_port = args.web_port
+
+        # Single-instance check. Only the process that owns the port can
+        # serve the browser; any second fun_doc that silently binds the
+        # same port would answer some requests and drop others. Skipping
+        # the whole dashboard setup here keeps every subsequent
+        # `python fun_doc.py ...` invocation a clean CLI command that
+        # defers to the already-running dashboard.
+        port_already_owned = False
+        try:
+            with socket.create_connection(("127.0.0.1", dash_port), timeout=0.3):
+                port_already_owned = True
+        except (ConnectionRefusedError, OSError):
+            port_already_owned = False
+
+        if port_already_owned:
+            print(
+                f"  Dashboard already running at http://127.0.0.1:{dash_port} "
+                f"— skipping dashboard + WorkerManager in this process"
+            )
+            dashboard_enabled = False
+
+    if dashboard_enabled:
         try:
             from web import create_app
             from event_bus import get_bus
 
             bus = get_bus()
             dash_app, dash_socketio = create_app(STATE_FILE, event_bus=bus)
-            dash_port = args.web_port
             dashboard_url = f"http://127.0.0.1:{dash_port}"
 
             # Run Flask-SocketIO in a daemon thread (auto-exits when main process exits)
@@ -5250,6 +7424,52 @@ def main():
                 print(f"  Dashboard opened: {dashboard_url}")
             else:
                 print(f"  Dashboard: {dashboard_url}")
+
+            # Phase 1 audit loop: start the report-only watcher alongside
+            # the dashboard. Reads rules from audit/rules.yaml, subscribes
+            # to the shared event bus, records matches to audit/queue.jsonl.
+            # No agent drains the queue yet (Phase 3).
+            try:
+                from audit.registry import AuditRegistry
+                from audit.watcher import AuditWatcher, load_rules_from_yaml
+                import requests as _audit_requests
+
+                audit_dir = SCRIPT_DIR / "audit"
+                rules_path = audit_dir / "rules.yaml"
+                if rules_path.is_file():
+                    audit_registry = AuditRegistry(audit_dir / "registry.json")
+
+                    def _fetch_bridge_counters():
+                        try:
+                            r = _audit_requests.get(
+                                f"http://127.0.0.1:{dash_port}/api/_diag_bridge",
+                                timeout=2,
+                            )
+                            return (r.json() or {}).get("bridge_counters", {}) or {}
+                        except Exception:
+                            return {}
+
+                    audit_watcher = AuditWatcher(
+                        bus=bus,
+                        registry=audit_registry,
+                        rules=load_rules_from_yaml(rules_path),
+                        queue_path=audit_dir / "queue.jsonl",
+                        bridge_counters_fetcher=_fetch_bridge_counters,
+                    )
+                    audit_watcher.start()
+                    print(
+                        f"  Audit watcher: {len(audit_watcher._rules)} rule(s) "
+                        f"loaded (Phase 1, report-only)"
+                    )
+                else:
+                    print("  Audit watcher: rules.yaml not found; skipping")
+            except ImportError as _audit_exc:
+                print(f"  Audit watcher: import failed ({_audit_exc}); skipping")
+            except Exception as _audit_exc:
+                print(
+                    f"  Audit watcher: startup failed "
+                    f"({type(_audit_exc).__name__}: {_audit_exc})"
+                )
         except ImportError:
             print(f"  Dashboard requires flask: pip install flask")
         except Exception as e:

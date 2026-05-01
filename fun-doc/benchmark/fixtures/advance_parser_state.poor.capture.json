@@ -1,0 +1,25 @@
+{
+  "description": "Poor fun-doc output — worker didn't recognize the state machine pattern, generic naming, plate is vague, signature left undefined, tool calls duplicated.",
+  "wall_time_sec": 35.1,
+  "captured": {
+    "name": "ProcessInput",
+    "return_type": "undefined4",
+    "parameters": [
+      {"name": "param_1", "type": "undefined4"},
+      {"name": "param_2", "type": "undefined4"}
+    ],
+    "locals": [
+      {"name": "iVar1", "type": "int"}
+    ],
+    "plate": "Processes an input value based on the current state and returns a new state value."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001000"}, "status": "ok"},
+    {"tool": "decompile_function", "args": {"address": "0x10001000"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001000"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001000"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001000", "name": "ProcessInput"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001000", "comment": "Processes an input value..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001000"}, "status": "ok"}
+  ]
+}

@@ -4,3 +4,4 @@ requests>=2.31
 python-dotenv>=1.0
 openai>=1.0
 claude-agent-sdk>=0.1.50
+pyyaml>=6.0

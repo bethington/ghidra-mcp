@@ -1,0 +1,619 @@
+{
+  "version": 1,
+  "timestamp": "2026-04-24T12:49:58",
+  "commit": "f5d856d",
+  "tier": "fast",
+  "providers": [
+    "minimax"
+  ],
+  "mock": true,
+  "variant": "poor",
+  "functions": {
+    "calc_crc16": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 41.2,
+        "quality": 0.046,
+        "dimensions": {
+          "name": {
+            "score": 0.0,
+            "tier": "miss",
+            "matched_against": null,
+            "generated": "ProcessBuffer"
+          },
+          "signature": {
+            "score": 0.0,
+            "return_type_match": false,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": false,
+                "truth": {
+                  "name": "data",
+                  "type": "const unsigned char *"
+                },
+                "generated": {
+                  "name": "param_1",
+                  "type": "undefined4"
+                },
+                "reason": "type mismatch"
+              },
+              {
+                "index": 1,
+                "match": false,
+                "truth": {
+                  "name": "length",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "param_2",
+                  "type": "undefined4"
+                },
+                "reason": "type mismatch"
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.229,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.229
+          },
+          "algorithm": {
+            "score": 0.0,
+            "mention_found": false,
+            "matched_tag": null
+          },
+          "locals": {
+            "score": 0.0,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "crc",
+                  "type": "unsigned short"
+                },
+                "generated": null,
+                "name_tier": "miss",
+                "type_match": false,
+                "score": 0.0
+              },
+              {
+                "truth": {
+                  "name": "byte_index",
+                  "type": "unsigned int"
+                },
+                "generated": null,
+                "name_tier": "miss",
+                "type_match": false,
+                "score": 0.0
+              },
+              {
+                "truth": {
+                  "name": "bit_index",
+                  "type": "unsigned int"
+                },
+                "generated": null,
+                "name_tier": "miss",
+                "type_match": false,
+                "score": 0.0
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 9,
+        "tool_calls_per_quality_point": 195.65,
+        "duplicate_tool_call_ratio": 0.444,
+        "captured": {
+          "name": "ProcessBuffer",
+          "return_type": "undefined4",
+          "parameters": [
+            {
+              "name": "param_1",
+              "type": "undefined4"
+            },
+            {
+              "name": "param_2",
+              "type": "undefined4"
+            }
+          ],
+          "locals": [
+            {
+              "name": "iVar1",
+              "type": "int"
+            },
+            {
+              "name": "iVar2",
+              "type": "int"
+            },
+            {
+              "name": "iVar3",
+              "type": "int"
+            }
+          ],
+          "plate": "This function processes a buffer and computes a value. It iterates over the input and updates an internal state. Returns the final state value."
+        }
+      }
+    },
+    "advance_parser_state": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 35.1,
+        "quality": 0.2,
+        "dimensions": {
+          "name": {
+            "score": 0.445,
+            "tier": "llm_stub",
+            "matched_against": "ParserStateTransition",
+            "generated": "ProcessInput",
+            "note": "stub: char-overlap heuristic; swap in Haiku judge"
+          },
+          "signature": {
+            "score": 0.0,
+            "return_type_match": false,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": false,
+                "truth": {
+                  "name": "current_state",
+                  "type": "int"
+                },
+                "generated": {
+                  "name": "param_1",
+                  "type": "undefined4"
+                },
+                "reason": "type mismatch"
+              },
+              {
+                "index": 1,
+                "match": false,
+                "truth": {
+                  "name": "input",
+                  "type": "unsigned char"
+                },
+                "generated": {
+                  "name": "param_2",
+                  "type": "undefined4"
+                },
+                "reason": "type mismatch"
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.071,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.071
+          },
+          "algorithm": {
+            "score": 0.0,
+            "mention_found": false,
+            "matched_tag": null
+          },
+          "locals": {
+            "score": 0.5,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "next_state",
+                  "type": "int"
+                },
+                "generated": {
+                  "name": "iVar1",
+                  "type": "int"
+                },
+                "name_tier": "miss",
+                "type_match": true,
+                "score": 0.5
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 7,
+        "tool_calls_per_quality_point": 35.0,
+        "duplicate_tool_call_ratio": 0.429,
+        "captured": {
+          "name": "ProcessInput",
+          "return_type": "undefined4",
+          "parameters": [
+            {
+              "name": "param_1",
+              "type": "undefined4"
+            },
+            {
+              "name": "param_2",
+              "type": "undefined4"
+            }
+          ],
+          "locals": [
+            {
+              "name": "iVar1",
+              "type": "int"
+            }
+          ],
+          "plate": "Processes an input value based on the current state and returns a new state value."
+        }
+      }
+    },
+    "compute_str_len": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 27.3,
+        "quality": 0.01,
+        "dimensions": {
+          "name": {
+            "score": 0.0,
+            "tier": "miss",
+            "matched_against": null,
+            "generated": "CountBytes"
+          },
+          "signature": {
+            "score": 0.0,
+            "return_type_match": false,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": false,
+                "truth": {
+                  "name": "str",
+                  "type": "const char *"
+                },
+                "generated": {
+                  "name": "param_1",
+                  "type": "undefined4 *"
+                },
+                "reason": "type mismatch"
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.049,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.049
+          },
+          "algorithm": {
+            "score": 0.0,
+            "mention_found": false,
+            "matched_tag": null
+          },
+          "locals": {
+            "score": 0.0,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "cursor",
+                  "type": "const char *"
+                },
+                "generated": null,
+                "name_tier": "miss",
+                "type_match": false,
+                "score": 0.0
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 6,
+        "tool_calls_per_quality_point": 600.0,
+        "duplicate_tool_call_ratio": 0.333,
+        "captured": {
+          "name": "CountBytes",
+          "return_type": "undefined4",
+          "parameters": [
+            {
+              "name": "param_1",
+              "type": "undefined4 *"
+            }
+          ],
+          "locals": [
+            {
+              "name": "iVar1",
+              "type": "int"
+            }
+          ],
+          "plate": "Iterates over a buffer and returns a count value."
+        }
+      }
+    },
+    "stat_list_add": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 44.8,
+        "quality": 0.116,
+        "dimensions": {
+          "name": {
+            "score": 0.425,
+            "tier": "llm_stub",
+            "matched_against": "AppendStat",
+            "generated": "UpdateData",
+            "note": "stub: char-overlap heuristic; swap in Haiku judge"
+          },
+          "signature": {
+            "score": 0.0,
+            "return_type_match": false,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": false,
+                "truth": {
+                  "name": "list",
+                  "type": "struct StatList *"
+                },
+                "generated": {
+                  "name": "param_1",
+                  "type": "undefined4 *"
+                },
+                "reason": "type mismatch"
+              },
+              {
+                "index": 1,
+                "match": false,
+                "truth": {
+                  "name": "id",
+                  "type": "unsigned short"
+                },
+                "generated": {
+                  "name": "param_2",
+                  "type": "undefined2"
+                },
+                "reason": "type mismatch"
+              },
+              {
+                "index": 2,
+                "match": false,
+                "truth": {
+                  "name": "flags",
+                  "type": "unsigned short"
+                },
+                "generated": {
+                  "name": "param_3",
+                  "type": "undefined2"
+                },
+                "reason": "type mismatch"
+              },
+              {
+                "index": 3,
+                "match": false,
+                "truth": {
+                  "name": "value",
+                  "type": "int"
+                },
+                "generated": {
+                  "name": "param_4",
+                  "type": "undefined4"
+                },
+                "reason": "type mismatch"
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.049,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.049
+          },
+          "algorithm": {
+            "score": 0.0,
+            "mention_found": false,
+            "matched_tag": null
+          },
+          "locals": {
+            "score": 0.0,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "slot_index",
+                  "type": "unsigned int"
+                },
+                "generated": null,
+                "name_tier": "miss",
+                "type_match": false,
+                "score": 0.0
+              },
+              {
+                "truth": {
+                  "name": "slot",
+                  "type": "struct StatEntry *"
+                },
+                "generated": null,
+                "name_tier": "miss",
+                "type_match": false,
+                "score": 0.0
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 9,
+        "tool_calls_per_quality_point": 77.59,
+        "duplicate_tool_call_ratio": 0.444,
+        "captured": {
+          "name": "UpdateData",
+          "return_type": "undefined4",
+          "parameters": [
+            {
+              "name": "param_1",
+              "type": "undefined4 *"
+            },
+            {
+              "name": "param_2",
+              "type": "undefined2"
+            },
+            {
+              "name": "param_3",
+              "type": "undefined2"
+            },
+            {
+              "name": "param_4",
+              "type": "undefined4"
+            }
+          ],
+          "locals": [
+            {
+              "name": "iVar1",
+              "type": "int"
+            },
+            {
+              "name": "pvVar2",
+              "type": "void *"
+            }
+          ],
+          "plate": "Updates a data structure with new values and returns a status code."
+        }
+      }
+    },
+    "compute_gcd": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 22.9,
+        "quality": 0.186,
+        "dimensions": {
+          "name": {
+            "score": 0.42,
+            "tier": "llm_stub",
+            "matched_against": "compute_gcd",
+            "generated": "ModReduce",
+            "note": "stub: char-overlap heuristic; swap in Haiku judge"
+          },
+          "signature": {
+            "score": 0.0,
+            "return_type_match": false,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": false,
+                "truth": {
+                  "name": "a",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "param_1",
+                  "type": "undefined4"
+                },
+                "reason": "type mismatch"
+              },
+              {
+                "index": 1,
+                "match": false,
+                "truth": {
+                  "name": "b",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "param_2",
+                  "type": "undefined4"
+                },
+                "reason": "type mismatch"
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.03,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.03
+          },
+          "algorithm": {
+            "score": 0.0,
+            "mention_found": false,
+            "matched_tag": null
+          },
+          "locals": {
+            "score": 0.5,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "remainder",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "uVar1",
+                  "type": "uint"
+                },
+                "name_tier": "miss",
+                "type_match": true,
+                "score": 0.5
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 7,
+        "tool_calls_per_quality_point": 37.63,
+        "duplicate_tool_call_ratio": 0.429,
+        "captured": {
+          "name": "ModReduce",
+          "return_type": "undefined4",
+          "parameters": [
+            {
+              "name": "param_1",
+              "type": "undefined4"
+            },
+            {
+              "name": "param_2",
+              "type": "undefined4"
+            }
+          ],
+          "locals": [
+            {
+              "name": "uVar1",
+              "type": "uint"
+            }
+          ],
+          "plate": "Performs a modulo reduction on two input values."
+        }
+      }
+    }
+  },
+  "aggregate": {
+    "quality_mean": 0.112,
+    "wall_time_sec_total": 171.3,
+    "tool_calls_total": 38,
+    "tool_calls_per_quality_point": 340.5,
+    "duplicate_tool_call_ratio": 0.421,
+    "function_count": 5
+  }
+}

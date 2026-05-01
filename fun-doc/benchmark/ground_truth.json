@@ -1,0 +1,436 @@
+{
+  "version": 1,
+  "functions": {
+    "calc_crc16": {
+      "name": "calc_crc16",
+      "source_file": "crc16.c",
+      "return_type": "unsigned short",
+      "parameters": [
+        {
+          "name": "data",
+          "type": "const unsigned char *"
+        },
+        {
+          "name": "length",
+          "type": "unsigned int"
+        }
+      ],
+      "locals": [
+        {
+          "name": "crc",
+          "type": "unsigned short"
+        },
+        {
+          "name": "byte_index",
+          "type": "unsigned int"
+        },
+        {
+          "name": "bit_index",
+          "type": "unsigned int"
+        }
+      ],
+      "doc_comment": "Compute CRC-16-CCITT checksum over a byte buffer.\n\nUses polynomial 0x1021 (CCITT / XMODEM variant), initial value 0xFFFF,\nno input reflection, no output reflection, no final XOR. Processes\none byte at a time, shifting through 8 bits of state per byte. This is\nthe classic CRC-16 used in a lot of network and storage protocols.\n\n@param data   pointer to the input buffer\n@param length number of bytes to checksum\n@return the 16-bit CRC",
+      "name_synonyms": [
+        "calc_crc16",
+        "compute_crc16",
+        "Crc16",
+        "CalcCrc16",
+        "ComputeCrc16",
+        "Crc16Ccitt",
+        "ComputeCrc16Ccitt",
+        "CalcCrc16Ccitt"
+      ],
+      "canonical_plate": "Computes a CRC-16 checksum over a byte buffer using the CCITT /\nXMODEM variant of the algorithm.\nPolynomial: 0x1021\nInitial CRC value: 0xFFFF\nNo input or output reflection, no final XOR.\nProcesses input one byte at a time, shifting 8 bits of state per byte.\n",
+      "algorithm_tag": "CRC-16-CCITT",
+      "algorithm_synonyms": [
+        "CRC-16-CCITT",
+        "CRC16-CCITT",
+        "CCITT CRC",
+        "XMODEM CRC",
+        "CRC-16/CCITT-FALSE"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "compute_gcd": {
+      "name": "compute_gcd",
+      "source_file": "gcd.c",
+      "return_type": "unsigned int",
+      "parameters": [
+        {
+          "name": "a",
+          "type": "unsigned int"
+        },
+        {
+          "name": "b",
+          "type": "unsigned int"
+        }
+      ],
+      "locals": [
+        {
+          "name": "remainder",
+          "type": "unsigned int"
+        }
+      ],
+      "doc_comment": "Compute the greatest common divisor via Euclid's algorithm.\n\nRecursive implementation: gcd(a, b) = gcd(b, a mod b), with\ngcd(a, 0) = a. Handles the classical GCD definition for\nnon-negative integers. No overflow protection \u2014 assumes inputs\nare within a reasonable range.\n\n@param a  first input\n@param b  second input\n@return the greatest common divisor of a and b",
+      "name_synonyms": [
+        "compute_gcd",
+        "ComputeGcd",
+        "gcd",
+        "Gcd",
+        "CalcGcd",
+        "calc_gcd",
+        "EuclideanGcd",
+        "euclidean_gcd",
+        "GreatestCommonDivisor",
+        "greatest_common_divisor"
+      ],
+      "canonical_plate": "Computes the greatest common divisor of two non-negative integers\nusing Euclid's algorithm. Recursive implementation: gcd(a, b) =\ngcd(b, a mod b), with gcd(a, 0) = a as the base case. No overflow\nprotection; inputs are assumed to be within a reasonable range.\n",
+      "algorithm_tag": "euclidean",
+      "algorithm_synonyms": [
+        "Euclid",
+        "Euclidean algorithm",
+        "Euclidean GCD",
+        "GCD",
+        "greatest common divisor",
+        "modulo recursion"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "get_stat_list_flags": {
+      "name": "get_stat_list_flags",
+      "source_file": "get_stat_list_flags.c",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "pStatList",
+          "type": "int *"
+        }
+      ],
+      "locals": [],
+      "doc_comment": "Read the flags bitfield from a D2 StatList structure.\n\nReturns the 32-bit flags value at offset 0x10 after validating the\npointer is non-null and the magic signature at offset 0x00 matches\nthe StatList tag 0x01020304. Returns 0 on null-pointer or magic-\nmismatch (corruption guard).\n\n@param pStatList  pointer to a StatList structure\n@return the flags at offset 0x10, or 0 if invalid",
+      "name_synonyms": [
+        "get_stat_list_flags",
+        "GetStatListFlags",
+        "getStatListFlags",
+        "ReadStatListFlags",
+        "read_stat_list_flags",
+        "StatListFlags",
+        "StatList_GetFlags",
+        "stat_list_flags",
+        "GetFlags"
+      ],
+      "canonical_plate": "Read the flags bitfield from a D2 StatList structure. Validates\nthe list pointer is non-null and the magic signature at offset 0\nmatches 0x01020304 (the StatList tag). On success returns the\n32-bit flags value at offset 0x10. Returns 0 on null-pointer or\nmagic-mismatch, guarding against reads from corrupted / non-\nStatList memory.\n",
+      "algorithm_tag": "struct accessor",
+      "algorithm_synonyms": [
+        "struct accessor",
+        "struct getter",
+        "field read",
+        "magic number",
+        "corruption guard",
+        "offset accessor"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "get_stat_list_layer": {
+      "name": "get_stat_list_layer",
+      "source_file": "get_stat_list_layer.c",
+      "return_type": "unsigned int",
+      "parameters": [
+        {
+          "name": "pStatList",
+          "type": "const unsigned char *"
+        }
+      ],
+      "locals": [],
+      "doc_comment": "Read the layer field from a D2 StatList structure.\n\nReturns the 32-bit DWORD at offset +0x04 (the StatList's layer\nindex). Performs NO validation \u2014 assumes the caller has already\nverified pStatList is non-null and points at a well-formed\nStatList. Callers that want the safety of magic-number validation\nshould use a validated variant instead.\n\n@param pStatList  pointer to a StatList structure\n@return the DWORD at offset +0x04 (layer index)",
+      "name_synonyms": [
+        "get_stat_list_layer",
+        "GetStatListLayer",
+        "getStatListLayer",
+        "StatListLayer",
+        "stat_list_layer",
+        "ReadStatListLayer",
+        "StatList_GetLayer",
+        "GetLayer"
+      ],
+      "canonical_plate": "Reads the layer index (DWORD at offset +0x04) from a D2 StatList\nstructure. Unvalidated \u2014 directly dereferences the pointer with\nno null-check and no magic-number validation. Callers must\nensure pStatList points at a well-formed StatList before\ninvocation. Returns the raw 32-bit value at +0x04.\n",
+      "algorithm_tag": "raw field read",
+      "algorithm_synonyms": [
+        "raw field read",
+        "struct accessor",
+        "direct read",
+        "unvalidated accessor",
+        "offset accessor"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "get_stat_list_owner_guid": {
+      "name": "get_stat_list_owner_guid",
+      "source_file": "get_stat_list_owner_guid.c",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "pStatList",
+          "type": "int *"
+        }
+      ],
+      "locals": [],
+      "doc_comment": "Read the owner GUID from a D2 StatList structure.\n\nReturns the 32-bit GUID at offset +0x20 after validating the\npointer is non-null and the magic signature at offset 0 matches\nthe StatList tag 0x01020304. Returns 0 on null-pointer or\nmagic-mismatch (corruption guard).\n\n@param pStatList  pointer to a StatList structure\n@return the GUID at offset +0x20, or 0 if invalid",
+      "name_synonyms": [
+        "get_stat_list_owner_guid",
+        "GetStatListOwnerGuid",
+        "getStatListOwnerGuid",
+        "StatListOwnerGuid",
+        "ReadStatListOwnerGuid",
+        "StatList_GetOwnerGuid",
+        "GetOwnerGuid",
+        "get_owner_guid",
+        "StatListGetOwnerID"
+      ],
+      "canonical_plate": "Read the owner GUID from a D2 StatList structure. Validates the\nlist pointer is non-null and the magic signature at offset 0\nmatches 0x01020304. On success returns the 32-bit GUID at\noffset +0x20. Returns 0 on null-pointer or magic-mismatch,\nguarding against reads from corrupted or non-StatList memory.\n",
+      "algorithm_tag": "struct accessor",
+      "algorithm_synonyms": [
+        "struct accessor",
+        "struct getter",
+        "field read",
+        "validated accessor",
+        "magic number",
+        "corruption guard",
+        "offset accessor"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "get_stat_list_prev_link": {
+      "name": "get_stat_list_prev_link",
+      "source_file": "get_stat_list_prev_link.c",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "pStatList",
+          "type": "int *"
+        }
+      ],
+      "locals": [],
+      "doc_comment": "Read the prev_link pointer from a D2 StatList structure.\n\nReturns the 32-bit pointer at offset +0x34 after validating\npStatList is non-null and its magic signature at offset 0\nmatches 0x01020304. Part of a linked-list traversal: following\nthis pointer repeatedly walks backwards through the stat list\nchain. Returns 0 on null or corruption.\n\n@param pStatList  pointer to a StatList structure\n@return the prev-link pointer at +0x34, or 0 if invalid",
+      "name_synonyms": [
+        "get_stat_list_prev_link",
+        "GetStatListPrevLink",
+        "getStatListPrevLink",
+        "StatListPrevLink",
+        "ReadStatListPrevLink",
+        "StatList_GetPrevLink",
+        "GetPrevLink",
+        "get_prev",
+        "StatListGetPrev",
+        "GetPrevStatList"
+      ],
+      "canonical_plate": "Read the prev-link pointer from a D2 StatList structure.\nValidates the list pointer is non-null and the magic signature\nat offset 0 matches 0x01020304. On success returns the 32-bit\npointer at offset +0x34 \u2014 this is the reverse traversal link in\na doubly-linked StatList chain. Following it repeatedly walks\nbackwards through the chain. Returns 0 on null-pointer or\nmagic-mismatch.\n",
+      "algorithm_tag": "linked-list traversal",
+      "algorithm_synonyms": [
+        "linked list",
+        "linked-list traversal",
+        "doubly linked list",
+        "prev pointer",
+        "prev link",
+        "struct accessor",
+        "validated accessor"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "stat_list_add": {
+      "name": "stat_list_add",
+      "source_file": "stat_list_add.c",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "list",
+          "type": "struct StatList *"
+        },
+        {
+          "name": "id",
+          "type": "unsigned short"
+        },
+        {
+          "name": "flags",
+          "type": "unsigned short"
+        },
+        {
+          "name": "value",
+          "type": "int"
+        }
+      ],
+      "locals": [
+        {
+          "name": "slot_index",
+          "type": "unsigned int"
+        },
+        {
+          "name": "slot",
+          "type": "struct StatEntry *"
+        }
+      ],
+      "doc_comment": "Append one stat entry to a StatList.\n\nValidates the list's magic number (rejects corrupted or\nuninitialized lists). If the list has room (entry_count <\nSTAT_LIST_CAPACITY), writes the new entry at the next free slot,\nincrements entry_count, and returns 1. Returns 0 on overflow or\ncorruption. The list's list_flags OR'd-in bits are untouched.\n\n@param list   pointer to the StatList to mutate\n@param id     stat id (u16, e.g. enum StatType)\n@param flags  entry flags (u16)\n@param value  stat numeric value\n@return 1 on success, 0 on overflow / corruption",
+      "name_synonyms": [
+        "stat_list_add",
+        "StatListAdd",
+        "AddStat",
+        "AppendStat",
+        "stat_append",
+        "StatListAppend",
+        "PushStat",
+        "AddStatEntry",
+        "add_stat_entry"
+      ],
+      "canonical_plate": "Appends one stat entry to a StatList. Validates the list pointer\nis non-null and that the list's magic number matches the expected\nvalue (a corruption guard). If the list has capacity remaining,\nwrites the new entry at the next free slot, increments entry_count,\nand returns 1. Returns 0 on overflow or validation failure.\n",
+      "algorithm_tag": "struct mutator",
+      "algorithm_synonyms": [
+        "struct mutator",
+        "struct append",
+        "array append",
+        "bounded array",
+        "list append",
+        "stat list",
+        "magic number"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "advance_parser_state": {
+      "name": "advance_parser_state",
+      "source_file": "state_machine.c",
+      "return_type": "int",
+      "parameters": [
+        {
+          "name": "current_state",
+          "type": "int"
+        },
+        {
+          "name": "input",
+          "type": "unsigned char"
+        }
+      ],
+      "locals": [
+        {
+          "name": "next_state",
+          "type": "int"
+        }
+      ],
+      "doc_comment": "Advance the parser state machine one input byte.\n\nGiven the current state and one input byte, return the next state.\nLetters advance into IDENT; digits into NUMBER; single punctuation\ncharacters (comma, semicolon, period) emit PUNCT; everything else\nresets to INIT. IDENT / NUMBER stay in-state while the character\nclass continues.\n\n@param current_state one of the PARSER_STATE_* enum values\n@param input         next input byte\n@return the next state",
+      "name_synonyms": [
+        "advance_parser_state",
+        "AdvanceParserState",
+        "advance_state",
+        "next_parser_state",
+        "NextParserState",
+        "ParserStateTransition",
+        "parser_transition",
+        "TokenizerStep",
+        "ParseByte"
+      ],
+      "canonical_plate": "Advances a small tokenizer-style state machine one input byte.\nGiven (current_state, input_byte) returns the next state. Letters\ntransition into an IDENT state, digits into NUMBER, single-byte\npunctuation (',', ';', '.') emits PUNCT, and anything else resets\nto INIT. IDENT and NUMBER are \"sticky\" while their character class\ncontinues; mismatches fall back to INIT.\n",
+      "algorithm_tag": "state-machine",
+      "algorithm_synonyms": [
+        "state machine",
+        "state-machine",
+        "state transition",
+        "tokenizer state",
+        "finite state",
+        "FSM"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    },
+    "compute_str_len": {
+      "name": "compute_str_len",
+      "source_file": "str_len.c",
+      "return_type": "unsigned int",
+      "parameters": [
+        {
+          "name": "str",
+          "type": "const char *"
+        }
+      ],
+      "locals": [
+        {
+          "name": "cursor",
+          "type": "const char *"
+        }
+      ],
+      "doc_comment": "Compute the length of a null-terminated byte string.\n\nWalks the input pointer one byte at a time until a zero byte is\nencountered; returns the distance from start to the first zero.\nMatches the semantics of standard strlen() but is a fresh\nreimplementation (does not call into CRT). Behavior on a non-null-\nterminated buffer is undefined.\n\n@param str  pointer to a null-terminated C string\n@return number of bytes before the terminating zero",
+      "name_synonyms": [
+        "compute_str_len",
+        "ComputeStrLen",
+        "StrLen",
+        "string_length",
+        "StringLength",
+        "calc_str_len",
+        "CalcStrLen",
+        "strlen_impl",
+        "my_strlen"
+      ],
+      "canonical_plate": "Computes the length of a null-terminated byte string. Walks the\ninput pointer one byte at a time until a zero byte is found, then\nreturns the distance from the start. Equivalent to the standard C\nlibrary's strlen() but implemented in-place (does not call into\nthe CRT). Behavior on a non-null-terminated buffer is undefined.\n",
+      "algorithm_tag": "strlen",
+      "algorithm_synonyms": [
+        "strlen",
+        "string length",
+        "null-terminated",
+        "null terminator",
+        "byte walk",
+        "pointer walk"
+      ],
+      "weights": {
+        "name": 0.25,
+        "signature": 0.25,
+        "plate": 0.2,
+        "algorithm": 0.15,
+        "locals": 0.15
+      }
+    }
+  }
+}

@@ -1,0 +1,634 @@
+{
+  "version": 1,
+  "timestamp": "2026-04-24T13:27:40",
+  "commit": "575e900",
+  "tier": "fast",
+  "providers": [
+    "minimax"
+  ],
+  "mock": true,
+  "variant": "baseline",
+  "functions": {
+    "calc_crc16": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 24.7,
+        "quality": 0.803,
+        "dimensions": {
+          "name": {
+            "score": 1.0,
+            "tier": "exact",
+            "matched_against": "CalcCrc16Ccitt",
+            "generated": "CalcCrc16Ccitt"
+          },
+          "signature": {
+            "score": 0.75,
+            "return_type_match": true,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": false,
+                "truth": {
+                  "name": "data",
+                  "type": "const unsigned char *"
+                },
+                "generated": {
+                  "name": "pbBuffer",
+                  "type": "byte *"
+                },
+                "reason": "type mismatch"
+              },
+              {
+                "index": 1,
+                "match": true,
+                "truth": {
+                  "name": "length",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "dwLength",
+                  "type": "uint"
+                },
+                "reason": null
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.564,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.564
+          },
+          "algorithm": {
+            "score": 1.0,
+            "mention_found": true,
+            "matched_tag": "CRC-16-CCITT"
+          },
+          "locals": {
+            "score": 0.688,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "crc",
+                  "type": "unsigned short"
+                },
+                "generated": {
+                  "name": "wCrc",
+                  "type": "ushort"
+                },
+                "name_tier": "prefix",
+                "type_match": true,
+                "score": 0.85
+              },
+              {
+                "truth": {
+                  "name": "byte_index",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "iByte",
+                  "type": "uint"
+                },
+                "name_tier": "llm_stub",
+                "type_match": true,
+                "score": 0.713
+              },
+              {
+                "truth": {
+                  "name": "bit_index",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "iBit",
+                  "type": "uint"
+                },
+                "name_tier": "miss",
+                "type_match": true,
+                "score": 0.5
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 12,
+        "tool_calls_per_quality_point": 14.94,
+        "duplicate_tool_call_ratio": 0.083,
+        "captured": {
+          "name": "CalcCrc16Ccitt",
+          "return_type": "ushort",
+          "parameters": [
+            {
+              "name": "pbBuffer",
+              "type": "byte *"
+            },
+            {
+              "name": "dwLength",
+              "type": "uint"
+            }
+          ],
+          "locals": [
+            {
+              "name": "wCrc",
+              "type": "ushort"
+            },
+            {
+              "name": "iByte",
+              "type": "uint"
+            },
+            {
+              "name": "iBit",
+              "type": "uint"
+            }
+          ],
+          "plate": "Computes a CRC-16-CCITT checksum over a buffer of bytes. Uses polynomial 0x1021 and an initial value of 0xFFFF. Processes one byte at a time with 8 bit-shifts per byte. No input or output reflection. Classic CRC used in XMODEM and many network protocols."
+        }
+      }
+    },
+    "advance_parser_state": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 19.4,
+        "quality": 0.883,
+        "dimensions": {
+          "name": {
+            "score": 1.0,
+            "tier": "exact",
+            "matched_against": "ParserStateTransition",
+            "generated": "ParserStateTransition"
+          },
+          "signature": {
+            "score": 1.0,
+            "return_type_match": true,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": true,
+                "truth": {
+                  "name": "current_state",
+                  "type": "int"
+                },
+                "generated": {
+                  "name": "state",
+                  "type": "int"
+                },
+                "reason": null
+              },
+              {
+                "index": 1,
+                "match": true,
+                "truth": {
+                  "name": "input",
+                  "type": "unsigned char"
+                },
+                "generated": {
+                  "name": "ch",
+                  "type": "byte"
+                },
+                "reason": null
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.525,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.525
+          },
+          "algorithm": {
+            "score": 1.0,
+            "mention_found": true,
+            "matched_tag": "state machine"
+          },
+          "locals": {
+            "score": 0.85,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "next_state",
+                  "type": "int"
+                },
+                "generated": {
+                  "name": "next",
+                  "type": "int"
+                },
+                "name_tier": "prefix",
+                "type_match": true,
+                "score": 0.85
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 10,
+        "tool_calls_per_quality_point": 11.33,
+        "duplicate_tool_call_ratio": 0.1,
+        "captured": {
+          "name": "ParserStateTransition",
+          "return_type": "int",
+          "parameters": [
+            {
+              "name": "state",
+              "type": "int"
+            },
+            {
+              "name": "ch",
+              "type": "byte"
+            }
+          ],
+          "locals": [
+            {
+              "name": "next",
+              "type": "int"
+            }
+          ],
+          "plate": "Parser state machine transition. Advances a small state machine one input byte. Letters transition INIT to IDENT, digits transition INIT to NUMBER, punctuation transitions INIT to PUNCT, and stay-in-state while the character class continues. Returns the next state."
+        }
+      }
+    },
+    "compute_str_len": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 12.8,
+        "quality": 0.693,
+        "dimensions": {
+          "name": {
+            "score": 1.0,
+            "tier": "exact",
+            "matched_against": "StrLen",
+            "generated": "StrLen"
+          },
+          "signature": {
+            "score": 0.5,
+            "return_type_match": true,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": false,
+                "truth": {
+                  "name": "str",
+                  "type": "const char *"
+                },
+                "generated": {
+                  "name": "pszInput",
+                  "type": "char *"
+                },
+                "reason": "type mismatch"
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.575,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.575
+          },
+          "algorithm": {
+            "score": 1.0,
+            "mention_found": true,
+            "matched_tag": "strlen"
+          },
+          "locals": {
+            "score": 0.35,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "cursor",
+                  "type": "const char *"
+                },
+                "generated": {
+                  "name": "pCursor",
+                  "type": "char *"
+                },
+                "name_tier": "prefix",
+                "type_match": false,
+                "score": 0.35
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 10,
+        "tool_calls_per_quality_point": 14.43,
+        "duplicate_tool_call_ratio": 0.1,
+        "captured": {
+          "name": "StrLen",
+          "return_type": "uint",
+          "parameters": [
+            {
+              "name": "pszInput",
+              "type": "char *"
+            }
+          ],
+          "locals": [
+            {
+              "name": "pCursor",
+              "type": "char *"
+            }
+          ],
+          "plate": "Computes the length of a null-terminated string. Walks the input pointer one byte at a time until the terminating zero byte is found, then returns the distance. Fresh reimplementation of strlen, does not call into the CRT."
+        }
+      }
+    },
+    "stat_list_add": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 38.5,
+        "quality": 0.746,
+        "dimensions": {
+          "name": {
+            "score": 0.7,
+            "tier": "prefix",
+            "matched_against": "AddStat",
+            "generated": "AddStatToList"
+          },
+          "signature": {
+            "score": 0.875,
+            "return_type_match": true,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": false,
+                "truth": {
+                  "name": "list",
+                  "type": "struct StatList *"
+                },
+                "generated": {
+                  "name": "pStatList",
+                  "type": "StatList *"
+                },
+                "reason": "type mismatch"
+              },
+              {
+                "index": 1,
+                "match": true,
+                "truth": {
+                  "name": "id",
+                  "type": "unsigned short"
+                },
+                "generated": {
+                  "name": "wStatId",
+                  "type": "ushort"
+                },
+                "reason": null
+              },
+              {
+                "index": 2,
+                "match": true,
+                "truth": {
+                  "name": "flags",
+                  "type": "unsigned short"
+                },
+                "generated": {
+                  "name": "wFlags",
+                  "type": "ushort"
+                },
+                "reason": null
+              },
+              {
+                "index": 3,
+                "match": true,
+                "truth": {
+                  "name": "value",
+                  "type": "int"
+                },
+                "generated": {
+                  "name": "iValue",
+                  "type": "int"
+                },
+                "reason": null
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.561,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.561
+          },
+          "algorithm": {
+            "score": 1.0,
+            "mention_found": true,
+            "matched_tag": "magic number"
+          },
+          "locals": {
+            "score": 0.6,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "slot_index",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "dwSlotIndex",
+                  "type": "uint"
+                },
+                "name_tier": "prefix",
+                "type_match": true,
+                "score": 0.85
+              },
+              {
+                "truth": {
+                  "name": "slot",
+                  "type": "struct StatEntry *"
+                },
+                "generated": {
+                  "name": "pSlot",
+                  "type": "StatEntry *"
+                },
+                "name_tier": "prefix",
+                "type_match": false,
+                "score": 0.35
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 13,
+        "tool_calls_per_quality_point": 17.43,
+        "duplicate_tool_call_ratio": 0.077,
+        "captured": {
+          "name": "AddStatToList",
+          "return_type": "int",
+          "parameters": [
+            {
+              "name": "pStatList",
+              "type": "StatList *"
+            },
+            {
+              "name": "wStatId",
+              "type": "ushort"
+            },
+            {
+              "name": "wFlags",
+              "type": "ushort"
+            },
+            {
+              "name": "iValue",
+              "type": "int"
+            }
+          ],
+          "locals": [
+            {
+              "name": "dwSlotIndex",
+              "type": "uint"
+            },
+            {
+              "name": "pSlot",
+              "type": "StatEntry *"
+            }
+          ],
+          "plate": "Appends a stat entry to a StatList struct. Validates the list pointer and checks the magic number; rejects on corruption or when entry_count is at capacity. On success, writes the new entry at the next free slot, bumps entry_count, returns 1. Returns 0 on overflow or validation failure."
+        }
+      }
+    },
+    "compute_gcd": {
+      "minimax": {
+        "provider": "minimax",
+        "model": null,
+        "wall_time_sec": 14.2,
+        "quality": 0.942,
+        "dimensions": {
+          "name": {
+            "score": 1.0,
+            "tier": "exact",
+            "matched_against": "CalcGcd",
+            "generated": "CalcGcd"
+          },
+          "signature": {
+            "score": 1.0,
+            "return_type_match": true,
+            "param_count_match": true,
+            "per_param_match": [
+              {
+                "index": 0,
+                "match": true,
+                "truth": {
+                  "name": "a",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "dwA",
+                  "type": "uint"
+                },
+                "reason": null
+              },
+              {
+                "index": 1,
+                "match": true,
+                "truth": {
+                  "name": "b",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "dwB",
+                  "type": "uint"
+                },
+                "reason": null
+              }
+            ]
+          },
+          "plate": {
+            "score": 0.821,
+            "tier": "llm_stub",
+            "note": "stub: jaccard word overlap; swap in Haiku judge",
+            "jaccard": 0.821
+          },
+          "algorithm": {
+            "score": 1.0,
+            "mention_found": true,
+            "matched_tag": "Euclid"
+          },
+          "locals": {
+            "score": 0.85,
+            "per_local_match": [
+              {
+                "truth": {
+                  "name": "remainder",
+                  "type": "unsigned int"
+                },
+                "generated": {
+                  "name": "dwRemainder",
+                  "type": "uint"
+                },
+                "name_tier": "prefix",
+                "type_match": true,
+                "score": 0.85
+              }
+            ]
+          }
+        },
+        "weights": {
+          "name": 0.25,
+          "signature": 0.25,
+          "plate": 0.2,
+          "algorithm": 0.15,
+          "locals": 0.15
+        },
+        "tool_calls_total": 10,
+        "tool_calls_per_quality_point": 10.62,
+        "duplicate_tool_call_ratio": 0.1,
+        "captured": {
+          "name": "CalcGcd",
+          "return_type": "uint",
+          "parameters": [
+            {
+              "name": "dwA",
+              "type": "uint"
+            },
+            {
+              "name": "dwB",
+              "type": "uint"
+            }
+          ],
+          "locals": [
+            {
+              "name": "dwRemainder",
+              "type": "uint"
+            }
+          ],
+          "plate": "Computes the greatest common divisor of two non-negative integers using Euclid's algorithm. Recursive implementation: gcd(a, b) = gcd(b, a mod b), with gcd(a, 0) = a as the base case. No overflow protection."
+        }
+      }
+    }
+  },
+  "aggregate": {
+    "quality_mean": 0.813,
+    "wall_time_sec_total": 109.6,
+    "tool_calls_total": 55,
+    "tool_calls_per_quality_point": 67.62,
+    "duplicate_tool_call_ratio": 0.091,
+    "function_count": 5
+  }
+}

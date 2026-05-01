@@ -18,10 +18,13 @@ import ghidra.program.model.symbol.Reference;
 import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public class DocumentFunctionWithClaude extends GhidraScript {
-    
-    private static final String PLATE_COMMENT_PROMPT = 
+
+    private static final long CLAUDE_PROCESS_TIMEOUT_SECONDS = 600;
+
+    private static final String PLATE_COMMENT_PROMPT =
         "First, call get_current_function() function to retrieve the function at the current cursor position in Ghidra.\n\n" +
         "Then, create a comprehensive function header comment using set_plate_comment following the exact format template from Format Template. " +
         "The plate comment must use plain text format WITHOUT any decorative borders - Ghidra adds all formatting automatically. " +
@@ -102,9 +105,9 @@ public class DocumentFunctionWithClaude extends GhidraScript {
         // Find Claude CLI and MCP config
         String userHome = System.getProperty("user.home");
         String mcpConfig = findMcpConfig(userHome);
-        
+
         if (mcpConfig == null) {
-            popup("Could not find mcp-config.json. Please ensure it exists in:\n" +
+            popup("Could not find .mcp.json. Please ensure it exists in:\n" +
                   "- " + userHome + "\\source\\mcp\\ghidra-mcp\\\n" +
                   "- Current directory");
             return;
@@ -114,35 +117,45 @@ public class DocumentFunctionWithClaude extends GhidraScript {
         // Use full path to claude.cmd since Java ProcessBuilder doesn't use PATH
         String claudePath = System.getenv("APPDATA") + "\\npm\\claude.cmd";
         ProcessBuilder pb = new ProcessBuilder(
-            claudePath, "-p", 
+            claudePath, "-p",
             "--mcp-config", mcpConfig,
             "--dangerously-skip-permissions"
         );
         pb.redirectErrorStream(true);
-        
+
         println("Executing: " + String.join(" ", pb.command()));
-        
+
         Process process = pb.start();
-        
+
         // Write prompt directly to stdin
         try (OutputStreamWriter writer = new OutputStreamWriter(process.getOutputStream())) {
             writer.write(fullPrompt);
             writer.flush();
         }
-        
+
         // Read output
-        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
         StringBuilder output = new StringBuilder();
-        String line;
-        
         println("\n=== Claude Output ===");
-        while ((line = reader.readLine()) != null) {
-            println(line);
-            output.append(line).append("\n");
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                println(line);
+                output.append(line).append("\n");
+            }
         }
-        
-        int exitCode = process.waitFor();
-        
+
+        if (!process.waitFor(CLAUDE_PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            process.destroy();
+            if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+            }
+            popup("Claude CLI timed out after " + CLAUDE_PROCESS_TIMEOUT_SECONDS + " seconds and was terminated.");
+            return;
+        }
+
+        int exitCode = process.exitValue();
+
         if (exitCode == 0) {
             println("\n=== SUCCESS ===");
             println("Function documentation completed!");
@@ -153,20 +166,19 @@ public class DocumentFunctionWithClaude extends GhidraScript {
     }
 
     private String findMcpConfig(String userHome) {
-        // Check common locations
         String[] possiblePaths = {
-            userHome + "\\source\\mcp\\ghidra-mcp\\mcp-config.json",
-            System.getProperty("user.dir") + "\\mcp-config.json",
-            "..\\mcp-config.json"
+            userHome + "\\source\\mcp\\ghidra-mcp\\.mcp.json",
+            System.getProperty("user.dir") + "\\.mcp.json",
+            "..\\.mcp.json"
         };
-        
+
         for (String path : possiblePaths) {
             File f = new File(path);
             if (f.exists()) {
                 return f.getAbsolutePath();
             }
         }
-        
+
         return null;
     }
 }

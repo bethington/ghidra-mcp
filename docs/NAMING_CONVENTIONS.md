@@ -28,7 +28,7 @@ SECURITY.md                  — Security guidelines and reporting (future)
 Organized reference documentation also uses **UPPERCASE**:
 
 ```
-docs/TOOL_REFERENCE.md           — Authoritative endpoint catalog (222 tools)
+docs/TOOL_REFERENCE.md           — Authoritative endpoint catalog (225 tools)
 docs/ERROR_CODES.md              — Error catalog and troubleshooting guide
 docs/PERFORMANCE_BASELINES.md    — Performance metrics and optimization
 docs/ARCHITECTURE.md             — System architecture and design
@@ -151,30 +151,23 @@ max_retries = 3                             ✅
 
 ---
 
-## Shell Scripts
+## Command-Line Utilities
 
-### File Naming (kebab-case or snake_case)
-PowerShell and Bash scripts use lowercase with separators:
+### Python Utility Naming
+Project-specific command-line utilities should be Python modules or
+snake_case Python scripts.
 
 ```
 ✅ GOOD
-ghidra-mcp-setup.ps1
-run_tests.sh
-build-docker.sh
-
-❌ AVOID
-DeployToGhidra.ps1
-deploy_to_ghidra.ps1
+bridge_mcp_ghidra.py
+ordinal_auto_fixer.py
+scan_undocumented_functions.py
 ```
 
-### Function Naming
-```powershell
-# PowerShell: PascalCase
-function Deploy-ToGhidra { }                ✅
-
-# Bash: kebab-case or snake_case
-deploy_to_ghidra() { }                      ✅
-```
+### Environment-Native Wrappers
+Generated or environment-specific launchers may still exist where required by
+the platform or toolchain, but they are not the preferred place for project
+logic. Examples include container entrypoints and generated build-tool wrappers.
 
 ---
 
@@ -182,7 +175,7 @@ deploy_to_ghidra() { }                      ✅
 
 ### Format: lowercase with dots
 ```
-mcp-config.json               — MCP server configuration
+.mcp.json                     — MCP server configuration (Claude Code auto-discovery)
 pytest.ini                    — Python test configuration
 .gitignore                    — Git ignore rules
 .env.template                 — Environment variable template
@@ -242,9 +235,9 @@ ghidra-mcp/
 │   └── test/java/
 │       └── com/xebyte/
 │           └── GhidraMCPPluginTest.java
-├── scripts/
-│   ├── deploy.sh
-│   ├── build.ps1
+├── tools/
+│   ├── setup/
+│   ├── document_function.py
 │   └── ...
 ├── logs/
 │   └── (archived logs here)
@@ -267,8 +260,8 @@ ghidra-mcp/
 | **Python classes** | PascalCase | `class GhidraBridge` | PEP 8 convention |
 | **Python functions** | snake_case | `get_xrefs()` | PEP 8 convention |
 | **Python constants** | UPPER_SNAKE_CASE | `API_VERSION` | PEP 8 convention |
-| **Shell scripts** | kebab-case | `ghidra-mcp-setup.ps1` | Shell convention |
-| **Config files** | lowercase.ext | `mcp-config.json` | Convention |
+| **Python utilities** | snake_case | `scan_functions_mcp.py` | PEP 8 convention |
+| **Config files** | lowercase.ext | `.mcp.json` | Convention |
 | **Logs** | snake_case_date | `build_log_20251105.txt` | Readability |
 
 ---
@@ -281,12 +274,8 @@ Add to CI/CD pipeline (when implemented):
 - **Java**: `checkstyle` enforces Java naming conventions
 
 ### Pre-commit Hooks (future)
-```bash
-# Validate file naming on commit
-- Check Markdown files are UPPERCASE
-- Check Python files are snake_case
-- Check Java files are PascalCase
-```
+Use pre-commit or CI checks to validate Markdown, Python, and Java naming
+conventions.
 
 ---
 

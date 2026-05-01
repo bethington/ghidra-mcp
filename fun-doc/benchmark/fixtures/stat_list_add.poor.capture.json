@@ -1,0 +1,30 @@
+{
+  "description": "Poor fun-doc output on stat_list_add — didn't identify the struct, types left undefined, generic naming, plate misses magic number and capacity check.",
+  "wall_time_sec": 44.8,
+  "captured": {
+    "name": "UpdateData",
+    "return_type": "undefined4",
+    "parameters": [
+      {"name": "param_1", "type": "undefined4 *"},
+      {"name": "param_2", "type": "undefined2"},
+      {"name": "param_3", "type": "undefined2"},
+      {"name": "param_4", "type": "undefined4"}
+    ],
+    "locals": [
+      {"name": "iVar1", "type": "int"},
+      {"name": "pvVar2", "type": "void *"}
+    ],
+    "plate": "Updates a data structure with new values and returns a status code."
+  },
+  "tool_calls": [
+    {"tool": "decompile_function", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "decompile_function", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "decompile_function", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "get_function_signature", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001150"}, "status": "ok"},
+    {"tool": "rename_function_by_address", "args": {"address": "0x10001150", "name": "UpdateData"}, "status": "ok"},
+    {"tool": "set_plate_comment", "args": {"address": "0x10001150", "comment": "Updates a data structure..."}, "status": "ok"},
+    {"tool": "analyze_function_completeness", "args": {"address": "0x10001150"}, "status": "ok"}
+  ]
+}

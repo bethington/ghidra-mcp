@@ -121,6 +121,14 @@ public class EndpointRegistry {
         return qStr(name, "");
     }
 
+    private static EndpointDef.ParamDef qStrOpt(String name, String desc) {
+        return new EndpointDef.ParamDef(name, "string", "query", false, null, desc);
+    }
+
+    private static EndpointDef.ParamDef qStrOpt(String name) {
+        return qStrOpt(name, "");
+    }
+
     private static EndpointDef.ParamDef qInt(String name, int def, String desc) {
         return new EndpointDef.ParamDef(name, "integer", "query", false, String.valueOf(def), desc);
     }
@@ -470,7 +478,7 @@ public class EndpointRegistry {
             (q, b) -> functionService.forceDecompile(str(q, "address"), str(q, "program")));
 
         get("/batch_decompile", "Decompile multiple functions at once",
-            params(qStr("functions", "Comma-separated function names"), pProg()),
+            params(qStr("functions", "Comma-separated function references (names or addresses)"), pProg()),
             (q, b) -> functionService.batchDecompileFunctions(str(q, "functions"), str(q, "program")));
 
         post("/rename_function", "Rename function by old and new name",
@@ -482,8 +490,8 @@ public class EndpointRegistry {
             (q, b) -> functionService.renameFunctionByAddress(bodyStr(b, "function_address"), bodyStr(b, "new_name"), str(q, "program")));
 
         post("/rename_variable", "Rename a variable in a function",
-            params(bStr("functionName"), bStr("oldName"), bStr("newName"), pProg()),
-            (q, b) -> functionService.renameVariableInFunction(bodyStr(b, "functionName"), bodyStr(b, "oldName"),
+            params(bStrOpt("functionName"), bStrOpt("function_address"), bStr("oldName"), bStr("newName"), pProg()),
+            (q, b) -> functionService.renameVariableInFunction(bodyStr(b, "functionName"), bodyStr(b, "function_address"), bodyStr(b, "oldName"),
                 bodyStr(b, "newName"), str(q, "program")));
 
         post("/set_function_prototype", "Set function prototype with calling convention",
@@ -533,8 +541,8 @@ public class EndpointRegistry {
                 bodyStr(b, "variable_name"), bodyStr(b, "storage"), str(q, "program")));
 
         get("/get_function_variables", "List all variables in a function",
-            params(qStr("function_name", "Function name"), pProg()),
-            (q, b) -> functionService.getFunctionVariables(str(q, "function_name"), str(q, "program"), null, null));
+            params(qStrOpt("function_name", "Function name"), qStrOpt("address", "Function address; takes precedence over function_name"), pProg()),
+            (q, b) -> functionService.getFunctionVariables(str(q, "function_name"), str(q, "address"), str(q, "program"), null, null));
 
         post("/batch_rename_function_components", "Rename function and components atomically",
             params(bStr("function_address"), bStrOpt("function_name"), bObj("parameter_renames"),
@@ -786,8 +794,10 @@ public class EndpointRegistry {
             params(qInt("offset", 0), qInt("limit", 100), pProg()),
             (q, b) -> dataTypeService.listDataTypeCategories(num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
 
-        post("/create_struct", "Create a structure data type",
-            params(bStr("name"), bJson("fields"), pProg()),
+        post("/create_struct", "Create a structure data type. Body fields must be a JSON array of objects with name and type, plus optional decimal offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name.",
+            params(bStr("name", "New structure type name, for example UnitAny or SkillTableEntry"),
+                bJson("fields", "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off."),
+                pProg()),
             (q, b) -> dataTypeService.createStruct(bodyStr(b, "name"), bodyFieldsJson(b, "fields"), str(q, "program")));
 
         post("/create_enum", "Create an enum data type",
@@ -977,7 +987,7 @@ public class EndpointRegistry {
                 num(q, "limit", 100), str(q, "program")));
 
         get("/analyze_function_complete", "Comprehensive single-call function analysis",
-            params(qStr("name", "Function name"), qBool("include_xrefs", true), qBool("include_callees", true),
+            params(qStr("name", "Function reference (name or address)"), qBool("include_xrefs", true), qBool("include_callees", true),
                 qBool("include_callers", true), qBool("include_disasm", true),
                 qBool("include_variables", true), pProg()),
             (q, b) -> analysisService.analyzeFunctionComplete(str(q, "name"),
@@ -1105,6 +1115,10 @@ public class EndpointRegistry {
             params(pProg()),
             (q, b) -> programScriptService.saveCurrentProgram(str(q, "program")));
 
+        get("/save_all_programs", "Save all open programs",
+            params(),
+            (q, b) -> programScriptService.saveAllOpenPrograms());
+
         get("/list_open_programs", "List all open programs",
             params(),
             (q, b) -> programScriptService.listOpenPrograms());
@@ -1125,6 +1139,14 @@ public class EndpointRegistry {
             params(qStr("folder", "Project folder path")),
             (q, b) -> programScriptService.listProjectFiles(str(q, "folder")));
 
+        post("/create_folder", "Create a folder in the project",
+            params(bStr("path"), pProg()),
+            (q, b) -> programScriptService.createFolder(bodyStr(b, "path"), str(q, "program")));
+
+        post("/delete_file", "Delete a file from the project",
+            params(bStr("filePath")),
+            (q, b) -> programScriptService.deleteFile(bodyStr(b, "filePath")));
+
         get("/open_program", "Open a program from the current project",
             params(qStr("path", "Program path in project"), qBool("auto_analyze", false, "Run auto-analysis")),
             (q, b) -> programScriptService.openProgramFromProject(str(q, "path"), bool(q, "auto_analyze")));
@@ -1134,8 +1156,8 @@ public class EndpointRegistry {
             (q, b) -> programScriptService.runGhidraScript(bodyStr(b, "script_path"), bodyStr(b, "args"), str(q, "program")));
 
         post("/run_script_inline", "Execute inline Ghidra script code",
-            params(bStr("code"), bStrOpt("args")),
-            (q, b) -> programScriptService.runGhidraScript(bodyStr(b, "code"), bodyStr(b, "args")));
+              params(bStr("code"), bStrOpt("args"), pProg()),
+              (q, b) -> programScriptService.runScriptInline(bodyStr(b, "code"), bodyStr(b, "args"), str(q, "program")));
 
         post("/run_ghidra_script", "Execute script with output capture and timeout",
             params(bStr("script_name"), bStrOpt("args"), bInt("timeout_seconds", 300),

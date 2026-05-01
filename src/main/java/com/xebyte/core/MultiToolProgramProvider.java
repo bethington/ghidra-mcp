@@ -82,6 +82,16 @@ public class MultiToolProgramProvider implements ProgramProvider {
 
         List<ProgramManager> managers = findAllProgramManagers();
 
+        // Exact project-path match (case-insensitive)
+        for (ProgramManager pm : managers) {
+            for (Program prog : pm.getAllOpenPrograms()) {
+                if (prog.getDomainFile() != null
+                        && prog.getDomainFile().getPathname().equalsIgnoreCase(searchName)) {
+                    return prog;
+                }
+            }
+        }
+
         // Exact name match (case-insensitive)
         for (ProgramManager pm : managers) {
             for (Program prog : pm.getAllOpenPrograms()) {
@@ -94,8 +104,8 @@ public class MultiToolProgramProvider implements ProgramProvider {
         // Partial match on path
         for (ProgramManager pm : managers) {
             for (Program prog : pm.getAllOpenPrograms()) {
-                String path = prog.getDomainFile().getPathname();
-                if (path.toLowerCase().contains(searchName.toLowerCase())) {
+                if (prog.getDomainFile() != null
+                        && prog.getDomainFile().getPathname().toLowerCase().contains(searchName.toLowerCase())) {
                     return prog;
                 }
             }
@@ -143,6 +153,26 @@ public class MultiToolProgramProvider implements ProgramProvider {
     public ProgramManager findProgramManager() {
         List<ProgramManager> managers = findAllProgramManagers();
         return managers.isEmpty() ? null : managers.get(0);
+    }
+
+    /**
+     * Close every open instance of the program at the given project path.
+     */
+    public boolean closeProgramByPath(String path) {
+        boolean closed = false;
+        if (path == null || path.trim().isEmpty()) {
+            return false;
+        }
+        for (ProgramManager pm : findAllProgramManagers()) {
+            for (Program prog : pm.getAllOpenPrograms()) {
+                if (prog.getDomainFile() != null
+                        && prog.getDomainFile().getPathname().equalsIgnoreCase(path.trim())) {
+                    pm.closeProgram(prog, false);
+                    closed = true;
+                }
+            }
+        }
+        return closed;
     }
 
     /**

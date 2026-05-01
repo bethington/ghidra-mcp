@@ -1,0 +1,42 @@
+# Core tier — D2-derived reconstructions.
+#
+# Target runtime: ~15 min against real Ghidra + minimax.
+# Each entry is our C-reconstruction of a real D2 1.13d function we
+# already understand deeply, compiled into Benchmark.dll. Ground truth
+# is the reconstructed C source + a truth.yaml overlay.
+#
+# Suites are the unit of Ghidra-state reset (Q7: suite-level reset).
+# For core-tier, group related functions into suites when they legit-
+# imately share structs or cross-call. Solo functions get one-function
+# suites so state reset is clean between unrelated archetypes.
+#
+# Scaffold a new core function with:
+#   python tools/add_core_function.py \
+#       --program /Mods/PD2-S12/D2Common.dll \
+#       --address 6fd7f3a0 \
+#       --name CalcDamageBonus
+#
+# Then reconstruct, author the truth.yaml, and add an entry below.
+
+tier: core
+suites:
+
+  # The stat_list_accessors suite is the first multi-function suite in
+  # the benchmark. Inside it, state deliberately bleeds between runs:
+  # a worker that figures out the StatList magic on the first function
+  # has that knowledge available for the rest. This mirrors how real
+  # fun-doc work flows — you document one accessor, the next one is
+  # easier. Q7's suite-level reset semantics apply BETWEEN suites,
+  # not within.
+  - name: stat_list_accessors
+    description: StatList struct accessors (magic 0x01020304 layout, D2Common.dll)
+    functions:
+      # Validated accessors — canonical pattern: null-check + magic
+      # validation + single field read at a known offset.
+      - get_stat_list_flags        # +0x10  (flags bitfield)
+      - get_stat_list_owner_guid   # +0x20  (owner GUID)
+      - get_stat_list_prev_link    # +0x34  (linked-list reverse pointer)
+      # Unvalidated accessor — structural variant: no null-check, no
+      # magic validation, raw dereference. Exercises fun-doc's ability
+      # to distinguish validated from unvalidated patterns.
+      - get_stat_list_layer        # +0x04  (layer index, raw read)
