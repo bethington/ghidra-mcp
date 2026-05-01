@@ -13,9 +13,9 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * Guard-rail for the v5.4.x function-tag endpoints added to
- * {@code FunctionService}. Locks in each tag tool's method, path, category, and
- * required-param set so a later refactor cannot silently drop one of them.
+ * Guard-rail for the function-tag endpoints in {@code FunctionService}.
+ * Locks in each tag tool's method, path, category, and required-param set so a
+ * later refactor cannot silently drop one of them.
  *
  * <p>Runs fully offline — shares the existing {@link ServiceFactory} stub wiring.
  */
