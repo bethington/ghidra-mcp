@@ -1,7 +1,7 @@
 {
   "version": "5.4.1",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 232,
+  "total_endpoints": 234,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -641,6 +641,21 @@
       "category": "debugger",
       "params": [],
       "description": "Interrupt (break into) the running target"
+    },
+    {
+      "path": "/debugger/launch",
+      "method": "POST",
+      "category": "debugger",
+      "params": [
+        "executable_path",
+        "args",
+        "cwd",
+        "timeout_seconds",
+        "program",
+        "offer",
+        "python_executable"
+      ],
+      "description": "Launch an executable through Ghidra's Trace RMI debugger launcher"
     },
     {
       "path": "/debugger/launch_offers",
@@ -1323,6 +1338,7 @@
       "category": "getter",
       "params": [
         "function_name",
+        "address",
         "program",
         "limit",
         "filter"
@@ -1940,6 +1956,7 @@
       "category": "rename",
       "params": [
         "functionName",
+        "function_address",
         "oldName",
         "newName",
         "program"
@@ -1986,9 +2003,17 @@
       "category": "script",
       "params": [
         "code",
-        "args"
+        "args",
+        "program"
       ],
       "description": "Run inline script code"
+    },
+    {
+      "path": "/save_all_programs",
+      "method": "GET",
+      "category": "program",
+      "params": [],
+      "description": "Save all open programs"
     },
     {
       "path": "/save_program",

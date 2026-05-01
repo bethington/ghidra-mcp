@@ -3278,13 +3278,15 @@ public class FunctionService {
         final String tagComment = comment != null ? comment : "";
 
         FunctionTagManager mgr = program.getFunctionManager().getFunctionTagManager();
-        if (mgr.getFunctionTag(tagName) != null) {
-            return Response.err("Tag already exists: " + tagName);
-        }
 
         AtomicReference<FunctionTag> created = new AtomicReference<>();
+        AtomicReference<String> conflict = new AtomicReference<>();
         try {
             threadingStrategy.executeWrite(program, "Create function tag via HTTP", () -> {
+                if (mgr.getFunctionTag(tagName) != null) {
+                    conflict.set(tagName);
+                    return null;
+                }
                 created.set(mgr.createFunctionTag(tagName, tagComment));
                 return null;
             });
@@ -3293,6 +3295,7 @@ public class FunctionService {
             Msg.error(this, "Failed to create function tag", e);
             return Response.err("Failed to create tag: " + e.getMessage());
         }
+        if (conflict.get() != null) return Response.err("Tag already exists: " + conflict.get());
         FunctionTag tag = created.get();
         if (tag == null) return Response.err("createFunctionTag returned null");
         return Response.ok(JsonHelper.mapOf(

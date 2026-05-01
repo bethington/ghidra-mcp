@@ -332,6 +332,35 @@ Covers: `debugger_attach`, `debugger_status`, `debugger_step_{into,over,out}`, `
 
 Use for: ground-truth validation after static analysis. After emulation resolves a hash, set a breakpoint on the resolved API and confirm the process actually calls it.
 
+## Function Tagging
+
+Lightweight per-function labels (program-wide tag definitions, attached to any function). Useful for carving curated subsets across long analysis sessions — e.g. `crypto`, `parser`, `reviewed`, `todo`, `imported-from-dll`. Tags are stored in the Ghidra DB so they roundtrip through save/checkin and survive across sessions.
+
+Two layers:
+
+- **Tag definitions** (program-wide): `create_function_tag`, `delete_function_tag`, `set_function_tag_comment`, `list_function_tags`.
+- **Per-function attachment**: `add_function_tag`, `remove_function_tag`, `get_function_tags`, `search_functions_by_tag`. Attaching a tag by name auto-creates the definition if it doesn't already exist.
+
+Batch variants: `batch_add_function_tags` / `batch_remove_function_tags` take an array of `{function, tags}` objects and run the whole set in one transaction. Use these when tagging a sweep result — single-call instead of N round-trips.
+
+Worked pattern — sweep + curate:
+
+```python
+# After locating all crypto routines via detect_crypto_constants / search_byte_patterns,
+# tag them with one batch call:
+batch_add_function_tags(assignments=[
+    {"function": "0x401abc",  "tags": "crypto,aes"},
+    {"function": "0x401d40",  "tags": "crypto,sha256"},
+    # ...
+])
+
+# Later, recall the curated list:
+search_functions_by_tag(tag="crypto")
+# → returns {tag, total, functions: [{name, address}, ...]}
+```
+
+Tags are case-sensitive; `search_functions_by_tag` rejects unknown tag names (returns error rather than empty list) so you can detect typos.
+
 ## Security Environment Variables (v5.4.1+)
 
 GhidraMCP defaults to localhost-unauthenticated — safe on a single-user dev box. Configure these before binding beyond loopback:
