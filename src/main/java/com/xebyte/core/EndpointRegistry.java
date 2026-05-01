@@ -998,11 +998,13 @@ public class EndpointRegistry {
         get("/search_functions_enhanced", "Advanced function search with filtering",
             params(qStr("name_pattern", "Name pattern"), qNullInt("min_xrefs"), qNullInt("max_xrefs"),
                 qStr("calling_convention", "Calling convention filter"), qNullBool("has_custom_name"),
+                qNullBool("is_thunk"), qNullBool("is_external"),
                 qBool("regex", false, "Use regex matching"), qStr("sort_by", "Sort field"),
                 qInt("offset", 0), qInt("limit", 100), pProg()),
             (q, b) -> analysisService.searchFunctionsEnhanced(str(q, "name_pattern"),
                 nullableInt(q, "min_xrefs"), nullableInt(q, "max_xrefs"),
                 str(q, "calling_convention"), nullableBool(q, "has_custom_name"),
+                nullableBool(q, "is_thunk"), nullableBool(q, "is_external"),
                 bool(q, "regex"), str(q, "sort_by", "address"),
                 num(q, "offset", 0), num(q, "limit", 100), str(q, "program")));
     }

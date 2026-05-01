@@ -1996,6 +1996,8 @@
         "max_xrefs",
         "calling_convention",
         "has_custom_name",
+        "is_thunk",
+        "is_external",
         "regex",
         "sort_by",
         "offset",

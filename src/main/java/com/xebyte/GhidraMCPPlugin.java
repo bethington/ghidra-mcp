@@ -3121,9 +3121,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
      * NEW v1.6.0: Enhanced function search with filtering and sorting
      */
     private String searchFunctionsEnhanced(String namePattern, Integer minXrefs, Integer maxXrefs,
-                                          String callingConvention, Boolean hasCustomName, boolean regex,
+                                          String callingConvention, Boolean hasCustomName,
+                                          Boolean isThunk, Boolean isExternal, boolean regex,
                                           String sortBy, int offset, int limit, String programName) {
-        return analysisService.searchFunctionsEnhanced(namePattern, minXrefs, maxXrefs, callingConvention, hasCustomName, regex, sortBy, offset, limit, programName).toJson();
+        return analysisService.searchFunctionsEnhanced(namePattern, minXrefs, maxXrefs, callingConvention, hasCustomName, isThunk, isExternal, regex, sortBy, offset, limit, programName).toJson();
     }
 
     /**

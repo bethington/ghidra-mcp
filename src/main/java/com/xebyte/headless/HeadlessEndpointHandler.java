@@ -1182,9 +1182,10 @@ public class HeadlessEndpointHandler {
      * Enhanced function search with multiple filter options.
      */
     public String searchFunctionsEnhanced(String namePattern, Integer minXrefs, Integer maxXrefs,
-                                          Boolean hasCustomName, boolean regex, String sortBy,
+                                          Boolean hasCustomName, Boolean isThunk, Boolean isExternal,
+                                          boolean regex, String sortBy,
                                           int offset, int limit, String programName) {
-        return analysisService.searchFunctionsEnhanced(namePattern, minXrefs, maxXrefs, null, hasCustomName, regex, sortBy, offset, limit, programName).toJson();
+        return analysisService.searchFunctionsEnhanced(namePattern, minXrefs, maxXrefs, null, hasCustomName, isThunk, isExternal, regex, sortBy, offset, limit, programName).toJson();
     }
 
     /**
