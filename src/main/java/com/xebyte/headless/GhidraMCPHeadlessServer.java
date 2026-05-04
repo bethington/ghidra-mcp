@@ -276,7 +276,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         }
         server = HttpServer.create(new InetSocketAddress(bindAddress, port), 0);
         registerEndpoints();
-        server.setExecutor(java.util.concurrent.Executors.newFixedThreadPool(10));
+        server.setExecutor(java.util.concurrent.Executors.newFixedThreadPool(4));
         server.start();
         running = true;
         System.out.println("HTTP server started on " + bindAddress + ":" + port);
@@ -294,6 +294,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             sendResponse(exchange, "Connection OK - GhidraMCP Headless Server v" + VERSION);
         });
 
+        // [DEPRECATED] Use /check_connection instead. Kept for backward compatibility.
         safeContext("/health", exchange -> {
             sendResponse(exchange, endpointHandler.getHealth());
         });
@@ -354,6 +355,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         // --- Program Management --- (registered via HeadlessManagementService)
 
+        // [DEPRECATED] Use /get_type_size instead (DataTypeService.getTypeSize). Kept for backward compatibility.
         // GET_DATA_TYPE_SIZE - Not yet in service layer
         safeContext("/get_data_type_size", exchange -> {
             Map<String, String> params = parseQueryParams(exchange);

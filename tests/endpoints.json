@@ -1,7 +1,7 @@
 {
   "version": "5.6.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 225,
+  "total_endpoints": 221,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -136,22 +136,6 @@
         "program"
       ],
       "description": "Analyze documentation completeness"
-    },
-    {
-      "path": "/analyze_function_full",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "name",
-        "include_xrefs",
-        "include_callees",
-        "include_callers",
-        "include_disasm",
-        "include_variables",
-        "include_completeness",
-        "program"
-      ],
-      "description": "Complete function analysis"
     },
     {
       "path": "/analyze_struct_field_usage",
@@ -322,20 +306,6 @@
         "filter"
       ],
       "description": "Bulk cross-binary function matching"
-    },
-    {
-      "path": "/bulk_fuzzy_match_functions",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "source_program",
-        "target_program",
-        "threshold",
-        "offset",
-        "limit",
-        "filter"
-      ],
-      "description": "Bulk fuzzy match functions across programs"
     },
     {
       "path": "/can_rename_at_address",
@@ -973,19 +943,6 @@
       "description": "Find similar functions"
     },
     {
-      "path": "/find_similar_functions_across_programs",
-      "method": "GET",
-      "category": "documentation",
-      "params": [
-        "address",
-        "source_program",
-        "target_program",
-        "threshold",
-        "limit"
-      ],
-      "description": "Find similar functions via fuzzy matching"
-    },
-    {
       "path": "/find_similar_functions_fuzzy",
       "method": "GET",
       "category": "documentation",
@@ -1009,16 +966,6 @@
       "description": "Find undocumented functions referencing string"
     },
     {
-      "path": "/find_undocumented_functions_by_strings",
-      "method": "GET",
-      "category": "documentation",
-      "params": [
-        "pattern",
-        "program"
-      ],
-      "description": "Report strings and their undocumented functions"
-    },
-    {
       "path": "/force_decompile",
       "method": "GET",
       "category": "decompile",
@@ -1026,7 +973,7 @@
         "address",
         "program"
       ],
-      "description": "Force fresh decompilation"
+      "description": "[DEPRECATED] Use decompile_function with force=true. Force fresh decompilation"
     },
     {
       "path": "/get_address_spaces",
@@ -1102,7 +1049,7 @@
         "type_name",
         "program"
       ],
-      "description": "Get data type size in bytes"
+      "description": "[DEPRECATED] Use get_type_size. Get data type size in bytes"
     },
     {
       "path": "/get_entry_points",
@@ -1388,7 +1335,7 @@
       "method": "GET",
       "category": "utility",
       "params": [],
-      "description": "Health check endpoint for headless server"
+      "description": "[DEPRECATED] Use check_connection. Health check endpoint for headless server"
     },
     {
       "path": "/import_data_types",
@@ -1540,7 +1487,7 @@
       "params": [
         "program"
       ],
-      "description": "List functions with addresses"
+      "description": "[DEPRECATED] Use list_functions_enhanced. List functions with addresses"
     },
     {
       "path": "/list_functions_enhanced",
@@ -1585,7 +1532,7 @@
         "limit",
         "program"
       ],
-      "description": "List all function names with pagination"
+      "description": "[DEPRECATED] Use list_functions_enhanced. List all function names with pagination"
     },
     {
       "path": "/list_namespaces",
@@ -1984,7 +1931,7 @@
         "limit",
         "program"
       ],
-      "description": "Search functions by name"
+      "description": "[DEPRECATED] Use search_functions_enhanced. Search functions by name"
     },
     {
       "path": "/search_functions_enhanced",

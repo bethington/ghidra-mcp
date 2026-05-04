@@ -588,6 +588,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             sendResponse(exchange, getCurrentFunction());
         }));
 
+        // [DEPRECATED] Use /get_type_size instead (DataTypeService.getTypeSize). Kept for backward compatibility.
         // GET_DATA_TYPE_SIZE - Get the size in bytes of a data type (not yet in service layer)
         server.createContext("/get_data_type_size", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
@@ -865,11 +866,11 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // Swing.runNow calls (auto-analysis, DomainObject flushEvents, etc.),
         // causing them to fail with "Timed-out waiting to run a Swing task".
         //
-        // Pool size 3 allows: 1 slow EDT-bound request in flight, 1 fast
+        // Pool size 4 allows: 1 slow EDT-bound request in flight, 2 fast
         // read-only in flight, 1 slot in reserve so Ghidra's internal tasks
         // can always slot in. Still faster than single-threaded (read-only
         // endpoints don't block) but safe for EDT saturation.
-        ExecutorService httpExecutor = Executors.newFixedThreadPool(3, new ThreadFactory() {
+        ExecutorService httpExecutor = Executors.newFixedThreadPool(4, new ThreadFactory() {
             private final AtomicInteger n = new AtomicInteger(1);
             @Override
             public Thread newThread(Runnable r) {

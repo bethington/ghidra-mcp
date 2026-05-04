@@ -69,7 +69,7 @@ public class UdsHttpServer {
         serverChannel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
         serverChannel.bind(UnixDomainSocketAddress.of(socketPath));
 
-        executor = Executors.newCachedThreadPool(r -> {
+        executor = Executors.newFixedThreadPool(4, r -> {
             Thread t = new Thread(r, "GhidraMCP-UDS-Worker");
             t.setDaemon(true);
             return t;

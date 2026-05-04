@@ -28,7 +28,7 @@ public class ListingService {
     // Listing endpoints
     // ========================================================================
 
-    @McpTool(path = "/list_methods", description = "List all function names with pagination", category = "listing")
+    @McpTool(path = "/list_methods", description = "[DEPRECATED] Use list_functions_enhanced instead. List all function names with pagination", category = "listing")
     public Response getAllFunctionNames(
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
@@ -229,7 +229,7 @@ public class ListingService {
         }
     }
 
-    @McpTool(path = "/search_functions", description = "Search functions by name pattern. Omit name_pattern to list all functions.", category = "listing")
+    @McpTool(path = "/search_functions", description = "[DEPRECATED] Use search_functions_enhanced instead. Search functions by name pattern. Omit name_pattern to list all functions.", category = "listing")
     public Response searchFunctionsByName(
             @Param(value = "name_pattern", description = "Substring to match against function names (omit or leave empty to return all functions)", defaultValue = "") String searchTerm,
             @Param(value = "offset", defaultValue = "0") int offset,
@@ -257,7 +257,7 @@ public class ListingService {
         return Response.text(ServiceUtils.paginateList(matches, offset, limit));
     }
 
-    @McpTool(path = "/list_functions", description = "List all functions (no pagination)", category = "listing")
+    @McpTool(path = "/list_functions", description = "[DEPRECATED] Use list_functions_enhanced instead. List all functions (no pagination)", category = "listing")
     public Response listFunctions(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
