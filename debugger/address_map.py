@@ -508,35 +508,51 @@ class AddressMapper:
     def _build_ghidra_candidates(
         self, ghidra_bases: Dict[str, int | str], ghidra_modules: list[dict]
     ) -> list[_GhidraBaseCandidate]:
-        if ghidra_modules:
-            result: list[_GhidraBaseCandidate] = []
-            for entry in ghidra_modules:
-                if not isinstance(entry, dict):
-                    raise ValueError(
-                        "Invalid ghidra_modules payload: each entry must be an object"
-                    )
-                module_id = str(entry.get("id", "")).strip()
-                if not module_id:
-                    module_id = str(entry.get("name", "")).strip()
-                if "base" not in entry:
-                    logger.warning("Skipping Ghidra module without base: %r", entry)
+        result: list[_GhidraBaseCandidate] = []
+        seen: set[tuple[str, int, str]] = set()
+        covered_legacy_keys: set[str] = set()
+
+        for entry in ghidra_modules:
+            if not isinstance(entry, dict):
+                raise ValueError(
+                    "Invalid ghidra_modules payload: each entry must be an object"
+                )
+            module_id = str(entry.get("id", "")).strip()
+            if not module_id:
+                module_id = str(entry.get("name", "")).strip()
+            if "base" not in entry:
+                logger.warning("Skipping Ghidra module without base: %r", entry)
+                continue
+            base = self._parse_base(entry["base"])
+            names = entry.get("names", []) or []
+            canonical_name = str(entry.get("name", "")).strip()
+            if canonical_name:
+                names = [canonical_name, *names]
+            if not names:
+                names = [module_id]
+            for raw_name in names:
+                text = self._clean_text(raw_name)
+                if not text:
                     continue
-                base = self._parse_base(entry["base"])
-                names = entry.get("names", []) or []
-                canonical_name = str(entry.get("name", "")).strip()
-                if canonical_name:
-                    names = [canonical_name, *names]
-                if not names:
-                    names = [module_id]
-                for raw_name in names:
-                    text = self._clean_text(raw_name)
-                    if text:
-                        result.append(_GhidraBaseCandidate(module_id or text, text, base))
-            return result
-        return [
-            _GhidraBaseCandidate(str(name), str(name), self._parse_base(base))
-            for name, base in ghidra_bases.items()
-        ]
+                candidate = _GhidraBaseCandidate(module_id or text, text, base)
+                ident = (candidate.id, candidate.base, candidate.name)
+                if ident not in seen:
+                    seen.add(ident)
+                    result.append(candidate)
+                covered_legacy_keys.add(text)
+
+        for name, base_value in ghidra_bases.items():
+            text = self._clean_text(name)
+            if not text or text in covered_legacy_keys:
+                continue
+            base = self._parse_base(base_value)
+            candidate = _GhidraBaseCandidate(text, text, base)
+            ident = (candidate.id, candidate.base, candidate.name)
+            if ident not in seen:
+                seen.add(ident)
+                result.append(candidate)
+
+        return result
 
     @staticmethod
     def _dedupe_candidates(
