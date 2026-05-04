@@ -1814,7 +1814,11 @@ def debugger_trace_list() -> str:
     return _debugger_request("GET", "/debugger/trace/list")
 @mcp.tool()
 def debugger_watch_memory(
-    ghidra_address: str, size: int = 4, access: str = "write", module: str = ""
+    ghidra_address: str = "",
+    size: int = 4,
+    access: str = "write",
+    module: str = "",
+    runtime_address: str = "",
 ) -> str:
     """Set a hardware watchpoint on a memory range to monitor read/write access.
 
@@ -1826,17 +1830,14 @@ def debugger_watch_memory(
         size: Bytes to watch (1, 2, or 4).
         access: "read", "write", or "readwrite".
         module: DLL name for address resolution.
+        runtime_address: Live process runtime address (skips address mapper).
     """
-    return _debugger_request(
-        "POST",
-        "/debugger/watch/start",
-        {
-            "ghidra_address": ghidra_address,
-            "module": module,
-            "size": size,
-            "access": access,
-        },
-    )
+    payload = {"size": size, "access": access, "module": module}
+    if runtime_address.strip():
+        payload["runtime_address"] = runtime_address
+    else:
+        payload["ghidra_address"] = ghidra_address
+    return _debugger_request("POST", "/debugger/watch/start", payload)
 @mcp.tool()
 def debugger_watch_stop(watch_id: int = -1) -> str:
     """Stop a memory watchpoint. Use watch_id=-1 to stop all.

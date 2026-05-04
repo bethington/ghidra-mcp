@@ -8,6 +8,11 @@ from enum import Enum
 from typing import Optional
 
 
+def _hex_addr(value: int) -> str:
+    width = 16 if value > 0xFFFFFFFF else 8
+    return f"0x{value:0{width}X}"
+
+
 class DebuggerState(str, Enum):
     DETACHED = "detached"
     ATTACHED = "attached"
@@ -42,7 +47,7 @@ class ModuleInfo:
     def to_dict(self) -> dict:
         d = {
             "name": self.name,
-            "runtime_base": f"0x{self.runtime_base:08X}",
+            "runtime_base": _hex_addr(self.runtime_base),
             "size": f"0x{self.size:X}",
         }
         if self.image_path:
@@ -50,7 +55,7 @@ class ModuleInfo:
         if self.loaded_name:
             d["loaded_name"] = self.loaded_name
         if self.ghidra_base is not None:
-            d["ghidra_base"] = f"0x{self.ghidra_base:08X}"
+            d["ghidra_base"] = _hex_addr(self.ghidra_base)
             d["offset"] = f"0x{self.runtime_base - self.ghidra_base:+X}"
         if self.ghidra_name:
             d["ghidra_name"] = self.ghidra_name
@@ -75,8 +80,8 @@ class BreakpointInfo:
     def to_dict(self) -> dict:
         return {
             "id": self.bp_id,
-            "runtime_address": f"0x{self.runtime_address:08X}",
-            "ghidra_address": f"0x{self.ghidra_address:08X}" if self.ghidra_address else None,
+            "runtime_address": _hex_addr(self.runtime_address),
+            "ghidra_address": _hex_addr(self.ghidra_address) if self.ghidra_address is not None else None,
             "module": self.module,
             "type": self.bp_type.value,
             "enabled": self.enabled,
@@ -103,21 +108,21 @@ class TraceEntry:
         d: dict = {
             "timestamp": round(self.timestamp, 4),
             "trace_id": self.trace_id,
-            "ghidra_address": f"0x{self.ghidra_address:08X}",
+            "ghidra_address": _hex_addr(self.ghidra_address),
             "module": self.module,
         }
         if self.arg_names and len(self.arg_names) == len(self.args):
             d["args"] = {
-                name: f"0x{val:08X}" for name, val in zip(self.arg_names, self.args)
+                name: _hex_addr(val) for name, val in zip(self.arg_names, self.args)
             }
         else:
-            d["args"] = [f"0x{v:08X}" for v in self.args]
+            d["args"] = [_hex_addr(v) for v in self.args]
         if self.return_value is not None:
-            d["return_value"] = f"0x{self.return_value:08X}"
+            d["return_value"] = _hex_addr(self.return_value)
         if self.caller is not None:
-            d["caller"] = f"0x{self.caller:08X}"
+            d["caller"] = _hex_addr(self.caller)
         if self.caller_ghidra is not None:
-            d["caller_ghidra"] = f"0x{self.caller_ghidra:08X}"
+            d["caller_ghidra"] = _hex_addr(self.caller_ghidra)
         if self.caller_symbol:
             d["caller_symbol"] = self.caller_symbol
         if self.thread_id is not None:
@@ -141,7 +146,7 @@ class TracePointInfo:
     def to_dict(self) -> dict:
         return {
             "trace_id": self.trace_id,
-            "ghidra_address": f"0x{self.ghidra_address:08X}",
+            "ghidra_address": _hex_addr(self.ghidra_address),
             "module": self.module,
             "convention": self.convention,
             "arg_count": self.arg_count,
@@ -170,18 +175,18 @@ class WatchHit:
         d: dict = {
             "timestamp": round(self.timestamp, 4),
             "watch_id": self.watch_id,
-            "address": f"0x{self.address:08X}",
+            "address": _hex_addr(self.address),
             "size": self.size,
             "access": self.access,
         }
         if self.ghidra_address is not None:
-            d["ghidra_address"] = f"0x{self.ghidra_address:08X}"
+            d["ghidra_address"] = _hex_addr(self.ghidra_address)
         if self.value is not None:
-            d["value"] = f"0x{self.value:08X}"
+            d["value"] = _hex_addr(self.value)
         if self.accessor_address is not None:
-            d["accessor"] = f"0x{self.accessor_address:08X}"
+            d["accessor"] = _hex_addr(self.accessor_address)
         if self.accessor_ghidra is not None:
-            d["accessor_ghidra"] = f"0x{self.accessor_ghidra:08X}"
+            d["accessor_ghidra"] = _hex_addr(self.accessor_ghidra)
         if self.accessor_symbol:
             d["accessor_symbol"] = self.accessor_symbol
         return d

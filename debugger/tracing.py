@@ -187,8 +187,10 @@ class TraceSession:
         with self._lock:
             self._traces[trace_id] = trace
 
+        origin_addr = ghidra_addr_value if ghidra_address is not None else runtime_addr
+        origin_kind = "ghidra" if ghidra_address is not None else "runtime"
         logger.info(
-            f"Trace #{trace_id} started: 0x{ghidra_address:08X} ({module}) "
+            f"Trace #{trace_id} started: 0x{origin_addr:X} ({origin_kind}, {module}) "
             f"[{convention}, {arg_count} args, "
             f"capture_return={capture_return}, max_hits={max_hits}]")
         return trace_id
@@ -373,8 +375,10 @@ class TraceSession:
         with self._lock:
             self._watches[watch_id] = watch
 
+        origin_addr = ghidra_addr_value if ghidra_address is not None else runtime_addr
+        origin_kind = "ghidra" if ghidra_address is not None else "runtime"
         logger.info(
-            f"Watch #{watch_id} set at 0x{ghidra_address:08X} ({module}) "
+            f"Watch #{watch_id} set at 0x{origin_addr:X} ({origin_kind}, {module}) "
             f"[size={size}, access={access}]")
         return watch_id
 
