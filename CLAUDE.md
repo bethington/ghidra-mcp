@@ -40,25 +40,7 @@ Use this file for architecture, conventions, and implementation guidance; use th
 
 ## Build & Deploy
 
-Two backends are supported. Maven is the default; Gradle is the new primary path. Switch with `TOOLS_SETUP_BACKEND=gradle`.
-
-**Gradle (set `TOOLS_SETUP_BACKEND=gradle` or invoke directly):**
-
-```text
-# Direct Gradle invocation — no tools.setup required
-./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
-./gradlew preflight      -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
-./gradlew deploy         -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
-./gradlew startGhidra    -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
-
-# Via tools.setup facade (same commands, Gradle backend)
-$env:TOOLS_SETUP_BACKEND = "gradle"
-python -m tools.setup build
-python -m tools.setup preflight --ghidra-path F:\ghidra_12.0.4_PUBLIC
-python -m tools.setup deploy    --ghidra-path F:\ghidra_12.0.4_PUBLIC
-```
-
-**Maven (default — existing tooling unchanged):**
+Maven is the only build system. All builds go through `pom.xml`.
 
 ```text
 python -m tools.setup build
@@ -69,9 +51,7 @@ python -m tools.setup deploy         --ghidra-path F:\ghidra_12.0.4_PUBLIC
 
 - Maven: `C:\Users\benam\tools\apache-maven-3.9.6\bin\mvn.cmd`
 - Ghidra install: `F:\ghidra_12.0.4_PUBLIC`
-- `tools.setup` delegates to Maven by default; set `TOOLS_SETUP_BACKEND=gradle` to route the same commands to Gradle
 - Deploy handles: build, extension install, FrontEndTool.xml patching, Ghidra restart
-- Migration plan: `docs/project-management/GRADLE_MIGRATION_CHECKLIST.md`
 
 ## Releases
 
@@ -162,7 +142,7 @@ Find the file(s) you edited below; run everything in that row. Always include th
 | `fun-doc/audit/*` | `tests/performance/test_audit_rules.py tests/performance/test_audit_registry.py` |
 | `fun-doc/benchmark/scorer.py` or `truth/*.yaml` or `src/*.c` | `tests/performance/test_benchmark_scorer.py tests/performance/test_benchmark_extract_truth.py tests/performance/test_benchmark_haiku_judge.py tests/performance/test_benchmark_ghidra_bridge.py` + rerun the benchmark itself |
 | `debugger/*` | `tests/unit/test_address_map.py tests/unit/test_d2_conventions.py tests/unit/test_debugger_engine.py tests/unit/test_debugger_server.py tests/unit/test_windbg.py` |
-| `tools/setup/*`, `build.gradle`, `pom.xml` | `tests/unit/test_setup_cli.py tests/unit/test_setup_ghidra.py tests/unit/test_gradle_tasks.py tests/unit/test_version_bump.py tests/unit/test_project_consistency.py` |
+| `tools/setup/*`, `pom.xml` | `tests/unit/test_setup_cli.py tests/unit/test_setup_ghidra.py tests/unit/test_version_bump.py tests/unit/test_project_consistency.py` |
 | `tests/endpoints.json` hand-edit | Offline (Java) — `EndpointsJsonParityTest` verifies every `@McpTool` is listed and hand-authored descriptions are preserved |
 | CLI: `bridge_mcp_ghidra.py --transport`, `tools.setup` subcommands | `tests/unit/test_setup_cli.py` + manual invocation |
 
@@ -177,9 +157,6 @@ pytest tests/unit/ --no-cov
 **Offline Java (scanner + endpoints.json parity, ~11 tests, <1s):**
 
 ```text
-# Gradle
-./gradlew test --tests 'com.xebyte.offline.*' -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
-# Maven
 mvn test -Dtest='com.xebyte.offline.*Test'
 ```
 
@@ -200,7 +177,7 @@ pytest tests/performance/ \
 
 ```text
 # Java
-./gradlew test -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC   # or: mvn test
+mvn test
 # Python — subset by marker
 pytest tests/ -m readonly          # safe, no writes
 pytest tests/ -m safe_write        # identity writes only

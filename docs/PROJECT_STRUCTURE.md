@@ -12,8 +12,7 @@ ghidra-mcp/
 ├── CONTRIBUTING.md              # Contributor workflow
 ├── AGENTS.md / CLAUDE.md        # AI operator guidance
 ├── bridge_mcp_ghidra.py         # Python MCP bridge
-├── pom.xml                      # Canonical Maven build
-├── build.gradle                 # Secondary/manual Gradle path
+├── pom.xml                      # Maven build
 ├── requirements*.txt            # Python dependencies
 ├── docs/                        # Maintained documentation
 ├── src/                         # Java plugin/headless server source

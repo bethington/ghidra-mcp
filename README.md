@@ -155,11 +155,6 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    mvn clean package assembly:single -DskipTests
    ```
 
-   ```bash
-   # Secondary/manual Gradle build path only (not used by tools.setup or VS Code tasks)
-   GHIDRA_INSTALL_DIR=/path/to/ghidra gradle buildExtension
-   ```
-
 ### Installation (Linux — Ubuntu/Debian)
 
 1. **Clone the repository:**
@@ -717,7 +712,7 @@ python -m tools.setup deploy --ghidra-path "C:\ghidra_12.0.4_PUBLIC"
 python -m tools.setup bump-version --new X.Y.Z
 ```
 
-The authoritative build system today is Maven. `tools.setup`, the VS Code tasks, and the documented deploy flow all build through `pom.xml` and write artifacts to `target/`. `build.gradle` remains in the repo as a manual fallback for direct Ghidra/Gradle users, but it is not the primary path.
+The authoritative build system is Maven. `tools.setup`, the VS Code tasks, and the documented deploy flow all build through `pom.xml` and write artifacts to `target/`.
 
 ### Command Reference
 
@@ -725,10 +720,10 @@ The authoritative build system today is Maven. `tools.setup`, the VS Code tasks,
 |---------|-------------|
 | `ensure-prereqs` | Install Python deps + Ghidra Maven JARs in one shot. Start here on a new machine. |
 | `preflight` | Validate Python, build tool, Ghidra path, and JAR availability without making changes. Add `--strict` to also check network reachability. |
-| `build` | Build the plugin JAR and extension ZIP via Maven (or Gradle when `TOOLS_SETUP_BACKEND=gradle`). |
+| `build` | Build the plugin JAR and extension ZIP via Maven. |
 | `deploy` | Copy the built extension into the Ghidra profile and patch `FrontEndTool.xml` for auto-activation. |
 | `start-ghidra` | Launch the configured Ghidra installation. |
-| `clean` | Remove Maven/Gradle build outputs (`target/`, `build/`). |
+| `clean` | Remove Maven build outputs (`target/`). |
 | `clean-all` | Remove build outputs plus local cache artifacts (`.m2` Ghidra JARs, etc.). |
 | `install-ghidra-deps` | Install only the Ghidra JARs into `~/.m2`. Useful when the build environment changes. |
 | `install-python-deps` | Install only the Python requirements files. |
@@ -791,7 +786,7 @@ ghidra-mcp/
 ├── docs/                    # Documentation
 │   ├── prompts/            # AI workflow prompts (V5 documentation workflows)
 │   ├── releases/           # Version release notes
-│   └── project-management/ # Contributor planning docs (Gradle migration, etc.)
+│   └── project-management/ # Contributor planning docs
 ├── tools/setup/             # Build and deployment CLI (python -m tools.setup)
 ├── fun-doc/                 # Internal RE curation tool — not part of the MCP plugin
 │                            #   Priority-queue worker, LLM scoring, web dashboard.
@@ -946,7 +941,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
 ### Quick Start
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Build and test your changes (`mvn clean package assembly:single -DskipTests` or `GHIDRA_INSTALL_DIR=/path/to/ghidra gradle buildExtension`)
+3. Build and test your changes (`mvn clean package assembly:single -DskipTests`)
 4. Update documentation as needed
 5. Commit your changes (`git commit -m 'Add amazing feature'`)
 6. Push to the branch (`git push origin feature/amazing-feature`)

@@ -721,7 +721,7 @@ The fun-doc automation engine was substantially rebuilt. It now ships a real-tim
 
 - **Streamable HTTP transport** — `--transport streamable-http` is now documented and recommended for web/HTTP clients. SSE transport is deprecated. Added `ghidra-mcp-http` config example to `mcp-config.json`.
 - **Engineering backlog** — Added `docs/project-management/BACKLOG.md` with prioritized roadmap from competitive fork analysis (GitHub issues #109–#114).
-- **Gradle build** — Added Gradle-based Ghidra extension build as an alternative to Maven (`build.gradle`, `settings.gradle`).
+
 
 #### Fixed
 
