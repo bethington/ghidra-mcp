@@ -197,20 +197,47 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_sync_modules(self, body: dict):
         ds = self._ds()
-        ghidra_bases = body.get("ghidra_bases", {})
-        ghidra_modules = body.get("ghidra_modules", [])
+        ghidra_bases = body.get("ghidra_bases")
+        ghidra_modules = body.get("ghidra_modules")
+
+        if ghidra_bases is None:
+            ghidra_bases = {}
+        if ghidra_modules is None:
+            ghidra_modules = []
+
+        if not isinstance(ghidra_bases, dict):
+            self._send_error(400, "'ghidra_bases' must be an object")
+            return
+
+        if not isinstance(ghidra_modules, list):
+            self._send_error(400, "'ghidra_modules' must be a list")
+            return
+
+        for i, entry in enumerate(ghidra_modules):
+            if not isinstance(entry, dict):
+                self._send_error(400, f"'ghidra_modules[{i}]' must be an object")
+                return
+
         if not ghidra_bases and not ghidra_modules:
             self._send_error(400, "Missing 'ghidra_bases' dict or 'ghidra_modules' list")
             return
+
         # Convert hex string values to int if needed
         parsed_bases = {}
         for name, base in ghidra_bases.items():
-            if isinstance(base, str):
-                parsed_bases[name] = (
-                    int(base, 16) if base.casefold().startswith("0x") else int(base)
+            try:
+                if isinstance(base, str):
+                    parsed_bases[name] = (
+                        int(base, 16) if base.casefold().startswith("0x") else int(base)
+                    )
+                else:
+                    parsed_bases[name] = int(base)
+            except (TypeError, ValueError) as exc:
+                self._send_error(
+                    400,
+                    f"Invalid base for ghidra_bases[{name!r}]: {base!r} ({exc})",
                 )
-            else:
-                parsed_bases[name] = int(base)
+                return
 
         runtime_modules = ds.engine.get_modules()
         result = ds.mapper.update_from_modules(
