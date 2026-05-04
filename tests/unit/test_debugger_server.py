@@ -355,6 +355,39 @@ class TestModulesEndpoint:
         assert body["count"] == len(body["modules"])
 
 
+class TestSyncModulesEndpoint:
+    def test_sync_modules_accepts_null_ghidra_bases_with_modules(self, debug_server):
+        base, ds = debug_server
+        ds.engine.get_modules.return_value = [ModuleInfo("A.exe", 0x140000000, 0x1000)]
+        status, _ = _post(
+            base,
+            "/debugger/sync_modules",
+            {
+                "ghidra_bases": None,
+                "ghidra_modules": [{"id": "A", "name": "A.exe", "base": "0x240000000"}],
+            },
+        )
+        assert status == 200
+
+    def test_sync_modules_rejects_non_object_ghidra_bases(self, debug_server):
+        base, _ = debug_server
+        status, body = _post(base, "/debugger/sync_modules", {"ghidra_bases": [], "ghidra_modules": []})
+        assert status == 400
+        assert "ghidra_bases" in body.get("error", "")
+
+    def test_sync_modules_rejects_non_list_ghidra_modules(self, debug_server):
+        base, _ = debug_server
+        status, body = _post(base, "/debugger/sync_modules", {"ghidra_bases": {}, "ghidra_modules": {}})
+        assert status == 400
+        assert "ghidra_modules" in body.get("error", "")
+
+    def test_sync_modules_rejects_non_object_entry(self, debug_server):
+        base, _ = debug_server
+        status, body = _post(base, "/debugger/sync_modules", {"ghidra_modules": ["bad"]})
+        assert status == 400
+        assert "ghidra_modules[0]" in body.get("error", "")
+
+
 # ---------------------------------------------------------------------------
 # Tests: routing
 # ---------------------------------------------------------------------------
