@@ -434,17 +434,18 @@ class AddressMapper:
         ghidra_index: dict[str, dict[str, list[_GhidraBaseCandidate]]],
     ) -> _ResolvedCandidate | str | None:
         aliases = self._aliases_for_runtime_module(module)
+        first_ambiguous: str | None = None
         for kind in _MATCH_ORDER:
             for key in aliases.get(kind, []):
                 unique = self._dedupe_candidates(ghidra_index[kind].get(key, []))
                 if len(unique) == 1:
                     return _ResolvedCandidate(module, unique[0], kind, key)
-                if len(unique) > 1:
-                    return (
+                if len(unique) > 1 and first_ambiguous is None:
+                    first_ambiguous = (
                         f"ambiguous_{kind}_match: "
                         + ", ".join(f"{c.name}@0x{c.base:08X}" for c in unique)
                     )
-        return None
+        return first_ambiguous
 
     def _resolve_mapped_module_by_name(self, name: str) -> Optional[ModuleMapping]:
         aliases = self._aliases_for_name(name)
