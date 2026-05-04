@@ -53,6 +53,8 @@ def _module_info_from_pybag_entry(raw_module: Any) -> ModuleInfo:
 
     if isinstance(raw_module, tuple) and len(raw_module) == 2:
         name_info, params = raw_module
+        image_path = ""
+        loaded_name = ""
         if isinstance(name_info, tuple):
             image_path = str(name_info[0]) if len(name_info) > 0 and name_info[0] else ""
             short_name = str(name_info[1]) if len(name_info) > 1 and name_info[1] else ""
@@ -65,14 +67,28 @@ def _module_info_from_pybag_entry(raw_module: Any) -> ModuleInfo:
         size = getattr(params, "Size", getattr(params, "size", None))
         if runtime_base is None or size is None:
             raise ValueError(f"Unsupported pybag module tuple: {raw_module!r}")
-        return ModuleInfo(name=name, runtime_base=int(runtime_base), size=int(size))
+        return ModuleInfo(
+            name=name,
+            runtime_base=int(runtime_base),
+            size=int(size),
+            image_path=image_path or None,
+            loaded_name=loaded_name or None,
+        )
 
     name = getattr(raw_module, "name", None)
     runtime_base = getattr(raw_module, "runtime_base", getattr(raw_module, "base", getattr(raw_module, "Base", None)))
     size = getattr(raw_module, "size", getattr(raw_module, "Size", None))
     if name is None or runtime_base is None or size is None:
         raise ValueError(f"Unsupported pybag module entry: {raw_module!r}")
-    return ModuleInfo(name=str(name), runtime_base=int(runtime_base), size=int(size))
+    image_path = getattr(raw_module, "image_path", getattr(raw_module, "ImageName", None))
+    loaded_name = getattr(raw_module, "loaded_name", getattr(raw_module, "LoadedImageName", None))
+    return ModuleInfo(
+        name=str(name),
+        runtime_base=int(runtime_base),
+        size=int(size),
+        image_path=str(image_path) if image_path else None,
+        loaded_name=str(loaded_name) if loaded_name else None,
+    )
 
 
 def _register_query_plan(bitness: str) -> List[Tuple[str, str]]:

@@ -33,6 +33,11 @@ class ModuleInfo:
     runtime_base: int
     size: int
     ghidra_base: Optional[int] = None
+    image_path: Optional[str] = None
+    loaded_name: Optional[str] = None
+    ghidra_name: Optional[str] = None
+    match_kind: Optional[str] = None
+    match_key: Optional[str] = None
 
     def to_dict(self) -> dict:
         d = {
@@ -40,9 +45,19 @@ class ModuleInfo:
             "runtime_base": f"0x{self.runtime_base:08X}",
             "size": f"0x{self.size:X}",
         }
+        if self.image_path:
+            d["image_path"] = self.image_path
+        if self.loaded_name:
+            d["loaded_name"] = self.loaded_name
         if self.ghidra_base is not None:
             d["ghidra_base"] = f"0x{self.ghidra_base:08X}"
             d["offset"] = f"0x{self.runtime_base - self.ghidra_base:+X}"
+        if self.ghidra_name:
+            d["ghidra_name"] = self.ghidra_name
+        if self.match_kind:
+            d["match_kind"] = self.match_kind
+        if self.match_key:
+            d["match_key"] = self.match_key
         return d
 
 

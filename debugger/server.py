@@ -186,28 +186,36 @@ class RequestHandler(BaseHTTPRequestHandler):
         # Enrich with Ghidra bases from mapper
         result = []
         for mod in modules:
-            mapping = ds.mapper.get_module(mod.name)
+            mapping = ds.mapper.get_mapping_for_runtime_module(mod)
             if mapping:
                 mod.ghidra_base = mapping.ghidra_base
+                mod.ghidra_name = mapping.ghidra_name
+                mod.match_kind = mapping.match_kind
+                mod.match_key = mapping.match_key
             result.append(mod.to_dict())
         self._send_json({"modules": result, "count": len(result)})
 
     def _handle_sync_modules(self, body: dict):
         ds = self._ds()
         ghidra_bases = body.get("ghidra_bases", {})
-        if not ghidra_bases:
-            self._send_error(400, "Missing 'ghidra_bases' dict")
+        ghidra_modules = body.get("ghidra_modules", [])
+        if not ghidra_bases and not ghidra_modules:
+            self._send_error(400, "Missing 'ghidra_bases' dict or 'ghidra_modules' list")
             return
         # Convert hex string values to int if needed
         parsed_bases = {}
         for name, base in ghidra_bases.items():
             if isinstance(base, str):
-                parsed_bases[name] = int(base, 16) if base.startswith("0x") else int(base)
+                parsed_bases[name] = (
+                    int(base, 16) if base.casefold().startswith("0x") else int(base)
+                )
             else:
                 parsed_bases[name] = int(base)
 
         runtime_modules = ds.engine.get_modules()
-        result = ds.mapper.update_from_modules(runtime_modules, parsed_bases)
+        result = ds.mapper.update_from_modules(
+            runtime_modules, parsed_bases, ghidra_modules=ghidra_modules
+        )
         self._send_json(result)
 
     def _handle_address_map(self):
@@ -215,13 +223,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         modules = ds.mapper.get_all_modules()
         result = []
         for m in modules:
-            result.append({
+            item = {
                 "name": m.name,
+                "ghidra_name": m.ghidra_name,
                 "ghidra_base": f"0x{m.ghidra_base:08X}",
                 "runtime_base": f"0x{m.runtime_base:08X}",
                 "size": f"0x{m.size:X}",
                 "offset": f"0x{m.offset:+X}",
-            })
+                "match_kind": m.match_kind,
+                "match_key": m.match_key,
+            }
+            if m.image_path:
+                item["image_path"] = m.image_path
+            if m.loaded_name:
+                item["loaded_name"] = m.loaded_name
+            result.append(item)
         self._send_json({"mappings": result, "count": len(result)})
 
     def _handle_registers(self):
