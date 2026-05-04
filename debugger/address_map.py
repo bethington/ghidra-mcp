@@ -34,7 +34,7 @@ _ORDINAL_RE = re.compile(r"Ordinal_(\d+)")
 
 # Mapping lookup order. Later stages are increasingly permissive and must be
 # treated as aliases, not unique identities.
-_MATCH_ORDER = ("exact", "basename", "canonical", "fuzzy")
+_MATCH_ORDER = ("exact", "basename", "canonical", "fuzzy", "stem")
 _SAFE_QUOTE_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789."
 
 
@@ -495,6 +495,7 @@ class AddressMapper:
             "basename": basename.casefold(),
             "canonical": cls._canonical_basename_key(basename),
             "fuzzy": cls._fuzzy_basename_key(basename),
+            "stem": cls._stem_basename_key(basename),
         }
 
     @staticmethod
@@ -510,6 +511,10 @@ class AddressMapper:
         if ghidra_modules:
             result: list[_GhidraBaseCandidate] = []
             for entry in ghidra_modules:
+                if not isinstance(entry, dict):
+                    raise ValueError(
+                        "Invalid ghidra_modules payload: each entry must be an object"
+                    )
                 module_id = str(entry.get("id", "")).strip()
                 if not module_id:
                     module_id = str(entry.get("name", "")).strip()
@@ -592,6 +597,12 @@ class AddressMapper:
         stem = re.sub(r"[^a-z0-9]+", "", stem)
         ext = ext if ext in {".exe", ".dll"} else ""
         return f"{stem}{ext}"
+
+    @staticmethod
+    def _stem_basename_key(basename: str) -> str:
+        """Compatibility alias for extensionless module names (e.g. D2Common)."""
+        stem, _ = os.path.splitext(basename.lower())
+        return re.sub(r"[^a-z0-9]+", "", stem)
 
     @classmethod
     def _ordinal_key(cls, name: str) -> str:
