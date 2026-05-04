@@ -96,14 +96,22 @@ _active_socket: str | None = None  # UDS socket path
 _active_tcp: str | None = None  # TCP base URL (e.g. "http://127.0.0.1:8089")
 _transport_mode: str = "none"  # "uds", "tcp", or "none"
 
-# Serialization lock for Ghidra HTTP calls — prevents stdout corruption when
-# multiple MCP tool calls arrive concurrently (see GitHub issue #91).
-_ghidra_lock = asyncio.Lock()
 _connected_project: str | None = None  # Project name for auto-reconnect
 
 # Serialization lock for Ghidra HTTP calls — prevents stdout corruption when
 # multiple MCP tool calls arrive concurrently (see GitHub issue #91).
 _ghidra_lock = threading.Lock()
+
+# Circuit breaker: if Ghidra returns 5 errors in 30s, stop hammering it.
+_circuit_failures: list[float] = []  # timestamps of recent failures
+_circuit_open: bool = False
+_circuit_opened_at: float = 0.0
+_circuit_threshold: int = 5
+_circuit_window: float = 30.0  # seconds
+_circuit_cooldown: float = 30.0  # seconds
+
+_health_poll_thread: threading.Thread | None = None
+_health_poll_stop = threading.Event()
 
 
 # ==========================================================================
@@ -593,6 +601,48 @@ def _ensure_connected() -> str | None:
     return None
 
 
+def _check_circuit() -> str | None:
+    global _circuit_open, _circuit_opened_at, _circuit_failures
+    now = time.time()
+    if _circuit_open:
+        if now - _circuit_opened_at > _circuit_cooldown:
+            _circuit_open = False
+            _circuit_failures.clear()
+            logger.info("Circuit breaker closed after cooldown.")
+            return None
+        remaining = _circuit_cooldown - (now - _circuit_opened_at)
+        return (
+            f"Ghidra is unhealthy (circuit breaker open). "
+            f"Retry in {remaining:.0f}s."
+        )
+    cutoff = now - _circuit_window
+    _circuit_failures = [t for t in _circuit_failures if t > cutoff]
+    return None
+
+
+def _record_failure() -> None:
+    global _circuit_open, _circuit_opened_at, _circuit_failures
+    now = time.time()
+    _circuit_failures.append(now)
+    cutoff = now - _circuit_window
+    _circuit_failures = [t for t in _circuit_failures if t > cutoff]
+    if len(_circuit_failures) >= _circuit_threshold:
+        _circuit_open = True
+        _circuit_opened_at = now
+        logger.warning(
+            f"Circuit breaker opened: {_circuit_threshold} failures in {_circuit_window}s. "
+            f"Cooling down for {_circuit_cooldown}s."
+        )
+
+
+def _record_success() -> None:
+    global _circuit_open, _circuit_failures
+    if _circuit_open or _circuit_failures:
+        _circuit_open = False
+        _circuit_failures.clear()
+        logger.info("Circuit breaker closed after successful request.")
+
+
 def sanitize_address(address: str) -> str:
     """Normalize address format for Ghidra AddressFactory.
 
@@ -629,21 +679,29 @@ def dispatch_get(endpoint: str, params: dict | None = None, retries: int = 3) ->
     if err:
         return json.dumps({"error": err})
 
+    cb_err = _check_circuit()
+    if cb_err:
+        return json.dumps({"error": cb_err})
+
     timeout = get_timeout(endpoint)
     for attempt in range(retries):
         try:
             text, status = do_request("GET", endpoint, params=params, timeout=timeout)
             if status == 200:
+                _record_success()
                 return text
-            if status >= 500 and attempt < retries - 1:
-                time.sleep(2**attempt)
-                continue
+            if status >= 500:
+                _record_failure()
+                if attempt < retries - 1:
+                    time.sleep(2**attempt)
+                    continue
             return json.dumps({"error": f"HTTP {status}: {text.strip()}"})
         except (ConnectionError, OSError) as e:
-            # Connection lost — try reconnect once, then retry
+            _record_failure()
             if attempt == 0 and _try_reconnect():
                 continue
             if attempt < retries - 1:
+                time.sleep(2**attempt)
                 continue
             return json.dumps({"error": str(e)})
         except Exception as e:
@@ -662,6 +720,10 @@ def dispatch_post(
     if err:
         return json.dumps({"error": err})
 
+    cb_err = _check_circuit()
+    if cb_err:
+        return json.dumps({"error": cb_err})
+
     data = _normalize_post_payload(endpoint, data)
     timeout = get_timeout(endpoint, data)
     for attempt in range(retries):
@@ -670,13 +732,16 @@ def dispatch_post(
                 "POST", endpoint, params=query_params, json_data=data, timeout=timeout
             )
             if status == 200:
+                _record_success()
                 return text.strip()
-            if status >= 500 and attempt < retries - 1:
-                time.sleep(1)
-                continue
+            if status >= 500:
+                _record_failure()
+                if attempt < retries - 1:
+                    time.sleep(1)
+                    continue
             return json.dumps({"error": f"HTTP {status}: {text.strip()}"})
         except (ConnectionError, OSError) as e:
-            # Connection lost — try reconnect once, then retry
+            _record_failure()
             if attempt == 0 and _try_reconnect():
                 continue
             if attempt < retries - 1:
@@ -834,10 +899,10 @@ _full_schema: list[dict] = []  # Complete parsed schema
 _loaded_groups: set[str] = set()
 
 # Core groups always loaded on connect (essential for basic RE workflow)
-CORE_GROUPS = {"listing", "function", "program"}
+CORE_GROUPS = {"listing", "function", "program", "xref", "comment", "datatype", "symbol"}
 
 # CLI-configurable: --lazy keeps only default groups, otherwise load all
-_lazy_mode = False  # default: eager (load all groups on connect)
+_lazy_mode = True  # default: lazy (load only core groups on connect)
 _default_groups: set[str] = CORE_GROUPS
 
 
@@ -1909,6 +1974,56 @@ def debugger_watch_log(watch_id: int = -1, last_n: int = 50) -> str:
     )
 
 
+def _cleanup_on_disconnect() -> None:
+    global _transport_mode, _active_socket, _active_tcp
+    with _ghidra_lock:
+        for name in list(_dynamic_tool_names):
+            try:
+                mcp._tool_manager._tools.pop(name, None)
+            except Exception:
+                pass
+        _dynamic_tool_names.clear()
+        _full_schema.clear()
+        _loaded_groups.clear()
+        _transport_mode = "none"
+        _active_socket = None
+        _active_tcp = None
+    logger.info("Cleaned up tool registrations after disconnect.")
+
+
+def _health_poll_loop() -> None:
+    while not _health_poll_stop.is_set():
+        _health_poll_stop.wait(15)
+        if _health_poll_stop.is_set():
+            break
+        if _transport_mode == "none":
+            continue
+        try:
+            text, status = do_request("GET", "/mcp/health", timeout=5)
+            if status != 200:
+                logger.warning(f"Health poll failed: HTTP {status}")
+                _record_failure()
+                _cleanup_on_disconnect()
+            else:
+                _record_success()
+        except Exception as e:
+            logger.warning(f"Health poll exception: {e}")
+            _record_failure()
+            _cleanup_on_disconnect()
+
+
+def _start_health_poll() -> None:
+    global _health_poll_thread
+    if _health_poll_thread is not None and _health_poll_thread.is_alive():
+        return
+    _health_poll_stop.clear()
+    _health_poll_thread = threading.Thread(
+        target=_health_poll_loop, daemon=True, name="HealthPoll"
+    )
+    _health_poll_thread.start()
+    logger.info("Health polling started (15s interval).")
+
+
 # ==========================================================================
 # Main
 # ==========================================================================
@@ -1940,22 +2055,23 @@ def main():
     )
     parser.add_argument(
         "--lazy",
+        dest="lazy",
         action="store_true",
-        default=False,
-        help="Only load default tool groups on connect (not recommended for Claude Code)",
+        default=True,
+        help="Only load default tool groups on connect (default)",
     )
     parser.add_argument(
         "--no-lazy",
         dest="lazy",
         action="store_false",
-        help="Load all tool groups on connect (default)",
+        help="Load all tool groups on connect (for clients that don't support tools/list_changed)",
     )
     parser.add_argument(
         "--default-groups",
         type=str,
         default=None,
         help="Comma-separated list of default tool groups to load on connect "
-        "(default: listing,function,program)",
+        "(default: listing,function,program,xref,comment,datatype,symbol)",
     )
     args = parser.parse_args()
 
@@ -1970,6 +2086,7 @@ def main():
             "Loading all tool groups on startup (clients that don't support tools/list_changed need this)"
         )
     _auto_connect()
+    _start_health_poll()
 
     mcp.settings.log_level = "INFO"
     mcp.settings.host = args.mcp_host
