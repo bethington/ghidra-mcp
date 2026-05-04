@@ -4,6 +4,16 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- Debugger MCP wrappers now expose runtime-address workflows: `debugger_set_breakpoint` and `debugger_trace_function` accept `runtime_address` so tracing/breakpoints can bypass unresolved Ghidra module maps.
+- Added a direct `debugger_interrupt` MCP tool wrapper for the existing `/debugger/interrupt` endpoint.
+- Extended tracing argument decoding with x64 conventions (`__fastcall_x64` / `msvc_x64`) using RCX/RDX/R8/R9 and pointer-width stack/return-address reads.
+
+---
+
 ## v5.6.0 - 2026-04-25 (release regression + fun-doc workflow)
 
 Release covering deploy/regression safety, live benchmark coverage, debugger

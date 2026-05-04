@@ -81,8 +81,9 @@ class TraceSession:
 
     def add_function_trace(
         self,
-        ghidra_address: int,
+        ghidra_address: Optional[int],
         module: str,
+        runtime_address: Optional[int] = None,
         convention: str = "__stdcall",
         arg_count: int = 4,
         arg_names: Optional[List[str]] = None,
@@ -106,14 +107,15 @@ class TraceSession:
         Returns:
             Trace ID.
         """
-        runtime_addr = self._mapper.to_runtime(ghidra_address, module or None)
+        runtime_addr = runtime_address if runtime_address is not None else self._mapper.to_runtime(int(ghidra_address), module or None)
+        ghidra_addr_value = ghidra_address if ghidra_address is not None else 0
 
         trace_id = self._next_trace_id
         self._next_trace_id += 1
 
         trace = _ActiveTrace(
             trace_id=trace_id,
-            ghidra_address=ghidra_address,
+            ghidra_address=ghidra_addr_value,
             runtime_address=runtime_addr,
             module=module,
             convention=convention,
@@ -136,9 +138,8 @@ class TraceSession:
 
                 regs = self._engine._collect_registers_impl()
 
-                args = read_args(regs, lambda a: struct.unpack("<I", base.read(a, 4))[0],
-                                 convention, arg_count)
-                caller = struct.unpack("<I", base.read(regs["ESP"], 4))[0]
+                args = read_args(regs, self._engine.read_pointer, convention, arg_count)
+                caller = read_return_address(regs, self._engine.read_pointer, convention)
 
                 # Map caller to Ghidra address
                 caller_ghidra = None
@@ -154,7 +155,7 @@ class TraceSession:
                 entry = TraceEntry(
                     timestamp=time.monotonic(),
                     trace_id=trace_id,
-                    ghidra_address=ghidra_address,
+                    ghidra_address=ghidra_addr_value,
                     module=module,
                     args=args,
                     arg_names=arg_names,
@@ -261,8 +262,9 @@ class TraceSession:
 
     def add_data_watch(
         self,
-        ghidra_address: int,
+        ghidra_address: Optional[int],
         module: str,
+        runtime_address: Optional[int] = None,
         size: int = 4,
         access: str = "write",
     ) -> int:
@@ -286,14 +288,15 @@ class TraceSession:
                 "x86 hardware breakpoint limit reached (4 max). "
                 "Stop an existing watchpoint first.")
 
-        runtime_addr = self._mapper.to_runtime(ghidra_address, module or None)
+        runtime_addr = runtime_address if runtime_address is not None else self._mapper.to_runtime(int(ghidra_address), module or None)
+        ghidra_addr_value = ghidra_address if ghidra_address is not None else 0
 
         watch_id = self._next_watch_id
         self._next_watch_id += 1
 
         watch = _ActiveWatch(
             watch_id=watch_id,
-            ghidra_address=ghidra_address,
+            ghidra_address=ghidra_addr_value,
             runtime_address=runtime_addr,
             module=module,
             size=size,
@@ -347,7 +350,7 @@ class TraceSession:
                     timestamp=time.monotonic(),
                     watch_id=watch_id,
                     address=runtime_addr,
-                    ghidra_address=ghidra_address,
+                    ghidra_address=ghidra_addr_value,
                     size=size,
                     access=access,
                     value=value,

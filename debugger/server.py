@@ -330,7 +330,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         arg_names = query.get("arg_names", "")
 
         regs = ds.engine.get_registers()
-        args = read_args(regs, ds.engine.read_dword, convention, count)
+        args = read_args(regs, ds.engine.read_pointer, convention, count)
 
         names = [n.strip() for n in arg_names.split(",")] if arg_names else []
         result_args = []
@@ -344,7 +344,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_json({
             "convention": convention,
             "args": result_args,
-            "return_address": f"0x{read_return_address(regs, ds.engine.read_dword):08X}",
+            "return_address": f"0x{read_return_address(regs, ds.engine.read_pointer, convention):X}",
         })
 
     def _handle_go(self):
@@ -445,6 +445,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         tracer = ds._ensure_tracer()
 
         ghidra_addr_str = body.get("ghidra_address", "")
+        runtime_addr_str = body.get("runtime_address", "")
         module = body.get("module", "")
         convention = body.get("convention", "__stdcall")
         arg_count = int(body.get("arg_count", 4))
@@ -452,15 +453,18 @@ class RequestHandler(BaseHTTPRequestHandler):
         capture_return = body.get("capture_return", False)
         max_hits = int(body.get("max_hits", 0))
 
-        if not ghidra_addr_str:
-            self._send_error(400, "Missing 'ghidra_address'")
+        if not ghidra_addr_str and not runtime_addr_str:
+            self._send_error(400, "Missing 'ghidra_address' or 'runtime_address'")
             return
 
-        ghidra_addr = int(ghidra_addr_str, 16) if isinstance(ghidra_addr_str, str) else int(ghidra_addr_str)
+        ghidra_addr = int(ghidra_addr_str, 16) if ghidra_addr_str else None
         arg_names = [n.strip() for n in arg_names_str.split(",") if n.strip()] if arg_names_str else None
+
+        runtime_addr = int(runtime_addr_str, 16) if runtime_addr_str else None
 
         trace_id = tracer.add_function_trace(
             ghidra_address=ghidra_addr,
+            runtime_address=runtime_addr,
             module=module,
             convention=convention,
             arg_count=arg_count,
@@ -514,15 +518,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         tracer = ds._ensure_tracer()
 
         ghidra_addr_str = body.get("ghidra_address", "")
+        runtime_addr_str = body.get("runtime_address", "")
         module = body.get("module", "")
         size = int(body.get("size", 4))
         access = body.get("access", "write")
 
-        if not ghidra_addr_str:
-            self._send_error(400, "Missing 'ghidra_address'")
+        if not ghidra_addr_str and not runtime_addr_str:
+            self._send_error(400, "Missing 'ghidra_address' or 'runtime_address'")
             return
 
-        ghidra_addr = int(ghidra_addr_str, 16) if isinstance(ghidra_addr_str, str) else int(ghidra_addr_str)
+        ghidra_addr = int(ghidra_addr_str, 16) if ghidra_addr_str else None
 
         watch_id = tracer.add_data_watch(
             ghidra_address=ghidra_addr,

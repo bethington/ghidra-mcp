@@ -573,9 +573,14 @@ class DebugEngine:
         data = self.read_memory(address, 4)
         return struct.unpack("<I", data)[0]
 
+    def read_qword(self, address: int) -> int:
+        """Read a 64-bit value from memory."""
+        data = self.read_memory(address, 8)
+        return struct.unpack("<Q", data)[0]
+
     def read_pointer(self, address: int) -> int:
-        """Read a pointer-sized value (32-bit for x86)."""
-        return self.read_dword(address)
+        """Read a pointer-sized value based on effective target bitness."""
+        return self.read_qword(address) if self._get_effective_bitness_impl() == "64" else self.read_dword(address)
 
     def get_stack_trace(self, depth: int = 20) -> List[dict]:
         """Get stack backtrace."""
