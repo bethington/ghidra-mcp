@@ -408,3 +408,38 @@ class TestRouting:
         base, _ = debug_server
         status, _ = _delete(base, "/debugger/nonexistent")
         assert status == 404
+
+
+class TestRuntimeAddressParity:
+
+    def test_trace_start_accepts_runtime_address(self, debug_server):
+        base, ds = debug_server
+        tracer = MagicMock()
+        tracer.add_function_trace.return_value = 7
+        ds._ensure_tracer = MagicMock(return_value=tracer)
+        status, body = _post(base, "/debugger/trace/start", {"runtime_address": "0x140001000"})
+        assert status == 200
+        assert body["trace_id"] == 7
+        tracer.add_function_trace.assert_called_once()
+
+    def test_watch_start_accepts_runtime_address(self, debug_server):
+        base, ds = debug_server
+        tracer = MagicMock()
+        tracer.add_data_watch.return_value = 9
+        ds._ensure_tracer = MagicMock(return_value=tracer)
+        status, body = _post(base, "/debugger/watch/start", {"runtime_address": "0x140002000"})
+        assert status == 200
+        assert body["watch_id"] == 9
+        tracer.add_data_watch.assert_called_once()
+
+    def test_trace_start_requires_address(self, debug_server):
+        base, _ = debug_server
+        status, body = _post(base, "/debugger/trace/start", {})
+        assert status == 400
+        assert "ghidra_address" in body.get("error", "")
+
+    def test_watch_start_requires_address(self, debug_server):
+        base, _ = debug_server
+        status, body = _post(base, "/debugger/watch/start", {})
+        assert status == 400
+        assert "ghidra_address" in body.get("error", "")

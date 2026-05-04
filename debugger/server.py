@@ -72,6 +72,11 @@ class RequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         logger.debug(format, *args)
 
+    @staticmethod
+    def _fmt_addr(value: int) -> str:
+        width = 16 if value > 0xFFFFFFFF else 8
+        return f"0x{value:0{width}X}"
+
     # -- Routing -----------------------------------------------------------
 
     def do_GET(self):
@@ -253,8 +258,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             item = {
                 "name": m.name,
                 "ghidra_name": m.ghidra_name,
-                "ghidra_base": f"0x{m.ghidra_base:08X}",
-                "runtime_base": f"0x{m.runtime_base:08X}",
+                "ghidra_base": self._fmt_addr(m.ghidra_base),
+                "runtime_base": self._fmt_addr(m.runtime_base),
                 "size": f"0x{m.size:X}",
                 "offset": f"0x{m.offset:+X}",
                 "match_kind": m.match_kind,
@@ -270,7 +275,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_registers(self):
         ds = self._ds()
         regs = ds.engine.get_registers()
-        formatted = {k: f"0x{v:08X}" for k, v in regs.items()}
+        formatted = {k: self._fmt_addr(v) for k, v in regs.items()}
         self._send_json({"registers": formatted})
 
     def _handle_memory(self, query: dict):
@@ -300,7 +305,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             dwords.append(f"0x{val:08X}")
 
         self._send_json({
-            "address": f"0x{address:08X}",
+            "address": self._fmt_addr(address),
             "size": len(data),
             "hex": hex_str,
             "dwords": dwords,
@@ -319,7 +324,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 mapped = ds.mapper.try_to_ghidra(addr)
                 if mapped:
                     frame["ghidra_module"] = mapped[0]
-                    frame["ghidra_address"] = f"0x{mapped[1]:08X}"
+                    frame["ghidra_address"] = self._fmt_addr(mapped[1])
 
         self._send_json({"frames": frames, "depth": len(frames)})
 
@@ -335,7 +340,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         names = [n.strip() for n in arg_names.split(",")] if arg_names else []
         result_args = []
         for i, val in enumerate(args):
-            entry: dict = {"index": i, "value": f"0x{val:08X}"}
+            entry: dict = {"index": i, "value": self._fmt_addr(val)}
             if i < len(names) and names[i]:
                 entry["name"] = names[i]
             entry["classification"] = classify_value(val)
@@ -396,8 +401,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         self._send_json({
             "id": bp_id,
-            "runtime_address": f"0x{runtime_addr:08X}",
-            "ghidra_address": f"0x{ghidra_addr:08X}" if ghidra_addr else None,
+            "runtime_address": self._fmt_addr(runtime_addr),
+            "ghidra_address": self._fmt_addr(ghidra_addr) if ghidra_addr is not None else None,
             "module": module,
             "type": bp_type.value,
             "oneshot": oneshot,
@@ -420,7 +425,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 mapped = ds.mapper.try_to_ghidra(addr)
                 if mapped:
                     bp["ghidra_module"] = mapped[0]
-                    bp["ghidra_address"] = f"0x{mapped[1]:08X}"
+                    bp["ghidra_address"] = self._fmt_addr(mapped[1])
 
         self._send_json({"breakpoints": bps, "count": len(bps)})
 

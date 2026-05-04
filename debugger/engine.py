@@ -230,6 +230,11 @@ class EngineEventHandler:
 # DebugEngine — main API
 # ---------------------------------------------------------------------------
 
+def _fmt_addr(value: int) -> str:
+    width = 16 if value > 0xFFFFFFFF else 8
+    return f"0x{value:0{width}X}"
+
+
 class DebugEngine:
     """
     Wraps pybag's dbgeng with proper COM threading.
@@ -496,7 +501,7 @@ class DebugEngine:
     def _step_into_impl(self, count: int) -> dict:
         self._require_stopped()
         self._base.stepi(count)
-        return {"state": "stopped", "pc": f"0x{self._read_pc_impl():08X}"}
+        return {"state": "stopped", "pc": _fmt_addr(self._read_pc_impl())}
 
     def step_over(self, count: int = 1) -> dict:
         """Step over (proceed)."""
@@ -505,7 +510,7 @@ class DebugEngine:
     def _step_over_impl(self, count: int) -> dict:
         self._require_stopped()
         self._base.stepo(count)
-        return {"state": "stopped", "pc": f"0x{self._read_pc_impl():08X}"}
+        return {"state": "stopped", "pc": _fmt_addr(self._read_pc_impl())}
 
     # -- State inspection --------------------------------------------------
 
@@ -596,10 +601,10 @@ class DebugEngine:
                         break
                     entry: dict = {
                         "level": i,
-                        "instruction_offset": f"0x{frame.InstructionOffset:08X}",
-                        "return_offset": f"0x{frame.ReturnOffset:08X}",
-                        "stack_offset": f"0x{frame.StackOffset:08X}",
-                        "frame_offset": f"0x{frame.FrameOffset:08X}",
+                        "instruction_offset": _fmt_addr(frame.InstructionOffset),
+                        "return_offset": _fmt_addr(frame.ReturnOffset),
+                        "stack_offset": _fmt_addr(frame.StackOffset),
+                        "frame_offset": _fmt_addr(frame.FrameOffset),
                     }
                     try:
                         name = self._base.get_name_by_offset(frame.InstructionOffset)
@@ -644,7 +649,7 @@ class DebugEngine:
                 handler=handler,
                 oneshot=oneshot,
             )
-        logger.info(f"Breakpoint #{bp_id} set at 0x{address:08X} "
+        logger.info(f"Breakpoint #{bp_id} set at {_fmt_addr(address)} "
                     f"(type={bp_type.value}, oneshot={oneshot})")
         return bp_id
 
@@ -688,7 +693,7 @@ class DebugEngine:
             access=access,
             handler=handler,
         )
-        logger.info(f"Data breakpoint #{bp_id} at 0x{address:08X} "
+        logger.info(f"Data breakpoint #{bp_id} at {_fmt_addr(address)} "
                     f"(size={size}, access=0x{access:X})")
         return bp_id
 
@@ -707,7 +712,7 @@ class DebugEngine:
                 bp_type = bp_obj.GetType()
                 result.append({
                     "id": bp_id,
-                    "address": f"0x{offset:08X}",
+                    "address": _fmt_addr(offset),
                     "enabled": bool(flags & DbgEng.DEBUG_BREAKPOINT_ENABLED),
                     "oneshot": bool(flags & DbgEng.DEBUG_BREAKPOINT_ONE_SHOT),
                     "type": "data" if bp_type[0] == DbgEng.DEBUG_BREAKPOINT_DATA else "code",
