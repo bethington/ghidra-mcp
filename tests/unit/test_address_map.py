@@ -121,6 +121,51 @@ class TestAddressMapper:
         assert "A.dll" in result["mapped_modules"]
         assert "B.dll" in result["unmapped_modules"]
 
+    def test_duplicate_basename_paths_are_reported_ambiguous(self):
+        mapper = AddressMapper()
+        runtime = [
+            ModuleInfo("foo.dll", 0x10000000, 0x1000, image_path="C:/app/foo.dll"),
+            ModuleInfo("foo.dll", 0x20000000, 0x1000, image_path="D:/other/foo.dll"),
+        ]
+        ghidra_modules = [{"id": "foo", "name": "foo.dll", "base": "0x40000000", "names": ["foo.dll"]}]
+        result = mapper.update_from_modules(runtime, ghidra_modules=ghidra_modules)
+        assert result["mapped"] == 0
+        assert result["ambiguous"] >= 1
+
+    def test_extensionless_module_name_resolves_when_unique(self):
+        mapper = AddressMapper()
+        runtime = [ModuleInfo("D2Common.dll", 0x74A60000, 0x100000)]
+        result = mapper.update_from_modules(runtime, {"D2Common.dll": 0x6FD60000})
+        assert result["mapped"] == 1
+        assert mapper.to_runtime(0x6FD60000, "D2Common") == 0x74A60000
+
+    def test_partial_ghidra_modules_merges_with_legacy_bases(self):
+        mapper = AddressMapper()
+        runtime = [
+            ModuleInfo("A.exe", 0x140000000, 0x1000),
+            ModuleInfo("B.dll", 0x180000000, 0x1000),
+        ]
+        result = mapper.update_from_modules(
+            runtime,
+            ghidra_bases={"B.dll": "0x280000000"},
+            ghidra_modules=[{"id": "A", "name": "A.exe", "base": "0x240000000", "names": ["A.exe"]}],
+        )
+        assert result["mapped"] == 2
+        assert mapper.require_module("B.dll").ghidra_base == 0x280000000
+
+    def test_malformed_ghidra_modules_entry_raises_value_error(self):
+        mapper = AddressMapper()
+        runtime = [ModuleInfo("A.exe", 0x140000000, 0x1000)]
+        with pytest.raises(ValueError, match="ghidra_modules payload"):
+            mapper.update_from_modules(runtime, ghidra_modules=["bad-entry"])
+
+    def test_to_runtime_with_module_out_of_range_raises(self):
+        mapper = AddressMapper()
+        runtime = [ModuleInfo("D2Common.dll", 0x74A60000, 0x1000)]
+        mapper.update_from_modules(runtime, {"D2Common.dll": 0x6FD60000})
+        with pytest.raises(ValueError, match="outside mapped module"):
+            mapper.to_runtime(0x6FD62000, "D2Common.dll")
+
 
 class TestOrdinalParsing:
     def setup_method(self):
