@@ -128,20 +128,7 @@ def _stub_version(
 
 
 class TestFindPluginArchive:
-    def test_prefers_gradle_output_over_maven(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
-        _stub_version(monkeypatch, tmp_path)
-        gradle_zip = tmp_path / "build" / "distributions" / "GhidraMCP-5.4.1.zip"
-        maven_zip = tmp_path / "target" / "GhidraMCP-5.4.1.zip"
-        gradle_zip.parent.mkdir(parents=True)
-        maven_zip.parent.mkdir(parents=True)
-        gradle_zip.write_bytes(b"gradle")
-        maven_zip.write_bytes(b"maven")
-
-        assert find_plugin_archive(tmp_path) == gradle_zip
-
-    def test_falls_back_to_maven_target_when_gradle_absent(
+    def test_finds_versioned_zip_in_target(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         _stub_version(monkeypatch, tmp_path)
@@ -151,23 +138,12 @@ class TestFindPluginArchive:
 
         assert find_plugin_archive(tmp_path) == maven_zip
 
-    def test_finds_versioned_gradle_zip_by_glob_when_name_differs(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
-        _stub_version(monkeypatch, tmp_path)
-        dist_dir = tmp_path / "build" / "distributions"
-        dist_dir.mkdir(parents=True)
-        other_zip = dist_dir / "GhidraMCP-5.4.0.zip"
-        other_zip.write_bytes(b"old")
-
-        assert find_plugin_archive(tmp_path) == other_zip
-
     def test_raises_when_no_archive_exists(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         _stub_version(monkeypatch, tmp_path)
 
-        with pytest.raises(FileNotFoundError, match="build/distributions"):
+        with pytest.raises(FileNotFoundError, match="target/"):
             find_plugin_archive(tmp_path)
 
 
