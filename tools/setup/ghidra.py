@@ -366,9 +366,7 @@ def find_ghidra_executable(ghidra_path: Path) -> Path:
 
 def find_plugin_archive(repo_root: Path) -> Path:
     version = read_pom_versions(repo_root).project_version
-    # Check Gradle output first, then Maven target/ for backward compatibility during transition.
     candidates = [
-        repo_root / "build" / "distributions" / f"GhidraMCP-{version}.zip",
         repo_root / "target" / f"GhidraMCP-{version}.zip",
         repo_root / "target" / "GhidraMCP.zip",
     ]
@@ -376,17 +374,16 @@ def find_plugin_archive(repo_root: Path) -> Path:
         if candidate.is_file():
             return candidate
 
-    for search_dir in [repo_root / "build" / "distributions", repo_root / "target"]:
-        archives = sorted(
-            search_dir.glob("GhidraMCP*.zip"),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        if archives:
-            return archives[0]
+    archives = sorted(
+        repo_root.joinpath("target").glob("GhidraMCP*.zip"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if archives:
+        return archives[0]
 
     raise FileNotFoundError(
-        "No GhidraMCP plugin archive found in build/distributions/ or target/"
+        "No GhidraMCP plugin archive found in target/"
     )
 
 

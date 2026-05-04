@@ -16,7 +16,7 @@ from .ghidra import (
     start_ghidra,
 )
 from .python_env import detect_repo_root, find_repo_python
-from .maven import find_maven_command, run_gradle, run_maven
+from .maven import find_maven_command, run_maven
 from .requirements import (
     execute_install_plan,
     make_install_plan,
@@ -24,14 +24,6 @@ from .requirements import (
 )
 from .version_bump import apply_version_bump
 from .versioning import infer_ghidra_version_from_path, read_pom_versions
-
-
-def _get_backend() -> str:
-    """Return the active build backend.
-
-    Set TOOLS_SETUP_BACKEND=gradle to use Gradle.  Maven is the default.
-    """
-    return os.environ.get("TOOLS_SETUP_BACKEND", "maven").lower()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -93,7 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     preflight_parser.add_argument(
         "--strict",
         action="store_true",
-        help="Also check network reachability for Maven Central and PyPI (Maven backend only).",
+        help="Also check network reachability for Maven Central and PyPI.",
     )
     preflight_parser.add_argument(
         "--use-debugger-toggle",
@@ -142,7 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     ghidra_deps_parser = subparsers.add_parser(
         "install-ghidra-deps",
-        help="Prepare Ghidra jars for compilation (Maven: installs to local repo; Gradle: validates jars in place)",
+        help="Install Ghidra jars into the local Maven repository for compilation",
     )
     ghidra_deps_parser.add_argument(
         "--ghidra-path",
@@ -152,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
     ghidra_deps_parser.add_argument(
         "--force",
         action="store_true",
-        help="Reinstall jars even if already present (Maven backend only).",
+        help="Reinstall jars even if already present in ~/.m2.",
     )
     ghidra_deps_parser.add_argument(
         "--dry-run", action="store_true", help="Print actions without executing them."
@@ -342,9 +334,6 @@ def cmd_verify_version(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
     ghidra_path = _resolve_ghidra_path(repo_root, args.ghidra_path)
 
-    if _get_backend() == "gradle":
-        return run_gradle(repo_root, ["verifyVersion"], ghidra_path=ghidra_path)
-
     versions = read_pom_versions(repo_root)
     print(f"Project version: {versions.project_version}")
     print(f"Ghidra version from pom.xml: {versions.ghidra_version}")
@@ -371,24 +360,6 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
     env_values = _load_repo_env(repo_root)
     python_executable = find_repo_python(repo_root)
-
-    if _get_backend() == "gradle":
-        pip_check = subprocess.run(
-            [str(python_executable), "-m", "pip", "--version"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if pip_check.returncode != 0:
-            print(
-                "pip is not available for the selected Python interpreter.",
-                file=sys.stderr,
-            )
-            return 1
-        print(f"Python: {python_executable}")
-        print("pip: available")
-        ghidra_path = _resolve_ghidra_path(repo_root, args.ghidra_path)
-        return run_gradle(repo_root, ["preflight"], ghidra_path=ghidra_path)
 
     try:
         maven_command = find_maven_command()
@@ -450,8 +421,6 @@ def cmd_preflight(args: argparse.Namespace) -> int:
 
 def cmd_build(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
-    if _get_backend() == "gradle":
-        return run_gradle(repo_root, ["buildExtension"], dry_run=args.dry_run)
     return run_maven(
         repo_root,
         ["clean", "package", "assembly:single", "-DskipTests"],
@@ -461,28 +430,17 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 def cmd_clean(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
-    if _get_backend() == "gradle":
-        return run_gradle(repo_root, ["clean"], dry_run=args.dry_run)
     return run_maven(repo_root, ["clean"], dry_run=args.dry_run)
 
 
 def cmd_run_tests(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
-    if _get_backend() == "gradle":
-        return run_gradle(repo_root, ["test"], dry_run=args.dry_run)
     return run_maven(repo_root, ["test"], dry_run=args.dry_run)
 
 
 def cmd_install_ghidra_deps(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
     ghidra_path = _require_ghidra_path(repo_root, args.ghidra_path)
-    if _get_backend() == "gradle":
-        return run_gradle(
-            repo_root,
-            ["prepareGhidraClasspath"],
-            ghidra_path=ghidra_path,
-            dry_run=args.dry_run,
-        )
     return install_ghidra_dependencies(
         repo_root, ghidra_path, force=args.force, dry_run=args.dry_run
     )
@@ -491,10 +449,6 @@ def cmd_install_ghidra_deps(args: argparse.Namespace) -> int:
 def cmd_deploy(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
     ghidra_path = _require_ghidra_path(repo_root, args.ghidra_path)
-    if _get_backend() == "gradle":
-        return run_gradle(
-            repo_root, ["deploy"], ghidra_path=ghidra_path, dry_run=args.dry_run
-        )
     return deploy_to_ghidra(
         repo_root, ghidra_path, dry_run=args.dry_run, test_modes=args.test
     )
@@ -503,17 +457,11 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 def cmd_start_ghidra(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
     ghidra_path = _require_ghidra_path(repo_root, args.ghidra_path)
-    if _get_backend() == "gradle":
-        return run_gradle(
-            repo_root, ["startGhidra"], ghidra_path=ghidra_path, dry_run=args.dry_run
-        )
     return start_ghidra(ghidra_path, dry_run=args.dry_run)
 
 
 def cmd_clean_all(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
-    if _get_backend() == "gradle":
-        return run_gradle(repo_root, ["cleanAll"], dry_run=args.dry_run)
     return clean_all(repo_root, dry_run=args.dry_run)
 
 
@@ -541,13 +489,6 @@ def cmd_ensure_prereqs(args: argparse.Namespace) -> int:
             print("Debugger Python dependencies are ready.")
 
     ghidra_path = _require_ghidra_path(repo_root, args.ghidra_path)
-    if _get_backend() == "gradle":
-        return run_gradle(
-            repo_root,
-            ["prepareGhidraClasspath"],
-            ghidra_path=ghidra_path,
-            dry_run=args.dry_run,
-        )
     return install_ghidra_dependencies(
         repo_root, ghidra_path, force=args.force, dry_run=args.dry_run
     )
