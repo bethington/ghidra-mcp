@@ -1,0 +1,22 @@
+# Auto-generated lockfile for reproducible CI builds.
+# Install with: pip install -r requirements.lock
+#
+# Generated from requirements.txt on 2026-05-04.
+# Pin versions here for CI reproducibility; update periodically.
+
+mcp==1.6.0
+requests==2.32.3
+
+# Transitive pins (explicit for reproducibility)
+certifi==2024.7.4
+charset-normalizer==3.3.2
+idna==3.7
+urllib3==2.2.2
+annotated-types==0.7.0
+anyio==4.4.0
+httpx==0.27.0
+pydantic==2.8.2
+pydantic-core==2.20.1
+sniffio==1.3.1
+starlette==0.37.2
+uvicorn==0.30.1

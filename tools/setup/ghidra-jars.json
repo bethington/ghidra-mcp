@@ -1,0 +1,25 @@
+{
+  "_comment": "Single source of truth for Ghidra JAR dependencies. All build tools, CI, and Docker read from here.",
+  "ghidra_version": "12.0.4",
+  "ghidra_date": "20260303",
+  "jars": [
+    {"name": "Base.jar", "path": "Ghidra/Features/Base/lib/Base.jar"},
+    {"name": "Decompiler.jar", "path": "Ghidra/Features/Decompiler/lib/Decompiler.jar"},
+    {"name": "PDB.jar", "path": "Ghidra/Features/PDB/lib/PDB.jar"},
+    {"name": "FunctionID.jar", "path": "Ghidra/Features/FunctionID/lib/FunctionID.jar"},
+    {"name": "SoftwareModeling.jar", "path": "Ghidra/Framework/SoftwareModeling/lib/SoftwareModeling.jar"},
+    {"name": "Project.jar", "path": "Ghidra/Framework/Project/lib/Project.jar"},
+    {"name": "Docking.jar", "path": "Ghidra/Framework/Docking/lib/Docking.jar"},
+    {"name": "Generic.jar", "path": "Ghidra/Framework/Generic/lib/Generic.jar"},
+    {"name": "Utility.jar", "path": "Ghidra/Framework/Utility/lib/Utility.jar"},
+    {"name": "Gui.jar", "path": "Ghidra/Framework/Gui/lib/Gui.jar"},
+    {"name": "FileSystem.jar", "path": "Ghidra/Framework/FileSystem/lib/FileSystem.jar"},
+    {"name": "Graph.jar", "path": "Ghidra/Framework/Graph/lib/Graph.jar"},
+    {"name": "DB.jar", "path": "Ghidra/Framework/DB/lib/DB.jar"},
+    {"name": "Emulation.jar", "path": "Ghidra/Framework/Emulation/lib/Emulation.jar"},
+    {"name": "TraceModel.jar", "path": "Ghidra/Debug/Framework-TraceModeling/lib/TraceModeling.jar"},
+    {"name": "DebuggerAPI.jar", "path": "Ghidra/Debug/DebuggerAPI/lib/DebuggerAPI.jar"},
+    {"name": "DebuggerModel.jar", "path": "Ghidra/Debug/Debugger/lib/DebuggerModel.jar"},
+    {"name": "DebuggerUtils.jar", "path": "Ghidra/Debug/DebuggerUtils/lib/DebuggerUtils.jar"}
+  ]
+}
