@@ -1623,13 +1623,13 @@ def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
     )
 
 
-def _normalize_optional_address(value: object) -> str:
-    """Normalize optional address-like inputs to a trimmed string."""
+def _normalize_optional_address(value: object) -> object:
+    """Normalize optional address-like inputs while preserving numeric types."""
     if value is None:
         return ""
     if isinstance(value, str):
         return value.strip()
-    return str(value).strip()
+    return value
 @mcp.tool()
 def debugger_set_breakpoint(
     ghidra_address: str = "",
