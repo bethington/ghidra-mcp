@@ -205,7 +205,8 @@ def parse_convention_from_prototype(prototype: str) -> str:
         "undefined4 FUN_6fd50a30(...)" -> "__cdecl" (default)
     """
     prototype_lower = prototype.lower()
-    for conv in ("__stdcall", "__fastcall", "__thiscall", "__cdecl", "__fastcall_x64", "msvc_x64"):
+    # Check more specific markers before generic substrings (e.g. __fastcall_x64 vs __fastcall).
+    for conv in ("__fastcall_x64", "msvc_x64", "__stdcall", "__fastcall", "__thiscall", "__cdecl"):
         if conv in prototype_lower:
             return conv
     return "__cdecl"  # Default
