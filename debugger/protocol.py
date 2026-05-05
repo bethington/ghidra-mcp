@@ -94,7 +94,7 @@ class BreakpointInfo:
 class TraceEntry:
     timestamp: float
     trace_id: int
-    ghidra_address: int
+    ghidra_address: Optional[int]
     module: str
     args: list[int]
     arg_names: Optional[list[str]] = None
@@ -108,7 +108,7 @@ class TraceEntry:
         d: dict = {
             "timestamp": round(self.timestamp, 4),
             "trace_id": self.trace_id,
-            "ghidra_address": _hex_addr(self.ghidra_address),
+            "ghidra_address": _hex_addr(self.ghidra_address) if self.ghidra_address is not None else None,
             "module": self.module,
         }
         if self.arg_names and len(self.arg_names) == len(self.args):
@@ -133,7 +133,7 @@ class TraceEntry:
 @dataclass
 class TracePointInfo:
     trace_id: int
-    ghidra_address: int
+    ghidra_address: Optional[int]
     module: str
     convention: str
     arg_count: int
@@ -146,7 +146,7 @@ class TracePointInfo:
     def to_dict(self) -> dict:
         return {
             "trace_id": self.trace_id,
-            "ghidra_address": _hex_addr(self.ghidra_address),
+            "ghidra_address": _hex_addr(self.ghidra_address) if self.ghidra_address is not None else None,
             "module": self.module,
             "convention": self.convention,
             "arg_count": self.arg_count,

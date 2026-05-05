@@ -36,7 +36,7 @@ MAX_WATCH_LOG_SIZE = 5_000
 class _ActiveTrace:
     """Internal state for an active function trace."""
     trace_id: int
-    ghidra_address: int
+    ghidra_address: Optional[int]
     runtime_address: int
     module: str
     convention: str
@@ -53,7 +53,7 @@ class _ActiveTrace:
 class _ActiveWatch:
     """Internal state for an active data watchpoint."""
     watch_id: int
-    ghidra_address: int
+    ghidra_address: Optional[int]
     runtime_address: int
     module: str
     size: int
@@ -108,7 +108,7 @@ class TraceSession:
             Trace ID.
         """
         runtime_addr = runtime_address if runtime_address is not None else self._mapper.to_runtime(int(ghidra_address), module or None)
-        ghidra_addr_value = ghidra_address if ghidra_address is not None else 0
+        ghidra_addr_value = ghidra_address
 
         trace_id = self._next_trace_id
         self._next_trace_id += 1
@@ -301,7 +301,7 @@ class TraceSession:
                 "Stop an existing watchpoint first.")
 
         runtime_addr = runtime_address if runtime_address is not None else self._mapper.to_runtime(int(ghidra_address), module or None)
-        ghidra_addr_value = ghidra_address if ghidra_address is not None else 0
+        ghidra_addr_value = ghidra_address
 
         watch_id = self._next_watch_id
         self._next_watch_id += 1
