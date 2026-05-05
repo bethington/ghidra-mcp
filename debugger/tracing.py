@@ -138,8 +138,18 @@ class TraceSession:
 
                 regs = self._engine._collect_registers_impl()
 
-                args = read_args(regs, self._engine.read_pointer, convention, arg_count)
-                caller = read_return_address(regs, self._engine.read_pointer, convention)
+                # NOTE: This callback runs while execution is still flowing
+                # (DEBUG_STATUS_GO_HANDLED). Use direct engine-thread reads
+                # instead of DebugEngine.read_pointer(), which enforces a
+                # stopped debugger state and would fail for live traces.
+                def _read_pointer_live(address: int) -> int:
+                    bitness = self._engine._get_effective_bitness_impl()
+                    size = 8 if bitness == "64" else 4
+                    data = bytes(self._engine._base.read(address, size))
+                    return struct.unpack("<Q" if size == 8 else "<I", data)[0]
+
+                args = read_args(regs, _read_pointer_live, convention, arg_count)
+                caller = read_return_address(regs, _read_pointer_live, convention)
 
                 # Map caller to Ghidra address
                 caller_ghidra = None
