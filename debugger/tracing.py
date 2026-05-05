@@ -107,6 +107,10 @@ class TraceSession:
         Returns:
             Trace ID.
         """
+        if runtime_address is None and ghidra_address is None:
+            raise ValueError("Either ghidra_address or runtime_address is required")
+
+
         runtime_addr = runtime_address if runtime_address is not None else self._mapper.to_runtime(int(ghidra_address), module or None)
         ghidra_addr_value = ghidra_address
 
@@ -299,6 +303,9 @@ class TraceSession:
             raise RuntimeError(
                 "x86 hardware breakpoint limit reached (4 max). "
                 "Stop an existing watchpoint first.")
+
+        if runtime_address is None and ghidra_address is None:
+            raise ValueError("Either ghidra_address or runtime_address is required")
 
         runtime_addr = runtime_address if runtime_address is not None else self._mapper.to_runtime(int(ghidra_address), module or None)
         ghidra_addr_value = ghidra_address
