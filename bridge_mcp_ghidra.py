@@ -1621,6 +1621,15 @@ def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
     return _debugger_request(
         "GET", "/debugger/ordinal", query={"dll": dll, "ordinal": str(ordinal)}
     )
+
+
+def _normalize_optional_address(value: object) -> str:
+    """Normalize optional address-like inputs to a trimmed string."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
 @mcp.tool()
 def debugger_set_breakpoint(
     ghidra_address: str = "",
@@ -1642,8 +1651,9 @@ def debugger_set_breakpoint(
         "type": bp_type,
         "oneshot": oneshot,
     }
-    if runtime_address.strip():
-        payload["runtime_address"] = runtime_address
+    normalized_runtime_address = _normalize_optional_address(runtime_address)
+    if normalized_runtime_address:
+        payload["runtime_address"] = normalized_runtime_address
     else:
         payload["ghidra_address"] = ghidra_address
         payload["module"] = module
@@ -1782,8 +1792,9 @@ def debugger_trace_function(
         "capture_return": capture_return,
         "max_hits": max_hits,
     }
-    if runtime_address.strip():
-        payload["runtime_address"] = runtime_address
+    normalized_runtime_address = _normalize_optional_address(runtime_address)
+    if normalized_runtime_address:
+        payload["runtime_address"] = normalized_runtime_address
     else:
         payload["ghidra_address"] = ghidra_address
     return _debugger_request("POST", "/debugger/trace/start", payload)
@@ -1833,8 +1844,9 @@ def debugger_watch_memory(
         runtime_address: Live process runtime address (skips address mapper).
     """
     payload = {"size": size, "access": access, "module": module}
-    if runtime_address.strip():
-        payload["runtime_address"] = runtime_address
+    normalized_runtime_address = _normalize_optional_address(runtime_address)
+    if normalized_runtime_address:
+        payload["runtime_address"] = normalized_runtime_address
     else:
         payload["ghidra_address"] = ghidra_address
     return _debugger_request("POST", "/debugger/watch/start", payload)
