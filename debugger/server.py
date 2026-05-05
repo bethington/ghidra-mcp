@@ -533,10 +533,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
         ghidra_addr = int(ghidra_addr_str, 16) if ghidra_addr_str else None
+        runtime_addr = int(runtime_addr_str, 16) if runtime_addr_str else None
 
         watch_id = tracer.add_data_watch(
             ghidra_address=ghidra_addr,
             module=module,
+            runtime_address=runtime_addr,
             size=size,
             access=access,
         )
