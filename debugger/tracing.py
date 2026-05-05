@@ -36,7 +36,7 @@ MAX_WATCH_LOG_SIZE = 5_000
 class _ActiveTrace:
     """Internal state for an active function trace."""
     trace_id: int
-    ghidra_address: int
+    ghidra_address: Optional[int]
     runtime_address: int
     module: str
     convention: str
@@ -53,7 +53,7 @@ class _ActiveTrace:
 class _ActiveWatch:
     """Internal state for an active data watchpoint."""
     watch_id: int
-    ghidra_address: int
+    ghidra_address: Optional[int]
     runtime_address: int
     module: str
     size: int
@@ -81,8 +81,9 @@ class TraceSession:
 
     def add_function_trace(
         self,
-        ghidra_address: int,
+        ghidra_address: Optional[int],
         module: str,
+        runtime_address: Optional[int] = None,
         convention: str = "__stdcall",
         arg_count: int = 4,
         arg_names: Optional[List[str]] = None,
@@ -106,14 +107,19 @@ class TraceSession:
         Returns:
             Trace ID.
         """
-        runtime_addr = self._mapper.to_runtime(ghidra_address, module or None)
+        if runtime_address is None and ghidra_address is None:
+            raise ValueError("Either ghidra_address or runtime_address is required")
+
+
+        runtime_addr = runtime_address if runtime_address is not None else self._mapper.to_runtime(int(ghidra_address), module or None)
+        ghidra_addr_value = ghidra_address
 
         trace_id = self._next_trace_id
         self._next_trace_id += 1
 
         trace = _ActiveTrace(
             trace_id=trace_id,
-            ghidra_address=ghidra_address,
+            ghidra_address=ghidra_addr_value,
             runtime_address=runtime_addr,
             module=module,
             convention=convention,
@@ -136,9 +142,18 @@ class TraceSession:
 
                 regs = self._engine._collect_registers_impl()
 
-                args = read_args(regs, lambda a: struct.unpack("<I", base.read(a, 4))[0],
-                                 convention, arg_count)
-                caller = struct.unpack("<I", base.read(regs["ESP"], 4))[0]
+                # NOTE: This callback runs while execution is still flowing
+                # (DEBUG_STATUS_GO_HANDLED). Use direct engine-thread reads
+                # instead of DebugEngine.read_pointer(), which enforces a
+                # stopped debugger state and would fail for live traces.
+                def _read_pointer_live(address: int) -> int:
+                    bitness = self._engine._get_effective_bitness_impl()
+                    size = 8 if bitness == "64" else 4
+                    data = bytes(self._engine._base.read(address, size))
+                    return struct.unpack("<Q" if size == 8 else "<I", data)[0]
+
+                args = read_args(regs, _read_pointer_live, convention, arg_count)
+                caller = read_return_address(regs, _read_pointer_live, convention)
 
                 # Map caller to Ghidra address
                 caller_ghidra = None
@@ -154,7 +169,7 @@ class TraceSession:
                 entry = TraceEntry(
                     timestamp=time.monotonic(),
                     trace_id=trace_id,
-                    ghidra_address=ghidra_address,
+                    ghidra_address=ghidra_addr_value,
                     module=module,
                     args=args,
                     arg_names=arg_names,
@@ -186,8 +201,10 @@ class TraceSession:
         with self._lock:
             self._traces[trace_id] = trace
 
+        origin_addr = ghidra_addr_value if ghidra_address is not None else runtime_addr
+        origin_kind = "ghidra" if ghidra_address is not None else "runtime"
         logger.info(
-            f"Trace #{trace_id} started: 0x{ghidra_address:08X} ({module}) "
+            f"Trace #{trace_id} started: 0x{origin_addr:X} ({origin_kind}, {module}) "
             f"[{convention}, {arg_count} args, "
             f"capture_return={capture_return}, max_hits={max_hits}]")
         return trace_id
@@ -261,8 +278,9 @@ class TraceSession:
 
     def add_data_watch(
         self,
-        ghidra_address: int,
+        ghidra_address: Optional[int],
         module: str,
+        runtime_address: Optional[int] = None,
         size: int = 4,
         access: str = "write",
     ) -> int:
@@ -286,14 +304,18 @@ class TraceSession:
                 "x86 hardware breakpoint limit reached (4 max). "
                 "Stop an existing watchpoint first.")
 
-        runtime_addr = self._mapper.to_runtime(ghidra_address, module or None)
+        if runtime_address is None and ghidra_address is None:
+            raise ValueError("Either ghidra_address or runtime_address is required")
+
+        runtime_addr = runtime_address if runtime_address is not None else self._mapper.to_runtime(int(ghidra_address), module or None)
+        ghidra_addr_value = ghidra_address
 
         watch_id = self._next_watch_id
         self._next_watch_id += 1
 
         watch = _ActiveWatch(
             watch_id=watch_id,
-            ghidra_address=ghidra_address,
+            ghidra_address=ghidra_addr_value,
             runtime_address=runtime_addr,
             module=module,
             size=size,
@@ -347,7 +369,7 @@ class TraceSession:
                     timestamp=time.monotonic(),
                     watch_id=watch_id,
                     address=runtime_addr,
-                    ghidra_address=ghidra_address,
+                    ghidra_address=ghidra_addr_value,
                     size=size,
                     access=access,
                     value=value,
@@ -370,8 +392,10 @@ class TraceSession:
         with self._lock:
             self._watches[watch_id] = watch
 
+        origin_addr = ghidra_addr_value if ghidra_address is not None else runtime_addr
+        origin_kind = "ghidra" if ghidra_address is not None else "runtime"
         logger.info(
-            f"Watch #{watch_id} set at 0x{ghidra_address:08X} ({module}) "
+            f"Watch #{watch_id} set at 0x{origin_addr:X} ({origin_kind}, {module}) "
             f"[size={size}, access={access}]")
         return watch_id
 

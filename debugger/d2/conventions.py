@@ -44,11 +44,11 @@ D2_MODULES = [
 ]
 
 # Conventions recognized by the arg reader
-CONVENTIONS = {"__stdcall", "__fastcall", "__thiscall", "__cdecl"}
+CONVENTIONS = {"__stdcall", "__fastcall", "__thiscall", "__cdecl", "__fastcall_x64", "msvc_x64"}
 
 
 def read_args(registers: Dict[str, int],
-              read_dword_fn,
+              read_ptr_fn,
               convention: str,
               count: int) -> List[int]:
     """Read function arguments at a breakpoint based on calling convention.
@@ -65,6 +65,14 @@ def read_args(registers: Dict[str, int],
     if count <= 0:
         return []
 
+    if convention in ("__fastcall_x64", "msvc_x64"):
+        rsp = registers.get("RSP", 0)
+        reg_args = [registers.get("RCX", 0), registers.get("RDX", 0), registers.get("R8", 0), registers.get("R9", 0)]
+        args = reg_args[:min(count, 4)]
+        for i in range(max(0, count - 4)):
+            args.append(read_ptr_fn(rsp + 0x28 + i * 8))
+        return args[:count]
+
     esp = registers.get("ESP", 0)
     ecx = registers.get("ECX", 0)
     edx = registers.get("EDX", 0)
@@ -78,14 +86,14 @@ def read_args(registers: Dict[str, int],
         # Remaining args on stack starting at ESP+4
         for i in range(max(0, count - 2)):
             addr = esp + 4 + i * 4
-            args.append(read_dword_fn(addr))
+            args.append(read_ptr_fn(addr))
         return args[:count]
 
     elif convention == "__thiscall":
         args = [ecx]  # 'this' pointer
         for i in range(max(0, count - 1)):
             addr = esp + 4 + i * 4
-            args.append(read_dword_fn(addr))
+            args.append(read_ptr_fn(addr))
         return args[:count]
 
     else:
@@ -93,14 +101,15 @@ def read_args(registers: Dict[str, int],
         args = []
         for i in range(count):
             addr = esp + 4 + i * 4
-            args.append(read_dword_fn(addr))
+            args.append(read_ptr_fn(addr))
         return args
 
 
-def read_return_address(registers: Dict[str, int], read_dword_fn) -> int:
-    """Read the return address from the top of the stack at function entry."""
-    esp = registers.get("ESP", 0)
-    return read_dword_fn(esp)
+def read_return_address(registers: Dict[str, int], read_ptr_fn, convention: str = "__stdcall") -> int:
+    """Read the return address from the top of stack at function entry."""
+    if convention in ("__fastcall_x64", "msvc_x64"):
+        return read_ptr_fn(registers.get("RSP", 0))
+    return read_ptr_fn(registers.get("ESP", 0))
 
 
 def classify_value(value: int) -> str:
@@ -196,7 +205,8 @@ def parse_convention_from_prototype(prototype: str) -> str:
         "undefined4 FUN_6fd50a30(...)" -> "__cdecl" (default)
     """
     prototype_lower = prototype.lower()
-    for conv in ("__stdcall", "__fastcall", "__thiscall", "__cdecl"):
+    # Check more specific markers before generic substrings (e.g. __fastcall_x64 vs __fastcall).
+    for conv in ("__fastcall_x64", "msvc_x64", "__stdcall", "__fastcall", "__thiscall", "__cdecl"):
         if conv in prototype_lower:
             return conv
     return "__cdecl"  # Default

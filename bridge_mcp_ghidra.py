@@ -776,6 +776,7 @@ STATIC_TOOL_NAMES = {
     "debugger_remove_breakpoint",
     "debugger_list_breakpoints",
     "debugger_continue",
+    "debugger_interrupt",
     "debugger_step_into",
     "debugger_step_over",
     "debugger_registers",
@@ -1620,31 +1621,43 @@ def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
     return _debugger_request(
         "GET", "/debugger/ordinal", query={"dll": dll, "ordinal": str(ordinal)}
     )
+
+
+def _normalize_optional_address(value: object) -> object:
+    """Normalize optional address-like inputs while preserving numeric types."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return value
 @mcp.tool()
 def debugger_set_breakpoint(
-    ghidra_address: str,
+    ghidra_address: str = "",
     module: str = "",
+    runtime_address: str = "",
     bp_type: str = "software",
     oneshot: bool = False,
 ) -> str:
-    """Set a breakpoint at a Ghidra address. Auto-translates to runtime address.
+    """Set a breakpoint using a Ghidra or runtime address.
 
     Args:
         ghidra_address: Address in Ghidra (e.g. "0x6FD9F450").
-        module: DLL name for disambiguation (e.g. "D2Common.dll").
+        module: DLL name for Ghidra address disambiguation (e.g. "D2Common.dll").
+        runtime_address: Live process runtime address (e.g. "0x7FF73A592070").
         bp_type: "software" (INT3) or "hardware" (debug register).
         oneshot: If true, breakpoint is removed after first hit.
     """
-    return _debugger_request(
-        "POST",
-        "/debugger/breakpoint",
-        {
-            "ghidra_address": ghidra_address,
-            "module": module,
-            "type": bp_type,
-            "oneshot": oneshot,
-        },
-    )
+    payload = {
+        "type": bp_type,
+        "oneshot": oneshot,
+    }
+    normalized_runtime_address = _normalize_optional_address(runtime_address)
+    if normalized_runtime_address:
+        payload["runtime_address"] = normalized_runtime_address
+    else:
+        payload["ghidra_address"] = ghidra_address
+        payload["module"] = module
+    return _debugger_request("POST", "/debugger/breakpoint", payload)
 @mcp.tool()
 def debugger_remove_breakpoint(bp_id: int) -> str:
     """Remove a breakpoint by its ID.
@@ -1665,6 +1678,11 @@ def debugger_continue() -> str:
     an exception occurs, or debugger_interrupt() is called.
     """
     return _debugger_request("POST", "/debugger/go")
+@mcp.tool()
+def debugger_interrupt() -> str:
+    """Interrupt a running process and return control to the debugger."""
+    return _debugger_request("POST", "/debugger/interrupt")
+
 @mcp.tool()
 def debugger_step_into(count: int = 1) -> str:
     """Single-step into the next instruction(s). Follows calls.
@@ -1741,8 +1759,9 @@ def debugger_read_args(
     )
 @mcp.tool()
 def debugger_trace_function(
-    ghidra_address: str,
+    ghidra_address: str = "",
     module: str = "",
+    runtime_address: str = "",
     convention: str = "__stdcall",
     arg_count: int = 4,
     arg_names: str = "",
@@ -1758,25 +1777,27 @@ def debugger_trace_function(
     Args:
         ghidra_address: Function address in Ghidra.
         module: DLL name (e.g. "D2Common.dll").
+        runtime_address: Live process runtime address (skips address mapper).
         convention: __stdcall, __fastcall, __thiscall, __cdecl.
         arg_count: Number of arguments to capture.
         arg_names: Comma-separated arg names (e.g. "pUnit,nSkillId,nWeaponSpeed").
         capture_return: Also capture return value (EAX).
         max_hits: Stop tracing after N hits (0 = unlimited).
     """
-    return _debugger_request(
-        "POST",
-        "/debugger/trace/start",
-        {
-            "ghidra_address": ghidra_address,
-            "module": module,
-            "convention": convention,
-            "arg_count": arg_count,
-            "arg_names": arg_names,
-            "capture_return": capture_return,
-            "max_hits": max_hits,
-        },
-    )
+    payload = {
+        "module": module,
+        "convention": convention,
+        "arg_count": arg_count,
+        "arg_names": arg_names,
+        "capture_return": capture_return,
+        "max_hits": max_hits,
+    }
+    normalized_runtime_address = _normalize_optional_address(runtime_address)
+    if normalized_runtime_address:
+        payload["runtime_address"] = normalized_runtime_address
+    else:
+        payload["ghidra_address"] = ghidra_address
+    return _debugger_request("POST", "/debugger/trace/start", payload)
 @mcp.tool()
 def debugger_trace_stop(trace_id: int = -1) -> str:
     """Stop a function trace. Use trace_id=-1 to stop all traces.
@@ -1804,7 +1825,11 @@ def debugger_trace_list() -> str:
     return _debugger_request("GET", "/debugger/trace/list")
 @mcp.tool()
 def debugger_watch_memory(
-    ghidra_address: str, size: int = 4, access: str = "write", module: str = ""
+    ghidra_address: str = "",
+    size: int = 4,
+    access: str = "write",
+    module: str = "",
+    runtime_address: str = "",
 ) -> str:
     """Set a hardware watchpoint on a memory range to monitor read/write access.
 
@@ -1816,17 +1841,15 @@ def debugger_watch_memory(
         size: Bytes to watch (1, 2, or 4).
         access: "read", "write", or "readwrite".
         module: DLL name for address resolution.
+        runtime_address: Live process runtime address (skips address mapper).
     """
-    return _debugger_request(
-        "POST",
-        "/debugger/watch/start",
-        {
-            "ghidra_address": ghidra_address,
-            "module": module,
-            "size": size,
-            "access": access,
-        },
-    )
+    payload = {"size": size, "access": access, "module": module}
+    normalized_runtime_address = _normalize_optional_address(runtime_address)
+    if normalized_runtime_address:
+        payload["runtime_address"] = normalized_runtime_address
+    else:
+        payload["ghidra_address"] = ghidra_address
+    return _debugger_request("POST", "/debugger/watch/start", payload)
 @mcp.tool()
 def debugger_watch_stop(watch_id: int = -1) -> str:
     """Stop a memory watchpoint. Use watch_id=-1 to stop all.
