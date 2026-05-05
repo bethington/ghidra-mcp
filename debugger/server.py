@@ -462,10 +462,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_error(400, "Missing 'ghidra_address' or 'runtime_address'")
             return
 
-        ghidra_addr = int(ghidra_addr_str, 16) if ghidra_addr_str else None
+        ghidra_addr = None
+        if ghidra_addr_str not in (None, ""):
+            ghidra_addr = int(ghidra_addr_str, 16) if isinstance(ghidra_addr_str, str) else int(ghidra_addr_str)
+
         arg_names = [n.strip() for n in arg_names_str.split(",") if n.strip()] if arg_names_str else None
 
-        runtime_addr = int(runtime_addr_str, 16) if runtime_addr_str else None
+        runtime_addr = None
+        if runtime_addr_str not in (None, ""):
+            runtime_addr = int(runtime_addr_str, 16) if isinstance(runtime_addr_str, str) else int(runtime_addr_str)
 
         trace_id = tracer.add_function_trace(
             ghidra_address=ghidra_addr,
@@ -532,8 +537,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_error(400, "Missing 'ghidra_address' or 'runtime_address'")
             return
 
-        ghidra_addr = int(ghidra_addr_str, 16) if ghidra_addr_str else None
-        runtime_addr = int(runtime_addr_str, 16) if runtime_addr_str else None
+        ghidra_addr = None
+        if ghidra_addr_str not in (None, ""):
+            ghidra_addr = int(ghidra_addr_str, 16) if isinstance(ghidra_addr_str, str) else int(ghidra_addr_str)
+
+        runtime_addr = None
+        if runtime_addr_str not in (None, ""):
+            runtime_addr = int(runtime_addr_str, 16) if isinstance(runtime_addr_str, str) else int(runtime_addr_str)
 
         watch_id = tracer.add_data_watch(
             ghidra_address=ghidra_addr,
