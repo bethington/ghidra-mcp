@@ -597,8 +597,8 @@ def sanitize_address(address: str) -> str:
     """Normalize address format for Ghidra AddressFactory.
 
     Handles:
-    - space:0xHEX  -> space:HEX   (strip 0x from offset; AddressFactory rejects 0x after colon)
-    - SPACE:HEX    -> space:HEX   (lowercase space name; AddressFactory is case-sensitive)
+    - space:0xHEX  -> space:HEX   (strip 0x; AddressFactory rejects 0x after colon)
+    - SPACE:HEX    -> SPACE:HEX   (preserve case — AddressFactory is case-sensitive; see #184)
     - 0xHEX        -> 0xhex       (lowercase)
     - HEX          -> 0xHEX       (add 0x prefix)
     """
@@ -609,13 +609,11 @@ def sanitize_address(address: str) -> str:
     # Step 1: handle space:0xHEX form (checked first — 'x' not in [0-9a-fA-F])
     m = SEGMENT_ADDR_WITH_0X_PATTERN.match(address)
     if m:
-        # Lowercase space name; preserve offset case (AddressFactory handles hex case)
-        return f"{m.group(1).lower()}:{m.group(2)}"
+        return f"{m.group(1)}:{m.group(2)}"  # case preserved (#184)
 
-    # Step 2: normalize valid space:HEX form (lowercase space name only)
+    # Step 2: valid space:HEX — pass through unchanged (#184)
     if SEGMENT_ADDRESS_PATTERN.match(address):
-        space, offset = address.split(":", 1)
-        return f"{space.lower()}:{offset}"
+        return address
 
     # Step 3: plain hex normalization (unchanged logic)
     if not address.startswith(("0x", "0X")):

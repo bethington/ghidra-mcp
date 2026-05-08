@@ -375,11 +375,12 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         });
 
         // --- Project Organization ---
-
-        safeContext("/create_folder", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.createFolder(params.get("path"), params.get("program")));
-        });
+        // Note: /create_folder and /delete_file are NOT registered here because
+        // they are already registered via @McpTool annotations on
+        // ProgramScriptService.{createFolder,deleteFile} which the
+        // AnnotationScanner picks up. Re-registering them manually causes
+        // "cannot add context to list" on headless startup (see #180).
+        // /move_file and /move_folder have no annotation, so they stay manual.
 
         safeContext("/move_file", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
@@ -389,11 +390,6 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         safeContext("/move_folder", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
             sendResponse(exchange, endpointHandler.moveFolder(params.get("sourcePath"), params.get("destPath")));
-        });
-
-        safeContext("/delete_file", exchange -> {
-            Map<String, String> params = parsePostParams(exchange);
-            sendResponse(exchange, endpointHandler.deleteFile(params.get("filePath")));
         });
 
         // --- Server Endpoints ---
@@ -517,8 +513,9 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
     private int countEndpoints() {
         // registeredEndpointCount = annotation-scanned (shared services + HeadlessManagementService)
-        // 31 = infrastructure + schema + remaining manual createContext registrations
-        return registeredEndpointCount + 31;
+        // 29 = infrastructure + schema + remaining manual createContext registrations
+        // (was 31; -2 after #180 dropped /create_folder + /delete_file as duplicates)
+        return registeredEndpointCount + 29;
     }
 
     public void stop() {
