@@ -350,6 +350,13 @@ GhidraMCP is designed for **localhost-only development**. The default configurat
 | `GHIDRA_MCP_ALLOW_SCRIPTS` | Set to `1`, `true`, or `yes` to enable `/run_script_inline` and `/run_ghidra_script`. **Off by default as of v5.4.1** — these endpoints execute arbitrary Java against the Ghidra process. |
 | `GHIDRA_MCP_FILE_ROOT` | When set to a directory path, filesystem-path endpoints (`/import_file`, `/open_project`, `/delete_file`, etc.) canonicalize the input and require it to fall under this root. Prevents path-traversal. |
 
+Function-name quality enforcement is separate from security. By default,
+`rename_function_by_address` rejects names that fail the built-in quality
+gate. Disable the hard-reject layer with **Edit > Tool Options > GhidraMCP
+HTTP Server > Strict Function Name Enforcement**. The Tool Options setting is
+read when the MCP server starts or restarts. Convention warnings are still
+returned when enforcement is disabled.
+
 ### Example: exposing to a private LAN with auth
 
 ```bash
