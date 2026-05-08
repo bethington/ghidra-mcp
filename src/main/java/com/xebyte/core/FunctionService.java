@@ -804,7 +804,7 @@ public class FunctionService {
             return Response.err("No function found for " + functionAddrStr);
         }
 
-        boolean enforceStrictFunctionNames = NamingPolicy.getInstance().isStrictFunctionNames();
+        boolean enforceStrictNaming = NamingPolicy.getInstance().isStrictNamingEnforcement();
         List<String> enforcementWarnings = new ArrayList<>();
 
         // ---- Q1-Q5 validator gate (defense in depth) ----------------------
@@ -817,7 +817,7 @@ public class FunctionService {
                     NamingConventions.checkFunctionNameQuality(newName);
             if (!quality.ok) {
                 Map<String, Object> rejection = nameQualityRejection(newName, quality);
-                if (enforceStrictFunctionNames) {
+                if (enforceStrictNaming) {
                     return Response.ok(rejection);
                 }
                 enforcementWarnings.add(disabledEnforcementWarning(rejection));
@@ -835,7 +835,7 @@ public class FunctionService {
                     NamingConventions.findTokenSubsetCollision(newName, existingNames);
             if (collidesWith != null) {
                 Map<String, Object> rejection = tokenSubsetCollisionRejection(newName, collidesWith);
-                if (enforceStrictFunctionNames) {
+                if (enforceStrictNaming) {
                     return Response.ok(rejection);
                 }
                 enforcementWarnings.add(disabledEnforcementWarning(rejection));
@@ -908,7 +908,7 @@ public class FunctionService {
     }
 
     private static String disabledEnforcementWarning(Map<String, Object> rejection) {
-        return "Strict function-name enforcement disabled: would have rejected "
+        return "Strict naming enforcement disabled: would have rejected "
                 + rejection.get("error") + "/" + rejection.get("issue") + " - "
                 + rejection.get("message");
     }

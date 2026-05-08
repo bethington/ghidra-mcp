@@ -7,6 +7,16 @@ For the full version history, see [CHANGELOG.md](../../CHANGELOG.md) in the proj
 For the release preparation runbook, see
 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
+## Unreleased
+
+- **Strict Naming Enforcement covers global name-quality gates** — the
+  existing Ghidra Tool Option remains strict by default, but disabling it now
+  lets `rename_data`, `rename_global_variable`, `set_global`, and the
+  `apply_data_type` prefix/type guard proceed with warnings instead of hard
+  rejects. Existing saved values from the legacy **Strict Function Name
+  Enforcement** option are migrated automatically. Endpoint schemas are
+  unchanged.
+
 ## Current Releases
 
 ### v5.7.1 (Latest) — community contributions + post-release triage
