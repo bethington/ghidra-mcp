@@ -2285,6 +2285,8 @@ public class AnalysisService {
             @Param(value = "max_xrefs", description = "Maximum xref count filter (omit for no maximum)", defaultValue = "") Integer maxXrefs,
             @Param(value = "calling_convention", description = "Calling convention filter (omit for any)", defaultValue = "") String callingConvention,
             @Param(value = "has_custom_name", description = "Filter by whether function has a user-defined name (omit for any)", defaultValue = "") Boolean hasCustomName,
+            @Param(value = "is_thunk", description = "Filter by thunk classification (true=only thunks, false=exclude thunks, omit for any)", defaultValue = "") Boolean isThunkFilter,
+            @Param(value = "is_external", description = "Filter by external classification (true=only external, false=exclude external, omit for any)", defaultValue = "") Boolean isExternalFilter,
             @Param(value = "regex", defaultValue = "false", description = "Use regex matching") boolean regex,
             @Param(value = "sort_by", defaultValue = "address", description = "Sort field") String sortBy,
             @Param(value = "offset", defaultValue = "0") int offset,
@@ -2346,11 +2348,24 @@ public class AnalysisService {
                             continue;
                         }
 
+                        // Classify once: classifyFunction walks instructions, so reuse for both filter and output
+                        boolean funcIsThunk = "thunk".equals(AnalysisService.classifyFunction(func, program));
+                        boolean funcIsExternal = func.isExternal();
+
+                        if (isThunkFilter != null && funcIsThunk != isThunkFilter) {
+                            continue;
+                        }
+                        if (isExternalFilter != null && funcIsExternal != isExternalFilter) {
+                            continue;
+                        }
+
                         // Create match entry
                         Map<String, Object> match = new LinkedHashMap<>();
                         match.put("name", func.getName());
                         match.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
                         match.put("xref_count", xrefCount);
+                        match.put("isThunk", funcIsThunk);
+                        match.put("isExternal", funcIsExternal);
                         matches.add(match);
                     }
 
