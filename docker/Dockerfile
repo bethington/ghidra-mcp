@@ -7,8 +7,14 @@
 FROM eclipse-temurin:21-jdk AS builder
 
 # Build arguments
-ARG GHIDRA_VERSION=12.0.3
-ARG GHIDRA_DATE=20260210
+# IMPORTANT: keep GHIDRA_VERSION in sync with pom.xml's <ghidra.version>.
+# The Maven build resolves ghidra:* artifacts at this exact version, and the
+# install-file step below stamps that version onto the JARs we extract from
+# the Ghidra release zip. A mismatch means Maven can't resolve dependencies
+# (see #183). GHIDRA_DATE must match the asset filename of the chosen
+# version on the upstream NSA/ghidra GitHub release.
+ARG GHIDRA_VERSION=12.0.4
+ARG GHIDRA_DATE=20260303
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
