@@ -7,17 +7,23 @@ For the full version history, see [CHANGELOG.md](../../CHANGELOG.md) in the proj
 For the release preparation runbook, see
 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
-## Unreleased
-
-- **GUI-configurable function-name enforcement** — the **Strict Function Name
-  Enforcement** Ghidra Tool Option controls whether
-  `rename_function_by_address` hard-rejects names that fail the verb-tier or
-  token-subset gates. The default remains strict; disabling the option lets
-  noncompliant names proceed while returning the same issues as warnings.
-
 ## Current Releases
 
-### v5.7.0 (Latest) — globals quality, scope guard, archive integration
+### v5.7.1 (Latest) — community contributions + post-release triage
+
+Patch release bundling five community-contributed PRs and three post-release bug fixes.
+
+- **Function tags** (chompie1337, [#179](https://github.com/bethington/ghidra-mcp/pull/179)) — 10 new MCP endpoints for tagging functions with program-wide labels (`add_function_tag`, `search_functions_by_tag`, `batch_add_function_tags`, etc.). Endpoint catalog grows 231 → 241.
+- **isThunk/isExternal filters** (c8rri3r, [#178](https://github.com/bethington/ghidra-mcp/pull/178)) — `search_functions_enhanced` exposes the fields and accepts `is_thunk`/`is_external` query parameters. Closes [#177](https://github.com/bethington/ghidra-mcp/issues/177).
+- **Function-name enforcement toggle** (Hummer12007, [#171](https://github.com/bethington/ghidra-mcp/pull/171)) — Ghidra Tool Option to switch verb-tier rejection between hard-reject (default) and warning-only. Power-user escape hatch.
+- **Headless startup crash fix** ([#180](https://github.com/bethington/ghidra-mcp/issues/180), originally diagnosed by @MMOStars) — duplicate route registration of `/create_folder` and `/delete_file` was tripping `HttpServerImpl.createContext` with `IllegalArgumentException`. Removed the manual registrations; the `@McpTool` annotations carry them. Affected every Docker/headless deployment.
+- **8051 (and similar) address-space fix** ([#184](https://github.com/bethington/ghidra-mcp/issues/184), reported by @Artem-B) — bridge no longer lowercases space names, which broke `CODE:123` etc. on architectures with uppercase-declared spaces.
+- **Docker build fix** ([#183](https://github.com/bethington/ghidra-mcp/issues/183), reported by @RocketMaDev) — `Dockerfile` `GHIDRA_VERSION` ARG bumped from `12.0.3` → `12.0.4` to match `pom.xml`.
+- **Maven Windows fix** (deckbsd, [#176](https://github.com/bethington/ghidra-mcp/pull/176)) — platform-aware `M2_HOME` candidate (only adds `mvn.cmd` on Windows) eliminates the `OSError` during setup discovery.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.7.0 — globals quality, scope guard, archive integration
 
 - **Four-axis "documented global" bar** — globals must have a meaningful name (`g_` + Hungarian + descriptor), a real type (not `undefined*`), bytes formatted to that type's expected length, and a plate comment with a meaningful one-line summary.
 - **`rename_data` / `rename_global_variable` validator gate** — hard-rejects names that fail `NamingConventions.checkGlobalNameQuality(name, type)` with a structured error including the conflicting issue, current type, and a concrete suggestion.

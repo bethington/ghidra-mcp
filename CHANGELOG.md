@@ -4,16 +4,81 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v5.7.1 - 2026-05-08 (community contributions + post-release triage)
+
+Patch release bundling five community-contributed PRs that landed on `main`
+in the 48 hours after v5.7.0 shipped, plus three post-release bug fixes
+diagnosed by users on the issue tracker. No breaking changes; endpoint
+count grows 231 → 241.
 
 ### Added
 
-- **GUI-configurable function-name enforcement** — the **Strict Function Name
-  Enforcement** Ghidra Tool Option controls whether
-  `rename_function_by_address` hard-rejects names that fail the verb-tier or
-  token-subset gates. The default remains strict. When disabled, the rename
-  proceeds while returning the same issues as warnings. No endpoint schema
-  change is required.
+- **Function tags** (community — chompie1337, [#179](https://github.com/bethington/ghidra-mcp/pull/179))
+  — 10 new MCP endpoints for tagging functions with program-wide labels:
+  `add_function_tag`, `remove_function_tag`, `get_function_tags`,
+  `search_functions_by_tag`, `create_function_tag`, `delete_function_tag`,
+  `set_function_tag_comment`, `list_function_tags`,
+  `batch_add_function_tags`, `batch_remove_function_tags`. Tags
+  auto-create on first use, are stored in the Ghidra DB so they persist
+  across save/checkin, and cover the "carve curated subsets across
+  long analysis sessions" pattern (e.g. `crypto`, `parser`, `reviewed`).
+  See `docs/prompts/TOOL_USAGE_GUIDE.md` for the sweep-and-curate worked
+  example.
+- **`isThunk` / `isExternal` filters in `search_functions_enhanced`**
+  (community — c8rri3r, [#178](https://github.com/bethington/ghidra-mcp/pull/178))
+  — every result now carries `isThunk` and `isExternal` boolean fields,
+  and the endpoint accepts `is_thunk=true|false` and
+  `is_external=true|false` query parameters for filtering. Closes
+  [#177](https://github.com/bethington/ghidra-mcp/issues/177).
+- **GUI-configurable function-name enforcement** (community — Hummer12007,
+  [#171](https://github.com/bethington/ghidra-mcp/pull/171)) — the
+  **Strict Function Name Enforcement** Ghidra Tool Option controls
+  whether `rename_function_by_address` hard-rejects names that fail the
+  verb-tier or token-subset gates. The default remains strict. When
+  disabled, the rename proceeds while returning the same issues as
+  warnings. No endpoint schema change is required.
+
+### Fixed
+
+- **Headless server crashes on startup with "cannot add context to list"**
+  ([#180](https://github.com/bethington/ghidra-mcp/issues/180), originally
+  diagnosed by @MMOStars). `/create_folder` and `/delete_file` were
+  registered both via `@McpTool` annotations on `ProgramScriptService`
+  and manually in `GhidraMCPHeadlessServer.registerEndpoints()`,
+  tripping `HttpServerImpl.createContext` with
+  `IllegalArgumentException`. Removed the duplicate manual
+  registrations; updated `countEndpoints()` -2.
+- **Address-space name lowercasing breaks 8051 and other uppercase-space
+  architectures** ([#184](https://github.com/bethington/ghidra-mcp/issues/184),
+  reported by @Artem-B). `bridge_mcp_ghidra.py::sanitize_address` was
+  lowercasing the space-name component (`CODE:123` → `code:123`), but
+  Ghidra's `AddressFactory` is case-sensitive and 8051 declares
+  `RAM`/`CODE`/`INTMEM`/`EXTMEM` uppercase. Fix: pass the space name
+  through unchanged. Three regression tests added covering the 8051
+  spaces. Two unrelated pre-existing test scaffolding bugs cleaned up
+  in the same commit (camelCase param key, missing mock kwarg) — test
+  file goes 18 → 21 passing tests.
+- **Docker build can't resolve Ghidra Maven artifacts**
+  ([#183](https://github.com/bethington/ghidra-mcp/issues/183), reported
+  by @RocketMaDev). `Dockerfile` `GHIDRA_VERSION` ARG defaulted to
+  `12.0.3` from the v5.6.0 era but `pom.xml` bumped to `12.0.4` in
+  v5.7.0. The build downloaded 12.0.3 and stamped JARs as
+  `ghidra:*:12.0.3`, then Maven failed to resolve `ghidra:*:12.0.4`.
+  Bumped to `12.0.4` + `GHIDRA_DATE=20260303` and added a comment
+  marking this as a release-time sync point with `pom.xml`.
+- **Maven `OSError` on Windows when `M2_HOME` is set** (community —
+  deckbsd, [#176](https://github.com/bethington/ghidra-mcp/pull/176)).
+  `tools/setup/maven.py::candidate_maven_commands` was always adding
+  both `<M2_HOME>/bin/mvn` (shell script) and `<M2_HOME>/bin/mvn.cmd`
+  (Windows wrapper) as candidates. On Windows the shell script
+  triggered an `OSError` when the discovery code tried to exec it.
+  Now adds only the platform-appropriate executable.
+
+### Changed
+
+- Endpoint catalog: 231 → 241 endpoints. Tool-count references in
+  `README.md`, `CLAUDE.md`, `AGENTS.md`, `docs/NAMING_CONVENTIONS.md`,
+  `MANIFEST.MF`, and `extension.properties` updated to match.
 
 ---
 

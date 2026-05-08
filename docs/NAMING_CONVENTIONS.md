@@ -28,7 +28,7 @@ SECURITY.md                  — Security guidelines and reporting (future)
 Organized reference documentation also uses **UPPERCASE**:
 
 ```
-docs/TOOL_REFERENCE.md           — Authoritative endpoint catalog (231 tools)
+docs/TOOL_REFERENCE.md           — Authoritative endpoint catalog (241 tools)
 docs/ERROR_CODES.md              — Error catalog and troubleshooting guide
 docs/PERFORMANCE_BASELINES.md    — Performance metrics and optimization
 docs/ARCHITECTURE.md             — System architecture and design
