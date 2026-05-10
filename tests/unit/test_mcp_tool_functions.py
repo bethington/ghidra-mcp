@@ -125,6 +125,92 @@ class TestPostToolDispatch(unittest.TestCase):
         # POST sends native types, not strings
         mock_post.assert_called_once_with("/search", data={"offset": 0, "limit": 50}, query_params=None)
 
+    @patch("bridge_mcp_ghidra.dispatch_post")
+    def test_post_synthetic_dry_run_only_for_true_values(self, mock_post):
+        from bridge_mcp_ghidra import _build_tool_function
+        mock_post.return_value = '{"success": true}'
+
+        schema = {
+            "properties": {
+                "address": {"type": "string"},
+                "name": {"type": "string"},
+            },
+            "required": ["address", "name"],
+        }
+        fn = _build_tool_function("/rename_function", "POST", schema)
+
+        fn(address="0x401000", name="main", dry_run="false")
+        mock_post.assert_called_once_with(
+            "/rename_function",
+            data={"address": "0x401000", "name": "main"},
+            query_params=None,
+        )
+
+        mock_post.reset_mock()
+        fn(address="0x401000", name="main", dry_run=True)
+        mock_post.assert_called_once_with(
+            "/rename_function",
+            data={"address": "0x401000", "name": "main"},
+            query_params={"dry_run": "true"},
+        )
+
+    @patch("bridge_mcp_ghidra.dispatch_post")
+    def test_schema_declared_query_dry_run_does_not_duplicate_signature(self, mock_post):
+        from bridge_mcp_ghidra import _build_tool_function
+        mock_post.return_value = '{"dry_run": true}'
+
+        schema = {
+            "properties": {
+                "program": {"type": "string", "source": "query", "default": ""},
+                "dry_run": {
+                    "type": "boolean",
+                    "source": "query",
+                    "default": "false",
+                },
+            },
+            "required": [],
+        }
+        fn = _build_tool_function("/archive_ingest_program", "POST", schema)
+        sig = inspect.signature(fn)
+
+        self.assertEqual(list(sig.parameters).count("dry_run"), 1)
+
+        fn(program="pwahelper.exe", dry_run="false")
+        mock_post.assert_called_once_with(
+            "/archive_ingest_program",
+            data={},
+            query_params={"program": "pwahelper.exe", "dry_run": "false"},
+        )
+
+    @patch("bridge_mcp_ghidra.dispatch_post")
+    def test_schema_declared_body_dry_run_uses_body_source(self, mock_post):
+        from bridge_mcp_ghidra import _build_tool_function
+        mock_post.return_value = '{"dry_run": true}'
+
+        schema = {
+            "properties": {
+                "source": {"type": "string", "source": "body"},
+                "target": {"type": "string", "source": "body"},
+                "dry_run": {
+                    "type": "boolean",
+                    "source": "body",
+                    "default": "false",
+                },
+            },
+            "required": ["source", "target"],
+        }
+        fn = _build_tool_function("/merge_program_documentation", "POST", schema)
+        sig = inspect.signature(fn)
+
+        self.assertEqual(list(sig.parameters).count("dry_run"), 1)
+
+        fn(source="recovered", target="original", dry_run=True)
+        mock_post.assert_called_once_with(
+            "/merge_program_documentation",
+            data={"source": "recovered", "target": "original", "dry_run": True},
+            query_params=None,
+        )
+
 
 class TestSchemaEdgeCases(unittest.TestCase):
     """Test edge cases in schema parsing."""
