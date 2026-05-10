@@ -7,19 +7,19 @@ For the full version history, see [CHANGELOG.md](../../CHANGELOG.md) in the proj
 For the release preparation runbook, see
 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 
-## Unreleased
-
-- **Strict Naming Enforcement covers global name-quality gates** — the
-  existing Ghidra Tool Option remains strict by default, but disabling it now
-  lets `rename_data`, `rename_global_variable`, `set_global`, and the
-  `apply_data_type` prefix/type guard proceed with warnings instead of hard
-  rejects. Existing saved values from the legacy **Strict Function Name
-  Enforcement** option are migrated automatically. Endpoint schemas are
-  unchanged.
-
 ## Current Releases
 
-### v5.7.1 (Latest) — community contributions + post-release triage
+### v5.7.2 (Latest) — critical bridge fix + Linux/Nix compat + toggle extension
+
+Patch release bundling one critical bridge fix and two Linux/Nix setup fixes, plus an extension of the v5.7.1 toggle.
+
+- **Bridge `duplicate parameter name: 'dry_run'` fix** (synthol, [#193](https://github.com/bethington/ghidra-mcp/pull/193), closes [#187](https://github.com/bethington/ghidra-mcp/issues/187)) — the bridge no longer collides its synthetic `dry_run` param with schema-declared ones. Affected every v5.7.0/v5.7.1 user whose plugin exposed `archive_ingest_function` or `archive_ingest_program`; the bridge failed to register tools on startup.
+- **Linux/Nix `tools.setup` compat** ([#194](https://github.com/bethington/ghidra-mcp/pull/194), closes [#190](https://github.com/bethington/ghidra-mcp/issues/190) + [#191](https://github.com/bethington/ghidra-mcp/issues/191)) — new `pip_command()` helper probes `python -m pip` first then falls back to a bare `pip` on PATH, fixing setup on Nix-managed Python environments where pip is exposed as a binary but not importable. `find_ghidra_executable` is platform-aware so `ghidraRun.bat` is no longer preferred on Linux. Reported by @Molkars + @letsjustfixit.
+- **Strict Naming Enforcement extended to globals** (Hummer12007, [#188](https://github.com/bethington/ghidra-mcp/pull/188)) — the existing Ghidra Tool Option remains strict by default, but disabling it now downgrades the hard name-quality rejects in `rename_data`, `rename_global_variable`, `set_global`, and the `apply_data_type` prefix/type guard to warnings, matching `rename_function_by_address`. Legacy saved values from the **Strict Function Name Enforcement** Tool Option migrate automatically.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.7.1 — community contributions + post-release triage
 
 Patch release bundling five community-contributed PRs and three post-release bug fixes.
 

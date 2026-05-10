@@ -4,17 +4,71 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v5.7.2 - 2026-05-10 (critical bridge fix + Linux/Nix compat + toggle extension)
+
+Patch release bundling one critical bridge fix that affected all v5.7.0/v5.7.1
+users, two Linux/Nix setup compatibility fixes, and an extension of the
+v5.7.1 naming-enforcement toggle to cover global name-quality gates. No
+endpoint count change (still 241).
+
+### Fixed
+
+- **Bridge `_fetch_and_register_schema()` raised "duplicate parameter name:
+  'dry_run'" on startup, preventing tool registration.** Affected every
+  v5.7.0/v5.7.1 user whose Ghidra plugin exposed any endpoint that already
+  declared `dry_run` in its `@McpTool` schema (e.g.
+  `archive_ingest_function`, `archive_ingest_program`); the bridge was
+  unconditionally adding a synthetic `dry_run` parameter to every POST
+  endpoint, colliding with the schema-declared one. The bridge now skips
+  the synthetic injection when a schema-declared `dry_run` is present and
+  preserves the schema's declared `source` (`query` vs `body`). Includes
+  regression tests for synthetic, schema-declared-query, and
+  schema-declared-body variants. Closes
+  [#187](https://github.com/bethington/ghidra-mcp/issues/187) (community —
+  @synthol, [#193](https://github.com/bethington/ghidra-mcp/pull/193)).
+
+- **`tools.setup` pip discovery failed on Nix-managed Python
+  environments.** Setup invoked pip as `python -m pip` everywhere, but on
+  Nix the active interpreter can't import pip even though `pip` exists on
+  PATH. Reported by @Molkars
+  ([#190](https://github.com/bethington/ghidra-mcp/issues/190)), confirmed
+  by @letsjustfixit on Debian. New `pip_command(python_executable)` helper
+  probes `python -m pip` first (safer, venv-aware) and falls back to a
+  bare `pip` on PATH only when the module form fails; result is cached per
+  interpreter. Six new unit tests cover the matrix (Windows/Mac happy
+  path, Nix fallback, neither-form-works, caching, isolation across
+  interpreters, integration with `install_requirements_file`). Closes
+  [#190](https://github.com/bethington/ghidra-mcp/issues/190).
+
+- **`tools.setup deploy` failed on Linux because
+  `find_ghidra_executable` preferred `ghidraRun.bat` first.** Ghidra
+  release zips ship both `ghidraRun` (shell script) and `ghidraRun.bat`
+  (Windows batch) regardless of host OS, so `is_file()` returned the
+  Windows batch on Linux too; `subprocess.Popen` then tried to exec
+  `cmd.exe` and failed with `FileNotFoundError`. Candidate order is now
+  platform-aware. Reported and diagnosed by @Molkars
+  ([#191](https://github.com/bethington/ghidra-mcp/issues/191)). Closes
+  [#191](https://github.com/bethington/ghidra-mcp/issues/191).
 
 ### Changed
 
-- **Strict Naming Enforcement covers global name-quality gates.**
-  The existing Ghidra Tool Option remains strict by default, but when disabled
-  it now downgrades the hard name-quality rejects in `rename_data`,
-  `rename_global_variable`, `set_global`, and the `apply_data_type`
-  prefix/type guard to warnings, matching `rename_function_by_address`. No
-  endpoint schema changes are required. Existing saved values from the legacy
-  **Strict Function Name Enforcement** option are migrated automatically.
+- **Strict Naming Enforcement now covers global name-quality gates.**
+  The existing Ghidra Tool Option remains strict by default, but when
+  disabled it now downgrades the hard name-quality rejects in
+  `rename_data`, `rename_global_variable`, `set_global`, and the
+  `apply_data_type` prefix/type guard to warnings, matching
+  `rename_function_by_address`'s behavior since v5.7.1. The legacy
+  **Strict Function Name Enforcement** Tool Option value is migrated
+  automatically. No endpoint schema changes. Community —
+  @Hummer12007, [#188](https://github.com/bethington/ghidra-mcp/pull/188).
+
+### Tests
+
+- Bridge soft-line-count cap raised from 2000 → 2100 to absorb the
+  `#187` fix's added conditional logic plus prior legitimate growth.
+  The cap remains a signal against gratuitous bloat — bump deliberately
+  on future trips, not reflexively (commit
+  [a0afe77](https://github.com/bethington/ghidra-mcp/commit/a0afe77)).
 
 ## v5.7.1 - 2026-05-08 (community contributions + post-release triage)
 
@@ -1598,7 +1652,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 **Documentation Organization:**
 - Ã¢Å“â€¦ Created comprehensive `PROJECT_STRUCTURE.md` documenting entire project layout
 - Ã¢Å“â€¦ Consolidated `DOCUMENTATION_INDEX.md` merging duplicate indexes
-- Ã¢Å“â€¦ Enhanced `scripts/README.md` with categorization and workflows  
+- Ã¢Å“â€¦ Enhanced `scripts/README.md` with categorization and workflows
 - Ã¢Å“â€¦ Established markdown naming standards (`MARKDOWN_NAMING.md`)
 - Ã¢Å“â€¦ Organized 40+ root-level files into clear categories
 
@@ -1639,7 +1693,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 
 - Ã¢Å“â€¦ Version consistency verification across all files
 - Ã¢Å“â€¦ Build configuration validated (Maven 3.9+, Java 21)
-- Ã¢Å“â€¦ Plugin deployment verified with Ghidra 11.4.2  
+- Ã¢Å“â€¦ Plugin deployment verified with Ghidra 11.4.2
 - Ã¢Å“â€¦ Python dependencies current (`requirements.txt`)
 - Ã¢Å“â€¦ All core functionality tested and working
 
@@ -1809,7 +1863,7 @@ code = decompile_function(address='0x401000', offset=100, limit=100)
 
 ### Bug Fixes
 - Ã¢Å“â€¦ **Fixed DocumentFunctionWithClaude.java** - Windows compatibility
-  - Resolved "claude: CreateProcess error=2" 
+  - Resolved "claude: CreateProcess error=2"
   - Now uses full path: `%APPDATA%\npm\claude.cmd`
   - Changed keybinding from Ctrl+Shift+D to Ctrl+Shift+P
 
