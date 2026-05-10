@@ -843,6 +843,14 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     """Build a callable that dispatches to the Ghidra HTTP endpoint."""
     properties = params_schema.get("properties", {})
     required = set(params_schema.get("required", []))
+    is_post = http_method.upper() == "POST"
+    has_schema_dry_run = "dry_run" in properties
+    use_synthetic_dry_run = is_post and not has_schema_dry_run
+
+    def is_truthy(value) -> bool:
+        if isinstance(value, str):
+            return value.lower() in {"1", "true", "yes", "on"}
+        return bool(value)
 
     def handler(**kwargs):
         # Sanitize address parameters before dispatch
@@ -853,8 +861,9 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
                 and kwargs[pname] is not None
             ):
                 kwargs[pname] = sanitize_address(str(kwargs[pname]))
-        # Extract dry_run before filtering — it goes as a query param, not in the body
-        dry_run = kwargs.pop("dry_run", None)
+        # Synthetic bridge dry-run goes as a query param. Schema-declared
+        # dry_run must stay in kwargs so its declared source (query/body) wins.
+        dry_run = kwargs.pop("dry_run", None) if use_synthetic_dry_run else None
         # Filter out None AND empty strings. Codex's MCP client passes schema
         # default values (including "") to every call, which the Ghidra
         # handler treats as "present but empty" and fails on params that
@@ -870,7 +879,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         }
         if http_method == "GET":
             str_params = {k: str(v) for k, v in filtered.items()}
-            if dry_run:
+            if use_synthetic_dry_run and is_truthy(dry_run):
                 str_params["dry_run"] = "true"
             return dispatch_get(endpoint, params=str_params if str_params else None)
         else:
@@ -881,7 +890,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
                     query_params[key] = str(value)
                 else:
                     body_data[key] = value
-            if dry_run:
+            if use_synthetic_dry_run and is_truthy(dry_run):
                 query_params["dry_run"] = "true"
             return dispatch_post(
                 endpoint,
@@ -911,7 +920,7 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
 
     sig_params = required_params + optional_params
     # Add dry_run parameter for POST (write) endpoints
-    if http_method == "POST":
+    if use_synthetic_dry_run:
         sig_params.append(
             inspect.Parameter(
                 "dry_run",
