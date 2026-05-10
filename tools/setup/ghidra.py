@@ -353,11 +353,23 @@ def install_user_extension(
 
 
 def find_ghidra_executable(ghidra_path: Path) -> Path:
-    candidates = [
-        ghidra_path / "ghidraRun.bat",
-        ghidra_path / "ghidraRun",
-        ghidra_path / "ghidra",
-    ]
+    # Ghidra release zips ship BOTH ghidraRun (shell script) and
+    # ghidraRun.bat (Windows batch) regardless of host OS, so picking the
+    # right one requires a platform check rather than first-match-found.
+    # On Linux/macOS, returning ghidraRun.bat made subprocess.Popen try to
+    # exec cmd.exe and fail with FileNotFoundError. See #191.
+    if sys.platform == "win32":
+        candidates = [
+            ghidra_path / "ghidraRun.bat",
+            ghidra_path / "ghidraRun",
+            ghidra_path / "ghidra",
+        ]
+    else:
+        candidates = [
+            ghidra_path / "ghidraRun",
+            ghidra_path / "ghidra",
+            ghidra_path / "ghidraRun.bat",
+        ]
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -1804,16 +1816,14 @@ def collect_preflight_issues(
     strict: bool = False,
     user_base_dir: Path | None = None,
 ) -> list[str]:
+    from .requirements import pip_command
+
     issues: list[str] = []
 
-    pip_check = subprocess.run(
-        [str(python_executable), "-m", "pip", "--version"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if pip_check.returncode != 0:
-        issues.append("pip is not available for the selected Python interpreter.")
+    try:
+        pip_command(python_executable)
+    except FileNotFoundError as exc:
+        issues.append(str(exc))
 
     if shutil.which("java") is None:
         issues.append("Java not found on PATH (JDK 21 recommended).")
