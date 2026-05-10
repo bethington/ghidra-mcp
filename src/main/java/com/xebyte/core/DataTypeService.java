@@ -1222,6 +1222,7 @@ public class DataTypeService {
             }
 
             Listing listing = program.getListing();
+            List<String> enforcementWarnings = new ArrayList<>();
 
             // Check if address is in a valid memory block
             if (!program.getMemory().contains(address)) {
@@ -1246,7 +1247,7 @@ public class DataTypeService {
                     NamingConventions.GlobalNameResult preCheckResult =
                             NamingConventions.checkGlobalNameQuality(existingName, typeName);
                     if (!preCheckResult.ok && "prefix_type_mismatch".equals(preCheckResult.issue)) {
-                        return Response.ok(JsonHelper.mapOf(
+                        Map<String, Object> rejection = JsonHelper.mapOf(
                                 "status", "rejected",
                                 "error", "prefix_type_mismatch",
                                 "address", addressStr,
@@ -1257,7 +1258,11 @@ public class DataTypeService {
                                         + "' first (use rename_data / rename_global_variable), "
                                         + "or apply the type+name change atomically with set_global "
                                         + "to avoid the silently-lying-name state."
-                        ));
+                        );
+                        if (NamingPolicy.getInstance().isStrictNamingEnforcement()) {
+                            return Response.ok(rejection);
+                        }
+                        enforcementWarnings.add(disabledGlobalEnforcementWarning(rejection));
                     }
                 }
             }
@@ -1294,6 +1299,9 @@ public class DataTypeService {
                 // Add value information if available
                 if (data != null && data.getValue() != null) {
                     resultText += "\nValue: " + data.getValue().toString();
+                }
+                for (String warning : enforcementWarnings) {
+                    resultText += "\nWarning: " + warning;
                 }
 
                 return Response.text(resultText);
@@ -3446,8 +3454,10 @@ public class DataTypeService {
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
-        // Pre-flight validation. If anything fails, return structured error
-        // and DO NOT touch the program.
+        // Pre-flight validation. Strict naming enforcement preserves the
+        // no-partial-write behavior for name-quality failures; when disabled,
+        // the write proceeds and reports the same issue as a warning.
+        List<String> enforcementWarnings = new ArrayList<>();
         if (newName != null && !newName.isEmpty()) {
             String typeForCheck = (typeName != null && !typeName.isEmpty()) ? typeName : null;
             // If type isn't being set, fall back to whatever's already at the address.
@@ -3460,7 +3470,7 @@ public class DataTypeService {
             NamingConventions.GlobalNameResult quality =
                     NamingConventions.checkGlobalNameQuality(newName, typeForCheck);
             if (!quality.ok) {
-                return Response.ok(JsonHelper.mapOf(
+                Map<String, Object> rejection = JsonHelper.mapOf(
                         "status", "rejected",
                         "error", "name_quality",
                         "issue", quality.issue,
@@ -3468,7 +3478,11 @@ public class DataTypeService {
                         "address", addressStr,
                         "message", quality.message,
                         "suggestion", quality.suggestion
-                ));
+                );
+                if (NamingPolicy.getInstance().isStrictNamingEnforcement()) {
+                    return Response.ok(rejection);
+                }
+                enforcementWarnings.add(disabledGlobalEnforcementWarning(rejection));
             }
         }
 
@@ -3667,12 +3681,23 @@ public class DataTypeService {
         }
 
         if (success.get()) {
-            return Response.ok(JsonHelper.mapOf(
+            Map<String, Object> result = JsonHelper.mapOf(
                     "status", "success",
                     "address", addr.toString(),
                     "applied", applied
-            ));
+            );
+            if (!enforcementWarnings.isEmpty()) {
+                result.put("warnings", enforcementWarnings);
+            }
+            return Response.ok(result);
         }
         return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
+    }
+
+    private static String disabledGlobalEnforcementWarning(Map<String, Object> rejection) {
+        Object issue = rejection.containsKey("issue") ? rejection.get("issue") : rejection.get("error");
+        return "Strict naming enforcement disabled: would have rejected "
+                + rejection.get("error") + "/" + issue + " - "
+                + rejection.get("message");
     }
 }

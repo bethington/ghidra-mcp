@@ -4,6 +4,18 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Changed
+
+- **Strict Naming Enforcement covers global name-quality gates.**
+  The existing Ghidra Tool Option remains strict by default, but when disabled
+  it now downgrades the hard name-quality rejects in `rename_data`,
+  `rename_global_variable`, `set_global`, and the `apply_data_type`
+  prefix/type guard to warnings, matching `rename_function_by_address`. No
+  endpoint schema changes are required. Existing saved values from the legacy
+  **Strict Function Name Enforcement** option are migrated automatically.
+
 ## v5.7.1 - 2026-05-08 (community contributions + post-release triage)
 
 Patch release bundling five community-contributed PRs that landed on `main`

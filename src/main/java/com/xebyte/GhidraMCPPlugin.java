@@ -188,7 +188,8 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private static final int DEFAULT_PORT = 8089;
     private static final String UDS_ENABLED_OPTION = "Enable UDS Transport";
     private static final String TCP_ENABLED_OPTION = "Enable TCP Transport";
-    private static final String STRICT_FUNCTION_NAMES_OPTION = "Strict Function Name Enforcement";
+    private static final String STRICT_NAMING_ENFORCEMENT_OPTION = "Strict Naming Enforcement";
+    private static final String LEGACY_STRICT_FUNCTION_NAMES_OPTION = "Strict Function Name Enforcement";
     private static final boolean DEFAULT_UDS_ENABLED = !System.getProperty("os.name", "").toLowerCase().contains("win");
     private static final boolean DEFAULT_TCP_ENABLED = System.getProperty("os.name", "").toLowerCase().contains("win");
 
@@ -293,12 +294,14 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             "Enable Unix Domain Socket transport for local multi-instance support.");
         options.registerOption(TCP_ENABLED_OPTION, DEFAULT_TCP_ENABLED, null,
             "Enable TCP transport for remote/network access.");
-        options.registerOption(STRICT_FUNCTION_NAMES_OPTION,
-            NamingPolicy.defaultStrictFunctionNames(), null,
-            "Reject rename_function_by_address names that fail the built-in " +
-            "function-name quality checks. Disable when your naming convention " +
+        options.registerOption(STRICT_NAMING_ENFORCEMENT_OPTION,
+            NamingPolicy.defaultStrictNamingEnforcement(), null,
+            "Reject function/global names that fail the built-in name-quality checks " +
+            "on rename_function_by_address, rename_data, rename_global_variable, " +
+            "set_global, and related write guards. Disable when your naming convention " +
             "does not match the built-in heuristic; convention warnings are still returned. " +
             "Takes effect when the MCP server starts or restarts.");
+        migrateLegacyNamingOption(options);
         refreshNamingPolicyFromOptions();
 
         boolean udsEnabled = options.getBoolean(UDS_ENABLED_OPTION, DEFAULT_UDS_ENABLED);
@@ -351,10 +354,23 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
 
     private void refreshNamingPolicyFromOptions() {
         Options options = tool.getOptions(OPTION_CATEGORY_NAME);
-        boolean strict = options.getBoolean(STRICT_FUNCTION_NAMES_OPTION,
-            NamingPolicy.defaultStrictFunctionNames());
-        NamingPolicy.getInstance().setStrictFunctionNames(strict, "tool_options");
-        Msg.info(this, "GhidraMCP strict function-name enforcement: " + strict);
+        boolean strict = options.getBoolean(STRICT_NAMING_ENFORCEMENT_OPTION,
+            NamingPolicy.defaultStrictNamingEnforcement());
+        NamingPolicy.getInstance().setStrictNamingEnforcement(strict, "tool_options");
+        Msg.info(this, "GhidraMCP strict naming enforcement: " + strict);
+    }
+
+    private void migrateLegacyNamingOption(Options options) {
+        if (!options.contains(LEGACY_STRICT_FUNCTION_NAMES_OPTION)
+                || !options.isDefaultValue(STRICT_NAMING_ENFORCEMENT_OPTION)) {
+            return;
+        }
+
+        boolean legacyStrict = options.getBoolean(LEGACY_STRICT_FUNCTION_NAMES_OPTION,
+                NamingPolicy.defaultStrictNamingEnforcement());
+        options.setBoolean(STRICT_NAMING_ENFORCEMENT_OPTION, legacyStrict);
+        options.removeOption(LEGACY_STRICT_FUNCTION_NAMES_OPTION);
+        Msg.info(this, "Migrated GhidraMCP naming enforcement option from legacy function-name setting");
     }
 
     private void stopServer() {
@@ -451,7 +467,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 String message = "GhidraMCP Server Status\n\n" +
                     "UDS: " + udsStatus + "\n" +
                     "TCP: " + tcpStatus + "\n" +
-                    "Strict function names: " + NamingPolicy.getInstance().isStrictFunctionNames() + "\n" +
+                    "Strict naming enforcement: " + NamingPolicy.getInstance().isStrictNamingEnforcement() + "\n" +
                     "Version: " + VersionInfo.getFullVersion() + "\n" +
                     "Endpoints: " + VersionInfo.getEndpointCount();
                 Msg.showInfo(getClass(), null, "GhidraMCP", message);

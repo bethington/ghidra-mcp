@@ -4,28 +4,28 @@ import com.xebyte.core.NamingPolicy;
 import junit.framework.TestCase;
 
 /**
- * Pure-logic tests for the function-name enforcement policy.
+ * Pure-logic tests for the naming enforcement policy.
  */
 public class NamingPolicyTest extends TestCase {
 
     public void testDefaultPreservesStrictBehavior() {
-        assertTrue(NamingPolicy.defaultStrictFunctionNames());
+        assertTrue(NamingPolicy.defaultStrictNamingEnforcement());
     }
 
     public void testGlobalSettingCanBeUpdatedAndRestored() {
         NamingPolicy policy = NamingPolicy.getInstance();
-        boolean originalValue = policy.isStrictFunctionNames();
+        boolean originalValue = policy.isStrictNamingEnforcement();
         String originalSource = policy.getSource();
 
         try {
-            policy.setStrictFunctionNames(false, "test");
-            assertFalse(policy.isStrictFunctionNames());
+            policy.setStrictNamingEnforcement(false, "test");
+            assertFalse(policy.isStrictNamingEnforcement());
             assertEquals("test", policy.getSource());
 
-            policy.setStrictFunctionNames(true, "test");
-            assertTrue(policy.isStrictFunctionNames());
+            policy.setStrictNamingEnforcement(true, "test");
+            assertTrue(policy.isStrictNamingEnforcement());
         } finally {
-            policy.setStrictFunctionNames(originalValue, originalSource);
+            policy.setStrictNamingEnforcement(originalValue, originalSource);
         }
     }
 }
