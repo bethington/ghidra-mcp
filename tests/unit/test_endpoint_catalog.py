@@ -173,11 +173,19 @@ class TestBridgeIsDynamic(unittest.TestCase):
         self.assertIn("/mcp/schema", content)
 
     def test_bridge_size_reasonable(self):
-        """Thin bridge should stay manageable while allowing debugger/tool-group growth."""
+        """Thin bridge should stay manageable while allowing debugger/tool-group growth.
+
+        The cap is a soft signal — if it trips, look at the diff to confirm
+        the added lines are pulling weight (real logic / regression coverage
+        / docstrings tied to a fix) rather than gratuitous. Bump deliberately
+        when the threshold becomes routine friction, but don't paper over
+        actual bloat. Last bumped 2026-05-10: 2000 -> 2100 to absorb the #187
+        dry_run-collision fix (#193) and the #184 address-space comments.
+        """
         bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
         lines = len(bridge_path.read_text().splitlines())
         self.assertLess(
-            lines, 2000, f"Bridge is {lines} lines, expected <2000 for thin multiplexer"
+            lines, 2100, f"Bridge is {lines} lines, expected <2100 for thin multiplexer"
         )
 
 
