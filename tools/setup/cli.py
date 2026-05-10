@@ -20,6 +20,7 @@ from .maven import find_maven_command, run_gradle, run_maven
 from .requirements import (
     execute_install_plan,
     make_install_plan,
+    pip_command,
     resolve_requirements_files,
 )
 from .version_bump import apply_version_bump
@@ -373,17 +374,10 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     python_executable = find_repo_python(repo_root)
 
     if _get_backend() == "gradle":
-        pip_check = subprocess.run(
-            [str(python_executable), "-m", "pip", "--version"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if pip_check.returncode != 0:
-            print(
-                "pip is not available for the selected Python interpreter.",
-                file=sys.stderr,
-            )
+        try:
+            pip_command(python_executable)
+        except FileNotFoundError as exc:
+            print(str(exc), file=sys.stderr)
             return 1
         print(f"Python: {python_executable}")
         print("pip: available")
@@ -397,16 +391,10 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         return 1
     print(f"Python: {python_executable}")
     print(f"Maven: {maven_command}")
-    pip_check = subprocess.run(
-        [str(python_executable), "-m", "pip", "--version"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if pip_check.returncode != 0:
-        print(
-            "pip is not available for the selected Python interpreter.", file=sys.stderr
-        )
+    try:
+        pip_command(python_executable)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
         return 1
     print("pip: available")
     if shutil.which("java") is None:
