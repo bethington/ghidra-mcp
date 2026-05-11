@@ -238,9 +238,43 @@ def _inventory_path(base_dir: Path) -> Path:
     return Path(base_dir) / INVENTORY_FILE_NAME
 
 
+def _try_repo():
+    """Return the storage repo if it's importable + initialized, else None.
+
+    Imports fun_doc lazily so a test that exercises pure inventory functions
+    doesn't drag the entire worker module into its sys.path.
+    """
+    try:
+        import fun_doc
+
+        return fun_doc._get_storage_repo()
+    except Exception:
+        return None
+
+
 def load_inventory(base_dir: Path) -> dict:
-    """Load inventory.json. Returns a fresh skeleton if the file is missing
-    or corrupt — never raises so the dashboard can boot through bad state."""
+    """Load the per-binary inventory rollup.
+
+    SQL backend path returns a dict shape identical to the legacy
+    inventory.json: ``{version, binaries: {program_path: {name,
+    total_documentable, scored, last_scan}}}``. Falls back to reading the
+    on-disk inventory.json when the storage layer is unavailable, so a
+    half-installed environment still functions.
+    """
+    repo = _try_repo()
+    if repo is not None:
+        out = {"version": INVENTORY_FILE_VERSION, "binaries": {}}
+        for row in repo.get_inventory():
+            ts = row.get("last_scan")
+            out["binaries"][row["program_path"]] = {
+                "name": row.get("binary_name"),
+                "total_documentable": row.get("total_documentable") or 0,
+                "scored": row.get("scored") or 0,
+                "last_scan": ts.isoformat() if hasattr(ts, "isoformat") else ts,
+            }
+        return out
+
+    # ---- Legacy inventory.json fallback ---------------------------------
     path = _inventory_path(base_dir)
     if not path.exists():
         return {"version": INVENTORY_FILE_VERSION, "binaries": {}}
@@ -249,7 +283,6 @@ def load_inventory(base_dir: Path) -> dict:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return {"version": INVENTORY_FILE_VERSION, "binaries": {}}
-    # Schema fix-ups for older shapes.
     if not isinstance(data, dict):
         return {"version": INVENTORY_FILE_VERSION, "binaries": {}}
     data.setdefault("version", INVENTORY_FILE_VERSION)
@@ -260,13 +293,47 @@ def load_inventory(base_dir: Path) -> dict:
 
 
 def save_inventory(base_dir: Path, data: dict) -> None:
-    """Atomic write of inventory.json — same tmp-then-replace pattern as
-    save_priority_queue / save_state."""
+    """Persist the per-binary inventory rollup.
+
+    SQL backend path upserts each binary row in the ``inventory`` table
+    (full-replace semantics on the columns we manage; columns the dict
+    didn't touch keep their existing values). Falls back to the legacy
+    atomic-write JSON path when the storage layer is unavailable.
+    """
+    binaries = data.get("binaries") or {}
+    repo = _try_repo()
+    if repo is not None:
+        for path, info in binaries.items():
+            ts = info.get("last_scan")
+            if isinstance(ts, str) and ts:
+                # SQLAlchemy SQLite needs datetime, not ISO string.
+                from datetime import datetime, timezone
+
+                try:
+                    ts_dt = datetime.fromisoformat(ts)
+                    if ts_dt.tzinfo is None:
+                        ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+                    ts = ts_dt
+                except ValueError:
+                    ts = None
+            repo.upsert_inventory(
+                {
+                    "program_path": path,
+                    "binary_name": info.get("name") or path.rsplit("/", 1)[-1],
+                    "version": _derive_version(path),
+                    "total_documentable": int(info.get("total_documentable") or 0),
+                    "scored": int(info.get("scored") or 0),
+                    "last_scan": ts,
+                }
+            )
+        return
+
+    # ---- Legacy inventory.json fallback ---------------------------------
     path = _inventory_path(base_dir)
     tmp = path.with_suffix(".json.tmp")
     payload = {
         "version": INVENTORY_FILE_VERSION,
-        "binaries": data.get("binaries", {}),
+        "binaries": binaries,
     }
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
@@ -276,6 +343,18 @@ def save_inventory(base_dir: Path, data: dict) -> None:
         except (OSError, AttributeError):
             pass
     tmp.replace(path)
+
+
+def _derive_version(program_path: str):
+    """Pull the version segment out of a Ghidra project path. See
+    fun_doc._derive_version for the canonical implementation; duplicated
+    here to avoid pulling fun_doc into pure-inventory tests."""
+    if not program_path:
+        return None
+    parts = [p for p in program_path.split("/") if p]
+    if len(parts) >= 2:
+        return parts[-2]
+    return None
 
 
 # ---------- threaded scorer ----------

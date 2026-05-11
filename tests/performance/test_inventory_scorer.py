@@ -295,9 +295,20 @@ def test_pick_next_binary_picks_current_when_unfetched():
 
 
 # ---------- inventory.json round-trip (Q10 shape stability) ----------
+#
+# These tests guard the legacy file-based fallback path. The SQL backend
+# (PR1 P6) is exercised by tests/performance/test_storage_*.py — see
+# test_inventory_upsert_and_get there. The fixture below forces the
+# fallback so we can keep enforcing the on-disk contract for users who
+# haven't migrated yet (e.g. someone on Python < 3.10 without psycopg).
 
 
-def test_save_load_inventory_round_trip(tmp_path):
+@pytest.fixture
+def force_inventory_legacy(monkeypatch):
+    monkeypatch.setattr(iv, "_try_repo", lambda: None)
+
+
+def test_save_load_inventory_round_trip(tmp_path, force_inventory_legacy):
     payload = {
         "binaries": {
             "/Vanilla/1.13d/D2Common.dll": {
@@ -314,19 +325,19 @@ def test_save_load_inventory_round_trip(tmp_path):
     assert loaded["binaries"] == payload["binaries"]
 
 
-def test_load_inventory_returns_skeleton_when_file_missing(tmp_path):
+def test_load_inventory_returns_skeleton_when_file_missing(tmp_path, force_inventory_legacy):
     loaded = iv.load_inventory(tmp_path)
     assert loaded == {"version": iv.INVENTORY_FILE_VERSION, "binaries": {}}
 
 
-def test_load_inventory_returns_skeleton_when_file_corrupt(tmp_path):
+def test_load_inventory_returns_skeleton_when_file_corrupt(tmp_path, force_inventory_legacy):
     """Don't let a corrupt inventory.json crash dashboard startup."""
     (tmp_path / "inventory.json").write_text("{not valid json")
     loaded = iv.load_inventory(tmp_path)
     assert loaded == {"version": iv.INVENTORY_FILE_VERSION, "binaries": {}}
 
 
-def test_save_inventory_atomic_write_uses_replace(tmp_path):
+def test_save_inventory_atomic_write_uses_replace(tmp_path, force_inventory_legacy):
     """Atomic-write contract: there's never a moment where inventory.json is
     truncated/half-written from another reader's perspective. We check this
     by verifying no .tmp file is left behind after a successful save."""

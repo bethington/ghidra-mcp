@@ -1,0 +1,254 @@
+version: 1
+binary: BH.dll
+exports:
+- source_symbol: BHIsReady
+  source_file: BH/BH.cpp
+  source_line: 277
+  binary_export: BHIsReady
+  address: 1003cb60
+  expected:
+    name_tokens:
+    - BHIs
+    - Ready
+    - Init
+    - Loaded
+    plate_keywords:
+    - ready
+    - init
+    - loaded
+    - status
+    return_type: int
+    arg_count: 0
+- source_symbol: BHGetConfig
+  source_file: BH/BH.cpp
+  source_line: 282
+  binary_export: BHGetConfig
+  address: 1003cb70
+  expected:
+    name_tokens:
+    - BH
+    - Get
+    - Config
+    plate_keywords:
+    - config
+    - get
+    - query
+    - settings
+    - return
+    return_type: int
+    arg_count: 1
+- source_symbol: BHSetConfig
+  source_file: BH/BH.cpp
+  source_line: 315
+  binary_export: BHSetConfig
+  address: 1003cc80
+  expected:
+    name_tokens:
+    - BH
+    - Set
+    - Config
+    plate_keywords:
+    - config
+    - set
+    - write
+    - update
+    return_type: int
+    arg_count: 2
+- source_symbol: BHInteract
+  source_file: BH/BH.cpp
+  source_line: 383
+  binary_export: BHInteract
+  address: 1003cdc0
+  expected:
+    name_tokens:
+    - BH
+    - Interact
+    - Toggle
+    - Trigger
+    plate_keywords:
+    - interact
+    - toggle
+    - trigger
+    - action
+    - hotkey
+    return_type: int
+    arg_count: 1
+- source_symbol: BHShowPlayersGear
+  source_file: BH/BH.cpp
+  source_line: 436
+  binary_export: BHShowPlayersGear
+  address: 1003cf30
+  expected:
+    name_tokens:
+    - BH
+    - Show
+    - Players
+    - Gear
+    plate_keywords:
+    - player
+    - gear
+    - display
+    - show
+    - equipment
+    - return
+    return_type: pointer
+    arg_count: 0
+- source_symbol: Initialize
+  source_file: BH/BH.h
+  source_line: 38
+  binary_export: Initialize
+  address: 1003b200
+  expected:
+    name_tokens:
+    - Initialize
+    - Init
+    - BH
+    - Startup
+    plate_keywords:
+    - init
+    - initialize
+    - startup
+    - load
+    - hook
+    return_type: void
+    arg_count: 0
+- source_symbol: BHOnProperties
+  source_file: BH/Modules/Item/Item.cpp
+  source_line: 1428
+  binary_export: BHOnProperties
+  address: null
+  expected:
+    name_tokens:
+    - BH
+    - 'On'
+    - Properties
+    - Item
+    plate_keywords:
+    - property
+    - properties
+    - item
+    - callback
+    - display
+    return_type: void
+    arg_count: 1
+- source_symbol: BHOnDamagePropertyBuild
+  source_file: BH/Modules/Item/Item.cpp
+  source_line: 2043
+  binary_export: BHOnDamagePropertyBuild
+  address: null
+  expected:
+    name_tokens:
+    - BH
+    - 'On'
+    - Damage
+    - Property
+    - Build
+    plate_keywords:
+    - damage
+    - property
+    - build
+    - item
+    - callback
+    return_type: bool
+    arg_count: 4
+- source_symbol: BHOnPropertyBuild
+  source_file: BH/Modules/Item/Item.cpp
+  source_line: 2184
+  binary_export: BHOnPropertyBuild
+  address: null
+  expected:
+    name_tokens:
+    - BH
+    - 'On'
+    - Property
+    - Build
+    plate_keywords:
+    - property
+    - build
+    - item
+    - format
+    - callback
+    return_type: void
+    arg_count: 4
+string_anchored:
+- source_symbol: Module::Module
+  source_file: BH/Modules/Module.cpp
+  anchor_string: ''
+  address: null
+  expected:
+    name_tokens:
+    - Module
+    - Init
+    - Construct
+    plate_keywords:
+    - module
+    - base
+    - construct
+    - init
+- source_symbol: ItemDisplay
+  source_file: BH/Modules/Item/Item.cpp
+  anchor_string: ItemDisplay
+  address: null
+  expected:
+    name_tokens:
+    - Item
+    - Display
+    - Draw
+    - Render
+    plate_keywords:
+    - item
+    - display
+    - draw
+    - render
+    - overlay
+- source_symbol: MapNotify
+  source_file: BH/Modules/MapNotify/MapNotify.cpp
+  anchor_string: MapNotify
+  address: null
+  expected:
+    name_tokens:
+    - Map
+    - Notify
+    - Draw
+    - Marker
+    plate_keywords:
+    - map
+    - notify
+    - marker
+    - draw
+    - position
+- source_symbol: AutomapInfo
+  source_file: BH/Modules/MapNotify/MapNotify.cpp
+  anchor_string: AutomapInfo
+  address: null
+  expected:
+    name_tokens:
+    - Automap
+    - Info
+    - Text
+    - Overlay
+    plate_keywords:
+    - automap
+    - overlay
+    - info
+    - text
+- source_symbol: ChatColor
+  source_file: BH/Modules/ChatColor/ChatColor.cpp
+  anchor_string: ChatColor
+  address: null
+  expected:
+    name_tokens:
+    - Chat
+    - Color
+    - Hook
+    plate_keywords:
+    - chat
+    - color
+    - hook
+    - message
+weights:
+  name_exact: 0.2
+  name_resemblance: 0.2
+  plate_quality: 0.3
+  prototype_match: 0.2
+  variable_typing: 0.1

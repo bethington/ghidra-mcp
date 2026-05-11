@@ -1035,27 +1035,27 @@ def create_app(state_file, event_bus=None):
     # --- Data loading helpers ---
 
     def load_state():
-        """Delegate to fun_doc.load_state — it has hardened retry + .bak
-        fallback + raise-on-corrupt semantics. Duplicating those here is what
-        caused the 2026-05-03 truncation incident: web.py's old implementation
-        silently returned an empty stub on race conditions, which then got
-        written back over the real 110 MB state.json by _save_state_inline.
-        """
+        """Delegate to fun_doc.load_state — backed by the storage repository
+        (Postgres or SQLite per the configured backend). The retry +
+        raise-on-corrupt semantics live in fun_doc itself; duplicating them
+        here was what caused the 2026-05-03 truncation incident, where
+        web.py's old implementation silently returned an empty stub on race
+        conditions which was then written back over the real state.json."""
         from fun_doc import load_state as _fd_load_state
         return _fd_load_state()
 
     def _save_state_inline(state):
-        """Atomic state write. Refuses to overwrite a populated state.json
-        with an empty-functions dict — that's the failure mode that nuked
-        state on 2026-05-03. Delegates to fun_doc._atomic_write_state for
-        the temp-file + os.replace dance."""
-        from fun_doc import _atomic_write_state, _state_lock
+        """Delegate to fun_doc.save_state — backed by the storage repository.
+        Refuses to overwrite a populated state.json with an empty-functions
+        dict, which is the failure mode that nuked ~110 MB of state on
+        2026-05-03 (a load_state race returned an empty stub that this
+        function then persisted). The guardrail only fires for users
+        mid-migration — once state.json is renamed to .migrated-<ISO>,
+        sf.exists() is false and the repo backend's own integrity checks
+        take over."""
+        from fun_doc import save_state as _fd_save_state
 
         sf = app.config["STATE_FILE"]
-        # Guardrail: if caller is asking us to save an empty-functions state
-        # but the on-disk file already has functions, refuse. This catches
-        # the "load_state raced a writer, returned default stub, caller
-        # mutated it, asked us to save" pattern that caused the incident.
         new_func_count = len(state.get("functions") or {})
         if new_func_count == 0 and sf.exists() and sf.stat().st_size > 1024:
             raise RuntimeError(
@@ -1064,8 +1064,7 @@ def create_app(state_file, event_bus=None):
                 "stub. Caller likely raced load_state and is about to clobber "
                 "real data. Investigate the call site."
             )
-        with _state_lock:
-            _atomic_write_state(state)
+        _fd_save_state(state)
 
     def load_queue():
         from fun_doc import load_priority_queue

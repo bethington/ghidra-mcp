@@ -48,16 +48,25 @@ def _debug_child_probe(funcdoc_dir, log_dir, debug_ctx, result_queue):
 
 @pytest.fixture
 def isolated_state(monkeypatch, tmp_path):
-    """Point fun_doc.STATE_FILE at a temp path for the duration of one test."""
+    """Point fun_doc.STATE_FILE at a temp path for the duration of one test.
+
+    Also forces the storage repo to be unavailable so save_state /
+    update_function_state fall through to the legacy state.json path that
+    these tests exercise. The SQL backend is covered by test_storage_*.py;
+    these tests guard the legacy fallback that ships for users who haven't
+    migrated yet.
+    """
     import sys
 
-    # Ensure fun-doc is importable
     funcdoc_dir = Path(__file__).parent.parent.parent / "fun-doc"
     sys.path.insert(0, str(funcdoc_dir))
     import fun_doc
 
     fake_state = tmp_path / "state.json"
     monkeypatch.setattr(fun_doc, "STATE_FILE", fake_state)
+    # Force legacy path (state.json fallback) for these tests.
+    monkeypatch.setattr(fun_doc, "_storage_repo", None)
+    monkeypatch.setattr(fun_doc, "_storage_repo_failed", True)
     yield fun_doc, fake_state
 
 
