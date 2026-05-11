@@ -4,6 +4,159 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.8.0 - 2026-05-11 (fun-doc SQL storage migration — PR1)
+
+Major release: fun-doc's per-function workflow state moves out of `state.json`
+(~106 MB single file, swapped per-binary by hand) into a SQL-backed
+repository abstraction. The default backend is SQLite at
+`fun-doc/state.db`; users with a Postgres instance can point
+`FUN_DOC_DB_URL=postgresql://...` to use it instead. Schema applies
+to `fun_doc.*` (Postgres) or the equivalent tables (SQLite). No
+endpoint changes — endpoint count unchanged at 241.
+
+This is **PR1** of the storage migration. **PR2** (v5.9.0) adds the
+re-kb FastAPI gateway so users running the re-universe Docker stack
+can have fun-doc state served from a shared remote service rather
+than a local file. PR2 is not in this release.
+
+### Added — storage abstraction (`fun-doc/storage/`)
+
+- **`storage/__init__.py`** — backend factory. Reads `FUN_DOC_DB_URL`
+  env var; SQLite (`sqlite:`) and Postgres (`postgresql:`) URLs are
+  both supported. Default when unset: SQLite at `fun-doc/state.db`.
+- **`storage/models.py`** — SQLAlchemy Core schema for
+  `functions_workflow`, `runs`, `inventory`, `global_inventory`,
+  `sessions`, `meta`. Hot fields (`run_count`, `audit_count`,
+  `escalation_count`, `last_run_at`, etc.) denormalized onto
+  `functions_workflow` rows so dashboard reads stay O(1).
+- **`storage/repository.py`** — CRUD layer. Single source of truth for
+  function-state reads/writes, run-row inserts, inventory rollups.
+- **`storage/slow_query_log.py`** — structured logging for queries
+  above the 100 ms threshold; logger name `fun_doc.storage.slow_query`.
+
+### Added — schema migrations
+
+- **`fun-doc/db/migrate.py`** — schema runner; idempotent.
+- **`fun-doc/db/migrations/0001_initial.sql`** — Postgres schema.
+- **`fun-doc/db/migrations/0001_initial.sqlite.sql`** — SQLite mirror
+  (`BIGSERIAL` → `INTEGER PRIMARY KEY AUTOINCREMENT`, `TIMESTAMPTZ` →
+  `TEXT` ISO-8601).
+
+### Added — migration tooling
+
+- **`fun-doc/scripts/migrate_state_to_sql.py`** — one-shot import:
+  `state.json` + `runs.jsonl` + `inventory.json` +
+  `global_inventory.json` → SQL store. Idempotent; safe to re-run.
+- **`fun-doc/scripts/verify_migration.py`** — zero-diff verifier
+  comparing SQL row counts and field values against the JSON sources.
+  Required pre-merge gate per the locked plan.
+
+### Added — pre-release smoke runbook
+
+- **`fun-doc/scripts/v58_smoke.py`** — single-command driver for the
+  migrate → pre-verify → worker spawn → check → post-verify cycle.
+  Subcommands: `prep`, `check`, `verify`, `post-verify`, `reset`.
+  Default backend: SQLite at `C:/tmp/v58-smoke.db` (disposable).
+  Caches pre-smoke counts to a snapshot for post-verify diffing.
+
+### Added — tier-2 doc-quality regression (`fun-doc/benchmark/bh/`)
+
+- **`fun-doc/benchmark/bh/grade.py`** — grades fun-doc's BH.dll
+  documentation against the upstream
+  [Project-Diablo-2/BH](https://github.com/Project-Diablo-2/BH)
+  source (Apache 2.0, license-compatible) as the ground-truth oracle.
+  Pulls each mapped function's current name, plate, signature, and
+  variables from a live Ghidra MCP server; scores against the truth;
+  emits per-function table + corpus aggregate + JSON for trend
+  tracking. `--compare` flag diffs two runs for regression-spotting.
+- **`fun-doc/benchmark/bh/mapping.yaml`** — 14 entries: 9 BH.dll
+  exports + 5 string-anchored internal-function placeholders.
+- **`fun-doc/benchmark/bh/runs/2026-05-10-baseline.json`** — baseline
+  corpus score 0.442 across 6 resolvable exports.
+- **`fun-doc/benchmark/bh/runs/2026-05-11-post-smoke.json`** — post-smoke
+  score 0.442 (no regression).
+
+### Changed
+
+- **fun-doc workers** read function state through `storage.repository`
+  instead of parsing `state.json` directly. The persistence-layer
+  swap is transparent to users — `load_state()` and `save_state()`
+  in `fun_doc.py` keep the same shapes; the backend changes underneath.
+- **Dashboard** (`fun-doc/web.py`) reads from the repository for all
+  function-listing, sessions, inventory, and stats endpoints. Same
+  rendered output; sub-100 ms per query on warmed indexes.
+- **`fun-doc/inventory_scorer.py`** rolls up to the repository instead
+  of writing `inventory.json` directly.
+- **`runs.jsonl`** is preserved as an append-only audit log for
+  back-compat and external tooling; the canonical source of truth is
+  now the SQL `runs` table.
+
+### Fixed (caught during smoke)
+
+- **`_invoke_provider_direct` minimax branch wraps through
+  `_wrap_result()`** so an early-exit return-None (missing API key,
+  missing `openai` package, etc.) yields a clean `(None, meta)` tuple
+  instead of crashing the caller's `text, meta = result` unpack with
+  TypeError. Same latent bug existed on v5.7.2; cherry-picked here.
+
+### Known follow-ups (not v5.8.0 blockers)
+
+- **Globals worker run-write path is JSON-only** — `process_global`
+  appends to `runs.jsonl` but doesn't call `repo.record_run()`. Affects
+  globals worker only; function workers are wired correctly.
+- **`runs.model` persists as `'unknown'`** — model name lookup
+  during the run-row insert isn't capturing the live model. Cosmetic
+  data-fidelity issue.
+- **`functions_workflow.run_count` denorm doesn't tick** on completed
+  runs. Denorm callback wiring incomplete.
+- **`/api/stats` slow** (~30 s on 61k function dataset). Aggregation
+  needs profiling.
+- **`tools/setup` doesn't auto-install the new SQLAlchemy + psycopg
+  dependencies** — users may need a manual `pip install -r
+  fun-doc/requirements.txt` after pulling.
+
+### Migration path
+
+For existing fun-doc users:
+
+```bash
+# 1. After updating to v5.8.0, install new deps:
+pip install -r fun-doc/requirements.txt
+
+# 2. Run the one-shot migration (idempotent; preserves state.json):
+python fun-doc/scripts/migrate_state_to_sql.py \
+    --state fun-doc/state.json \
+    --runs fun-doc/logs/runs.jsonl \
+    --inventory fun-doc/inventory.json \
+    --global-inventory fun-doc/global_inventory.json
+
+# 3. Verify zero-diff:
+python fun-doc/scripts/verify_migration.py [same args]
+
+# 4. Restart the dashboard. fun-doc/state.db (SQLite) is the new
+#    canonical store. state.json stays put as a back-compat copy.
+```
+
+For users with Postgres:
+
+```bash
+export FUN_DOC_DB_URL='postgresql://user:pass@host:5432/dbname'
+# then run the same migrate + verify + restart sequence
+```
+
+### Verification
+
+- Tier-0: 295 unit tests + 29 storage abstraction tests (SQLite +
+  cross-backend) pass; 17 PG-specific tests skip without Docker.
+- Tier-1 (mechanical smoke): post-migrate verifier zero-diff,
+  function-worker SQL write path confirmed end-to-end on BH.dll
+  (`ParseSignedShort @ 10052ba0`, score 0→37, atomic
+  `functions_workflow` + `runs` row update).
+- Tier-2 (BH grader): corpus score 0.442, identical to baseline —
+  no doc-quality regression.
+
+---
+
 ## v5.7.2 - 2026-05-10 (critical bridge fix + Linux/Nix compat + toggle extension)
 
 Patch release bundling one critical bridge fix that affected all v5.7.0/v5.7.1

@@ -70,7 +70,7 @@ public class GhidraMCPPluginTest extends TestCase {
                     .build();
                 
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                if (response.statusCode() == 200 && response.body() != null && response.body().contains("5.7.2")) {
+                if (response.statusCode() == 200 && response.body() != null && response.body().contains("5.8.0")) {
                     return true;
                 }
             } catch (Exception e) {

@@ -54,7 +54,7 @@ public class EndpointRegistrationTest extends TestCase {
                 .GET()
                 .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            return response.statusCode() == 200 && response.body() != null && response.body().contains("5.7.2");
+            return response.statusCode() == 200 && response.body() != null && response.body().contains("5.8.0");
         } catch (Exception e) {
             return false;
         }

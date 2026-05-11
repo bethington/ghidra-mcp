@@ -4582,9 +4582,14 @@ def _invoke_provider_direct(
         )
 
     if effective_provider == "minimax":
-        result = _invoke_minimax(
+        # Wrap through _wrap_result so an early-exit (None return — missing
+        # API key, missing openai package, etc.) doesn't crash the caller's
+        # `text, meta = result` unpack with TypeError. _wrap_result(None)
+        # yields (None, {tool_calls: -1, ...}) which propagates as a clean
+        # "no provider output" failure instead of an opaque traceback.
+        result = _wrap_result(_invoke_minimax(
             prompt, selected_model, max_turns, complexity_tier=complexity_tier
-        )
+        ))
     elif effective_provider == "codex":
         result = _wrap_result(_invoke_codex(prompt, selected_model, max_turns))
     elif effective_provider == "gemini":

@@ -248,18 +248,17 @@ def cmd_prep(args) -> int:
     print("\n" + "=" * 70)
     print(f"{PASS_GLYPH} prep complete. Now do these steps:\n")
     target = args.binary or "<your-binary>"
+    # The v5.8 storage factory reads exactly one env var: FUN_DOC_DB_URL.
+    # Backend is inferred from the URL scheme (sqlite: vs postgresql:).
     if sys.platform == "win32":
-        print("  # 1. Set the backend env vars in this shell (PowerShell):")
-        print(f"  $env:FUN_DOC_BACKEND = '{args.backend}'")
-        print(f"  $env:FUN_DOC_STORAGE_URL = '{url}'")
+        print("  # 1. Set the backend URL in this shell (PowerShell):")
+        print(f"  $env:FUN_DOC_DB_URL = '{url}'")
         print()
         print("  # or in bash:")
-        print(f"  export FUN_DOC_BACKEND={args.backend}")
-        print(f"  export FUN_DOC_STORAGE_URL='{url}'")
+        print(f"  export FUN_DOC_DB_URL='{url}'")
     else:
-        print("  # 1. Set the backend env vars in this shell:")
-        print(f"  export FUN_DOC_BACKEND={args.backend}")
-        print(f"  export FUN_DOC_STORAGE_URL='{url}'")
+        print("  # 1. Set the backend URL in this shell:")
+        print(f"  export FUN_DOC_DB_URL='{url}'")
     print()
     print(f"  # 2. Start the dashboard (from the worktree dir, NOT main):")
     print(f"  cd {REPO_ROOT}")

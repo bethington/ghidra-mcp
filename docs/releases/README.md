@@ -9,7 +9,29 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.7.2 (Latest) — critical bridge fix + Linux/Nix compat + toggle extension
+### v5.8.0 (Latest) — fun-doc SQL storage migration (PR1)
+
+Major release: fun-doc's per-function workflow state moves out of `state.json` (~106 MB single file, swapped per-binary by hand) into a SQL-backed repository abstraction. SQLite is the default backend (`fun-doc/state.db`); set `FUN_DOC_DB_URL=postgresql://...` to use Postgres instead. No endpoint changes — count unchanged at 241.
+
+- **Storage abstraction** (`fun-doc/storage/`) — SQLAlchemy Core schema, factory, repository CRUD, slow-query log. Hot fields denormalized so dashboard reads stay O(1).
+- **Schema migrations** (`fun-doc/db/migrations/`) — Postgres and SQLite mirrors. Idempotent migrate runner.
+- **One-shot migration tools** — `migrate_state_to_sql.py` + `verify_migration.py` (zero-diff gate).
+- **Pre-release smoke runbook** (`fun-doc/scripts/v58_smoke.py`) — single-command migrate/check/verify cycle.
+- **Tier-2 doc-quality regression** (`fun-doc/benchmark/bh/`) — grades BH.dll documentation against the upstream Project-Diablo-2/BH source as ground truth. Baseline corpus score 0.442 captured.
+
+Migration path for existing users:
+```bash
+pip install -r fun-doc/requirements.txt
+python fun-doc/scripts/migrate_state_to_sql.py [--state ... --runs ... --inventory ... --global-inventory ...]
+python fun-doc/scripts/verify_migration.py [same args]   # expect: zero diff
+# restart dashboard — fun-doc/state.db is now canonical; state.json remains for back-compat
+```
+
+Known follow-ups (not blockers): globals worker run-write path is JSON-only; `runs.model` persists as 'unknown'; `functions_workflow.run_count` denorm doesn't tick; `/api/stats` slow. PR2 (re-kb FastAPI gateway) deferred to v5.9.0.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.7.2 — critical bridge fix + Linux/Nix compat + toggle extension
 
 Patch release bundling one critical bridge fix and two Linux/Nix setup fixes, plus an extension of the v5.7.1 toggle.
 
