@@ -31,6 +31,19 @@ public class ServerManager {
     private final AtomicReference<String> activeToolId = new AtomicReference<>();
     private MultiToolProgramProvider programProvider;
     private UdsHttpServer server;
+    // Bound TCP port for the legacy HTTP transport when the plugin picked
+    // a port-range fallback (issue #175). -1 means "TCP not running or
+    // port unknown". Surfaced via /mcp/instance_info so the bridge can
+    // connect to the actual bound port without hard-coding 8089.
+    private volatile int boundTcpPort = -1;
+
+    public void setBoundTcpPort(int port) {
+        this.boundTcpPort = port;
+    }
+
+    public int getBoundTcpPort() {
+        return boundTcpPort;
+    }
 
     private ServerManager() {}
 
@@ -177,7 +190,16 @@ public class ServerManager {
         return params;
     }
 
-    private Map<String, Object> buildInstanceInfo() {
+    /**
+     * Build the /mcp/instance_info JSON string. Exposed so the TCP server
+     * in GhidraMCPPlugin can serve the same endpoint as the UDS server --
+     * needed by the bridge's TCP port-range scanner (issue #175 + Copilot).
+     */
+    public String buildInstanceInfoJson() {
+        return Response.ok(buildInstanceInfo()).toJson();
+    }
+
+    Map<String, Object> buildInstanceInfo() {
         long pid = ProcessHandle.current().pid();
         String projectName = "unknown";
         String projectPath = "";
@@ -226,6 +248,11 @@ public class ServerManager {
         info.put("project", projectName);
         info.put("project_path", projectPath);
         info.put("programs", programs);
+        // Tell the bridge which TCP port this instance is actually bound to.
+        // -1 means TCP transport is not running (UDS only). The bridge uses
+        // this to support port-range fallback when issue #175's multi-instance
+        // case has pushed us off the default 8089.
+        info.put("tcp_port", boundTcpPort);
         info.put("tools", tools.size());
         return info;
     }

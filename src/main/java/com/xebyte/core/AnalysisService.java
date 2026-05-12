@@ -4778,6 +4778,265 @@ public class AnalysisService {
         if (r == null) return false;
         return r.equals(target) || target.contains(r) || r.contains(target);
     }
+
+    // ----------------------------------------------------------------------
+    // Issue #192: P-code dump + language metadata
+    // ----------------------------------------------------------------------
+
+    private static Map<String, Object> varnodeToJson(Varnode v) {
+        if (v == null) return null;
+        Map<String, Object> m = new LinkedHashMap<>();
+        // Varnodes live in SLEIGH spaces ("const", "unique", "register", "ram",
+        // etc.) -- not all of these are real program addresses, so we keep the
+        // explicit space/offset/size shape rather than reusing the program-
+        // address helper. Real program addresses for seq numbers and basic-
+        // block bounds go through ServiceUtils.addressToJson() instead, so
+        // consumers get a consistent representation for the address-bearing
+        // fields.
+        Address a = v.getAddress();
+        m.put("space", a != null && a.getAddressSpace() != null ? a.getAddressSpace().getName() : null);
+        m.put("offset", a != null ? Long.toHexString(a.getOffset()) : null);
+        m.put("size", v.getSize());
+        // Space-classification flags (which Varnode slot this is).
+        m.put("is_register", v.isRegister());
+        m.put("is_constant", v.isConstant());
+        m.put("is_unique", v.isUnique());
+        // SSA / data-flow flags from HighFunction analysis. `addr_tied` means
+        // the varnode is bound to a stack/global address (escapes SSA);
+        // `hash` is set on HighFunction-internal hash varnodes; `persistent`
+        // means the varnode holds a value across function calls. `merge_group`
+        // partitions varnodes that share an SSA-resolved storage slot.
+        m.put("is_addrtied", v.isAddrTied());
+        m.put("is_hash", v.isHash());
+        m.put("is_persistent", v.isPersistent());
+        m.put("merge_group", v.getMergeGroup());
+        return m;
+    }
+
+    private static Map<String, Object> pcodeOpToJson(PcodeOp op, Program program) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("mnemonic", op.getMnemonic());
+        m.put("opcode", op.getOpcode());
+        // Seq number's target is a real program address — emit via the
+        // shared helper so multi-space binaries (mem:0x1000 etc.) format
+        // consistently with the rest of the API.
+        Address seq = op.getSeqnum() != null ? op.getSeqnum().getTarget() : null;
+        if (seq != null && program != null) {
+            Map<String, Object> seqJson = ServiceUtils.addressToJson(seq, program);
+            m.put("seq", seqJson);
+        }
+        List<Map<String, Object>> inputs = new ArrayList<>();
+        Varnode[] vis = op.getInputs();
+        if (vis != null) {
+            for (Varnode v : vis) inputs.add(varnodeToJson(v));
+        }
+        m.put("inputs", inputs);
+        m.put("output", varnodeToJson(op.getOutput()));
+        return m;
+    }
+
+    @McpTool(path = "/get_function_pcode",
+             description = "Dump raw P-code for a function (issue #192). Returns low (basic-iter) and high (HighFunction) P-code with basic blocks and varnodes. Granularity controls output: 'basic' = basic-block iter only (less memory), 'high' = HighFunction graph (default; includes both BB iter and op-iter). For P-code emulators / ML pipelines / alternative decompilers.",
+             category = "analysis")
+    public Response getFunctionPcode(
+            @Param(value = "function_address", paramType = "address",
+                   description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddress,
+            @Param(value = "granularity", defaultValue = "high",
+                   description = "'basic' = raw PcodeOps from basic-block iter only; 'high' = HighFunction P-code graph (default; richer, includes varnode SSA info).") String granularity,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit for active program).") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        Function func = program.getFunctionManager().getFunctionAt(addr);
+        if (func == null) func = program.getFunctionManager().getFunctionContaining(addr);
+        if (func == null) return Response.err("No function at address: " + functionAddress);
+
+        DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
+        if (decompResults == null || !decompResults.decompileCompleted()) {
+            // Surface the underlying decompiler error so callers can diagnose
+            // (matches the convention used elsewhere in this file).
+            String detail = decompResults != null ? decompResults.getErrorMessage() : null;
+            String msg = "Decompilation failed for " + func.getName();
+            if (detail != null && !detail.isEmpty()) msg += ": " + detail;
+            return Response.err(msg);
+        }
+        HighFunction hf = decompResults.getHighFunction();
+        if (hf == null) {
+            return Response.err("No HighFunction available for " + func.getName());
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("name", func.getName());
+        out.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+
+        // Basic-block-level P-code (raw iteration order, matches the issue's
+        // requested "getBasicIter" output shape). Basic-block bounds are real
+        // program addresses -- serialize via the shared helper for consistent
+        // multi-space formatting.
+        boolean wantHigh = !"basic".equalsIgnoreCase(granularity);
+        List<Map<String, Object>> basicBlocks = new ArrayList<>();
+        try {
+            for (var bb : hf.getBasicBlocks()) {
+                Map<String, Object> bbMap = new LinkedHashMap<>();
+                bbMap.put("start", ServiceUtils.addressToJson(bb.getStart(), program));
+                bbMap.put("stop", ServiceUtils.addressToJson(bb.getStop(), program));
+                List<Map<String, Object>> bbOps = new ArrayList<>();
+                var iter = bb.getIterator();
+                while (iter.hasNext()) {
+                    bbOps.add(pcodeOpToJson(iter.next(), program));
+                }
+                bbMap.put("pcodes", bbOps);
+                basicBlocks.add(bbMap);
+            }
+        } catch (Exception e) {
+            out.put("basic_blocks_error", e.getMessage());
+        }
+        out.put("basic_blocks", basicBlocks);
+
+        if (wantHigh) {
+            // HighFunction global PcodeOp iterator
+            List<Map<String, Object>> highOps = new ArrayList<>();
+            try {
+                var allOps = hf.getPcodeOps();
+                while (allOps.hasNext()) {
+                    PcodeOpAST op = allOps.next();
+                    highOps.add(pcodeOpToJson(op, program));
+                }
+            } catch (Exception e) {
+                out.put("high_pcodes_error", e.getMessage());
+            }
+            out.put("high_pcodes", highOps);
+        }
+
+        return Response.ok(out);
+    }
+
+    @McpTool(path = "/get_language_metadata",
+             description = "Dump the program's language description: address spaces, registers (with parent/child/aliases/description), default symbols (with end address and isEntry/isPrimary/isVolatile flags), endianness, pointer size. For P-code emulators / ML pipelines that need the SLEIGH-level facts.",
+             category = "program")
+    public Response getLanguageMetadata(
+            @Param(value = "include_registers", defaultValue = "true",
+                   description = "Include the full register list (can be hundreds of entries on x86).") boolean includeRegisters,
+            @Param(value = "include_default_symbols", defaultValue = "true",
+                   description = "Include the language's default symbol set (entry points, interrupt vectors).") boolean includeDefaultSymbols,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit for active program).") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        ghidra.program.model.lang.Language lang = program.getLanguage();
+        ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("language_id", lang.getLanguageID().getIdAsString());
+        out.put("processor", lang.getProcessor().toString());
+        out.put("endian", ld.getEndian().toString());
+        out.put("size", ld.getSize());
+        out.put("variant", ld.getVariant());
+        out.put("default_space", lang.getDefaultSpace() != null ? lang.getDefaultSpace().getName() : null);
+        out.put("default_data_space", lang.getDefaultDataSpace() != null ? lang.getDefaultDataSpace().getName() : null);
+        Register pc = lang.getProgramCounter();
+        out.put("program_counter", pc != null ? pc.getName() : null);
+
+        // Address spaces. min/max addresses are SLEIGH-internal -- they
+        // describe the space, not program data -- so the flat space/offset
+        // shape is appropriate here.
+        List<Map<String, Object>> spaces = new ArrayList<>();
+        for (var space : program.getAddressFactory().getAllAddressSpaces()) {
+            Map<String, Object> s = new LinkedHashMap<>();
+            s.put("name", space.getName());
+            s.put("id", space.getSpaceID());
+            s.put("size", space.getSize());
+            s.put("pointer_size", space.getPointerSize());
+            s.put("type", space.getType());
+            Address min = space.getMinAddress();
+            Address max = space.getMaxAddress();
+            if (min != null) s.put("min_offset", Long.toHexString(min.getOffset()));
+            if (max != null) s.put("max_offset", Long.toHexString(max.getOffset()));
+            spaces.add(s);
+        }
+        out.put("address_spaces", spaces);
+
+        if (includeRegisters) {
+            List<Map<String, Object>> regs = new ArrayList<>();
+            for (Register r : lang.getRegisters()) {
+                Map<String, Object> rj = new LinkedHashMap<>();
+                rj.put("name", r.getName());
+                rj.put("bit_length", r.getBitLength());
+                rj.put("is_big_endian", r.isBigEndian());
+                // Register description (often null for raw SLEIGH registers,
+                // populated for processor-specific helpers like x87 / SIMD).
+                String desc = r.getDescription();
+                rj.put("description", desc);
+                Address ra = r.getAddress();
+                if (ra != null) {
+                    rj.put("space", ra.getAddressSpace().getName());
+                    rj.put("offset", Long.toHexString(ra.getOffset()));
+                }
+                // Parent / child hierarchy: needed by SSA-aware tools for
+                // aliasing analysis (e.g. EAX is a child of RAX on x86_64).
+                Register parent = r.getParentRegister();
+                rj.put("parent", parent != null ? parent.getName() : null);
+                List<String> children = new ArrayList<>();
+                for (Register c : r.getChildRegisters()) children.add(c.getName());
+                rj.put("children", children);
+                // Aliases (alternate SLEIGH names that resolve to the same
+                // storage). Empty list when there are none -- consumers can
+                // treat absence and empty list identically.
+                List<String> aliases = new ArrayList<>();
+                try {
+                    Iterable<String> ai = r.getAliases();
+                    if (ai != null) for (String s : ai) aliases.add(s);
+                } catch (Exception ignored) {
+                    // Some custom languages don't implement getAliases().
+                }
+                rj.put("aliases", aliases);
+                regs.add(rj);
+            }
+            out.put("registers", regs);
+        }
+
+        if (includeDefaultSymbols) {
+            List<Map<String, Object>> syms = new ArrayList<>();
+            try {
+                for (var info : lang.getDefaultSymbols()) {
+                    Map<String, Object> sj = new LinkedHashMap<>();
+                    sj.put("label", info.getLabel());
+                    Address a = info.getAddress();
+                    if (a != null) {
+                        sj.put("space", a.getAddressSpace().getName());
+                        sj.put("offset", Long.toHexString(a.getOffset()));
+                    }
+                    // Range + flag metadata called out in the issue spec:
+                    // end_address, byte_size, is_entry (interrupt/reset vector
+                    // marker), is_primary, is_volatile.
+                    try {
+                        Address end = info.getEndAddress();
+                        if (end != null) {
+                            sj.put("end_space", end.getAddressSpace().getName());
+                            sj.put("end_offset", Long.toHexString(end.getOffset()));
+                        }
+                    } catch (Exception ignored) {}
+                    try { sj.put("byte_size", info.getByteSize()); } catch (Exception ignored) {}
+                    try { sj.put("is_entry", info.isEntry()); } catch (Exception ignored) {}
+                    try { sj.put("is_primary", info.isPrimary()); } catch (Exception ignored) {}
+                    try { sj.put("is_volatile", info.isVolatile()); } catch (Exception ignored) {}
+                    syms.add(sj);
+                }
+            } catch (Exception e) {
+                out.put("default_symbols_error", e.getMessage());
+            }
+            out.put("default_symbols", syms);
+        }
+
+        return Response.ok(out);
+    }
 }
 
 
