@@ -137,13 +137,22 @@ def get_socket_dir() -> Path:
 
 
 def get_socket_dir_candidates() -> list[Path]:
-    """All plausible socket runtime directories, in preference order.
+    """All plausible socket runtime directories the bridge should search.
 
-    Returns the dirs the plugin's `ServerManager.getSocketDir()` (Java side)
-    could plausibly have picked, accounting for environment-variable drift
-    between the parent (e.g. Ghidra started from a terminal with `$TMPDIR`)
-    and the child (bridge spawned by Claude Desktop without `$TMPDIR`).
-    Duplicates removed; order matters (most-likely first).
+    Superset of what the Java plugin's `ServerManager.getSocketDir()`
+    actually picks (which is `XDG_RUNTIME_DIR` → `TMPDIR` → `/tmp` with
+    `System.getProperty("user.name")` as the user component). The Python
+    side covers additional locations the plugin's `$TMPDIR` could *resolve
+    to* at runtime even when the bridge inherits a different environment
+    -- specifically the macOS per-user temp under `/var/folders/...` and
+    its `/private` symlink, which is what `$TMPDIR` points at when the
+    parent shell or Ghidra had it set but Claude Desktop spawned the
+    bridge without forwarding the variable (issue #170).
+
+    Username component is derived from `$USER` (POSIX) or `$USERNAME`
+    (Windows); the Java side uses `user.name` which may differ in edge
+    cases (e.g., headless services). Falls back to "unknown" if neither
+    env var is set. Duplicates removed; order matters (most-likely first).
     """
     user = os.getenv("USER") or os.getenv("USERNAME") or "unknown"
     candidates: list[Path] = []
@@ -173,13 +182,19 @@ def get_socket_dir_candidates() -> list[Path]:
     if tmpdir:
         _add(Path(tmpdir) / f"ghidra-mcp-{user}")
 
-    # macOS per-user temp at /var/folders/<random>/T/ — glob to find any that
-    # exist. This catches the issue #170 case where the bridge has no
-    # $TMPDIR but the plugin wrote sockets under the parent shell's $TMPDIR.
-    var_folders = Path("/var/folders")
-    if var_folders.exists():
+    # macOS per-user temp -- $TMPDIR resolves to
+    #   /var/folders/<2-char-hash>/<random-id>/T/
+    # (note: TWO directory levels before `T`, the Copilot fix). On macOS
+    # `/var` is itself a symlink to `/private/var`, so socket files may
+    # appear under either prefix depending on how the parent walked the
+    # filesystem -- cover both. Globbing returns whatever exists.
+    for prefix in ("/var/folders", "/private/var/folders"):
+        var_folders = Path(prefix)
         try:
-            for hit in var_folders.glob(f"*/T/ghidra-mcp-{user}"):
+            if not var_folders.exists():
+                continue
+            # */*/T/ghidra-mcp-<user> is the canonical macOS shape.
+            for hit in var_folders.glob(f"*/*/T/ghidra-mcp-{user}"):
                 _add(hit)
         except OSError:
             pass

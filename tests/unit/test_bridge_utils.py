@@ -83,22 +83,123 @@ class TestGetSocketDirCandidates(unittest.TestCase):
         paths = list(get_socket_dir_candidates())
         self.assertEqual(len(paths), len(set(paths)), f"Duplicate paths: {paths}")
 
-    def test_macos_var_folders_glob(self):
-        """On macOS, the plugin writes to $TMPDIR which resolves to
-        /var/folders/<random>/T/. When the bridge has no TMPDIR set,
-        the candidate list must still include any /var/folders/*/T/
-        path that exists for this user."""
+    def test_macos_var_folders_glob_matches_real_layout(self):
+        """The macOS per-user temp lives at
+        /var/folders/<2-char>/<random>/T/ghidra-mcp-<user> -- two levels
+        before T, not one (Copilot review of #195 caught the original
+        glob was wrong). Fake the layout via Path.exists/Path.glob mocks
+        and assert the candidate list actually includes the hit. Without
+        this assertion the test could pass even if the glob never
+        matched, because /tmp/ghidra-mcp-<user> is always added too."""
         env = {k: v for k, v in os.environ.items() if k != "TMPDIR"}
         env["USER"] = "testuser"
-        # We can't easily fake /var/folders without filesystem mocking,
-        # but we can verify the code path doesn't crash when /var/folders
-        # exists (Linux/Mac) or is missing (most CI).
-        with patch.dict(os.environ, env, clear=True):
+
+        fake_hit = Path("/var/folders/xk/randomid123/T/ghidra-mcp-testuser")
+
+        # Patch Path.exists so /var/folders is reachable; Path.glob to
+        # return the canonical macOS layout. Leave /private/var/folders
+        # absent so we only assert the primary prefix.
+        orig_exists = Path.exists
+        orig_glob = Path.glob
+
+        def fake_exists(self):
+            if self == Path("/var/folders"):
+                return True
+            if self == Path("/private/var/folders"):
+                return False
+            return orig_exists(self)
+
+        def fake_glob(self, pattern):
+            if self == Path("/var/folders") and pattern == "*/*/T/ghidra-mcp-testuser":
+                return iter([fake_hit])
+            return orig_glob(self, pattern)
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(Path, "exists", fake_exists), \
+             patch.object(Path, "glob", fake_glob):
             from bridge_mcp_ghidra import get_socket_dir_candidates
 
-            # Should not raise
             candidates = get_socket_dir_candidates()
-            self.assertGreater(len(candidates), 0)
+            self.assertIn(
+                fake_hit, candidates,
+                f"macOS /var/folders glob hit must appear in candidates: {candidates}",
+            )
+            # And the POSIX /tmp fallback must still be there too.
+            self.assertIn(Path("/tmp/ghidra-mcp-testuser"), candidates)
+
+    def test_macos_glob_one_level_layout_does_not_match(self):
+        """Regression guard: the OLD glob was `*/T/...` (one level), which
+        would falsely match /var/folders/xk/T/... but miss the real macOS
+        layout. The NEW glob is `*/*/T/...` (two levels). Mock a fake
+        old-style layout and assert it does NOT appear in candidates."""
+        env = {k: v for k, v in os.environ.items() if k != "TMPDIR"}
+        env["USER"] = "testuser"
+
+        one_level_hit = Path("/var/folders/xk/T/ghidra-mcp-testuser")
+        orig_exists = Path.exists
+        orig_glob = Path.glob
+
+        def fake_exists(self):
+            if self == Path("/var/folders"):
+                return True
+            if self == Path("/private/var/folders"):
+                return False
+            return orig_exists(self)
+
+        def fake_glob(self, pattern):
+            # No matches for the new two-level pattern.
+            if self == Path("/var/folders") and pattern == "*/*/T/ghidra-mcp-testuser":
+                return iter([])
+            # If anything still asked for the old one-level pattern,
+            # return a hit — we expect this branch never runs.
+            if self == Path("/var/folders") and pattern == "*/T/ghidra-mcp-testuser":
+                return iter([one_level_hit])
+            return orig_glob(self, pattern)
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(Path, "exists", fake_exists), \
+             patch.object(Path, "glob", fake_glob):
+            from bridge_mcp_ghidra import get_socket_dir_candidates
+
+            candidates = get_socket_dir_candidates()
+            self.assertNotIn(
+                one_level_hit, candidates,
+                f"old one-level glob must not match: {candidates}",
+            )
+
+    def test_macos_private_var_folders_also_covered(self):
+        """macOS symlinks /var → /private/var. If the resolved socket
+        appears under /private/var/folders/.../T/ghidra-mcp-<user>, the
+        scan must pick it up too."""
+        env = {k: v for k, v in os.environ.items() if k != "TMPDIR"}
+        env["USER"] = "testuser"
+
+        private_hit = Path("/private/var/folders/xk/randomid123/T/ghidra-mcp-testuser")
+        orig_exists = Path.exists
+        orig_glob = Path.glob
+
+        def fake_exists(self):
+            if self == Path("/var/folders"):
+                return False  # only /private/var/folders this time
+            if self == Path("/private/var/folders"):
+                return True
+            return orig_exists(self)
+
+        def fake_glob(self, pattern):
+            if self == Path("/private/var/folders") and pattern == "*/*/T/ghidra-mcp-testuser":
+                return iter([private_hit])
+            return orig_glob(self, pattern)
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(Path, "exists", fake_exists), \
+             patch.object(Path, "glob", fake_glob):
+            from bridge_mcp_ghidra import get_socket_dir_candidates
+
+            candidates = get_socket_dir_candidates()
+            self.assertIn(
+                private_hit, candidates,
+                f"/private/var/folders hit must appear in candidates: {candidates}",
+            )
 
 
 class TestDiscoverInstancesMultiDir(unittest.TestCase):
