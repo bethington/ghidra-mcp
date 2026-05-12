@@ -101,6 +101,83 @@ class TestProgramInfo:
         response = http_client.get("/get_entry_points")
         assert response.status_code == 200
 
+    def test_get_language_metadata(self, http_client):
+        """Issue #192: language metadata dump (address spaces, registers,
+        default symbols, endianness). Skip the heavy sections to keep the
+        readonly suite fast — they're exercised separately in
+        TestGetLanguageMetadataFull."""
+        response = http_client.get(
+            "/get_language_metadata",
+            params={"include_registers": "false", "include_default_symbols": "false"},
+        )
+        assert response.status_code == 200
+        # Endpoint returns flat JSON (no `data` wrapper).
+        data = response.json()
+        # Core SLEIGH facts must always be present
+        for key in (
+            "language_id", "processor", "endian", "size", "default_space",
+            "address_spaces",
+        ):
+            assert key in data, f"missing '{key}' in language metadata: {data}"
+        assert isinstance(data["address_spaces"], list)
+        assert len(data["address_spaces"]) > 0
+        # When the heavy sections are off they should not be in the payload.
+        assert "registers" not in data
+        assert "default_symbols" not in data
+
+    def test_get_language_metadata_with_registers(self, http_client):
+        """Issue #192: register list is included when requested. x86 typically
+        has 100+ registers; ARM has fewer; either way the list must be
+        non-empty. After Copilot review: every register entry has a stable
+        shape (name/bit_length/is_big_endian/children/aliases always present)
+        and richer fields (description/parent) appear when non-null. Gson
+        strips null values so absence of a key means the underlying value
+        was null, not that the endpoint forgot to emit it."""
+        response = http_client.get(
+            "/get_language_metadata",
+            params={"include_registers": "true", "include_default_symbols": "false"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "registers" in data
+        regs = data["registers"]
+        assert isinstance(regs, list)
+        assert len(regs) > 0
+        # Stable fields present on every entry.
+        for r in regs[:5]:
+            for key in ("name", "bit_length", "is_big_endian", "children", "aliases"):
+                assert key in r, f"missing key '{key}' on register: {list(r.keys())}"
+            assert isinstance(r["children"], list)
+            assert isinstance(r["aliases"], list)
+        # At least one register reports a parent (e.g. AX → EAX on x86).
+        # If none do, the parent linkage isn't being emitted at all -- bug.
+        parent_count = sum(1 for r in regs if "parent" in r)
+        assert parent_count > 0, "no register reported a parent linkage"
+        # At least one register reports a description (e.g. EFLAGS bits on x86
+        # carry descriptions). If none do, the description is being silently
+        # dropped server-side.
+        desc_count = sum(1 for r in regs if "description" in r)
+        assert desc_count > 0, "no register reported a description"
+
+    def test_mcp_instance_info_on_tcp(self, http_client):
+        """Issue #175 + Copilot review: /mcp/instance_info must be served
+        on the TCP transport too (was UDS-only before this PR). The
+        bridge's TCP port-range scanner relies on this endpoint to identify
+        which project lives on which port. Must include `tcp_port` so the
+        scanner can distinguish port-fallback-aware plugins from older ones
+        that only ever bound to 8089."""
+        response = http_client.get("/mcp/instance_info")
+        assert response.status_code == 200
+        info = response.json()
+        # Required fields the bridge's scanner reads.
+        assert "project" in info, f"missing 'project' in instance_info: {info}"
+        assert "pid" in info
+        assert "tcp_port" in info, "tcp_port must be advertised so port-fallback works"
+        # tcp_port may legitimately be -1 (TCP transport stopped) but the
+        # key must be present so the scanner doesn't false-positive on
+        # older plugins that simply omit it.
+        assert isinstance(info["tcp_port"], int)
+
 
 class TestFunctionListing:
     """Test function listing and query endpoints (read-only)."""
@@ -423,6 +500,64 @@ class TestFunctionAnalysis:
             "/analyze_function_completeness", params={"address": first_function_address}
         )
         assert response.status_code == 200
+
+    def test_get_function_pcode_basic(self, http_client, first_function_address):
+        """Issue #192: dump P-code for a function (basic-block iter only).
+        Validates that basic_blocks is a list and each entry has start/stop
+        addresses + a pcodes list."""
+        response = http_client.get(
+            "/get_function_pcode",
+            params={
+                "function_address": first_function_address,
+                "granularity": "basic",
+            },
+        )
+        assert response.status_code == 200
+        # Endpoint returns flat JSON (no `data` wrapper).
+        data = response.json()
+        assert "basic_blocks" in data
+        assert isinstance(data["basic_blocks"], list)
+        # `basic` granularity omits the high-PcodeOp graph
+        assert "high_pcodes" not in data
+        # Validate shape of the first basic block (if any). Start/stop are
+        # nested ServiceUtils.addressToJson objects with a guaranteed
+        # 'address' key (and optional address_full/address_space on multi-
+        # space binaries).
+        if data["basic_blocks"]:
+            bb = data["basic_blocks"][0]
+            assert "start" in bb and isinstance(bb["start"], dict)
+            assert "stop" in bb and isinstance(bb["stop"], dict)
+            assert "address" in bb["start"]
+            assert "address" in bb["stop"]
+            assert "pcodes" in bb
+            assert isinstance(bb["pcodes"], list)
+            # PcodeOps carry mnemonic + opcode + SSA varnode flags
+            if bb["pcodes"]:
+                op = bb["pcodes"][0]
+                assert "mnemonic" in op
+                assert "opcode" in op
+                assert "inputs" in op
+                # SSA flags now present on every varnode
+                if op["inputs"]:
+                    vn = op["inputs"][0]
+                    for key in ("is_addrtied", "is_hash", "is_persistent", "merge_group"):
+                        assert key in vn, f"missing SSA flag '{key}' on varnode: {vn}"
+
+    def test_get_function_pcode_high_granularity(self, http_client, first_function_address):
+        """Issue #192: `high` granularity (default) adds the full HighFunction
+        PcodeOp graph. Verify both basic_blocks and high_pcodes appear."""
+        response = http_client.get(
+            "/get_function_pcode",
+            params={
+                "function_address": first_function_address,
+                "granularity": "high",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "basic_blocks" in data
+        assert "high_pcodes" in data
+        assert isinstance(data["high_pcodes"], list)
 
 
 class TestXRefEndpoints:

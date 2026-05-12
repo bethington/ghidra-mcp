@@ -22,7 +22,10 @@ Rules the selector must maintain (from the docstring + hard-won experience):
  11. decompile_timeout=True and not pinned → excluded (one-shot pathological
      function blacklist — decompile exceeds the 12s scoring-path cap, so
      re-picking just wastes HTTP thread time)
- 12. stagnation_runs >= 3 and not pinned → excluded (general safety net for
+ 12. library_code=True and not pinned → excluded (CRT/STL/iostream/SEH code
+     auto-classified by the heuristic detector — skips wasted LLM spend on
+     statically-linked compiler runtime that isn't authored source)
+ 13. stagnation_runs >= 3 and not pinned → excluded (general safety net for
      infinite re-pick loops where the function completes but makes no
      meaningful progress — catches the codex-tool_calls=-1 loop, regression
      oscillations, and "all fixes applied but scorer floor is dominating")
@@ -330,6 +333,64 @@ def test_decompile_timeout_bypassed_by_pin():
     # Pinned: included (user wants to retry)
     result = select_candidates(state, _queue(pinned=["a::timeout"]))
     assert _keys(result) == ["a::timeout"]
+
+
+def test_library_code_excluded_when_not_pinned():
+    """Functions auto-classified as library code (MSVC CRT / STL / iostream /
+    SEH machinery) by the heuristic detector must be excluded from selection
+    unless pinned. This is the cost-control gate: without it, workers spend
+    100K+ tokens documenting `ParseSignedShort` and friends -- code that
+    isn't even part of the binary's authored surface."""
+    state = _state(
+        **{
+            "a::library": {
+                "score": 31,
+                "fixable": 20,
+                "library_code": True,
+            },
+            "a::fresh": {"score": 31, "fixable": 20},
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert _keys(result) == ["a::fresh"]
+
+
+def test_library_code_bypassed_by_pin():
+    """Pinning a library-code function restores it to the queue. The detector
+    is conservative but not perfect; if it misclassifies a real user function,
+    the user can pin it to force processing."""
+    state = _state(
+        **{
+            "a::library": {
+                "score": 31,
+                "fixable": 20,
+                "library_code": True,
+            },
+        }
+    )
+    assert _keys(select_candidates(state, _queue())) == []
+    result = select_candidates(state, _queue(pinned=["a::library"]))
+    assert _keys(result) == ["a::library"]
+
+
+def test_library_code_does_not_affect_unflagged():
+    """Unflagged functions (library_code=False or missing) must continue to
+    flow through the selector normally."""
+    state = _state(
+        **{
+            "a::user_explicit": {
+                "score": 50,
+                "fixable": 30,
+                "library_code": False,
+            },
+            "a::user_implicit": {
+                "score": 50,
+                "fixable": 30,
+            },
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert set(_keys(result)) == {"a::user_explicit", "a::user_implicit"}
 
 
 def test_stagnation_runs_excluded_at_threshold():

@@ -1,7 +1,7 @@
 {
   "version": "5.8.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 241,
+  "total_endpoints": 243,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -1358,6 +1358,17 @@
       "description": "Get labels in function"
     },
     {
+      "path": "/get_function_pcode",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "function_address",
+        "granularity",
+        "program"
+      ],
+      "description": "Dump raw P-code for a function (issue #192). Returns low (basic-iter) and high (HighFunction) P-code with basic blocks and varnodes. Granularity controls output: 'basic' = basic-block iter only (less memory), 'high' = HighFunction graph (default; includes both BB iter and op-iter). For P-code emulators / ML pipelines / alternative decompilers."
+    },
+    {
       "path": "/get_function_signature",
       "method": "GET",
       "category": "utility",
@@ -1402,6 +1413,17 @@
         "program"
       ],
       "description": "Get function cross-references"
+    },
+    {
+      "path": "/get_language_metadata",
+      "method": "GET",
+      "category": "program",
+      "params": [
+        "include_registers",
+        "include_default_symbols",
+        "program"
+      ],
+      "description": "Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192). Use for P-code emulators / ML pipelines that need the SLEIGH-level facts. include_registers/include_default_symbols toggle expensive sections."
     },
     {
       "path": "/get_metadata",
@@ -2407,6 +2429,17 @@
       "description": "Set function prototype (return type, param types, calling convention). NOTE: the function name in the prototype string does NOT rename the function — call rename_function_by_address separately if needed."
     },
     {
+      "path": "/set_function_tag_comment",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "name",
+        "comment",
+        "program"
+      ],
+      "description": "Update the comment/description on an existing program-wide function tag."
+    },
+    {
       "path": "/set_global",
       "method": "POST",
       "category": "datatype",
@@ -2419,17 +2452,6 @@
         "program"
       ],
       "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type → rename_data → batch_set_comments → create_label)."
-    },
-    {
-      "path": "/set_function_tag_comment",
-      "method": "POST",
-      "category": "function",
-      "params": [
-        "name",
-        "comment",
-        "program"
-      ],
-      "description": "Update the comment/description on an existing program-wide function tag."
     },
     {
       "path": "/set_image_base",

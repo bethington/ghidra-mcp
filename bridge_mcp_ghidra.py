@@ -68,6 +68,12 @@ ENDPOINT_TIMEOUTS = {
 }
 
 DEFAULT_TCP_URL = "http://127.0.0.1:8089"
+DEFAULT_TCP_PORT = 8089
+# Bridge-side TCP port scan range. Mirrors the plugin's
+# TCP_PORT_FALLBACK_RANGE so a TCP-only multi-instance setup (e.g. Windows
+# 10 pre-1803 where AF_UNIX is unavailable) can still be discovered without
+# having to set GHIDRA_MCP_URL per instance. See issue #175 + Copilot review.
+TCP_PORT_SCAN_RANGE = 16
 
 # Logging
 LOG_LEVEL = os.getenv("GHIDRA_MCP_LOG_LEVEL", "INFO")
@@ -125,25 +131,89 @@ class UnixHTTPConnection(http.client.HTTPConnection):
 
 
 def get_socket_dir() -> Path:
-    """Get the GhidraMCP socket runtime directory."""
+    """Get the primary GhidraMCP socket runtime directory.
+
+    Kept for backwards compatibility. For instance discovery prefer
+    `get_socket_dir_candidates()` -- when Claude Desktop spawns the bridge
+    without forwarding `$TMPDIR`, the bridge would fall through to `/tmp`
+    while the plugin (with `$TMPDIR` set) wrote sockets to
+    `/var/folders/.../T/ghidra-mcp-<user>/` (issue #170).
+    """
+    return get_socket_dir_candidates()[0]
+
+
+def get_socket_dir_candidates() -> list[Path]:
+    """All plausible socket runtime directories the bridge should search.
+
+    Superset of what the Java plugin's `ServerManager.getSocketDir()`
+    actually picks (which is `XDG_RUNTIME_DIR` → `TMPDIR` → `/tmp` with
+    `System.getProperty("user.name")` as the user component). The Python
+    side covers additional locations the plugin's `$TMPDIR` could *resolve
+    to* at runtime even when the bridge inherits a different environment
+    -- specifically the macOS per-user temp under `/var/folders/...` and
+    its `/private` symlink, which is what `$TMPDIR` points at when the
+    parent shell or Ghidra had it set but Claude Desktop spawned the
+    bridge without forwarding the variable (issue #170).
+
+    Username component is derived from `$USER` (POSIX) or `$USERNAME`
+    (Windows); the Java side uses `user.name` which may differ in edge
+    cases (e.g., headless services). Falls back to "unknown" if neither
+    env var is set. Duplicates removed; order matters (most-likely first).
+    """
+    user = os.getenv("USER") or os.getenv("USERNAME") or "unknown"
+    candidates: list[Path] = []
+
+    def _add(p):
+        if p is None:
+            return
+        p = Path(p)
+        if p not in candidates:
+            candidates.append(p)
+
+    # Linux: XDG_RUNTIME_DIR / /run/user/<uid>
     xdg = os.environ.get("XDG_RUNTIME_DIR")
     if xdg:
-        return Path(xdg) / "ghidra-mcp"
-
+        _add(Path(xdg) / "ghidra-mcp")
     getuid = getattr(os, "getuid", None)
     if callable(getuid):
         run_user_dir = Path(f"/run/user/{getuid()}")
         try:
             if run_user_dir.exists():
-                return run_user_dir / "ghidra-mcp"
+                _add(run_user_dir / "ghidra-mcp")
         except OSError:
             logger.debug("Ignoring unusable runtime dir candidate: %s", run_user_dir)
 
-    user = os.getenv("USER", "unknown")
+    # Per-user TMPDIR (the macOS Claude Desktop gap)
     tmpdir = os.environ.get("TMPDIR")
     if tmpdir:
-        return Path(tmpdir) / f"ghidra-mcp-{user}"
-    return Path(f"/tmp/ghidra-mcp-{user}")
+        _add(Path(tmpdir) / f"ghidra-mcp-{user}")
+
+    # macOS per-user temp -- $TMPDIR resolves to
+    #   /var/folders/<2-char-hash>/<random-id>/T/
+    # (note: TWO directory levels before `T`, the Copilot fix). On macOS
+    # `/var` is itself a symlink to `/private/var`, so socket files may
+    # appear under either prefix depending on how the parent walked the
+    # filesystem -- cover both. Globbing returns whatever exists.
+    for prefix in ("/var/folders", "/private/var/folders"):
+        var_folders = Path(prefix)
+        try:
+            if not var_folders.exists():
+                continue
+            # */*/T/ghidra-mcp-<user> is the canonical macOS shape.
+            for hit in var_folders.glob(f"*/*/T/ghidra-mcp-{user}"):
+                _add(hit)
+        except OSError:
+            pass
+
+    # POSIX fallback
+    _add(Path(f"/tmp/ghidra-mcp-{user}"))
+
+    # Windows fallback — Java's java.io.tmpdir is typically %TEMP%
+    win_temp = os.environ.get("TEMP") or os.environ.get("TMP")
+    if win_temp:
+        _add(Path(win_temp) / f"ghidra-mcp-{user}")
+
+    return candidates
 
 
 # Enhanced error classes
@@ -392,41 +462,56 @@ def do_request(
 
 
 def discover_instances() -> list[dict]:
-    """Scan socket directory and query each live instance for info."""
-    socket_dir = get_socket_dir()
-    if not socket_dir.exists():
-        return []
+    """Scan every plausible socket directory and query each live instance.
 
-    instances = []
-    for sock_file in sorted(socket_dir.glob("*.sock")):
-        name = sock_file.stem  # ghidra-<pid>
-        dash = name.rfind("-")
-        if dash < 0:
-            continue
-        try:
-            pid = int(name[dash + 1 :])
-        except ValueError:
-            continue
+    Searches *all* candidates returned by `get_socket_dir_candidates()`. This
+    handles issue #170: when Claude Desktop spawns the bridge without
+    forwarding `$TMPDIR`, the bridge falls back to `/tmp` while the plugin
+    (with `$TMPDIR` set) wrote its socket to `/var/folders/.../T/...`. By
+    scanning every candidate, the bridge finds instances regardless of which
+    side knows about `$TMPDIR`. A socket discovered under one candidate dir
+    is de-duplicated by absolute path.
+    """
+    seen_paths: set[str] = set()
+    instances: list[dict] = []
 
-        if not is_pid_alive(pid):
-            logger.debug(f"Cleaning up stale socket: {sock_file}")
+    for socket_dir in get_socket_dir_candidates():
+        if not socket_dir.exists():
+            continue
+        for sock_file in sorted(socket_dir.glob("*.sock")):
+            abs_path = str(sock_file.resolve())
+            if abs_path in seen_paths:
+                continue
+            seen_paths.add(abs_path)
+
+            name = sock_file.stem  # ghidra-<pid>
+            dash = name.rfind("-")
+            if dash < 0:
+                continue
             try:
-                sock_file.unlink(missing_ok=True)
-            except OSError:
-                pass
-            continue
+                pid = int(name[dash + 1:])
+            except ValueError:
+                continue
 
-        info: dict = {"socket": str(sock_file), "pid": pid}
-        try:
-            text, status = uds_request(
-                str(sock_file), "GET", "/mcp/instance_info", timeout=5
-            )
-            if status == 200:
-                info.update(_unwrap_response_data(text))
-        except Exception as e:
-            logger.debug(f"Could not query {sock_file}: {e}")
+            if not is_pid_alive(pid):
+                logger.debug(f"Cleaning up stale socket: {sock_file}")
+                try:
+                    sock_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                continue
 
-        instances.append(info)
+            info: dict = {"socket": str(sock_file), "pid": pid}
+            try:
+                text, status = uds_request(
+                    str(sock_file), "GET", "/mcp/instance_info", timeout=5
+                )
+                if status == 200:
+                    info.update(_unwrap_response_data(text))
+            except Exception as e:
+                logger.debug(f"Could not query {sock_file}: {e}")
+
+            instances.append(info)
 
     return instances
 
@@ -437,6 +522,55 @@ def _unwrap_response_data(text: str) -> dict:
     if isinstance(data, dict) and "data" in data:
         return data["data"]
     return data
+
+
+def _scan_tcp_for_project(project: str, start_port: int = DEFAULT_TCP_PORT,
+                          range_size: int = TCP_PORT_SCAN_RANGE,
+                          timeout: float = 1.0) -> str | None:
+    """Scan a small TCP port range for a Ghidra plugin matching `project`.
+
+    Used when UDS discovery returns nothing (e.g., TCP-only multi-instance
+    setups on Windows pre-1803). For each port in [start_port, start_port +
+    range_size), issues `GET /mcp/instance_info` with a short timeout. The
+    first one whose `project` field matches (exact wins; substring used as
+    fallback) returns its URL. Returns None if no match found.
+
+    Project matching mirrors connect_instance's UDS match order so the same
+    `connect_instance("D2Common")` call selects the same instance regardless
+    of which transport found it.
+
+    Uses http.client (stdlib) rather than `requests` to keep the bridge's
+    dependency footprint minimal -- see test_project_consistency.
+    """
+    if not project:
+        return None
+    project_lower = project.lower()
+    substring_url: str | None = None
+    for port in range(start_port, start_port + range_size):
+        url = f"http://127.0.0.1:{port}"
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+            try:
+                conn.request("GET", "/mcp/instance_info")
+                resp = conn.getresponse()
+                if resp.status != 200:
+                    continue
+                body = resp.read().decode("utf-8", errors="replace")
+            finally:
+                conn.close()
+            info = _unwrap_response_data(body)
+            if not isinstance(info, dict):
+                continue
+            inst_project = info.get("project", "")
+            if inst_project == project:
+                # Exact match — return immediately.
+                return url
+            if not substring_url and project_lower in inst_project.lower():
+                substring_url = url
+        except Exception:
+            # Connection refused / timeout / non-JSON response — try next port.
+            continue
+    return substring_url
 
 
 def discover_active_tcp_instance() -> dict | None:
@@ -1186,8 +1320,42 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
                     {"error": f"Schema fetch failed: {e}", "socket": _active_socket}
                 )
 
-    # Try TCP fallback
-    tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
+    # Try TCP fallback. The behavior depends on what UDS discovery returned:
+    #
+    #   * If GHIDRA_MCP_URL is set, it always wins (explicit user override).
+    #   * If UDS found one or more instances and none matched the project,
+    #     refuse to fall back to TCP -- that's how we previously silently
+    #     connected to the wrong instance (Copilot #196 review item).
+    #   * If UDS found NOTHING (no instances at all), scan the TCP port range
+    #     looking for a /mcp/instance_info that matches the project. Handles
+    #     the TCP-only multi-instance case (e.g. Windows pre-1803 without
+    #     AF_UNIX).
+    #   * If no scan match either, try the default port as a last resort.
+    env_tcp = os.getenv("GHIDRA_MCP_URL")
+    if env_tcp:
+        tcp_url = env_tcp
+    elif instances:
+        # UDS found instances but none matched the requested project. Don't
+        # randomly pick another instance's tcp_port — that connects to the
+        # wrong project. Return the "no match" error directly.
+        available = [inst.get("project", "unknown") for inst in instances]
+        return json.dumps(
+            {
+                "error": (
+                    f"No instance matching '{project}' (UDS: {len(instances)} found, "
+                    f"none matched). Refusing to use any instance's tcp_port — would "
+                    f"connect to the wrong project. Use list_instances() to see what's "
+                    f"available."
+                ),
+                "available": available,
+            }
+        )
+    else:
+        # No UDS instances. Scan the TCP port range to find one matching
+        # the project. _scan_tcp_for_project returns the URL of the first
+        # matching instance, or None if nothing matched.
+        scanned = _scan_tcp_for_project(project)
+        tcp_url = scanned if scanned else DEFAULT_TCP_URL
     if not validate_server_url(tcp_url):
         return json.dumps(
             {

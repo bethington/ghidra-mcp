@@ -97,6 +97,7 @@ except (AttributeError, OSError):
     pass
 
 from event_bus import emit as bus_emit, get_bus, get_worker_id
+from library_code_detector import detect_library_code, format_plate as format_library_plate
 
 # Thread safety for state.json access across concurrent workers.
 # RLock (reentrant) is required because the common read-modify-write
@@ -945,6 +946,7 @@ _STATE_DIRECT_FIELDS = (
     "is_thunk",
     "is_external",
     "is_thrashing",
+    "library_code",
     "deductions",
     "callees",
     "snapshot_provider",
@@ -1001,6 +1003,10 @@ def _state_func_to_row(func_key, rec):
         out["last_result"] = rec["last_result"]
     if "decompile_timeout_at" in rec:
         out["decompile_timeout_at"] = _parse_state_ts(rec["decompile_timeout_at"])
+    if "library_code_at" in rec:
+        out["library_code_at"] = _parse_state_ts(rec["library_code_at"])
+    if "library_code_reasons" in rec:
+        out["library_code_reasons"] = rec["library_code_reasons"]
     if "last_audited" in rec:
         out["last_audited_at"] = _parse_state_ts(rec["last_audited"])
     if "last_escalated" in rec:
@@ -1057,6 +1063,11 @@ def _row_to_state_func(row):
     if row.get("decompile_timeout_at") is not None:
         v = row["decompile_timeout_at"]
         out["decompile_timeout_at"] = v.isoformat() if hasattr(v, "isoformat") else v
+    if row.get("library_code_at") is not None:
+        v = row["library_code_at"]
+        out["library_code_at"] = v.isoformat() if hasattr(v, "isoformat") else v
+    if row.get("library_code_reasons") is not None:
+        out["library_code_reasons"] = row["library_code_reasons"]
     if row.get("last_audited_at") is not None:
         v = row["last_audited_at"]
         out["last_audited"] = v.isoformat() if hasattr(v, "isoformat") else v
@@ -2539,6 +2550,15 @@ DEFAULT_QUEUE_CONFIG = {
     # documentation bar (name + type + bytes + plate). Same idle-time pattern
     # as the function inventory scorer; persists to global_inventory.json.
     "global_inventory_enabled": False,
+    # Library-code auto-classification (v5.9.0, on by default). When True,
+    # the worker runs the library-code detector after fetching decompile
+    # and BEFORE invoking the LLM. Detected functions get a generic plate
+    # stamped and `library_code: True` flag set, which excludes them from
+    # future selector picks. Prevents wasted LLM tokens on statically-linked
+    # MSVC CRT / STL / iostream / SEH code that isn't the binary's authored
+    # source. Disable by setting False if you have a binary where the
+    # detector misfires on user code.
+    "skip_library_code": True,
 }
 
 PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"
@@ -2604,6 +2624,7 @@ def build_worker_config_snapshot(queue, primary_provider):
         "audit_min_delta": int(cfg.get("audit_min_delta", 5)),
         "complexity_handoff_provider": cfg.get("complexity_handoff_provider"),
         "complexity_handoff_max": int(cfg.get("complexity_handoff_max", 0) or 0),
+        "skip_library_code": bool(cfg.get("skip_library_code", True)),
     }
 
     # Per-provider slices — only the providers this worker can invoke. The
@@ -2763,6 +2784,7 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
     - Skip funcs with >=3 consecutive_fails (unless pinned)
     - Skip funcs with recovery_pass_done (complexity-forced recovery already ran)
     - Skip funcs with decompile_timeout (pathological, one-shot blacklist)
+    - Skip funcs with library_code (CRT/STL/iostream — auto-classified, plate-stamped)
     - Skip funcs with >=3 stagnation_runs (no-progress / regression safety net)
     - When require_scored is on, treat unscored funcs as top priority so the
       worker scores them on first contact instead of leaving them stranded
@@ -2830,6 +2852,15 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         # we already know can't be scored. Cleared by the same refresh paths
         # as recovery_pass_done.
         if func.get("decompile_timeout") and not is_pinned:
+            continue
+
+        # Library-code one-shot: functions classified as MSVC CRT / STL /
+        # iostream / SEH machinery by the heuristic detector get a generic
+        # plate stamped and are excluded from selector picks. Burning LLM
+        # tokens on `ParseSignedShort` and friends is wasted spend — the
+        # function isn't user-authored code. Cleared by the same refresh
+        # paths as the other one-shots; pinning bypasses.
+        if func.get("library_code") and not is_pinned:
             continue
 
         # Stagnation safety net: blacklist functions that have completed 3+
@@ -2976,6 +3007,12 @@ def refresh_candidate_scores(
             # user can retry after e.g. Ghidra analysis improvements.
             func.pop("decompile_timeout", None)
             func.pop("decompile_timeout_at", None)
+            # Library-code auto-classification clears on refresh too — the
+            # detector is conservative but not perfect, and the explicit
+            # refresh gesture is the user saying "look at everything fresh."
+            func.pop("library_code", None)
+            func.pop("library_code_at", None)
+            func.pop("library_code_reasons", None)
             # And the stagnation counter: a refresh is the user saying
             # "re-score this from scratch, I'm willing to try again."
             func.pop("stagnation_runs", None)
@@ -6939,6 +6976,70 @@ def process_function(
             score_after=live_score,
             reason="decompile-heavy endpoint hit read timeout",
         )
+
+    # Library-code auto-classification: detect statically-linked MSVC CRT /
+    # STL / iostream / SEH code before invoking the LLM. Pinned functions
+    # bypass (user explicitly queued them — respect their judgment). The
+    # check runs after the decompile fetch so the detector has body text
+    # for callee-substring fallback when call-graph data isn't populated.
+    queue_for_library = load_priority_queue()
+    cfg_for_library = queue_for_library.get("config") or DEFAULT_QUEUE_CONFIG
+    skip_library = (
+        cfg_for_library.get("skip_library_code", True) if config_snapshot is None
+        else config_snapshot.get("skip_library_code", True)
+    )
+    is_pinned_for_library = func_key in set(queue_for_library.get("pinned", []))
+    if skip_library and not manual and not is_pinned_for_library:
+        decomp_text = data.get("decompiled")
+        if decomp_text and not _is_error_response(decomp_text):
+            detection = detect_library_code(
+                name=func.get("name"),
+                decompile=str(decomp_text),
+                callees=func.get("callees"),
+            )
+            if detection.is_library:
+                plate_text = format_library_plate(detection)
+                # Best-effort plate stamp via MCP — failure is non-fatal,
+                # the flag itself is the primary skip mechanism.
+                try:
+                    ghidra_post(
+                        "/batch_set_comments",
+                        params={"program": program},
+                        data={
+                            "function_address": f"0x{address}",
+                            "plate_comment": plate_text,
+                        },
+                    )
+                except Exception as e:
+                    print(
+                        f"  LIBRARY-CODE plate stamp failed (non-fatal): {e}",
+                        flush=True,
+                    )
+                func["library_code"] = True
+                func["library_code_at"] = datetime.now().isoformat()
+                func["library_code_reasons"] = detection.reasons
+                func["last_processed"] = datetime.now().isoformat()
+                func["last_result"] = "library_code"
+                print(
+                    f"  LIBRARY CODE — auto-classified ({', '.join(detection.reasons)}). "
+                    f"Stamped generic plate, marked for selector skip.",
+                    flush=True,
+                )
+                update_function_state(func_key, func)
+                bus_emit(
+                    "function_complete",
+                    {
+                        "key": func_key,
+                        "result": "library_code",
+                        "score": live_score,
+                        "reasons": detection.reasons,
+                    },
+                )
+                return _finish(
+                    "library_code",
+                    score_after=live_score,
+                    reason=f"library-code detector: {','.join(detection.reasons)}",
+                )
 
     # Refine mode based on live score and completeness context
     mode = determine_mode(live_score, data.get("deductions"), data.get("completeness"))

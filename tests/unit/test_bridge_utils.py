@@ -46,6 +46,361 @@ class TestGetSocketDir(unittest.TestCase):
             self.assertEqual(result, Path("/custom/tmp/ghidra-mcp-testuser"))
 
 
+class TestTcpPortScan(unittest.TestCase):
+    """Test _scan_tcp_for_project (issue #175 + Copilot review): when UDS
+    discovery returns nothing (e.g., AF_UNIX unavailable on the host), the
+    bridge must scan a TCP port range to find the matching instance instead
+    of giving up on port 8089. Project matching is project-name aware so
+    cross-transport behavior is consistent with UDS discovery.
+
+    Tests patch http.client.HTTPConnection (the bridge's stdlib HTTP client)
+    rather than `requests`, to keep the bridge dependency footprint minimal.
+    """
+
+    def _make_fake_conn(self, port_to_response):
+        """Build a HTTPConnection stand-in driven by a {port: (status, body)}
+        map. Ports not present raise ConnectionRefusedError to simulate a
+        closed port."""
+
+        class FakeResponse:
+            def __init__(self, status, body):
+                self.status = status
+                self._body = body
+            def read(self):
+                return self._body.encode("utf-8") if isinstance(self._body, str) else self._body
+
+        class FakeConn:
+            def __init__(self, host, port, timeout=None):
+                self.host = host
+                self.port = port
+                self._resp = port_to_response.get(port)
+                if self._resp is None:
+                    raise ConnectionRefusedError(f"no listener on {port}")
+            def request(self, method, url):
+                pass
+            def getresponse(self):
+                status, body = self._resp
+                return FakeResponse(status, body)
+            def close(self):
+                pass
+
+        return FakeConn
+
+    def test_scan_finds_exact_project_match(self):
+        """The first port responding with a matching project name wins."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
+
+        FakeConn = self._make_fake_conn({
+            8089: (200, json.dumps({"project": "other"})),
+            8090: (200, json.dumps({"project": "wanted"})),
+        })
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=4, timeout=0.5)
+        self.assertEqual(result, "http://127.0.0.1:8090")
+
+    def test_scan_returns_none_when_no_match(self):
+        """No instance matches the project — return None so connect_instance
+        produces a clear error instead of guessing."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
+
+        FakeConn = self._make_fake_conn({
+            8089: (200, json.dumps({"project": "unrelated"})),
+            8090: (200, json.dumps({"project": "alsoNot"})),
+        })
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=4, timeout=0.5)
+        self.assertIsNone(result)
+
+    def test_scan_returns_none_when_nothing_listening(self):
+        """Every port refuses connection — return None, don't crash."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
+
+        FakeConn = self._make_fake_conn({})  # empty: every port refuses
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=4, timeout=0.5)
+        self.assertIsNone(result)
+
+    def test_scan_falls_back_to_substring_when_no_exact(self):
+        """Substring match is used only when no exact match is found anywhere
+        in the scanned range. This mirrors the UDS match order."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
+
+        FakeConn = self._make_fake_conn({
+            8089: (200, json.dumps({"project": "MyProjectVariant"})),
+        })
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("MyProject", start_port=8089, range_size=4, timeout=0.5)
+        self.assertEqual(result, "http://127.0.0.1:8089")
+
+    def test_scan_exact_match_wins_over_earlier_substring(self):
+        """If a substring match is found at port N but an exact match exists
+        at port N+M, the exact match must win regardless of port order."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
+
+        FakeConn = self._make_fake_conn({
+            8089: (200, json.dumps({"project": "Diablo2Mod"})),  # substring of "Diablo2"
+            8091: (200, json.dumps({"project": "Diablo2"})),     # exact match
+        })
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("Diablo2", start_port=8089, range_size=4, timeout=0.5)
+        self.assertEqual(result, "http://127.0.0.1:8091")
+
+    def test_scan_unwraps_data_wrapper(self):
+        """/mcp/instance_info may be wrapped in {success, data} -- the scan
+        must reach the project field either way (uses _unwrap_response_data)."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
+
+        FakeConn = self._make_fake_conn({
+            8089: (200, json.dumps({"data": {"project": "wanted"}})),
+        })
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=2, timeout=0.5)
+        self.assertEqual(result, "http://127.0.0.1:8089")
+
+    def test_scan_empty_project_returns_none(self):
+        """Empty project name is a programming error -- return None rather
+        than scan + match nothing."""
+        import bridge_mcp_ghidra as bridge
+
+        self.assertIsNone(bridge._scan_tcp_for_project(""))
+        self.assertIsNone(bridge._scan_tcp_for_project(None))
+
+
+class TestGetSocketDirCandidates(unittest.TestCase):
+    """Test multi-directory socket discovery (issue #170)."""
+
+    def test_candidates_includes_all_relevant_paths(self):
+        """When TMPDIR is set the candidate list must include both the
+        TMPDIR-derived path AND /tmp, so the bridge can find sockets
+        regardless of which side knows about TMPDIR (the Claude Desktop
+        spawn-without-TMPDIR case)."""
+        env = {k: v for k, v in os.environ.items() if k not in ("XDG_RUNTIME_DIR",)}
+        env["TMPDIR"] = "/custom/tmp"
+        env["USER"] = "testuser"
+        with patch.dict(os.environ, env, clear=True), patch(
+            "os.getuid", return_value=9_999_999, create=True
+        ):
+            from bridge_mcp_ghidra import get_socket_dir_candidates
+
+            # Use pathlib.Path equality, which normalizes separators across OSes.
+            paths = get_socket_dir_candidates()
+            self.assertIn(
+                Path("/custom/tmp/ghidra-mcp-testuser"),
+                paths,
+                f"TMPDIR-derived path missing: {paths}",
+            )
+            self.assertIn(
+                Path("/tmp/ghidra-mcp-testuser"),
+                paths,
+                f"/tmp fallback missing: {paths}",
+            )
+
+    def test_candidates_dedup(self):
+        """Adding the same path twice (via different env hints) must not
+        produce duplicates."""
+        from bridge_mcp_ghidra import get_socket_dir_candidates
+
+        paths = list(get_socket_dir_candidates())
+        self.assertEqual(len(paths), len(set(paths)), f"Duplicate paths: {paths}")
+
+    def test_macos_var_folders_glob_matches_real_layout(self):
+        """The macOS per-user temp lives at
+        /var/folders/<2-char>/<random>/T/ghidra-mcp-<user> -- two levels
+        before T, not one (Copilot review of #195 caught the original
+        glob was wrong). Fake the layout via Path.exists/Path.glob mocks
+        and assert the candidate list actually includes the hit. Without
+        this assertion the test could pass even if the glob never
+        matched, because /tmp/ghidra-mcp-<user> is always added too."""
+        env = {k: v for k, v in os.environ.items() if k != "TMPDIR"}
+        env["USER"] = "testuser"
+
+        fake_hit = Path("/var/folders/xk/randomid123/T/ghidra-mcp-testuser")
+
+        # Patch Path.exists so /var/folders is reachable; Path.glob to
+        # return the canonical macOS layout. Leave /private/var/folders
+        # absent so we only assert the primary prefix.
+        orig_exists = Path.exists
+        orig_glob = Path.glob
+
+        def fake_exists(self):
+            if self == Path("/var/folders"):
+                return True
+            if self == Path("/private/var/folders"):
+                return False
+            return orig_exists(self)
+
+        def fake_glob(self, pattern):
+            if self == Path("/var/folders") and pattern == "*/*/T/ghidra-mcp-testuser":
+                return iter([fake_hit])
+            return orig_glob(self, pattern)
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(Path, "exists", fake_exists), \
+             patch.object(Path, "glob", fake_glob):
+            from bridge_mcp_ghidra import get_socket_dir_candidates
+
+            candidates = get_socket_dir_candidates()
+            self.assertIn(
+                fake_hit, candidates,
+                f"macOS /var/folders glob hit must appear in candidates: {candidates}",
+            )
+            # And the POSIX /tmp fallback must still be there too.
+            self.assertIn(Path("/tmp/ghidra-mcp-testuser"), candidates)
+
+    def test_macos_glob_one_level_layout_does_not_match(self):
+        """Regression guard: the OLD glob was `*/T/...` (one level), which
+        would falsely match /var/folders/xk/T/... but miss the real macOS
+        layout. The NEW glob is `*/*/T/...` (two levels). Mock a fake
+        old-style layout and assert it does NOT appear in candidates."""
+        env = {k: v for k, v in os.environ.items() if k != "TMPDIR"}
+        env["USER"] = "testuser"
+
+        one_level_hit = Path("/var/folders/xk/T/ghidra-mcp-testuser")
+        orig_exists = Path.exists
+        orig_glob = Path.glob
+
+        def fake_exists(self):
+            if self == Path("/var/folders"):
+                return True
+            if self == Path("/private/var/folders"):
+                return False
+            return orig_exists(self)
+
+        def fake_glob(self, pattern):
+            # No matches for the new two-level pattern.
+            if self == Path("/var/folders") and pattern == "*/*/T/ghidra-mcp-testuser":
+                return iter([])
+            # If anything still asked for the old one-level pattern,
+            # return a hit — we expect this branch never runs.
+            if self == Path("/var/folders") and pattern == "*/T/ghidra-mcp-testuser":
+                return iter([one_level_hit])
+            return orig_glob(self, pattern)
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(Path, "exists", fake_exists), \
+             patch.object(Path, "glob", fake_glob):
+            from bridge_mcp_ghidra import get_socket_dir_candidates
+
+            candidates = get_socket_dir_candidates()
+            self.assertNotIn(
+                one_level_hit, candidates,
+                f"old one-level glob must not match: {candidates}",
+            )
+
+    def test_macos_private_var_folders_also_covered(self):
+        """macOS symlinks /var → /private/var. If the resolved socket
+        appears under /private/var/folders/.../T/ghidra-mcp-<user>, the
+        scan must pick it up too."""
+        env = {k: v for k, v in os.environ.items() if k != "TMPDIR"}
+        env["USER"] = "testuser"
+
+        private_hit = Path("/private/var/folders/xk/randomid123/T/ghidra-mcp-testuser")
+        orig_exists = Path.exists
+        orig_glob = Path.glob
+
+        def fake_exists(self):
+            if self == Path("/var/folders"):
+                return False  # only /private/var/folders this time
+            if self == Path("/private/var/folders"):
+                return True
+            return orig_exists(self)
+
+        def fake_glob(self, pattern):
+            if self == Path("/private/var/folders") and pattern == "*/*/T/ghidra-mcp-testuser":
+                return iter([private_hit])
+            return orig_glob(self, pattern)
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(Path, "exists", fake_exists), \
+             patch.object(Path, "glob", fake_glob):
+            from bridge_mcp_ghidra import get_socket_dir_candidates
+
+            candidates = get_socket_dir_candidates()
+            self.assertIn(
+                private_hit, candidates,
+                f"/private/var/folders hit must appear in candidates: {candidates}",
+            )
+
+
+class TestDiscoverInstancesMultiDir(unittest.TestCase):
+    """End-to-end test of issue #170: discover_instances() must find sockets
+    that the plugin wrote under one candidate dir (e.g. $TMPDIR) even when the
+    bridge inherited a different effective socket dir.
+
+    Sets up two temp dirs, drops a fake `ghidra-<pid>.sock` in each, monkey-
+    patches get_socket_dir_candidates to return both, and verifies:
+      1. Both sockets are discovered.
+      2. Duplicate-path entries are deduped by absolute path.
+      3. The PID-alive check still works (uses the current process PID).
+    """
+
+    def test_finds_sockets_across_dirs_and_dedups(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+            pid_alive = os.getpid()  # the current process is always alive
+            # Drop a socket file under each dir
+            (Path(d1) / f"ghidra-{pid_alive}.sock").touch()
+            (Path(d2) / f"ghidra-{pid_alive + 1000}.sock").touch()
+
+            # is_pid_alive(pid_alive + 1000) will likely be False; that socket
+            # should get cleaned up, not returned.
+            from bridge_mcp_ghidra import discover_instances
+            import bridge_mcp_ghidra as bridge
+
+            # Patch both `get_socket_dir_candidates` and the UDS info query so
+            # the test doesn't actually try to connect.
+            with patch.object(
+                bridge, "get_socket_dir_candidates",
+                return_value=[Path(d1), Path(d2)],
+            ), patch.object(
+                bridge, "uds_request",
+                return_value=("{}", 500),  # info query fails — that's fine
+            ), patch.object(
+                bridge, "is_pid_alive",
+                side_effect=lambda p: p == pid_alive,
+            ):
+                instances = discover_instances()
+
+            # Exactly one alive socket should be returned; the bogus PID's
+            # socket should have been cleaned up.
+            self.assertEqual(len(instances), 1)
+            self.assertEqual(instances[0]["pid"], pid_alive)
+
+    def test_dedup_when_same_path_appears_twice(self):
+        """If two candidate dirs symlink to the same place (or if a symlink
+        produces the same absolute path), the same socket must be reported
+        only once."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            pid_alive = os.getpid()
+            (Path(d) / f"ghidra-{pid_alive}.sock").touch()
+
+            from bridge_mcp_ghidra import discover_instances
+            import bridge_mcp_ghidra as bridge
+
+            with patch.object(
+                bridge, "get_socket_dir_candidates",
+                return_value=[Path(d), Path(d)],  # same dir twice
+            ), patch.object(
+                bridge, "uds_request",
+                return_value=("{}", 500),
+            ), patch.object(
+                bridge, "is_pid_alive",
+                side_effect=lambda p: p == pid_alive,
+            ):
+                instances = discover_instances()
+
+            self.assertEqual(len(instances), 1)
+
+
 class TestIsPidAlive(unittest.TestCase):
     """Test PID liveness check."""
 
