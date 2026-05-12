@@ -131,25 +131,89 @@ class UnixHTTPConnection(http.client.HTTPConnection):
 
 
 def get_socket_dir() -> Path:
-    """Get the GhidraMCP socket runtime directory."""
+    """Get the primary GhidraMCP socket runtime directory.
+
+    Kept for backwards compatibility. For instance discovery prefer
+    `get_socket_dir_candidates()` -- when Claude Desktop spawns the bridge
+    without forwarding `$TMPDIR`, the bridge would fall through to `/tmp`
+    while the plugin (with `$TMPDIR` set) wrote sockets to
+    `/var/folders/.../T/ghidra-mcp-<user>/` (issue #170).
+    """
+    return get_socket_dir_candidates()[0]
+
+
+def get_socket_dir_candidates() -> list[Path]:
+    """All plausible socket runtime directories the bridge should search.
+
+    Superset of what the Java plugin's `ServerManager.getSocketDir()`
+    actually picks (which is `XDG_RUNTIME_DIR` → `TMPDIR` → `/tmp` with
+    `System.getProperty("user.name")` as the user component). The Python
+    side covers additional locations the plugin's `$TMPDIR` could *resolve
+    to* at runtime even when the bridge inherits a different environment
+    -- specifically the macOS per-user temp under `/var/folders/...` and
+    its `/private` symlink, which is what `$TMPDIR` points at when the
+    parent shell or Ghidra had it set but Claude Desktop spawned the
+    bridge without forwarding the variable (issue #170).
+
+    Username component is derived from `$USER` (POSIX) or `$USERNAME`
+    (Windows); the Java side uses `user.name` which may differ in edge
+    cases (e.g., headless services). Falls back to "unknown" if neither
+    env var is set. Duplicates removed; order matters (most-likely first).
+    """
+    user = os.getenv("USER") or os.getenv("USERNAME") or "unknown"
+    candidates: list[Path] = []
+
+    def _add(p):
+        if p is None:
+            return
+        p = Path(p)
+        if p not in candidates:
+            candidates.append(p)
+
+    # Linux: XDG_RUNTIME_DIR / /run/user/<uid>
     xdg = os.environ.get("XDG_RUNTIME_DIR")
     if xdg:
-        return Path(xdg) / "ghidra-mcp"
-
+        _add(Path(xdg) / "ghidra-mcp")
     getuid = getattr(os, "getuid", None)
     if callable(getuid):
         run_user_dir = Path(f"/run/user/{getuid()}")
         try:
             if run_user_dir.exists():
-                return run_user_dir / "ghidra-mcp"
+                _add(run_user_dir / "ghidra-mcp")
         except OSError:
             logger.debug("Ignoring unusable runtime dir candidate: %s", run_user_dir)
 
-    user = os.getenv("USER", "unknown")
+    # Per-user TMPDIR (the macOS Claude Desktop gap)
     tmpdir = os.environ.get("TMPDIR")
     if tmpdir:
-        return Path(tmpdir) / f"ghidra-mcp-{user}"
-    return Path(f"/tmp/ghidra-mcp-{user}")
+        _add(Path(tmpdir) / f"ghidra-mcp-{user}")
+
+    # macOS per-user temp -- $TMPDIR resolves to
+    #   /var/folders/<2-char-hash>/<random-id>/T/
+    # (note: TWO directory levels before `T`, the Copilot fix). On macOS
+    # `/var` is itself a symlink to `/private/var`, so socket files may
+    # appear under either prefix depending on how the parent walked the
+    # filesystem -- cover both. Globbing returns whatever exists.
+    for prefix in ("/var/folders", "/private/var/folders"):
+        var_folders = Path(prefix)
+        try:
+            if not var_folders.exists():
+                continue
+            # */*/T/ghidra-mcp-<user> is the canonical macOS shape.
+            for hit in var_folders.glob(f"*/*/T/ghidra-mcp-{user}"):
+                _add(hit)
+        except OSError:
+            pass
+
+    # POSIX fallback
+    _add(Path(f"/tmp/ghidra-mcp-{user}"))
+
+    # Windows fallback — Java's java.io.tmpdir is typically %TEMP%
+    win_temp = os.environ.get("TEMP") or os.environ.get("TMP")
+    if win_temp:
+        _add(Path(win_temp) / f"ghidra-mcp-{user}")
+
+    return candidates
 
 
 # Enhanced error classes
@@ -398,41 +462,56 @@ def do_request(
 
 
 def discover_instances() -> list[dict]:
-    """Scan socket directory and query each live instance for info."""
-    socket_dir = get_socket_dir()
-    if not socket_dir.exists():
-        return []
+    """Scan every plausible socket directory and query each live instance.
 
-    instances = []
-    for sock_file in sorted(socket_dir.glob("*.sock")):
-        name = sock_file.stem  # ghidra-<pid>
-        dash = name.rfind("-")
-        if dash < 0:
-            continue
-        try:
-            pid = int(name[dash + 1 :])
-        except ValueError:
-            continue
+    Searches *all* candidates returned by `get_socket_dir_candidates()`. This
+    handles issue #170: when Claude Desktop spawns the bridge without
+    forwarding `$TMPDIR`, the bridge falls back to `/tmp` while the plugin
+    (with `$TMPDIR` set) wrote its socket to `/var/folders/.../T/...`. By
+    scanning every candidate, the bridge finds instances regardless of which
+    side knows about `$TMPDIR`. A socket discovered under one candidate dir
+    is de-duplicated by absolute path.
+    """
+    seen_paths: set[str] = set()
+    instances: list[dict] = []
 
-        if not is_pid_alive(pid):
-            logger.debug(f"Cleaning up stale socket: {sock_file}")
+    for socket_dir in get_socket_dir_candidates():
+        if not socket_dir.exists():
+            continue
+        for sock_file in sorted(socket_dir.glob("*.sock")):
+            abs_path = str(sock_file.resolve())
+            if abs_path in seen_paths:
+                continue
+            seen_paths.add(abs_path)
+
+            name = sock_file.stem  # ghidra-<pid>
+            dash = name.rfind("-")
+            if dash < 0:
+                continue
             try:
-                sock_file.unlink(missing_ok=True)
-            except OSError:
-                pass
-            continue
+                pid = int(name[dash + 1:])
+            except ValueError:
+                continue
 
-        info: dict = {"socket": str(sock_file), "pid": pid}
-        try:
-            text, status = uds_request(
-                str(sock_file), "GET", "/mcp/instance_info", timeout=5
-            )
-            if status == 200:
-                info.update(_unwrap_response_data(text))
-        except Exception as e:
-            logger.debug(f"Could not query {sock_file}: {e}")
+            if not is_pid_alive(pid):
+                logger.debug(f"Cleaning up stale socket: {sock_file}")
+                try:
+                    sock_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                continue
 
-        instances.append(info)
+            info: dict = {"socket": str(sock_file), "pid": pid}
+            try:
+                text, status = uds_request(
+                    str(sock_file), "GET", "/mcp/instance_info", timeout=5
+                )
+                if status == 200:
+                    info.update(_unwrap_response_data(text))
+            except Exception as e:
+                logger.debug(f"Could not query {sock_file}: {e}")
+
+            instances.append(info)
 
     return instances
 
