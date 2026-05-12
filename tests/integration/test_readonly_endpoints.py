@@ -101,6 +101,48 @@ class TestProgramInfo:
         response = http_client.get("/get_entry_points")
         assert response.status_code == 200
 
+    def test_get_language_metadata(self, http_client):
+        """Issue #192: language metadata dump (address spaces, registers,
+        default symbols, endianness). Skip the heavy sections to keep the
+        readonly suite fast — they're exercised separately in
+        TestGetLanguageMetadataFull."""
+        response = http_client.get(
+            "/get_language_metadata",
+            params={"include_registers": "false", "include_default_symbols": "false"},
+        )
+        assert response.status_code == 200
+        data = response.json().get("data", {})
+        # Core SLEIGH facts must always be present
+        for key in (
+            "language_id", "processor", "endian", "size", "default_space",
+            "address_spaces",
+        ):
+            assert key in data, f"missing '{key}' in language metadata: {data}"
+        assert isinstance(data["address_spaces"], list)
+        assert len(data["address_spaces"]) > 0
+        # When the heavy sections are off they should not be in the payload.
+        assert "registers" not in data
+        assert "default_symbols" not in data
+
+    def test_get_language_metadata_with_registers(self, http_client):
+        """Issue #192: register list is included when requested. x86 typically
+        has 100+ registers; ARM has fewer; either way the list must be
+        non-empty."""
+        response = http_client.get(
+            "/get_language_metadata",
+            params={"include_registers": "true", "include_default_symbols": "false"},
+        )
+        assert response.status_code == 200
+        data = response.json().get("data", {})
+        assert "registers" in data
+        regs = data["registers"]
+        assert isinstance(regs, list)
+        assert len(regs) > 0
+        # Every register entry has a name and bit_length
+        for r in regs[:5]:  # spot-check the first few
+            assert "name" in r
+            assert "bit_length" in r
+
 
 class TestFunctionListing:
     """Test function listing and query endpoints (read-only)."""
@@ -423,6 +465,53 @@ class TestFunctionAnalysis:
             "/analyze_function_completeness", params={"address": first_function_address}
         )
         assert response.status_code == 200
+
+    def test_get_function_pcode_basic(self, http_client, first_function_address):
+        """Issue #192: dump P-code for a function (basic-block iter only).
+        Validates that basic_blocks is a list and each entry has start/stop
+        addresses + a pcodes list."""
+        response = http_client.get(
+            "/get_function_pcode",
+            params={
+                "function_address": first_function_address,
+                "granularity": "basic",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json().get("data", {})
+        assert "basic_blocks" in data
+        assert isinstance(data["basic_blocks"], list)
+        # `basic` granularity omits the high-PcodeOp graph
+        assert "high_pcodes" not in data
+        # Validate shape of the first basic block (if any)
+        if data["basic_blocks"]:
+            bb = data["basic_blocks"][0]
+            assert "start_offset" in bb
+            assert "stop_offset" in bb
+            assert "pcodes" in bb
+            assert isinstance(bb["pcodes"], list)
+            # PcodeOps carry mnemonic + opcode if non-empty
+            if bb["pcodes"]:
+                op = bb["pcodes"][0]
+                assert "mnemonic" in op
+                assert "opcode" in op
+                assert "inputs" in op
+
+    def test_get_function_pcode_high_granularity(self, http_client, first_function_address):
+        """Issue #192: `high` granularity (default) adds the full HighFunction
+        PcodeOp graph. Verify both basic_blocks and high_pcodes appear."""
+        response = http_client.get(
+            "/get_function_pcode",
+            params={
+                "function_address": first_function_address,
+                "granularity": "high",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json().get("data", {})
+        assert "basic_blocks" in data
+        assert "high_pcodes" in data
+        assert isinstance(data["high_pcodes"], list)
 
 
 class TestXRefEndpoints:
