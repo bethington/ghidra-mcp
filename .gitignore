@@ -242,6 +242,11 @@ private/
 *.db
 *.sqlite
 *.sqlite3
+# SQLite sidecars (WAL mode produces -shm + -wal; rollback-journal mode produces -journal).
+# These are session-scoped runtime artifacts; the canonical state lives in the .db itself.
+*.db-shm
+*.db-wal
+*.db-journal
 
 # =============================================================================
 # MAVEN AND JAVA
