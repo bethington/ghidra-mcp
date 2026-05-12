@@ -125,25 +125,74 @@ class UnixHTTPConnection(http.client.HTTPConnection):
 
 
 def get_socket_dir() -> Path:
-    """Get the GhidraMCP socket runtime directory."""
+    """Get the primary GhidraMCP socket runtime directory.
+
+    Kept for backwards compatibility. For instance discovery prefer
+    `get_socket_dir_candidates()` -- when Claude Desktop spawns the bridge
+    without forwarding `$TMPDIR`, the bridge would fall through to `/tmp`
+    while the plugin (with `$TMPDIR` set) wrote sockets to
+    `/var/folders/.../T/ghidra-mcp-<user>/` (issue #170).
+    """
+    return get_socket_dir_candidates()[0]
+
+
+def get_socket_dir_candidates() -> list[Path]:
+    """All plausible socket runtime directories, in preference order.
+
+    Returns the dirs the plugin's `ServerManager.getSocketDir()` (Java side)
+    could plausibly have picked, accounting for environment-variable drift
+    between the parent (e.g. Ghidra started from a terminal with `$TMPDIR`)
+    and the child (bridge spawned by Claude Desktop without `$TMPDIR`).
+    Duplicates removed; order matters (most-likely first).
+    """
+    user = os.getenv("USER") or os.getenv("USERNAME") or "unknown"
+    candidates: list[Path] = []
+
+    def _add(p):
+        if p is None:
+            return
+        p = Path(p)
+        if p not in candidates:
+            candidates.append(p)
+
+    # Linux: XDG_RUNTIME_DIR / /run/user/<uid>
     xdg = os.environ.get("XDG_RUNTIME_DIR")
     if xdg:
-        return Path(xdg) / "ghidra-mcp"
-
+        _add(Path(xdg) / "ghidra-mcp")
     getuid = getattr(os, "getuid", None)
     if callable(getuid):
         run_user_dir = Path(f"/run/user/{getuid()}")
         try:
             if run_user_dir.exists():
-                return run_user_dir / "ghidra-mcp"
+                _add(run_user_dir / "ghidra-mcp")
         except OSError:
             logger.debug("Ignoring unusable runtime dir candidate: %s", run_user_dir)
 
-    user = os.getenv("USER", "unknown")
+    # Per-user TMPDIR (the macOS Claude Desktop gap)
     tmpdir = os.environ.get("TMPDIR")
     if tmpdir:
-        return Path(tmpdir) / f"ghidra-mcp-{user}"
-    return Path(f"/tmp/ghidra-mcp-{user}")
+        _add(Path(tmpdir) / f"ghidra-mcp-{user}")
+
+    # macOS per-user temp at /var/folders/<random>/T/ — glob to find any that
+    # exist. This catches the issue #170 case where the bridge has no
+    # $TMPDIR but the plugin wrote sockets under the parent shell's $TMPDIR.
+    var_folders = Path("/var/folders")
+    if var_folders.exists():
+        try:
+            for hit in var_folders.glob(f"*/T/ghidra-mcp-{user}"):
+                _add(hit)
+        except OSError:
+            pass
+
+    # POSIX fallback
+    _add(Path(f"/tmp/ghidra-mcp-{user}"))
+
+    # Windows fallback — Java's java.io.tmpdir is typically %TEMP%
+    win_temp = os.environ.get("TEMP") or os.environ.get("TMP")
+    if win_temp:
+        _add(Path(win_temp) / f"ghidra-mcp-{user}")
+
+    return candidates
 
 
 # Enhanced error classes
@@ -392,41 +441,56 @@ def do_request(
 
 
 def discover_instances() -> list[dict]:
-    """Scan socket directory and query each live instance for info."""
-    socket_dir = get_socket_dir()
-    if not socket_dir.exists():
-        return []
+    """Scan every plausible socket directory and query each live instance.
 
-    instances = []
-    for sock_file in sorted(socket_dir.glob("*.sock")):
-        name = sock_file.stem  # ghidra-<pid>
-        dash = name.rfind("-")
-        if dash < 0:
-            continue
-        try:
-            pid = int(name[dash + 1 :])
-        except ValueError:
-            continue
+    Searches *all* candidates returned by `get_socket_dir_candidates()`. This
+    handles issue #170: when Claude Desktop spawns the bridge without
+    forwarding `$TMPDIR`, the bridge falls back to `/tmp` while the plugin
+    (with `$TMPDIR` set) wrote its socket to `/var/folders/.../T/...`. By
+    scanning every candidate, the bridge finds instances regardless of which
+    side knows about `$TMPDIR`. A socket discovered under one candidate dir
+    is de-duplicated by absolute path.
+    """
+    seen_paths: set[str] = set()
+    instances: list[dict] = []
 
-        if not is_pid_alive(pid):
-            logger.debug(f"Cleaning up stale socket: {sock_file}")
+    for socket_dir in get_socket_dir_candidates():
+        if not socket_dir.exists():
+            continue
+        for sock_file in sorted(socket_dir.glob("*.sock")):
+            abs_path = str(sock_file.resolve())
+            if abs_path in seen_paths:
+                continue
+            seen_paths.add(abs_path)
+
+            name = sock_file.stem  # ghidra-<pid>
+            dash = name.rfind("-")
+            if dash < 0:
+                continue
             try:
-                sock_file.unlink(missing_ok=True)
-            except OSError:
-                pass
-            continue
+                pid = int(name[dash + 1:])
+            except ValueError:
+                continue
 
-        info: dict = {"socket": str(sock_file), "pid": pid}
-        try:
-            text, status = uds_request(
-                str(sock_file), "GET", "/mcp/instance_info", timeout=5
-            )
-            if status == 200:
-                info.update(_unwrap_response_data(text))
-        except Exception as e:
-            logger.debug(f"Could not query {sock_file}: {e}")
+            if not is_pid_alive(pid):
+                logger.debug(f"Cleaning up stale socket: {sock_file}")
+                try:
+                    sock_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                continue
 
-        instances.append(info)
+            info: dict = {"socket": str(sock_file), "pid": pid}
+            try:
+                text, status = uds_request(
+                    str(sock_file), "GET", "/mcp/instance_info", timeout=5
+                )
+                if status == 200:
+                    info.update(_unwrap_response_data(text))
+            except Exception as e:
+                logger.debug(f"Could not query {sock_file}: {e}")
+
+            instances.append(info)
 
     return instances
 

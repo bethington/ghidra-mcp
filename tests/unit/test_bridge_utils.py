@@ -46,6 +46,61 @@ class TestGetSocketDir(unittest.TestCase):
             self.assertEqual(result, Path("/custom/tmp/ghidra-mcp-testuser"))
 
 
+class TestGetSocketDirCandidates(unittest.TestCase):
+    """Test multi-directory socket discovery (issue #170)."""
+
+    def test_candidates_includes_all_relevant_paths(self):
+        """When TMPDIR is set the candidate list must include both the
+        TMPDIR-derived path AND /tmp, so the bridge can find sockets
+        regardless of which side knows about TMPDIR (the Claude Desktop
+        spawn-without-TMPDIR case)."""
+        env = {k: v for k, v in os.environ.items() if k not in ("XDG_RUNTIME_DIR",)}
+        env["TMPDIR"] = "/custom/tmp"
+        env["USER"] = "testuser"
+        with patch.dict(os.environ, env, clear=True), patch(
+            "os.getuid", return_value=9_999_999, create=True
+        ):
+            from bridge_mcp_ghidra import get_socket_dir_candidates
+
+            # Use pathlib.Path equality, which normalizes separators across OSes.
+            paths = get_socket_dir_candidates()
+            self.assertIn(
+                Path("/custom/tmp/ghidra-mcp-testuser"),
+                paths,
+                f"TMPDIR-derived path missing: {paths}",
+            )
+            self.assertIn(
+                Path("/tmp/ghidra-mcp-testuser"),
+                paths,
+                f"/tmp fallback missing: {paths}",
+            )
+
+    def test_candidates_dedup(self):
+        """Adding the same path twice (via different env hints) must not
+        produce duplicates."""
+        from bridge_mcp_ghidra import get_socket_dir_candidates
+
+        paths = list(get_socket_dir_candidates())
+        self.assertEqual(len(paths), len(set(paths)), f"Duplicate paths: {paths}")
+
+    def test_macos_var_folders_glob(self):
+        """On macOS, the plugin writes to $TMPDIR which resolves to
+        /var/folders/<random>/T/. When the bridge has no TMPDIR set,
+        the candidate list must still include any /var/folders/*/T/
+        path that exists for this user."""
+        env = {k: v for k, v in os.environ.items() if k != "TMPDIR"}
+        env["USER"] = "testuser"
+        # We can't easily fake /var/folders without filesystem mocking,
+        # but we can verify the code path doesn't crash when /var/folders
+        # exists (Linux/Mac) or is missing (most CI).
+        with patch.dict(os.environ, env, clear=True):
+            from bridge_mcp_ghidra import get_socket_dir_candidates
+
+            # Should not raise
+            candidates = get_socket_dir_candidates()
+            self.assertGreater(len(candidates), 0)
+
+
 class TestIsPidAlive(unittest.TestCase):
     """Test PID liveness check."""
 
