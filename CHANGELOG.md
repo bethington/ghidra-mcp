@@ -4,6 +4,112 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased (v5.9.0 candidate)
+
+Bundles three community-reported bug fixes (#170, #175, #192) plus an
+internal fun-doc improvement (library-code auto-classification). Net
+result: cleaner multi-instance discovery, fewer surprise port collisions,
+new endpoints for downstream P-code tooling, and no more LLM tokens wasted
+on statically-linked CRT.
+
+### Fixed
+
+- **#170**: macOS bridge spawned by Claude Desktop couldn't find Ghidra
+  instances. Root cause: Claude Desktop spawned the bridge without
+  forwarding `$TMPDIR`, so the bridge fell back to `/tmp/ghidra-mcp-<user>`
+  while the plugin (with `$TMPDIR` set to a `/var/folders/<2>/<rand>/T/`
+  path) wrote its socket elsewhere. Fix: `bridge_mcp_ghidra.py` now scans
+  every plausible socket directory (`XDG_RUNTIME_DIR`, `/run/user/<uid>`,
+  `$TMPDIR`, `/var/folders/*/*/T/...`, `/private/var/folders/*/*/T/...`,
+  `/tmp`, `%TEMP%`) via `get_socket_dir_candidates()` and deduplicates by
+  absolute path. Backwards-compatible: `get_socket_dir()` still returns
+  the primary candidate. (PR #195)
+
+- **#175**: On Windows, two Ghidra instances couldn't run simultaneously
+  because both tried to bind TCP `8089` and the second failed with
+  "Address already in use: bind". Two-part fix:
+  1. **UDS enabled by default on all platforms** (Win10 1803+ has
+     `AF_UNIX`; older Windows falls through to the TCP path). Per-PID
+     socket file names mean no port competition for UDS users.
+  2. **TCP port-range fallback** in `GhidraMCPPlugin`: when the
+     configured port is taken, the plugin scans the next 15 ports and
+     binds the first that's free. The actual bound port is surfaced via
+     `/mcp/instance_info → tcp_port` (now served on both UDS and TCP
+     transports), and the bridge's new `_scan_tcp_for_project()` walks
+     `8089..8104` probing for the matching project. Project-mismatch
+     refusal: the bridge no longer silently connects to a wrong-project
+     instance — if UDS finds instances but none match the requested
+     project, it returns a clear error rather than guessing a TCP port.
+     (PR #196)
+
+### Added
+
+- **#192 — decompiler P-code endpoints** for downstream tooling that needs
+  the raw graph rather than the C decompile (P-code emulators, alternative
+  decompilers, ML pipelines):
+  - `/get_function_pcode?function_address=...&granularity={basic|high}`:
+    dumps HighFunction P-code. `basic` returns the basic-block iter only
+    (PcodeOps in program order, lighter payload). `high` (default) adds
+    the full HighFunction PcodeOp graph from `hf.getPcodeOps()`. Each op
+    carries mnemonic, opcode, varnode inputs/output with space/offset/size
+    and SSA flags (`is_register`, `is_constant`, `is_unique`, `is_addrtied`,
+    `is_hash`, `is_persistent`, `merge_group`). Basic blocks carry start/
+    stop addresses via the shared `ServiceUtils.addressToJson` helper.
+  - `/get_language_metadata?include_registers=true&include_default_symbols=true`:
+    SLEIGH-level program facts — language ID, processor, endian, size,
+    variant, default space, default data space, program counter, full
+    address-space list, register list (with parent/child relations,
+    description, aliases, bit length), default symbol set (with
+    end_offset, byte_size, is_entry/is_primary/is_volatile flags).
+
+  Endpoint count: 241 → 243. (PR #197)
+
+- **PDB import helper** (`scripts/ghidra/ImportMSDLPDB.java`): user-
+  installable Ghidra script that reads the program's `PdbInformation`
+  (GUID / age) and kicks the PDB Universal Analyzer to fetch + apply
+  matching symbols from Microsoft's symbol server. Authoritative names
+  for everything MSVCRT / VC-runtime / MFC. Skip-with-reason JSON when
+  the binary has no PDB metadata. Install per
+  `scripts/ghidra/README.md`.
+
+- **Library-code auto-classification (fun-doc)**: heuristic detector at
+  `fun-doc/library_code_detector.py` runs after decompile and before LLM
+  invocation. Trips on canonical CRT names (`??2@YAPAXI@Z`, `_strtoi64@4`,
+  `std::_*`) or CRT-only callees (`__SEH_prolog4`, `_Xinvalid_argument`,
+  `_CxxThrowException`). Detected functions get a generic plate stamped
+  and `library_code=True` set on the workflow row, excluding them from
+  future selector picks until refresh. Motivating case: 729K tokens
+  burned on `ParseSignedShort @ 10052ba0` in BH.dll — code that doesn't
+  exist in BH source. Conservative tuning: `/GS` stack-cookie helpers are
+  SOFT signals (they appear in user code too) so a single `__security_check_cookie`
+  hit doesn't trip the gate. New `skip_library_code` config flag (default
+  `True`) for disable. Storage migration `0002_library_code.sql` adds
+  three columns; 19-case detector unit suite + 3 selector regression
+  tests. (PR #198)
+
+### Test coverage notes
+
+- **Bridge size cap** bumped from 2100 → 2250 lines to absorb the multi-
+  candidate socket-dir scan + TCP port-range scanner. The cap is a soft
+  signal per its docstring; both contributions pull weight (real bug
+  fixes with docstrings + unit coverage).
+- **New unit/integration test files:**
+  - `tests/unit/test_bridge_utils.py` — `TestGetSocketDirCandidates`
+    (3 cases), `TestDiscoverInstancesMultiDir` (2 cases), `TestTcpPortScan`
+    (7 cases), plus three macOS-layout tests using `Path.exists`/`Path.glob`
+    mocks.
+  - `src/test/java/com/xebyte/offline/ServerManagerPortTest.java` —
+    3-case Java unit suite for `boundTcpPort` (default value, persistence,
+    volatile thread-visibility).
+  - `tests/integration/test_readonly_endpoints.py` — new readonly tests
+    for `/mcp/instance_info` (TCP), `/get_function_pcode` (basic + high
+    granularity), and `/get_language_metadata` (with/without heavy
+    sections).
+  - `tests/performance/test_library_code_detector.py` — 19-case detector
+    unit suite.
+
+---
+
 ## v5.8.0 - 2026-05-11 (fun-doc SQL storage migration — PR1)
 
 Major release: fun-doc's per-function workflow state moves out of `state.json`
