@@ -100,6 +100,9 @@ def build_metadata(schema: str | None = None) -> MetaData:
         # transient worker state
         Column("is_thrashing", Boolean, default=False),
         Column("decompile_timeout_at", DateTime(timezone=True)),
+        Column("library_code", Boolean, default=False),
+        Column("library_code_at", DateTime(timezone=True)),
+        Column("library_code_reasons", JSON),
         # JSONB blobs
         Column("deductions", JSON),
         Column("callees", JSON),

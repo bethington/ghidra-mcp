@@ -771,7 +771,7 @@ class WorkerManager:
                     session["completed"] += 1
                     session["functions"].append(key)
                     worker["_rate_limit_streak"] = 0  # reset on success
-                elif result in ("skipped", "decompile_timeout"):
+                elif result in ("skipped", "decompile_timeout", "library_code"):
                     worker["progress"]["skipped"] += 1
                     session["skipped"] += 1
                 elif result in ("failed", "blocked", "needs_redo"):
