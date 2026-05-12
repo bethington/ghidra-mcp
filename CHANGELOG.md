@@ -4,7 +4,7 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased (v5.9.0 candidate)
+## v5.9.0 - 2026-05-12 (community fixes + P-code endpoints + library-code detector)
 
 Bundles three community-reported bug fixes (#170, #175, #192) plus an
 internal fun-doc improvement (library-code auto-classification). Net

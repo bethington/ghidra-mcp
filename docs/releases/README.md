@@ -9,7 +9,7 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.8.0 (Latest) — fun-doc SQL storage migration (PR1)
+### v5.9.0 (Latest) — fun-doc SQL storage migration (PR1)
 
 Major release: fun-doc's per-function workflow state moves out of `state.json` (~106 MB single file, swapped per-binary by hand) into a SQL-backed repository abstraction. SQLite is the default backend (`fun-doc/state.db`); set `FUN_DOC_DB_URL=postgresql://...` to use Postgres instead. No endpoint changes — count unchanged at 241.
 
