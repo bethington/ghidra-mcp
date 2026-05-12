@@ -68,6 +68,12 @@ ENDPOINT_TIMEOUTS = {
 }
 
 DEFAULT_TCP_URL = "http://127.0.0.1:8089"
+DEFAULT_TCP_PORT = 8089
+# Bridge-side TCP port scan range. Mirrors the plugin's
+# TCP_PORT_FALLBACK_RANGE so a TCP-only multi-instance setup (e.g. Windows
+# 10 pre-1803 where AF_UNIX is unavailable) can still be discovered without
+# having to set GHIDRA_MCP_URL per instance. See issue #175 + Copilot review.
+TCP_PORT_SCAN_RANGE = 16
 
 # Logging
 LOG_LEVEL = os.getenv("GHIDRA_MCP_LOG_LEVEL", "INFO")
@@ -516,6 +522,55 @@ def _unwrap_response_data(text: str) -> dict:
     if isinstance(data, dict) and "data" in data:
         return data["data"]
     return data
+
+
+def _scan_tcp_for_project(project: str, start_port: int = DEFAULT_TCP_PORT,
+                          range_size: int = TCP_PORT_SCAN_RANGE,
+                          timeout: float = 1.0) -> str | None:
+    """Scan a small TCP port range for a Ghidra plugin matching `project`.
+
+    Used when UDS discovery returns nothing (e.g., TCP-only multi-instance
+    setups on Windows pre-1803). For each port in [start_port, start_port +
+    range_size), issues `GET /mcp/instance_info` with a short timeout. The
+    first one whose `project` field matches (exact wins; substring used as
+    fallback) returns its URL. Returns None if no match found.
+
+    Project matching mirrors connect_instance's UDS match order so the same
+    `connect_instance("D2Common")` call selects the same instance regardless
+    of which transport found it.
+
+    Uses http.client (stdlib) rather than `requests` to keep the bridge's
+    dependency footprint minimal -- see test_project_consistency.
+    """
+    if not project:
+        return None
+    project_lower = project.lower()
+    substring_url: str | None = None
+    for port in range(start_port, start_port + range_size):
+        url = f"http://127.0.0.1:{port}"
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+            try:
+                conn.request("GET", "/mcp/instance_info")
+                resp = conn.getresponse()
+                if resp.status != 200:
+                    continue
+                body = resp.read().decode("utf-8", errors="replace")
+            finally:
+                conn.close()
+            info = _unwrap_response_data(body)
+            if not isinstance(info, dict):
+                continue
+            inst_project = info.get("project", "")
+            if inst_project == project:
+                # Exact match — return immediately.
+                return url
+            if not substring_url and project_lower in inst_project.lower():
+                substring_url = url
+        except Exception:
+            # Connection refused / timeout / non-JSON response — try next port.
+            continue
+    return substring_url
 
 
 def discover_active_tcp_instance() -> dict | None:
@@ -1265,8 +1320,42 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
                     {"error": f"Schema fetch failed: {e}", "socket": _active_socket}
                 )
 
-    # Try TCP fallback
-    tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
+    # Try TCP fallback. The behavior depends on what UDS discovery returned:
+    #
+    #   * If GHIDRA_MCP_URL is set, it always wins (explicit user override).
+    #   * If UDS found one or more instances and none matched the project,
+    #     refuse to fall back to TCP -- that's how we previously silently
+    #     connected to the wrong instance (Copilot #196 review item).
+    #   * If UDS found NOTHING (no instances at all), scan the TCP port range
+    #     looking for a /mcp/instance_info that matches the project. Handles
+    #     the TCP-only multi-instance case (e.g. Windows pre-1803 without
+    #     AF_UNIX).
+    #   * If no scan match either, try the default port as a last resort.
+    env_tcp = os.getenv("GHIDRA_MCP_URL")
+    if env_tcp:
+        tcp_url = env_tcp
+    elif instances:
+        # UDS found instances but none matched the requested project. Don't
+        # randomly pick another instance's tcp_port — that connects to the
+        # wrong project. Return the "no match" error directly.
+        available = [inst.get("project", "unknown") for inst in instances]
+        return json.dumps(
+            {
+                "error": (
+                    f"No instance matching '{project}' (UDS: {len(instances)} found, "
+                    f"none matched). Refusing to use any instance's tcp_port — would "
+                    f"connect to the wrong project. Use list_instances() to see what's "
+                    f"available."
+                ),
+                "available": available,
+            }
+        )
+    else:
+        # No UDS instances. Scan the TCP port range to find one matching
+        # the project. _scan_tcp_for_project returns the URL of the first
+        # matching instance, or None if nothing matched.
+        scanned = _scan_tcp_for_project(project)
+        tcp_url = scanned if scanned else DEFAULT_TCP_URL
     if not validate_server_url(tcp_url):
         return json.dumps(
             {
