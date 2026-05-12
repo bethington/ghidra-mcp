@@ -190,8 +190,18 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private static final String TCP_ENABLED_OPTION = "Enable TCP Transport";
     private static final String STRICT_NAMING_ENFORCEMENT_OPTION = "Strict Naming Enforcement";
     private static final String LEGACY_STRICT_FUNCTION_NAMES_OPTION = "Strict Function Name Enforcement";
-    private static final boolean DEFAULT_UDS_ENABLED = !System.getProperty("os.name", "").toLowerCase().contains("win");
-    private static final boolean DEFAULT_TCP_ENABLED = System.getProperty("os.name", "").toLowerCase().contains("win");
+    // UDS is supported on Linux, macOS, and Windows 10 1803+ (Java AF_UNIX).
+    // Enable on all platforms by default and let the bind attempt fail gracefully
+    // on systems that don't support it -- the TCP path is the safety net. This
+    // fixes issue #175 (multi-instance bind conflict on Windows) by giving each
+    // Ghidra PID its own per-PID socket file rather than racing for TCP 8089.
+    private static final boolean DEFAULT_UDS_ENABLED = true;
+    private static final boolean DEFAULT_TCP_ENABLED = true;
+    // Maximum TCP port-range fallback. If the configured port is in use, the
+    // plugin tries port..port+TCP_PORT_FALLBACK_RANGE-1 and uses the first
+    // that binds. Surfaces the actual port via /mcp/instance_info so the
+    // bridge can discover it without hard-coding 8089.
+    private static final int TCP_PORT_FALLBACK_RANGE = 16;
 
     // Field analysis constants (v1.4.0)
     private static final int MAX_FUNCTIONS_TO_ANALYZE = 100;
@@ -503,20 +513,40 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             server = null;
         }
 
-        // Create new server - if port is in use, try to handle gracefully
-        try {
-            server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
-            Msg.info(this, "HTTP server created successfully on 127.0.0.1:" + port);
-        } catch (java.net.BindException e) {
-            Msg.error(this, "Port " + port + " is already in use. " +
-                "Another instance may be running or port is not released yet. " +
-                "Please wait a few seconds and restart Ghidra, or change the port in Tool Options.");
-            throw e;
-        } catch (IllegalArgumentException e) {
-            Msg.error(this, "Cannot create HTTP server contexts - they may already exist. " +
-                "Please restart Ghidra completely. Error: " + e.getMessage());
-            throw new IOException("Server context creation failed", e);
+        // Create new server. If the configured port is in use (multiple
+        // Ghidra instances are the common case -- issue #175), scan the
+        // next TCP_PORT_FALLBACK_RANGE-1 ports and use the first that binds.
+        // The actual port is recorded via setBoundTcpPort so /mcp/instance_info
+        // can surface it to the bridge.
+        java.net.BindException lastBindException = null;
+        int boundPort = -1;
+        for (int candidate = port; candidate < port + TCP_PORT_FALLBACK_RANGE; candidate++) {
+            try {
+                server = HttpServer.create(new InetSocketAddress("127.0.0.1", candidate), 0);
+                boundPort = candidate;
+                if (candidate == port) {
+                    Msg.info(this, "HTTP server created successfully on 127.0.0.1:" + candidate);
+                } else {
+                    Msg.warn(this, "Port " + port + " was in use; HTTP server bound to fallback port "
+                        + candidate + " (range " + port + "-" + (port + TCP_PORT_FALLBACK_RANGE - 1)
+                        + "). The bridge discovers this port via /mcp/instance_info.");
+                }
+                break;
+            } catch (java.net.BindException e) {
+                lastBindException = e;
+            } catch (IllegalArgumentException e) {
+                Msg.error(this, "Cannot create HTTP server contexts - they may already exist. " +
+                    "Please restart Ghidra completely. Error: " + e.getMessage());
+                throw new IOException("Server context creation failed", e);
+            }
         }
+        if (server == null) {
+            Msg.error(this, "All ports in range " + port + "-" + (port + TCP_PORT_FALLBACK_RANGE - 1)
+                + " are in use. Either too many Ghidra instances are running, or another process "
+                + "is squatting on this range. Change Server Port in Tool Options to a free range.");
+            throw lastBindException;
+        }
+        ServerManager.getInstance().setBoundTcpPort(boundPort);
 
         // ==========================================================================
         // SHARED ENDPOINTS — Annotation-driven registration via AnnotationScanner

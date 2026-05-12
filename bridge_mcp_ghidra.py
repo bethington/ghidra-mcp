@@ -1186,8 +1186,24 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
                     {"error": f"Schema fetch failed: {e}", "socket": _active_socket}
                 )
 
-    # Try TCP fallback
-    tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
+    # Try TCP fallback. If any UDS-discovered instance reported its actual
+    # bound TCP port via /mcp/instance_info (issue #175 port-range fallback),
+    # prefer that over the default 8089. The GHIDRA_MCP_URL env var still wins
+    # when set, for explicit override.
+    env_tcp = os.getenv("GHIDRA_MCP_URL")
+    if env_tcp:
+        tcp_url = env_tcp
+    else:
+        discovered_port = None
+        for inst in instances:
+            port = inst.get("tcp_port")
+            if isinstance(port, int) and port > 0:
+                discovered_port = port
+                break
+        if discovered_port:
+            tcp_url = f"http://127.0.0.1:{discovered_port}"
+        else:
+            tcp_url = DEFAULT_TCP_URL
     if not validate_server_url(tcp_url):
         return json.dumps(
             {
