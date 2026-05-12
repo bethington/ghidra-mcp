@@ -190,7 +190,16 @@ public class ServerManager {
         return params;
     }
 
-    private Map<String, Object> buildInstanceInfo() {
+    /**
+     * Build the /mcp/instance_info JSON string. Exposed so the TCP server
+     * in GhidraMCPPlugin can serve the same endpoint as the UDS server --
+     * needed by the bridge's TCP port-range scanner (issue #175 + Copilot).
+     */
+    public String buildInstanceInfoJson() {
+        return Response.ok(buildInstanceInfo()).toJson();
+    }
+
+    Map<String, Object> buildInstanceInfo() {
         long pid = ProcessHandle.current().pid();
         String projectName = "unknown";
         String projectPath = "";

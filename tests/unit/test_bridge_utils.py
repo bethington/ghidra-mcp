@@ -46,66 +46,130 @@ class TestGetSocketDir(unittest.TestCase):
             self.assertEqual(result, Path("/custom/tmp/ghidra-mcp-testuser"))
 
 
-class TestTcpPortDiscovery(unittest.TestCase):
-    """Test issue #175 TCP port-range discovery: when the plugin reported its
-    bound TCP port via /mcp/instance_info (because port 8089 was in use), the
-    bridge's connect_instance() must prefer that port over the default 8089.
+class TestTcpPortScan(unittest.TestCase):
+    """Test _scan_tcp_for_project (issue #175 + Copilot review): when UDS
+    discovery returns nothing (e.g., AF_UNIX unavailable on the host), the
+    bridge must scan a TCP port range to find the matching instance instead
+    of giving up on port 8089. Project matching is project-name aware so
+    cross-transport behavior is consistent with UDS discovery.
 
-    The connect_instance function is async + heavy with side effects, so we
-    don't unit-test the whole thing; instead we test the discovery slice
-    directly with the same data shape connect_instance sees in `instances`.
+    Tests patch http.client.HTTPConnection (the bridge's stdlib HTTP client)
+    rather than `requests`, to keep the bridge dependency footprint minimal.
     """
 
-    def _pick_tcp_url(self, instances, env_url=None):
-        """Mirror the bridge's tcp_url selection logic for unit testing.
+    def _make_fake_conn(self, port_to_response):
+        """Build a HTTPConnection stand-in driven by a {port: (status, body)}
+        map. Ports not present raise ConnectionRefusedError to simulate a
+        closed port."""
 
-        Keeps this test stable even if connect_instance's signature changes —
-        what we care about is "does the bridge prefer a discovered tcp_port
-        over the hard-coded default?"
-        """
-        from bridge_mcp_ghidra import DEFAULT_TCP_URL
+        class FakeResponse:
+            def __init__(self, status, body):
+                self.status = status
+                self._body = body
+            def read(self):
+                return self._body.encode("utf-8") if isinstance(self._body, str) else self._body
 
-        if env_url:
-            return env_url
-        for inst in instances:
-            port = inst.get("tcp_port")
-            if isinstance(port, int) and port > 0:
-                return f"http://127.0.0.1:{port}"
-        return DEFAULT_TCP_URL
+        class FakeConn:
+            def __init__(self, host, port, timeout=None):
+                self.host = host
+                self.port = port
+                self._resp = port_to_response.get(port)
+                if self._resp is None:
+                    raise ConnectionRefusedError(f"no listener on {port}")
+            def request(self, method, url):
+                pass
+            def getresponse(self):
+                status, body = self._resp
+                return FakeResponse(status, body)
+            def close(self):
+                pass
 
-    def test_discovered_port_wins_over_default(self):
-        """Plugin reported a non-default bound port (8092). Bridge must use it."""
-        instances = [{"pid": 1234, "project": "test", "tcp_port": 8092}]
-        url = self._pick_tcp_url(instances)
-        self.assertEqual(url, "http://127.0.0.1:8092")
+        return FakeConn
 
-    def test_no_tcp_port_falls_back_to_default(self):
-        """Old plugin (pre-#175) without tcp_port field — bridge uses 8089."""
-        instances = [{"pid": 1234, "project": "test"}]
-        url = self._pick_tcp_url(instances)
-        self.assertEqual(url, "http://127.0.0.1:8089")
+    def test_scan_finds_exact_project_match(self):
+        """The first port responding with a matching project name wins."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
 
-    def test_env_url_overrides_discovered(self):
-        """GHIDRA_MCP_URL env var wins over discovered tcp_port (explicit override)."""
-        instances = [{"pid": 1234, "project": "test", "tcp_port": 8092}]
-        url = self._pick_tcp_url(instances, env_url="http://127.0.0.1:9999")
-        self.assertEqual(url, "http://127.0.0.1:9999")
+        FakeConn = self._make_fake_conn({
+            8089: (200, json.dumps({"project": "other"})),
+            8090: (200, json.dumps({"project": "wanted"})),
+        })
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=4, timeout=0.5)
+        self.assertEqual(result, "http://127.0.0.1:8090")
 
-    def test_zero_or_negative_tcp_port_treated_as_absent(self):
-        """tcp_port=-1 means TCP transport not running; should fall back."""
-        instances = [{"pid": 1234, "project": "test", "tcp_port": -1}]
-        url = self._pick_tcp_url(instances)
-        self.assertEqual(url, "http://127.0.0.1:8089")
+    def test_scan_returns_none_when_no_match(self):
+        """No instance matches the project — return None so connect_instance
+        produces a clear error instead of guessing."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
 
-    def test_first_instance_with_tcp_port_wins(self):
-        """When multiple instances report different ports, take the first."""
-        instances = [
-            {"pid": 1234, "project": "a", "tcp_port": -1},  # not running TCP
-            {"pid": 5678, "project": "b", "tcp_port": 8091},  # this one
-            {"pid": 9012, "project": "c", "tcp_port": 8092},  # ignored
-        ]
-        url = self._pick_tcp_url(instances)
-        self.assertEqual(url, "http://127.0.0.1:8091")
+        FakeConn = self._make_fake_conn({
+            8089: (200, json.dumps({"project": "unrelated"})),
+            8090: (200, json.dumps({"project": "alsoNot"})),
+        })
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=4, timeout=0.5)
+        self.assertIsNone(result)
+
+    def test_scan_returns_none_when_nothing_listening(self):
+        """Every port refuses connection — return None, don't crash."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
+
+        FakeConn = self._make_fake_conn({})  # empty: every port refuses
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=4, timeout=0.5)
+        self.assertIsNone(result)
+
+    def test_scan_falls_back_to_substring_when_no_exact(self):
+        """Substring match is used only when no exact match is found anywhere
+        in the scanned range. This mirrors the UDS match order."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
+
+        FakeConn = self._make_fake_conn({
+            8089: (200, json.dumps({"project": "MyProjectVariant"})),
+        })
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("MyProject", start_port=8089, range_size=4, timeout=0.5)
+        self.assertEqual(result, "http://127.0.0.1:8089")
+
+    def test_scan_exact_match_wins_over_earlier_substring(self):
+        """If a substring match is found at port N but an exact match exists
+        at port N+M, the exact match must win regardless of port order."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
+
+        FakeConn = self._make_fake_conn({
+            8089: (200, json.dumps({"project": "Diablo2Mod"})),  # substring of "Diablo2"
+            8091: (200, json.dumps({"project": "Diablo2"})),     # exact match
+        })
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("Diablo2", start_port=8089, range_size=4, timeout=0.5)
+        self.assertEqual(result, "http://127.0.0.1:8091")
+
+    def test_scan_unwraps_data_wrapper(self):
+        """/mcp/instance_info may be wrapped in {success, data} -- the scan
+        must reach the project field either way (uses _unwrap_response_data)."""
+        from unittest.mock import patch
+        import bridge_mcp_ghidra as bridge
+
+        FakeConn = self._make_fake_conn({
+            8089: (200, json.dumps({"data": {"project": "wanted"}})),
+        })
+        with patch("http.client.HTTPConnection", FakeConn):
+            result = bridge._scan_tcp_for_project("wanted", start_port=8089, range_size=2, timeout=0.5)
+        self.assertEqual(result, "http://127.0.0.1:8089")
+
+    def test_scan_empty_project_returns_none(self):
+        """Empty project name is a programming error -- return None rather
+        than scan + match nothing."""
+        import bridge_mcp_ghidra as bridge
+
+        self.assertIsNone(bridge._scan_tcp_for_project(""))
+        self.assertIsNone(bridge._scan_tcp_for_project(None))
 
 
 class TestIsPidAlive(unittest.TestCase):

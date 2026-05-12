@@ -190,11 +190,16 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private static final String TCP_ENABLED_OPTION = "Enable TCP Transport";
     private static final String STRICT_NAMING_ENFORCEMENT_OPTION = "Strict Naming Enforcement";
     private static final String LEGACY_STRICT_FUNCTION_NAMES_OPTION = "Strict Function Name Enforcement";
-    // UDS is supported on Linux, macOS, and Windows 10 1803+ (Java AF_UNIX).
-    // Enable on all platforms by default and let the bind attempt fail gracefully
-    // on systems that don't support it -- the TCP path is the safety net. This
-    // fixes issue #175 (multi-instance bind conflict on Windows) by giving each
-    // Ghidra PID its own per-PID socket file rather than racing for TCP 8089.
+    // Both transports default ON. UDS gives per-PID socket files so multi-
+    // instance setups don't race for the same TCP port (issue #175 primary
+    // fix). TCP stays on by default because many users have HTTP-only
+    // tooling pointed at 127.0.0.1:8089 (the release deploy/smoke test
+    // itself uses it). When 8089 is in use, the port-range fallback below
+    // walks 8089..8089+TCP_PORT_FALLBACK_RANGE-1 and surfaces the actual
+    // bound port via /mcp/instance_info → tcp_port for bridge discovery.
+    //
+    // Users who want UDS-only (no TCP listener at all) can disable TCP via
+    // Tool Options → GhidraMCP HTTP Server → "Enable TCP Transport".
     private static final boolean DEFAULT_UDS_ENABLED = true;
     private static final boolean DEFAULT_TCP_ENABLED = true;
     // Maximum TCP port-range fallback. If the configured port is in use, the
@@ -337,11 +342,20 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 try {
                     startServer();
                     ownsServer = true;
-                    int port = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
+                    // Surface the ACTUAL bound port (may differ from the
+                    // configured port when port-range fallback fired -- see
+                    // Copilot review on #175). Falls back to configured port
+                    // if for some reason the bound-port wasn't recorded.
+                    int actualPort = ServerManager.getInstance().getBoundTcpPort();
+                    int configuredPort = options.getInt(PORT_OPTION_NAME, DEFAULT_PORT);
+                    int displayedPort = actualPort > 0 ? actualPort : configuredPort;
+                    String portStr = displayedPort == configuredPort
+                        ? String.valueOf(displayedPort)
+                        : (displayedPort + " (fallback; configured " + configuredPort + " was in use)");
                     if (!tcpEnabled) {
-                        Msg.warn(this, "GhidraMCP: Both transports disabled or UDS failed — started TCP on port " + port + " as safety net.");
+                        Msg.warn(this, "GhidraMCP: UDS failed or disabled — started TCP on port " + portStr + " as safety net.");
                     } else {
-                        Msg.info(this, "GhidraMCP TCP server active on port " + port);
+                        Msg.info(this, "GhidraMCP TCP server active on port " + portStr);
                     }
                 } catch (IOException e) {
                     Msg.error(this, "Failed to start TCP server: " + e.getMessage(), e);
@@ -393,6 +407,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 Thread.currentThread().interrupt();
             }
             server = null;
+            // Clear the advertised TCP port so /mcp/instance_info doesn't
+            // report a stale port after the listener stops (Copilot #196
+            // review item).
+            ServerManager.getInstance().setBoundTcpPort(-1);
             Msg.info(this, "GhidraMCP HTTP server stopped.");
         }
     }
@@ -511,6 +529,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 Msg.warn(this, "Interrupted while waiting for server to stop");
             }
             server = null;
+            // Reset bound-port advertisement before re-binding so a transient
+            // window between stop and bind doesn't expose the stale value.
+            ServerManager.getInstance().setBoundTcpPort(-1);
         }
 
         // Create new server. If the configured port is in use (multiple
@@ -581,6 +602,23 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         String schemaJson = scanner.generateSchema();
         server.createContext("/mcp/schema", safeHandler(exchange -> {
             sendResponse(exchange, schemaJson);
+        }));
+
+        // ==========================================================================
+        // INSTANCE INFO ENDPOINT (TCP mirror of the UDS endpoint)
+        // The UDS server exposes /mcp/instance_info for in-band discovery. We
+        // need the same endpoint on TCP so the bridge's port-range scanner
+        // (issue #175 + Copilot review) can identify which project lives on
+        // which port without already having to be connected. The body is the
+        // same JSON the UDS handler emits via ServerManager.
+        // ==========================================================================
+        server.createContext("/mcp/instance_info", safeHandler(exchange -> {
+            try {
+                String json = ServerManager.getInstance().buildInstanceInfoJson();
+                sendResponse(exchange, json);
+            } catch (Exception e) {
+                sendResponse(exchange, com.xebyte.core.Response.err(e.getMessage()).toJson());
+            }
         }));
 
         // ==========================================================================
