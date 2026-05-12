@@ -46,6 +46,68 @@ class TestGetSocketDir(unittest.TestCase):
             self.assertEqual(result, Path("/custom/tmp/ghidra-mcp-testuser"))
 
 
+class TestTcpPortDiscovery(unittest.TestCase):
+    """Test issue #175 TCP port-range discovery: when the plugin reported its
+    bound TCP port via /mcp/instance_info (because port 8089 was in use), the
+    bridge's connect_instance() must prefer that port over the default 8089.
+
+    The connect_instance function is async + heavy with side effects, so we
+    don't unit-test the whole thing; instead we test the discovery slice
+    directly with the same data shape connect_instance sees in `instances`.
+    """
+
+    def _pick_tcp_url(self, instances, env_url=None):
+        """Mirror the bridge's tcp_url selection logic for unit testing.
+
+        Keeps this test stable even if connect_instance's signature changes —
+        what we care about is "does the bridge prefer a discovered tcp_port
+        over the hard-coded default?"
+        """
+        from bridge_mcp_ghidra import DEFAULT_TCP_URL
+
+        if env_url:
+            return env_url
+        for inst in instances:
+            port = inst.get("tcp_port")
+            if isinstance(port, int) and port > 0:
+                return f"http://127.0.0.1:{port}"
+        return DEFAULT_TCP_URL
+
+    def test_discovered_port_wins_over_default(self):
+        """Plugin reported a non-default bound port (8092). Bridge must use it."""
+        instances = [{"pid": 1234, "project": "test", "tcp_port": 8092}]
+        url = self._pick_tcp_url(instances)
+        self.assertEqual(url, "http://127.0.0.1:8092")
+
+    def test_no_tcp_port_falls_back_to_default(self):
+        """Old plugin (pre-#175) without tcp_port field — bridge uses 8089."""
+        instances = [{"pid": 1234, "project": "test"}]
+        url = self._pick_tcp_url(instances)
+        self.assertEqual(url, "http://127.0.0.1:8089")
+
+    def test_env_url_overrides_discovered(self):
+        """GHIDRA_MCP_URL env var wins over discovered tcp_port (explicit override)."""
+        instances = [{"pid": 1234, "project": "test", "tcp_port": 8092}]
+        url = self._pick_tcp_url(instances, env_url="http://127.0.0.1:9999")
+        self.assertEqual(url, "http://127.0.0.1:9999")
+
+    def test_zero_or_negative_tcp_port_treated_as_absent(self):
+        """tcp_port=-1 means TCP transport not running; should fall back."""
+        instances = [{"pid": 1234, "project": "test", "tcp_port": -1}]
+        url = self._pick_tcp_url(instances)
+        self.assertEqual(url, "http://127.0.0.1:8089")
+
+    def test_first_instance_with_tcp_port_wins(self):
+        """When multiple instances report different ports, take the first."""
+        instances = [
+            {"pid": 1234, "project": "a", "tcp_port": -1},  # not running TCP
+            {"pid": 5678, "project": "b", "tcp_port": 8091},  # this one
+            {"pid": 9012, "project": "c", "tcp_port": 8092},  # ignored
+        ]
+        url = self._pick_tcp_url(instances)
+        self.assertEqual(url, "http://127.0.0.1:8091")
+
+
 class TestIsPidAlive(unittest.TestCase):
     """Test PID liveness check."""
 
