@@ -179,13 +179,16 @@ class TestBridgeIsDynamic(unittest.TestCase):
         the added lines are pulling weight (real logic / regression coverage
         / docstrings tied to a fix) rather than gratuitous. Bump deliberately
         when the threshold becomes routine friction, but don't paper over
-        actual bloat. Last bumped 2026-05-10: 2000 -> 2100 to absorb the #187
-        dry_run-collision fix (#193) and the #184 address-space comments.
+        actual bloat. Last bumped 2026-05-12: 2100 -> 2250 to absorb the #170
+        multi-candidate socket-dir scan and #175 TCP port-range discovery
+        (`_scan_tcp_for_project` + new helpers + docstrings). Both pull
+        weight: bug fixes for real reproducible user reports with associated
+        unit test coverage.
         """
         bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
         lines = len(bridge_path.read_text().splitlines())
         self.assertLess(
-            lines, 2100, f"Bridge is {lines} lines, expected <2100 for thin multiplexer"
+            lines, 2250, f"Bridge is {lines} lines, expected <2250 for thin multiplexer"
         )
 
 
