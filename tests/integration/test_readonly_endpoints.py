@@ -111,7 +111,8 @@ class TestProgramInfo:
             params={"include_registers": "false", "include_default_symbols": "false"},
         )
         assert response.status_code == 200
-        data = response.json().get("data", {})
+        # Endpoint returns flat JSON (no `data` wrapper).
+        data = response.json()
         # Core SLEIGH facts must always be present
         for key in (
             "language_id", "processor", "endian", "size", "default_space",
@@ -133,7 +134,7 @@ class TestProgramInfo:
             params={"include_registers": "true", "include_default_symbols": "false"},
         )
         assert response.status_code == 200
-        data = response.json().get("data", {})
+        data = response.json()
         assert "registers" in data
         regs = data["registers"]
         assert isinstance(regs, list)
@@ -478,7 +479,8 @@ class TestFunctionAnalysis:
             },
         )
         assert response.status_code == 200
-        data = response.json().get("data", {})
+        # Endpoint returns flat JSON (no `data` wrapper).
+        data = response.json()
         assert "basic_blocks" in data
         assert isinstance(data["basic_blocks"], list)
         # `basic` granularity omits the high-PcodeOp graph
@@ -508,7 +510,7 @@ class TestFunctionAnalysis:
             },
         )
         assert response.status_code == 200
-        data = response.json().get("data", {})
+        data = response.json()
         assert "basic_blocks" in data
         assert "high_pcodes" in data
         assert isinstance(data["high_pcodes"], list)
