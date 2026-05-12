@@ -101,6 +101,25 @@ class TestProgramInfo:
         response = http_client.get("/get_entry_points")
         assert response.status_code == 200
 
+    def test_mcp_instance_info_on_tcp(self, http_client):
+        """Issue #175 + Copilot review: /mcp/instance_info must be served
+        on the TCP transport too (was UDS-only before this PR). The
+        bridge's TCP port-range scanner relies on this endpoint to identify
+        which project lives on which port. Must include `tcp_port` so the
+        scanner can distinguish port-fallback-aware plugins from older ones
+        that only ever bound to 8089."""
+        response = http_client.get("/mcp/instance_info")
+        assert response.status_code == 200
+        info = response.json()
+        # Required fields the bridge's scanner reads.
+        assert "project" in info, f"missing 'project' in instance_info: {info}"
+        assert "pid" in info
+        assert "tcp_port" in info, "tcp_port must be advertised so port-fallback works"
+        # tcp_port may legitimately be -1 (TCP transport stopped) but the
+        # key must be present so the scanner doesn't false-positive on
+        # older plugins that simply omit it.
+        assert isinstance(info["tcp_port"], int)
+
 
 class TestFunctionListing:
     """Test function listing and query endpoints (read-only)."""
