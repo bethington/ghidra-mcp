@@ -128,7 +128,11 @@ class TestProgramInfo:
     def test_get_language_metadata_with_registers(self, http_client):
         """Issue #192: register list is included when requested. x86 typically
         has 100+ registers; ARM has fewer; either way the list must be
-        non-empty."""
+        non-empty. After Copilot review: every register entry has a stable
+        shape (name/bit_length/is_big_endian/children/aliases always present)
+        and richer fields (description/parent) appear when non-null. Gson
+        strips null values so absence of a key means the underlying value
+        was null, not that the endpoint forgot to emit it."""
         response = http_client.get(
             "/get_language_metadata",
             params={"include_registers": "true", "include_default_symbols": "false"},
@@ -139,10 +143,21 @@ class TestProgramInfo:
         regs = data["registers"]
         assert isinstance(regs, list)
         assert len(regs) > 0
-        # Every register entry has a name and bit_length
-        for r in regs[:5]:  # spot-check the first few
-            assert "name" in r
-            assert "bit_length" in r
+        # Stable fields present on every entry.
+        for r in regs[:5]:
+            for key in ("name", "bit_length", "is_big_endian", "children", "aliases"):
+                assert key in r, f"missing key '{key}' on register: {list(r.keys())}"
+            assert isinstance(r["children"], list)
+            assert isinstance(r["aliases"], list)
+        # At least one register reports a parent (e.g. AX → EAX on x86).
+        # If none do, the parent linkage isn't being emitted at all -- bug.
+        parent_count = sum(1 for r in regs if "parent" in r)
+        assert parent_count > 0, "no register reported a parent linkage"
+        # At least one register reports a description (e.g. EFLAGS bits on x86
+        # carry descriptions). If none do, the description is being silently
+        # dropped server-side.
+        desc_count = sum(1 for r in regs if "description" in r)
+        assert desc_count > 0, "no register reported a description"
 
 
 class TestFunctionListing:
@@ -485,19 +500,29 @@ class TestFunctionAnalysis:
         assert isinstance(data["basic_blocks"], list)
         # `basic` granularity omits the high-PcodeOp graph
         assert "high_pcodes" not in data
-        # Validate shape of the first basic block (if any)
+        # Validate shape of the first basic block (if any). Start/stop are
+        # nested ServiceUtils.addressToJson objects with a guaranteed
+        # 'address' key (and optional address_full/address_space on multi-
+        # space binaries).
         if data["basic_blocks"]:
             bb = data["basic_blocks"][0]
-            assert "start_offset" in bb
-            assert "stop_offset" in bb
+            assert "start" in bb and isinstance(bb["start"], dict)
+            assert "stop" in bb and isinstance(bb["stop"], dict)
+            assert "address" in bb["start"]
+            assert "address" in bb["stop"]
             assert "pcodes" in bb
             assert isinstance(bb["pcodes"], list)
-            # PcodeOps carry mnemonic + opcode if non-empty
+            # PcodeOps carry mnemonic + opcode + SSA varnode flags
             if bb["pcodes"]:
                 op = bb["pcodes"][0]
                 assert "mnemonic" in op
                 assert "opcode" in op
                 assert "inputs" in op
+                # SSA flags now present on every varnode
+                if op["inputs"]:
+                    vn = op["inputs"][0]
+                    for key in ("is_addrtied", "is_hash", "is_persistent", "merge_group"):
+                        assert key in vn, f"missing SSA flag '{key}' on varnode: {vn}"
 
     def test_get_function_pcode_high_granularity(self, http_client, first_function_address):
         """Issue #192: `high` granularity (default) adds the full HighFunction
