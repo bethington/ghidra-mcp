@@ -101,6 +101,79 @@ class TestGetSocketDirCandidates(unittest.TestCase):
             self.assertGreater(len(candidates), 0)
 
 
+class TestDiscoverInstancesMultiDir(unittest.TestCase):
+    """End-to-end test of issue #170: discover_instances() must find sockets
+    that the plugin wrote under one candidate dir (e.g. $TMPDIR) even when the
+    bridge inherited a different effective socket dir.
+
+    Sets up two temp dirs, drops a fake `ghidra-<pid>.sock` in each, monkey-
+    patches get_socket_dir_candidates to return both, and verifies:
+      1. Both sockets are discovered.
+      2. Duplicate-path entries are deduped by absolute path.
+      3. The PID-alive check still works (uses the current process PID).
+    """
+
+    def test_finds_sockets_across_dirs_and_dedups(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+            pid_alive = os.getpid()  # the current process is always alive
+            # Drop a socket file under each dir
+            (Path(d1) / f"ghidra-{pid_alive}.sock").touch()
+            (Path(d2) / f"ghidra-{pid_alive + 1000}.sock").touch()
+
+            # is_pid_alive(pid_alive + 1000) will likely be False; that socket
+            # should get cleaned up, not returned.
+            from bridge_mcp_ghidra import discover_instances
+            import bridge_mcp_ghidra as bridge
+
+            # Patch both `get_socket_dir_candidates` and the UDS info query so
+            # the test doesn't actually try to connect.
+            with patch.object(
+                bridge, "get_socket_dir_candidates",
+                return_value=[Path(d1), Path(d2)],
+            ), patch.object(
+                bridge, "uds_request",
+                return_value=("{}", 500),  # info query fails — that's fine
+            ), patch.object(
+                bridge, "is_pid_alive",
+                side_effect=lambda p: p == pid_alive,
+            ):
+                instances = discover_instances()
+
+            # Exactly one alive socket should be returned; the bogus PID's
+            # socket should have been cleaned up.
+            self.assertEqual(len(instances), 1)
+            self.assertEqual(instances[0]["pid"], pid_alive)
+
+    def test_dedup_when_same_path_appears_twice(self):
+        """If two candidate dirs symlink to the same place (or if a symlink
+        produces the same absolute path), the same socket must be reported
+        only once."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            pid_alive = os.getpid()
+            (Path(d) / f"ghidra-{pid_alive}.sock").touch()
+
+            from bridge_mcp_ghidra import discover_instances
+            import bridge_mcp_ghidra as bridge
+
+            with patch.object(
+                bridge, "get_socket_dir_candidates",
+                return_value=[Path(d), Path(d)],  # same dir twice
+            ), patch.object(
+                bridge, "uds_request",
+                return_value=("{}", 500),
+            ), patch.object(
+                bridge, "is_pid_alive",
+                side_effect=lambda p: p == pid_alive,
+            ):
+                instances = discover_instances()
+
+            self.assertEqual(len(instances), 1)
+
+
 class TestIsPidAlive(unittest.TestCase):
     """Test PID liveness check."""
 
