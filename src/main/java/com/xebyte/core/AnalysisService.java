@@ -4778,6 +4778,210 @@ public class AnalysisService {
         if (r == null) return false;
         return r.equals(target) || target.contains(r) || r.contains(target);
     }
+
+    // ----------------------------------------------------------------------
+    // Issue #192: P-code dump + language metadata
+    // ----------------------------------------------------------------------
+
+    private static Map<String, Object> varnodeToJson(Varnode v) {
+        if (v == null) return null;
+        Map<String, Object> m = new LinkedHashMap<>();
+        Address a = v.getAddress();
+        m.put("space", a != null && a.getAddressSpace() != null ? a.getAddressSpace().getName() : null);
+        m.put("offset", a != null ? Long.toHexString(a.getOffset()) : null);
+        m.put("size", v.getSize());
+        m.put("is_register", v.isRegister());
+        m.put("is_constant", v.isConstant());
+        m.put("is_unique", v.isUnique());
+        return m;
+    }
+
+    private static Map<String, Object> pcodeOpToJson(PcodeOp op) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("mnemonic", op.getMnemonic());
+        m.put("opcode", op.getOpcode());
+        Address seq = op.getSeqnum() != null ? op.getSeqnum().getTarget() : null;
+        if (seq != null) {
+            m.put("seq_offset", Long.toHexString(seq.getOffset()));
+            m.put("seq_space", seq.getAddressSpace().getName());
+        }
+        List<Map<String, Object>> inputs = new ArrayList<>();
+        Varnode[] vis = op.getInputs();
+        if (vis != null) {
+            for (Varnode v : vis) inputs.add(varnodeToJson(v));
+        }
+        m.put("inputs", inputs);
+        m.put("output", varnodeToJson(op.getOutput()));
+        return m;
+    }
+
+    @McpTool(path = "/get_function_pcode",
+             description = "Dump raw P-code for a function (issue #192). Returns low (basic-iter) and high (HighFunction) P-code with basic blocks and varnodes. Granularity controls output: 'basic' = basic-block iter only (less memory), 'high' = HighFunction graph (default; includes both BB iter and op-iter). For P-code emulators / ML pipelines / alternative decompilers.",
+             category = "analysis")
+    public Response getFunctionPcode(
+            @Param(value = "function_address", paramType = "address",
+                   description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddress,
+            @Param(value = "granularity", defaultValue = "high",
+                   description = "'basic' = raw PcodeOps from basic-block iter only; 'high' = HighFunction P-code graph (default; richer, includes varnode SSA info).") String granularity,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit for active program).") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        Address addr = ServiceUtils.parseAddress(program, functionAddress);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        Function func = program.getFunctionManager().getFunctionAt(addr);
+        if (func == null) func = program.getFunctionManager().getFunctionContaining(addr);
+        if (func == null) return Response.err("No function at address: " + functionAddress);
+
+        DecompileResults decompResults = functionService.decompileFunctionNoRetry(func, program);
+        if (decompResults == null || !decompResults.decompileCompleted()) {
+            return Response.err("Decompilation failed for " + func.getName());
+        }
+        HighFunction hf = decompResults.getHighFunction();
+        if (hf == null) {
+            return Response.err("No HighFunction available for " + func.getName());
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("name", func.getName());
+        out.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+
+        // Basic-block-level P-code (raw iteration order, matches the issue's
+        // requested "getBasicIter" output shape).
+        boolean wantHigh = !"basic".equalsIgnoreCase(granularity);
+        List<Map<String, Object>> basicBlocks = new ArrayList<>();
+        try {
+            for (var bb : hf.getBasicBlocks()) {
+                Map<String, Object> bbMap = new LinkedHashMap<>();
+                Address start = bb.getStart();
+                Address stop = bb.getStop();
+                bbMap.put("start_space", start.getAddressSpace().getName());
+                bbMap.put("start_offset", Long.toHexString(start.getOffset()));
+                bbMap.put("stop_space", stop.getAddressSpace().getName());
+                bbMap.put("stop_offset", Long.toHexString(stop.getOffset()));
+                List<Map<String, Object>> bbOps = new ArrayList<>();
+                var iter = bb.getIterator();
+                while (iter.hasNext()) {
+                    bbOps.add(pcodeOpToJson(iter.next()));
+                }
+                bbMap.put("pcodes", bbOps);
+                basicBlocks.add(bbMap);
+            }
+        } catch (Exception e) {
+            out.put("basic_blocks_error", e.getMessage());
+        }
+        out.put("basic_blocks", basicBlocks);
+
+        if (wantHigh) {
+            // HighFunction global PcodeOp iterator
+            List<Map<String, Object>> highOps = new ArrayList<>();
+            try {
+                var allOps = hf.getPcodeOps();
+                while (allOps.hasNext()) {
+                    PcodeOpAST op = allOps.next();
+                    highOps.add(pcodeOpToJson(op));
+                }
+            } catch (Exception e) {
+                out.put("high_pcodes_error", e.getMessage());
+            }
+            out.put("high_pcodes", highOps);
+        }
+
+        return Response.ok(out);
+    }
+
+    @McpTool(path = "/get_language_metadata",
+             description = "Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192). Use for P-code emulators / ML pipelines that need the SLEIGH-level facts. include_registers/include_default_symbols toggle expensive sections.",
+             category = "program")
+    public Response getLanguageMetadata(
+            @Param(value = "include_registers", defaultValue = "true",
+                   description = "Include the full register list (can be hundreds of entries on x86).") String includeRegistersStr,
+            @Param(value = "include_default_symbols", defaultValue = "true",
+                   description = "Include the language's default symbol set (entry points, interrupt vectors).") String includeDefaultSymbolsStr,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit for active program).") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        boolean includeRegisters = !"false".equalsIgnoreCase(includeRegistersStr);
+        boolean includeDefaultSymbols = !"false".equalsIgnoreCase(includeDefaultSymbolsStr);
+
+        ghidra.program.model.lang.Language lang = program.getLanguage();
+        ghidra.program.model.lang.LanguageDescription ld = lang.getLanguageDescription();
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("language_id", lang.getLanguageID().getIdAsString());
+        out.put("processor", lang.getProcessor().toString());
+        out.put("endian", ld.getEndian().toString());
+        out.put("size", ld.getSize());
+        out.put("variant", ld.getVariant());
+        out.put("default_space", lang.getDefaultSpace() != null ? lang.getDefaultSpace().getName() : null);
+        out.put("default_data_space", lang.getDefaultDataSpace() != null ? lang.getDefaultDataSpace().getName() : null);
+        Register pc = lang.getProgramCounter();
+        out.put("program_counter", pc != null ? pc.getName() : null);
+
+        // Address spaces
+        List<Map<String, Object>> spaces = new ArrayList<>();
+        for (var space : program.getAddressFactory().getAllAddressSpaces()) {
+            Map<String, Object> s = new LinkedHashMap<>();
+            s.put("name", space.getName());
+            s.put("id", space.getSpaceID());
+            s.put("size", space.getSize());
+            s.put("pointer_size", space.getPointerSize());
+            s.put("type", space.getType());
+            Address min = space.getMinAddress();
+            Address max = space.getMaxAddress();
+            if (min != null) s.put("min_offset", Long.toHexString(min.getOffset()));
+            if (max != null) s.put("max_offset", Long.toHexString(max.getOffset()));
+            spaces.add(s);
+        }
+        out.put("address_spaces", spaces);
+
+        if (includeRegisters) {
+            List<Map<String, Object>> regs = new ArrayList<>();
+            for (Register r : lang.getRegisters()) {
+                Map<String, Object> rj = new LinkedHashMap<>();
+                rj.put("name", r.getName());
+                rj.put("bit_length", r.getBitLength());
+                rj.put("is_big_endian", r.isBigEndian());
+                Address ra = r.getAddress();
+                if (ra != null) {
+                    rj.put("space", ra.getAddressSpace().getName());
+                    rj.put("offset", Long.toHexString(ra.getOffset()));
+                }
+                List<String> children = new ArrayList<>();
+                for (Register c : r.getChildRegisters()) children.add(c.getName());
+                rj.put("children", children);
+                regs.add(rj);
+            }
+            out.put("registers", regs);
+        }
+
+        if (includeDefaultSymbols) {
+            List<Map<String, Object>> syms = new ArrayList<>();
+            try {
+                for (var info : lang.getDefaultSymbols()) {
+                    Map<String, Object> sj = new LinkedHashMap<>();
+                    sj.put("label", info.getLabel());
+                    Address a = info.getAddress();
+                    if (a != null) {
+                        sj.put("space", a.getAddressSpace().getName());
+                        sj.put("offset", Long.toHexString(a.getOffset()));
+                    }
+                    syms.add(sj);
+                }
+            } catch (Exception e) {
+                out.put("default_symbols_error", e.getMessage());
+            }
+            out.put("default_symbols", syms);
+        }
+
+        return Response.ok(out);
+    }
 }
 
 
