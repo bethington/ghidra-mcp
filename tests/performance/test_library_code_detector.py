@@ -227,6 +227,37 @@ def test_hard_callee_names_set_is_nonempty_and_canonical():
     assert "__chkstk" not in HARD_CALLEE_NAMES
 
 
+def test_v591_locale_atexit_patterns_added():
+    """v5.9.1 added _Atexit / _Setgloballocale / TLS-lazy-init helpers to
+    HARD_CALLEE_NAMES. Caught the SetGlobalLocale miss observed on release
+    day where the worker spent 92K tokens documenting an msvcp library
+    thunk. These symbols are MSVCP internals; user code uses `atexit()`
+    (no underscore) and never calls `_Setgloballocale` directly."""
+    for sym in ("_Atexit", "_Setgloballocale", "__dyn_tls_init", "__tlregdtor"):
+        assert sym in HARD_CALLEE_NAMES, f"v5.9.1 pattern missing: {sym}"
+
+
+def test_set_global_locale_pattern_classifies():
+    """End-to-end check using a synthetic version of the BH.dll
+    SetGlobalLocale body that escaped detection in v5.9.0. The decompile
+    body contains a call to `_Atexit` (the MSVCP atexit-registration
+    helper) and references `std::locale`, which together must classify
+    as library."""
+    body = '''
+    void SetGlobalLocale(void *pFacet) {
+        if (g_bGlobalLocaleFacetInitialized == 0) {
+            g_bGlobalLocaleFacetInitialized = 1;
+            _Atexit(_Cleanup_global_locale);
+        }
+        g_pGlobalLocaleFacet = pFacet;
+        // see std::locale internal init
+    }
+    '''
+    result = detect_library_code("SetGlobalLocale", body)
+    assert result.is_library, f"v5.9.0 miss should now classify: {result}"
+    assert any("_Atexit" in r for r in result.reasons), result.reasons
+
+
 def test_confidence_increases_with_more_hits():
     """Multiple hard hits should push confidence higher than single hits."""
     body_one = "void foo() { __SEH_prolog4(); }"

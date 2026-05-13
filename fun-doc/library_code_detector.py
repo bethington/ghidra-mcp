@@ -77,6 +77,17 @@ HARD_CALLEE_NAMES = frozenset({
     # iostream helpers — dead giveaways for ParseSignedShort-style code
     # that never appear in authored user functions.
     "_Xinvalid_argument", "_Xout_of_range", "_Xlength_error", "_Xbad_alloc",
+    # std::locale / atexit-registration helpers (v5.9.1 — caught the
+    # SetGlobalLocale miss). These are MSVCP library internals; user code
+    # registers atexit handlers via `atexit()` (no underscore) and never
+    # calls `_Setgloballocale` / `_Atexit` directly.
+    "_Atexit", "_Setgloballocale",
+    "_Getcoll", "_Getfac", "_Getfmt",
+    # CRT thread-local-storage lazy resolution. The DATATBLS_LazyResolve
+    # family on BH.dll matched this pattern -- it's the MSVCRT lazy TLS
+    # callback machinery, not user code.
+    "__dyn_tls_init", "__dyn_tls_dtor",
+    "__tlregdtor",
 })
 
 # Substrings that, when present in the decompile body, indicate library code.

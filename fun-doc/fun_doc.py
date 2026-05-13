@@ -96,6 +96,36 @@ try:
 except (AttributeError, OSError):
     pass
 
+# Loud-fail guard: fun-doc requires SQL backend since v5.8.0. If sqlalchemy
+# is missing, the storage layer silently falls back to legacy state.json,
+# which (a) doesn't get the library_code denormalization, (b) makes new
+# workflows invisible to the SQL-backed dashboard, and (c) leaves the
+# operator wondering why their /api/stats counters are flat (1692 runs
+# observed in runs.jsonl, 0 in state.db — confirmed in a v5.9.0 release-
+# day incident where the dashboard was launched from the system Python).
+# Better to refuse to start than to half-work.
+try:
+    import sqlalchemy  # noqa: F401
+except ImportError:
+    sys.stderr.write(
+        "ERROR: fun-doc requires the 'sqlalchemy' package (v5.8.0+).\n"
+        "\n"
+        "You appear to be running fun_doc.py from a Python interpreter that\n"
+        f"  doesn't have sqlalchemy installed (sys.executable={sys.executable}).\n"
+        "\n"
+        "Fix one of:\n"
+        "  1. Use the project venv:\n"
+        "       .venv/Scripts/python.exe -u fun_doc.py  (Windows)\n"
+        "       .venv/bin/python    -u fun_doc.py       (Linux/macOS)\n"
+        "  2. Install the missing dependency into the current interpreter:\n"
+        "       pip install -r requirements.txt\n"
+        "\n"
+        "Refusing to start with a missing storage backend rather than silently\n"
+        "falling back to legacy state.json — your workflow updates would not\n"
+        "persist to state.db and dashboard counters would underreport.\n"
+    )
+    sys.exit(1)
+
 from event_bus import emit as bus_emit, get_bus, get_worker_id
 from library_code_detector import detect_library_code, format_plate as format_library_plate
 
