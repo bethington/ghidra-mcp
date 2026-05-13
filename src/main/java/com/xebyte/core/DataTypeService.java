@@ -1463,11 +1463,11 @@ public class DataTypeService {
                         struct.replace(targetComponent.getOrdinal(), newDataType, newDataType.getLength());
                     }
 
-                    // If new name is specified, auto-fix Hungarian prefix and change the field name
+                    // If new name is specified, apply the configured field naming policy.
                     if (newName != null && !newName.isEmpty()) {
                         targetComponent = struct.getComponent(targetComponent.getOrdinal()); // Refresh component
                         String fieldTypeName = targetComponent.getDataType().getName();
-                        String fixedName = NamingConventions.autoFixFieldPrefix(newName, fieldTypeName);
+                        String fixedName = NamingConventions.applyStructFieldNamingPolicy(newName, fieldTypeName);
                         targetComponent.setFieldName(fixedName);
                     }
 
@@ -1509,8 +1509,8 @@ public class DataTypeService {
         if (fieldName == null || fieldName.isEmpty()) return Response.text("Field name is required");
         if (fieldType == null || fieldType.isEmpty()) return Response.text("Field type is required");
 
-        // Auto-fix Hungarian prefix
-        fieldName = NamingConventions.autoFixFieldPrefix(fieldName, fieldType);
+        // Apply configured struct-field naming policy.
+        fieldName = NamingConventions.applyStructFieldNamingPolicy(fieldName, fieldType);
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -2795,9 +2795,9 @@ public class DataTypeService {
             Msg.error(this, "Error parsing JSON object: " + e.getMessage());
         }
 
-        // Auto-fix Hungarian prefix on field name
+        // Apply configured struct-field naming policy.
         if (name != null && type != null) {
-            name = NamingConventions.autoFixFieldPrefix(name, type);
+            name = NamingConventions.applyStructFieldNamingPolicy(name, type);
         }
 
         return new FieldDefinition(name, type, offset);

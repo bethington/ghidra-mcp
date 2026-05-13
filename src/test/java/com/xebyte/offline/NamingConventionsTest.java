@@ -2,6 +2,7 @@ package com.xebyte.offline;
 
 import com.xebyte.core.NamingConventions;
 import com.xebyte.core.NamingConventions.NameQualityResult;
+import com.xebyte.core.NamingPolicy;
 import junit.framework.TestCase;
 
 import java.util.Arrays;
@@ -621,5 +622,41 @@ public class NamingConventionsTest extends TestCase {
         // Pin the threshold — changing it requires updating the prompt
         // wrap-target guidance in step-globals.md.
         assertEquals(80, NamingConventions.PLATE_LINE_CLIP_THRESHOLD);
+    }
+
+    // ---------- struct-field naming policy ----------
+
+    public void testStructFieldPolicyAutoFixesWhenStrictNamingEnabled() {
+        NamingPolicy policy = NamingPolicy.getInstance();
+        boolean originalValue = policy.isStrictNamingEnforcement();
+        String originalSource = policy.getSource();
+
+        try {
+            policy.setStrictNamingEnforcement(true, "test");
+            assertEquals("dwItem_count",
+                    NamingConventions.applyStructFieldNamingPolicy("item_count", "uint"));
+            assertEquals("pNext_item",
+                    NamingConventions.applyStructFieldNamingPolicy("next_item", "void *"));
+        } finally {
+            policy.setStrictNamingEnforcement(originalValue, originalSource);
+        }
+    }
+
+    public void testStructFieldPolicyPreservesNamesWhenStrictNamingDisabled() {
+        NamingPolicy policy = NamingPolicy.getInstance();
+        boolean originalValue = policy.isStrictNamingEnforcement();
+        String originalSource = policy.getSource();
+
+        try {
+            policy.setStrictNamingEnforcement(false, "test");
+            assertEquals("item_count",
+                    NamingConventions.applyStructFieldNamingPolicy("item_count", "uint"));
+            assertEquals("next_item",
+                    NamingConventions.applyStructFieldNamingPolicy("next_item", "void *"));
+            assertEquals("is_enabled",
+                    NamingConventions.applyStructFieldNamingPolicy("is_enabled", "bool"));
+        } finally {
+            policy.setStrictNamingEnforcement(originalValue, originalSource);
+        }
     }
 }
