@@ -8,13 +8,29 @@ will silently use the SQL backend instead of the legacy file path the test
 is trying to validate.
 
 This conftest provides an autouse fixture that:
-  * Removes any stray ``fun-doc/state.db`` left over from prior tests.
   * Resets the cached storage repo on the fun_doc module so the next
     test that calls _get_storage_repo() re-runs init logic.
 
 Tests that explicitly want the SQL backend (test_storage_*.py) construct
 their own Repository against a tmp_path SQLite or testcontainers PG, so
 this autouse cleanup doesn't interfere with them.
+
+DESTRUCTIVE-FIXTURE GUARD (v5.9.1)
+==================================
+Previous versions of this conftest also unconditionally deleted
+``fun-doc/state.db`` before AND after every test. That was correct in a
+clean-repo / CI context where the file is purely a leftover test
+artifact — but in a developer environment the file holds the LIVE
+fun-doc database (workflow state, run history, library_code flags).
+Running ``pytest tests/performance/`` on a working repo wiped the
+user's database to 0 bytes (real incident: 65 library_code flags and
+36k+ runs lost; recoverable only by re-running
+scripts/migrate_state_to_sql.py against state.json).
+
+We now check the size of state.db before deleting and refuse to remove
+files that look populated. A populated database is preserved; only
+truly-empty (0-byte) leftover files get cleaned. Tests that genuinely
+need a fresh SQL backend create their own under tmp_path.
 """
 
 from __future__ import annotations
@@ -27,17 +43,37 @@ import pytest
 
 _FUNDOC_DIR = Path(__file__).resolve().parent.parent.parent / "fun-doc"
 _DEFAULT_STATE_DB = _FUNDOC_DIR / "state.db"
+# Anything larger than this is treated as a real user database, not a
+# stray test artifact. A fresh-bootstrap schema-only SQLite file is
+# typically ~50-150 KB; we use 512 KB as a comfortable threshold.
+_USER_DB_SIZE_THRESHOLD_BYTES = 512 * 1024
+
+
+def _safe_clean_state_db() -> None:
+    """Delete ``fun-doc/state.db`` only if it's empty or trivially small.
+
+    Refuses to delete user data. Tests that need a guaranteed fresh DB
+    should construct one under ``tmp_path`` instead of relying on this.
+    """
+    if not _DEFAULT_STATE_DB.exists():
+        return
+    try:
+        size = _DEFAULT_STATE_DB.stat().st_size
+    except OSError:
+        return
+    if size > _USER_DB_SIZE_THRESHOLD_BYTES:
+        # Looks like the user's live database — leave it alone.
+        return
+    try:
+        _DEFAULT_STATE_DB.unlink()
+    except OSError:
+        pass
 
 
 @pytest.fixture(autouse=True)
 def _isolate_storage_repo():
     """Reset the fun_doc storage repo singleton + clean stray state.db."""
-    # Pre-test: clear any leftover default state.db from prior runs.
-    if _DEFAULT_STATE_DB.exists():
-        try:
-            _DEFAULT_STATE_DB.unlink()
-        except OSError:
-            pass
+    _safe_clean_state_db()
     # Pre-test: drop the cached repo so the next call re-initializes.
     if "fun_doc" in sys.modules:
         fd = sys.modules["fun_doc"]
@@ -56,8 +92,4 @@ def _isolate_storage_repo():
                 pass
             fd._storage_repo = None
         fd._storage_repo_failed = False
-    if _DEFAULT_STATE_DB.exists():
-        try:
-            _DEFAULT_STATE_DB.unlink()
-        except OSError:
-            pass
+    _safe_clean_state_db()
