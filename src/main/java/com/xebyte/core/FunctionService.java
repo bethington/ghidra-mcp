@@ -2347,7 +2347,7 @@ public class FunctionService {
      * @param restrictToExecuteMemory If true, restricts disassembly to executable memory (default: true)
      * @return JSON result with disassembly status
      */
-    @McpTool(path = "/disassemble_bytes", method = "POST", description = "Disassemble a range of bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/disassemble_bytes", method = "POST", description = "Disassemble a range of bytes. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution. Returns the disassembled instruction text (mnemonic + operands + bytes) when `include_instructions` is true (default), so callers working on custom processor definitions (#205) can read back what Ghidra produced without a follow-up call.", category = "function")
     public Response disassembleBytes(
             @Param(value = "start_address", paramType = "address", source = ParamSource.BODY,
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
@@ -2363,6 +2363,10 @@ public class FunctionService {
                                + "address is unambiguous.") String endAddress,
             @Param(value = "length", source = ParamSource.BODY, defaultValue = "0") Integer length,
             @Param(value = "restrict_to_execute_memory", source = ParamSource.BODY, defaultValue = "true") boolean restrictToExecuteMemory,
+            @Param(value = "include_instructions", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Return the disassembled instruction list (mnemonic, operands, raw bytes, address) in the response. Disable for byte ranges where you only need the success/byte-count summary.") boolean includeInstructions,
+            @Param(value = "max_instructions", source = ParamSource.BODY, defaultValue = "1000",
+                   description = "Cap on number of instructions returned when include_instructions is true. Protects against runaway payload for large ranges; if the actual count exceeds this, the response sets truncated=true and instructions_total reports the real count.") int maxInstructions,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -2470,13 +2474,65 @@ public class FunctionService {
                     if (cmd.applyTo(program, ghidra.util.task.TaskMonitor.DUMMY)) {
                         // Success - build result
                         Msg.debug(this, "disassembleBytes: Successfully disassembled " + numBytes + " byte(s) from " + start + " to " + end);
-                        resultData.set(JsonHelper.mapOf(
-                            "success", true,
-                            "start_address", start.toString(),
-                            "end_address", end.toString(),
-                            "bytes_disassembled", numBytes,
-                            "message", "Successfully disassembled " + numBytes + " byte(s)"
-                        ));
+                        Map<String, Object> result = new java.util.LinkedHashMap<>();
+                        result.put("success", true);
+                        result.put("start_address", start.toString());
+                        result.put("end_address", end.toString());
+                        result.put("bytes_disassembled", numBytes);
+                        result.put("message", "Successfully disassembled " + numBytes + " byte(s)");
+
+                        // Issue #205: surface the actual instruction text so
+                        // callers working on custom processor definitions can
+                        // read back what Ghidra produced without a follow-up
+                        // /disassemble_function call.
+                        if (includeInstructions) {
+                            List<Map<String, Object>> instructions = new java.util.ArrayList<>();
+                            int truncatedLimit = Math.max(1, maxInstructions);
+                            int totalCount = 0;
+                            Listing listing = program.getListing();
+                            ghidra.program.model.listing.InstructionIterator instIter =
+                                listing.getInstructions(addressSet, true);
+                            while (instIter.hasNext()) {
+                                ghidra.program.model.listing.Instruction inst = instIter.next();
+                                totalCount++;
+                                if (instructions.size() < truncatedLimit) {
+                                    Map<String, Object> instJson = new java.util.LinkedHashMap<>();
+                                    instJson.put("address", inst.getAddress().toString());
+                                    instJson.put("mnemonic", inst.getMnemonicString());
+                                    // Operands joined with comma to match the
+                                    // visible listing format users see in the GUI.
+                                    String[] operands = new String[inst.getNumOperands()];
+                                    for (int i = 0; i < operands.length; i++) {
+                                        operands[i] = inst.getDefaultOperandRepresentation(i);
+                                    }
+                                    instJson.put("operands", String.join(", ", operands));
+                                    instJson.put("length", inst.getLength());
+                                    // Raw bytes as lowercase hex string for
+                                    // emulator / encoder verification.
+                                    try {
+                                        byte[] bytes = inst.getBytes();
+                                        StringBuilder hex = new StringBuilder(bytes.length * 2);
+                                        for (byte b : bytes) {
+                                            hex.append(String.format("%02x", b));
+                                        }
+                                        instJson.put("bytes", hex.toString());
+                                    } catch (Exception e) {
+                                        instJson.put("bytes", null);
+                                    }
+                                    instructions.add(instJson);
+                                }
+                            }
+                            result.put("instructions", instructions);
+                            result.put("instructions_total", totalCount);
+                            if (totalCount > instructions.size()) {
+                                result.put("truncated", true);
+                                result.put("truncation_note", "max_instructions=" + truncatedLimit
+                                    + " reached; raise the cap to get the rest.");
+                            } else {
+                                result.put("truncated", false);
+                            }
+                        }
+                        resultData.set(result);
                         success = true;
                     } else {
                         errorMsg.set("Disassembly failed: " + cmd.getStatusMsg());
@@ -2511,9 +2567,23 @@ public class FunctionService {
         return Response.err("Unknown failure");
     }
 
+    /**
+     * Back-compat overloads for callers that don't care about the
+     * include_instructions / max_instructions options added for issue #205.
+     * Default to the new behavior (instructions included, 1000-instruction cap)
+     * so the headless and registry paths surface the same data as the MCP
+     * endpoint.
+     */
     public Response disassembleBytes(String startAddress, String endAddress, Integer length,
                                    boolean restrictToExecuteMemory) {
-        return disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory, null);
+        return disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory,
+                                true, 1000, null);
+    }
+
+    public Response disassembleBytes(String startAddress, String endAddress, Integer length,
+                                   boolean restrictToExecuteMemory, String programName) {
+        return disassembleBytes(startAddress, endAddress, length, restrictToExecuteMemory,
+                                true, 1000, programName);
     }
 
     // ========================================================================

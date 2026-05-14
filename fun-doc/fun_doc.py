@@ -5085,9 +5085,21 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
             ErrorEvent,
             ResultEvent,
         )
-    except ImportError:
+    except ImportError as e:
+        # The PyPI build of gemini-cli-sdk 0.1.0 is missing GeminiCli; the
+        # working version lives in a local source tree that hasn't been
+        # republished. Issue #201 tracks the fix. For now, surface a clear
+        # path forward instead of a bare ImportError.
         print(
-            "ERROR: gemini-cli-sdk not installed. Run: pip install gemini-cli-sdk",
+            f"ERROR: gemini-cli-sdk import failed ({e}).\n"
+            f"\n"
+            f"  The published PyPI version (0.1.0) lacks the GeminiCli class\n"
+            f"  this worker uses. Fix is tracked in ghidra-mcp issue #201.\n"
+            f"\n"
+            f"  Workaround until a working version is published: switch\n"
+            f"  fun-doc's primary provider in priority_queue.json to one of\n"
+            f"  'minimax', 'claude', or 'codex' (config.provider_models),\n"
+            f"  OR pin gemini-cli-sdk to a working build from source.\n",
             file=sys.stderr,
         )
         return None
