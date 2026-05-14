@@ -100,10 +100,12 @@ except (AttributeError, OSError):
 # is missing, the storage layer silently falls back to legacy state.json,
 # which (a) doesn't get the library_code denormalization, (b) makes new
 # workflows invisible to the SQL-backed dashboard, and (c) leaves the
-# operator wondering why their /api/stats counters are flat (1692 runs
-# observed in runs.jsonl, 0 in state.db — confirmed in a v5.9.0 release-
-# day incident where the dashboard was launched from the system Python).
-# Better to refuse to start than to half-work.
+# operator wondering why their /api/stats counters are flat. Confirmed in
+# two v5.9.0 release-day incidents where the dashboard was launched from
+# the system Python (no sqlalchemy) — both times silently fell back, the
+# user accumulated hours of worker activity that never landed in state.db,
+# and recovery required re-running migrate_state_to_sql.py. Better to
+# refuse to start than to half-work.
 try:
     import sqlalchemy  # noqa: F401
 except ImportError:
@@ -121,7 +123,7 @@ except ImportError:
         "       pip install -r requirements.txt\n"
         "\n"
         "Refusing to start with a missing storage backend rather than silently\n"
-        "falling back to legacy state.json — your workflow updates would not\n"
+        "falling back to legacy state.json -- your workflow updates would not\n"
         "persist to state.db and dashboard counters would underreport.\n"
     )
     sys.exit(1)

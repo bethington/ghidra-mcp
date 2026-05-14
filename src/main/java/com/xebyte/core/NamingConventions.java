@@ -602,6 +602,21 @@ public final class NamingConventions {
         }
     }
 
+    /**
+     * Apply struct-field naming policy for write endpoints.
+     *
+     * <p>When strict naming enforcement is enabled, preserve the historical
+     * Hungarian auto-prefix behavior. When it is disabled, return the field
+     * name exactly as supplied so non-Hungarian projects can keep their local
+     * convention.
+     */
+    public static String applyStructFieldNamingPolicy(String fieldName, String typeName) {
+        if (!NamingPolicy.getInstance().shouldAutoFixStructFieldPrefixes()) {
+            return fieldName;
+        }
+        return autoFixFieldPrefix(fieldName, typeName);
+    }
+
     // -----------------------------------------------------------------------
     // Type validation
     // -----------------------------------------------------------------------

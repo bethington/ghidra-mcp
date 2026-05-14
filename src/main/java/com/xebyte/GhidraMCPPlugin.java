@@ -313,8 +313,9 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             NamingPolicy.defaultStrictNamingEnforcement(), null,
             "Reject function/global names that fail the built-in name-quality checks " +
             "on rename_function_by_address, rename_data, rename_global_variable, " +
-            "set_global, and related write guards. Disable when your naming convention " +
-            "does not match the built-in heuristic; convention warnings are still returned. " +
+            "set_global, and related write guards. Also controls struct-field " +
+            "Hungarian prefix auto-fixes. Disable when your naming convention " +
+            "does not match the built-in heuristic; function/global convention warnings are still returned. " +
             "Takes effect when the MCP server starts or restarts.");
         migrateLegacyNamingOption(options);
         refreshNamingPolicyFromOptions();

@@ -39,6 +39,18 @@ public final class NamingPolicy {
         return strictNamingEnforcement;
     }
 
+    /**
+     * Whether write endpoints should rewrite struct field names to match the
+     * built-in Hungarian-prefix convention.
+     *
+     * <p>This intentionally follows the strict naming option: users who disable
+     * the built-in convention should be able to preserve names chosen by their
+     * agent, including snake_case fields.
+     */
+    public boolean shouldAutoFixStructFieldPrefixes() {
+        return strictNamingEnforcement;
+    }
+
     public String getSource() {
         return source;
     }
