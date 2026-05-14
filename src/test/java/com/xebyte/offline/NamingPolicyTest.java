@@ -20,10 +20,12 @@ public class NamingPolicyTest extends TestCase {
         try {
             policy.setStrictNamingEnforcement(false, "test");
             assertFalse(policy.isStrictNamingEnforcement());
+            assertFalse(policy.shouldAutoFixStructFieldPrefixes());
             assertEquals("test", policy.getSource());
 
             policy.setStrictNamingEnforcement(true, "test");
             assertTrue(policy.isStrictNamingEnforcement());
+            assertTrue(policy.shouldAutoFixStructFieldPrefixes());
         } finally {
             policy.setStrictNamingEnforcement(originalValue, originalSource);
         }

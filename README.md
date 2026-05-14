@@ -352,12 +352,15 @@ GhidraMCP is designed for **localhost-only development**. The default configurat
 
 Name-quality enforcement is separate from security. By default,
 `rename_function_by_address` and global write endpoints reject names that fail
-the built-in quality gates. Disable the hard-reject layer with **Edit > Tool
-Options > GhidraMCP HTTP Server > Strict Naming Enforcement**. The same
-Tool Options checkbox covers `rename_data`, `rename_global_variable`,
-`set_global`, and the `apply_data_type` prefix/type guard. The setting is read
-when the MCP server starts or restarts. Convention warnings are still returned
-when enforcement is disabled.
+the built-in quality gates, and struct field writes apply the built-in field
+prefix convention. Disable the built-in convention layer with **Edit > Tool
+Options > GhidraMCP HTTP Server > Strict Naming Enforcement**. The same Tool
+Options checkbox covers `rename_data`, `rename_global_variable`,
+`set_global`, the `apply_data_type` prefix/type guard, and struct-field
+Hungarian prefix auto-fixes in `create_struct`, `add_struct_field`, and
+`modify_struct_field`. The setting is read when the MCP server starts or
+restarts. Function/global convention warnings are still returned when
+enforcement is disabled.
 
 ### Example: exposing to a private LAN with auth
 

@@ -4,6 +4,17 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **#200**: Disabling **Strict Naming Enforcement** now also preserves
+  agent-provided struct field names. `create_struct`, `add_struct_field`, and
+  `modify_struct_field` no longer auto-add Hungarian prefixes when the built-in
+  naming convention is disabled.
+
+---
+
 ## v5.9.0 - 2026-05-12 (community fixes + P-code endpoints + library-code detector)
 
 Bundles three community-reported bug fixes (#170, #175, #192) plus an
