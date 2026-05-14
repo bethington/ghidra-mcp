@@ -254,6 +254,19 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
    }
    ```
 
+### Installation (Arch Linux — AUR)
+
+[@Pandoriaantje](https://github.com/Pandoriaantje) maintains community AUR packages:
+
+- [`ghidra-mcp-git`](https://aur.archlinux.org/packages/ghidra-mcp-git) — tracks `main`
+- [`ghidra-mcp`](https://aur.archlinux.org/packages/ghidra-mcp) — tracks tagged releases
+
+Install with your AUR helper of choice, e.g.:
+
+```bash
+yay -S ghidra-mcp        # or ghidra-mcp-git
+```
+
 ### Basic Usage
 
 #### Option 1: Stdio Transport (Recommended for AI tools)
