@@ -954,6 +954,8 @@
         "end_address",
         "length",
         "restrict_to_execute_memory",
+        "include_instructions",
+        "max_instructions",
         "program"
       ],
       "description": "Disassemble byte range"
