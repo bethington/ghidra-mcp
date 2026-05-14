@@ -6725,6 +6725,38 @@ def _inject_tool_block(prompt):
     return prompt + "\n" + tool_block
 
 
+def _extract_marker_reason(output: str, marker: str, max_chars: int = 200) -> str | None:
+    """Pull the human-readable hint after a model output marker.
+
+    The model's structured output uses markers like `BLOCKED: <reason>`,
+    `NEEDS REDO: <issue>`, and natural-language rate-limit phrases. The
+    text immediately after the marker (up to end of line) explains the
+    outcome — but until v5.9.1 the worker discarded it and wrote
+    `reason: ""` to runs.jsonl, leaving operators with no signal about
+    what went wrong.
+
+    Returns the first non-empty line after the marker, trimmed to
+    `max_chars`, or None if the marker isn't actually present (the model
+    may mention "rate limit" while documenting code that talks about rate
+    limiting — we filter via case-insensitive lookup but stay generous).
+    """
+    if not output or not marker:
+        return None
+    lower_output = output.lower()
+    lower_marker = marker.lower()
+    idx = lower_output.find(lower_marker)
+    if idx < 0:
+        return None
+    # Pull the slice starting right after the marker so we can extract the
+    # first non-empty line.
+    tail = output[idx + len(marker):]
+    for line in tail.splitlines():
+        s = line.strip()
+        if s:
+            return s[:max_chars]
+    return None
+
+
 def process_function(
     func_key,
     func,
@@ -7595,6 +7627,14 @@ def process_function(
 
     # Parse result
     result = "completed"
+    # result_reason captures a short, human-readable hint about why a non-
+    # success outcome was chosen. Plumbed into _log_run_once below so the
+    # `reason` field in runs.jsonl/SQL runs is non-empty for blocked,
+    # rate_limited, and needs_redo outcomes. (v5.9.1: the user observed
+    # 1431 "blocked" runs in JSONL with empty reason/error fields — the
+    # block cause was being thrown away even though it was right there in
+    # the model's output as text after the "BLOCKED:" marker.)
+    result_reason: str | None = None
     if output:
         # Check success markers FIRST — models sometimes mention rate limits,
         # blocked states, etc. in their reasoning text while ultimately
@@ -7615,13 +7655,25 @@ def process_function(
             # not the model discussing "rate limiting" in game code analysis.
             print(f"  RATE LIMITED on this function", flush=True)
             result = "rate_limited"
+            # Match-phrase + a snippet so the reason field shows which
+            # specific phrase tripped detection (helps disambiguate genuine
+            # rate-limit messages from false positives in game-code text).
+            matched_phrase = next(
+                (p for p in rate_limit_phrases if p in output.lower()), None
+            )
+            result_reason = (
+                _extract_marker_reason(output, matched_phrase)
+                if matched_phrase else None
+            ) or "rate-limit phrase in provider output"
         elif "BLOCKED:" in output:
             # Check BLOCKED after DONE — models sometimes mention a previous
             # BLOCKED attempt in their reasoning text before ultimately
             # succeeding with a DONE marker. DONE takes priority.
             result = "blocked"
+            result_reason = _extract_marker_reason(output, "BLOCKED:")
         elif "NEEDS REDO:" in output:
             result = "needs_redo"
+            result_reason = _extract_marker_reason(output, "NEEDS REDO:")
     elif tool_calls_made >= 1 or tool_calls_made == -1:
         # Empty output (no final text block) but the model made tool calls
         # (or the provider doesn't report tool counts, i.e. -1). The writes
@@ -8063,8 +8115,11 @@ def process_function(
         func["partial_runs"] = func.get("partial_runs", 0) + 1
 
     # Log this run for audit trail. Early exits use the same helper so
-    # runs.jsonl explains skips/config/offline failures too.
-    _log_run_once(result)
+    # runs.jsonl explains skips/config/offline failures too. `result_reason`
+    # carries the human-readable hint extracted from the model output for
+    # blocked/rate_limited/needs_redo outcomes (v5.9.1 fix — was being
+    # silently dropped on the main worker path).
+    _log_run_once(result, reason=result_reason)
 
     bus_emit(
         "score_update",

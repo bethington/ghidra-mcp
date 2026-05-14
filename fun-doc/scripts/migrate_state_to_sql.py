@@ -101,6 +101,8 @@ _DIRECT_FIELDS = {
     "is_thrashing",
     "deductions",
     "callees",
+    "library_code",
+    "library_code_reasons",
 }
 
 # Renamed columns (state key → DB column).
@@ -109,6 +111,7 @@ _RENAMED_FIELDS = {
     "last_audited": "last_audited_at",
     "last_escalated": "last_escalated_at",
     "decompile_timeout_at": "decompile_timeout_at",
+    "library_code_at": "library_code_at",
 }
 
 
@@ -180,6 +183,8 @@ def function_record_to_row(rec: dict) -> dict:
         out["last_processed"] = parse_ts(rec["last_processed"])
     if "decompile_timeout_at" in rec:
         out["decompile_timeout_at"] = parse_ts(rec["decompile_timeout_at"])
+    if "library_code_at" in rec:
+        out["library_code_at"] = parse_ts(rec["library_code_at"])
     # ``attempts`` int column = len(inline attempts list). Migrating the
     # list contents into the runs table happens after the bulk upsert.
     inline = rec.get("attempts")
