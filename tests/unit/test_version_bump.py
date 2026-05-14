@@ -23,8 +23,12 @@ NEW = "5.5.0"
 @pytest.fixture()
 def repo(tmp_path: Path) -> Path:
     """Minimal file tree with OLD version in every location that build_rules targets."""
-    # pom.xml — two rules: <version> tag and docker tag reference
+    # pom.xml — two rules: <version> tag and docker tag reference.
+    # Project version is anchored after <packaging>jar</packaging> so the
+    # bump regex doesn't catch dependency versions; the fixture mirrors the
+    # real pom's coordinates block.
     (tmp_path / "pom.xml").write_text(
+        f"<packaging>jar</packaging>\n"
         f"<version>{OLD}</version>\n"
         f"  ghidra image: v{OLD}:latest\n",
         encoding="utf-8",
@@ -345,6 +349,45 @@ def test_build_rules_no_match_does_not_modify_unrelated_text(tmp_path: Path):
     result = re.sub(pom_rule.pattern, pom_rule.replacement, unrelated)
     # The <version> rule should not match inside <description>
     assert result == unrelated
+
+
+def test_build_rules_pom_version_does_not_match_dependency_version(tmp_path: Path):
+    """Regression for v5.9.0 → v5.9.1 release: mockito-core's <version>5.9.0</version>
+    was rewritten to 5.9.1 by the project-version bump because the regex was a
+    bare (<version>5.9.0</version>) match. mockito-core 5.9.1 doesn't exist on
+    Maven Central and the build failed mid-release. Anchoring to the project's
+    coordinates block (<packaging>jar</packaging>) is what fixes it.
+    """
+    from tools.setup.version_bump import build_rules
+
+    pom_rule = next(
+        r for r in build_rules(tmp_path, OLD, NEW)
+        if r.file_path.name == "pom.xml" and "<version>" in r.pattern
+    )
+
+    # Realistic pom shape: project version + dependency that shares the version.
+    pom_content = (
+        "<project>\n"
+        "  <groupId>com.xebyte</groupId>\n"
+        "  <artifactId>GhidraMCP</artifactId>\n"
+        "  <packaging>jar</packaging>\n"
+        f"  <version>{OLD}</version>\n"
+        "  <dependencies>\n"
+        "    <dependency>\n"
+        "      <groupId>org.mockito</groupId>\n"
+        "      <artifactId>mockito-core</artifactId>\n"
+        f"      <version>{OLD}</version>\n"
+        "      <scope>test</scope>\n"
+        "    </dependency>\n"
+        "  </dependencies>\n"
+        "</project>\n"
+    )
+    result = re.sub(pom_rule.pattern, pom_rule.replacement, pom_content)
+
+    # Project version is rewritten exactly once.
+    assert f"<packaging>jar</packaging>\n  <version>{NEW}</version>" in result
+    # Dependency version is left alone (mockito-core 5.9.1 doesn't exist).
+    assert f"<artifactId>mockito-core</artifactId>\n      <version>{OLD}</version>" in result
 
 
 # ---------------------------------------------------------------------------

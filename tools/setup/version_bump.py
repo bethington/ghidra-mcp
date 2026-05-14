@@ -33,9 +33,14 @@ def build_rules(
 ) -> list[ReplacementRule]:
     escaped_old = re.escape(old_version)
     return [
+        # Pom <version> is anchored to the project coordinates block (right after
+        # <packaging>jar</packaging>) so the regex doesn't also rewrite dependency
+        # versions (e.g. mockito-core) that happen to match the current project
+        # version. Bit me on v5.9.0 → v5.9.1: mockito-core 5.9.0 → 5.9.1 doesn't
+        # exist on Maven Central and the build failed mid-release.
         ReplacementRule(
             repo_root / "pom.xml",
-            rf"(<version>){escaped_old}(</version>)",
+            rf"(<packaging>jar</packaging>\s*<version>){escaped_old}(</version>)",
             rf"\g<1>{new_version}\g<2>",
         ),
         ReplacementRule(repo_root / "pom.xml", rf"v{escaped_old}:", f"v{new_version}:"),

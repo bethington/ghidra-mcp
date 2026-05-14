@@ -9,7 +9,64 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.9.0 (Latest) — fun-doc SQL storage migration (PR1)
+### v5.9.1 (Latest) — community fixes + fun-doc reliability
+
+Patch release rolling up four community fixes (#200, #201, #202, #205)
+plus three internal reliability fixes that landed during v5.9.0 worker
+review. No new endpoints; existing `/disassemble_bytes` gains an
+instruction-text payload (back-compat preserved). 243 tools.
+
+- **Strict-naming toggle now preserves struct field names** (#200/#202,
+  @1ndahaus3) — `create_struct`, `add_struct_field`, `modify_struct_field`
+  no longer auto-prefix when the built-in naming convention is disabled.
+- **`/disassemble_bytes` returns instruction text** (#205, @larrynz) —
+  new optional `include_instructions` (default `true`) and
+  `max_instructions` (default `1000`) POST params; each entry carries
+  `address`, `mnemonic`, `operands`, `length`, `bytes` (lowercase hex).
+- **Friendlier `gemini-cli-sdk` ImportError** (#201, @dalen) — message
+  quotes the actual import error, names three working alternatives
+  (minimax / claude / codex), and points at the pin-to-source workaround.
+- **fun-doc loud-fail on missing sqlalchemy** — refuses to start instead
+  of silently falling back to legacy `state.json` (hit the same user
+  twice on v5.9.0 release day after running the dashboard from system
+  Python).
+- **Library-code detector catches `_Setgloballocale` / `_Atexit` / TLS
+  callbacks** — added to `HARD_CALLEE_NAMES`, plugging a v5.9.0 miss
+  where the worker burned 92K tokens on locale init.
+- **Migration script carries `library_code` fields** — was dropping
+  them on `state.json → state.db` folds.
+- **Block-reason capture** — `_log_run_once` now extracts the reason
+  text after recognized markers (`BLOCKED:`, `NEEDS REDO:`, rate-limit
+  phrases) instead of dropping it.
+- **Test fixture stopped wiping `fun-doc/state.db`** — autouse fixture
+  refuses to delete files over 512 KB.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.9.0 — community fixes + P-code endpoints + library-code detector
+
+Bundles three community-reported bug fixes (#170, #175, #192) plus an
+internal fun-doc improvement (library-code auto-classification). 241 → 243 tools.
+
+- **Multi-instance discovery on macOS** (#170, PR #195) — bridge now
+  scans every plausible socket directory (`XDG_RUNTIME_DIR`,
+  `$TMPDIR`, `/var/folders/*/*/T/`, `/private/var/folders/*/*/T/`,
+  `/tmp`, `%TEMP%`).
+- **Windows TCP port collisions** (#175, PR #196) — UDS enabled by
+  default on all platforms; TCP port-range fallback scans
+  `8089..8104` when the configured port is taken; actual bound port
+  surfaced via `/mcp/instance_info → tcp_port`.
+- **P-code endpoints** (#192, PR #197) — `/get_function_pcode` (basic
+  + high granularity, full HighFunction graph with SSA flags),
+  `/get_language_metadata` (SLEIGH facts, register relations,
+  default symbols).
+- **Library-code auto-classification (fun-doc)** (PR #198) — heuristic
+  detector trips on canonical CRT names + CRT-only callees;
+  conservative tuning for `/GS` stack-cookie helpers.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.8.0 — fun-doc SQL storage migration (PR1)
 
 Major release: fun-doc's per-function workflow state moves out of `state.json` (~106 MB single file, swapped per-binary by hand) into a SQL-backed repository abstraction. SQLite is the default backend (`fun-doc/state.db`); set `FUN_DOC_DB_URL=postgresql://...` to use Postgres instead. No endpoint changes — count unchanged at 241.
 

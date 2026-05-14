@@ -4,14 +4,102 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v5.9.1 - 2026-05-14 (community fixes + fun-doc reliability)
+
+Patch release rolling up four community fixes (#200, #201, #202, #205)
+plus three internal reliability fixes that landed during v5.9.0 worker
+review. No new endpoints over v5.9.0; existing `/disassemble_bytes`
+gains an instruction-text payload (back-compat preserved). 243 tools.
 
 ### Fixed
 
-- **#200**: Disabling **Strict Naming Enforcement** now also preserves
-  agent-provided struct field names. `create_struct`, `add_struct_field`, and
-  `modify_struct_field` no longer auto-add Hungarian prefixes when the built-in
-  naming convention is disabled.
+- **#200 / #202**: Disabling **Strict Naming Enforcement** now also
+  preserves agent-provided struct field names. `create_struct`,
+  `add_struct_field`, and `modify_struct_field` no longer auto-add
+  Hungarian prefixes when the built-in naming convention is disabled.
+  Community fix from @1ndahaus3. (PR #202)
+
+- **fun-doc — silent state.json fallback when sqlalchemy is missing**:
+  if `sqlalchemy` wasn't importable, `fun_doc.py` quietly fell back to
+  legacy `state.json` and accumulated worker output that never reached
+  `state.db`. Hit the same user twice on v5.9.0 release day after
+  launching the dashboard from `C:\Python313\python.exe` (no
+  sqlalchemy installed) instead of the project venv. New loud-fail
+  guard at startup imports sqlalchemy early and `sys.exit(1)`s with
+  the actual `sys.executable` path and the venv + pip-install fix
+  commands. (PRs #203, cherry-pick 3657e77)
+
+- **fun-doc — library-code detector missed `_Setgloballocale` /
+  `_Atexit` / TLS callbacks**: a real v5.9.0 case where the worker
+  explicitly wrote `"Source: Visual Studio 2019 Release (msvcp*.dll)"`
+  in its plate but still burned 92K tokens because the detector
+  didn't catch `_Setgloballocale`. Added `_Atexit`,
+  `_Setgloballocale`, `_Getcoll`, `_Getfac`, `_Getfmt`,
+  `__dyn_tls_init`, `__dyn_tls_dtor`, `__tlregdtor` to
+  `HARD_CALLEE_NAMES`. Detector unit suite 19 → 21 cases. (PR #203)
+
+- **fun-doc — migration script dropped library_code fields**:
+  `scripts/migrate_state_to_sql.py` was silently discarding
+  `library_code`, `library_code_at`, and `library_code_reasons` when
+  folding `state.json` back into `state.db`. Surfaced when the user's
+  state.json had 65 functions correctly flagged but state.db showed
+  zero after migration. Added the fields to `_DIRECT_FIELDS` and
+  `_RENAMED_FIELDS`. (PR #203)
+
+- **fun-doc — block-reason empty on 1431 runs**:
+  `_log_run_once(result)` on the main worker output-parsing branch
+  was discarding the reason text the model wrote after recognized
+  markers (`BLOCKED:`, `NEEDS REDO:`, rate-limit phrases). New
+  `_extract_marker_reason()` helper pulls the first non-empty line
+  after the marker and plumbs `result_reason` through to the run
+  log. Other early-exit paths already passed explicit `reason=`
+  strings. (PR #203)
+
+- **tests — autouse fixture was wiping the developer's live
+  `fun-doc/state.db`**: `tests/performance/conftest.py` was
+  unconditionally `unlink()`ing `state.db` before and after every
+  test. Correct in clean-repo / CI contexts but in a developer
+  environment this destroyed the 124 MB user database. Real
+  incident: 65 library_code flags + 36k+ runs lost; recovered only
+  by re-running the migrator against `state.json`. New
+  `_safe_clean_state_db()` checks file size and refuses to delete
+  anything over 512 KB (fresh bootstrap is ~50-150 KB). Tests that
+  genuinely need a fresh DB should construct one under `tmp_path`.
+  (commit e031c3c, also in PR #203)
+
+- **#201 — friendlier error when `gemini-cli-sdk` import fails**
+  (@dalen): the published `gemini-cli-sdk` 0.1.0 on PyPI lacks the
+  `GeminiCli` class fun_doc.py uses (working version lives in a
+  local source tree that hasn't been republished). The bare
+  `ImportError` was unactionable. New error message quotes the
+  actual import error, explains the situation, links to issue #201,
+  lists three working alternative providers
+  (minimax / claude / codex), and mentions the pin-to-source
+  workaround. Doesn't fix the root cause — that requires republishing
+  the SDK to PyPI — but stops new users from filing the same issue.
+  (PR #206)
+
+### Added
+
+- **#205 — instruction text in `/disassemble_bytes`** (@larrynz): the
+  endpoint already disassembled a byte range but returned only a
+  success summary. Callers building custom processor definitions had
+  no way to read back what Ghidra actually produced without a follow-
+  up `/disassemble_function` call. Two new optional POST params:
+  - `include_instructions` (default `true`) — include the
+    disassembled instruction list in the response.
+  - `max_instructions` (default `1000`) — cap on returned
+    instructions; the response sets `truncated=true` and
+    `instructions_total` when exceeded.
+
+  Each instruction entry has `address`, `mnemonic`, `operands`
+  (joined like the GUI listing), `length`, and `bytes` (lowercase
+  hex). Walks the listing via `InstructionIterator` over the address
+  set the disassembly was just applied to, after the transaction
+  succeeds — exactly what Ghidra parsed, no second pass needed.
+  Back-compat: two helper overloads on the public
+  `disassembleBytes(...)` signature so `HeadlessEndpointHandler` /
+  `EndpointRegistry` callers keep working unchanged. (PR #206)
 
 ---
 
