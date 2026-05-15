@@ -4,7 +4,9 @@ import com.xebyte.core.*;
 import ghidra.program.model.listing.Program;
 
 import java.io.File;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Program and project management endpoints for headless mode.
@@ -89,34 +91,82 @@ public class HeadlessManagementService {
         return Response.text("{\"success\": true, \"closed\": \"" + ServiceUtils.escapeJson(projectName) + "\"}");
     }
 
-    @McpTool(path = "/load_program_from_project", method = "POST", description = "Load a program from the open project", category = "headless")
+    @McpTool(path = "/load_program_from_project", method = "POST", description = "Load a program from the open project. Returns structured diagnostics on failure (available paths, server-binding state) so the operator can tell server-side-checkout-but-not-shared from path-typo from server-unreachable. See discussion #119.", category = "headless")
     public Response loadProgramFromProject(
             @Param(value = "path", source = ParamSource.BODY, description = "Program path within the project") String programPath) {
         if (programPath == null || programPath.isEmpty()) {
             return Response.err("Program path required");
         }
         if (!programProvider.hasProject()) {
-            return Response.err("No project open. Use open_project first.");
+            return Response.err("No project open. Call /open_project first.");
         }
-        Program program = programProvider.loadProgramFromProject(programPath);
-        if (program != null) {
-            return Response.text("{\"success\": true, \"program\": \"" + ServiceUtils.escapeJson(program.getName())
-                + "\", \"path\": \"" + ServiceUtils.escapeJson(programPath) + "\"}");
+
+        HeadlessProgramProvider.ProgramLoadResult res =
+            programProvider.loadProgramFromProjectDetailed(programPath);
+
+        if (res.success) {
+            Map<String, Object> ok = new LinkedHashMap<>();
+            ok.put("success", true);
+            ok.put("program", res.program.getName());
+            ok.put("path", programPath);
+            return Response.ok(ok);
         }
-        return Response.err("Failed to load program: " + programPath);
+
+        // Structured failure — exposed so a Docker-headless user can tell
+        // "wrong path" from "project not bound to server" from "server
+        // unreachable" without needing to read Ghidra logs in the container.
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("project_open", true);
+        diagnostics.put("project_name", programProvider.getProjectName());
+        HeadlessProgramProvider.ServerBindingInfo binding = programProvider.getProjectServerInfo();
+        if (binding != null) {
+            diagnostics.put("project_server_bound", binding.serverBound);
+            if (binding.serverBound) {
+                diagnostics.put("server", binding.serverInfo);
+                diagnostics.put("server_repo", binding.repoName);
+            }
+        }
+        if (res.availablePaths != null) {
+            diagnostics.put("available_program_paths", res.availablePaths);
+        }
+        if (res.serverHint != null && !res.serverHint.isEmpty()) {
+            diagnostics.put("suggestion", res.serverHint);
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("success", false);
+        body.put("error", res.error);
+        body.put("requested_path", programPath);
+        body.put("diagnostics", diagnostics);
+        return Response.ok(body);
     }
 
-    @McpTool(path = "/get_project_info", description = "Get info about the currently open project", category = "headless")
+    @McpTool(path = "/get_project_info", description = "Get info about the currently open project, including server-binding state. A shared (server-bound) project is required for /server/version_control/checkout to deliver content the headless can open; if `project_server_bound` is false, the open project is local-only.", category = "headless")
     public Response getProjectInfo() {
         if (!programProvider.hasProject()) {
             return Response.text("{\"has_project\": false}");
         }
         List<HeadlessProgramProvider.ProjectFileInfo> files = programProvider.listProjectFiles();
         int programCount = (int) files.stream().filter(f -> "Program".equals(f.contentType)).count();
-        return Response.text("{\"has_project\": true"
-            + ", \"project_name\": \"" + ServiceUtils.escapeJson(programProvider.getProjectName()) + "\""
-            + ", \"file_count\": " + files.size()
-            + ", \"program_count\": " + programCount + "}");
+
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("has_project", true);
+        info.put("project_name", programProvider.getProjectName());
+        info.put("file_count", files.size());
+        info.put("program_count", programCount);
+
+        // Server-binding visibility (#119) — lets the operator confirm at
+        // a glance whether checkout flows will actually deliver content
+        // their /load_program_from_project can pick up.
+        HeadlessProgramProvider.ServerBindingInfo binding = programProvider.getProjectServerInfo();
+        if (binding != null) {
+            info.put("project_server_bound", binding.serverBound);
+            if (binding.serverBound) {
+                info.put("server", binding.serverInfo);
+                info.put("server_repo", binding.repoName);
+            }
+        }
+        return Response.ok(info);
     }
 
     // ========================================================================
