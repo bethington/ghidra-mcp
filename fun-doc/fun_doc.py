@@ -914,9 +914,22 @@ _storage_repo_failed = False  # cache import-time failure to avoid retry storm
 def _get_storage_repo():
     """Return the storage Repository, lazily building it on first use.
 
-    Returns None if the storage layer can't be loaded (missing sqlalchemy,
-    misconfigured URL, etc.). Callers fall back to the legacy state.json
-    path in that case so a partially-installed environment still functions.
+    Returns None only when the test fixture has explicitly flipped
+    `_storage_repo_failed = True` to exercise the legacy state.json path
+    (see tests/performance/test_state_atomicity.py). At runtime the
+    function loud-fails via sys.exit(1) if the SQL backend can't be
+    opened — silently degrading to state.json was the v5.9.0 release-day
+    failure mode that the sqlalchemy import guard above only half-fixed.
+
+    The import guard catches the "package missing" case at startup. Any
+    error reached here is a real misconfiguration that the legacy
+    fallback would only hide:
+      * priority_queue.json `config.storage` block malformed → bad URL
+      * Postgres unreachable / wrong credentials → connection refused
+      * Schema migration broken → bootstrap_schema() raises
+      * SQLite path unwritable → operational error on open
+    All of these would let the dashboard run on a flat state.json while
+    the user thinks they have a working SQL backend.
     """
     global _storage_repo, _storage_repo_failed
     if _storage_repo is not None:
@@ -939,15 +952,33 @@ def _get_storage_repo():
         _storage_repo.bootstrap_schema()
         return _storage_repo
     except Exception as e:
-        _storage_repo_failed = True
-        print(
-            f"WARNING: storage backend unavailable ({type(e).__name__}: {e}); "
-            f"falling back to state.json. Install sqlalchemy and run "
-            f"scripts/migrate_state_to_sql.py to enable the SQL backend.",
-            file=sys.stderr,
-            flush=True,
+        # Loud fail — see docstring. Don't return None here; that path is
+        # reserved for the test fixture's explicit override.
+        sys.stderr.write(
+            "ERROR: fun-doc storage backend failed to open.\n"
+            "\n"
+            f"  {type(e).__name__}: {e}\n"
+            "\n"
+            "sqlalchemy is installed (the import guard at the top of fun_doc.py\n"
+            "would have exited already otherwise), so this is a real backend\n"
+            "misconfiguration -- not a missing dependency. Common causes:\n"
+            "\n"
+            "  * Postgres host/port unreachable\n"
+            "      → check FUN_DOC_DB_URL or priority_queue.json config.storage.url\n"
+            "  * Wrong credentials\n"
+            "      → check the username/password in the URL\n"
+            "  * Schema migration broken or partially applied\n"
+            "      → run: python fun-doc/scripts/migrate_state_to_sql.py --verify\n"
+            "  * SQLite path unwritable (default backend)\n"
+            "      → check filesystem permissions on fun-doc/state.db\n"
+            "\n"
+            "Refusing to start rather than silently falling back to legacy\n"
+            "state.json. That fallback would accept worker writes but leave the\n"
+            "SQL-backed dashboard reading stale data -- exactly the v5.9.0\n"
+            "release-day failure mode the import guard above only half-fixed.\n"
         )
-        return None
+        sys.stderr.flush()
+        sys.exit(1)
 
 
 # Field mapping between the state.json dict shape and the SQL row.
