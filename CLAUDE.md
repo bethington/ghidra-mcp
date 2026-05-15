@@ -212,10 +212,6 @@ pytest tests/ -m safe_write        # identity writes only
 pytest tests/                      # full suite, includes mutating tests
 ```
 
-### Known pre-existing failures
-
-- `tests/performance/test_worker_watchdog.py` — three tests reference `WorkerManager._watchdog_stop`, which no longer exists. Failures are unrelated to most changes; ignore unless editing the watchdog itself.
-
 ### Catalog drift
 
 If `EndpointsJsonParityTest` fails after `@McpTool` edits, regenerate `tests/endpoints.json` from the scanner (preserves hand-authored descriptions and hand-registered routes):
