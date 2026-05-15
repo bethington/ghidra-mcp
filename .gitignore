@@ -593,6 +593,11 @@ fun-doc/state.json.*.bak
 fun-doc/state.json.corrupt-*
 fun-doc/state.json.truncated-*
 fun-doc/state.json.before-*
+# Demonstrably-stale recovery snapshots get moved to fun-doc/archive/ over
+# time (see fun-doc/archive/README.md). Ignored wholesale — nothing in
+# there is read at runtime, but the directory + its README are committed.
+fun-doc/archive/*
+!fun-doc/archive/README.md
 fun-doc/inventory.json.before-*
 fun-doc/global_inventory.json
 fun-doc/global_inventory.json.before-*

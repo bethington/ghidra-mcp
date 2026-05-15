@@ -389,14 +389,19 @@ def _short_jsonish(value, limit=1000):
 
 
 def _log_ghidra_http_event(entry):
-    """Persist detailed Ghidra HTTP diagnostics without cluttering stdout."""
+    """Persist detailed Ghidra HTTP diagnostics without cluttering stdout.
+
+    Routed through log_rotation.write_jsonl_rotating so the file is
+    bounded — pre-rotation this log grew unbounded at ~50 MB/day and
+    hit 1+ GB on long-running workspaces.
+    """
+    from log_rotation import write_jsonl_rotating
+
     try:
-        LOG_DIR.mkdir(exist_ok=True)
-        with _http_log_lock:
-            with open(GHIDRA_HTTP_LOG_FILE, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, default=str) + "\n")
+        line = json.dumps(entry, default=str)
     except Exception:
-        pass
+        return
+    write_jsonl_rotating(GHIDRA_HTTP_LOG_FILE, line)
 
 
 def _parse_response(r):
@@ -6564,54 +6569,68 @@ def _rescore_and_sync(func, address, program):
 
 
 def _append_run_log(entry):
-    """Append a single JSONL entry to the run log. Thread-safe."""
+    """Append a single JSONL entry to the run log.
+
+    Routed through log_rotation.write_jsonl_rotating for bounded disk;
+    the helper owns its own per-path RLock so we no longer hold
+    _state_lock during file I/O (was serializing every storage write
+    behind the run-log append). The helper also never raises — its
+    return value reports whether the write landed — so this function's
+    outer error path is just for the bus_emit / event-log / cost-history
+    side-effects that follow.
+    """
+    from log_rotation import write_jsonl_rotating
+
     try:
-        LOG_DIR.mkdir(exist_ok=True)
-        with _state_lock:
-            with open(LOG_FILE, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, default=str) + "\n")
-        bus_emit("run_logged", entry)
-        # Also emit a structured event so the canonical audit trail
-        # captures every run attempt. Mirrors the key fields only —
-        # the full row is still in runs.jsonl.
-        try:
-            from event_log import log_event
-
-            log_event(
-                "run.logged",
-                run_id=entry.get("run_id"),
-                worker_id=entry.get("worker_id"),
-                program=entry.get("program"),
-                address=entry.get("address"),
-                function=entry.get("function"),
-                provider=entry.get("provider"),
-                mode=entry.get("mode"),
-                result=entry.get("result"),
-                score_before=entry.get("score_before"),
-                score_after=entry.get("score_after"),
-                score_delta=entry.get("score_delta"),
-                tool_calls=entry.get("tool_calls"),
-                input_tokens=entry.get("input_tokens"),
-                output_tokens=entry.get("output_tokens"),
-                missing_artifacts=entry.get("missing_artifacts"),
-            )
-        except Exception:
-            pass  # never let event logging break run logging
-
-        # Update per-function cost history for thrashing detection.
-        # Best-effort — failures do not block run logging.
-        try:
-            _update_function_cost_history(entry)
-        except Exception:
-            pass
+        line = json.dumps(entry, default=str)
     except Exception as e:
-        print(f"  WARNING: Failed to write run log: {e}", flush=True)
+        # Bad payload — can't serialize. Log and bail before touching
+        # anything else; downstream consumers will see the gap as a
+        # missing run row, which is the right signal.
+        print(f"  WARNING: Failed to serialize run-log entry: {e}", flush=True)
         try:
             from event_log import log_event
-
             log_event("run.log_failed", error=str(e), error_type=type(e).__name__)
         except Exception:
             pass
+        return
+
+    write_jsonl_rotating(LOG_FILE, line)
+    bus_emit("run_logged", entry)
+
+    # Also emit a structured event so the canonical audit trail
+    # captures every run attempt. Mirrors the key fields only —
+    # the full row is still in runs.jsonl.
+    try:
+        from event_log import log_event
+
+        log_event(
+            "run.logged",
+            run_id=entry.get("run_id"),
+            worker_id=entry.get("worker_id"),
+            program=entry.get("program"),
+            address=entry.get("address"),
+            function=entry.get("function"),
+            provider=entry.get("provider"),
+            mode=entry.get("mode"),
+            result=entry.get("result"),
+            score_before=entry.get("score_before"),
+            score_after=entry.get("score_after"),
+            score_delta=entry.get("score_delta"),
+            tool_calls=entry.get("tool_calls"),
+            input_tokens=entry.get("input_tokens"),
+            output_tokens=entry.get("output_tokens"),
+            missing_artifacts=entry.get("missing_artifacts"),
+        )
+    except Exception:
+        pass  # never let event logging break run logging
+
+    # Update per-function cost history for thrashing detection.
+    # Best-effort — failures do not block run logging.
+    try:
+        _update_function_cost_history(entry)
+    except Exception:
+        pass
 
 
 def _update_function_cost_history(entry):

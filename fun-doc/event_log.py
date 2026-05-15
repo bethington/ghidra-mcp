@@ -36,7 +36,12 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from log_rotation import write_jsonl_rotating
+
 _EVENT_LOG_FILE = Path(__file__).parent / "logs" / "events.jsonl"
+# Kept for backwards compatibility with anything still grabbing this lock
+# directly. Real serialization happens inside write_jsonl_rotating's
+# per-path RLock; this one is now effectively unused.
 _event_lock = threading.Lock()
 
 # Counters help detect silent data loss — exposed via get_counters() so a
@@ -67,25 +72,25 @@ def log_event(event, **fields):
         "event": event,
         **fields,
     }
+    # JSON-serialize first so a bad payload surfaces as events_failed and
+    # never reaches the rotating writer's per-path lock.
     try:
-        _EVENT_LOG_FILE.parent.mkdir(exist_ok=True)
-        with _event_lock:
-            # errors='replace' ensures a stray non-UTF-8 char never
-            # crashes the writer — unlike the console print that took
-            # down workers earlier today.
-            with open(_EVENT_LOG_FILE, "a", encoding="utf-8", errors="replace") as f:
-                f.write(json.dumps(entry, default=str, ensure_ascii=False) + "\n")
-        with _counter_lock:
-            _counters["events_logged"] += 1
+        line = json.dumps(entry, default=str, ensure_ascii=False)
     except Exception as e:
         with _counter_lock:
             _counters["events_failed"] += 1
-        # Print to stderr via a safe path — no newline inside the f-string
-        # to avoid the charmap crash pattern.
         try:
-            print(f"  WARNING: event_log write failed: {type(e).__name__}", flush=True)
+            print(f"  WARNING: event_log serialize failed: {type(e).__name__}", flush=True)
         except Exception:
             pass
+        return
+
+    ok = write_jsonl_rotating(_EVENT_LOG_FILE, line)
+    with _counter_lock:
+        if ok:
+            _counters["events_logged"] += 1
+        else:
+            _counters["events_failed"] += 1
 
 
 def get_counters():
