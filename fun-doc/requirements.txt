@@ -12,16 +12,11 @@ pyyaml>=6.0
 sqlalchemy>=2.0,<3.0
 psycopg[binary]>=3.1; python_version >= "3.10"
 
-# OPTIONAL: Gemini provider
-# ─────────────────────────
-# fun-doc supports Gemini as a worker provider but the SDK isn't on PyPI
-# under the obvious name -- `gemini-cli-sdk` on PyPI is held by an
-# unrelated project. Install the working SDK from GitHub:
-#
-#   pip install git+https://github.com/bethington/gemini-cli-sdk@main
-#
-# (or via tarball if your environment can't git-clone over HTTPS:
-#   pip install https://github.com/bethington/gemini-cli-sdk/archive/refs/heads/main.tar.gz)
-#
-# Skip this if you only use minimax / claude / codex. See
+# Gemini provider — no pip dependency needed.
+# The Gemini worker provider's SDK (gemini_agent_sdk) is vendored at
+# fun-doc/vendored/gemini_agent_sdk/, so there's nothing to install here.
+# Using the Gemini provider does still require the `gemini` *binary*:
+#   npm install -g @google/gemini-cli
+# Skip that if you only use minimax / claude / codex.
+# See fun-doc/vendored/gemini_agent_sdk/_VENDORED.md and
 # https://github.com/bethington/ghidra-mcp/issues/201 for context.

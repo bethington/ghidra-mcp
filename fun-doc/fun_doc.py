@@ -5148,14 +5148,21 @@ def _invoke_codex(prompt, model=None, max_turns=25):
 
 
 def _invoke_gemini(prompt, model=None, max_turns=25):
-    """Invoke Gemini via the gemini-cli-sdk with native MCP tool support."""
+    """Invoke Gemini via the vendored gemini_agent_sdk with native MCP tool support."""
     import asyncio
 
     model = _require_model_name(model, "gemini")
 
+    # The Gemini SDK is vendored under fun-doc/vendored/gemini_agent_sdk/
+    # (see fun-doc/vendored/gemini_agent_sdk/_VENDORED.md). It's not a pip
+    # dependency: the upstream package is GitHub-only (the obvious PyPI
+    # name belongs to an unrelated project) and git-install is fragile in
+    # locked-down environments, so fun-doc ships the source directly.
+    # Import failure here means the vendored tree was deleted/corrupted,
+    # not a missing pip install.
     try:
-        from gemini_cli_sdk import GeminiCli, GeminiOptions
-        from gemini_cli_sdk.events import (
+        from vendored.gemini_agent_sdk import GeminiCli, GeminiOptions
+        from vendored.gemini_agent_sdk.events import (
             InitEvent,
             MessageEvent,
             ToolUseEvent,
@@ -5164,25 +5171,21 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
             ResultEvent,
         )
     except ImportError as e:
-        # The PyPI package `gemini-cli-sdk` (0.1.0) is owned by an
-        # unrelated project with a different API surface, so the working
-        # SDK ships from GitHub instead. Issue #201 has the full story.
         print(
-            f"ERROR: gemini-cli-sdk import failed ({e}).\n"
+            f"ERROR: vendored gemini_agent_sdk import failed ({e}).\n"
             f"\n"
-            f"  Install the working SDK from GitHub (the PyPI name\n"
-            f"  belongs to an unrelated project):\n"
+            f"  The Gemini SDK is vendored at\n"
+            f"  fun-doc/vendored/gemini_agent_sdk/ and should always be\n"
+            f"  importable. This error means the vendored tree is missing\n"
+            f"  or corrupted. Restore it with:\n"
             f"\n"
-            f"    pip install git+https://github.com/bethington/gemini-cli-sdk@main\n"
+            f"    python -m scripts.sync_vendored_gemini\n"
             f"\n"
-            f"  If your environment can't reach git over HTTPS, fall back\n"
-            f"  to the tarball install:\n"
-            f"\n"
-            f"    pip install https://github.com/bethington/gemini-cli-sdk/archive/refs/heads/main.tar.gz\n"
+            f"  (run from fun-doc/, with a checkout of\n"
+            f"  github.com/bethington/gemini-agent-sdk as a sibling repo)\n"
             f"\n"
             f"  Or switch fun-doc's primary provider in priority_queue.json\n"
-            f"  to 'minimax', 'claude', or 'codex' to avoid Gemini entirely.\n"
-            f"  See ghidra-mcp issue #201 for background.\n",
+            f"  to 'minimax', 'claude', or 'codex' to avoid Gemini entirely.\n",
             file=sys.stderr,
         )
         return None
