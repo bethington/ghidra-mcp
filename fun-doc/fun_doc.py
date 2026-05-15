@@ -5164,20 +5164,25 @@ def _invoke_gemini(prompt, model=None, max_turns=25):
             ResultEvent,
         )
     except ImportError as e:
-        # The PyPI build of gemini-cli-sdk 0.1.0 is missing GeminiCli; the
-        # working version lives in a local source tree that hasn't been
-        # republished. Issue #201 tracks the fix. For now, surface a clear
-        # path forward instead of a bare ImportError.
+        # The PyPI package `gemini-cli-sdk` (0.1.0) is owned by an
+        # unrelated project with a different API surface, so the working
+        # SDK ships from GitHub instead. Issue #201 has the full story.
         print(
             f"ERROR: gemini-cli-sdk import failed ({e}).\n"
             f"\n"
-            f"  The published PyPI version (0.1.0) lacks the GeminiCli class\n"
-            f"  this worker uses. Fix is tracked in ghidra-mcp issue #201.\n"
+            f"  Install the working SDK from GitHub (the PyPI name\n"
+            f"  belongs to an unrelated project):\n"
             f"\n"
-            f"  Workaround until a working version is published: switch\n"
-            f"  fun-doc's primary provider in priority_queue.json to one of\n"
-            f"  'minimax', 'claude', or 'codex' (config.provider_models),\n"
-            f"  OR pin gemini-cli-sdk to a working build from source.\n",
+            f"    pip install git+https://github.com/bethington/gemini-cli-sdk@main\n"
+            f"\n"
+            f"  If your environment can't reach git over HTTPS, fall back\n"
+            f"  to the tarball install:\n"
+            f"\n"
+            f"    pip install https://github.com/bethington/gemini-cli-sdk/archive/refs/heads/main.tar.gz\n"
+            f"\n"
+            f"  Or switch fun-doc's primary provider in priority_queue.json\n"
+            f"  to 'minimax', 'claude', or 'codex' to avoid Gemini entirely.\n"
+            f"  See ghidra-mcp issue #201 for background.\n",
             file=sys.stderr,
         )
         return None

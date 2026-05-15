@@ -11,3 +11,17 @@ pyyaml>=6.0
 # needed for users who configure the Postgres backend. SQLite is stdlib.
 sqlalchemy>=2.0,<3.0
 psycopg[binary]>=3.1; python_version >= "3.10"
+
+# OPTIONAL: Gemini provider
+# ─────────────────────────
+# fun-doc supports Gemini as a worker provider but the SDK isn't on PyPI
+# under the obvious name -- `gemini-cli-sdk` on PyPI is held by an
+# unrelated project. Install the working SDK from GitHub:
+#
+#   pip install git+https://github.com/bethington/gemini-cli-sdk@main
+#
+# (or via tarball if your environment can't git-clone over HTTPS:
+#   pip install https://github.com/bethington/gemini-cli-sdk/archive/refs/heads/main.tar.gz)
+#
+# Skip this if you only use minimax / claude / codex. See
+# https://github.com/bethington/ghidra-mcp/issues/201 for context.
