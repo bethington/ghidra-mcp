@@ -161,7 +161,7 @@ snake_case Python scripts.
 ✅ GOOD
 bridge_mcp_ghidra.py
 ordinal_auto_fixer.py
-scan_undocumented_functions.py
+inventory_scorer.py
 ```
 
 ### Environment-Native Wrappers
@@ -237,8 +237,7 @@ ghidra-mcp/
 │           └── GhidraMCPPluginTest.java
 ├── tools/
 │   ├── setup/
-│   ├── document_function.py
-│   └── ...
+│   └── README.md   # points at fun-doc/ for documentation CLI
 ├── logs/
 │   └── (archived logs here)
 └── ...
@@ -260,7 +259,7 @@ ghidra-mcp/
 | **Python classes** | PascalCase | `class GhidraBridge` | PEP 8 convention |
 | **Python functions** | snake_case | `get_xrefs()` | PEP 8 convention |
 | **Python constants** | UPPER_SNAKE_CASE | `API_VERSION` | PEP 8 convention |
-| **Python utilities** | snake_case | `scan_functions_mcp.py` | PEP 8 convention |
+| **Python utilities** | snake_case | `inventory_scorer.py` | PEP 8 convention |
 | **Config files** | lowercase.ext | `.mcp.json` | Convention |
 | **Logs** | snake_case_date | `build_log_20251105.txt` | Readability |
 
