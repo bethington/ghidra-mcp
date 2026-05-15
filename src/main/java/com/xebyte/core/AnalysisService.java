@@ -987,8 +987,12 @@ public class AnalysisService {
             result.put("scope", functionScope == null || functionScope.trim().isEmpty()
                     ? "program"
                     : "function:" + functionScope);
-            result.put("mnemonic_filter", wantMnemonic.isEmpty() ? null : wantMnemonic);
-            result.put("operand_filter", wantOperand.isEmpty() ? null : wantOperand);
+            // Echo the filters back as plain strings (empty == "no filter") so
+            // both keys are always present in the JSON. Gson drops null fields
+            // by default, which left clients unable to tell "field absent
+            // because no filter" from "field absent because old build".
+            result.put("mnemonic_filter", wantMnemonic);
+            result.put("operand_filter", wantOperand);
             return Response.ok(result);
         } catch (Exception e) {
             return Response.err("search_instructions failed: " + e.getMessage());

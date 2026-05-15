@@ -668,8 +668,9 @@ class TestSearchInstructions:
         ):
             assert key in body, f"missing top-level field: {key}"
         assert isinstance(body["matches"], list)
+        # Both filter-echo keys are always present; empty string means "no filter".
         assert body["mnemonic_filter"] == "ret"
-        assert body["operand_filter"] is None
+        assert body["operand_filter"] == ""
 
         # Each match record carries the documented shape.
         for m in body["matches"]:
