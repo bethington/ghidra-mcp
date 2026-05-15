@@ -4,6 +4,78 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **`/search_instructions`** — operand-pattern instruction search. Complement to
+  `/search_byte_patterns` (byte-level): this matches after Ghidra has parsed
+  instructions, so callers can search for `mov` + `[ecx+0xD0]` without knowing
+  the encoding. Mnemonic match is case-insensitive exact; operand pattern is
+  case-insensitive substring on the joined operand string. Optional
+  `function=` scope restricts to a single function's body. Closes the gap
+  raised in #172.
+- **fun-doc — log rotation** (`fun-doc/log_rotation.py`) — single
+  `write_jsonl_rotating()` helper that wraps the three operational JSONL logs
+  (`ghidra_http.jsonl`, `runs.jsonl`, `events.jsonl`). Default 200 MB per file
+  × 5 backups = ~1.2 GB hard cap per log series, tunable via
+  `FUN_DOC_LOG_MAX_BYTES` / `FUN_DOC_LOG_BACKUPS` env vars. Pre-rotation the
+  `ghidra_http.jsonl` log was unbounded and hit 1.03 GB in three weeks on the
+  user's main workspace.
+- **fun-doc — name-source provenance (#204)** — three new columns on
+  `functions_workflow`:
+  - `name_source` TEXT — `'scan'` (default) / `'manual'` / `'propagation'` /
+    `'pdb'` / `'archive'`
+  - `name_source_binary` TEXT — when source = propagation, the binary the name
+    came from
+  - `name_confidence` REAL — 0.0–1.0 archive/BSim-gate signal (nullable)
+
+  The selector now skips functions where `name_source = 'propagation'` and
+  `name_confidence < 0.5` (env-tunable via
+  `FUN_DOC_PROPAGATION_CONFIDENCE_THRESHOLD`), unless pinned. Closes the
+  v5.9.x failure mode where cross-version hash propagation gave plausible
+  D2-style names (`DATATBLS_*`, `ROOM_*`, `CLIENT_*`, `NET_*`, `GAME_*`) to
+  statically-linked CRT/STL/iostream code — ~10M input tokens burned on the
+  top 7 such misidentifications in BH.dll's last 24h before the gate landed.
+  Existing rows default to `name_source = 'scan'`; mark propagated names
+  retroactively with `python -m scripts.backfill_name_source --program X
+  --name-pattern '^(DATATBLS|ROOM|CLIENT|NET|GAME)_' --source-binary Y
+  --apply`.
+
+  Migration: `0003_name_source.sql` (Postgres) + `0003_name_source.sqlite.sql`
+  (SQLite). Auto-applied by `db.migrate` runner on first dashboard start.
+
+### Changed
+
+- **fun-doc — storage backend open failures now loud-fail** (post-v5.9.1
+  follow-up). The v5.9.1 import-time guard caught "sqlalchemy missing";
+  this commit extends the guard so post-import failures (Postgres
+  unreachable, bad URL, schema migration broken, SQLite path unwritable)
+  also `sys.exit(1)` with an actionable diagnostic instead of silently
+  falling back to legacy `state.json`. The test-fixture override path
+  (`_storage_repo_failed = True`) is preserved so
+  `test_state_atomicity.py`'s legacy-fallback regression coverage stays
+  intact.
+- **fun-doc — `_append_run_log` no longer serializes behind `_state_lock`.**
+  The log-rotation rewire moved file-I/O ownership to per-path RLocks in
+  `log_rotation.py`. Storage writes that previously queued behind a long
+  run-log append now run independently.
+- **CHANGELOG/tool counts** — endpoint count goes from 243 to 244 with
+  `/search_instructions`. Docs (README, CLAUDE.md, AGENTS.md) get the
+  bump at next release tag via `tools.setup bump-version`.
+
+### Removed
+
+- **`tools/scan_undocumented_functions.py`,
+  `tools/scan_functions_mcp.py`, `tools/document_function.py`** —
+  archived to `docs/archive/legacy-tools/` with a README mapping each
+  to its `fun-doc/` replacement. They predated `fun-doc/` by ~7 months
+  and were last touched on 2025-10-10; everything they did is now
+  better-handled by the worker + dashboard. Files still work against
+  the stable v5.9.1 HTTP API; they're unmaintained going forward.
+
+---
+
 ## v5.9.1 - 2026-05-14 (community fixes + fun-doc reliability)
 
 Patch release rolling up four community fixes (#200, #201, #202, #205)

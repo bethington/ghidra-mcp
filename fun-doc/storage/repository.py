@@ -68,6 +68,18 @@ _UPDATABLE_WORKFLOW_FIELDS = {
     "decompile_timeout_at",
     "deductions",
     "callees",
+    # name-source provenance (#204)
+    "name_source",
+    "name_source_binary",
+    "name_confidence",
+    # library_code gate (#198) — defensive: the worker doesn't update
+    # these via the partial path today (it bulk-upserts via library_code
+    # path in fun_doc.py), but listing them here means a future
+    # update_function_fields(name="...", library_code=False) call
+    # doesn't get silently dropped.
+    "library_code",
+    "library_code_at",
+    "library_code_reasons",
 }
 
 

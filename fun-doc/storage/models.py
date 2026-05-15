@@ -103,6 +103,11 @@ def build_metadata(schema: str | None = None) -> MetaData:
         Column("library_code", Boolean, default=False),
         Column("library_code_at", DateTime(timezone=True)),
         Column("library_code_reasons", JSON),
+        # name-source provenance (#204) — drives the "skip propagated
+        # CRT/STL with no archive backing" gate in the selector
+        Column("name_source", String, default="scan"),
+        Column("name_source_binary", String),
+        Column("name_confidence", Float),
         # JSONB blobs
         Column("deductions", JSON),
         Column("callees", JSON),

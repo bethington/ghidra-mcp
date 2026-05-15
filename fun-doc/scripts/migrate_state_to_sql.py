@@ -103,6 +103,13 @@ _DIRECT_FIELDS = {
     "callees",
     "library_code",
     "library_code_reasons",
+    # name-source provenance (#204) — kept here so a state.json that
+    # was already marked with propagation source folds cleanly into
+    # state.db. Defaults to 'scan' / null at the schema level for
+    # never-touched rows.
+    "name_source",
+    "name_source_binary",
+    "name_confidence",
 }
 
 # Renamed columns (state key → DB column).

@@ -1020,6 +1020,13 @@ _STATE_DIRECT_FIELDS = (
     "snapshot_provider",
     "snapshot_model",
     "snapshot_max_turns",
+    # name-source provenance (#204) — flows through state.json migration
+    # and selector skip-gate. Default 'scan' for everything; the
+    # propagation scripts + backfill_name_source.py CLI paint the
+    # 'propagation' rows in bulk.
+    "name_source",
+    "name_source_binary",
+    "name_confidence",
 )
 
 
@@ -2631,6 +2638,19 @@ DEFAULT_QUEUE_CONFIG = {
 
 PRIORITY_QUEUE_FILE = SCRIPT_DIR / "priority_queue.json"
 
+# Selector confidence floor for propagation-sourced names (#204). A
+# function with name_source='propagation' and name_confidence below
+# this threshold is treated as untrusted and skipped by the selector
+# unless the user pins it. Set to 0.5 so a half-confident archive
+# match (Q5-D gate signal) is enough to admit the name, while a
+# null/zero confidence (the default for fresh propagated names) keeps
+# the function out of LLM scoring. Tunable via env so a user with a
+# very-confidence-poor archive can tighten or loosen it without a
+# rebuild.
+_PROPAGATION_CONFIDENCE_THRESHOLD = float(
+    os.environ.get("FUN_DOC_PROPAGATION_CONFIDENCE_THRESHOLD", "0.5")
+)
+
 
 def _normalize_provider_models(raw_models):
     """Normalize provider->mode->model config, backfilling missing entries
@@ -2930,6 +2950,28 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         # paths as the other one-shots; pinning bypasses.
         if func.get("library_code") and not is_pinned:
             continue
+
+        # Propagation-provenance skip (#204): when a function's name came
+        # from cross-version hash propagation and has no high-confidence
+        # archive backing, treat it as untrusted. Cross-version
+        # propagation gives plausible D2-style names like
+        # `DATATBLS_SerializeJsonValue` to statically-linked nlohmann::json
+        # template instantiations, std::map operations, and iostream
+        # parsers — code that doesn't exist in the binary's authored
+        # source. ~10M input tokens were burned on the top 7 such
+        # misidentifications in BH.dll's last 24h before this gate
+        # landed; the heuristic detector can't catch them because the
+        # propagator gave the callees plausible names too.
+        #
+        # name_source values: 'scan' (default) | 'manual' | 'propagation'
+        #                     | 'pdb' | 'archive'
+        # Skip rule: propagation AND (no confidence OR < threshold) AND
+        # not pinned. Pinning bypasses for "I know this is real, please
+        # document it anyway". Cleared by re-scan / refresh paths.
+        if not is_pinned and func.get("name_source") == "propagation":
+            conf = func.get("name_confidence")
+            if conf is None or conf < _PROPAGATION_CONFIDENCE_THRESHOLD:
+                continue
 
         # Stagnation safety net: blacklist functions that have completed 3+
         # runs in a row with no meaningful progress (delta <= 1%) OR with

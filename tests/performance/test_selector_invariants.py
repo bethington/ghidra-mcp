@@ -393,6 +393,134 @@ def test_library_code_does_not_affect_unflagged():
     assert set(_keys(result)) == {"a::user_explicit", "a::user_implicit"}
 
 
+# ---------------------------------------------------------------------------
+# Propagation-provenance gate (#204)
+#
+# Names that came from cross-version hash propagation but have no archive
+# backing get skipped. This was the v5.9.x failure mode where
+# `DATATBLS_SerializeJsonValue` etc. ate ~10M tokens in BH.dll's last 24h
+# before the gate landed. The library-code detector can't catch these
+# because the propagator gave the callees plausible names too.
+# ---------------------------------------------------------------------------
+
+def test_propagation_with_no_confidence_excluded():
+    """`name_source = 'propagation'` with `name_confidence = None` (the
+    schema default for a freshly-propagated row) is the dominant case
+    and must be skipped."""
+    state = _state(
+        **{
+            "a::propagated": {
+                "score": 31,
+                "fixable": 20,
+                "name_source": "propagation",
+                "name_source_binary": "/Vanilla/1.13d/D2Common.dll",
+                "name_confidence": None,
+            },
+            "a::scanned": {
+                "score": 31,
+                "fixable": 20,
+                "name_source": "scan",
+            },
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert _keys(result) == ["a::scanned"]
+
+
+def test_propagation_below_threshold_excluded():
+    """A propagated row with a confidence score *below* the 0.5 floor is
+    still untrusted and gets skipped."""
+    state = _state(
+        **{
+            "a::low_conf": {
+                "score": 31,
+                "fixable": 20,
+                "name_source": "propagation",
+                "name_confidence": 0.2,
+            },
+        }
+    )
+    assert _keys(select_candidates(state, _queue())) == []
+
+
+def test_propagation_at_or_above_threshold_admitted():
+    """High-confidence propagated names (≥ 0.5 threshold — Q5-D archive
+    gate or BSim same-binary match) flow through the selector normally.
+    The gate is about untrusted propagation, not all propagation."""
+    state = _state(
+        **{
+            "a::high_conf": {
+                "score": 31,
+                "fixable": 20,
+                "name_source": "propagation",
+                "name_confidence": 0.5,
+            },
+            "a::very_high": {
+                "score": 31,
+                "fixable": 20,
+                "name_source": "propagation",
+                "name_confidence": 0.95,
+            },
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert set(_keys(result)) == {"a::high_conf", "a::very_high"}
+
+
+def test_propagation_bypassed_by_pin():
+    """Pinning a propagated function restores it to the queue — the
+    user has said "I know this is real, please document it anyway"."""
+    state = _state(
+        **{
+            "a::propagated": {
+                "score": 31,
+                "fixable": 20,
+                "name_source": "propagation",
+                "name_confidence": None,
+            },
+        }
+    )
+    # Without pinning: skipped.
+    assert _keys(select_candidates(state, _queue())) == []
+    # With pinning: surfaces at the top.
+    result = select_candidates(state, _queue(pinned=["a::propagated"]))
+    assert _keys(result) == ["a::propagated"]
+
+
+def test_other_name_sources_not_skipped():
+    """Only `name_source = 'propagation'` triggers the gate. 'scan'
+    (default), 'manual', 'pdb', 'archive' all flow through normally —
+    those are trustworthy provenance sources."""
+    state = _state(
+        **{
+            "a::scan": {"score": 31, "fixable": 20, "name_source": "scan"},
+            "a::manual": {"score": 31, "fixable": 20, "name_source": "manual"},
+            "a::pdb": {"score": 31, "fixable": 20, "name_source": "pdb"},
+            "a::archive": {"score": 31, "fixable": 20, "name_source": "archive"},
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert set(_keys(result)) == {"a::scan", "a::manual", "a::pdb", "a::archive"}
+
+
+def test_missing_name_source_treated_as_default():
+    """Rows that don't have name_source at all (pre-migration data, or
+    fresh state.json dicts the worker hasn't touched yet) must flow
+    through — anything else would break the legacy state.json fallback
+    path and the pre-migration soak window."""
+    state = _state(
+        **{
+            "a::pre_migration": {
+                "score": 31,
+                "fixable": 20,
+                # no name_source key at all
+            },
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert _keys(result) == ["a::pre_migration"]
+
+
 def test_stagnation_runs_excluded_at_threshold():
     """Functions with stagnation_runs >= 3 must be excluded from selection
     unless pinned. This is the general safety net for any re-pick loop
