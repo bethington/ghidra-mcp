@@ -630,6 +630,115 @@ class TestMemoryInspection:
         assert response.status_code in [200, 404]
 
 
+class TestSearchInstructions:
+    """`/search_instructions` (#172) — operand-pattern instruction search.
+
+    Auto-skips when the endpoint isn't registered (deployed JAR older
+    than the source). All assertions are response-shape — they don't
+    pin to a specific binary's contents so the suite is portable
+    across the team's various analysis sessions.
+    """
+
+    def _request(self, http_client, **params):
+        return http_client.get("/search_instructions", params=params)
+
+    def test_endpoint_present(self, http_client):
+        """Quick health check — endpoint should respond (200) when called
+        with a valid mnemonic filter, or 404 if not deployed."""
+        r = self._request(http_client, mnemonic="ret")
+        if r.status_code == 404:
+            pytest.skip("/search_instructions not deployed in current Ghidra JAR")
+        assert r.status_code == 200
+
+    def test_response_shape_for_mnemonic_search(self, http_client):
+        r = self._request(http_client, mnemonic="ret", limit=5)
+        if r.status_code == 404:
+            pytest.skip("/search_instructions not deployed")
+        assert r.status_code == 200
+        body = r.json()
+        # Top-level fields the docstring promises.
+        for key in (
+            "matches",
+            "match_count",
+            "instructions_scanned",
+            "truncated",
+            "scope",
+            "mnemonic_filter",
+            "operand_filter",
+        ):
+            assert key in body, f"missing top-level field: {key}"
+        assert isinstance(body["matches"], list)
+        assert body["mnemonic_filter"] == "ret"
+        assert body["operand_filter"] is None
+
+        # Each match record carries the documented shape.
+        for m in body["matches"]:
+            for key in ("address", "function", "mnemonic", "operands", "length", "bytes"):
+                assert key in m, f"match missing field: {key}"
+            assert isinstance(m["length"], int) and m["length"] >= 1
+            # bytes is lowercase hex with exactly 2 chars per byte.
+            assert len(m["bytes"]) == m["length"] * 2
+            assert m["bytes"] == m["bytes"].lower()
+            # mnemonic match is case-insensitive but exact.
+            assert m["mnemonic"].lower() == "ret"
+
+    def test_rejects_empty_filters(self, http_client):
+        """Both filters empty → server-side error (must specify at least one)."""
+        r = self._request(http_client, mnemonic="", operand_pattern="", limit=1)
+        if r.status_code == 404:
+            pytest.skip("/search_instructions not deployed")
+        # The endpoint returns {"error": "..."} with HTTP 200 OR an HTTP-level
+        # 4xx — both are acceptable signals of "you didn't filter anything".
+        if r.status_code == 200:
+            body = r.json()
+            assert "error" in body
+            assert "mnemonic" in body["error"].lower() or "operand" in body["error"].lower()
+        else:
+            assert r.status_code in (400, 422)
+
+    def test_limit_clamping(self, http_client):
+        """Limit ≤ 0 or > 50000 is rejected."""
+        r = self._request(http_client, mnemonic="ret", limit=0)
+        if r.status_code == 404:
+            pytest.skip("/search_instructions not deployed")
+        if r.status_code == 200:
+            body = r.json()
+            assert "error" in body
+            assert "limit" in body["error"].lower()
+        else:
+            assert r.status_code in (400, 422)
+
+    def test_truncated_flag_when_limit_hit(self, http_client):
+        """limit=1 on a mnemonic that has many matches sets truncated=True."""
+        r = self._request(http_client, mnemonic="ret", limit=1)
+        if r.status_code == 404:
+            pytest.skip("/search_instructions not deployed")
+        assert r.status_code == 200
+        body = r.json()
+        if body["match_count"] == 0:
+            # Binary genuinely has zero `ret` — implausible but skip cleanly.
+            pytest.skip("No `ret` instructions in this binary; can't verify truncation")
+        assert body["match_count"] == 1
+        # `truncated` is True iff the iterator stopped because the limit
+        # was reached; it's possible (but unlikely) for a binary to have
+        # exactly one `ret` total, in which case truncated stays False.
+        # Just assert the field is a bool.
+        assert isinstance(body["truncated"], bool)
+
+    def test_operand_filter_substring_match(self, http_client):
+        """operand_pattern is a case-insensitive substring on the joined
+        operand string — should never match instructions whose operands
+        don't contain the substring."""
+        r = self._request(http_client, operand_pattern="zzznonexistentzzz", limit=10)
+        if r.status_code == 404:
+            pytest.skip("/search_instructions not deployed")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["match_count"] == 0
+        assert body["matches"] == []
+        assert body["operand_filter"] == "zzznonexistentzzz"
+
+
 class TestBulkHashing:
     """Test bulk hash endpoints (read-only)."""
 

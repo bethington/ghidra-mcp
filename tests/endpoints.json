@@ -1,7 +1,7 @@
 {
   "version": "5.9.1",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 243,
+  "total_endpoints": 244,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -2189,6 +2189,19 @@
         "program"
       ],
       "description": "Advanced function search"
+    },
+    {
+      "path": "/search_instructions",
+      "method": "GET",
+      "category": "analysis",
+      "params": [
+        "mnemonic",
+        "operand_pattern",
+        "function",
+        "limit",
+        "program"
+      ],
+      "description": "Search for instructions by mnemonic and/or operand substring. Complement to /search_byte_patterns (byte-level); this matches after Ghidra has parsed instructions, so you can search for 'mov' + '[ecx+0xD0]' without knowing the encoding. Case-insensitive substring match on both fields. Returns {address, function, mnemonic, operands, bytes} per match."
     },
     {
       "path": "/search_strings",
