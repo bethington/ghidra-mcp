@@ -990,6 +990,41 @@ class WorkerManager:
         self._socketio.emit("worker_status", self.get_status())
 
 
+def compute_skip_reason(func: dict, key: str, pinned_keys: set) -> str | None:
+    """Return the selector skip reason for ``func``, or ``None`` if eligible.
+
+    Mirrors the gates in ``fun_doc.select_candidates`` exactly. Surfaced via
+    the dashboard's function-list APIs so the UI can show "why isn't this
+    function getting picked?" without users reading source. Keep in sync
+    with the selector; if a new gate lands there, add a branch here.
+
+    Every gate respects pinning — in ``select_candidates`` the pattern is
+    ``if func.get("X") and not is_pinned: continue``, so a pinned row with
+    a library_code / propagation / stagnation / etc. flag still gets
+    admitted at high priority. The dashboard column must reflect that
+    same reality or it'll lie to the user about what the worker will do.
+    """
+    is_pinned = key in pinned_keys
+    if func.get("library_code") and not is_pinned:
+        return "library_code"
+    if (
+        not is_pinned
+        and func.get("name_source") == "propagation"
+        and (
+            func.get("name_confidence") is None
+            or func.get("name_confidence", 0) < 0.5
+        )
+    ):
+        return "propagation"
+    if func.get("decompile_timeout") and not is_pinned:
+        return "decompile_timeout"
+    if func.get("stagnation_runs", 0) >= 3 and not is_pinned:
+        return "stagnation"
+    if func.get("recovery_pass_done") and not is_pinned:
+        return "recovery_done"
+    return None
+
+
 def create_app(state_file, event_bus=None):
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
     app.config["STATE_FILE"] = Path(state_file)
@@ -1615,6 +1650,13 @@ def create_app(state_file, event_bus=None):
                     "unscored": not func.get("last_processed"),
                     "tool_calls": func.get("tool_calls"),
                     "tool_calls_known": func.get("tool_calls_known"),
+                    # Provenance (#204) — surface name_source, the source-binary
+                    # forensic pointer, the gate-confidence, and the selector
+                    # skip reason (None when eligible).
+                    "name_source": func.get("name_source") or "scan",
+                    "name_source_binary": func.get("name_source_binary"),
+                    "name_confidence": func.get("name_confidence"),
+                    "skip_reason": compute_skip_reason(func, key, pinned_keys),
                 }
             )
         func_list.sort(key=lambda x: x["score"])
@@ -2695,6 +2737,13 @@ def create_app(state_file, event_bus=None):
                     "unscored": not func.get("last_processed"),
                     "tool_calls": func.get("tool_calls"),
                     "tool_calls_known": func.get("tool_calls_known"),
+                    # Provenance (#204) — see compute_skip_reason() for the
+                    # selector-mirror logic. `name_source_binary` is the
+                    # forensic "where did this name come from?" pointer.
+                    "name_source": func.get("name_source") or "scan",
+                    "name_source_binary": func.get("name_source_binary"),
+                    "name_confidence": func.get("name_confidence"),
+                    "skip_reason": compute_skip_reason(func, key, pinned),
                 }
             )
         if sort == "name":
