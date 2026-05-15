@@ -4,7 +4,17 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v5.10.0 - 2026-05-15 (operations + propagation provenance + community features)
+
+Minor release rolling up a community feature (#172), two operational
+hardening passes (log rotation, storage loud-fail), and the
+propagation-provenance gate (#204) that closes the v5.9.x worker
+token-leak on cross-version hash-propagated CRT/STL. Plus the
+legacy-CLI archive and the AUR README link from the post-v5.9.1
+hygiene sweep.
+
+243 → 244 tools. Schema migration `0003_name_source.sql` applied
+automatically on first dashboard start.
 
 ### Added
 

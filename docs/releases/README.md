@@ -9,7 +9,55 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.9.1 (Latest) — community fixes + fun-doc reliability
+### v5.10.0 (Latest) — operations + propagation provenance + community features
+
+Minor release rolling up a community feature (#172), two operational
+hardening passes, and the propagation-provenance gate (#204) that
+closes the v5.9.x worker token-leak on cross-version hash-propagated
+CRT/STL. 243 → 244 tools.
+
+- **`/search_instructions`** (#172, @Gaok1) — operand-pattern
+  instruction search. Complement to `/search_byte_patterns`
+  (byte-level); this matches after Ghidra has parsed instructions,
+  so callers can search for `mov` + `[ecx+0xD0]` without knowing the
+  encoding. Optional `function=` scope, `limit=` cap with
+  truncation reporting.
+- **Name-source provenance** (#204) — three new columns on
+  `functions_workflow` (`name_source`, `name_source_binary`,
+  `name_confidence`) tracking where each function name came from.
+  The selector now skips `name_source = 'propagation'` rows with
+  `name_confidence < 0.5` (tunable via
+  `FUN_DOC_PROPAGATION_CONFIDENCE_THRESHOLD`) unless pinned. Closes
+  the v5.9.x failure mode where cross-version hash propagation gave
+  plausible D2-style names to statically-linked CRT/STL/iostream —
+  ~10M input tokens burned on the top 7 such misidentifications in
+  BH.dll's last 24h before the gate. Includes a backfill CLI
+  (`scripts/backfill_name_source.py`) to mark existing rows by
+  regex or JSON manifest. Migration `0003_name_source.sql` applied
+  automatically on first dashboard start.
+- **Log rotation** (`fun-doc/log_rotation.py`) — single
+  `write_jsonl_rotating()` helper wraps the three operational JSONL
+  logs (`ghidra_http.jsonl`, `runs.jsonl`, `events.jsonl`). Default
+  200 MB × 5 backups = ~1.2 GB hard cap per series. Pre-rotation,
+  `ghidra_http.jsonl` was unbounded and hit 1.03 GB in three weeks
+  on the user's main workspace.
+- **Storage backend loud-fail** — post-v5.9.1 follow-up: the
+  import-time guard caught "sqlalchemy missing"; this commit extends
+  the guard so post-import failures (Postgres unreachable, bad URL,
+  schema migration broken, SQLite path unwritable) also `sys.exit(1)`
+  with an actionable diagnostic instead of silently falling back to
+  legacy `state.json`.
+- **Legacy CLI tools archived** — `tools/scan_undocumented_functions.py`,
+  `tools/scan_functions_mcp.py`, `tools/document_function.py` moved
+  to `docs/archive/legacy-tools/` (gitmv-preserved history). All
+  three predated `fun-doc/` by ~7 months and were last touched
+  2025-10-10; everything they did is now better-handled by the
+  worker + dashboard. Files still work against the stable v5.9.1
+  HTTP API.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.9.1 — community fixes + fun-doc reliability
 
 Patch release rolling up four community fixes (#200, #201, #202, #205)
 plus three internal reliability fixes that landed during v5.9.0 worker
@@ -27,17 +75,14 @@ instruction-text payload (back-compat preserved). 243 tools.
   quotes the actual import error, names three working alternatives
   (minimax / claude / codex), and points at the pin-to-source workaround.
 - **fun-doc loud-fail on missing sqlalchemy** — refuses to start instead
-  of silently falling back to legacy `state.json` (hit the same user
-  twice on v5.9.0 release day after running the dashboard from system
-  Python).
+  of silently falling back to legacy `state.json`.
 - **Library-code detector catches `_Setgloballocale` / `_Atexit` / TLS
-  callbacks** — added to `HARD_CALLEE_NAMES`, plugging a v5.9.0 miss
-  where the worker burned 92K tokens on locale init.
+  callbacks** — plugging a v5.9.0 miss where the worker burned 92K
+  tokens on locale init.
 - **Migration script carries `library_code` fields** — was dropping
   them on `state.json → state.db` folds.
 - **Block-reason capture** — `_log_run_once` now extracts the reason
-  text after recognized markers (`BLOCKED:`, `NEEDS REDO:`, rate-limit
-  phrases) instead of dropping it.
+  text after recognized markers instead of dropping it.
 - **Test fixture stopped wiping `fun-doc/state.db`** — autouse fixture
   refuses to delete files over 512 KB.
 
