@@ -59,14 +59,32 @@ public class ProgramScriptService {
             return false;
         }
         try {
-            ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
             AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-            if (force) {
-                mgr.reAnalyzeAll(null);
+            // Ghidra's analyzers mutate the program DB, which requires an
+            // open transaction. The GUI analysis-task framework opens one
+            // for you; a direct mgr.startAnalysis() from the bridge does
+            // NOT. Without this wrapper FunctionStartAnalyzer (and any
+            // other writing analyzer) throws db.NoTransactionException
+            // ("Transaction has not been started") on any program that
+            // isn't already fully analyzed — the program-open path then
+            // fails. Confirmed root cause of #209. The markProgram* option
+            // writes go inside the same transaction since they mutate the
+            // program too; persistProgram (save) runs AFTER the
+            // transaction is closed.
+            int txId = program.startTransaction("GhidraMCP auto-analysis");
+            boolean txOk = false;
+            try {
+                ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
+                if (force) {
+                    mgr.reAnalyzeAll(null);
+                }
+                mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
+                mgr.waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
+                ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
+                txOk = true;
+            } finally {
+                program.endTransaction(txId, txOk);
             }
-            mgr.startAnalysis(ghidra.util.task.TaskMonitor.DUMMY);
-            mgr.waitForAnalysis(null, ghidra.util.task.TaskMonitor.DUMMY);
-            ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
             persistProgram(program, AUTO_ANALYSIS_COMPLETION_MESSAGE);
             return true;
         } catch (Exception e) {
