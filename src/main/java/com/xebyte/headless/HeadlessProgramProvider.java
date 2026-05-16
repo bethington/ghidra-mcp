@@ -303,8 +303,14 @@ public class HeadlessProgramProvider implements ProgramProvider {
                     + "mount it into this container, then reopen it via "
                     + "/open_project.";
             }
-            String serverName = repo.getServer() != null ? repo.getServer().getServerInfo() : "?";
-            return "Project bound to server " + serverName + " repo '" + repo.getName() + "'";
+            // Only RepositoryAdapter.getName() is touched here — the
+            // server host:port lives behind getServer().getServerInfo(),
+            // whose return type differs across Ghidra 12.0.x point builds
+            // (String on some, ServerInfo on others) and broke the CI
+            // build. The repo name + "bound to a server" is the
+            // diagnostic the operator actually needs; they configured the
+            // host:port themselves.
+            return "Project is bound to a Ghidra Server (repo '" + repo.getName() + "')";
         } catch (Exception e) {
             return "Server binding probe failed: " + e.getClass().getSimpleName();
         }
@@ -323,8 +329,11 @@ public class HeadlessProgramProvider implements ProgramProvider {
             if (repo == null) {
                 return new ServerBindingInfo(false, null, null);
             }
-            String serverInfo = repo.getServer() != null ? repo.getServer().getServerInfo() : null;
-            return new ServerBindingInfo(true, serverInfo, repo.getName());
+            // serverInfo (host:port) is intentionally left null — see
+            // describeServerBinding: getServer().getServerInfo()'s return
+            // type isn't stable across Ghidra 12.0.x point builds. The
+            // serverBound flag + repo name are the load-bearing fields.
+            return new ServerBindingInfo(true, null, repo.getName());
         } catch (Exception e) {
             return new ServerBindingInfo(false, null, null);
         }
