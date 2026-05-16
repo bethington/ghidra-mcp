@@ -4,6 +4,70 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+Post-v5.10.0 fixes — community bug reports plus the gemini-cli-sdk
+reconciliation. No new endpoints; `/search_instructions` and the
+headless diagnostics need a plugin redeploy to take effect.
+
+### Fixed
+
+- **#207 — fun-doc called Ghidra endpoints with wrong parameter
+  names** (@dalen). Audited every `ghidra_get`/`ghidra_post` call in
+  `fun_doc.py` against the endpoint catalog. Three real bugs + one
+  latent, all in fun-doc's internal helper paths (archive-apply,
+  library-code stamp) that fail silently:
+  - `/rename_function_by_address` was sent `address` (endpoint wants
+    `function_address`) with the body params in the query string —
+    every archive-hit rename silently no-op'd.
+  - `/batch_set_comments` (archive-apply) used a dead
+    `items=[{address,type,text}]` payload shape — plate write no-op'd.
+  - `/batch_set_comments` (library-code stamp) sent `function_address`
+    where the param is `address` — the generic plate never landed.
+  - `/get_function_variables` address-fallback passed the address as
+    `function_name` instead of using the `address` param.
+  `fix-prototype.md` prompt example corrected
+  (`set_function_prototype` → `function_address` + `prototype`). New
+  `test_fundoc_endpoint_param_parity.py` AST-checks every fun-doc call
+  against `endpoints.json` so param drift is a CI failure. The
+  API-wide param inconsistency (`address` vs `function_address` etc.)
+  is tracked separately in #210.
+
+- **#209 — bridge auto-analysis crashed on un-analyzed programs**
+  (@s-b-repo). `runAutoAnalysisAndPersistFlags` ran
+  `AutoAnalysisManager.startAnalysis` with no open DB transaction, so
+  `FunctionStartAnalyzer` threw `db.NoTransactionException` on any
+  program not already fully analyzed. Wrapped the analysis sequence in
+  `startTransaction`/`endTransaction`, matching the sibling
+  `set_image_base` and `HeadlessProgramProvider.runAnalysis` paths.
+
+- **#201 — Gemini worker SDK** (@dalen). The working SDK now ships
+  from GitHub (`bethington/gemini-agent-sdk`) and is vendored into
+  `fun-doc/vendored/gemini_agent_sdk/`, so the Gemini provider works
+  with no install step. Renamed from `gemini-cli-sdk` (distribution
+  *and* import package) to de-conflict with the unrelated PyPI
+  `gemini-cli-sdk` — the import-name collision was the root cause of
+  the original `ImportError`.
+
+- **`/search_instructions` always echoes filter values** — Gson
+  dropped null map values, so `mnemonic_filter`/`operand_filter` were
+  silently absent from the response when the filter was empty. They
+  are now always present as plain strings (empty = no filter).
+
+### Added
+
+- **#119 — structured diagnostics for `/load_program_from_project`**
+  (@j4s0n, @t0xk). Failure responses now carry a `diagnostics` block
+  (`project_server_bound`, `available_program_paths`, `suggestion`)
+  and `/get_project_info` surfaces server-binding state, so the
+  "checked out but can't open" failure mode is self-diagnosing.
+
+- **Dashboard name-source column** (#204 follow-up) — the All
+  Functions table shows each row's `name_source` and flags
+  propagation rows the selector will skip.
+
+---
+
 ## v5.10.0 - 2026-05-15 (operations + propagation provenance + community features)
 
 Minor release rolling up a community feature (#172), two operational
