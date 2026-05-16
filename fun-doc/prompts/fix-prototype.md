@@ -14,7 +14,9 @@
    - Return type: what does EAX hold at each RET? void, int, pointer, bool?
    - Parameter types: how are stack/register params used?
    - Calling convention: __stdcall, __cdecl, __fastcall, __thiscall
-2. **Set prototype**: `set_function_prototype(address, prototype_string)`
+2. **Set prototype**: `set_function_prototype(function_address=..., prototype=...)`
+   - The address parameter is named `function_address` (not `address`), and the
+     prototype string parameter is named `prototype`.
    - Use typed struct pointers when the struct is known
    - Use Hungarian camelCase for parameter names
 3. **Refresh variables**: `get_function_variables(address=...)` -- prototype changes may create new SSA variables; use the function address, not the name, in the same pass

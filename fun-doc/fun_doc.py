@@ -757,22 +757,23 @@ def check_archive_for_match(func, func_name, live_score, run_id):
 
     try:
         if new_name and not new_name.startswith("FUN_"):
+            # /rename_function_by_address: function_address + new_name are
+            # BODY params (ParamSource.BODY), program is QUERY. Sending the
+            # body params as query made this silently no-op — the endpoint
+            # saw null function_address and errored (#207).
             ghidra_post(
                 "/rename_function_by_address",
-                params={
-                    "address": address,
-                    "program": program,
-                    "new_name": new_name,
-                },
+                data={"function_address": address, "new_name": new_name},
+                params={"program": program},
             )
         if plate:
+            # /batch_set_comments takes address + plate_comment as BODY
+            # params (plus optional decompiler_comments / disassembly_comments
+            # arrays). The old `items=[{address,type,text}]` shape is not an
+            # API this endpoint ever had — the plate write silently no-op'd.
             ghidra_post(
                 "/batch_set_comments",
-                data={
-                    "items": [
-                        {"address": address, "type": "PLATE", "text": plate}
-                    ]
-                },
+                data={"address": address, "plate_comment": plate},
                 params={"program": program},
             )
         ghidra_post("/save_program", params={"program": program})
@@ -6534,11 +6535,13 @@ def _audit_hungarian_compliance(address, program):
         "/get_function_variables",
         params={"function_name": f"FUN_{address}", "program": program},
     )
-    # Try address-based lookup if name-based fails
+    # Try address-based lookup if name-based fails. /get_function_variables
+    # has a dedicated `address` param — the old fallback passed the address
+    # string as `function_name`, which can't resolve (#207).
     if not vars_data:
         vars_data = ghidra_get(
             "/get_function_variables",
-            params={"function_name": f"0x{address}", "program": program},
+            params={"address": f"0x{address}", "program": program},
         )
     if not vars_data or not isinstance(vars_data, dict):
         return [], 0
@@ -7178,11 +7181,16 @@ def process_function(
                 # Best-effort plate stamp via MCP — failure is non-fatal,
                 # the flag itself is the primary skip mechanism.
                 try:
+                    # /batch_set_comments' address param is named `address`,
+                    # not `function_address` (#207 — fun-doc had it wrong, so
+                    # the generic library-code plate silently never landed;
+                    # the library_code flag is the real skip mechanism so the
+                    # gate still worked, but the plate was missing).
                     ghidra_post(
                         "/batch_set_comments",
                         params={"program": program},
                         data={
-                            "function_address": f"0x{address}",
+                            "address": f"0x{address}",
                             "plate_comment": plate_text,
                         },
                     )
