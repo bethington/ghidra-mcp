@@ -12,6 +12,12 @@ headless diagnostics need a plugin redeploy to take effect.
 
 ### Fixed
 
+- **#212 -- bridge tool registration aborted on one malformed schema
+  entry** (@killerra). Dynamic registration now skips only the failing
+  tool, keeps loading later valid tools during both connect-time
+  registration and lazy group loading, and writes a compact stderr
+  diagnostic with the bad tool name and exception.
+
 - **#207 — fun-doc called Ghidra endpoints with wrong parameter
   names** (@dalen). Audited every `ghidra_get`/`ghidra_post` call in
   `fun_doc.py` against the endpoint catalog. Three real bugs + one
