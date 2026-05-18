@@ -4,7 +4,7 @@
 		{
 			"id": "ghidraPath",
 			"description": "Path to Ghidra installation directory",
-			"default": "F:\\ghidra_12.0.4_PUBLIC",
+			"default": "F:\\ghidra_12.1_PUBLIC",
 			"type": "promptString"
 		},
 		{

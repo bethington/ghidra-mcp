@@ -16,7 +16,7 @@
 # Plain `ghidraRun.bat` (no env var) keeps the default unscoped behavior.
 
 param(
-    [string]$GhidraPath = "F:\ghidra_12.0.4_PUBLIC",
+    [string]$GhidraPath = "F:\ghidra_12.1_PUBLIC",
     [string]$Scope      = "/Mods/PD2-S12"
 )
 

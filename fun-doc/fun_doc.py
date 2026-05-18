@@ -834,8 +834,8 @@ def try_launch_ghidra():
         candidates.append(Path(env_dir))
     # Common install locations
     candidates += [
-        Path("F:/ghidra_12.0.4_PUBLIC"),
-        Path("C:/ghidra_12.0.4_PUBLIC"),
+        Path("F:/ghidra_12.1_PUBLIC"),
+        Path("C:/ghidra_12.1_PUBLIC"),
         Path("C:/Program Files/ghidra"),
         Path(os.path.expanduser("~/ghidra")),
     ]

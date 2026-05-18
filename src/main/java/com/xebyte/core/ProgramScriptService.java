@@ -1223,6 +1223,11 @@ public class ProgramScriptService {
                     ghidra.app.script.GhidraScriptProvider provider = ghidra.app.script.GhidraScriptUtil.getProvider(scriptFile);
                     if (provider == null) {
                         resultMsg.append("ERROR: No script provider found for: ").append(scriptFile.getName()).append("\n");
+                        if (scriptFile.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".py")) {
+                            resultMsg.append("Ghidra 12.1 ships Jython as an optional extension. ")
+                                    .append("Install the Jython extension from File > Install Extensions, ")
+                                    .append("restart Ghidra, then refresh Script Manager before running .py scripts.\n");
+                        }
                         return;
                     }
 

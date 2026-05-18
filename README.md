@@ -102,6 +102,15 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 - **Ghidra 12.1** (or compatible version)
 - **Python 3.10+** with pip
 
+> Shared Ghidra Server users: Ghidra 12.1 clients require a Ghidra
+> Server at 12.1, 12.0.5, or a newer compatible version. Upgrade the
+> server before using this plugin from a 12.1 client.
+>
+> Ghidra 12.1 ships Jython as an optional extension. Java scripts work
+> by default, but `.py` scripts in `ghidra_scripts/` require installing
+> the Jython extension from **File > Install Extensions** and restarting
+> Ghidra.
+
 ### Installation
 
 > Recommended for all platforms: use `python -m tools.setup` directly.
@@ -389,6 +398,10 @@ java -jar GhidraMCPHeadless.jar --bind 0.0.0.0 --port 8089
 
 When connecting to a shared Ghidra Server, GhidraMCP can suppress the password dialog automatically. It resolves credentials in this order (first non-empty value wins):
 
+Compatibility note: Ghidra 12.1 clients require Ghidra Server 12.1,
+12.0.5, or a newer compatible server. Older shared servers are not safe
+targets for a 12.1 client upgrade.
+
 1. `GHIDRA_SERVER_PASSWORD` environment variable (or `.env` file in the Ghidra install directory or `~`)
 2. `~/.ghidra-cred` — single-line password file in your home directory
 3. `<ghidra-install-dir>/.ghidra-cred`
@@ -461,6 +474,17 @@ into and run from the same interpreter.
 1. Verify endpoint exists: `curl http://127.0.0.1:8089/get_version`
 2. Check for typos in endpoint name
 3. Ensure you're using correct HTTP method (GET vs POST)
+
+### Python Ghidra scripts fail with "No script provider found"
+
+**Cause:** In Ghidra 12.1, Jython support is no longer enabled by
+default. `.py` scripts need the bundled Jython extension; Python 3
+scripts should use PyGhidra instead of the Ghidra Script Manager.
+
+**Solution:**
+1. In the Ghidra Front End, open **File > Install Extensions**.
+2. Check **Jython**, restart Ghidra, then refresh Script Manager.
+3. For new automation, prefer Java Ghidra scripts or PyGhidra.
 
 ### Extension not appearing in Install Extensions
 
