@@ -12,6 +12,11 @@ headless diagnostics need a plugin redeploy to take effect.
 
 ### Fixed
 
+- **#211 - Ghidra 12.1 compatibility** (@firefart). Updated the
+  project Ghidra dependency version, CI/release/Docker download
+  metadata, setup defaults, examples, and compatibility tests from
+  Ghidra 12.0.4 to the latest official Ghidra 12.1 release.
+
 - **#207 — fun-doc called Ghidra endpoints with wrong parameter
   names** (@dalen). Audited every `ghidra_get`/`ghidra_post` call in
   `fun_doc.py` against the endpoint catalog. Three real bugs + one

@@ -56,7 +56,7 @@ def require_v5_7_endpoints(server_url, http_session):
         pytest.skip(
             "audit_global endpoint not registered on running server "
             "(v5.7.0 not deployed yet — run "
-            "`python -m tools.setup deploy --ghidra-path F:\\ghidra_12.0.4_PUBLIC --test release` "
+            "`python -m tools.setup deploy --ghidra-path F:\\ghidra_12.1_PUBLIC --test release` "
             "to deploy then re-run these tests)"
         )
 
