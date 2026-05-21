@@ -493,8 +493,17 @@ def _expect_mcp_error(path: str, payload: object, required_terms: tuple[str, ...
         )
 
 
-def _find_matching_ghidra_processes(ghidra_path: Path) -> list[dict[str, object]]:
-    target = str(ghidra_path.resolve()).lower()
+def _enumerate_ghidra_processes() -> list[dict[str, object]]:
+    """Return every running Ghidra process on this machine, install-agnostic.
+
+    Each entry is {pid, name, command}. The earlier
+    _find_matching_ghidra_processes filtered by install path on the same
+    pass, which silently missed Ghidras running from a *different*
+    install during a version-changing deploy — see the v5.10→v5.11
+    Ghidra-12.1 deploy where an old 12.0.4 was still up but went
+    undetected. This helper does the cross-platform process scan once;
+    callers filter by path themselves.
+    """
     if os.name == "nt":
         command = [
             "powershell",
@@ -512,35 +521,67 @@ def _find_matching_ghidra_processes(ghidra_path: Path) -> list[dict[str, object]
             return []
         raw = json.loads(completed.stdout)
         rows = raw if isinstance(raw, list) else [raw]
-        matches = []
+        out: list[dict[str, object]] = []
         for row in rows:
             cmd = str(row.get("CommandLine") or "")
             name = str(row.get("Name") or "").lower()
             cmd_lower = cmd.lower()
-            is_ghidra_process = (
+            is_ghidra = (
                 name in {"java.exe", "javaw.exe", "ghidrarun.bat", "ghidrarun"}
                 and ("ghidra.ghidra" in cmd_lower or "ghidrarun" in cmd_lower)
             )
-            if target in cmd_lower and is_ghidra_process:
-                matches.append(
+            if is_ghidra:
+                out.append(
                     {
                         "pid": int(row["ProcessId"]),
                         "name": row.get("Name", ""),
                         "command": cmd,
                     }
                 )
-        return matches
+        return out
     ps = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, check=False)
-    matches = []
+    out = []
     for line in ps.stdout.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
         pid_text, _, command = stripped.partition(" ")
         command_lower = command.lower()
-        if target in command_lower and ("ghidra.ghidra" in command_lower or "ghidrarun" in command_lower):
-            matches.append({"pid": int(pid_text), "name": "process", "command": command})
-    return matches
+        if "ghidra.ghidra" in command_lower or "ghidrarun" in command_lower:
+            out.append({"pid": int(pid_text), "name": "process", "command": command})
+    return out
+
+
+def _find_matching_ghidra_processes(ghidra_path: Path) -> list[dict[str, object]]:
+    """Ghidra processes whose command-line includes ``ghidra_path``.
+
+    Used by the deploy flow to identify the install we're targeting so
+    it can be gracefully shut down before extension replacement. For
+    processes that match *other* Ghidra installs, see
+    ``_find_mismatched_ghidra_processes`` — those would be warned about
+    rather than auto-shut-down, because they may belong to unrelated
+    work the operator hasn't agreed to close.
+    """
+    target = str(ghidra_path.resolve()).lower()
+    return [
+        proc for proc in _enumerate_ghidra_processes()
+        if target in str(proc["command"]).lower()
+    ]
+
+
+def _find_mismatched_ghidra_processes(ghidra_path: Path) -> list[dict[str, object]]:
+    """Ghidra processes from a DIFFERENT install than ``ghidra_path``.
+
+    Surfaced as a warning at deploy time so a version-mixing scenario
+    is visible: an old Ghidra still bound to MCP port 8089 will respond
+    to the deploy's post-start smoke checks instead of the just-deployed
+    new version, producing confusing "wrong version" failures.
+    """
+    target = str(ghidra_path.resolve()).lower()
+    return [
+        proc for proc in _enumerate_ghidra_processes()
+        if target not in str(proc["command"]).lower()
+    ]
 
 
 def _terminate_process(pid: int) -> None:
@@ -631,6 +672,29 @@ def close_running_ghidra_for_deploy(
     dry_run: bool = False,
     wait_seconds: int = DEFAULT_GHIDRA_EXIT_WAIT_SECONDS,
 ) -> bool:
+    # Warn about Ghidras running from a DIFFERENT install. We don't
+    # touch them (they may belong to unrelated work the operator hasn't
+    # agreed to close), but surfacing them keeps a version-mixing
+    # scenario from going undetected: an old Ghidra still bound to MCP
+    # port 8089 will respond to the deploy's post-start smoke checks
+    # instead of the just-deployed new version, producing confusing
+    # "wrong version" failures. This was the v5.10→v5.11 deploy gap
+    # the user flagged after the Ghidra 12.0.4 → 12.1 cutover.
+    mismatched = _find_mismatched_ghidra_processes(ghidra_path)
+    if mismatched:
+        print(
+            f"WARNING: {len(mismatched)} Ghidra process(es) running from a "
+            f"DIFFERENT install than deploy target {ghidra_path}:"
+        )
+        for proc in mismatched:
+            print(f"  PID {proc['pid']}: {proc['command']}")
+        print(
+            "  These may bind MCP port 8089 and intercept the post-deploy "
+            "smoke checks intended for the new install. If the deploy's "
+            "version probe reports the wrong version, close the other "
+            "Ghidra(s) (save work first) and re-run."
+        )
+
     matches = _find_matching_ghidra_processes(ghidra_path)
     if not matches:
         print("No matching running Ghidra process detected.")
