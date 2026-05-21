@@ -149,6 +149,58 @@ class TestToolGroupManagement(unittest.TestCase):
         self.assertEqual(loaded, ["grp_test_b"])
         self.assertIn("grp_beta", _loaded_groups)
 
+    def test_load_group_skips_bad_tool_and_continues(self):
+        """Lazy group loading should not abort on one malformed tool."""
+        import bridge_mcp_ghidra as bridge
+
+        schema = [
+            {
+                "name": "issue_212_already_loaded",
+                "description": "",
+                "endpoint": "/issue_212_already_loaded",
+                "http_method": "GET",
+                "category": "grp_alpha",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "issue_212_lazy_bad_signature",
+                "description": "",
+                "endpoint": "/issue_212_lazy_bad_signature",
+                "http_method": "GET",
+                "category": "grp_beta",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"bad-param": {"type": "string"}},
+                },
+            },
+            {
+                "name": "issue_212_lazy_valid_after",
+                "description": "",
+                "endpoint": "/issue_212_lazy_valid_after",
+                "http_method": "GET",
+                "category": "grp_beta",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+        ]
+
+        try:
+            bridge.register_tools_from_schema(schema, groups={"grp_alpha"})
+            with mock.patch("sys.stderr") as mock_stderr:
+                loaded = bridge._load_group("grp_beta")
+
+            self.assertEqual(loaded, ["issue_212_lazy_valid_after"])
+            self.assertIn("grp_beta", bridge._loaded_groups)
+            self.assertIn("issue_212_lazy_valid_after", bridge._dynamic_tool_names)
+            self.assertNotIn(
+                "issue_212_lazy_bad_signature", bridge._dynamic_tool_names
+            )
+            message = mock_stderr.write.call_args.args[0]
+            self.assertIn("1 tool(s) failed to register", message)
+            self.assertIn("issue_212_lazy_bad_signature", message)
+            self.assertIn("bad-param", message)
+        finally:
+            bridge.register_tools_from_schema([])
+
 
 class TestConnectInstance(unittest.TestCase):
     """Test connect_instance eager-loading behavior."""

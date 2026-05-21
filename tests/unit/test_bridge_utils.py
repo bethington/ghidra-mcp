@@ -733,6 +733,54 @@ class TestRegisterToolsFromSchema(unittest.TestCase):
         self.assertIn("test_tool_reg_1", _dynamic_tool_names)
         self.assertIn("test_tool_reg_2", _dynamic_tool_names)
 
+    def test_register_skips_bad_tool_and_continues(self):
+        import bridge_mcp_ghidra as bridge
+
+        schema = [
+            {
+                "name": "issue_212_valid_before",
+                "description": "",
+                "endpoint": "/issue_212_valid_before",
+                "http_method": "GET",
+                "category": "listing",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "issue_212_bad_signature",
+                "description": "",
+                "endpoint": "/issue_212_bad_signature",
+                "http_method": "GET",
+                "category": "listing",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"bad-param": {"type": "string"}},
+                },
+            },
+            {
+                "name": "issue_212_valid_after",
+                "description": "",
+                "endpoint": "/issue_212_valid_after",
+                "http_method": "GET",
+                "category": "listing",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+        ]
+
+        try:
+            with patch("sys.stderr") as mock_stderr:
+                count = bridge.register_tools_from_schema(schema)
+
+            self.assertEqual(count, 2)
+            self.assertIn("issue_212_valid_before", bridge._dynamic_tool_names)
+            self.assertIn("issue_212_valid_after", bridge._dynamic_tool_names)
+            self.assertNotIn("issue_212_bad_signature", bridge._dynamic_tool_names)
+            message = mock_stderr.write.call_args.args[0]
+            self.assertIn("1 tool(s) failed to register", message)
+            self.assertIn("issue_212_bad_signature", message)
+            self.assertIn("bad-param", message)
+        finally:
+            bridge.register_tools_from_schema([])
+
     def test_clears_previous_tools(self):
         from bridge_mcp_ghidra import register_tools_from_schema, _dynamic_tool_names
 

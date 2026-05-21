@@ -12,13 +12,19 @@ headless diagnostics need a plugin redeploy to take effect.
 
 ### Fixed
 
-- **#211 - Ghidra 12.1 compatibility** (@firefart). Updated the
+- **#211 — Ghidra 12.1 compatibility** (@firefart). Updated the
   project Ghidra dependency version, CI/release/Docker download
   metadata, setup defaults, examples, and compatibility tests from
   Ghidra 12.0.4 to the latest official Ghidra 12.1 release. Added
   12.1-specific shared-server guidance, Jython-extension documentation,
   preflight messaging for configured shared servers, and a clearer
   `.py` script-provider error when Jython is not installed.
+
+- **#212 — bridge tool registration aborted on one malformed schema
+  entry** (@killerra, PR #214 by @synthol). Dynamic registration now
+  skips only the failing tool, keeps loading later valid tools during
+  both connect-time registration and lazy group loading, and writes a
+  compact stderr diagnostic with the bad tool name and exception.
 
 - **#207 — fun-doc called Ghidra endpoints with wrong parameter
   names** (@dalen). Audited every `ghidra_get`/`ghidra_post` call in

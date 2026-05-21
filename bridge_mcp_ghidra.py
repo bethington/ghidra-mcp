@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import socket
+import sys
 import time
 import threading
 import http.client
@@ -1090,6 +1091,20 @@ def _register_tool_def(tool_def: dict) -> bool:
     return True
 
 
+def _report_tool_registration_failures(failures: list[str]) -> None:
+    """Emit a compact stderr diagnostic for schema tools that could not load."""
+    if not failures:
+        return
+
+    shown = "; ".join(failures[:8])
+    suffix = "..." if len(failures) > 8 else ""
+    sys.stderr.write(
+        f"[bridge_mcp_ghidra] {len(failures)} tool(s) failed to register: "
+        f"{shown}{suffix}\n"
+    )
+    sys.stderr.flush()
+
+
 def register_tools_from_schema(
     schema: list[dict], groups: set[str] | None = None
 ) -> int:
@@ -1116,13 +1131,20 @@ def register_tools_from_schema(
     _full_schema = _normalize_tool_def_names(schema)
 
     count = 0
+    failures: list[str] = []
     for tool_def in _full_schema:
         category = tool_def.get("category", "unknown")
         if groups is not None and category not in groups:
             continue
-        if _register_tool_def(tool_def):
-            _loaded_groups.add(category)
-            count += 1
+        try:
+            if _register_tool_def(tool_def):
+                _loaded_groups.add(category)
+                count += 1
+        except Exception as e:
+            name = tool_def.get("name", "<unnamed>")
+            failures.append(f"{name}: {e}")
+
+    _report_tool_registration_failures(failures)
 
     return count
 
@@ -1130,16 +1152,21 @@ def register_tools_from_schema(
 def _load_group(group_name: str) -> list[str]:
     """Load tools for a specific group from cached schema. Returns list of newly loaded tool names."""
     loaded_names: list[str] = []
+    failures: list[str] = []
     for tool_def in _full_schema:
         if tool_def.get("category") != group_name:
             continue
         name = tool_def["name"]
         if name in _dynamic_tool_names:
             continue  # Already loaded
-        _register_tool_def(tool_def)
-        loaded_names.append(name)
+        try:
+            if _register_tool_def(tool_def):
+                loaded_names.append(name)
+        except Exception as e:
+            failures.append(f"{name}: {e}")
     if loaded_names:
         _loaded_groups.add(group_name)
+    _report_tool_registration_failures(failures)
     return loaded_names
 
 
