@@ -222,7 +222,7 @@ def test_cmd_deploy_routes_to_gradle(tmp_path, monkeypatch):
         lambda root, tasks, **kw: recorded.update({"tasks": tasks, **kw}) or 0,
     )
 
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     ghidra_path.mkdir()
     result = cli.cmd_deploy(_args(ghidra_path=ghidra_path))
 
@@ -248,7 +248,7 @@ def test_cmd_deploy_routes_to_maven(tmp_path, monkeypatch):
         or 0,
     )
 
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     ghidra_path.mkdir()
     result = cli.cmd_deploy(_args(ghidra_path=ghidra_path))
 
@@ -295,7 +295,7 @@ def test_cmd_start_ghidra_routes_to_gradle(tmp_path, monkeypatch):
         lambda root, tasks, **kw: recorded.update({"tasks": tasks}) or 0,
     )
 
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     ghidra_path.mkdir()
     result = cli.cmd_start_ghidra(_args(ghidra_path=ghidra_path))
 
@@ -315,7 +315,7 @@ def test_cmd_start_ghidra_routes_to_maven(tmp_path, monkeypatch):
         cli, "start_ghidra", lambda path, dry_run=False: called.append(path) or 0
     )
 
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     ghidra_path.mkdir()
     result = cli.cmd_start_ghidra(_args(ghidra_path=ghidra_path))
 
@@ -389,7 +389,7 @@ def test_cmd_install_ghidra_deps_routes_to_maven(tmp_path, monkeypatch):
         lambda root, path, force=False, dry_run=False: called.append(path) or 0,
     )
 
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     ghidra_path.mkdir()
     cli.cmd_install_ghidra_deps(_args(ghidra_path=ghidra_path))
     assert called
@@ -409,7 +409,7 @@ def test_cmd_install_ghidra_deps_routes_to_gradle(tmp_path, monkeypatch):
         lambda root, tasks, **kw: recorded.update({"tasks": tasks}) or 0,
     )
 
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     ghidra_path.mkdir()
     cli.cmd_install_ghidra_deps(_args(ghidra_path=ghidra_path))
     assert recorded["tasks"] == ["prepareGhidraClasspath"]
@@ -428,7 +428,7 @@ def test_cmd_verify_version_maven_no_ghidra_path(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(
-        cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.0.4")
+        cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.1")
     )
 
     result = cli.cmd_verify_version(_args(ghidra_path=None))
@@ -436,7 +436,7 @@ def test_cmd_verify_version_maven_no_ghidra_path(tmp_path, monkeypatch, capsys):
     assert result == 0
     out = capsys.readouterr().out
     assert "5.4.1" in out
-    assert "12.0.4" in out
+    assert "12.1" in out
 
 
 def test_cmd_verify_version_maven_versions_match(tmp_path, monkeypatch):
@@ -447,11 +447,11 @@ def test_cmd_verify_version_maven_versions_match(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(
-        cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.0.4")
+        cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.1")
     )
-    monkeypatch.setattr(cli, "infer_ghidra_version_from_path", lambda path: "12.0.4")
+    monkeypatch.setattr(cli, "infer_ghidra_version_from_path", lambda path: "12.1")
 
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     ghidra_path.mkdir()
     result = cli.cmd_verify_version(_args(ghidra_path=ghidra_path))
 
@@ -466,7 +466,7 @@ def test_cmd_verify_version_maven_version_mismatch(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(
-        cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.0.4")
+        cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.1")
     )
     monkeypatch.setattr(cli, "infer_ghidra_version_from_path", lambda path: "11.0.0")
 
@@ -485,7 +485,7 @@ def test_cmd_verify_version_maven_uninferrable_path(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_get_backend", lambda: "maven")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
     monkeypatch.setattr(
-        cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.0.4")
+        cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.1")
     )
     monkeypatch.setattr(cli, "infer_ghidra_version_from_path", lambda path: None)
 
@@ -593,7 +593,7 @@ def test_cmd_bump_version_passes_dry_run_and_tag(tmp_path, monkeypatch):
 def test_resolve_ghidra_path_prefers_arg(tmp_path, monkeypatch):
     from tools.setup import cli
 
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     ghidra_path.mkdir()
     other_path = tmp_path / "other"
     monkeypatch.setattr(
@@ -607,7 +607,7 @@ def test_resolve_ghidra_path_prefers_arg(tmp_path, monkeypatch):
 def test_resolve_ghidra_path_from_env(tmp_path, monkeypatch):
     from tools.setup import cli
 
-    env_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    env_path = tmp_path / "ghidra_12.1_PUBLIC"
     env_path.mkdir()
     monkeypatch.setattr(
         cli, "_load_repo_env", lambda root: {"GHIDRA_PATH": str(env_path)}
@@ -637,7 +637,7 @@ def test_require_ghidra_path_raises_when_missing(tmp_path, monkeypatch):
 def test_require_ghidra_path_returns_path_when_set(tmp_path, monkeypatch):
     from tools.setup import cli
 
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     ghidra_path.mkdir()
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
 
@@ -747,7 +747,7 @@ def test_cmd_preflight_maven_passes_without_ghidra_path(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
     monkeypatch.setattr(cli, "find_maven_command", lambda: Path("/usr/bin/mvn"))
     monkeypatch.setattr(
-        cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.0.4")
+        cli, "read_pom_versions", lambda root: VersionInfo("5.4.1", "12.1")
     )
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 0})()
@@ -811,7 +811,7 @@ def test_cmd_ensure_prereqs_dry_run_prints_plan(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "execute_install_plan", lambda plan: None)
     monkeypatch.setattr(cli, "run_gradle", lambda root, tasks, **kw: 0)
 
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     ghidra_path.mkdir()
     result = cli.cmd_ensure_prereqs(_args(ghidra_path=ghidra_path, dry_run=True))
 

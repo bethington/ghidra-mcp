@@ -127,7 +127,7 @@ Example recovery state:
   "transport": "uds",
   "pid": 12345,
   "launched_by_bridge": true,
-  "ghidra_path": "F:/ghidra_12.0.4_PUBLIC",
+  "ghidra_path": "F:/ghidra_12.1_PUBLIC",
   "project": "MyProject",
   "project_path": "C:/Users/benam/ghidra/projects/MyProject.gpr",
   "program": "/Mods/PD2-S12/D2Common.dll",

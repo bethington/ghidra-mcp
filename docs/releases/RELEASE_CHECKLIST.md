@@ -63,7 +63,7 @@ rg -n "OLD_VERSION|NEW_VERSION|MCP Tools|GUI Endpoints|Headless Endpoints|total_
 Run the cheap gates before any live Ghidra work:
 
 ```text
-python -m tools.setup preflight --ghidra-path "F:\ghidra_12.0.4_PUBLIC"
+python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1_PUBLIC"
 python -m tools.setup build
 pytest tests/unit/ -v --no-cov
 git diff --check
@@ -91,7 +91,7 @@ benchmark, or endpoint behavior changes.
 - [ ] Run the release-grade deploy regression:
 
 ```text
-python -m tools.setup deploy --ghidra-path "F:\ghidra_12.0.4_PUBLIC" --test release
+python -m tools.setup deploy --ghidra-path "F:\ghidra_12.1_PUBLIC" --test release
 ```
 
 - [ ] Record whether the release regression passed.

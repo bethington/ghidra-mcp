@@ -8,7 +8,7 @@ on:
       ghidra_path:
         description: "Path to the Ghidra install on the self-hosted runner"
         required: true
-        default: "F:\\ghidra_12.0.4_PUBLIC"
+        default: "F:\\ghidra_12.1_PUBLIC"
       test_tier:
         description: "Deploy regression tier to run"
         required: true
@@ -41,7 +41,7 @@ jobs:
     runs-on: [self-hosted, Windows]
     timeout-minutes: 30
     env:
-      GHIDRA_REGRESSION_PATH: ${{ inputs.ghidra_path || vars.GHIDRA_PATH || 'F:\ghidra_12.0.4_PUBLIC' }}
+      GHIDRA_REGRESSION_PATH: ${{ inputs.ghidra_path || vars.GHIDRA_PATH || 'F:\ghidra_12.1_PUBLIC' }}
       GHIDRA_REGRESSION_TIER: ${{ inputs.test_tier || 'release' }}
 
     steps:

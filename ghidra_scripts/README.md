@@ -42,7 +42,10 @@ import ghidra.program.model.listing.*;
 ```
 
 ### Python Scripts (Jython)
-Ghidra uses Jython 2.7, not Python 3. Scripts must use:
+Ghidra uses Jython 2.7, not Python 3. In Ghidra 12.1, Jython is shipped
+as an optional extension and is not enabled by default. Install it from
+**File > Install Extensions**, restart Ghidra, then refresh Script Manager
+before running `.py` scripts. Scripts must use:
 ```python
 from ghidra.app.script import GhidraScript
 ```

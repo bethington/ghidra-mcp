@@ -21,11 +21,11 @@ on:
       ghidra_path:
         description: 'Ghidra path for live regression self-hosted runner'
         required: false
-        default: 'F:\ghidra_12.0.4_PUBLIC'
+        default: 'F:\ghidra_12.1_PUBLIC'
 
 env:
-  GHIDRA_VERSION: 12.0.4
-  GHIDRA_DATE: 20260303
+  GHIDRA_VERSION: 12.1
+  GHIDRA_DATE: 20260513
 
 jobs:
   release-regression:

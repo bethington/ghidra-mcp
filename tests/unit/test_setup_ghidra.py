@@ -74,12 +74,12 @@ def test_patch_codebrowser_tcd_removes_ghidra_mcp_package_block():
 
 def test_resolve_ghidra_user_dir_prefers_matching_public_dir(tmp_path: Path):
     user_base = tmp_path / "ghidra"
-    matching_dir = user_base / "ghidra_12.0.4_PUBLIC"
+    matching_dir = user_base / "ghidra_12.1_PUBLIC"
     other_dir = user_base / "ghidra_12.0.3_PUBLIC"
     matching_dir.mkdir(parents=True)
     other_dir.mkdir(parents=True)
 
-    resolved = resolve_ghidra_user_dir(Path("F:/ghidra_12.0.4_PUBLIC"), user_base)
+    resolved = resolve_ghidra_user_dir(Path("F:/ghidra_12.1_PUBLIC"), user_base)
 
     assert resolved == matching_dir
 
@@ -99,11 +99,11 @@ def test_resolve_ghidra_user_dir_falls_back_to_latest_existing_dir(tmp_path: Pat
 def test_collect_preflight_issues_reports_missing_jar_and_debugger_requirements(
     tmp_path: Path,
 ):
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     (ghidra_path / "Extensions" / "Ghidra").mkdir(parents=True)
     (ghidra_path / "ghidraRun.bat").write_text("echo off\n", encoding="utf-8")
     user_base = tmp_path / "user-ghidra"
-    (user_base / "ghidra_12.0.4_PUBLIC").mkdir(parents=True)
+    (user_base / "ghidra_12.1_PUBLIC").mkdir(parents=True)
 
     issues = collect_preflight_issues(
         tmp_path,
@@ -123,7 +123,7 @@ def _stub_version(
 ) -> None:
     monkeypatch.setattr(
         "tools.setup.ghidra.read_pom_versions",
-        lambda _root: VersionInfo(project_version=version, ghidra_version="12.0.4"),
+        lambda _root: VersionInfo(project_version=version, ghidra_version="12.1"),
     )
 
 
@@ -174,7 +174,7 @@ class TestFindPluginArchive:
 def test_collect_preflight_issues_passes_with_required_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    ghidra_path = tmp_path / "ghidra_12.0.4_PUBLIC"
+    ghidra_path = tmp_path / "ghidra_12.1_PUBLIC"
     (ghidra_path / "Extensions" / "Ghidra").mkdir(parents=True)
     (ghidra_path / "ghidraRun.bat").write_text("echo off\n", encoding="utf-8")
     for _artifact_id, relative_path in REQUIRED_GHIDRA_JARS:
@@ -186,7 +186,7 @@ def test_collect_preflight_issues_passes_with_required_files(
         "pybag==1.0\n", encoding="utf-8"
     )
     user_base = tmp_path / "user-ghidra"
-    (user_base / "ghidra_12.0.4_PUBLIC").mkdir(parents=True)
+    (user_base / "ghidra_12.1_PUBLIC").mkdir(parents=True)
     monkeypatch.setattr(
         "tools.setup.ghidra.shutil.which",
         lambda name: "java" if name == "java" else None,

@@ -33,7 +33,7 @@ Title: Decompile timeout on binary > 10MB
 
 Environment:
 - OS: Windows 11
-- Ghidra: 12.0.4
+- Ghidra: 12.1
 - Binary: 12MB x86-64
 
 Steps:
@@ -394,7 +394,7 @@ pytest tests/ -v
 - Java 21 LTS
 - Apache Maven 3.9+
 - Python 3.10+
-- Ghidra 12.0.4
+- Ghidra 12.1
 
 ### Local Development
 ```bash

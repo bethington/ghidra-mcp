@@ -89,7 +89,7 @@ Reads `ghidra.version` from `pom.xml` and compares it against the version report
 
 ```
 ./gradlew verifyVersion
-./gradlew verifyVersion -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
+./gradlew verifyVersion -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1_PUBLIC
 ```
 
 ---
@@ -101,7 +101,7 @@ Reads `ghidra.version` from `pom.xml` and compares it against the version report
 Validates Java on PATH, all 18 required Ghidra jars present, write access to both the Ghidra install extensions dir and the user-profile extensions dir. Depends on `verifyVersion`.
 
 ```
-./gradlew preflight -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
+./gradlew preflight -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1_PUBLIC
 ```
 
 ---
@@ -113,7 +113,7 @@ Validates Java on PATH, all 18 required Ghidra jars present, write access to bot
 Checks that all 18 required Ghidra jars exist under `GHIDRA_INSTALL_DIR`. No `mvn install:install-file` step required — Gradle uses fileTree directly for compilation.
 
 ```
-./gradlew prepareGhidraClasspath -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC
+./gradlew prepareGhidraClasspath -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1_PUBLIC
 ```
 
 ---
@@ -171,7 +171,7 @@ def find_plugin_archive(repo_root: Path) -> Path:
     raise FileNotFoundError("No GhidraMCP plugin archive found in build/distributions/ or target/")
 ```
 
-**Acceptance test**: run `./gradlew buildExtension`, then `python -m tools.setup deploy --ghidra-path F:\ghidra_12.0.4_PUBLIC`. Should find the zip and complete without error.
+**Acceptance test**: run `./gradlew buildExtension`, then `python -m tools.setup deploy --ghidra-path F:\ghidra_12.1_PUBLIC`. Should find the zip and complete without error.
 
 ---
 
@@ -179,14 +179,14 @@ def find_plugin_archive(repo_root: Path) -> Path:
 
 Run these after applying item 10:
 
-- [ ] `./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC` exits 0
+- [ ] `./gradlew buildExtension -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1_PUBLIC` exits 0
 - [ ] `build/distributions/GhidraMCP-5.4.1.zip` exists
 - [ ] ZIP contains exactly: `GhidraMCP/extension.properties`, `GhidraMCP/Module.manifest`, `GhidraMCP/lib/GhidraMCP-5.4.1.jar` (no extra jars)
 - [ ] `extension.properties` inside the ZIP has the substituted version (not `${project.version}`)
-- [ ] `./gradlew test -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC` passes (offline unit tests)
-- [ ] `./gradlew verifyVersion -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC` exits 0
-- [ ] `./gradlew preflight -PGHIDRA_INSTALL_DIR=F:\ghidra_12.0.4_PUBLIC` exits 0
-- [ ] `python -m tools.setup deploy --ghidra-path F:\ghidra_12.0.4_PUBLIC` finds the Gradle-produced ZIP
+- [ ] `./gradlew test -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1_PUBLIC` passes (offline unit tests)
+- [ ] `./gradlew verifyVersion -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1_PUBLIC` exits 0
+- [ ] `./gradlew preflight -PGHIDRA_INSTALL_DIR=F:\ghidra_12.1_PUBLIC` exits 0
+- [ ] `python -m tools.setup deploy --ghidra-path F:\ghidra_12.1_PUBLIC` finds the Gradle-produced ZIP
 
 ---
 

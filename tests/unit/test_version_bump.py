@@ -402,7 +402,7 @@ def test_get_current_version_reads_pom(tmp_path: Path):
         '<project xmlns="http://maven.apache.org/POM/4.0.0">\n'
         f"  <version>{OLD}</version>\n"
         "  <properties>\n"
-        "    <ghidra.version>12.0.4</ghidra.version>\n"
+        "    <ghidra.version>12.1</ghidra.version>\n"
         "  </properties>\n"
         "</project>\n",
         encoding="utf-8",
