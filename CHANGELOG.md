@@ -4,6 +4,70 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.11.1 - 2026-05-21 (deploy hardening, coverage, attribution)
+
+Patch release bundling the post-v5.11.0 deploy hardening and test
+coverage backfill discovered while shipping Ghidra 12.1 support. 244
+tools, no functional API changes.
+
+### Fixed
+
+- **Plugin: `endpoint_count` no longer drifts from `/mcp/schema`** —
+  The version banner's `endpoint_count` field was a hardcoded constant
+  (177) while the AnnotationScanner had grown to register 196. The
+  plugin now sets `VersionInfo.setEndpointCount(scanner.getEndpoints()
+  .size())` after registration so `/get_version` reflects ground truth.
+  Verified by a new integration smoke test that pins schema == version
+  banner count.
+- **Deploy: warn when an old Ghidra install is still running** —
+  Process detection was lumping install-path matching with enumeration;
+  a Ghidra running from a *different* install path was silently
+  invisible, then intercepted post-start smoke checks bound to MCP port
+  8089. Split into `_enumerate_*` (every Ghidra) → `_find_matching_*` /
+  `_find_mismatched_*` partitions; deploy now logs PIDs + command lines
+  for mismatched Ghidras before continuing. (`d8cb60e`)
+- **Tests: `test_set_global_rejects_bad_name` was broken on the day it
+  landed** — used `DAT_1234` as the bad-name fixture, but per design
+  auto-generated globals are intentionally exempt from
+  `checkGlobalNameQuality` (renaming back to a Ghidra default is the
+  documented "revert" affordance). Replaced with a plain non-`g_`-
+  prefixed identifier so the test actually exercises the
+  `missing_g_prefix` path it describes.
+
+### Added
+
+- **16 new unit + integration tests** covering deploy-setup paths that
+  had no coverage before: open-form `<PACKAGE NAME="Utility">`
+  patching, `patch_frontend_tool_config` idempotency,
+  `mark_extension_known_in_tool_config` (4 cases),
+  `patch_ghidra_user_configs` (5 cases including dry-run, missing base,
+  stale tcd cleanup, idempotency), and the DEV+PUBLIC user-config dir
+  coexistence scenario behind the v5.10→v5.11 deploy snag (#217).
+- **Integration smoke tests for MCP readiness**: plugin version matches
+  `pom.xml` (catches stale-jar deploys), `/mcp/schema` meets the v5.x
+  150-tool floor, `endpoint_count` agreement, and `ghidra_version`
+  well-formedness.
+- **Synthetic `_OLD_PUBLIC` / `_NEW_PUBLIC` markers** in process-
+  detection tests so an auto-linter cannot silently rewrite "old
+  version" to "new version" and erase the test invariant.
+
+### Licensing
+
+- **`LICENSE` copyright line filled in** with both upstream (LaurieWired)
+  and current-project (Ben Ethington + contributors) attribution.
+  Previously the Apache 2.0 placeholder `Copyright [yyyy] [name of
+  copyright owner]` had been left as-is — inherited from upstream.
+- **New `NOTICE` file** documenting the upstream origin (LaurieWired/
+  GhidraMCP, August 2025) and the Apache-2.0 attribution.
+- **README acknowledgment** of the upstream project alongside existing
+  contributor credits.
+
+These are housekeeping items to make the repo's attribution
+self-contained, independent of the GitHub fork pointer, before the
+fork is converted to a standalone repository.
+
+---
+
 ## v5.11.0 - 2026-05-21 (Ghidra 12.1 + community fixes)
 
 Minor release rolling up Ghidra 12.1 support (#211), bridge tool-

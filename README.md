@@ -943,7 +943,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v5.11.0
+# Connection OK - GhidraMCP Headless Server v5.11.1
 ```
 
 ### Headless API Workflow
@@ -1009,7 +1009,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 5.11.0 |
+| **Version** | 5.11.1 |
 | **MCP Tools** | 244 fully implemented |
 | **GUI Endpoints** | 177 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |
@@ -1023,6 +1023,9 @@ See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
 
 ## 🙏 Acknowledgments
+
+This project was originally derived from [LaurieWired/GhidraMCP](https://github.com/LaurieWired/GhidraMCP) in August 2025 and has since been substantially rewritten and extended. We acknowledge LaurieWired's original work as the starting point. See [NOTICE](NOTICE) for license attribution.
+
 ## 👥 Contributors
 
 This project has benefited from the work of dedicated contributors:
