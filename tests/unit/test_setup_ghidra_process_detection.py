@@ -42,31 +42,48 @@ def _process(pid: int, cmd: str, name: str = "javaw.exe") -> dict:
 # _find_matching / _find_mismatched as partitions of _enumerate
 # ---------------------------------------------------------------------------
 
+
 def test_matching_excludes_mismatched_install_paths(ghidra_module, monkeypatch):
-    """A Ghidra from F:\\ghidra_12.0.4_PUBLIC is NOT a match for a deploy
-    targeting F:\\ghidra_12.1_PUBLIC — exactly the v5.10→v5.11 case."""
+    """A Ghidra from an OLDER install is NOT a match for a deploy
+    targeting the new install — exactly the v5.10→v5.11 case.
+
+    Uses synthetic _OLD_/_NEW_ install paths instead of literal version
+    numbers so a linter/auto-replace can't silently rewrite "the old
+    version" string into "the new version" and break the test invariant
+    (that bit us once).
+    """
     monkeypatch.setattr(
         ghidra_module,
         "_enumerate_ghidra_processes",
         lambda: [
-            _process(101, r"javaw -cp F:\ghidra_12.0.4_PUBLIC\support\..\Ghidra\Framework\Utility\lib\Utility.jar ghidra.Ghidra ghidra.GhidraRun"),
+            _process(
+                101,
+                r"javaw -cp F:\ghidra_OLD_PUBLIC\support\..\Ghidra\Framework\Utility\lib\Utility.jar ghidra.Ghidra ghidra.GhidraRun",
+            ),
         ],
     )
-    matches = ghidra_module._find_matching_ghidra_processes(Path(r"F:\ghidra_12.1_PUBLIC"))
+    matches = ghidra_module._find_matching_ghidra_processes(
+        Path(r"F:\ghidra_NEW_PUBLIC")
+    )
     assert matches == []
 
 
 def test_mismatched_finds_the_other_install(ghidra_module, monkeypatch):
     """The mismatched probe — the bit the v5.10→v5.11 deploy was
-    missing — flags the 12.0.4 Ghidra when we deploy to 12.1."""
+    missing — flags the older Ghidra when we deploy to the newer one."""
     monkeypatch.setattr(
         ghidra_module,
         "_enumerate_ghidra_processes",
         lambda: [
-            _process(101, r"javaw -cp F:\ghidra_12.0.4_PUBLIC\support\..\Ghidra\Framework\Utility\lib\Utility.jar ghidra.Ghidra ghidra.GhidraRun"),
+            _process(
+                101,
+                r"javaw -cp F:\ghidra_OLD_PUBLIC\support\..\Ghidra\Framework\Utility\lib\Utility.jar ghidra.Ghidra ghidra.GhidraRun",
+            ),
         ],
     )
-    mismatched = ghidra_module._find_mismatched_ghidra_processes(Path(r"F:\ghidra_12.1_PUBLIC"))
+    mismatched = ghidra_module._find_mismatched_ghidra_processes(
+        Path(r"F:\ghidra_NEW_PUBLIC")
+    )
     assert len(mismatched) == 1
     assert mismatched[0]["pid"] == 101
 
@@ -78,10 +95,15 @@ def test_matching_includes_target_install(ghidra_module, monkeypatch):
         ghidra_module,
         "_enumerate_ghidra_processes",
         lambda: [
-            _process(101, r"javaw -cp F:\ghidra_12.1_PUBLIC\support\..\Ghidra\Framework\Utility\lib\Utility.jar ghidra.Ghidra ghidra.GhidraRun"),
+            _process(
+                101,
+                r"javaw -cp F:\ghidra_NEW_PUBLIC\support\..\Ghidra\Framework\Utility\lib\Utility.jar ghidra.Ghidra ghidra.GhidraRun",
+            ),
         ],
     )
-    matches = ghidra_module._find_matching_ghidra_processes(Path(r"F:\ghidra_12.1_PUBLIC"))
+    matches = ghidra_module._find_matching_ghidra_processes(
+        Path(r"F:\ghidra_NEW_PUBLIC")
+    )
     assert len(matches) == 1
     assert matches[0]["pid"] == 101
 
@@ -93,11 +115,17 @@ def test_mixed_installs_partitioned_correctly(ghidra_module, monkeypatch):
         ghidra_module,
         "_enumerate_ghidra_processes",
         lambda: [
-            _process(101, r"javaw -cp F:\ghidra_12.0.4_PUBLIC\... ghidra.Ghidra ghidra.GhidraRun"),
-            _process(202, r"javaw -cp F:\ghidra_12.1_PUBLIC\... ghidra.Ghidra ghidra.GhidraRun"),
+            _process(
+                101,
+                r"javaw -cp F:\ghidra_OLD_PUBLIC\... ghidra.Ghidra ghidra.GhidraRun",
+            ),
+            _process(
+                202,
+                r"javaw -cp F:\ghidra_NEW_PUBLIC\... ghidra.Ghidra ghidra.GhidraRun",
+            ),
         ],
     )
-    target = Path(r"F:\ghidra_12.1_PUBLIC")
+    target = Path(r"F:\ghidra_NEW_PUBLIC")
     matches = ghidra_module._find_matching_ghidra_processes(target)
     mismatched = ghidra_module._find_mismatched_ghidra_processes(target)
     assert [p["pid"] for p in matches] == [202]
@@ -108,7 +136,7 @@ def test_mixed_installs_partitioned_correctly(ghidra_module, monkeypatch):
 
 def test_no_processes_means_empty_partitions(ghidra_module, monkeypatch):
     monkeypatch.setattr(ghidra_module, "_enumerate_ghidra_processes", lambda: [])
-    target = Path(r"F:\ghidra_12.1_PUBLIC")
+    target = Path(r"F:\ghidra_NEW_PUBLIC")
     assert ghidra_module._find_matching_ghidra_processes(target) == []
     assert ghidra_module._find_mismatched_ghidra_processes(target) == []
 
@@ -122,8 +150,13 @@ def test_path_match_is_case_insensitive(ghidra_module, monkeypatch):
         "_enumerate_ghidra_processes",
         lambda: [
             # Lower-case drive letter, native backslashes
-            _process(101, r"javaw -cp f:\ghidra_12.1_public\support\..\Ghidra\Framework\Utility\lib\Utility.jar ghidra.Ghidra ghidra.GhidraRun"),
+            _process(
+                101,
+                r"javaw -cp f:\ghidra_new_public\support\..\Ghidra\Framework\Utility\lib\Utility.jar ghidra.Ghidra ghidra.GhidraRun",
+            ),
         ],
     )
-    matches = ghidra_module._find_matching_ghidra_processes(Path(r"F:\ghidra_12.1_PUBLIC"))
+    matches = ghidra_module._find_matching_ghidra_processes(
+        Path(r"F:\ghidra_NEW_PUBLIC")
+    )
     assert len(matches) == 1

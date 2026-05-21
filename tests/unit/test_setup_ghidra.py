@@ -12,8 +12,10 @@ from tools.setup.ghidra import (
     REQUIRED_GHIDRA_JARS,
     collect_preflight_issues,
     find_plugin_archive,
+    mark_extension_known_in_tool_config,
     patch_codebrowser_tcd,
     patch_frontend_tool_config,
+    patch_ghidra_user_configs,
     resolve_mcp_url,
     resolve_deploy_test_modes,
     resolve_ghidra_user_dir,
@@ -55,6 +57,60 @@ def test_patch_frontend_tool_config_removes_stale_package_and_inserts_plugin():
     assert '<EXTENSION NAME="GhidraMCP" />' in updated
 
 
+def test_patch_frontend_tool_config_inserts_into_existing_open_utility_block():
+    """The shape produced by an already-running Ghidra: Utility block is
+    open and has other INCLUDE entries inside. The plugin INCLUDE must
+    land *inside* the existing block, not duplicate the block.
+
+    This is the layout I had to patch by hand on the v5.10 -> v5.11
+    deploy when the script picked the wrong user-config dir (#217), so
+    nail it down with a test."""
+    content = (
+        "<TOOL>\n"
+        '    <PACKAGE NAME="Utility">\n'
+        '        <INCLUDE CLASS="ghidra.framework.someother.Plugin" />\n'
+        "    </PACKAGE>\n"
+        "</TOOL>"
+    )
+
+    updated, modified = patch_frontend_tool_config(content)
+
+    assert modified is True
+    assert updated.count('<PACKAGE NAME="Utility">') == 1
+    assert PLUGIN_CLASS in updated
+    assert "ghidra.framework.someother.Plugin" in updated, (
+        "preexisting Utility INCLUDE must be preserved"
+    )
+    # Our INCLUDE must be inside the Utility block, not after </PACKAGE>.
+    plugin_idx = updated.find(PLUGIN_CLASS)
+    closing_idx = updated.find("</PACKAGE>")
+    assert plugin_idx < closing_idx, "plugin INCLUDE leaked outside Utility block"
+
+
+def test_patch_frontend_tool_config_is_idempotent_when_plugin_present():
+    """If the plugin is already in the Utility block, the file should
+    not get a second INCLUDE entry, and `modified` flips off so the
+    deploy script skips the disk write."""
+    content = (
+        "<TOOL>\n"
+        '    <PACKAGE NAME="Utility">\n'
+        f'        <INCLUDE CLASS="{PLUGIN_CLASS}" />\n'
+        "    </PACKAGE>\n"
+        '    <EXTENSIONS>\n'
+        '        <EXTENSION NAME="GhidraMCP" />\n'
+        "    </EXTENSIONS>\n"
+        "</TOOL>"
+    )
+
+    updated, modified = patch_frontend_tool_config(content)
+
+    assert updated.count(PLUGIN_CLASS) == 1, (
+        "Plugin already present — must not be re-added"
+    )
+    assert updated.count('<EXTENSION NAME="GhidraMCP" />') == 1
+    assert modified is False, "no-op patch must report unmodified"
+
+
 def test_patch_codebrowser_tcd_removes_ghidra_mcp_package_block():
     content = (
         "<TOOL>\n"
@@ -84,10 +140,33 @@ def test_resolve_ghidra_user_dir_prefers_matching_public_dir(tmp_path: Path):
     assert resolved == matching_dir
 
 
+def test_resolve_ghidra_user_dir_picks_public_when_dev_and_public_coexist(
+    tmp_path: Path,
+):
+    """A Ghidra dev install creates `ghidra_<v>_DEV/` next to `_PUBLIC/`.
+    When the user is deploying for the PUBLIC release we must not let
+    the resolver pick the DEV dir. This is the exact scenario behind
+    #217 — when the v5.10->v5.11 deploy installed to a `_DEV` user
+    config and the FrontEnd patch landed in the wrong place."""
+    user_base = tmp_path / "ghidra"
+    dev_dir = user_base / "ghidra_12.1_DEV"
+    dev_loc = user_base / "ghidra_12.1_DEV_location_ghidra"
+    public_dir = user_base / "ghidra_12.1_PUBLIC"
+    dev_dir.mkdir(parents=True)
+    dev_loc.mkdir(parents=True)
+    public_dir.mkdir(parents=True)
+
+    resolved = resolve_ghidra_user_dir(Path("F:/ghidra_12.1_PUBLIC"), user_base)
+
+    assert resolved == public_dir
+    assert resolved != dev_dir
+    assert resolved != dev_loc
+
+
 def test_resolve_ghidra_user_dir_falls_back_to_latest_existing_dir(tmp_path: Path):
     user_base = tmp_path / "ghidra"
     latest_dir = user_base / "ghidra_12.1.0_PUBLIC"
-    older_dir = user_base / "ghidra_12.0.4_PUBLIC"
+    older_dir = user_base / "ghidra_12.1_PUBLIC"
     latest_dir.mkdir(parents=True)
     older_dir.mkdir(parents=True)
 
@@ -226,7 +305,9 @@ def test_resolve_mcp_url_defaults_when_env_missing(tmp_path: Path):
 
 
 def test_resolve_deploy_test_modes_defaults_to_cli_only(tmp_path: Path):
-    assert resolve_deploy_test_modes(tmp_path, ["selected-contract"]) == ["selected-contract"]
+    assert resolve_deploy_test_modes(tmp_path, ["selected-contract"]) == [
+        "selected-contract"
+    ]
 
 
 def test_resolve_deploy_test_modes_reads_local_env(tmp_path: Path):
@@ -247,10 +328,7 @@ def test_run_default_smoke_test_requires_key_tools(tmp_path: Path, monkeypatch):
     from tools.setup import ghidra
 
     schema = {
-        "tools": [
-            {"path": f"/{name}"}
-            for name in sorted(ghidra.SMOKE_REQUIRED_TOOLS)
-        ]
+        "tools": [{"path": f"/{name}"} for name in sorted(ghidra.SMOKE_REQUIRED_TOOLS)]
     }
     monkeypatch.setattr(
         ghidra,
@@ -298,8 +376,14 @@ def test_selected_endpoint_contract_checks_schema_against_catalog(
                 "endpoints": [
                     {
                         "path": f"/{name}",
-                        "method": "POST" if name in {"create_struct", "delete_file"} else "GET",
-                        "params": ["program"] if name != "delete_file" else ["filePath"],
+                        "method": (
+                            "POST"
+                            if name in {"create_struct", "delete_file"}
+                            else "GET"
+                        ),
+                        "params": (
+                            ["program"] if name != "delete_file" else ["filePath"]
+                        ),
                     }
                     for name in selected
                 ]
@@ -316,7 +400,11 @@ def test_selected_endpoint_contract_checks_schema_against_catalog(
                 "tools": [
                     {
                         "path": f"/{name}",
-                        "method": "POST" if name in {"create_struct", "delete_file"} else "GET",
+                        "method": (
+                            "POST"
+                            if name in {"create_struct", "delete_file"}
+                            else "GET"
+                        ),
                         "params": (
                             [{"name": "filePath"}]
                             if name == "delete_file"
@@ -357,15 +445,26 @@ def test_run_deploy_tests_dispatches_release_tier(monkeypatch: pytest.MonkeyPatc
     from tools.setup import ghidra
 
     calls: list[str] = []
-    monkeypatch.setattr(ghidra, "run_default_smoke_test", lambda *args: calls.append("smoke"))
-    monkeypatch.setattr(ghidra, "reset_benchmark_fixture", lambda *args: calls.append("reset"))
-    monkeypatch.setattr(ghidra, "run_benchmark_read_test", lambda *args: calls.append("read"))
-    monkeypatch.setattr(ghidra, "run_benchmark_write_test", lambda *args: calls.append("write"))
-    monkeypatch.setattr(ghidra, "run_release_regression_tests", lambda *args: calls.append("release"))
+    monkeypatch.setattr(
+        ghidra, "run_default_smoke_test", lambda *args: calls.append("smoke")
+    )
+    monkeypatch.setattr(
+        ghidra, "reset_benchmark_fixture", lambda *args: calls.append("reset")
+    )
+    monkeypatch.setattr(
+        ghidra, "run_benchmark_read_test", lambda *args: calls.append("read")
+    )
+    monkeypatch.setattr(
+        ghidra, "run_benchmark_write_test", lambda *args: calls.append("write")
+    )
+    monkeypatch.setattr(
+        ghidra, "run_release_regression_tests", lambda *args: calls.append("release")
+    )
     monkeypatch.setattr(
         ghidra,
         "_mcp_request",
-        lambda *args, **kwargs: calls.append("prompt_policy") or (200, {"enabled": True}),
+        lambda *args, **kwargs: calls.append("prompt_policy")
+        or (200, {"enabled": True}),
     )
 
     run_deploy_tests(Path("C:/repo"), "http://127.0.0.1:8089", ["release"])
@@ -373,15 +472,178 @@ def test_run_deploy_tests_dispatches_release_tier(monkeypatch: pytest.MonkeyPatc
     assert calls == ["smoke", "prompt_policy", "release"]
 
 
-def test_run_deploy_tests_default_does_not_import_benchmark(monkeypatch: pytest.MonkeyPatch):
+def test_run_deploy_tests_default_does_not_import_benchmark(
+    monkeypatch: pytest.MonkeyPatch,
+):
     from tools.setup import ghidra
 
     calls: list[str] = []
-    monkeypatch.setattr(ghidra, "run_default_smoke_test", lambda *args: calls.append("smoke"))
-    monkeypatch.setattr(ghidra, "reset_benchmark_fixture", lambda *args: calls.append("reset"))
-    monkeypatch.setattr(ghidra, "run_benchmark_read_test", lambda *args: calls.append("read"))
-    monkeypatch.setattr(ghidra, "run_benchmark_write_test", lambda *args: calls.append("write"))
+    monkeypatch.setattr(
+        ghidra, "run_default_smoke_test", lambda *args: calls.append("smoke")
+    )
+    monkeypatch.setattr(
+        ghidra, "reset_benchmark_fixture", lambda *args: calls.append("reset")
+    )
+    monkeypatch.setattr(
+        ghidra, "run_benchmark_read_test", lambda *args: calls.append("read")
+    )
+    monkeypatch.setattr(
+        ghidra, "run_benchmark_write_test", lambda *args: calls.append("write")
+    )
 
     run_deploy_tests(Path("C:/repo"), "http://127.0.0.1:8089", [])
 
     assert calls == ["smoke"]
+
+
+# ---------------------------------------------------------------------------
+# mark_extension_known_in_tool_config — suppress Ghidra's first-run plugin
+# dialog by recording the extension as already known. Without this the user
+# sees a "new extension found, do you want to enable?" modal that blocks
+# Ghidra's startup. Until now it had no direct unit coverage.
+# ---------------------------------------------------------------------------
+
+
+def test_mark_extension_known_promotes_empty_extensions_to_open_form():
+    content = (
+        "<TOOL>\n"
+        "    <EXTENSIONS />\n"
+        "</TOOL>"
+    )
+
+    updated = mark_extension_known_in_tool_config(content, "GhidraMCP")
+
+    assert "<EXTENSIONS />" not in updated
+    assert "<EXTENSIONS>" in updated
+    assert '<EXTENSION NAME="GhidraMCP" />' in updated
+
+
+def test_mark_extension_known_appends_into_existing_open_extensions_block():
+    content = (
+        "<TOOL>\n"
+        "    <EXTENSIONS>\n"
+        '        <EXTENSION NAME="OtherExt" />\n'
+        "    </EXTENSIONS>\n"
+        "</TOOL>"
+    )
+
+    updated = mark_extension_known_in_tool_config(content, "GhidraMCP")
+
+    assert updated.count("<EXTENSIONS>") == 1
+    assert '<EXTENSION NAME="OtherExt" />' in updated
+    assert '<EXTENSION NAME="GhidraMCP" />' in updated
+
+
+def test_mark_extension_known_is_idempotent():
+    content = (
+        "<TOOL>\n"
+        "    <EXTENSIONS>\n"
+        '        <EXTENSION NAME="GhidraMCP" />\n'
+        "    </EXTENSIONS>\n"
+        "</TOOL>"
+    )
+
+    updated = mark_extension_known_in_tool_config(content, "GhidraMCP")
+
+    assert updated == content
+    assert updated.count('<EXTENSION NAME="GhidraMCP" />') == 1
+
+
+def test_mark_extension_known_creates_extensions_block_when_missing():
+    content = (
+        "<TOOL>\n"
+        '    <PACKAGE NAME="Utility" />\n'
+        "</TOOL>"
+    )
+
+    updated = mark_extension_known_in_tool_config(content, "GhidraMCP")
+
+    assert "<EXTENSIONS>" in updated
+    assert '<EXTENSION NAME="GhidraMCP" />' in updated
+
+
+# ---------------------------------------------------------------------------
+# patch_ghidra_user_configs — orchestrator that visits every user-config
+# dir under the Ghidra app-data root and patches FrontEndTool.xml /
+# tool tcd files. Previously untested.
+# ---------------------------------------------------------------------------
+
+
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def test_patch_ghidra_user_configs_patches_frontend_tool_xml(tmp_path: Path):
+    user_base = tmp_path / "ghidra"
+    fe_xml = user_base / "ghidra_12.1_PUBLIC" / "FrontEndTool.xml"
+    _write(fe_xml, '<TOOL><PACKAGE NAME="Utility" /></TOOL>')
+
+    patch_ghidra_user_configs(user_base)
+
+    patched = fe_xml.read_text(encoding="utf-8")
+    assert PLUGIN_CLASS in patched
+    assert '<EXTENSION NAME="GhidraMCP" />' in patched
+
+
+def test_patch_ghidra_user_configs_dry_run_does_not_modify(tmp_path: Path):
+    user_base = tmp_path / "ghidra"
+    fe_xml = user_base / "ghidra_12.1_PUBLIC" / "FrontEndTool.xml"
+    original = '<TOOL><PACKAGE NAME="Utility" /></TOOL>'
+    _write(fe_xml, original)
+
+    patch_ghidra_user_configs(user_base, dry_run=True)
+
+    assert fe_xml.read_text(encoding="utf-8") == original
+
+
+def test_patch_ghidra_user_configs_handles_missing_user_base(tmp_path: Path):
+    """A missing user-config dir is a no-op, not an error. Ghidra creates
+    the dir lazily on first run; patching shouldn't blow up if the user
+    has never launched Ghidra of that version."""
+    missing = tmp_path / "no-such-dir"
+
+    patch_ghidra_user_configs(missing)
+
+
+def test_patch_ghidra_user_configs_strips_stale_codebrowser_tcd(tmp_path: Path):
+    """Stale tcd files from older Ghidra versions get the GhidraMCP
+    PACKAGE block removed (the plugin lives in FrontEnd now). The
+    deploy depends on this cleanup to avoid double-registration."""
+    user_base = tmp_path / "ghidra"
+    tcd = user_base / "ghidra_12.1_PUBLIC" / "tools" / "_code_browser.tcd"
+    _write(
+        tcd,
+        (
+            "<TOOL>\n"
+            '    <PACKAGE NAME="GhidraMCP">\n'
+            f'        <INCLUDE CLASS="{PLUGIN_CLASS}" />\n'
+            "    </PACKAGE>\n"
+            "</TOOL>"
+        ),
+    )
+
+    patch_ghidra_user_configs(user_base)
+
+    patched = tcd.read_text(encoding="utf-8")
+    assert PLUGIN_CLASS not in patched
+    assert 'PACKAGE NAME="GhidraMCP"' not in patched
+    assert '<EXTENSION NAME="GhidraMCP" />' in patched
+
+
+def test_patch_ghidra_user_configs_idempotent_second_call_no_op(tmp_path: Path):
+    """Re-running the deploy when configs are already patched must not
+    duplicate INCLUDE entries or grow the file unboundedly."""
+    user_base = tmp_path / "ghidra"
+    fe_xml = user_base / "ghidra_12.1_PUBLIC" / "FrontEndTool.xml"
+    _write(fe_xml, '<TOOL><PACKAGE NAME="Utility" /></TOOL>')
+
+    patch_ghidra_user_configs(user_base)
+    after_first = fe_xml.read_text(encoding="utf-8")
+
+    patch_ghidra_user_configs(user_base)
+    after_second = fe_xml.read_text(encoding="utf-8")
+
+    assert after_first == after_second
+    assert after_second.count(PLUGIN_CLASS) == 1
+    assert after_second.count('<EXTENSION NAME="GhidraMCP" />') == 1

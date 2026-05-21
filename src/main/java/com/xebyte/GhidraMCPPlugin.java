@@ -108,7 +108,11 @@ class VersionInfo {
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
     private static String BUILD_NUMBER = "0"; // Will be replaced by Maven
-    private static final int ENDPOINT_COUNT = 177;
+    // Default fallback when the plugin has not yet finished registering its
+    // scanner-driven endpoints (e.g., headless usage that imports this class
+    // without running the GUI activation path). The live value is set via
+    // setEndpointCount() once the scanner has enumerated everything.
+    private static volatile int ENDPOINT_COUNT = 177;
 
     static {
         // v5.4.2: loading "/version.properties" from the classpath root was
@@ -154,6 +158,16 @@ class VersionInfo {
 
     public static int getEndpointCount() {
         return ENDPOINT_COUNT;
+    }
+
+    /**
+     * Update the live endpoint count after the AnnotationScanner has
+     * enumerated everything. Keeps {@code /get_version.endpoint_count}
+     * in sync with {@code /mcp/schema} so version-banner output and
+     * release smoke tests don't drift from reality.
+     */
+    public static void setEndpointCount(int count) {
+        ENDPOINT_COUNT = count;
     }
 
     public static String getFullVersion() {
@@ -595,6 +609,10 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 }
             }));
         }
+        // Reflect the live count so /get_version.endpoint_count matches
+        // what /mcp/schema actually serves. Previously a hardcoded constant
+        // that drifted as services added new @McpTool methods.
+        VersionInfo.setEndpointCount(scanner.getEndpoints().size());
 
         // ==========================================================================
         // SCHEMA ENDPOINT — Serves machine-readable API metadata
