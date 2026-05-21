@@ -4,11 +4,21 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v5.11.0 - 2026-05-21 (Ghidra 12.1 + community fixes)
 
-Post-v5.10.0 fixes — community bug reports plus the gemini-cli-sdk
-reconciliation. No new endpoints; `/search_instructions` and the
-headless diagnostics need a plugin redeploy to take effect.
+Minor release rolling up Ghidra 12.1 support (#211), bridge tool-
+registration resilience (#212), the bridge auto-analysis crash fix
+(#209), fun-doc's wrong-param bug (#207), the gemini-cli-sdk
+reconciliation (#201), the headless server-binding diagnostics
+(#119), and the dashboard name-source column (#204 follow-up).
+244 tools.
+
+**Ghidra 12.1 upgrade note** — this release retargets the project at
+Ghidra 12.1. Users on 12.0.4 should upgrade their Ghidra install;
+shared-server setups need Ghidra Server 12.1 (or 12.0.5+ where the
+compatibility matrix permits). Jython is optional in 12.1; install
+the Jython extension from File → Install Extensions if you run
+`.py` Ghidra scripts.
 
 ### Fixed
 

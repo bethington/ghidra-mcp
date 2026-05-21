@@ -9,7 +9,66 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.10.0 (Latest) — operations + propagation provenance + community features
+### v5.11.0 (Latest) — Ghidra 12.1 + community fixes
+
+Minor release retargeting at Ghidra 12.1 and rolling up four
+community-reported fixes plus the gemini-cli-sdk reconciliation.
+244 tools.
+
+- **#211 — Ghidra 12.1 support** (@firefart, PR #213 by @synthol).
+  pom bumped 12.0.4 → 12.1; CI / release / Docker download metadata
+  pointed at the Ghidra 12.1 20260513 upstream asset; setup docs,
+  examples, defaults, and compatibility tests refreshed for
+  `ghidra_12.1_PUBLIC`. Documents the 12.1 shared-server requirement
+  (clients on 12.1 need server 12.1 or 12.0.5+) and that Jython is
+  optional in 12.1 (install via File → Install Extensions if you run
+  `.py` Ghidra scripts).
+- **#212 — bridge tool registration aborted on one malformed schema
+  entry** (@killerra, PR #214 by @synthol). Dynamic registration now
+  skips only the failing tool, keeps loading later valid tools, and
+  writes a stderr diagnostic with the bad tool name and exception.
+  Tests cover both the connect-time eager and the lazy group-load
+  paths.
+- **#209 — bridge auto-analysis crash on un-analyzed programs**
+  (@s-b-repo). `runAutoAnalysisAndPersistFlags` wrapped in
+  `startTransaction`/`endTransaction` so writing analyzers no longer
+  hit `db.NoTransactionException`.
+- **#207 — fun-doc tool parameter mismatches** (@dalen). Three
+  silent-failing internal calls fixed (archive-apply rename, archive-
+  apply plate, library-code plate) + one latent fallback. New AST-
+  driven parity test (`test_fundoc_endpoint_param_parity.py`) makes
+  param drift a CI failure. Broader API-wide naming inconsistency
+  tracked in #210.
+- **#201 — Gemini SDK reconciliation** (@dalen). The working SDK
+  lives at `bethington/gemini-agent-sdk` (renamed to de-conflict
+  with the unrelated PyPI `gemini-cli-sdk`); fun-doc vendors it at
+  `fun-doc/vendored/gemini_agent_sdk/` so the Gemini provider works
+  with no extra install step.
+- **#119 — structured headless diagnostics** (@j4s0n, @t0xk).
+  `/load_program_from_project` failure responses now carry
+  `project_server_bound`, `available_program_paths`, and a
+  `suggestion`; `/get_project_info` surfaces server binding state.
+  The "checked out but can't open" failure mode is now self-
+  diagnosing. (Full shared-project endpoint still tracked in #119.)
+- **#204 dashboard follow-up** — All Functions table gains a `Src`
+  column showing each row's `name_source` and flagging propagation
+  rows the selector will skip. Mirrors the selector gates exactly
+  via a shared `compute_skip_reason` helper, regression-pinned by
+  `test_compute_skip_reason.py`.
+- **Security policy** (@dodge1218, #215). `SECURITY.md` published
+  with the private-vulnerability-reporting path; GitHub PVR enabled
+  for the repository.
+- `/search_instructions` always echoes `mnemonic_filter` /
+  `operand_filter` (Gson was dropping the null values).
+
+**Upgrade note** — this release retargets the project at Ghidra 12.1.
+Users on 12.0.4 should upgrade their Ghidra install; shared-server
+setups need Ghidra Server 12.1 or 12.0.5+. Jython is optional in
+12.1.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.10.0 — operations + propagation provenance + community features
 
 Minor release rolling up a community feature (#172), two operational
 hardening passes, and the propagation-provenance gate (#204) that
