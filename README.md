@@ -12,7 +12,7 @@
 
 [![Stars](https://img.shields.io/github/stars/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=yellow)](https://github.com/bethington/ghidra-mcp/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/bethington/ghidra-mcp?style=for-the-badge&logo=git&logoColor=white)](https://github.com/bethington/ghidra-mcp/commits/main)
-[![Discussions](https://img.shields.io/github/discussions/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white)](https://github.com/bethington/ghidra-mcp/discussions)
+[![Discussions](https://img.shields.io/badge/discussions-join-7B68EE?style=for-the-badge&logo=github&logoColor=white)](https://github.com/bethington/ghidra-mcp/discussions)
 [![Issues](https://img.shields.io/github/issues/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=orange)](https://github.com/bethington/ghidra-mcp/issues)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
@@ -943,7 +943,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v5.11.2
+# Connection OK - GhidraMCP Headless Server v5.11.3
 ```
 
 ### Headless API Workflow
@@ -1009,7 +1009,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 5.11.2 |
+| **Version** | 5.11.3 |
 | **MCP Tools** | 244 fully implemented |
 | **GUI Endpoints** | 196 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |
@@ -1037,6 +1037,11 @@ This project has benefited from the work of dedicated contributors:
 - Script execution improvements and bug fixes (#12)
 - New API endpoints: `save_program`, `exit_ghidra`, `delete_function`, `create_memory_block`, `run_script_inline` (#11)
 - Architectural vision: annotation-driven design, UDS transport, Python bridge optimization proposals
+
+**[@huehuehuehueing](https://github.com/huehuehuehueing)** — Significant contributions including:
+- Address-space prefix support — added `<space>:<hex>` syntax (e.g., `mem:1000`, `code:ff00`) to address parsing across the entire endpoint surface, unlocking multi-space targets like embedded firmware (#84, closes #65)
+- Optional `program` parameter + required-param schema fixes — made `program` optional on every endpoint with a sane currentProgram fallback, and fixed several required-vs-optional schema bugs the catalog had inherited (#92)
+- Seeded #44 (data-type / enum tools) — the issue that motivated the v5.0 enum + struct enforcement layer
 
 
 - **Ghidra Team** - For the incredible reverse engineering platform

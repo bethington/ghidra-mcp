@@ -1082,6 +1082,35 @@ def create_app(state_file, event_bus=None):
     ]:
         bus.on(evt, bridge(evt))
 
+    # --- Bridge event counters for the audit watcher ---
+    # The audit rule `bridge_counter_stall` (fun-doc/audit/rules.yaml)
+    # checks that tool_call / tool_result / model_text counters are
+    # advancing while workers are active. Until v5.11.3 this rule fired
+    # daily as a false positive because the diag endpoint it polls
+    # (`/api/_diag_bridge`) didn't exist — the fetcher caught the 404,
+    # returned an empty dict, and every counter read as 0 indefinitely.
+    # See registry.json: 24 fires per signature between 2026-04-25 and
+    # 2026-05-21.
+    #
+    # The fix wires three subscribers onto the bus that maintain
+    # monotonically-increasing counters, then surfaces them at
+    # /api/_diag_bridge in the shape the audit fetcher expects.
+    bridge_counters: dict[str, int] = {
+        "tool_call": 0,
+        "tool_result": 0,
+        "model_text": 0,
+    }
+    _bridge_counter_lock = threading.Lock()
+
+    def _make_bridge_counter(name: str):
+        def _inc(_data):
+            with _bridge_counter_lock:
+                bridge_counters[name] = bridge_counters.get(name, 0) + 1
+        return _inc
+
+    for _name in ("tool_call", "tool_result", "model_text"):
+        bus.on(_name, _make_bridge_counter(_name))
+
     # --- Data loading helpers ---
 
     def load_state():
@@ -2022,6 +2051,24 @@ def create_app(state_file, event_bus=None):
         stats = compute_stats(state)
         stats.pop("all_functions", None)
         return jsonify(stats)
+
+    @app.route("/api/_diag_bridge")
+    def api_diag_bridge():
+        """Audit watcher's data source for the bridge_counter_stall rule.
+
+        Returns monotonically-increasing counters for tool_call,
+        tool_result, and model_text bus events. The audit rule trips
+        when any of these stays at zero for 30+ minutes while workers
+        are active — that pattern was the original signature of the
+        v5.7.x NameError silent-delivery bug (fixed in 78ba6cd).
+
+        Before v5.11.3 this endpoint did not exist; the audit fetcher
+        caught the 404 and returned an empty dict, which made every
+        counter read as 0 and produced 24+ false-positive fires.
+        """
+        with _bridge_counter_lock:
+            snapshot = dict(bridge_counters)
+        return jsonify({"bridge_counters": snapshot})
 
     @app.route("/api/queue", methods=["GET"])
     def get_queue():

@@ -647,3 +647,203 @@ def test_patch_ghidra_user_configs_idempotent_second_call_no_op(tmp_path: Path):
     assert after_first == after_second
     assert after_second.count(PLUGIN_CLASS) == 1
     assert after_second.count('<EXTENSION NAME="GhidraMCP" />') == 1
+
+
+# ---------------------------------------------------------------------------
+# #217: target-only patching. A deploy targeting Ghidra 12.1 must NOT
+# touch user-config dirs from older Ghidra installs sitting next to it.
+# Observed twice in production logs (v5.10→v5.11 and the v5.11.2 deploy):
+#     Patched FrontEnd config …/ghidra_12.0.4_PUBLIC/FrontEndTool.xml
+#     Patched FrontEnd config …/ghidra_12.1_PUBLIC/FrontEndTool.xml
+# Only the second line should ever appear.
+# ---------------------------------------------------------------------------
+
+
+def test_patch_ghidra_user_configs_target_dir_only_touches_target(tmp_path: Path):
+    """When target_user_dir is supplied, sibling version dirs are skipped."""
+    user_base = tmp_path / "ghidra"
+    target = user_base / "ghidra_12.1_PUBLIC"
+    sibling_old = user_base / "ghidra_12.0.4_PUBLIC"
+    sibling_dev = user_base / "ghidra_11.4.2"
+
+    template = '<TOOL><PACKAGE NAME="Utility" /></TOOL>'
+    _write(target / "FrontEndTool.xml", template)
+    _write(sibling_old / "FrontEndTool.xml", template)
+    _write(sibling_dev / "FrontEndTool.xml", template)
+
+    patch_ghidra_user_configs(user_base, target)
+
+    assert PLUGIN_CLASS in (target / "FrontEndTool.xml").read_text(encoding="utf-8")
+    # The two sibling dirs must remain untouched — those config files
+    # belong to other Ghidra installs and stamping our 12.1 INCLUDE there
+    # would point them at an extension that isn't installed.
+    assert (sibling_old / "FrontEndTool.xml").read_text(encoding="utf-8") == template
+    assert (sibling_dev / "FrontEndTool.xml").read_text(encoding="utf-8") == template
+
+
+def test_patch_ghidra_user_configs_target_dir_only_touches_target_tcd(tmp_path: Path):
+    """Same scope guarantee for tool tcd files, which carry historical
+    GhidraMCP PACKAGE blocks that should be cleared only in the target."""
+    user_base = tmp_path / "ghidra"
+    target = user_base / "ghidra_12.1_PUBLIC"
+    sibling = user_base / "ghidra_12.0.4_PUBLIC"
+
+    stale_tcd = (
+        "<TOOL>\n"
+        '    <PACKAGE NAME="GhidraMCP">\n'
+        f'        <INCLUDE CLASS="{PLUGIN_CLASS}" />\n'
+        "    </PACKAGE>\n"
+        "</TOOL>"
+    )
+    _write(target / "tools" / "_code_browser.tcd", stale_tcd)
+    _write(sibling / "tools" / "_code_browser.tcd", stale_tcd)
+
+    patch_ghidra_user_configs(user_base, target)
+
+    assert PLUGIN_CLASS not in (target / "tools" / "_code_browser.tcd").read_text(encoding="utf-8")
+    # Sibling tcd must keep its (stale) PACKAGE block — leaving it for
+    # whatever Ghidra version actually owns that user dir.
+    assert (sibling / "tools" / "_code_browser.tcd").read_text(encoding="utf-8") == stale_tcd
+
+
+def test_patch_ghidra_user_configs_target_dir_missing_is_no_op(tmp_path: Path):
+    """When the target user dir doesn't exist yet (Ghidra hasn't been
+    launched once after install), the call should be a clean no-op
+    rather than falling back to the broad glob."""
+    user_base = tmp_path / "ghidra"
+    sibling = user_base / "ghidra_12.0.4_PUBLIC"
+    template = '<TOOL><PACKAGE NAME="Utility" /></TOOL>'
+    _write(sibling / "FrontEndTool.xml", template)
+
+    nonexistent_target = user_base / "ghidra_12.1_PUBLIC"
+    patch_ghidra_user_configs(user_base, nonexistent_target)
+
+    # Sibling was NOT touched even though it has a patchable config —
+    # the target dir's absence must not silently fall back to the
+    # broad-glob legacy behavior.
+    assert (sibling / "FrontEndTool.xml").read_text(encoding="utf-8") == template
+
+
+def test_patch_ghidra_user_configs_no_target_keeps_legacy_glob(tmp_path: Path):
+    """Calling without target_user_dir keeps the historical
+    glob-everything behavior — back-compat for anyone calling this
+    helper directly without going through deploy_to_ghidra."""
+    user_base = tmp_path / "ghidra"
+    dir_a = user_base / "ghidra_12.1_PUBLIC"
+    dir_b = user_base / "ghidra_12.0.4_PUBLIC"
+    template = '<TOOL><PACKAGE NAME="Utility" /></TOOL>'
+    _write(dir_a / "FrontEndTool.xml", template)
+    _write(dir_b / "FrontEndTool.xml", template)
+
+    patch_ghidra_user_configs(user_base)  # no target — old behavior
+
+    assert PLUGIN_CLASS in (dir_a / "FrontEndTool.xml").read_text(encoding="utf-8")
+    assert PLUGIN_CLASS in (dir_b / "FrontEndTool.xml").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Debugger-live test environmental skip. The release-tier deploy used to
+# fail outright on machines without the Windows Debugger Toolkit / a
+# built BenchmarkDebug.exe — masking real test results as "release tier
+# is broken." A DebuggerLiveTestSkipped sentinel exception now lets the
+# caller turn those environmental gaps into a SKIPPED line without
+# failing the gate.
+# ---------------------------------------------------------------------------
+
+
+def test_debugger_live_skipped_on_non_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "posix")
+    with pytest.raises(ghidra.DebuggerLiveTestSkipped, match="Windows-only"):
+        ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
+
+
+def test_debugger_live_skipped_when_benchmarkdebug_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "nt")
+    # Fresh tmp_path → no BenchmarkDebug.exe at the expected location.
+    with pytest.raises(ghidra.DebuggerLiveTestSkipped, match="BenchmarkDebug.exe"):
+        ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
+
+
+def test_debugger_live_skipped_on_environmental_launch_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A /debugger/launch failure whose error matches a known-environmental
+    hint (no WDK, ghidratrace mismatch, dbgeng missing) gets re-classified
+    as a skip, not a regression."""
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "nt")
+    # Pretend BenchmarkDebug.exe exists so we reach the launch path.
+    benchmark_path = tmp_path / ghidra.DEFAULT_BENCHMARK_DEBUG_EXE
+    benchmark_path.parent.mkdir(parents=True, exist_ok=True)
+    benchmark_path.write_bytes(b"")
+
+    def fake_mcp_request(repo_root, mcp_url, path, **kwargs):
+        return 200, {"error": "Debugger launch failed using 'dbgeng (.bat)': null"}
+
+    monkeypatch.setattr(ghidra, "_mcp_request", fake_mcp_request)
+    monkeypatch.setattr(ghidra, "load_env_file", lambda _p: {})
+
+    with pytest.raises(ghidra.DebuggerLiveTestSkipped, match="Debugger backend unavailable"):
+        ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
+
+
+def test_debugger_live_raises_runtime_error_on_real_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A non-environmental error (something the test actually caught)
+    must still bubble up as RuntimeError so the release gate fails."""
+    from tools.setup import ghidra
+
+    monkeypatch.setattr(ghidra.os, "name", "nt")
+    benchmark_path = tmp_path / ghidra.DEFAULT_BENCHMARK_DEBUG_EXE
+    benchmark_path.parent.mkdir(parents=True, exist_ok=True)
+    benchmark_path.write_bytes(b"")
+
+    def fake_mcp_request(repo_root, mcp_url, path, **kwargs):
+        return 200, {"error": "Unexpected internal state in trace handler"}
+
+    monkeypatch.setattr(ghidra, "_mcp_request", fake_mcp_request)
+    monkeypatch.setattr(ghidra, "load_env_file", lambda _p: {})
+
+    # Real test failure must NOT be swallowed as a skip.
+    with pytest.raises(RuntimeError, match="Unexpected internal state"):
+        ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
+
+
+def test_run_release_regression_catches_debugger_skip(
+    monkeypatch: pytest.MonkeyPatch, capsys
+):
+    """When debugger-live throws DebuggerLiveTestSkipped, the release
+    regression tier prints SKIPPED and reports success — does NOT fail
+    the gate."""
+    from tools.setup import ghidra
+
+    def fake_skipped(*args, **kwargs):
+        raise ghidra.DebuggerLiveTestSkipped("test reason here")
+
+    # Stub every other tier step so we isolate the skip handling.
+    for name in (
+        "reset_benchmark_fixture",
+        "run_selected_endpoint_contract_test",
+        "run_benchmark_extended_read_test",
+        "run_benchmark_yaml_regression",
+        "run_multi_program_targeting_test",
+        "run_negative_contract_test",
+    ):
+        monkeypatch.setattr(ghidra, name, lambda *_args, **_kw: None)
+    monkeypatch.setattr(ghidra, "run_debugger_live_test", fake_skipped)
+
+    ghidra.run_release_regression_tests(Path("C:/repo"), "http://127.0.0.1:8089")
+
+    out = capsys.readouterr().out
+    assert "SKIPPED debugger live test: test reason here" in out
+    assert "Release regression tier passed." in out

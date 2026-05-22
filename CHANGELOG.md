@@ -4,6 +4,67 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.11.3 - 2026-05-22 (deploy + audit hardening, contributor recognition)
+
+Patch release closing four small papercuts: a recurring deploy bug
+re-observed in the v5.11.2 cut, a release-test environmental flake,
+a year-running audit false positive, and a long-overdue contributor
+credit. 244 tools, no functional API changes.
+
+### Fixed
+
+- **#217 — deploy no longer over-patches sibling Ghidra user dirs.**
+  `patch_ghidra_user_configs` globbed `*/FrontEndTool.xml` and
+  `*/tools/*.tcd` under the entire user-config base, stamping the
+  new plugin's INCLUDE into every Ghidra version's user dir
+  (12.0.4, 11.4.2, …) even when targeting 12.1. Observed twice in
+  this release cycle's deploy logs. Function now takes an explicit
+  `target_user_dir`; `deploy_to_ghidra` passes the result of
+  `resolve_ghidra_user_dir(ghidra_path)`. The no-arg form is kept
+  for back-compat with direct callers + existing tests.
+- **Release-tier deploy: debugger-live test now skips on missing
+  prerequisites** instead of failing the whole `--test release`
+  gate. New `DebuggerLiveTestSkipped` sentinel exception covers
+  non-Windows hosts, absent `BenchmarkDebug.exe`, and known-
+  environmental launch errors (no WDK, ghidratrace version
+  mismatch, dbgeng backend missing — all observed in this
+  session's deploys on dev machines).
+- **Audit watcher: `bridge_counter_stall` false-positive fixed.**
+  The rule polls `/api/_diag_bridge` for tool_call / tool_result /
+  model_text counters, but the endpoint didn't exist — the fetcher
+  caught the 404, returned `{}`, and every counter read as 0
+  indefinitely. Result: 24 identical fires between 2026-04-25 and
+  2026-05-21, exactly one per signature per day at the 30-min stall
+  threshold the rule was configured for. Dashboard now exposes the
+  endpoint with real counters wired off the bus; stale registry +
+  queue archived during the cut so phase-3 work starts clean.
+
+### Added
+
+- **README — `@huehuehuehueing` recognized in Core Contributors** for
+  address-space prefix support (PR #84, closes #65 — added the
+  `<space>:<hex>` syntax to address parsing across every endpoint)
+  and the optional `program` parameter + required-param schema
+  fixes (PR #92). The `mem:1000` / `code:ff00` syntax mentioned in
+  half the endpoint docstrings is their work.
+- **9 new offline tests**: 4 pin the #217 target-only patching
+  contract, 5 cover the debugger-live skip classification.
+- **4 new performance tests** for the `/api/_diag_bridge` endpoint:
+  endpoint exists + correct payload shape, counters increment on
+  matching bus events, unrelated events don't bump the counters,
+  monotonic-increment guarantee.
+
+### Changed
+
+- **README Discussions badge** swapped from
+  `shields.io/github/discussions/...` (rendering "unable to select
+  next GitHub token from pool" due to a shields.io rate-limit
+  issue) to a static "discussions → join" badge. Same destination
+  link; just doesn't depend on shields.io's discussions endpoint
+  staying up.
+
+---
+
 ## v5.11.2 - 2026-05-22 (customizable convention enforcement)
 
 Feature release introducing per-project customization of the v5.0

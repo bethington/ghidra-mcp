@@ -9,7 +9,49 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.11.2 (Latest) — customizable convention enforcement
+### v5.11.3 (Latest) — deploy/audit hardening + contributor recognition
+
+Patch release closing several small papercuts: a recurring deploy bug,
+a release-test environmental flake, a year-running audit false
+positive, and a long-overdue contributor credit. 244 tools, no
+functional API changes.
+
+- **#217 fixed — deploy no longer over-patches sibling Ghidra user
+  dirs.** `patch_ghidra_user_configs` globbed `*/FrontEndTool.xml`
+  under the user-config base, stamping the new plugin's INCLUDE
+  into every Ghidra version's user dir (12.0.4, 11.4.2, …) even
+  when the deploy was targeting 12.1. Observed twice in this
+  release cycle's logs. Function now takes an explicit
+  `target_user_dir`; `deploy_to_ghidra` passes the result of
+  `resolve_ghidra_user_dir(ghidra_path)`. Four new regression
+  tests pin the target-only contract.
+- **Release-tier deploy: debugger-live test now skips on missing
+  prerequisites** instead of failing the whole release gate. New
+  `DebuggerLiveTestSkipped` sentinel exception covers
+  non-Windows hosts, absent `BenchmarkDebug.exe`, and known-
+  environmental launch errors (no WDK, ghidratrace version
+  mismatch, dbgeng backend missing). Five new unit tests pin the
+  skip/raise classification.
+- **Audit watcher: `bridge_counter_stall` false-positive fixed.**
+  The rule polls `/api/_diag_bridge` for tool-call counters, but
+  the endpoint didn't exist — the fetcher caught the 404,
+  returned `{}`, and every counter read as 0. Result: 24
+  identical fires between 2026-04-25 and 2026-05-21, exactly one
+  per day at the 30-minute stall threshold. New endpoint
+  surfaces real counters wired off the bus; four new tests pin
+  the shape + monotonic-increment contract. Stale registry +
+  queue archived during the cut.
+- **README updates** — `@huehuehuehueing` joins `@heeen` in Core
+  Contributors for address-space prefix support (#84) and the
+  optional `program` parameter / schema fixes (#92). Discussions
+  badge swapped from `shields.io/github/discussions` (broken
+  with "unable to select next GitHub token from pool" — a
+  shields.io rate-limit issue, not ours) to a static
+  "discussions → join" badge that always renders.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.11.2 — customizable convention enforcement
 
 Feature release opening the v5.0 enforcement layer to per-project
 customization without weakening the strict-by-default posture. 244
