@@ -1,8 +1,30 @@
-# Optional dependencies for the standalone debugger server.
+# Optional dependencies for the standalone debugger server *and* the
+# Ghidra TraceRmi debugger backend launched from the Ghidra GUI (the
+# dbgeng / gdb / lldb launchers under
+# Ghidra/Debug/Debugger-agent-*/data/debugger-launchers/).
+#
 # Install with: pip install -r requirements-debugger.txt
+#
+# The Ghidra back-end uses `ghidratrace` to speak the TraceRmi
+# protocol with the front-end. The version of `ghidratrace` MUST
+# match the Ghidra install (12.0 ↔ 12.0, 12.1 ↔ 12.1, etc); a
+# mismatch surfaces as `VersionMismatchError: Mismatched versions:
+# Front-end: 12.1, back-end: 12.0` in the launcher terminal.
+# Because the wheel ships inside the Ghidra install, install it
+# directly from disk during a Ghidra version bump:
+#
+#   pip install --force-reinstall \
+#     "F:\ghidra_<ver>_PUBLIC\Ghidra\Debug\Debugger-rmi-trace\pypkg\dist\ghidratrace-<ver>-py3-none-any.whl"
+#
+# protobuf>=6.31.0 is required because ghidratrace's setuputils
+# refuses to start otherwise.
 
 # dbgeng wrapper used by debugger/engine.py (Windows-only)
 pybag==2.2.16
 
 # COM bindings required by pybag on Windows
 comtypes==1.4.16
+
+# TraceRmi wire format. ghidratrace's prompt_and_mitigate_dependencies
+# bails when protobuf is below this floor.
+protobuf>=6.31.0
