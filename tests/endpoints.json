@@ -1,5 +1,5 @@
 {
-  "version": "5.11.1",
+  "version": "5.11.2",
   "description": "GhidraMCP REST API Endpoint Specification",
   "total_endpoints": 244,
   "categories": {
@@ -198,7 +198,8 @@
         "address",
         "type_name",
         "clear_existing",
-        "program"
+        "program",
+        "strict_mode"
       ],
       "description": "Apply data type"
     },
@@ -2011,7 +2012,8 @@
       "params": [
         "function_address",
         "new_name",
-        "program"
+        "program",
+        "strict_mode"
       ],
       "description": "Rename function by address"
     },
@@ -2022,7 +2024,8 @@
       "params": [
         "old_name",
         "new_name",
-        "program"
+        "program",
+        "strict_mode"
       ],
       "description": "Rename global variable"
     },
@@ -2045,7 +2048,8 @@
       "params": [
         "address",
         "name",
-        "program"
+        "program",
+        "strict_mode"
       ],
       "description": "Rename or create label"
     },
@@ -2464,7 +2468,8 @@
         "type_name",
         "array_length",
         "plate_comment",
-        "program"
+        "program",
+        "strict_mode"
       ],
       "description": "Atomically apply name + type + plate-comment + array length to a global variable. Single-transaction; rejects on validation failure with no partial write. Replaces the 4-tool chain (apply_data_type → rename_data → batch_set_comments → create_label)."
     },

@@ -43,7 +43,8 @@ public final class NamingConventions {
 
     private static final Pattern PASCAL_CASE = Pattern.compile("^[A-Z][a-zA-Z0-9]+$");
     private static final Pattern MODULE_PREFIX = Pattern.compile("^[A-Z]+_[A-Z].*");
-    private static final int MIN_FUNCTION_NAME_LENGTH = 8;
+    // Built-in minimum function-name length; the active value flows through
+    // ConventionConfig.FunctionNamingRules.minLength() so projects can override.
 
     // ---- Verb specificity tiers (Q2 design) -------------------------------
     // Tier 1: highly specific verbs — a single specifier token is enough
@@ -83,6 +84,20 @@ public final class NamingConventions {
     );
 
     /**
+     * Whether {@code verb} is on the effective verb whitelist: built-in
+     * {@link #ALLOWED_VERBS} plus {@code verbs_add} minus {@code verbs_remove}
+     * from the per-project config. Also accepts any verb explicitly placed
+     * into a tier override (a project that tiers a verb has effectively
+     * whitelisted it). */
+    private static boolean isAllowedVerb(String verb, ConventionConfig.FunctionNamingRules rules) {
+        if (verb == null) return false;
+        if (rules.verbsRemove().contains(verb)) return false;
+        if (rules.verbsAdd().contains(verb)) return true;
+        if (rules.verbTierOverrides().containsKey(verb)) return true;
+        return ALLOWED_VERBS.contains(verb);
+    }
+
+    /**
      * Validate a function name against conventions. Returns list of warnings (empty = valid).
      * Thunks/imports with underscores are exempt.
      */
@@ -112,13 +127,16 @@ public final class NamingConventions {
             warnings.add("Function name '" + name + "' — main part '" + mainName + "' contains underscores. Use PascalCase after the module prefix.");
         }
 
-        if (mainName.length() < MIN_FUNCTION_NAME_LENGTH) {
-            warnings.add("Function name '" + name + "' is too short (main part '" + mainName + "' is " + mainName.length() + " chars, minimum " + MIN_FUNCTION_NAME_LENGTH + ").");
+        ConventionConfig.FunctionNamingRules fnRules =
+                NamingPolicy.getInstance().getConfig().functionNaming();
+        int minLength = fnRules.minLength();
+        if (mainName.length() < minLength) {
+            warnings.add("Function name '" + name + "' is too short (main part '" + mainName + "' is " + mainName.length() + " chars, minimum " + minLength + ").");
         }
 
         // Extract first word (verb) from PascalCase main part
         String firstWord = extractFirstPascalWord(mainName);
-        if (firstWord != null && !ALLOWED_VERBS.contains(firstWord)) {
+        if (firstWord != null && !isAllowedVerb(firstWord, fnRules)) {
             warnings.add("Function name '" + name + "' does not start with a recognized verb. First word '" + firstWord + "' not in allowed list. Common verbs: Get, Set, Initialize, Process, Calculate, Find, Check, Handle");
         }
 
@@ -157,18 +175,34 @@ public final class NamingConventions {
         }
     }
 
-    /** Tier of the given verb (1/2/3); 0 = unknown verb (treated as Tier 2). */
+    /** Tier of the given verb (1/2/3); 0 = unknown verb (treated as Tier 2).
+     *
+     * <p>Per-project overrides via {@code .ghidra-mcp/conventions.json}
+     * (`function_naming.verb_tier_overrides`) take precedence over the
+     * built-in tier tables. */
     public static int getVerbTier(String verb) {
         if (verb == null) return 0;
+        Integer override = NamingPolicy.getInstance().getConfig()
+                .functionNaming().verbTierOverrides().get(verb);
+        if (override != null) return override;
         if (VERBS_TIER1.contains(verb)) return 1;
         if (VERBS_TIER2.contains(verb)) return 2;
         if (VERBS_TIER3.contains(verb)) return 3;
         return 0;
     }
 
-    /** Whether a token is a "weak noun" that contributes no specificity. */
+    /** Whether a token is a "weak noun" that contributes no specificity.
+     *
+     * <p>The built-in {@link #WEAK_NOUNS} set is the floor; a project's
+     * {@code function_naming.weak_nouns_add} extends it and
+     * {@code function_naming.weak_nouns_remove} subtracts. */
     public static boolean isWeakNoun(String token) {
-        return token != null && WEAK_NOUNS.contains(token);
+        if (token == null) return false;
+        ConventionConfig.FunctionNamingRules rules =
+                NamingPolicy.getInstance().getConfig().functionNaming();
+        if (rules.weakNounsRemove().contains(token)) return false;
+        if (rules.weakNounsAdd().contains(token)) return true;
+        return WEAK_NOUNS.contains(token);
     }
 
     /**
@@ -210,8 +244,11 @@ public final class NamingConventions {
         List<String> tokens = tokenizeFunctionName(name);
         if (tokens.size() < 2) return 0;
         int count = 0;
+        // Use the config-aware view so project-specific weak-noun add/remove
+        // overrides flow through the specifier counter the same way they
+        // flow through isWeakNoun().
         for (int i = 1; i < tokens.size(); i++) {
-            if (!WEAK_NOUNS.contains(tokens.get(i))) count++;
+            if (!isWeakNoun(tokens.get(i))) count++;
         }
         return count;
     }
@@ -487,28 +524,38 @@ public final class NamingConventions {
     // -----------------------------------------------------------------------
 
     /**
-     * Validate plate comment has required sections. Returns list of warnings.
+     * Validate plate comment has the required sections. Returns list of
+     * warnings (empty = valid).
+     *
+     * <p>Required-section list is driven by the active
+     * {@link ConventionConfig#plateComments()} so a project can replace
+     * the default (Algorithm / Parameters / Returns) with its own format
+     * — or set {@code plate_comments.validate = false} to skip the check
+     * entirely.
      */
     public static List<String> validatePlateCommentStructure(String plateComment) {
         List<String> warnings = new ArrayList<>();
         if (plateComment == null || plateComment.isEmpty()) return warnings;
 
-        String[] lines = plateComment.split("\n");
-        boolean hasAlgorithm = false;
-        boolean hasParameters = false;
-        boolean hasReturns = false;
+        ConventionConfig.PlateCommentRules rules =
+                NamingPolicy.getInstance().getConfig().plateComments();
+        if (!rules.validate()) return warnings;
 
+        String[] lines = plateComment.split("\n");
+        Set<String> present = new java.util.HashSet<>();
         for (String line : lines) {
             String trimmed = line.trim();
-            if (trimmed.startsWith("Algorithm:") || trimmed.equals("Algorithm")) hasAlgorithm = true;
-            if (trimmed.startsWith("Parameters:") || trimmed.equals("Parameters")) hasParameters = true;
-            if (trimmed.startsWith("Returns:") || trimmed.equals("Returns")) hasReturns = true;
+            for (String section : rules.requiredSections()) {
+                if (trimmed.equals(section) || trimmed.startsWith(section + ":")) {
+                    present.add(section);
+                }
+            }
         }
-
-        if (!hasAlgorithm) warnings.add("Plate comment missing Algorithm section");
-        if (!hasParameters) warnings.add("Plate comment missing Parameters section");
-        if (!hasReturns) warnings.add("Plate comment missing Returns section");
-
+        for (String section : rules.requiredSections()) {
+            if (!present.contains(section)) {
+                warnings.add("Plate comment missing " + section + " section");
+            }
+        }
         return warnings;
     }
 
@@ -869,6 +916,12 @@ public final class NamingConventions {
      */
     public static String[] checkGlobalPlateComment(String plateComment) {
         if (plateComment == null) return null;
+        ConventionConfig.PlateCommentRules rules =
+                NamingPolicy.getInstance().getConfig().plateComments();
+        // Project disabled plate-comment validation entirely — accept
+        // anything. (Previously this gate was always-on; v5.11.2 adds the
+        // toggle so non-Algorithm/Parameters/Returns formats can ship.)
+        if (!rules.validate()) return null;
         String trimmed = plateComment.trim();
         if (trimmed.isEmpty()) return null;
         String firstLine = trimmed.split("\n", 2)[0].trim();
@@ -877,7 +930,7 @@ public final class NamingConventions {
         }
         // split("\\s+") on a non-empty trimmed string returns ≥1 token.
         int wordCount = firstLine.split("\\s+").length;
-        if (wordCount < 4) {
+        if (wordCount < rules.minFirstLineWords()) {
             return new String[]{"plate_comment_too_short", firstLine};
         }
         return null;
@@ -957,6 +1010,12 @@ public final class NamingConventions {
      */
     public static GlobalNameResult checkGlobalNameQuality(String name, String typeName) {
         if (name == null || name.isEmpty()) return GlobalNameResult.ok();
+        ConventionConfig.GlobalNamingRules globalRules =
+                NamingPolicy.getInstance().getConfig().globalNaming();
+        // Project disabled global-name validation entirely. Accept any
+        // identifier and let the scoring layer surface low-quality names
+        // through other signals.
+        if (!globalRules.validate()) return GlobalNameResult.ok();
         // Auto-generated symbols (DAT_xxx, PTR_DAT_xxx, etc.) are exempt —
         // they get the unrenamed_globals deduction at the scoring layer.
         if (isAutoGeneratedGlobalName(name)) return GlobalNameResult.ok();
@@ -967,13 +1026,22 @@ public final class NamingConventions {
         // burned ~50 provider calls confirming-and-skipping these labels.
         if (isOsCanonicalGlobalName(name)) return GlobalNameResult.ok();
 
-        if (!name.startsWith("g_")) {
+        if (globalRules.requireGPrefix() && !name.startsWith("g_")) {
             return GlobalNameResult.reject(
                     "missing_g_prefix",
                     "Global '" + name + "' must start with 'g_' per project convention.",
                     "Prepend 'g_' followed by the Hungarian type prefix and a descriptive name. "
                             + "Example: g_dwActiveQuestState, g_pUnitList, g_szPlayerName."
             );
+        }
+        // When the g_ prefix is NOT required by config, downstream Hungarian
+        // checks below still need a stripped name. Treat the whole identifier
+        // as "after g_" in that case.
+        if (!globalRules.requireGPrefix() && !name.startsWith("g_")) {
+            // Skip the g_-prefix-specific structural checks; the rest of the
+            // validator assumes g_-prefixed input. A project that opted out of
+            // the g_ requirement gets a more permissive accept here.
+            return GlobalNameResult.ok();
         }
 
         if (AUTO_GLOBAL_NAME.matcher(name).matches()) {
@@ -1013,12 +1081,13 @@ public final class NamingConventions {
         // so we know descriptor starts with an uppercase letter — no need to
         // check that explicitly. Just verify the descriptor is long enough.
         String descriptor = afterG.substring(hungarian.length());
-        if (descriptor.length() < 2) {
+        int minDescriptor = globalRules.minDescriptorLength();
+        if (descriptor.length() < minDescriptor) {
             return GlobalNameResult.reject(
                     "short_descriptor",
                     "Global '" + name + "' has only a " + descriptor.length() + "-char descriptor after "
                             + "Hungarian prefix '" + hungarian + "'.",
-                    "Provide ≥2 chars of descriptor explaining what the global represents."
+                    "Provide ≥" + minDescriptor + " chars of descriptor explaining what the global represents."
             );
         }
 

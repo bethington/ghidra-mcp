@@ -1193,7 +1193,10 @@ public class DataTypeService {
                                + "address is unambiguous.") String addressStr,
             @Param(value = "type_name", source = ParamSource.BODY) String typeName,
             @Param(value = "clear_existing", source = ParamSource.BODY, defaultValue = "true") boolean clearExisting,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
+                    String strictModeArg) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -1206,7 +1209,7 @@ public class DataTypeService {
             return Response.text("Data type name is required");
         }
 
-        try {
+        try (AutoCloseable scopedMode = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
             Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
                 return Response.text(ServiceUtils.getLastParseError());
@@ -1317,9 +1320,15 @@ public class DataTypeService {
         }
     }
 
+    /** Four-arg overload preserving the pre-v5.11.2 signature. */
+    public Response applyDataType(String addressStr, String typeName, boolean clearExisting,
+                                   String programName) {
+        return applyDataType(addressStr, typeName, clearExisting, programName, null);
+    }
+
     // Backward compatibility overload
     public Response applyDataType(String addressStr, String typeName, boolean clearExisting) {
-        return applyDataType(addressStr, typeName, clearExisting, null);
+        return applyDataType(addressStr, typeName, clearExisting, null, null);
     }
 
     /**
@@ -3445,7 +3454,10 @@ public class DataTypeService {
                    description = "If >0, applied as an array of array_length elements of type_name. Required when documenting an array of fixed length (e.g., a 100-entry data table).") int arrayLength,
             @Param(value = "plate_comment", source = ParamSource.BODY,
                    description = "Plate comment for the address. First line must be a meaningful one-line summary (≥4 words). Optional sectioned details (Used by:, Layout:, Source:, Bitfield:) follow when applicable. Pass empty to leave plate comment unchanged.") String plateComment,
-            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName,
+            @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
+                    String strictModeArg) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -3454,6 +3466,7 @@ public class DataTypeService {
         Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) return Response.err(ServiceUtils.getLastParseError());
 
+        try (AutoCloseable scopedMode = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
         // Pre-flight validation. Strict naming enforcement preserves the
         // no-partial-write behavior for name-quality failures; when disabled,
         // the write proceeds and reports the same issue as a warning.
@@ -3692,6 +3705,11 @@ public class DataTypeService {
             return Response.ok(result);
         }
         return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
+        } catch (Exception e) {
+            // try-with-resources close() is declared as throws Exception;
+            // re-wrap since the body never raises a checked exception.
+            throw new RuntimeException(e);
+        }
     }
 
     private static String disabledGlobalEnforcementWarning(Map<String, Object> rejection) {

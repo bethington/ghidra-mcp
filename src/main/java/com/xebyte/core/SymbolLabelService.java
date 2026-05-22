@@ -346,8 +346,13 @@ public class SymbolLabelService {
         return Response.ok(result);
     }
 
+    /** Three-arg overload preserving the pre-v5.11.2 signature. */
+    public Response renameOrLabel(String addressStr, String newName, String programName) {
+        return renameOrLabel(addressStr, newName, programName, null);
+    }
+
     public Response renameOrLabel(String addressStr, String newName) {
-        return renameOrLabel(addressStr, newName, null);
+        return renameOrLabel(addressStr, newName, null, null);
     }
 
     @McpTool(path = "/rename_or_label", method = "POST", description = "Rename or create label at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
@@ -359,7 +364,10 @@ public class SymbolLabelService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
             @Param(value = "name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
+                    String strictModeArg) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -371,7 +379,7 @@ public class SymbolLabelService {
             return Response.err("Name is required");
         }
 
-        try {
+        try (AutoCloseable scopedMode = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
             Address address = ServiceUtils.parseAddress(program, addressStr);
             if (address == null) {
                 return Response.err(ServiceUtils.getLastParseError());
@@ -711,15 +719,23 @@ public class SymbolLabelService {
         return Response.err(errorMsg.get() != null ? errorMsg.get() : "Unknown failure");
     }
 
+    /** Three-arg overload preserving the pre-v5.11.2 signature. */
+    public Response renameGlobalVariable(String oldName, String newName, String programName) {
+        return renameGlobalVariable(oldName, newName, programName, null);
+    }
+
     public Response renameGlobalVariable(String oldName, String newName) {
-        return renameGlobalVariable(oldName, newName, null);
+        return renameGlobalVariable(oldName, newName, null, null);
     }
 
     @McpTool(path = "/rename_global_variable", method = "POST", description = "Rename a global variable", category = "symbol")
     public Response renameGlobalVariable(
             @Param(value = "old_name", source = ParamSource.BODY) String oldName,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional per-call override for naming enforcement: 'enforce' / 'warn' / 'off'. Omit to use the project/global setting.")
+                    String strictModeArg) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -731,6 +747,7 @@ public class SymbolLabelService {
             return Response.err("New variable name is required");
         }
 
+        try (AutoCloseable scopedMode = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
         // Q3/Q4 validator gate (v5.7.0): hard-reject names that fail global
         // naming rules. Look up the symbol's existing data type for the
         // Hungarian-vs-type check.
@@ -833,6 +850,11 @@ public class SymbolLabelService {
             return Response.err(e.getMessage());
         } finally {
             program.endTransaction(txId, success);
+        }
+        } catch (Exception e) {
+            // try-with-resources close() can throw Exception (checked).
+            // Re-wrap as runtime; the inner catch already handled real errors.
+            throw new RuntimeException(e);
         }
     }
 

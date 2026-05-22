@@ -103,7 +103,7 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "5.11.1"; // Default fallback
+    private static String VERSION = "5.11.2"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
@@ -395,8 +395,48 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         Options options = tool.getOptions(OPTION_CATEGORY_NAME);
         boolean strict = options.getBoolean(STRICT_NAMING_ENFORCEMENT_OPTION,
             NamingPolicy.defaultStrictNamingEnforcement());
+
+        // v5.11.2: load .ghidra-mcp/conventions.json from the active
+        // project root before applying the Tool Option boolean override.
+        // Order matters: the JSON sets all sections (including mode), then
+        // the GUI toggle overrides JUST the mode bit. That keeps the GUI
+        // checkbox as the user's most-recent intent without forcing them
+        // to also delete the JSON file.
+        java.nio.file.Path projectDir = resolveProjectRootDir();
+        com.xebyte.core.ConventionConfigLoader.LoadResult loadResult =
+                NamingPolicy.getInstance().refreshFromProjectRoot(projectDir);
+        if (loadResult.loaded()) {
+            Msg.info(this, "Loaded convention config from " + loadResult.resolvedFrom());
+        } else if (loadResult.error() != null) {
+            Msg.warn(this, "Convention config not loaded: " + loadResult.error()
+                    + " — using built-in defaults");
+        }
+        for (String warning : loadResult.warnings()) {
+            Msg.warn(this, "Convention config: " + warning);
+        }
+
+        // Apply the Tool Option toggle on top. setStrictNamingEnforcement()
+        // preserves all other config sections — only the mode flips.
         NamingPolicy.getInstance().setStrictNamingEnforcement(strict, "tool_options");
         Msg.info(this, "GhidraMCP strict naming enforcement: " + strict);
+    }
+
+    /** Best-effort resolution of the active Ghidra project directory.
+     * Returns null if no project is currently open. */
+    private java.nio.file.Path resolveProjectRootDir() {
+        try {
+            Project project = tool.getProject();
+            if (project == null) return null;
+            ghidra.framework.model.ProjectLocator locator = project.getProjectLocator();
+            if (locator == null) return null;
+            java.io.File dir = locator.getProjectDir();
+            return dir != null ? dir.toPath() : null;
+        } catch (Exception e) {
+            // Any reflection / API surprise here is non-fatal — fall back
+            // to defaults. The active config is still usable, just without
+            // the per-project overrides.
+            return null;
+        }
     }
 
     private void migrateLegacyNamingOption(Options options) {

@@ -4,6 +4,86 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.11.2 - 2026-05-22 (customizable convention enforcement)
+
+Feature release introducing per-project customization of the v5.0
+convention-enforcement layer. The enforcement that used to be
+"hardcoded constants in `NamingConventions.java`" is now driven by a
+`ConventionConfig` object loaded from
+`<ghidra-project>/.ghidra-mcp/conventions.json`. Defaults reproduce
+exactly the pre-v5.11.2 hardcoded behavior, so projects with no config
+file see zero behavior change.
+
+### Added
+
+- **`.ghidra-mcp/conventions.json` per-project config** — five sections
+  (`strict_mode`, `function_naming`, `hungarian`, `global_naming`,
+  `plate_comments`) covering every previously-hardcoded knob: verb
+  whitelist add/remove, verb tier overrides (1/2/3), weak-noun
+  add/remove, function-name min length, struct-field auto-Hungarian
+  toggle, `g_` prefix requirement toggle, descriptor min length, plate-
+  comment validation toggle, required-section list, first-line word
+  count. See [`docs/prompts/CUSTOMIZING_CONVENTIONS.md`](docs/prompts/CUSTOMIZING_CONVENTIONS.md)
+  for the full schema + a worked non-Hungarian C++ example.
+- **Per-call `strict_mode` parameter** on the five enforcement
+  endpoints (`rename_function_by_address`, `apply_data_type`,
+  `set_global`, `rename_or_label`, `rename_global_variable`). Values:
+  `enforce` / `warn` / `off`. Default null = "use the project/global
+  setting" so existing callers don't change behavior. Plumbed via a
+  thread-local override on `NamingPolicy` and the
+  `scopedRequestMode(...)` AutoCloseable helper so the override clears
+  even if the body throws.
+- **Plate-comment validation gate** — `checkGlobalPlateComment()`
+  previously always-rejected; now consults the active
+  `plate_comments.validate` flag. This closes the longstanding gap
+  flagged in the v5.6.0 design (the strict-mode toggle was wired
+  everywhere else but bypassed plate-comment).
+- **Project doc**: [`CUSTOMIZING_CONVENTIONS.md`](docs/prompts/CUSTOMIZING_CONVENTIONS.md)
+  with schema reference, three-layer precedence table, and a worked
+  example for non-Hungarian C++ projects.
+
+### Changed
+
+- `NamingPolicy` now holds a full `ConventionConfig` rather than a
+  bare boolean. The existing
+  `setStrictNamingEnforcement(boolean, source)` setter still works —
+  it flips just the mode bit and preserves all other config sections.
+- `NamingConventions.getVerbTier()`, `isWeakNoun()`,
+  `countSpecifierTokens()`, `validateFunctionName()`,
+  `validatePlateCommentStructure()`, `checkGlobalPlateComment()`, and
+  `checkGlobalNameQuality()` now consult the active config. With no
+  config file present, all behavior is unchanged.
+- The five enforcement endpoints' MCP signatures grow one optional
+  `strict_mode` body parameter (`tests/endpoints.json` regenerated).
+
+### Backward compatibility
+
+Every change is additive. No config file = identical behavior to
+v5.11.1. The legacy `Strict Naming Enforcement` Ghidra Tool Option
+still works and still wins over the config file's `strict_mode` field,
+so the GUI-toggle workflow keeps working.
+
+### Also included
+
+- **fun-doc workers now surface `no_eligible_candidates` on exit** —
+  previously a worker that spawned on a binary with nothing left to do
+  (everything at-or-above `good_enough_score`, library-code-skipped,
+  retry-budget-exhausted) silently exited with status "finished" and 0
+  progress, indistinguishable from a real failure. The dashboard now
+  renders "finished — no eligible candidates" with 5 regression tests
+  pinning the contract.
+
+### Tests
+
+27 new offline Java tests in `ConventionConfigTest` covering defaults,
+JSON parsing of each section, file loading, weak-noun / verb-tier /
+plate-comment / global-naming config consumption, and per-call
+override lifecycle (thread-local scoping + cleanup-on-throw). 5 new
+Python tests in `test_worker_exit_reason.py` for the worker exit
+reason. `tests/endpoints.json` regenerated to capture the new params.
+
+---
+
 ## v5.11.1 - 2026-05-21 (deploy hardening, coverage, attribution)
 
 Patch release bundling the post-v5.11.0 deploy hardening and test

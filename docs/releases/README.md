@@ -9,7 +9,7 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.11.1 (Latest) — Ghidra 12.1 + community fixes
+### v5.11.2 (Latest) — Ghidra 12.1 + community fixes
 
 Minor release retargeting at Ghidra 12.1 and rolling up four
 community-reported fixes plus the gemini-cli-sdk reconciliation.

@@ -1582,12 +1582,28 @@
             }
         }
 
-        function markPaneFinished(workerId, reason) {
+        // Human-readable label for a structured exit_reason. Returns null
+        // when the worker exited normally with work done; the caller falls
+        // back to the raw status string in that case.
+        function exitReasonLabel(exitReason) {
+            if (!exitReason) return null;
+            if (exitReason === 'no_eligible_candidates') return 'no eligible candidates';
+            // Unknown reason: render as-is so we don't silently swallow a
+            // new exit code the backend may add later.
+            return exitReason;
+        }
+
+        function markPaneFinished(workerId, reason, exitReason) {
             const pane = workerPanes[workerId];
             if (!pane) return;
             pane.element.className = 'worker-pane finished';
             const status = document.getElementById(`wp-status-${workerId}`);
-            if (status) status.textContent = reason || 'finished';
+            const label = exitReasonLabel(exitReason);
+            if (status) {
+                status.textContent = label
+                    ? `${reason || 'finished'} — ${label}`
+                    : (reason || 'finished');
+            }
             const stopBtn = document.getElementById(`wp-stop-${workerId}`);
             const dismissBtn = document.getElementById(`wp-dismiss-${workerId}`);
             if (stopBtn) stopBtn.style.display = 'none';
@@ -1653,8 +1669,13 @@
             const pane = workerPanes[d.worker_id];
             // Close any block left open by mid-function abandonment (Q2 C).
             if (pane) _closeFnBlock(pane, null, null, true /* interrupted */);
-            appendToPane(d.worker_id, `Worker ${d.reason}: ${d.progress?.completed || 0} completed`, d.reason === 'finished' ? 'success' : 'neutral');
-            markPaneFinished(d.worker_id, d.reason);
+            const exitLabel = exitReasonLabel(d.exit_reason);
+            const completed = d.progress?.completed || 0;
+            const summary = exitLabel
+                ? `Worker ${d.reason}: ${completed} completed — ${exitLabel}`
+                : `Worker ${d.reason}: ${completed} completed`;
+            appendToPane(d.worker_id, summary, d.reason === 'finished' ? 'success' : 'neutral');
+            markPaneFinished(d.worker_id, d.reason, d.exit_reason);
             if (_focusedWorkerId === d.worker_id) unfocusWorker();
             refreshStats();
         });
@@ -2184,7 +2205,7 @@
                     // we reconnect, restore the finished-state styling so the
                     // user can dismiss it.
                     if (w.status === 'finished' || w.status === 'stopped') {
-                        markPaneFinished(w.id, w.status);
+                        markPaneFinished(w.id, w.status, w.exit_reason);
                     }
                 }
                 // Keep title in sync in case provider/model were still

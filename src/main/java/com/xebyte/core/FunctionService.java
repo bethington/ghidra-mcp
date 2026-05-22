@@ -786,7 +786,12 @@ public class FunctionService {
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
             @Param(value = "new_name", source = ParamSource.BODY) String newName,
-            @Param(value = "program", defaultValue = "") String programName) {
+            @Param(value = "program", defaultValue = "") String programName,
+            @Param(value = "strict_mode", source = ParamSource.BODY, defaultValue = "",
+                   description = "Optional per-call override for naming enforcement: 'enforce' (reject "
+                               + "low-quality names), 'warn' (write goes through with warnings), or 'off' "
+                               + "(skip validation entirely). Omit to use the project/global setting.")
+                    String strictModeArg) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -804,6 +809,10 @@ public class FunctionService {
             return Response.err("No function found for " + functionAddrStr);
         }
 
+        // Per-call strict_mode override. The AutoCloseable returned by
+        // scopedRequestMode() clears the override on close — even if the
+        // body throws — so it never leaks across HTTP requests.
+        try (AutoCloseable ignored = NamingPolicy.getInstance().scopedRequestMode(strictModeArg)) {
         boolean enforceStrictNaming = NamingPolicy.getInstance().isStrictNamingEnforcement();
         List<String> enforcementWarnings = new ArrayList<>();
 
@@ -870,10 +879,23 @@ public class FunctionService {
             return Response.ok(data);
         }
         return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
+        } catch (Exception e) {
+            // try-with-resources close path: scopedRequestMode's close()
+            // is declared on AutoCloseable so the compiler requires us to
+            // handle a checked Exception here. Re-wrap as runtime since
+            // none of the body throws checked exceptions.
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Three-arg overload preserving the pre-v5.11.2 signature for the
+     * registry + headless dispatcher + bare programmatic callers. */
+    public Response renameFunctionByAddress(String functionAddrStr, String newName, String programName) {
+        return renameFunctionByAddress(functionAddrStr, newName, programName, null);
     }
 
     public Response renameFunctionByAddress(String functionAddrStr, String newName) {
-        return renameFunctionByAddress(functionAddrStr, newName, null);
+        return renameFunctionByAddress(functionAddrStr, newName, null, null);
     }
 
     private static Map<String, Object> nameQualityRejection(

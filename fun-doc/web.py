@@ -391,6 +391,11 @@ class WorkerManager:
                     "last_heartbeat_at": w.get("last_heartbeat_at"),
                     "stall_kill_fired": bool(w.get("stall_kill_fired", False)),
                     "is_stale": heartbeat_age > STALL_KILL_THRESHOLD_SEC,
+                    # exit_reason is set on clean exits where the operator
+                    # benefits from knowing *why* the worker stopped. Today
+                    # we set it for "no_eligible_candidates" (queue empty);
+                    # future reasons can be added without changing this shape.
+                    "exit_reason": w.get("exit_reason"),
                     }
                 )
             return rows
@@ -647,6 +652,15 @@ class WorkerManager:
                             break
 
                 if target is None:
+                    # No eligible candidates left in the priority queue for
+                    # this binary. Most common cause: every function on the
+                    # binary is either at/above good_enough_score, classified
+                    # as library code, or has exhausted retry budgets
+                    # (consecutive_fails / stagnation_runs). Without an exit
+                    # reason the dashboard renders this as a generic "stopped"
+                    # and the operator can't tell it apart from a real failure.
+                    if processed == 0:
+                        worker["exit_reason"] = "no_eligible_candidates"
                     break  # No more work available
 
                 key, func = target
@@ -877,6 +891,7 @@ class WorkerManager:
                 {
                     "worker_id": worker_id,
                     "reason": worker["status"],
+                    "exit_reason": worker.get("exit_reason"),
                     "progress": dict(worker["progress"]),
                 },
             )
