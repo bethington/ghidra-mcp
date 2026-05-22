@@ -34,6 +34,13 @@ on:
         type: string
         default: "release"
 
+# OSSF Scorecard Token-Permissions: default to read-only. The
+# regression runner reads the checked-out tree and uploads test
+# artifacts (via actions/upload-artifact, which does NOT need
+# repo-write — it uses its own scoped token).
+permissions:
+  contents: read
+
 jobs:
   live-ghidra-regression:
     name: Live Ghidra Release Regression

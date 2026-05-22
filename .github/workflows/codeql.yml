@@ -1,0 +1,68 @@
+# GitHub CodeQL — static analysis for the Java plugin + Python
+# bridge/tooling. Findings show up in the Security tab; required by
+# OSSF Scorecard's SAST check.
+#
+# Two languages because we ship both:
+#   * java-kotlin → covers src/main/java/com/xebyte/ (the GhidraMCP
+#     plugin + headless server, ~20K LOC)
+#   * python → covers bridge_mcp_ghidra.py + tools/setup/ + fun-doc/
+#
+# Build mode "none" for both: CodeQL extracts source directly. The
+# Java side compiles against Ghidra jars that aren't on Maven Central
+# (installed from the local Ghidra install via tools.setup
+# install-ghidra-deps), so an autobuild here would fail. Source-only
+# extraction skips the build entirely and still catches the SAST
+# rules CodeQL fires on syntax + dataflow patterns.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan — separate from push-triggered runs so a quiet
+    # repo still gets fresh analysis as rules update.
+    - cron: '17 8 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Required to upload results to the Security tab.
+      security-events: write
+      # Required to read packages info for some language analyses.
+      packages: read
+      # Default scope.
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: none
+          - language: python
+            build-mode: none
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

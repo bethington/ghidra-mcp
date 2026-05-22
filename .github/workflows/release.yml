@@ -27,6 +27,12 @@ env:
   GHIDRA_VERSION: 12.1
   GHIDRA_DATE: 20260513
 
+# OSSF Scorecard Token-Permissions: default to read-only. The
+# create-release job elevates to contents:write for tag + asset
+# creation; the release-regression reusable workflow is read-only.
+permissions:
+  contents: read
+
 jobs:
   release-regression:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_live_regression == 'true'

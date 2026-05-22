@@ -1,0 +1,72 @@
+# Dependabot configuration — keeps dependencies fresh on a known
+# cadence so security advisories surface as PRs instead of as
+# "discovered six months too late" entries in a Snyk report.
+#
+# Covers every package ecosystem in the repo:
+#   * GitHub Actions used by the workflows under .github/workflows/
+#   * Python requirements at the repo root (bridge runtime + test + debugger)
+#   * Python requirements under fun-doc/ (the documentation workflow)
+#   * Maven (pom.xml) for the Java plugin
+#   * Gradle (build.gradle) for the alternate Gradle build path
+#
+# Schedule: weekly per ecosystem to keep noise manageable but stay
+# inside most CVE advisory windows. open-pull-requests-limit keeps
+# Dependabot from spamming a backlog of stale PRs if a maintainer
+# falls behind on review.
+#
+# Required by OSSF Scorecard's Dependency-Update-Tool check.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+
+  - package-ecosystem: pip
+    directory: "/fun-doc"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+      - fun-doc
+
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - java
+    # Ghidra API jars are installed from the local Ghidra install
+    # via tools.setup install-ghidra-deps — they are not on Maven
+    # Central, so Dependabot would file noise PRs proposing
+    # nonsensical upgrades. Ignore them.
+    ignore:
+      - dependency-name: "ghidra:*"
+
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - java
+      - gradle

@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# OSSF Scorecard Token-Permissions: default to read-only so any job
+# without an explicit permissions block can only read repo contents,
+# not push, write packages, etc. Build is a pure CI workflow that
+# doesn't need anything beyond reading the checked-out tree.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest

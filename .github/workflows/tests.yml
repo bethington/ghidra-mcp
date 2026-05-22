@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+# OSSF Scorecard Token-Permissions: default to read-only so any job
+# without an explicit permissions block can only read repo contents.
+# Codecov upload (java-build job) and any future job needing write
+# scopes must add their own job-level permissions block.
+permissions:
+  contents: read
+
 jobs:
   java-build:
     name: Java Build (Maven)
