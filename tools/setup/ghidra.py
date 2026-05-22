@@ -1905,6 +1905,92 @@ def run_deploy_tests(repo_root: Path, mcp_url: str, test_modes: list[str]) -> No
             run_release_regression_tests(repo_root, mcp_url)
 
 
+def _resolve_debugger_python(repo_root: Path) -> Path | None:
+    """Find the Python interpreter Ghidra's debugger launchers actually use.
+
+    The Ghidra dbgeng / gdb / lldb launcher .bat / .sh scripts run
+    ``"%OPT_PYTHON_EXE%" ...`` (defaulting to ``python``), and the
+    GhidraMCP plugin propagates ``GHIDRA_DEBUGGER_PYTHON`` from .env into
+    that variable when running the debugger live test. So the
+    interpreter to install ``ghidratrace`` into is:
+
+      1. ``GHIDRA_DEBUGGER_PYTHON`` from the environment, if set
+      2. ``GHIDRA_DEBUGGER_PYTHON`` from ``<repo>/.env``, if set
+      3. ``shutil.which("python")`` as the system default
+
+    Returns ``None`` only when no resolvable interpreter is found —
+    rare on Windows but possible in headless CI containers.
+    """
+    candidate = os.environ.get("GHIDRA_DEBUGGER_PYTHON", "").strip()
+    if not candidate:
+        env_values = load_env_file(repo_root / ".env")
+        candidate = env_values.get("GHIDRA_DEBUGGER_PYTHON", "").strip()
+    if candidate:
+        path = Path(candidate)
+        if path.is_file():
+            return path
+    fallback = shutil.which("python")
+    return Path(fallback) if fallback else None
+
+
+def install_ghidratrace_for_debugger(
+    repo_root: Path,
+    ghidra_path: Path,
+    *,
+    dry_run: bool = False,
+) -> int:
+    """Install the matching ``ghidratrace`` wheel into the launcher Python.
+
+    Why this exists: when Ghidra is upgraded (e.g., 12.0.4 → 12.1), the
+    wheel that ships at ``<ghidra>/Ghidra/Debug/Debugger-rmi-trace/pypkg/dist``
+    bumps version too. If a stale 12.0 ``ghidratrace`` is still
+    pip-installed in the launcher's Python, TraceRmi negotiation fails
+    with ``VersionMismatchError: Front-end: 12.1, back-end: 12.0`` —
+    observed twice in this release cycle. The wheel lives inside the
+    Ghidra install (not on PyPI), so a vanilla ``pip install`` against
+    requirements-debugger.txt can't cover it.
+
+    Returns 0 on success / no-op, nonzero on installer failure.
+    """
+    wheel_dir = ghidra_path / "Ghidra" / "Debug" / "Debugger-rmi-trace" / "pypkg" / "dist"
+    wheels = sorted(wheel_dir.glob("ghidratrace-*-py3-none-any.whl"))
+    if not wheels:
+        print(f"  No ghidratrace wheel found under {wheel_dir} — skipping debugger Python sync")
+        return 0
+    wheel = wheels[-1]
+
+    debugger_python = _resolve_debugger_python(repo_root)
+    if debugger_python is None:
+        print("  Could not resolve a debugger Python (set GHIDRA_DEBUGGER_PYTHON) — skipping")
+        return 0
+
+    if dry_run:
+        print(f"DRY RUN: {debugger_python} -m pip install --force-reinstall {wheel}")
+        print(f"DRY RUN: {debugger_python} -m pip install --upgrade 'protobuf>=6.31.0'")
+        return 0
+
+    # protobuf>=6.31.0 is gated separately by ghidratrace.setuputils — install
+    # it before the wheel so the post-install setuputils check doesn't trip.
+    pb = subprocess.run(
+        [str(debugger_python), "-m", "pip", "install", "--upgrade", "protobuf>=6.31.0"],
+        check=False, capture_output=True, text=True,
+    )
+    if pb.returncode != 0:
+        print(f"  protobuf install failed: {pb.stderr.strip()[:200]}")
+        return pb.returncode
+
+    gt = subprocess.run(
+        [str(debugger_python), "-m", "pip", "install", "--force-reinstall", str(wheel)],
+        check=False, capture_output=True, text=True,
+    )
+    if gt.returncode != 0:
+        print(f"  ghidratrace install failed: {gt.stderr.strip()[:200]}")
+        return gt.returncode
+
+    print(f"  Installed {wheel.name} into {debugger_python}")
+    return 0
+
+
 def install_ghidra_dependencies(
     repo_root: Path,
     ghidra_path: Path,
@@ -1949,6 +2035,15 @@ def install_ghidra_dependencies(
         completed = subprocess.run(command, cwd=repo_root, check=False)
         if completed.returncode != 0:
             return completed.returncode
+
+    # Keep the debugger launcher's Python in sync with the installed
+    # Ghidra version's ghidratrace wheel. Without this, a Ghidra version
+    # bump leaves a stale ghidratrace pip-installed in the launcher's
+    # Python and TraceRmi negotiation fails with the back-end reporting
+    # the old version. Best-effort: a failure here does NOT block the
+    # main JAR-install dependency setup since most users don't use the
+    # live debugger.
+    install_ghidratrace_for_debugger(repo_root, ghidra_path, dry_run=dry_run)
 
     return 0
 

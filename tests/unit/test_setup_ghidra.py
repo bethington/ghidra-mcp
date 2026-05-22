@@ -825,6 +825,123 @@ def test_debugger_live_raises_runtime_error_on_real_failure(
         ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
 
 
+# ---------------------------------------------------------------------------
+# install_ghidratrace_for_debugger — keep the launcher Python's ghidratrace
+# wheel in sync with the installed Ghidra. Misalignment caused the
+# VersionMismatchError observed three times in this release cycle: an old
+# 12.0 wheel was pip-installed in the launcher's Python (the one named by
+# GHIDRA_DEBUGGER_PYTHON in .env) and shadowed the bundled 12.1 source.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_debugger_python_prefers_env_var(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from tools.setup import ghidra
+
+    fake_py = tmp_path / "ms-store-python.exe"
+    fake_py.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GHIDRA_DEBUGGER_PYTHON", str(fake_py))
+    resolved = ghidra._resolve_debugger_python(tmp_path)
+    assert resolved == fake_py
+
+
+def test_resolve_debugger_python_falls_back_to_dotenv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from tools.setup import ghidra
+
+    monkeypatch.delenv("GHIDRA_DEBUGGER_PYTHON", raising=False)
+    fake_py = tmp_path / "dotenv-python.exe"
+    fake_py.write_text("", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        f"GHIDRA_DEBUGGER_PYTHON={fake_py}\n", encoding="utf-8"
+    )
+    resolved = ghidra._resolve_debugger_python(tmp_path)
+    assert resolved == fake_py
+
+
+def test_install_ghidratrace_skips_when_no_wheel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    from tools.setup import ghidra
+
+    monkeypatch.delenv("GHIDRA_DEBUGGER_PYTHON", raising=False)
+    fake_ghidra = tmp_path / "ghidra_install"
+    fake_ghidra.mkdir()
+    rc = ghidra.install_ghidratrace_for_debugger(tmp_path, fake_ghidra)
+    assert rc == 0
+    assert "No ghidratrace wheel found" in capsys.readouterr().out
+
+
+def test_install_ghidratrace_dry_run_does_not_invoke_pip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    from tools.setup import ghidra
+
+    # Build a fake wheel and a fake Python.
+    wheel_dir = tmp_path / "ghidra_install" / "Ghidra" / "Debug" / "Debugger-rmi-trace" / "pypkg" / "dist"
+    wheel_dir.mkdir(parents=True)
+    wheel = wheel_dir / "ghidratrace-12.1-py3-none-any.whl"
+    wheel.write_bytes(b"")
+    fake_py = tmp_path / "debugger-python.exe"
+    fake_py.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GHIDRA_DEBUGGER_PYTHON", str(fake_py))
+
+    # subprocess.run must NOT be invoked in dry-run mode.
+    def fail_if_called(*_a, **_kw):
+        raise AssertionError("subprocess.run must not run in dry_run mode")
+
+    monkeypatch.setattr(ghidra.subprocess, "run", fail_if_called)
+    rc = ghidra.install_ghidratrace_for_debugger(
+        tmp_path, tmp_path / "ghidra_install", dry_run=True
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "DRY RUN" in out
+    assert "ghidratrace-12.1" in out
+
+
+def test_install_ghidratrace_invokes_pip_with_force_reinstall(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from tools.setup import ghidra
+
+    wheel_dir = tmp_path / "ghidra_install" / "Ghidra" / "Debug" / "Debugger-rmi-trace" / "pypkg" / "dist"
+    wheel_dir.mkdir(parents=True)
+    wheel = wheel_dir / "ghidratrace-12.1-py3-none-any.whl"
+    wheel.write_bytes(b"")
+    fake_py = tmp_path / "debugger-python.exe"
+    fake_py.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GHIDRA_DEBUGGER_PYTHON", str(fake_py))
+
+    invocations: list[list[str]] = []
+
+    class FakeCompleted:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        invocations.append(list(cmd))
+        return FakeCompleted()
+
+    monkeypatch.setattr(ghidra.subprocess, "run", fake_run)
+    rc = ghidra.install_ghidratrace_for_debugger(
+        tmp_path, tmp_path / "ghidra_install"
+    )
+    assert rc == 0
+    assert len(invocations) == 2, (
+        "expected 2 pip invocations (protobuf + ghidratrace)"
+    )
+    # First: protobuf upgrade
+    assert invocations[0][0] == str(fake_py)
+    assert invocations[0][1:5] == ["-m", "pip", "install", "--upgrade"]
+    assert any("protobuf" in arg for arg in invocations[0])
+    # Second: ghidratrace --force-reinstall pointing at the bundled wheel
+    assert invocations[1][1:5] == ["-m", "pip", "install", "--force-reinstall"]
+    assert str(wheel) in invocations[1]
+
+
 def test_run_release_regression_catches_debugger_skip(
     monkeypatch: pytest.MonkeyPatch, capsys
 ):
