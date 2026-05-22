@@ -19,6 +19,11 @@ on:
     - cron: '17 8 * * 1'   # Mondays 08:17 UTC
   push:
     branches: [main]
+  # Manual trigger so the score can be refreshed without forcing a
+  # dummy commit (useful after enabling repo Settings toggles like
+  # Dependabot security alerts or branch protection rulesets, which
+  # don't themselves push anything).
+  workflow_dispatch:
 
 permissions: read-all
 
