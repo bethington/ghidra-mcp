@@ -9,7 +9,44 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.11.3 (Latest) — deploy/audit hardening + contributor recognition
+### v5.11.4 (Latest) — automatic ghidratrace install for the debugger launcher
+
+Patch release with one targeted fix: the deploy flow now auto-installs
+the matching `ghidratrace` wheel into the launcher Python during
+`install-ghidra-deps` / `ensure-prereqs`, so the same
+`VersionMismatchError: Front-end 12.1, back-end 12.0` that surfaced
+three times in this release cycle cannot recur after a Ghidra version
+bump. 244 tools, no functional API changes.
+
+- **New helper `install_ghidratrace_for_debugger()`** resolves the
+  launcher Python via the same precedence the live test uses
+  (`GHIDRA_DEBUGGER_PYTHON` env var → `<repo>/.env` → `shutil.which("python")`),
+  then `pip install --force-reinstall`s the wheel from
+  `<ghidra>/Ghidra/Debug/Debugger-rmi-trace/pypkg/dist/`. Protobuf
+  `>=6.31.0` (the floor `ghidratrace.setuputils` enforces) is upgraded
+  first.
+- **Wired into `install_ghidra_dependencies`** so `tools.setup
+  ensure-prereqs` and `install-ghidra-deps` keep the launcher Python's
+  `ghidratrace` aligned with the installed Ghidra every time they run.
+  Best-effort: a pip failure here does NOT block the main JAR
+  dependency setup (most users don't run the live debugger).
+- **CI tests-on-Linux fix** — debugger-live unit tests stub
+  `_terminate_processes_by_name` so the function's `finally:` clause
+  doesn't spawn `taskkill` on the Linux runner and mask the test's
+  actual outcome (previously caused a pytest INTERNALERROR with
+  "cannot instantiate WindowsPath on your system").
+- **5 new unit tests** pin the install helper's contract:
+  env-var precedence, dotenv fallback, no-op when no wheel is
+  bundled, dry-run doesn't invoke pip, and live invocation passes
+  `--force-reinstall` + the bundled wheel path.
+
+Backward compatibility: every change is additive. Existing
+deployments unchanged until the next `ensure-prereqs` /
+`install-ghidra-deps` run.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.11.3 — deploy/audit hardening + contributor recognition
 
 Patch release closing several small papercuts: a recurring deploy bug,
 a release-test environmental flake, a year-running audit false

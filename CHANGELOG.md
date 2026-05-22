@@ -4,6 +4,66 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.11.4 - 2026-05-22 (automatic ghidratrace install for debugger launcher)
+
+Targeted patch release. One real change: the deploy flow now keeps
+the launcher Python's `ghidratrace` wheel aligned with the installed
+Ghidra version, so the `VersionMismatchError: Front-end 12.1,
+back-end 12.0` that surfaced three times in this release cycle
+cannot recur on the next Ghidra version bump. 244 tools, no
+functional API changes.
+
+### Fixed
+
+- **Auto-install matching `ghidratrace` into the launcher Python.**
+  When Ghidra upgrades major/minor (e.g., 12.0.4 → 12.1), the
+  `ghidratrace` wheel bundled at
+  `<ghidra>/Ghidra/Debug/Debugger-rmi-trace/pypkg/dist/` bumps with
+  it. The TraceRmi launcher imports `ghidratrace` from whichever
+  Python `GHIDRA_DEBUGGER_PYTHON` (in `.env`) points at — and any
+  stale `ghidratrace` pip-installed in that Python from the previous
+  Ghidra version silently shadows the bundled source via
+  `sys.path.append()`'s end-of-path insertion. New helper
+  `install_ghidratrace_for_debugger()` resolves that exact Python
+  (env var → dotenv → `shutil.which("python")`), upgrades protobuf
+  to `>=6.31.0` (the `ghidratrace.setuputils` floor), then
+  `pip install --force-reinstall`s the bundled wheel. Wired into
+  `install_ghidra_dependencies` so `tools.setup ensure-prereqs` and
+  `install-ghidra-deps` cover it on every run. Best-effort: a pip
+  failure here does NOT block the main JAR-install dependency
+  setup (most users don't run the live debugger).
+- **CI tests-on-Linux unblock for debugger-live unit tests.** The
+  monkeypatched-Windows tests hit the function's `finally:` clause,
+  which called `_terminate_processes_by_name` → `subprocess.run
+  (["taskkill", ...])` → `FileNotFoundError` on the Linux runner.
+  The error escaped the test and pytest crashed during
+  failure-report formatting with `cannot instantiate WindowsPath
+  on your system`. Stub the terminator in the two affected tests
+  so the body's outcome surfaces cleanly.
+
+### Added
+
+- **5 new unit tests for `install_ghidratrace_for_debugger`**:
+  env-var precedence, dotenv fallback, no-op when no wheel is
+  bundled (older Ghidra installs without the wheel layout),
+  dry-run does not invoke pip, and live invocation passes
+  `--force-reinstall` + the bundled wheel path.
+
+### Notes
+
+This is the third occurrence of the
+`VersionMismatchError: Front-end 12.1, back-end 12.0` symptom in
+this release cycle. The first two were patched out-of-band by
+manually installing `ghidratrace` into a Python — but both manual
+fixes hit the wrong interpreter (`C:\Python313` and the project
+venv) because `GHIDRA_DEBUGGER_PYTHON` actually pointed at a
+third Python (Microsoft Store 3.12) where a stale 12.0 wheel was
+still pip-installed. The new helper resolves the launcher Python
+via the same precedence the live test uses, so the install can
+never miss again.
+
+---
+
 ## v5.11.3 - 2026-05-22 (deploy + audit hardening, contributor recognition)
 
 Patch release closing four small papercuts: a recurring deploy bug
