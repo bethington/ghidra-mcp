@@ -791,6 +791,11 @@ def test_debugger_live_skipped_on_environmental_launch_failure(
 
     monkeypatch.setattr(ghidra, "_mcp_request", fake_mcp_request)
     monkeypatch.setattr(ghidra, "load_env_file", lambda _p: {})
+    # The function's `finally:` block calls _terminate_processes_by_name
+    # which spawns `taskkill` when os.name == "nt". On Linux CI that
+    # binary doesn't exist and the subprocess.run raises FileNotFoundError
+    # *out of the finally*, masking the test's actual outcome. Stub.
+    monkeypatch.setattr(ghidra, "_terminate_processes_by_name", lambda _name: None)
 
     with pytest.raises(ghidra.DebuggerLiveTestSkipped, match="Debugger backend unavailable"):
         ghidra.run_debugger_live_test(tmp_path, "http://127.0.0.1:8089")
@@ -813,6 +818,7 @@ def test_debugger_live_raises_runtime_error_on_real_failure(
 
     monkeypatch.setattr(ghidra, "_mcp_request", fake_mcp_request)
     monkeypatch.setattr(ghidra, "load_env_file", lambda _p: {})
+    monkeypatch.setattr(ghidra, "_terminate_processes_by_name", lambda _name: None)
 
     # Real test failure must NOT be swallowed as a skip.
     with pytest.raises(RuntimeError, match="Unexpected internal state"):
