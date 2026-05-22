@@ -9,7 +9,73 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.11.2 (Latest) — Ghidra 12.1 + community fixes
+### v5.11.2 (Latest) — customizable convention enforcement
+
+Feature release opening the v5.0 enforcement layer to per-project
+customization without weakening the strict-by-default posture. 244
+tools.
+
+- **`.ghidra-mcp/conventions.json` per-project config** — five sections
+  (`strict_mode`, `function_naming`, `hungarian`, `global_naming`,
+  `plate_comments`) cover every previously-hardcoded knob: verb
+  whitelist add/remove, verb tier overrides, weak-noun add/remove,
+  function-name min length, struct-field auto-Hungarian toggle,
+  `g_` prefix requirement toggle, descriptor min length, plate-
+  comment validation toggle, required-section list, first-line word
+  count. Defaults reproduce pre-v5.11.2 hardcoded behavior exactly.
+- **Per-call `strict_mode` parameter** on five enforcement endpoints
+  (`rename_function_by_address`, `apply_data_type`, `set_global`,
+  `rename_or_label`, `rename_global_variable`). Values:
+  `enforce` / `warn` / `off`. Defaults to null = "use the global
+  setting" so existing callers don't change.
+- **Plate-comment validation gate** finally toggleable — closes the
+  longstanding always-reject gap from v5.6.0.
+- **fun-doc workers** now surface `no_eligible_candidates` on empty
+  exits — workers spawned on a binary with nothing left to do are
+  distinguishable from real failures in the dashboard.
+- **Deploy hardening** — pinned `protobuf>=6.31.0` in
+  `requirements-debugger.txt` and documented the manual
+  `ghidratrace` wheel install. Both are required to keep the Ghidra
+  TraceRmi debugger backend in sync with the front-end after a
+  Ghidra version bump (a stale 12.0 ghidratrace shadow installed
+  during the 12.0.4 → 12.1 upgrade caused
+  `VersionMismatchError: Front-end 12.1, back-end 12.0`).
+- **Docs**: [`docs/prompts/CUSTOMIZING_CONVENTIONS.md`](../prompts/CUSTOMIZING_CONVENTIONS.md)
+  with the full schema, three-layer precedence table, and a worked
+  non-Hungarian C++ project example.
+
+Backward compatibility: every change is additive. No config file +
+no `strict_mode` param = identical behavior to v5.11.1.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.11.1 — deploy hardening, coverage, attribution
+
+Patch release bundling the post-v5.11.0 deploy hardening and test
+coverage backfill discovered while shipping Ghidra 12.1 support. 244
+tools, no functional API changes.
+
+- **Plugin `endpoint_count` no longer drifts from `/mcp/schema`** —
+  the version banner field was hardcoded at 177 while the scanner
+  registered 196. Now set dynamically after registration completes.
+- **Deploy warns when an old Ghidra is still running** — process
+  detection split so a Ghidra running from a *different* install
+  path is no longer invisible (it used to intercept post-start
+  smoke checks bound to MCP port 8089).
+- **Apache 2.0 attribution self-contained** — `LICENSE` copyright
+  line filled in (LaurieWired + project contributors), new `NOTICE`
+  file, README acknowledgment of the upstream project.
+- **16 new tests** covering deploy-setup paths and MCP-readiness:
+  open-form `<PACKAGE NAME="Utility">` patching,
+  `patch_frontend_tool_config` idempotency,
+  `mark_extension_known_in_tool_config`, `patch_ghidra_user_configs`,
+  the DEV+PUBLIC user-config dir coexistence scenario (#217), plus
+  version-vs-pom matching, schema floor, endpoint-count consistency,
+  and ghidra-version well-formedness.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.11.0 — Ghidra 12.1 + community fixes
 
 Minor release retargeting at Ghidra 12.1 and rolling up four
 community-reported fixes plus the gemini-cli-sdk reconciliation.
