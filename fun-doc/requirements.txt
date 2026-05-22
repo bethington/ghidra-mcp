@@ -3,7 +3,7 @@ flask-socketio>=5.3
 requests>=2.31
 python-dotenv>=1.0
 openai>=1.0
-claude-agent-sdk>=0.1.50
+claude-agent-sdk>=0.2.85
 pyyaml>=6.0
 
 # Storage layer (PR1: Postgres + SQLite backends).
