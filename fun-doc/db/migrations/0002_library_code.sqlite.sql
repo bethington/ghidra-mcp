@@ -5,11 +5,12 @@
 -- See the Postgres file for design rationale and the consumer wiring in
 -- library_code_detector.py + fun_doc.py.
 --
--- SQLite doesn't support ALTER TABLE IF NOT EXISTS for ADD COLUMN, so we use
--- one ALTER per column. Re-running this migration after partial application
--- (e.g. one column added, the next failed) requires manual recovery; the
--- normal path of `python -m db.migrate` records the version in
--- schema_versions and skips re-running entirely.
+-- SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS. fun-doc's
+-- migration runner (db/migrate.py) makes this idempotent automatically by
+-- inspecting PRAGMA table_info(functions_workflow) before each ADD COLUMN
+-- and skipping ones whose column is already present. A crashed-mid-script
+-- retry (where the column landed but the schema_versions row didn't) now
+-- succeeds on the next run instead of requiring manual recovery.
 
 ALTER TABLE functions_workflow ADD COLUMN library_code INTEGER DEFAULT 0;
 ALTER TABLE functions_workflow ADD COLUMN library_code_at TEXT;
