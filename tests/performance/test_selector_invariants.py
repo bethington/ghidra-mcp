@@ -622,3 +622,133 @@ def test_recovery_pass_done_does_not_affect_unflagged_functions():
     )
     result = select_candidates(state, _queue())
     assert set(_keys(result)) == {"a::normal", "a::explicit_false"}
+
+
+# ---------------------------------------------------------------------------
+# Archive-applied terminal — closes the cross-version archive re-pick loop.
+# ---------------------------------------------------------------------------
+
+
+def test_archive_applied_excluded_when_not_pinned():
+    """Functions whose last_result is 'archive_applied' (cross-version
+    archive matched + wrote name + plate via the Q5-D gate) must be
+    excluded from selection unless pinned. Without this guard the
+    selector re-picks the same function every cycle: the score doesn't
+    change, consecutive_fails isn't incremented (archive_apply is a
+    success path), and the next archive lookup hits the same match.
+
+    Observed in production: 21 archive_applied loops on a single data
+    address in one hour, ~1.4M input tokens burned before the guard
+    landed."""
+    state = _state(
+        **{
+            "a::archived": {
+                "score": 70,
+                "fixable": 20,
+                "last_result": "archive_applied",
+            },
+            "a::fresh": {"score": 55, "fixable": 20},
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert _keys(result) == ["a::fresh"]
+
+
+def test_archive_applied_bypassed_by_pin():
+    """Pinning an archive-applied function should restore it to the queue
+    — the user explicitly asked for a re-document pass, archive match
+    notwithstanding."""
+    state = _state(
+        **{
+            "a::archived": {
+                "score": 70,
+                "fixable": 20,
+                "last_result": "archive_applied",
+            },
+        }
+    )
+    assert _keys(select_candidates(state, _queue())) == []
+    result = select_candidates(state, _queue(pinned=["a::archived"]))
+    assert _keys(result) == ["a::archived"]
+
+
+def test_archive_applied_does_not_affect_other_last_results():
+    """Sanity: the guard fires only on the exact string 'archive_applied'.
+    Other last_result values (completed, blocked, failed, scanned) follow
+    their existing rules."""
+    state = _state(
+        **{
+            "a::archived": {
+                "score": 70,
+                "fixable": 20,
+                "last_result": "archive_applied",
+            },
+            # 'completed' separately maps to queue_status='done' and
+            # gets filtered by the good_enough_score gate normally —
+            # represented here at score 55 < good_enough so it stays.
+            "a::completed": {
+                "score": 55,
+                "fixable": 20,
+                "last_result": "completed",
+            },
+            "a::blocked": {
+                "score": 55,
+                "fixable": 20,
+                "last_result": "blocked",
+            },
+            "a::scanned": {
+                "score": 55,
+                "fixable": 20,
+                "last_result": "scanned",
+            },
+        }
+    )
+    result_keys = set(_keys(select_candidates(state, _queue())))
+    assert "a::archived" not in result_keys
+    # The other three follow normal selector behavior (admit/exclude
+    # by score, consecutive_fails, etc.). For this synthetic state they
+    # should all be admitted — last_result alone doesn't drop them.
+    assert result_keys == {"a::completed", "a::blocked", "a::scanned"}
+
+
+# ---------------------------------------------------------------------------
+# Not-a-function one-shot — pre-flight gate for data addresses the priority
+# queue mistakenly lists as functions.
+# ---------------------------------------------------------------------------
+
+
+def test_not_a_function_excluded_when_not_pinned():
+    """Functions flagged with not_a_function=True (process_function detected
+    no decompiled body and no function_name from Ghidra) must be excluded
+    from selection unless pinned. This catches data addresses the priority
+    queue mistakenly lists as functions — without the guard the LLM burns
+    100K-500K input tokens confirming 'this is data, not code.'"""
+    state = _state(
+        **{
+            "a::data": {
+                "score": 70,
+                "fixable": 20,
+                "not_a_function": True,
+            },
+            "a::real": {"score": 55, "fixable": 20},
+        }
+    )
+    result = select_candidates(state, _queue())
+    assert _keys(result) == ["a::real"]
+
+
+def test_not_a_function_bypassed_by_pin():
+    """Pinning a not_a_function-flagged entry restores it (user wants the
+    re-evaluation, e.g., after Ghidra re-analysis recovered the function)."""
+    state = _state(
+        **{
+            "a::data": {
+                "score": 70,
+                "fixable": 20,
+                "not_a_function": True,
+            },
+        }
+    )
+    assert _keys(select_candidates(state, _queue())) == []
+    result = select_candidates(state, _queue(pinned=["a::data"]))
+    assert _keys(result) == ["a::data"]
