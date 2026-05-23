@@ -1,7 +1,7 @@
 {
-  "version": "5.11.3",
+  "version": "5.11.4",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 244,
+  "total_endpoints": 245,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -1186,6 +1186,13 @@
       "description": "Get function at cursor (GUI only)"
     },
     {
+      "path": "/get_current_selection",
+      "method": "GET",
+      "category": "getter",
+      "params": [],
+      "description": "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted."
+    },
+    {
       "path": "/get_current_program_info",
       "method": "GET",
       "category": "program",
@@ -2237,6 +2244,7 @@
       "method": "POST",
       "category": "server",
       "params": [
+        "repo",
         "path"
       ],
       "description": "Terminate all checkouts in a folder recursively"
@@ -2246,7 +2254,10 @@
       "method": "POST",
       "category": "server",
       "params": [
-        "path"
+        "repo",
+        "path",
+        "checkoutId",
+        "checkout_id"
       ],
       "description": "Terminate all checkouts on a single file"
     },
