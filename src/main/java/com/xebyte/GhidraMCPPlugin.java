@@ -75,8 +75,11 @@ import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
 import ghidra.framework.model.ProjectData;
+import ghidra.framework.model.ProjectLocator;
+import ghidra.framework.model.ProjectManager;
 import ghidra.framework.store.ItemCheckoutStatus;
 import ghidra.framework.client.RepositoryAdapter;
+import ghidra.framework.main.AppInfo;
 
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.util.task.TaskMonitor;
@@ -760,6 +763,26 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // — selection is a UI concept that has no meaning there).
         server.createContext("/get_current_selection", safeHandler(exchange -> {
             sendResponse(exchange, getCurrentSelection());
+        }));
+
+        // /open_project — open (or switch to) a Ghidra project from the
+        // FrontEnd plugin programmatically. Mirrors the headless server's
+        // /open_project route but additionally supports an optional
+        // `headless` boolean (default true) that controls whether a
+        // CodeBrowser window is auto-launched for `program` after the
+        // project opens. Without the flag, the project is loaded into the
+        // FrontEnd tool only — useful for automation that wants to access
+        // programs via the `program` query parameter without spawning UI.
+        //
+        // Body: { "path": <.gpr or project dir>, "headless": true|false,
+        //         "program": "<DomainFile path to launch in CodeBrowser>" }
+        server.createContext("/open_project", safeHandler(exchange -> {
+            Map<String, Object> params = parseJsonParams(exchange);
+            String projectPath = params.get("path") != null ? params.get("path").toString() : null;
+            boolean headless = params.get("headless") == null
+                || Boolean.parseBoolean(String.valueOf(params.get("headless")));
+            String programToLaunch = params.get("program") != null ? params.get("program").toString() : null;
+            sendResponse(exchange, openProject(projectPath, headless, programToLaunch));
         }));
 
         // GET_DATA_TYPE_SIZE - Get the size in bytes of a data type (not yet in service layer)
@@ -3980,6 +4003,127 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         } catch (Exception e) {
             return "{\"error\": \"Failed to list tools: " + escapeJson(e.getMessage()) + "\"}";
         }
+    }
+
+    /**
+     * Open (or switch to) a Ghidra project from the FrontEnd plugin.
+     *
+     * <p>When the requested project is already active this is a no-op
+     * success. When a different project is active it is saved and closed
+     * before opening the new one — destructive to any unsaved CodeBrowser
+     * state, but matches the manual File &gt; Open Project flow.
+     *
+     * @param projectPath {@code .gpr} file, {@code <name>.rep} project
+     *                    directory, or a directory whose name is the
+     *                    project name (sibling .gpr/.rep expected).
+     * @param headless    {@code true} (default) opens the project without
+     *                    launching a CodeBrowser; {@code false} ALSO
+     *                    launches CodeBrowser for {@code programToLaunch}.
+     * @param programToLaunch project-internal DomainFile path to open in
+     *                        CodeBrowser when {@code headless == false};
+     *                        ignored otherwise.
+     */
+    private String openProject(String projectPath, boolean headless, String programToLaunch) {
+        if (projectPath == null || projectPath.trim().isEmpty()) {
+            return "{\"error\": \"path parameter is required\"}";
+        }
+
+        // Parse the path into a (location, name) pair for ProjectLocator.
+        // Accept three shapes the user is likely to type:
+        //   F:/proj/MyProj.gpr   — marker file
+        //   F:/proj/MyProj.rep   — project data directory
+        //   F:/proj/MyProj       — bare name, sibling .gpr/.rep expected
+        File pathFile = new File(projectPath);
+        String location;
+        String name;
+        String projExt = ProjectLocator.getProjectExtension();   // ".gpr"
+        String dirExt = ProjectLocator.getProjectDirExtension(); // ".rep"
+        String fname = pathFile.getName();
+        if (fname.endsWith(projExt)) {
+            location = pathFile.getParent();
+            name = fname.substring(0, fname.length() - projExt.length());
+        } else if (fname.endsWith(dirExt)) {
+            location = pathFile.getParent();
+            name = fname.substring(0, fname.length() - dirExt.length());
+        } else {
+            location = pathFile.getParent();
+            name = fname;
+        }
+        if (location == null || location.isEmpty()) {
+            return "{\"error\": \"path must include a parent directory: " + escapeJson(projectPath) + "\"}";
+        }
+
+        ProjectLocator locator;
+        try {
+            locator = new ProjectLocator(location, name);
+        } catch (IllegalArgumentException e) {
+            return "{\"error\": \"Invalid project path: " + escapeJson(e.getMessage()) + "\"}";
+        }
+        if (!locator.exists()) {
+            return "{\"error\": \"Project does not exist: " + escapeJson(projectPath) + "\"}";
+        }
+
+        Project currentProject = tool.getProject();
+        if (currentProject != null && locator.equals(currentProject.getProjectLocator())) {
+            // Already open — honor headless flag for CodeBrowser side-effect anyway.
+            String maybeLaunch = null;
+            if (!headless && programToLaunch != null && !programToLaunch.isEmpty()) {
+                maybeLaunch = launchCodeBrowser(programToLaunch);
+            }
+            return "{\"success\": true, \"project\": \"" + escapeJson(name) + "\", "
+                + "\"already_open\": true, \"headless\": " + headless
+                + (maybeLaunch != null ? ", \"program_launch_result\": " + maybeLaunch : "")
+                + "}";
+        }
+
+        ProjectManager pm = tool.getProjectManager();
+        if (pm == null) {
+            return "{\"error\": \"ProjectManager not available on this tool\"}";
+        }
+
+        // Must run on the EDT — FrontEndTool state updates expect Swing.
+        final String[] errMsg = {null};
+        final Project[] opened = {null};
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    if (currentProject != null) {
+                        try { currentProject.save(); } catch (Exception ignored) { /* best-effort */ }
+                        currentProject.close();
+                    }
+                    Project p = pm.openProject(locator, true, false);
+                    if (p == null) {
+                        errMsg[0] = "ProjectManager.openProject returned null";
+                        return;
+                    }
+                    AppInfo.setActiveProject(p);
+                    opened[0] = p;
+                } catch (Exception e) {
+                    errMsg[0] = e.getClass().getSimpleName() + ": " + e.getMessage();
+                }
+            });
+        } catch (Exception e) {
+            return "{\"error\": \"EDT invocation failed: " + escapeJson(e.getMessage()) + "\"}";
+        }
+        if (errMsg[0] != null) {
+            return "{\"error\": \"Failed to open project: " + escapeJson(errMsg[0]) + "\"}";
+        }
+        if (opened[0] == null) {
+            return "{\"error\": \"openProject returned null without an error\"}";
+        }
+
+        String launchResult = null;
+        if (!headless && programToLaunch != null && !programToLaunch.isEmpty()) {
+            launchResult = launchCodeBrowser(programToLaunch);
+        }
+        StringBuilder json = new StringBuilder(256);
+        json.append("{\"success\": true, \"project\": \"").append(escapeJson(opened[0].getName()))
+            .append("\", \"headless\": ").append(headless);
+        if (launchResult != null) {
+            json.append(", \"program_launch_result\": ").append(launchResult);
+        }
+        json.append("}");
+        return json.toString();
     }
 
     private String launchCodeBrowser(String filePath) {

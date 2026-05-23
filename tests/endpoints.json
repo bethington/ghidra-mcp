@@ -1915,9 +1915,11 @@
       "method": "POST",
       "category": "headless",
       "params": [
-        "path"
+        "path",
+        "headless",
+        "program"
       ],
-      "description": "Open an existing Ghidra project (.gpr file or directory)"
+      "description": "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params."
     },
     {
       "path": "/project/info",
