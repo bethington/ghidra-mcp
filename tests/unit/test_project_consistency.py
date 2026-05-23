@@ -20,6 +20,7 @@ JAVA_SRC = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte"
 CORE_SRC = JAVA_SRC / "core"
 POM_XML = PROJECT_ROOT / "pom.xml"
 PYTHON_BRIDGE = PROJECT_ROOT / "bridge_mcp_ghidra.py"
+ENDPOINTS_JSON = PROJECT_ROOT / "tests" / "endpoints.json"
 
 
 def get_pom_version() -> str:
@@ -48,6 +49,25 @@ class TestVersionConsistency(unittest.TestCase):
             if match:
                 self.assertEqual(match.group(1), pom_version,
                     f"VersionInfo VERSION={match.group(1)} != pom.xml {pom_version}")
+
+    def test_user_visible_tool_counts_match_endpoint_catalog(self):
+        """Marketing/extension metadata should not drift from endpoints.json."""
+        expected = json.loads(ENDPOINTS_JSON.read_text())["total_endpoints"]
+        checks = {
+            "README.md": PROJECT_ROOT / "README.md",
+            "CLAUDE.md": PROJECT_ROOT / "CLAUDE.md",
+            "AGENTS.md": PROJECT_ROOT / "AGENTS.md",
+            "extension.properties": PROJECT_ROOT / "src" / "main" / "resources" / "extension.properties",
+            "MANIFEST.MF": PROJECT_ROOT / "src" / "main" / "resources" / "META-INF" / "MANIFEST.MF",
+        }
+        pattern = re.compile(r"(\d+)\s+MCP tools?", re.IGNORECASE)
+        mismatches = []
+        for name, path in checks.items():
+            for match in pattern.finditer(path.read_text(encoding="utf-8")):
+                found = int(match.group(1))
+                if found != expected:
+                    mismatches.append(f"{name}: {found} != {expected}")
+        self.assertEqual(mismatches, [])
 
 
 class TestBridgeConfiguration(unittest.TestCase):
@@ -130,6 +150,67 @@ class TestJavaArchitecture(unittest.TestCase):
                 content = path.read_text()
                 self.assertIn("@McpTool", content,
                     f"{name}.java missing @McpTool annotations")
+
+    def test_manual_gui_headless_shared_endpoints_do_not_drift(self):
+        """Manual createContext registrations need explicit GUI/headless parity."""
+        gui_file = JAVA_SRC / "GhidraMCPPlugin.java"
+        headless_file = JAVA_SRC / "headless" / "GhidraMCPHeadlessServer.java"
+        gui = set(re.findall(r'server\.createContext\("([^"]+)"', gui_file.read_text()))
+        headless = set(re.findall(r'safeContext\("([^"]+)"', headless_file.read_text()))
+        annotated = set()
+        for java_file in list(CORE_SRC.glob("*Service.java")) + list((JAVA_SRC / "headless").glob("*Service.java")):
+            annotated.update(
+                re.findall(r'@McpTool\(\s*(?:path\s*=\s*)?"([^"]+)"', java_file.read_text())
+            )
+
+        gui_only_expected = {
+            "/batch_apply_documentation",
+            # /get_current_selection — added 2026-05-23 (@I-Knight-I, #153).
+            # Selection is the CodeBrowser listing's highlight state — a UI
+            # concept with no equivalent in headless mode, so it lives only
+            # on the GUI plugin alongside the other current_* sibling tools
+            # (which DO have headless equivalents because address + function
+            # generalize to "currentProgram-relative" outside a UI context).
+            "/get_current_selection",
+            "/mcp/health",
+            "/mcp/instance_info",
+            "/project/info",
+            "/server/authenticate",
+            "/tool/goto_address",
+            "/tool/launch_codebrowser",
+            "/tool/running_tools",
+        }
+        headless_only_expected = {
+            "/configure_analyzer",
+            "/delete_project",
+            "/health",
+            "/list_projects",
+            "/move_file",
+            "/move_folder",
+        }
+
+        self.assertEqual(gui - headless - annotated, gui_only_expected)
+        self.assertEqual(headless - gui - annotated, headless_only_expected)
+
+    def test_manual_admin_endpoint_params_are_cataloged(self):
+        """Hand-registered admin routes should document mode-specific params."""
+        catalog = {
+            entry["path"]: set(entry.get("params", []))
+            for entry in json.loads(ENDPOINTS_JSON.read_text())["endpoints"]
+        }
+
+        expected_params = {
+            "/server/admin/terminate_all_checkouts": {"repo", "path"},
+            "/server/admin/terminate_checkout": {
+                "repo", "path", "checkoutId", "checkout_id"
+            },
+        }
+        for path, params in expected_params.items():
+            self.assertIn(path, catalog)
+            self.assertTrue(
+                params.issubset(catalog[path]),
+                f"{path} missing params: {sorted(params - catalog[path])}",
+            )
 
 
 class TestProjectStructure(unittest.TestCase):

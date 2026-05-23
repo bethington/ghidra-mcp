@@ -2,7 +2,7 @@
 
 ## Overview
 
-MCP server bridging Ghidra reverse engineering with AI tools. 244 MCP tools for binary analysis.
+MCP server bridging Ghidra reverse engineering with AI tools. 245 MCP tools for binary analysis.
 
 - **Package**: `com.xebyte` | **Version**: 5.11.4 | **Java**: 21 LTS | **Ghidra**: 12.1
 
@@ -40,9 +40,9 @@ Use this file for architecture, conventions, and implementation guidance; use th
 
 ## Build & Deploy
 
-Two backends are supported. Maven is the default; Gradle is the new primary path. Switch with `TOOLS_SETUP_BACKEND=gradle`.
+Two backends are supported. Maven is the default used by `tools.setup`; Gradle is available through the wrapper when Maven is not installed or when testing the migration path. Switch with `TOOLS_SETUP_BACKEND=gradle`.
 
-**Gradle (set `TOOLS_SETUP_BACKEND=gradle` or invoke directly):**
+**Gradle fallback / migration path (set `TOOLS_SETUP_BACKEND=gradle` or invoke directly):**
 
 ```text
 # Direct Gradle invocation — no tools.setup required

@@ -751,6 +751,17 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
             sendResponse(exchange, getCurrentFunction());
         }));
 
+        // /get_current_selection — filed by @I-Knight-I on issue #153 as
+        // the third "where am I?" tool an AI client expects, alongside
+        // /get_current_address and /get_current_function. Returns the
+        // address ranges the user has highlighted in the CodeBrowser
+        // listing, or an empty-selection payload when nothing is
+        // highlighted. GUI-only (no equivalent on the headless server
+        // — selection is a UI concept that has no meaning there).
+        server.createContext("/get_current_selection", safeHandler(exchange -> {
+            sendResponse(exchange, getCurrentSelection());
+        }));
+
         // GET_DATA_TYPE_SIZE - Get the size in bytes of a data type (not yet in service layer)
         server.createContext("/get_data_type_size", safeHandler(exchange -> {
             Map<String, String> qparams = parseQueryParams(exchange);
@@ -1223,6 +1234,60 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
                 "address", func.getEntryPoint().toString(),
                 "program", programPath,
                 "signature", func.getSignature().getPrototypeString()));
+    }
+
+    /**
+     * Get the current selection (highlighted address ranges) from the
+     * CodeBrowser listing. Returns a payload shape that matches the
+     * other GUI-only ``/get_current_*`` tools and that AI clients can
+     * consume directly without scraping prose.
+     *
+     * <p>Shapes:
+     * <ul>
+     *   <li>No CodeBrowser available → ``"Code viewer service not available"``
+     *       (same prose the other current_* tools use, so clients can
+     *       fall through with one error path).</li>
+     *   <li>CodeBrowser running but selection is empty → JSON
+     *       ``{"program": "...", "is_empty": true, "ranges": []}``.</li>
+     *   <li>Selection present → JSON with the program path, an
+     *       ``is_empty: false`` marker, every contiguous range with its
+     *       start/end/length, plus the overall bounds + total address
+     *       count for convenience.</li>
+     * </ul>
+     */
+    private String getCurrentSelection() {
+        CodeViewerService service = findCodeViewerService();
+        if (service == null) return "Code viewer service not available";
+
+        ghidra.program.util.ProgramSelection selection = service.getCurrentSelection();
+        ghidra.program.util.ProgramLocation location = service.getCurrentLocation();
+        Program program = location != null ? location.getProgram() : getCurrentProgram();
+        String programPath = (program != null && program.getDomainFile() != null)
+                ? program.getDomainFile().getPathname()
+                : (program != null ? program.getName() : null);
+
+        if (selection == null || selection.isEmpty()) {
+            return JsonHelper.toJson(JsonHelper.mapOf(
+                    "program", programPath,
+                    "is_empty", true,
+                    "ranges", new java.util.ArrayList<>()));
+        }
+
+        java.util.List<Map<String, Object>> ranges = new java.util.ArrayList<>();
+        for (ghidra.program.model.address.AddressRange range : selection.getAddressRanges()) {
+            ranges.add(JsonHelper.mapOf(
+                    "start", range.getMinAddress().toString(),
+                    "end", range.getMaxAddress().toString(),
+                    "length", range.getLength()));
+        }
+
+        return JsonHelper.toJson(JsonHelper.mapOf(
+                "program", programPath,
+                "is_empty", false,
+                "ranges", ranges,
+                "min_address", selection.getMinAddress().toString(),
+                "max_address", selection.getMaxAddress().toString(),
+                "num_addresses", selection.getNumAddresses()));
     }
 
     /**

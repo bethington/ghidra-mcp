@@ -627,6 +627,96 @@ public class GhidraServerManager {
     }
 
     /**
+     * Admin: forcibly terminate every checkout under a repository folder.
+     *
+     * @param repoName Repository name
+     * @param folderPath Folder path within the repository
+     * @return JSON string with result summary
+     */
+    public String terminateAllCheckouts(String repoName, String folderPath) {
+        if (!connected || serverAdapter == null) {
+            return "{\"error\": \"Not connected to server.\"}";
+        }
+        if (repoName == null || repoName.isEmpty()) {
+            return "{\"error\": \"Repository name required.\"}";
+        }
+        if (folderPath == null || folderPath.isEmpty()) {
+            folderPath = "/";
+        }
+
+        try {
+            RepositoryAdapter repo = getRepository(repoName);
+            if (repo == null) {
+                return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
+            }
+
+            StringBuilder details = new StringBuilder();
+            details.append("[");
+            int[] counts = {0, 0};
+            terminateCheckoutsRecursive(repo, folderPath, details, counts);
+            details.append("]");
+
+            return "{\"status\": \"terminated\", \"repository\": \"" + escapeJson(repoName) +
+                   "\", \"folder\": \"" + escapeJson(folderPath) + "\"" +
+                   ", \"files_with_checkouts\": " + counts[0] +
+                   ", \"checkouts_terminated\": " + counts[1] +
+                   ", \"details\": " + details + "}";
+        } catch (Exception e) {
+            lastError = e.getMessage();
+            return "{\"error\": \"Terminate all checkouts failed: " + escapeJson(e.getMessage()) + "\"}";
+        }
+    }
+
+    private void terminateCheckoutsRecursive(
+            RepositoryAdapter repo, String folderPath, StringBuilder details, int[] counts)
+            throws IOException {
+        RepositoryItem[] items = repo.getItemList(folderPath);
+        if (items != null) {
+            for (RepositoryItem item : items) {
+                String filePath = item.getPathName();
+                int lastSlash = filePath.lastIndexOf('/');
+                String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
+                String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
+                try {
+                    ItemCheckoutStatus[] checkouts = repo.getCheckouts(parentPath, fileName);
+                    if (checkouts == null || checkouts.length == 0) {
+                        continue;
+                    }
+
+                    int terminated = 0;
+                    for (ItemCheckoutStatus cs : checkouts) {
+                        try {
+                            repo.terminateCheckout(parentPath, fileName, cs.getCheckoutId(), false);
+                            terminated++;
+                        } catch (Exception ignored) {
+                            // Continue through the folder and report partial progress.
+                        }
+                    }
+
+                    if (counts[0] > 0) details.append(", ");
+                    details.append("{\"path\": \"").append(escapeJson(filePath)).append("\"");
+                    details.append(", \"terminated\": ").append(terminated);
+                    details.append(", \"total\": ").append(checkouts.length).append("}");
+                    counts[0]++;
+                    counts[1] += terminated;
+                } catch (Exception ignored) {
+                    // Skip files that disappear or reject checkout queries mid-walk.
+                }
+            }
+        }
+
+        String[] subfolders = repo.getSubfolderList(folderPath);
+        if (subfolders != null) {
+            for (String subfolder : subfolders) {
+                String childPath = "/".equals(folderPath)
+                    ? "/" + subfolder
+                    : folderPath + "/" + subfolder;
+                terminateCheckoutsRecursive(repo, childPath, details, counts);
+            }
+        }
+    }
+
+    /**
      * Admin: list all users registered on the server.
      *
      * @return JSON string with user list
