@@ -4,6 +4,69 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.12.0 - 2026-05-23 (community-driven tools: /get_current_selection + GUI /open_project)
+
+Minor release. Two new endpoints filed/scoped by community feedback
+(@I-Knight-I on #153, plus an internal "open project without launching
+a CodeBrowser" workflow request), plus a quiet headless parity fix
+that surfaced while writing the parity test. 245 tools.
+
+### Added
+
+- **`/get_current_selection`** (GUI-only). Closes the "where am I?"
+  tool family alongside `/get_current_address` and
+  `/get_current_function`. Returns the CodeBrowser listing's current
+  selection as `{program, is_empty, ranges, min_address, max_address,
+  num_addresses}`. Reads from `CodeViewerService.getCurrentSelection()`
+  — the canonical Ghidra API for the listing's highlight state. Like
+  its siblings, returns "Code viewer service not available" when no
+  CodeBrowser is up, so AI clients see one consistent error shape for
+  the whole family. Filed by @I-Knight-I on issue #153.
+- **GUI plugin `/open_project`** with optional `headless=true` (default
+  true) and optional `program` body params. The headless server has
+  had `/open_project` since v4.x; the GUI plugin previously had no
+  programmatic way to point Ghidra at a different project. The new
+  route closes (saves) the active project, opens the requested one
+  via `ProjectManager.openProject(locator, ...)`, calls
+  `AppInfo.setActiveProject`, and — only when `headless=false` and
+  `program` is set — auto-launches a CodeBrowser for that DomainFile.
+  Same project already active is a no-op success (`already_open: true`)
+  so accidental re-opens don't blow away CodeBrowser state. All
+  FrontEnd mutations run on the EDT via `SwingUtilities.invokeAndWait`.
+
+### Fixed
+
+- **Headless server now registers `/server/admin/terminate_all_checkouts`**
+  for GUI parity. The GUI plugin has registered this route since v5.6
+  but the headless server didn't, causing
+  `test_manual_gui_headless_shared_endpoints_do_not_drift` to fail on
+  CI when /get_current_selection was added (the parity test enumerates
+  all `server.createContext` and `safeContext` registrations). Also
+  accepts `checkout_id` as an alias for `checkoutId` on
+  `/server/admin/terminate_checkout` to match the cataloged param name.
+
+### Tests
+
+- **OpenProjectGuiEndpointTest** (4 source-level invariants) — route
+  registration, helper signature, EDT marshaling, `AppInfo.setActiveProject`
+  call, and the catalog `params` drift guard.
+- **GetCurrentSelectionEndpointTest** (3 source-level invariants) —
+  route registration, helper uses `CodeViewerService.getCurrentSelection()`,
+  catalog entry exists with empty `params: []`.
+
+### Notes
+
+`/open_project` is shared between the GUI and headless servers. The
+catalog entry now lists `path`, `headless`, and `program`; the
+headless server's `@McpTool` annotation still consumes only `path`
+(headless mode has no CodeBrowser to launch), and
+`EndpointsJsonParityTest` tolerates extra catalog params over what's
+scanned. The shared path appears in neither `gui_only_expected` nor
+`headless_only_expected` because the annotation also lives in the
+`headless/` package and the parity check subtracts the annotated set.
+
+---
+
 ## v5.11.4 - 2026-05-22 (automatic ghidratrace install for debugger launcher)
 
 Targeted patch release. One real change: the deploy flow now keeps

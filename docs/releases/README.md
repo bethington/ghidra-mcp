@@ -9,7 +9,49 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.11.4 (Latest) — automatic ghidratrace install for the debugger launcher
+### v5.12.0 (Latest) — community-driven tools: /get_current_selection + GUI /open_project
+
+Minor release. Two new endpoints filed/scoped by community feedback,
+plus a quiet headless parity fix that surfaced while writing the
+parity test. 245 tools.
+
+- **`/get_current_selection` (GUI-only)** — closes the "where am I?"
+  family alongside `/get_current_address` and `/get_current_function`.
+  Returns the CodeBrowser listing's current selection as
+  `{program, is_empty, ranges, min_address, max_address, num_addresses}`.
+  Reads from `CodeViewerService.getCurrentSelection()` — the canonical
+  Ghidra API for the listing's highlight state. Returns "Code viewer
+  service not available" when no CodeBrowser is up, matching the
+  sibling tools' error shape so AI clients see one consistent fall-
+  through path for the whole family. Filed by @I-Knight-I on issue #153.
+- **GUI plugin `/open_project`** with optional `headless=true` (default
+  true) and optional `program` body params. The headless server has
+  had `/open_project` since v4.x; the GUI plugin previously had no
+  programmatic way to point Ghidra at a different project. The new
+  route saves and closes the active project, opens the requested one
+  via `ProjectManager.openProject(locator, ...)`, calls
+  `AppInfo.setActiveProject`, and only when `headless=false` and
+  `program` is set — auto-launches a CodeBrowser for that DomainFile.
+  Same project already active is a no-op success (`already_open: true`)
+  so accidental re-opens don't blow away CodeBrowser state. All
+  FrontEnd mutations run on the EDT via `SwingUtilities.invokeAndWait`.
+- **Headless `/server/admin/terminate_all_checkouts` parity fix** — the
+  GUI plugin has registered this route since v5.6 but the headless
+  server didn't. Added the `safeContext` registration plus the
+  `terminateAllCheckouts()` implementation on `GhidraServerManager`.
+  Also accepts `checkout_id` alias on
+  `/server/admin/terminate_checkout` to match the cataloged param.
+- **7 new offline tests** pin the new endpoints at the source level:
+  route registrations, helper signatures, EDT marshaling, the
+  `AppInfo.setActiveProject` call, and the catalog `params` drift
+  guards.
+
+Backward compatibility: every change is additive. Existing endpoint
+behavior unchanged.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.11.4 — automatic ghidratrace install for the debugger launcher
 
 Patch release with one targeted fix: the deploy flow now auto-installs
 the matching `ghidratrace` wheel into the launcher Python during
