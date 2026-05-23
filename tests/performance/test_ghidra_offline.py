@@ -91,6 +91,111 @@ def test_fetch_function_data_returns_offline_flag():
 
 
 # ---------------------------------------------------------------------------
+# Unit: fetch_function_data detects "not a function" (data address) when
+# Ghidra is online but both /decompile_function and
+# /analyze_function_completeness come back with no usable result. Without
+# this signal the worker burns 100K-500K input tokens on the LLM
+# confirming "this address is data, not code." Observed in production:
+# 21 archive_applied loops on 0x10101014 in BH.dll in one hour.
+# ---------------------------------------------------------------------------
+
+
+def _mock_ghidra_response(json_payload):
+    """Mock helper: return a MagicMock response that .json() to the payload."""
+    m = MagicMock()
+    m.status_code = 200
+    m.json.return_value = json_payload
+    # ghidra_get also inspects .text for the "Error" string-shape fallback
+    m.text = json.dumps(json_payload) if isinstance(json_payload, dict) else str(json_payload)
+    return m
+
+
+def test_fetch_function_data_marks_not_a_function_when_data_address():
+    """When the address is raw data (no function body, no name), both
+    Ghidra endpoints return error-shaped responses and fetch_function_data
+    must set not_a_function=True so the caller can flag the function
+    once-and-done. The dual-signal check (decompile error + completeness
+    missing function_name) keeps false positives down — a transient
+    decompile failure on a real function would still have a function_name
+    in completeness and is therefore not marked."""
+
+    def fake_get(url, *args, **kwargs):
+        if "/decompile_function" in url:
+            return _mock_ghidra_response({"error": "No function found at 0x10101014"})
+        if "/analyze_function_completeness" in url:
+            return _mock_ghidra_response({"error": "No function at 0x10101014"})
+        # variables / analyze_for_doc — irrelevant for the gate
+        return _mock_ghidra_response({})
+
+    with patch("fun_doc.requests.get", side_effect=fake_get):
+        data = fun_doc.fetch_function_data(
+            "/Mods/PD2-S12/BH.dll", "10101014", mode="FIX"
+        )
+
+    assert data["not_a_function"] is True
+    assert data["ghidra_offline"] is False
+    assert data["decompile_timeout"] is False
+
+
+def test_fetch_function_data_does_not_mark_not_a_function_when_decompile_succeeds():
+    """Sanity: if /decompile_function returns a real body, not_a_function
+    must stay False even if completeness scoring happens to fail. A real
+    function with a temporarily broken scorer is a retryable condition,
+    not a permanent blacklist."""
+
+    def fake_get(url, *args, **kwargs):
+        if "/decompile_function" in url:
+            return _mock_ghidra_response({"decompiled": "void FUN_x() { return; }"})
+        if "/analyze_function_completeness" in url:
+            return _mock_ghidra_response({"error": "scorer hiccup"})
+        return _mock_ghidra_response({})
+
+    with patch("fun_doc.requests.get", side_effect=fake_get):
+        data = fun_doc.fetch_function_data(
+            "/Mods/PD2-S12/BH.dll", "10001000", mode="FIX"
+        )
+
+    assert data["not_a_function"] is False
+
+
+def test_fetch_function_data_does_not_mark_not_a_function_when_completeness_has_name():
+    """Sanity: completeness reporting a function_name even with no
+    decompiled body means Ghidra knows the function exists — keep it
+    retryable, don't blacklist."""
+
+    def fake_get(url, *args, **kwargs):
+        if "/decompile_function" in url:
+            return _mock_ghidra_response({"error": "decompile transient"})
+        if "/analyze_function_completeness" in url:
+            return _mock_ghidra_response({
+                "function_name": "RealFunc",
+                "effective_score": 40,
+                "deduction_breakdown": [],
+            })
+        return _mock_ghidra_response({})
+
+    with patch("fun_doc.requests.get", side_effect=fake_get):
+        data = fun_doc.fetch_function_data(
+            "/Mods/PD2-S12/BH.dll", "10001000", mode="FIX"
+        )
+
+    assert data["not_a_function"] is False
+
+
+def test_fetch_function_data_does_not_mark_not_a_function_when_offline():
+    """The offline path short-circuits BEFORE the not_a_function gate.
+    Offline is retryable; not_a_function is a one-shot blacklist —
+    confusing the two would permanently exclude functions during a
+    transient Ghidra outage."""
+    with patch("fun_doc.requests.get", side_effect=_make_offline_requests_get):
+        data = fun_doc.fetch_function_data(
+            "/Mods/PD2-S12/BH.dll", "10001000", mode="FIX"
+        )
+    assert data["ghidra_offline"] is True
+    assert data["not_a_function"] is False
+
+
+# ---------------------------------------------------------------------------
 # Unit: check_ghidra_online returns False when server is down
 # ---------------------------------------------------------------------------
 

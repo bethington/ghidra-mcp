@@ -2288,6 +2288,7 @@ def fetch_function_data(program, address, mode="FIX"):
         "fixable_categories": [],
         "decompile_timeout": False,
         "ghidra_offline": False,
+        "not_a_function": False,
     }
 
     # Navigation removed — was calling /tool/goto_address on every function,
@@ -2373,6 +2374,30 @@ def fetch_function_data(program, address, mode="FIX"):
                 data["decompile_timeout"] = True
                 return data
         data["analyze_for_doc"] = afd
+
+    # Pre-flight: detect addresses that aren't functions at all (raw data,
+    # PRIMITIVE-typed regions, dead code that the priority queue lists with
+    # a stale score). Without this signal the worker falls through to the
+    # LLM, which then burns 100K-500K input tokens confirming "this is
+    # data, not code." Observed in production: 21 archive-applied loops on
+    # a single data address in one hour. The caller marks the function
+    # `not_a_function` so the selector won't re-pick.
+    #
+    # Definitive when BOTH the decompile call and the completeness call
+    # came back with no usable result and neither timed out / went
+    # offline (those are retryable). Conservative — if either returned
+    # SOMETHING, the LLM might still extract value, so we don't short-
+    # circuit.
+    if not data["decompile_timeout"] and not data["ghidra_offline"]:
+        decompiled_is_error = _is_error_response(data.get("decompiled"))
+        completeness = data.get("completeness")
+        completeness_missing_name = (
+            not completeness
+            or not (isinstance(completeness, dict)
+                    and completeness.get("function_name"))
+        )
+        if decompiled_is_error and completeness_missing_name:
+            data["not_a_function"] = True
 
     return data
 
@@ -2958,6 +2983,33 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         # function isn't user-authored code. Cleared by the same refresh
         # paths as the other one-shots; pinning bypasses.
         if func.get("library_code") and not is_pinned:
+            continue
+
+        # Archive-apply terminal: when the cross-version doc archive (re-kb)
+        # matches and writes name + plate via the Q5-D gate, the function
+        # is done from this worker's perspective even though the score
+        # may stay below good_enough (the archive-applied score reflects
+        # what the archive provided, not a fresh local re-score). Without
+        # this skip the selector re-picks the same function every cycle:
+        # the score doesn't change, no consecutive_fails increment (archive
+        # apply is "success"), and the next archive lookup hits the same
+        # match. Observed in production: 21 archive_applied loops on a
+        # single data address in one hour, burning ~1.4M input tokens.
+        # Cleared by refresh / re-scan paths (same as the other one-shots).
+        # Pinned bypasses for "re-document this even though archive matched."
+        if func.get("last_result") == "archive_applied" and not is_pinned:
+            continue
+
+        # Not-a-function one-shot: addresses that the priority queue thinks
+        # are functions but Ghidra disagrees with (raw data regions, dead
+        # code that was never disassembled). Without this guard the
+        # selector keeps picking them and the worker falls through to the
+        # LLM, which then burns 100K-500K input tokens to confirm "this is
+        # data, not code." Set by process_function when fetch_function_data
+        # returns no decompiled body and no function_name in completeness.
+        # Cleared by refresh / re-scan paths so post-analysis changes
+        # (Ghidra recovering a function at that address) get re-evaluated.
+        if func.get("not_a_function") and not is_pinned:
             continue
 
         # Propagation-provenance skip (#204): when a function's name came
@@ -6962,8 +7014,21 @@ def process_function(
         if _debug_ctx.get().get("enabled", False):
             path = _debug_get_log_path()
             debug_path = str(path) if path else None
+        # Stamp the worker_id from the event-bus thread-local so per-worker
+        # filtering in the dashboard and audit attribution in logs/events.jsonl
+        # work. Before this fix the run.logged events carried worker_id=null
+        # even when heartbeats from the same thread carried a real worker_id,
+        # so the dashboard's per-worker run filter silently dropped every row.
+        # The CLI / non-dashboard path leaves worker_id unset (None), which is
+        # the right behavior — there's no worker context to attribute to.
+        try:
+            from event_bus import get_worker_id as _get_worker_id
+            _worker_id = _get_worker_id()
+        except Exception:
+            _worker_id = None
         entry = {
             "run_id": run_id,
+            "worker_id": _worker_id,
             "timestamp": datetime.now().isoformat(),
             "program": program,
             "address": address,
@@ -7162,6 +7227,40 @@ def process_function(
             "decompile_timeout",
             score_after=live_score,
             reason="decompile-heavy endpoint hit read timeout",
+        )
+
+    if data.get("not_a_function"):
+        # The priority queue thinks 0x{address} is a function, but Ghidra
+        # came back with no decompiled body AND no function_name in the
+        # completeness response — the address is data (or dead code that
+        # was never disassembled). Mark it so the selector skips it
+        # until an explicit refresh re-evaluates whether it became a
+        # function in the meantime (rare but possible after analysis
+        # re-runs on the binary).
+        func["not_a_function"] = True
+        func["not_a_function_at"] = datetime.now().isoformat()
+        func["last_processed"] = datetime.now().isoformat()
+        func["last_result"] = "not_a_function"
+        print(
+            f"  NOT A FUNCTION — 0x{address} has no decompiled body and "
+            f"no function_name. Marking and skipping. "
+            f"Will be excluded from selector until next refresh.",
+            flush=True,
+        )
+        update_function_state(func_key, func)
+        bus_emit(
+            "function_complete",
+            {
+                "key": func_key,
+                "result": "not_a_function",
+                "score": live_score,
+            },
+        )
+        return _finish(
+            "blocked",
+            logged_result="not_a_function",
+            score_after=live_score,
+            reason=f"address 0x{address} is not a function",
         )
 
     # Library-code auto-classification: detect statically-linked MSVC CRT /
