@@ -1888,9 +1888,13 @@ public class ProgramScriptService {
             return Response.err("Script name is required");
         }
 
+        // Fail fast with a clear "program not found" error before doing
+        // the script-file search. The Program object isn't used in this
+        // method directly — the 3-arg runGhidraScript call at the end
+        // re-resolves it from programName via the same helper, which is
+        // where currentProgram-via-GhidraState binding actually happens.
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
-        Program program = pe.program();
 
         try {
             // Locate the script file - search Ghidra's standard script directories
@@ -1934,9 +1938,21 @@ public class ProgramScriptService {
                 return Response.err("Script '" + filename + "' not found. Searched: " + searched);
             }
 
-            // Execute the script via the existing execution method
+            // Execute the script via the existing execution method.
+            //
+            // The 3-arg overload (line ~1133) threads programName through
+            // ServiceUtils.getProgramOrError -> GhidraState -> the script's
+            // currentProgram global. The 2-arg overload below drops the
+            // program info, so the script executes against whatever
+            // currentProgram happens to be in the session (typically the
+            // GUI's focused CodeBrowser). Prior to v5.11.5 this method
+            // called the 2-arg form even though it had just resolved the
+            // operator's requested program at line 1891 — a real bug
+            // surfaced by community report (Copilot review on #207):
+            // "It is fixed for run_script_inline but not fixed for
+            //  run_ghidra_script, which always runs for the current program."
             long startTime = System.currentTimeMillis();
-            Response scriptResponse = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs);
+            Response scriptResponse = runGhidraScript(scriptFile.getAbsolutePath(), scriptArgs, programName);
             double executionTime = (System.currentTimeMillis() - startTime) / 1000.0;
 
             // Extract output text from the Response
