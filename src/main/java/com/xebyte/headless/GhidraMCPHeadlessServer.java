@@ -467,9 +467,18 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
         safeContext("/server/admin/terminate_checkout", exchange -> {
             Map<String, String> params = parsePostParams(exchange);
-            long checkoutId = Long.parseLong(params.getOrDefault("checkoutId", "0"));
+            String checkoutIdParam = params.getOrDefault("checkoutId", params.getOrDefault("checkout_id", "0"));
+            long checkoutId = Long.parseLong(checkoutIdParam);
             sendResponse(exchange, serverManager.terminateCheckout(
                 params.get("repo"), params.get("path"), checkoutId));
+        });
+
+        safeContext("/server/admin/terminate_all_checkouts", exchange -> {
+            Map<String, String> params = parsePostParams(exchange);
+            String folderPath = params.get("path");
+            if (folderPath == null) folderPath = "/";
+            sendResponse(exchange, serverManager.terminateAllCheckouts(
+                params.get("repo"), folderPath));
         });
 
         safeContext("/server/admin/users", exchange -> {
@@ -513,9 +522,10 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
     private int countEndpoints() {
         // registeredEndpointCount = annotation-scanned (shared services + HeadlessManagementService)
-        // 29 = infrastructure + schema + remaining manual createContext registrations
+        // 30 = infrastructure + schema + remaining manual createContext registrations
         // (was 31; -2 after #180 dropped /create_folder + /delete_file as duplicates)
-        return registeredEndpointCount + 29;
+        // (was 29; +1 after adding /server/admin/terminate_all_checkouts for GUI parity)
+        return registeredEndpointCount + 30;
     }
 
     public void stop() {
