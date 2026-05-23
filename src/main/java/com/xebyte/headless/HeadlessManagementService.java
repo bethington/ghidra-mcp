@@ -29,9 +29,18 @@ public class HeadlessManagementService {
     // Program management
     // ========================================================================
 
-    @McpTool(path = "/load_program", method = "POST", description = "Load a binary file into the headless server for analysis", category = "headless")
+    @McpTool(path = "/load_program", method = "POST",
+            description = "Load a binary file into the headless server for analysis. "
+                + "For raw firmware (no recognizable header), pass `language` (e.g. 'ARM:LE:32:Cortex') "
+                + "and optionally `compiler_spec` (e.g. 'default'); the file is then imported as raw binary "
+                + "with the requested processor. When `language` is omitted, the loader auto-detects the format.",
+            category = "headless")
     public Response loadProgram(
-            @Param(value = "file", source = ParamSource.BODY, description = "Absolute path to the binary file") String filePath) {
+            @Param(value = "file", source = ParamSource.BODY, description = "Absolute path to the binary file") String filePath,
+            @Param(value = "language", source = ParamSource.BODY, defaultValue = "",
+                description = "Optional Ghidra language ID for raw binaries (e.g. 'ARM:LE:32:Cortex', 'x86:LE:64:default'). Leave empty to auto-detect.") String languageId,
+            @Param(value = "compiler_spec", source = ParamSource.BODY, defaultValue = "",
+                description = "Optional compiler-spec ID (e.g. 'default', 'gcc', 'windows'). Only consulted when `language` is set; falls back to the language default when empty.") String compilerSpecId) {
         if (filePath == null || filePath.isEmpty()) {
             return Response.err("file path required");
         }
@@ -39,11 +48,23 @@ public class HeadlessManagementService {
         if (!file.exists()) {
             return Response.err("File not found: " + filePath);
         }
-        Program program = programProvider.loadProgramFromFile(file);
+        boolean hasLanguage = languageId != null && !languageId.trim().isEmpty();
+        Program program = hasLanguage
+            ? programProvider.loadProgramFromFileWithLanguage(file, languageId, compilerSpecId)
+            : programProvider.loadProgramFromFile(file);
         if (program != null) {
-            return Response.text("{\"success\": true, \"program\": \"" + ServiceUtils.escapeJson(program.getName()) + "\"}");
+            String langOut = program.getLanguageID() != null
+                ? program.getLanguageID().getIdAsString() : "";
+            return Response.text("{\"success\": true, \"program\": \""
+                + ServiceUtils.escapeJson(program.getName()) + "\", \"language\": \""
+                + ServiceUtils.escapeJson(langOut) + "\"}");
         }
-        return Response.err("Failed to load program from: " + filePath);
+        if (hasLanguage) {
+            return Response.err("Failed to load program with language '" + languageId
+                + "' from: " + filePath);
+        }
+        return Response.err("Failed to load program from: " + filePath
+            + " (auto-detect failed; for raw firmware pass `language`, e.g. 'ARM:LE:32:Cortex')");
     }
 
     // ========================================================================

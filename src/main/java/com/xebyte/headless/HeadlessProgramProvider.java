@@ -19,6 +19,7 @@ import com.xebyte.core.ProgramProvider;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.app.util.importer.AutoImporter;
 import ghidra.app.util.importer.MessageLog;
+import ghidra.app.util.opinion.Loaded;
 import ghidra.app.util.opinion.LoadResults;
 import ghidra.base.project.GhidraProject;
 import ghidra.framework.model.DomainFile;
@@ -26,7 +27,13 @@ import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
 import ghidra.framework.model.ProjectData;
 import ghidra.program.model.address.AddressSetView;
+import ghidra.program.model.lang.CompilerSpec;
+import ghidra.program.model.lang.CompilerSpecID;
+import ghidra.program.model.lang.Language;
+import ghidra.program.model.lang.LanguageID;
+import ghidra.program.model.lang.LanguageService;
 import ghidra.program.model.listing.Program;
+import ghidra.program.util.DefaultLanguageService;
 import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 import ghidra.util.task.TaskMonitor;
@@ -163,6 +170,80 @@ public class HeadlessProgramProvider implements ProgramProvider {
             return program;
         } catch (Exception e) {
             Msg.error(this, "Error loading program from file: " + file.getAbsolutePath(), e);
+            return null;
+        }
+    }
+
+    /**
+     * Load a raw binary with an explicit language / compiler spec.
+     *
+     * Used for firmware blobs and other raw images where AutoImporter's best-guess
+     * format detection has no header to latch onto (e.g. ARM Cortex-M .mem dumps).
+     * Mirrors {@link #loadProgramFromFile(File)} for openPrograms / currentProgram
+     * bookkeeping so subsequent /list_functions, /decompile_function, etc. resolve
+     * the result transparently.
+     *
+     * @param file         The raw binary file
+     * @param languageId   Ghidra language ID, e.g. "ARM:LE:32:Cortex"
+     * @param compilerSpecId Optional compiler-spec ID; empty/null falls back to the language default
+     * @return The loaded Program, or null on failure
+     */
+    public Program loadProgramFromFileWithLanguage(File file, String languageId, String compilerSpecId) {
+        if (!file.exists()) {
+            Msg.error(this, "File not found: " + file.getAbsolutePath());
+            return null;
+        }
+        if (languageId == null || languageId.trim().isEmpty()) {
+            Msg.error(this, "loadProgramFromFileWithLanguage requires a non-empty languageId");
+            return null;
+        }
+
+        try {
+            LanguageService langService = DefaultLanguageService.getLanguageService();
+            Language language = langService.getLanguage(new LanguageID(languageId));
+
+            CompilerSpec compilerSpec;
+            if (compilerSpecId != null && !compilerSpecId.trim().isEmpty()) {
+                compilerSpec = language.getCompilerSpecByID(new CompilerSpecID(compilerSpecId));
+            } else {
+                compilerSpec = language.getDefaultCompilerSpec();
+            }
+
+            MessageLog log = new MessageLog();
+            Loaded<Program> loaded = AutoImporter.importAsBinary(
+                file,
+                null,   // project (null = in-memory, same model as loadProgramFromFile)
+                "/",    // folder path (ignored when project is null)
+                language,
+                compilerSpec,
+                this,   // consumer
+                log,
+                monitor
+            );
+
+            Program program = null;
+            if (loaded != null) {
+                program = loaded.getDomainObject(this);
+            }
+
+            if (program != null) {
+                openPrograms.put(program.getName(), program);
+                if (currentProgram == null) {
+                    currentProgram = program;
+                }
+                Msg.info(this, "Loaded raw binary: " + program.getName()
+                    + " (" + file.getAbsolutePath() + ") as " + languageId);
+            } else {
+                Msg.error(this, "Failed to load raw binary from: " + file.getAbsolutePath());
+                if (!log.toString().isEmpty()) {
+                    Msg.error(this, "Import log: " + log.toString());
+                }
+            }
+
+            return program;
+        } catch (Exception e) {
+            Msg.error(this, "Error loading raw binary from file: " + file.getAbsolutePath()
+                + " (language=" + languageId + ")", e);
             return null;
         }
     }
