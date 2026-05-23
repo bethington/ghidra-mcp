@@ -1218,16 +1218,19 @@ def _ts_to_iso(value):
 
 
 def load_state():
-    """Load state from the SQL backend, with a state.json fallback.
+    """Load state from the SQL backend.
 
-    SQL backend is the runtime path (see Q4-A in the storage migration plan).
-    Returns the same dict shape callers have always expected:
+    SQL backend is the only runtime path. Returns the same dict shape
+    callers have always expected:
         {project_folder, last_scan, active_binary, current_session,
          sessions: list, functions: {key: record}}
 
-    Falls back to reading state.json directly only if the storage layer
-    can't be loaded (missing sqlalchemy, misconfigured URL). This keeps a
-    half-installed environment functional during the cutover window.
+    The state.json fallback below is now test-only scaffolding (reached
+    only when the test fixture flips ``_storage_repo_failed = True``).
+    At runtime the import guard (line ~109) and the storage-init
+    loud-fail (line ~987) sys.exit(1) before this point is ever reached
+    with a missing backend. See test_state_atomicity.py for the
+    fixture's exercise of the fallback.
     """
     repo = _get_storage_repo()
     if repo is not None:
@@ -1310,7 +1313,10 @@ def _atomic_write_state(state):
 
 
 def save_state(state):
-    """Persist state to the SQL backend (or state.json fallback).
+    """Persist state to the SQL backend.
+
+    (state.json fallback path below is test-only scaffolding; runtime
+    loud-fail above prevents reaching it without an explicit test flag.)
 
     The legacy contract was 'rewrite the entire state.json from this dict.'
     Under the SQL backend that maps to:
@@ -1411,8 +1417,10 @@ def update_function_state(func_key, updated_func):
     "I just finished a run" signal. Other shapes fall back to the workflow
     UPDATE alone.
 
-    Falls back to the legacy state.json RMW when the storage layer isn't
-    available.
+    State.json RMW path below is test-only scaffolding (test fixtures
+    set ``_storage_repo_failed = True`` to exercise it). At runtime the
+    sqlalchemy import guard + storage-init loud-fail ensure the repo
+    is always available before this point.
     """
     repo = _get_storage_repo()
     if repo is not None:
@@ -7161,14 +7169,23 @@ def process_function(
     # bypass (user explicitly queued them — respect their judgment). The
     # check runs after the decompile fetch so the detector has body text
     # for callee-substring fallback when call-graph data isn't populated.
-    queue_for_library = load_priority_queue()
-    cfg_for_library = queue_for_library.get("config") or DEFAULT_QUEUE_CONFIG
+    #
+    # v5.11.5 hot-path optimization: previously this branch loaded
+    # priority_queue.json from disk on EVERY processed function (Copilot
+    # review #3) — across N workers × M functions/min that was a real
+    # I/O bottleneck and contention point. Now:
+    #   * skip_library_code reads from config_snapshot (already frozen
+    #     at worker start; lifetime-stable per worker)
+    #   * pinned-check is deferred until AFTER detect_library_code says
+    #     "library" — for the vast majority of (non-library) functions
+    #     the disk read never happens at all.
     skip_library = (
-        cfg_for_library.get("skip_library_code", True) if config_snapshot is None
-        else config_snapshot.get("skip_library_code", True)
+        config_snapshot.get("skip_library_code", True)
+        if config_snapshot is not None
+        else (load_priority_queue().get("config") or DEFAULT_QUEUE_CONFIG)
+            .get("skip_library_code", True)
     )
-    is_pinned_for_library = func_key in set(queue_for_library.get("pinned", []))
-    if skip_library and not manual and not is_pinned_for_library:
+    if skip_library and not manual:
         decomp_text = data.get("decompiled")
         if decomp_text and not _is_error_response(decomp_text):
             detection = detect_library_code(
@@ -7177,53 +7194,63 @@ def process_function(
                 callees=func.get("callees"),
             )
             if detection.is_library:
-                plate_text = format_library_plate(detection)
-                # Best-effort plate stamp via MCP — failure is non-fatal,
-                # the flag itself is the primary skip mechanism.
-                try:
-                    # /batch_set_comments' address param is named `address`,
-                    # not `function_address` (#207 — fun-doc had it wrong, so
-                    # the generic library-code plate silently never landed;
-                    # the library_code flag is the real skip mechanism so the
-                    # gate still worked, but the plate was missing).
-                    ghidra_post(
-                        "/batch_set_comments",
-                        params={"program": program},
-                        data={
-                            "address": f"0x{address}",
-                            "plate_comment": plate_text,
-                        },
-                    )
-                except Exception as e:
+                # Deferred pinned check: only consult the queue if the
+                # detector wants to skip. Saves one priority_queue.json
+                # disk read per non-library function (the common case).
+                if func_key in set(load_priority_queue().get("pinned", [])):
+                    # User explicitly pinned this function — respect the
+                    # override, fall through to the normal LLM workflow
+                    # below. Drop into the same code path we would have
+                    # without the library_code branch.
+                    pass
+                else:
+                    plate_text = format_library_plate(detection)
+                    # Best-effort plate stamp via MCP — failure is non-fatal,
+                    # the flag itself is the primary skip mechanism.
+                    try:
+                        # /batch_set_comments' address param is named `address`,
+                        # not `function_address` (#207 — fun-doc had it wrong, so
+                        # the generic library-code plate silently never landed;
+                        # the library_code flag is the real skip mechanism so the
+                        # gate still worked, but the plate was missing).
+                        ghidra_post(
+                            "/batch_set_comments",
+                            params={"program": program},
+                            data={
+                                "address": f"0x{address}",
+                                "plate_comment": plate_text,
+                            },
+                        )
+                    except Exception as e:
+                        print(
+                            f"  LIBRARY-CODE plate stamp failed (non-fatal): {e}",
+                            flush=True,
+                        )
+                    func["library_code"] = True
+                    func["library_code_at"] = datetime.now().isoformat()
+                    func["library_code_reasons"] = detection.reasons
+                    func["last_processed"] = datetime.now().isoformat()
+                    func["last_result"] = "library_code"
                     print(
-                        f"  LIBRARY-CODE plate stamp failed (non-fatal): {e}",
+                        f"  LIBRARY CODE — auto-classified ({', '.join(detection.reasons)}). "
+                        f"Stamped generic plate, marked for selector skip.",
                         flush=True,
                     )
-                func["library_code"] = True
-                func["library_code_at"] = datetime.now().isoformat()
-                func["library_code_reasons"] = detection.reasons
-                func["last_processed"] = datetime.now().isoformat()
-                func["last_result"] = "library_code"
-                print(
-                    f"  LIBRARY CODE — auto-classified ({', '.join(detection.reasons)}). "
-                    f"Stamped generic plate, marked for selector skip.",
-                    flush=True,
-                )
-                update_function_state(func_key, func)
-                bus_emit(
-                    "function_complete",
-                    {
-                        "key": func_key,
-                        "result": "library_code",
-                        "score": live_score,
-                        "reasons": detection.reasons,
-                    },
-                )
-                return _finish(
-                    "library_code",
-                    score_after=live_score,
-                    reason=f"library-code detector: {','.join(detection.reasons)}",
-                )
+                    update_function_state(func_key, func)
+                    bus_emit(
+                        "function_complete",
+                        {
+                            "key": func_key,
+                            "result": "library_code",
+                            "score": live_score,
+                            "reasons": detection.reasons,
+                        },
+                    )
+                    return _finish(
+                        "library_code",
+                        score_after=live_score,
+                        reason=f"library-code detector: {','.join(detection.reasons)}",
+                    )
 
     # Refine mode based on live score and completeness context
     mode = determine_mode(live_score, data.get("deductions"), data.get("completeness"))

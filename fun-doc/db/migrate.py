@@ -129,6 +129,58 @@ def _connect(backend: str, url: Optional[str]):
     raise SystemExit(f"Unknown backend: {backend!r}")
 
 
+_ALTER_ADD_COLUMN_RE = re.compile(
+    r"""ALTER\s+TABLE\s+                        # ALTER TABLE
+        (?P<table>[A-Za-z_][\w.]*)\s+           # qualified table name
+        ADD\s+COLUMN\s+                          # ADD COLUMN
+        (?P<column>[A-Za-z_]\w*)                # column identifier (must be word-bounded)
+        \b                                       # …no embedded suffix
+        [^;]*;                                   # type + defaults + closing semicolon
+    """,
+    re.IGNORECASE | re.VERBOSE | re.DOTALL,
+)
+
+
+def _existing_columns_sqlite(conn, table: str) -> set[str]:
+    """Lower-cased column names already on ``table`` (empty if missing)."""
+    try:
+        cur = conn.execute(f"PRAGMA table_info({table})")
+        return {row[1].lower() for row in cur.fetchall()}
+    except Exception:
+        # Table doesn't exist yet (the migration creating it hasn't run);
+        # let the script run and surface the real error naturally.
+        return set()
+
+
+def _strip_existing_alter_add_column_sqlite(conn, sql: str) -> str:
+    """SQLite ALTER TABLE ADD COLUMN has no IF NOT EXISTS form. Without
+    pre-flight skipping, re-running a migration whose schema_versions
+    entry didn't commit (process crashed between executescript and
+    commit) raises "duplicate column name" and forces manual recovery.
+
+    This helper inspects each ALTER TABLE ADD COLUMN statement against
+    PRAGMA table_info(<table>); if the column is already present it
+    rewrites the statement to a SQL comment so the rest of the script
+    still runs. Postgres migrations are unaffected — they use ADD
+    COLUMN IF NOT EXISTS natively.
+
+    Bare-string scanning is sufficient because the migration files are
+    hand-authored, one-statement-per-line, no embedded `;` inside types.
+    A more elaborate parser would be overkill for this controlled input.
+    """
+    def _maybe_strip(match: re.Match) -> str:
+        table = match.group("table").lower()
+        column = match.group("column").lower()
+        if column in _existing_columns_sqlite(conn, table):
+            return (
+                f"-- [migrate] skipped: column {column!r} already present on "
+                f"{table!r} (idempotent ADD COLUMN)"
+            )
+        return match.group(0)
+
+    return _ALTER_ADD_COLUMN_RE.sub(_maybe_strip, sql)
+
+
 class _SqliteConnAdapter:
     """Thin wrapper so SQLite and psycopg connections share a tiny interface."""
 
@@ -144,7 +196,11 @@ class _SqliteConnAdapter:
         return cur
 
     def executescript(self, sql):
-        self._conn.executescript(sql)
+        # Make ALTER TABLE ADD COLUMN idempotent so a crashed-mid-migration
+        # retry doesn't fail with "duplicate column name". The check
+        # consults PRAGMA table_info before each statement runs.
+        filtered = _strip_existing_alter_add_column_sqlite(self, sql)
+        self._conn.executescript(filtered)
 
     def commit(self):
         self._conn.commit()

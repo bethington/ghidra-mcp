@@ -40,14 +40,27 @@ HARD_NAME_PATTERNS = (
     re.compile(r"^_+(crt|invoke_watson|except_handler|security_check|amsg_exit|setjmp|aullshr|chkstk|alloca_probe|local_unwind|cinit|tlsdtor|RTC_)"),
     # Operator new/delete and CXX scalar/vector
     re.compile(r"^\?\?[23](@|_)"),
-    # MSVC C++ symbol mangling: starts with `?` and contains `@@`
-    re.compile(r"^\?[A-Za-z_].*@@"),
+    # MSVC C++ mangled names with a recognized STL/MSVCP namespace.
+    # The earlier `^\?[A-Za-z_].*@@` (any mangled name) was too broad:
+    # it matched user-authored exported C++ APIs whose mangled names
+    # happen to follow the same outer shape (e.g., `?MyApiFunc@MyApp@@YA…`).
+    # Restricting to the std / experimental / chrono / filesystem /
+    # ranges / regex / thread / locale / iostream namespace markers
+    # keeps the CRT/STL cases (the actual library targets) without
+    # catching every user-namespaced export.
+    re.compile(r"^\?[A-Za-z_].*@(std|experimental|chrono|filesystem|ranges|regex|locale|ios_base|_System_error_category)@@"),
     # C++ standard library namespace
     re.compile(r"^(std::|__std_|__crt_|_Std|_VEC_memcpy|_VEC_memzero)"),
     # CRT internal mangled exports (e.g. `_strtoi64@4`, `_atof@4`)
     re.compile(r"^_(strtoi64|strtoui64|wcstoi64|wcstoui64|atof|atoi|atol|atoll|strtod|strtol|strtoul|memcpy_s|strcpy_s|wcscpy_s|sprintf_s|vsnprintf_s|fread_s)(@\d+)?$"),
-    # iostream / locale parsers
-    re.compile(r"^(Parse|Read|Write|Get|Put|Skip)?(Signed|Unsigned)?(Char|Short|Int|Long|Float|Double|Hex|Oct|Octal|Dec|Decimal)(Value|Field|Token)?$"),
+    # (REMOVED v5.11.5) The iostream/locale parser HARD regex
+    # `^(Parse|Read|Write|Get|Put|Skip)?(Signed|Unsigned)?(Char|Short|...)
+    #  (Value|Field|Token)?$` was too broad — it matched user-authored
+    # functions like `GetInt`, `ReadLong`, `WriteFloat`, even literally
+    # `Char`. The narrower SOFT_NAME_PATTERNS entry (Parse|Read|Convert
+    # + Signed/Unsigned + numeric type) catches the actual library
+    # cases when corroborated by body/callee evidence; removing the
+    # broad HARD form prevents false-positive classification.
 )
 
 # Functions decompile output calls when it's CRT or VC-runtime. Detecting any of
