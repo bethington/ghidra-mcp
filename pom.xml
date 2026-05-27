@@ -197,7 +197,7 @@
             <!-- Use custom MANIFEST.MF -->
             <plugin>
                 <artifactId>maven-jar-plugin</artifactId>
-                <version>3.2.2</version>
+                <version>3.5.0</version>
                 <configuration>
                     <archive>
                         <manifestFile>src/main/resources/META-INF/MANIFEST.MF</manifestFile>
@@ -256,7 +256,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-jar-plugin</artifactId>
-                        <version>3.2.2</version>
+                        <version>3.5.0</version>
                         <configuration>
                             <archive>
                                 <manifest>
