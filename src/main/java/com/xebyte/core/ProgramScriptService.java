@@ -1147,6 +1147,10 @@ public class ProgramScriptService {
         // Track whether we copied the script (for cleanup)
         final File[] copiedScript = {null};
 
+        // Holder so the catch block can surface OSGi build/activate output
+        // captured into scriptWriter before a failure.
+        final StringWriter[] scriptWriterHolder = {null};
+
         // Get the PluginTool for script state (GUI mode only)
         final PluginTool pluginTool = getToolFromProvider();
 
@@ -1236,6 +1240,7 @@ public class ProgramScriptService {
                     // Create script instance
                     StringWriter scriptWriter = new StringWriter();
                     PrintWriter scriptPrintWriter = new PrintWriter(scriptWriter);
+                    scriptWriterHolder[0] = scriptWriter;
 
                     ghidra.app.script.GhidraScript script = provider.getScriptInstance(scriptFile, scriptPrintWriter);
                     if (script == null) {
@@ -1287,6 +1292,20 @@ public class ProgramScriptService {
                     PrintWriter pw = new PrintWriter(sw);
                     e.printStackTrace(pw);
                     resultMsg.append("Stack trace:\n").append(sw.toString()).append("\n");
+
+                    // Surface any build/activate output that was captured into the
+                    // script writer before the failure (e.g. OSGi/Felix compile
+                    // errors from JavaScriptProvider.activateAll()).
+                    try {
+                        StringWriter sw2 = scriptWriterHolder[0];
+                        if (sw2 != null) {
+                            String capturedBuild = sw2.toString();
+                            if (!capturedBuild.isEmpty()) {
+                                resultMsg.append("--- BUILD/ACTIVATE OUTPUT ---\n")
+                                        .append(capturedBuild).append("\n");
+                            }
+                        }
+                    } catch (Throwable ignore) { /* scriptWriter may be unavailable */ }
 
                     Msg.error(this, "Script execution failed: " + scriptPath, e);
                 } finally {

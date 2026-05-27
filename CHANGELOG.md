@@ -4,6 +4,39 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Headless: `/run_ghidra_script` and `/run_script_inline` crashed
+  with `NullPointerException`** at
+  `JavaScriptProvider.getScriptInstance()` because
+  `GhidraScriptUtil.bundleHost` is never initialized outside the GUI
+  (in GUI mode `GhidraScriptMgrPlugin` does it). The headless server
+  now calls `GhidraScriptUtil.acquireBundleHostReference()` at startup
+  and `releaseBundleHostReference()` at shutdown when
+  `GHIDRA_MCP_ALLOW_SCRIPTS` is enabled (via
+  `SecurityConfig.areScriptsAllowed()`), then ensures the user script
+  directory is registered as an enabled `GhidraSourceBundle` so
+  `JavaScriptProvider.loadClass()` can resolve compiled scripts.
+  Gated on the existing opt-in flag to keep the ~hundreds-of-ms Felix
+  OSGi startup cost off the default path.
+
+- **Docker runtime image switched from `eclipse-temurin:21-jre` to
+  `eclipse-temurin:21-jdk`.** Ghidra's `GhidraScript` OSGi loader
+  invokes `javax.tools.ToolProvider.getSystemJavaCompiler()` to
+  compile `.java` scripts on the fly; that returns `null` on a JRE,
+  surfacing as `AssertException: Can't find java compiler` for any
+  Java script run inside the container.
+
+- **`ProgramScriptService` now surfaces OSGi build/activate output**
+  when script execution fails. The `StringWriter` capturing
+  `JavaScriptProvider.activateAll()` output is appended to the error
+  response under `--- BUILD/ACTIVATE OUTPUT ---`, so Felix compile
+  errors are visible to the caller instead of being silently dropped.
+
+---
+
 ## v5.12.0 - 2026-05-23 (community-driven tools: /get_current_selection + GUI /open_project)
 
 Minor release. Two new endpoints filed/scoped by community feedback
