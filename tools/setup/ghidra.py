@@ -17,7 +17,11 @@ from pathlib import Path
 
 from .envfile import load_env_file
 from .maven import find_maven_command
-from .versioning import infer_ghidra_version_from_path, read_pom_versions
+from .versioning import (
+    infer_ghidra_install_meta,
+    infer_ghidra_version_from_path,
+    read_pom_versions,
+)
 
 
 REQUIRED_GHIDRA_JARS: tuple[tuple[str, str], ...] = (
@@ -127,17 +131,48 @@ def _version_sort_key(name: str) -> tuple[int, int, int]:
 def resolve_ghidra_user_dir(
     ghidra_path: Path, user_base_dir: Path | None = None
 ) -> Path:
+    """Resolve the user-config dir matching a Ghidra install.
+
+    Ghidra writes its per-user state under
+    ``%APPDATA%\\ghidra\\ghidra_<version>_<layout>\\``. The dir is
+    created lazily on first launch, so for a freshly-installed Ghidra
+    it may not exist yet. We therefore prefer to *construct* the
+    expected dir name from the install path rather than enumerating
+    existing siblings — see #217, where a v5.10→v5.11 deploy targeting
+    a freshly-installed ``F:\\ghidra_12.1_PUBLIC`` quietly resolved to
+    a leftover ``ghidra_12.1_DEV`` user dir and installed the
+    extension where the running Ghidra never looked for it.
+    """
     user_base_dir = user_base_dir or ghidra_user_base_dir()
-    target_version = infer_ghidra_version_from_path(ghidra_path)
+    target_version, target_layout = infer_ghidra_install_meta(ghidra_path)
 
-    if user_base_dir.is_dir() and target_version:
-        matching_dirs = sorted(user_base_dir.glob(f"ghidra_{target_version}*"))
-        if matching_dirs:
-            public_dir = next(
-                (path for path in matching_dirs if "PUBLIC" in path.name), None
+    # When both version and layout are recoverable from the install
+    # path, return the explicit dir unconditionally. The dir does not
+    # need to already exist — Ghidra will create it on first launch.
+    if target_version and target_layout:
+        return user_base_dir / f"ghidra_{target_version}_{target_layout}"
+
+    # Version known but layout couldn't be inferred (e.g. a custom
+    # install path with application.properties present). Prefer an
+    # existing matching dir, then PUBLIC, then a constructed PUBLIC
+    # default.
+    if target_version:
+        if user_base_dir.is_dir():
+            matching_dirs = sorted(
+                path
+                for path in user_base_dir.glob(f"ghidra_{target_version}*")
+                if path.is_dir() and "_location_" not in path.name
             )
-            return public_dir or matching_dirs[0]
+            if matching_dirs:
+                public_dir = next(
+                    (path for path in matching_dirs if "PUBLIC" in path.name), None
+                )
+                return public_dir or matching_dirs[0]
+        return user_base_dir / f"ghidra_{target_version}_PUBLIC"
 
+    # No version metadata at all — last-resort fallback to the
+    # newest-looking existing dir so a totally custom install still
+    # gets *some* answer instead of an exception.
     if user_base_dir.is_dir():
         version_dirs = sorted(
             (path for path in user_base_dir.glob("ghidra_*") if path.is_dir()),
@@ -147,8 +182,6 @@ def resolve_ghidra_user_dir(
         if version_dirs:
             return version_dirs[0]
 
-    if target_version:
-        return user_base_dir / f"ghidra_{target_version}_PUBLIC"
     return user_base_dir / "ghidra_unknown_PUBLIC"
 
 
