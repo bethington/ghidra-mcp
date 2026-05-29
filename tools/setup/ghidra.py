@@ -121,11 +121,29 @@ def ghidra_user_base_dir() -> Path:
     return Path.home() / ".config" / "ghidra"
 
 
-def _version_sort_key(name: str) -> tuple[int, int, int]:
+def _version_sort_key(name: str) -> tuple[int, int, int, int]:
+    """Sort key for Ghidra user-config dir names.
+
+    Returns ``(major, minor, patch, explicit_patch)``. The trailing
+    flag is 1 when the dir name carried an explicit patch component
+    (e.g. ``ghidra_12.1.0_PUBLIC``) and 0 when it didn't
+    (``ghidra_12.1_PUBLIC``), so a dir with an explicit patch beats
+    an otherwise-equal shorter dir name. Without this tiebreaker the
+    sort was non-deterministic across filesystems: Windows' alpha
+    glob order put ``ghidra_12.1.0_PUBLIC`` before ``ghidra_12.1_PUBLIC``
+    and the test passed; Linux's creation-order glob produced the
+    opposite outcome and CI failed.
+    """
     match = re.search(r"ghidra_(\d+)\.(\d+)(?:\.(\d+))?", name)
     if not match:
-        return (0, 0, 0)
-    return (int(match.group(1)), int(match.group(2)), int(match.group(3) or 0))
+        return (0, 0, 0, 0)
+    explicit_patch = 1 if match.group(3) is not None else 0
+    return (
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3) or 0),
+        explicit_patch,
+    )
 
 
 def resolve_ghidra_user_dir(
