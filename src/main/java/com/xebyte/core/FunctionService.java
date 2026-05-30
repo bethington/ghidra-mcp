@@ -7,7 +7,10 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.DataTypeManager;
+import ghidra.program.model.data.Pointer;
+import ghidra.program.model.data.Structure;
 import ghidra.program.model.listing.*;
+import ghidra.program.model.symbol.Namespace;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.HighFunctionDBUtil;
 import ghidra.program.model.pcode.HighFunctionDBUtil.ReturnCommitOption;
@@ -1027,9 +1030,9 @@ public class FunctionService {
             String cc = callingConvention != null ? callingConvention : "";
             boolean protoHasThiscall = prototype != null && (prototype.contains("__thiscall") || cc.contains("__thiscall"));
             if (protoHasThiscall && prototype != null && !prototype.contains("void *this") && !prototype.contains("void * this")) {
-                msg += "\n\nWARNING: __thiscall ECX auto-parameter 'this' cannot be retyped via API. "
-                     + "Ghidra accepts the prototype but the decompiler will still show 'this' as void*. "
-                     + "Document the intended type in the plate comment Parameters section instead.";
+                msg += "\n\nNOTE: For __thiscall/__fastcall member functions, also call set_function_this_type "
+                     + "with the concrete struct/class pointer (e.g. MyWidget *) so the decompiler "
+                     + "uses typed 'this' field access instead of void*.";
             }
             if (!result.getErrorMessage().isEmpty()) {
                 msg += "\n\nWarnings/Debug Info:\n" + result.getErrorMessage();
@@ -1455,7 +1458,182 @@ public class FunctionService {
             @Param(value = "parameter_name", source = ParamSource.BODY) String parameterName,
             @Param(value = "new_type", source = ParamSource.BODY) String newType,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        if ("this".equals(parameterName)) {
+            return setFunctionThisType(functionAddress, newType, programName);
+        }
         return setLocalVariableType(functionAddress, parameterName, newType, programName);
+    }
+
+    /**
+     * Retype the implicit {@code this} pointer for {@code __thiscall} / {@code __fastcall} member
+     * functions so decompilation shows {@code this->field} with the correct struct/class type.
+     */
+    @McpTool(path = "/set_function_this_type", method = "POST",
+            description = "Type the implicit 'this' of a __thiscall/__fastcall member function by associating the function with its class. Ghidra's auto-'this' (ECX on x86) is an immutable auto-parameter; with auto-storage it derives its type from the function's parent Class namespace, matched by name to a same-named structure. This tool finds/creates a class namespace for the struct and moves the function into it (no custom storage). Pass 'MyClass *' or 'MyClass'; the structure MyClass must already exist (create_struct). On programs with multiple address spaces, prefix function_address with the space name (mem:1000).",
+            category = "function")
+    public Response setFunctionThisType(
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddrStr,
+            @Param(value = "this_type", source = ParamSource.BODY,
+                   description = "Class type for this, e.g. 'MyWidget *' or 'MyWidget'. The base struct name becomes the function's class.") String thisType,
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+
+        if (functionAddrStr == null || functionAddrStr.isEmpty()) {
+            return Response.err("Function address is required");
+        }
+        if (thisType == null || thisType.isEmpty()) {
+            return Response.err("this_type is required");
+        }
+        if (thisType.startsWith("undefined")) {
+            return Response.err("Rejected: this_type must be a concrete struct/class pointer, not " + thisType);
+        }
+
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
+        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+
+        final StringBuilder resultMsg = new StringBuilder();
+        final AtomicBoolean success = new AtomicBoolean(false);
+
+        try {
+            threadingStrategy.executeWrite(program, "Associate function with class for 'this'", () -> {
+                Function func = ServiceUtils.getFunctionForAddress(program, addr);
+                if (func == null) {
+                    resultMsg.append("Error: No function found at ").append(functionAddrStr);
+                    return null;
+                }
+
+                // The this_type names the owning class. Its base must be an existing structure,
+                // because Ghidra derives the auto-'this' type from a class namespace that is
+                // associated by name with a same-named struct.
+                DataTypeManager dtm = program.getDataTypeManager();
+                DataType pointerType = resolveThisPointerType(dtm, thisType);
+                if (!(pointerType instanceof Pointer)) {
+                    resultMsg.append("Error: Could not resolve this_type '").append(thisType)
+                            .append("' to a pointer. Create the structure first with create_struct, then retry.");
+                    return null;
+                }
+                DataType base = ((Pointer) pointerType).getDataType();
+                if (!(base instanceof Structure)) {
+                    resultMsg.append("Error: 'this' must point to a structure/class type; '")
+                            .append(base != null ? base.getName() : "void")
+                            .append("' is not a structure. Ghidra derives the 'this' type from a same-named struct.");
+                    return null;
+                }
+                String className = base.getName();
+
+                // The member function must already have an implicit 'this'; that only exists for a
+                // hasThis convention (__thiscall/__fastcall). Bail out before mutating anything so
+                // non-member functions are not silently re-parented into a class.
+                Parameter thisParam = findAutoThisParameter(func);
+                if (thisParam == null) {
+                    String cc;
+                    try {
+                        cc = func.getCallingConventionName();
+                    } catch (Exception ignored) {
+                        cc = "";
+                    }
+                    resultMsg.append("Error: ").append(func.getName())
+                            .append(" has no implicit 'this' parameter (calling convention '")
+                            .append(cc == null || cc.isEmpty() ? "(default)" : cc)
+                            .append("'). Set it to __thiscall with set_function_prototype, then retry.");
+                    return null;
+                }
+
+                // Auto-parameters are immutable via the API; the 'this' auto-parameter instead
+                // obtains its type from the function's parent Class namespace (auto-storage). So we
+                // place the function in a GhidraClass named after the struct rather than retyping
+                // 'this' directly. This is the same model as the decompiler's "Auto Fill in Class
+                // Structure" / re-parenting via the Symbol Tree — no custom storage required.
+                SymbolTable st = program.getSymbolTable();
+                Namespace global = program.getGlobalNamespace();
+                GhidraClass classNs;
+                Namespace existing = st.getNamespace(className, global);
+                if (existing == null) {
+                    classNs = st.createClass(global, className, SourceType.USER_DEFINED);
+                } else if (existing instanceof GhidraClass) {
+                    classNs = (GhidraClass) existing;
+                } else {
+                    classNs = st.convertNamespaceToClass(existing);
+                }
+
+                Namespace currentNs = func.getParentNamespace();
+                boolean alreadyInClass = currentNs instanceof GhidraClass
+                        && className.equals(currentNs.getName());
+                if (!alreadyInClass) {
+                    func.getSymbol().setNamespace(classNs);
+                }
+
+                // Re-read the auto-'this' so we report the type Ghidra now derives from the class.
+                thisParam = findAutoThisParameter(func);
+                DataType resolvedThis = thisParam != null ? thisParam.getDataType() : pointerType;
+                String resolvedName = resolvedThis != null ? resolvedThis.getDisplayName() : (className + " *");
+                success.set(true);
+                resultMsg.append(alreadyInClass ? "Confirmed " : "Moved ").append(func.getName())
+                        .append(alreadyInClass ? " in class " : " into class ").append(className)
+                        .append("; 'this' types as ").append(resolvedName)
+                        .append(" (auto-storage). Call get_decompiled_code or force_decompile to refresh output.");
+                return null;
+            });
+        } catch (Exception e) {
+            return Response.err("set_function_this_type failed: " + e.getMessage());
+        }
+
+        if (success.get()) {
+            return Response.ok(JsonHelper.mapOf("status", "success", "message", resultMsg.toString()));
+        }
+        String text = resultMsg.length() > 0 ? resultMsg.toString() : "Failed to set 'this' type";
+        return Response.err(text.startsWith("Error: ") ? text.substring(7) : text);
+    }
+
+    /** Locate the implicit {@code this} (auto-parameter or explicit) on a member function. */
+    static Parameter findAutoThisParameter(Function func) {
+        if (func == null) {
+            return null;
+        }
+        for (Parameter param : func.getParameters()) {
+            if (param.isAutoParameter() && param.getAutoParameterType() == AutoParameterType.THIS) {
+                return param;
+            }
+            if ("this".equals(param.getName())) {
+                return param;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Alias for {@link #setLocalVariableType} — name matches Ghidra UI "Retype Variable".
+     */
+    @McpTool(path = "/set_decompiler_variable_type", method = "POST",
+            description = "Set a decompiler (high-level) variable or parameter type by name. Same as set_local_variable_type. For __thiscall 'this', prefer set_function_this_type.",
+            category = "function")
+    public Response setDecompilerVariableType(
+            @Param(value = "function_address", paramType = "address", source = ParamSource.BODY) String functionAddress,
+            @Param(value = "variable_name", source = ParamSource.BODY) String variableName,
+            @Param(value = "new_type", source = ParamSource.BODY) String newType,
+            @Param(value = "program", defaultValue = "") String programName) {
+        if ("this".equals(variableName)) {
+            return setFunctionThisType(functionAddress, newType, programName);
+        }
+        return setLocalVariableType(functionAddress, variableName, newType, programName);
+    }
+
+    static DataType resolveThisPointerType(DataTypeManager dtm, String thisType) {
+        if (dtm == null) {
+            return null;
+        }
+        String normalized = thisType.trim();
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        if (!normalized.contains("*")) {
+            normalized = normalized + " *";
+        }
+        return ServiceUtils.resolveDataType(dtm, normalized);
     }
 
     /**

@@ -467,17 +467,15 @@ public class DataTypeService {
     /**
      * Create a new structure data type with specified fields
      */
-    @McpTool(path = "/create_struct", method = "POST", description = "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name.", category = "datatype")
+    @McpTool(path = "/create_struct", method = "POST", description = "Create a structure data type. Body fields must be a JSON array of objects; each object needs name and type, with optional offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name. Set replace_placeholder=true to delete a 1-byte demangler/placeholder type with the same name before creating. To change size of an existing struct in place, use resize_struct; for atomic delete+recreate, use recreate_struct (see docs/STRUCT_RESIZE_WORKFLOW.md).", category = "datatype")
     public Response createStruct(
             @Param(value = "name", source = ParamSource.BODY,
                    description = "New structure type name, for example UnitAny or SkillTableEntry") String name,
             @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true,
                    description = "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off. Example: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]") String fieldsJson,
+            @Param(value = "replace_placeholder", source = ParamSource.BODY, defaultValue = "false",
+                   description = "If true and a same-named type exists with size <= 1 byte (typical /Demangler stub), delete it first then create the struct.") boolean replacePlaceholder,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
-        if (pe.hasError()) return pe.error();
-        Program program = pe.program();
-
         if (name == null || name.isEmpty()) {
             return Response.text("Structure name is required");
         }
@@ -498,6 +496,10 @@ public class DataTypeService {
                             + "...)"));
         }
 
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
         final StringBuilder resultMsg = new StringBuilder();
         final AtomicBoolean successFlag = new AtomicBoolean(false);
 
@@ -514,9 +516,18 @@ public class DataTypeService {
             DataTypeManager dtm = program.getDataTypeManager();
 
             // Check if struct already exists
-            DataType existingType = dtm.getDataType("/" + name);
+            DataType existingType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, name);
             if (existingType != null) {
-                return Response.text("Structure with name '" + name + "' already exists");
+                if (replacePlaceholder && existingType.getLength() <= 1) {
+                    if (!deletePlaceholderType(program, existingType, name, new StringBuilder())) {
+                        return Response.text("Failed to remove 1-byte placeholder '"
+                                + existingType.getPathName() + "' before create_struct");
+                    }
+                } else {
+                    return Response.text("Structure with name '" + name + "' already exists"
+                            + " (" + existingType.getPathName() + ", " + existingType.getLength()
+                            + " bytes). Use replace_placeholder=true for 1-byte stubs, or resolve_duplicate_type.");
+                }
             }
 
             // Pre-resolve all field types before entering the transaction
@@ -604,7 +615,11 @@ public class DataTypeService {
 
     // Backward compatibility overload
     public Response createStruct(String name, String fieldsJson) {
-        return createStruct(name, fieldsJson, null);
+        return createStruct(name, fieldsJson, false, null);
+    }
+
+    public Response createStruct(String name, String fieldsJson, String programName) {
+        return createStruct(name, fieldsJson, false, programName);
     }
 
     /**
@@ -1334,14 +1349,19 @@ public class DataTypeService {
     /**
      * Delete a data type from the program
      */
-    @McpTool(path = "/delete_data_type", method = "POST", description = "Delete a data type", category = "datatype")
+    @McpTool(path = "/delete_data_type", method = "POST",
+            description = "Delete a data type by name. Fails if the type is referenced; use resolve_duplicate_type first to remove unused /Demangler 1-byte stubs when a full type exists.",
+            category = "datatype")
     public Response deleteDataType(
             @Param(value = "type_name", source = ParamSource.BODY) String typeName,
+            @Param(value = "resolve_demangler_duplicate", source = ParamSource.BODY, defaultValue = "false",
+                   description = "If delete fails, attempt resolve_duplicate_type to remove a /Demangler size-1 stub when a larger same-named type exists.") boolean resolveDemanglerDuplicate,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        if (typeName == null || typeName.isEmpty()) return Response.text("Type name is required");
+
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
-        if (typeName == null || typeName.isEmpty()) return Response.text("Type name is required");
 
         AtomicBoolean success = new AtomicBoolean(false);
         StringBuilder result = new StringBuilder();
@@ -1366,7 +1386,8 @@ public class DataTypeService {
                         result.append("Data type '").append(typeName).append("' deleted successfully");
                         success.set(true);
                     } else {
-                        result.append("Failed to delete data type '").append(typeName).append("'");
+                        result.append("Failed to delete data type '").append(typeName)
+                                .append("' (may be in use). Try resolve_duplicate_type if a /Demangler 1-byte stub blocks a full struct.");
                     }
 
                 } catch (Exception e) {
@@ -1379,18 +1400,27 @@ public class DataTypeService {
             result.append("Failed to execute data type deletion on Swing thread: ").append(e.getMessage());
         }
 
+        if (!success.get() && resolveDemanglerDuplicate) {
+            resolveDuplicateType(typeName, true, programName);
+            return deleteDataType(typeName, false, programName);
+        }
+
         return Response.text(result.toString());
     }
 
     // Backward compatibility overload
     public Response deleteDataType(String typeName) {
-        return deleteDataType(typeName, null);
+        return deleteDataType(typeName, false, null);
+    }
+
+    public Response deleteDataType(String typeName, String programName) {
+        return deleteDataType(typeName, false, programName);
     }
 
     /**
      * Modify a field in an existing structure
      */
-    @McpTool(path = "/modify_struct_field", method = "POST", description = "Modify a field in a structure. Fields can be identified by name or by offset (for unnamed fields).", category = "datatype")
+    @McpTool(path = "/modify_struct_field", method = "POST", description = "Modify a field in a structure. Fields can be identified by name or by offset (for unnamed fields). For layout size changes (grow/shrink padding), use resize_struct instead of manual delete+create.", category = "datatype")
     public Response modifyStructField(
             @Param(value = "struct_name", source = ParamSource.BODY) String structName,
             @Param(value = "field_name", source = ParamSource.BODY, defaultValue = "",
@@ -1499,6 +1529,389 @@ public class DataTypeService {
     // Backward compatibility overload
     public Response modifyStructField(String structName, String fieldName, String newType, String newName) {
         return modifyStructField(structName, fieldName, newType, newName, null);
+    }
+
+    /**
+     * Alias for {@link #modifyStructField} when only the field type changes.
+     */
+    @McpTool(path = "/modify_struct_field_type", method = "POST",
+            description = "Set a structure field's type by name or offset (offset:N). Same as modify_struct_field with new_type only.",
+            category = "datatype")
+    public Response modifyStructFieldType(
+            @Param(value = "struct_name", source = ParamSource.BODY) String structName,
+            @Param(value = "field_name", source = ParamSource.BODY,
+                   description = "Field name or offset:N (e.g. offset:0x88).") String fieldName,
+            @Param(value = "new_type", source = ParamSource.BODY) String newType,
+            @Param(value = "program", defaultValue = "") String programName) {
+        return modifyStructField(structName, fieldName, newType, "", programName);
+    }
+
+    /**
+     * Embed a structure by value at a field offset (not a pointer). Common for nested MSVC-style subobjects.
+     */
+    @McpTool(path = "/embed_struct_field", method = "POST",
+            description = "Replace a structure field with an embedded struct type by value (e.g. Rectangle inside LayoutNode). Uses modify_struct_field internally.",
+            category = "datatype")
+    public Response embedStructField(
+            @Param(value = "parent_struct", source = ParamSource.BODY) String parentStruct,
+            @Param(value = "field_name", source = ParamSource.BODY, defaultValue = "",
+                   description = "Field name or offset:N.") String fieldName,
+            @Param(value = "embedded_struct", source = ParamSource.BODY,
+                   description = "Existing structure type to embed by value.") String embeddedStruct,
+            @Param(value = "program", defaultValue = "") String programName) {
+        if (embeddedStruct == null || embeddedStruct.isEmpty()) {
+            return Response.text("embedded_struct is required");
+        }
+        return modifyStructField(parentStruct, fieldName, embeddedStruct, "", programName);
+    }
+
+    /**
+     * Grow or shrink an existing structure without delete+recreate.
+     */
+    @McpTool(path = "/resize_struct", method = "POST",
+            description = "Grow or shrink an existing structure by total byte size. Defined fields whose end offset fits within new_size are preserved; growth pads with undefined filler. Refuses shrink that would clip defined fields unless force=true. See docs/STRUCT_RESIZE_WORKFLOW.md.",
+            category = "datatype")
+    public Response resizeStruct(
+            @Param(value = "name", source = ParamSource.BODY) String name,
+            @Param(value = "new_size", source = ParamSource.BODY) int newSize,
+            @Param(value = "preserve_fields", source = ParamSource.BODY, defaultValue = "true",
+                   description = "When true (default), keep defined fields that still fit; when false with force, trailing layout may be cleared before resize.") boolean preserveFields,
+            @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Allow shrink even when defined fields extend past new_size (clips trailing layout).") boolean force,
+            @Param(value = "program", defaultValue = "") String programName) {
+
+        if (name == null || name.isEmpty()) {
+            return Response.err("name is required");
+        }
+        if (newSize <= 0) {
+            return Response.err("new_size must be positive");
+        }
+
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        AtomicBoolean success = new AtomicBoolean(false);
+        StringBuilder result = new StringBuilder();
+        final int[] oldLenOut = new int[1];
+
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Resize structure: " + name);
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    DataType dataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, name);
+                    if (dataType == null) {
+                        result.append("Structure not found: ").append(name);
+                        return;
+                    }
+                    if (!(dataType instanceof Structure)) {
+                        result.append("Data type '").append(name).append("' is not a structure");
+                        return;
+                    }
+
+                    Structure struct = (Structure) dataType;
+                    oldLenOut[0] = struct.getLength();
+                    String clipError = validateStructResize(struct, newSize, force);
+                    if (clipError != null) {
+                        result.append(clipError);
+                        return;
+                    }
+
+                    if (!preserveFields && force && newSize < oldLenOut[0]) {
+                        clearStructComponentsFromOffset(struct, newSize);
+                    }
+
+                    struct.setLength(newSize);
+                    success.set(true);
+                    result.append("Resized '").append(name).append("' from ")
+                            .append(oldLenOut[0]).append(" to ").append(struct.getLength()).append(" bytes");
+                } catch (IllegalArgumentException e) {
+                    result.append("Resize failed: ").append(e.getMessage())
+                            .append(". Use force=true or recreate_struct with an explicit fields array.");
+                } catch (Exception e) {
+                    result.append("Error resizing structure: ").append(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (InterruptedException | InvocationTargetException e) {
+            return Response.err("Failed to resize structure on Swing thread: " + e.getMessage());
+        }
+
+        if (success.get()) {
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "success",
+                    "name", name,
+                    "old_size", oldLenOut[0],
+                    "new_size", newSize,
+                    "message", result.toString()));
+        }
+        return result.length() > 0 ? Response.err(result.toString()) : Response.err("Failed to resize structure");
+    }
+
+    /**
+     * Replace a structure: remove placeholder or existing type (when allowed), then create with fields.
+     * Not a single transaction; the delete and create are committed separately.
+     */
+    @McpTool(path = "/recreate_struct", method = "POST",
+            description = "Replace a structure in one step: optionally remove an existing same-named type, then create with fields JSON (same shape as create_struct). Use when resize_struct cannot apply or you are rebuilding layout from get_struct_layout export. Set force=true to delete a non-stub type that is not referenced.",
+            category = "datatype")
+    public Response recreateStruct(
+            @Param(value = "name", source = ParamSource.BODY) String name,
+            @Param(value = "fields", source = ParamSource.BODY, fieldsJson = true) String fieldsJson,
+            @Param(value = "size", source = ParamSource.BODY, defaultValue = "0",
+                   description = "Optional minimum total size in bytes after create; grows with undefined padding when larger than implied field layout.") int size,
+            @Param(value = "replace_placeholder", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Delete a 1-byte placeholder/Demangler stub before recreate (default true).") boolean replacePlaceholder,
+            @Param(value = "force", source = ParamSource.BODY, defaultValue = "false",
+                   description = "Delete an existing full-sized struct before recreate (fails if referenced).") boolean force,
+            @Param(value = "program", defaultValue = "") String programName) {
+
+        if (name == null || name.isEmpty()) {
+            return Response.err("name is required");
+        }
+        if (fieldsJson == null || fieldsJson.isEmpty()) {
+            return Response.err(badFieldsFormatHint("fields JSON is required"));
+        }
+
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        DataTypeManager dtm = program.getDataTypeManager();
+        DataType existing = ServiceUtils.findDataTypeByNameInAllCategories(dtm, name);
+        if (existing != null) {
+            boolean stub = existing.getLength() <= 1;
+            boolean demangler = isDemanglerPlaceholder(existing);
+            if (stub && (replacePlaceholder || demangler)) {
+                StringBuilder stubMsg = new StringBuilder();
+                if (!deletePlaceholderType(program, existing, name, stubMsg)) {
+                    return Response.err("Could not remove placeholder before recreate: " + stubMsg);
+                }
+            } else if (force) {
+                AtomicBoolean deleted = new AtomicBoolean(false);
+                StringBuilder delMsg = new StringBuilder();
+                try {
+                    SwingUtilities.invokeAndWait(() -> {
+                        int tx = program.startTransaction("Recreate struct delete");
+                        try {
+                            deleted.set(dtm.remove(existing, null));
+                            if (deleted.get()) {
+                                delMsg.append("Removed existing type before recreate");
+                            } else {
+                                delMsg.append("Could not delete '").append(name)
+                                        .append("' (may be in use)");
+                            }
+                        } finally {
+                            program.endTransaction(tx, deleted.get());
+                        }
+                    });
+                } catch (InterruptedException | InvocationTargetException e) {
+                    return Response.err("Delete before recreate failed: " + e.getMessage());
+                }
+                if (!deleted.get()) {
+                    return Response.err(delMsg.toString());
+                }
+            } else {
+                return Response.err("Structure '" + name + "' already exists ("
+                        + existing.getLength() + " bytes at " + existing.getPathName()
+                        + "). Use resize_struct, replace_placeholder for 1-byte stubs, or force=true.");
+            }
+        }
+
+        Response created = createStruct(name, fieldsJson, false, programName);
+        if (size <= 0) {
+            return created;
+        }
+       
+       if (!(ServiceUtils.findDataTypeByNameInAllCategories(dtm, name) instanceof Structure)) {
+            return created;
+        }
+
+        Response resized = resizeStruct(name, size, true, true, programName);
+        
+        if (resized instanceof Response.Err) {
+            return Response.err("Created struct but post-create resize failed: "
+                    + ((Response.Err) resized).message());
+        }
+        return resized;
+    }
+
+    /**
+     * Remove a 1-byte /Demangler placeholder when a full same-named type exists.
+     */
+    @McpTool(path = "/resolve_duplicate_type", method = "POST",
+            description = "Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists. Helps fix 'Can't resolve datatype' and create_struct already exists on placeholders.",
+            category = "datatype")
+    public Response resolveDuplicateType(
+            @Param(value = "type_name", source = ParamSource.BODY) String typeName,
+            @Param(value = "delete_demangler_stub", source = ParamSource.BODY, defaultValue = "true",
+                   description = "Delete /Demangler/* stubs (size <= 1) when a larger type with the same name exists.") boolean deleteDemanglerStub,
+            @Param(value = "program", defaultValue = "") String programName) {
+
+        if (typeName == null || typeName.isEmpty()) {
+            return Response.text("type_name is required");
+        }
+
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        DataTypeManager dtm = program.getDataTypeManager();
+        List<DataType> matches = findAllTypesBySimpleName(dtm, typeName);
+        if (matches.isEmpty()) {
+            return Response.text("No data type named '" + typeName + "'");
+        }
+
+        List<DataType> demanglerStubs = new ArrayList<>();
+        List<DataType> canonical = new ArrayList<>();
+        for (DataType dt : matches) {
+            if (isDemanglerPlaceholder(dt)) {
+                demanglerStubs.add(dt);
+            } else {
+                canonical.add(dt);
+            }
+        }
+
+        StringBuilder report = new StringBuilder();
+        report.append("Found ").append(matches.size()).append(" type(s) named '").append(typeName).append("': ");
+        for (DataType dt : matches) {
+            report.append(dt.getPathName()).append(" (").append(dt.getLength()).append(" B); ");
+        }
+
+        if (demanglerStubs.isEmpty()) {
+            if (canonical.size() <= 1) {
+                return Response.text(report + "No /Demangler 1-byte stub to resolve.");
+            }
+            return Response.text(report + "Multiple canonical types — pick one manually or delete orphans with delete_data_type.");
+        }
+
+        if (canonical.isEmpty()) {
+            return Response.text(report + "Only demangler stub(s) present — use delete_data_type or create_struct with replace_placeholder=true.");
+        }
+
+        if (!deleteDemanglerStub) {
+            return Response.text(report + "Demangler stub(s) present; set delete_demangler_stub=true to remove.");
+        }
+
+        int removed = 0;
+        for (DataType stub : demanglerStubs) {
+            StringBuilder stubMsg = new StringBuilder();
+            if (deletePlaceholderType(program, stub, typeName, stubMsg)) {
+                removed++;
+                report.append("Deleted ").append(stub.getPathName()).append(". ");
+            } else {
+                report.append("Could not delete ").append(stub.getPathName()).append(": ")
+                        .append(stubMsg).append(" ");
+            }
+        }
+
+        DataType best = canonical.stream().max(Comparator.comparingInt(DataType::getLength)).orElse(canonical.get(0));
+        report.append("Prefer canonical type ").append(best.getPathName())
+                .append(" (").append(best.getLength()).append(" B).");
+
+        if (removed > 0) {
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "success",
+                    "removed", removed,
+                    "message", report.toString(),
+                    "canonical_path", best.getPathName()));
+        }
+        return Response.text(report.toString());
+    }
+
+    static List<DataType> findAllTypesBySimpleName(DataTypeManager dtm, String typeName) {
+        List<DataType> matches = new ArrayList<>();
+        Iterator<DataType> all = dtm.getAllDataTypes();
+        while (all.hasNext()) {
+            DataType dt = all.next();
+            if (typeName.equals(dt.getName())) {
+                matches.add(dt);
+            }
+        }
+        return matches;
+    }
+
+    static boolean isDemanglerPlaceholder(DataType dt) {
+        if (dt == null) {
+            return false;
+        }
+        String path = dt.getCategoryPath() != null ? dt.getCategoryPath().getPath() : null;
+        return isDemanglerPlaceholder(dt.getLength(), path);
+    }
+
+    static boolean isDemanglerPlaceholder(int length, String categoryPath) {
+        if (length > 1) {
+            return false;
+        }
+        return categoryPath != null && categoryPath.contains("/Demangler");
+    }
+
+    /** Highest byte offset covered by any defined component (0 if empty). */
+    static int structDefinedByteExtent(Structure struct) {
+        int max = 0;
+        for (DataTypeComponent component : struct.getDefinedComponents()) {
+            max = Math.max(max, component.getEndOffset());
+        }
+        return max;
+    }
+
+    /**
+     * @return error message when shrink would clip defined fields and force is false; null if OK
+     */
+    static String validateStructResize(Structure struct, int newSize, boolean force) {
+        return validateStructResize(structDefinedByteExtent(struct), struct.getName(), newSize, force);
+    }
+
+    static String validateStructResize(int definedByteExtent, String structName, int newSize, boolean force) {
+        if (newSize <= 0) {
+            return "new_size must be positive";
+        }
+        if (newSize < definedByteExtent && !force) {
+            return "Cannot shrink '" + structName + "' to " + newSize
+                    + " bytes: defined fields extend to " + definedByteExtent
+                    + " bytes. Set force=true to clip, or use recreate_struct with a new fields array.";
+        }
+        return null;
+    }
+
+    /** Delete components starting at {@code fromOffset} (highest ordinal first). */
+    static void clearStructComponentsFromOffset(Structure struct, int fromOffset) {
+        for (int i = struct.getNumComponents() - 1; i >= 0; i--) {
+            DataTypeComponent component = struct.getComponent(i);
+            if (component != null && component.getOffset() >= fromOffset) {
+                struct.delete(i);
+            }
+        }
+    }
+
+    boolean deletePlaceholderType(Program program, DataType dataType, String logicalName,
+                                         StringBuilder result) {
+        AtomicBoolean success = new AtomicBoolean(false);
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                int tx = program.startTransaction("Delete placeholder type " + logicalName);
+                try {
+                    DataTypeManager dtm = program.getDataTypeManager();
+                    boolean deleted = dtm.remove(dataType, null);
+                    if (deleted) {
+                        result.append("Removed placeholder '").append(dataType.getPathName()).append("'");
+                        success.set(true);
+                    } else {
+                        result.append("Could not remove '").append(dataType.getPathName())
+                                .append("' (in use or locked)");
+                    }
+                } catch (Exception e) {
+                    result.append("Error: ").append(e.getMessage());
+                } finally {
+                    program.endTransaction(tx, success.get());
+                }
+            });
+        } catch (InterruptedException | InvocationTargetException e) {
+            result.append("Swing error: ").append(e.getMessage());
+        }
+        return success.get();
     }
 
     /**

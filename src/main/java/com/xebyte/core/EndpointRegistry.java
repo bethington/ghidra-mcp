@@ -523,8 +523,18 @@ public class EndpointRegistry {
 
         post("/set_parameter_type", "Set the data type of a function parameter",
             params(bStr("function_address"), bStr("parameter_name"), bStr("new_type"), pProg()),
-            (q, b) -> functionService.setLocalVariableType(bodyStr(b, "function_address"),
+            (q, b) -> functionService.setParameterTypeEndpoint(bodyStr(b, "function_address"),
                 bodyStr(b, "parameter_name"), bodyStr(b, "new_type"), str(q, "program")));
+
+        post("/set_function_this_type", "Set __thiscall/__fastcall implicit this pointer type for decompiler",
+            params(bStr("function_address"), bStr("this_type"), pProg()),
+            (q, b) -> functionService.setFunctionThisType(bodyStr(b, "function_address"),
+                bodyStr(b, "this_type"), str(q, "program")));
+
+        post("/set_decompiler_variable_type", "Set decompiler variable or parameter type by name",
+            params(bStr("function_address"), bStr("variable_name"), bStr("new_type"), pProg()),
+            (q, b) -> functionService.setDecompilerVariableType(bodyStr(b, "function_address"),
+                bodyStr(b, "variable_name"), bodyStr(b, "new_type"), str(q, "program")));
 
         post("/set_function_no_return", "Mark function as no-return",
             params(bStr("function_address"), bBool("no_return"), pProg()),
@@ -797,8 +807,9 @@ public class EndpointRegistry {
         post("/create_struct", "Create a structure data type. Body fields must be a JSON array of objects with name and type, plus optional decimal offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name.",
             params(bStr("name", "New structure type name, for example UnitAny or SkillTableEntry"),
                 bJson("fields", "JSON array of field objects. Required keys: name, type. Optional key: offset as a decimal byte offset. Alternate keys are accepted: field_name/fieldName, field_type/fieldType/data_type/dataType, field_offset/fieldOffset/off."),
-                pProg()),
-            (q, b) -> dataTypeService.createStruct(bodyStr(b, "name"), bodyFieldsJson(b, "fields"), str(q, "program")));
+                bBool("replace_placeholder", false), pProg()),
+            (q, b) -> dataTypeService.createStruct(bodyStr(b, "name"), bodyFieldsJson(b, "fields"),
+                bodyBool(b, "replace_placeholder", false), str(q, "program")));
 
         post("/create_enum", "Create an enum data type",
             params(bStr("name"), bJson("values"), bInt("size", 4), pProg()),
@@ -842,13 +853,42 @@ public class EndpointRegistry {
                 bodyBool(b, "clear_existing", true), str(q, "program")));
 
         post("/delete_data_type", "Delete a data type",
-            params(bStr("type_name"), pProg()),
-            (q, b) -> dataTypeService.deleteDataType(bodyStr(b, "type_name"), str(q, "program")));
+            params(bStr("type_name"), bBool("resolve_demangler_duplicate", false), pProg()),
+            (q, b) -> dataTypeService.deleteDataType(bodyStr(b, "type_name"),
+                bodyBool(b, "resolve_demangler_duplicate", false), str(q, "program")));
+
+        post("/resolve_duplicate_type", "Remove /Demangler 1-byte stub when canonical type exists",
+            params(bStr("type_name"), bBool("delete_demangler_stub", true), pProg()),
+            (q, b) -> dataTypeService.resolveDuplicateType(bodyStr(b, "type_name"),
+                bodyBool(b, "delete_demangler_stub", true), str(q, "program")));
 
         post("/modify_struct_field", "Modify a field in a structure",
             params(bStr("struct_name"), bStr("field_name"), bStrOpt("new_type"), bStrOpt("new_name"), pProg()),
             (q, b) -> dataTypeService.modifyStructField(bodyStr(b, "struct_name"), bodyStr(b, "field_name"),
                 bodyStr(b, "new_type"), bodyStr(b, "new_name"), str(q, "program")));
+
+        post("/modify_struct_field_type", "Set structure field type by name or offset",
+            params(bStr("struct_name"), bStr("field_name"), bStr("new_type"), pProg()),
+            (q, b) -> dataTypeService.modifyStructFieldType(bodyStr(b, "struct_name"),
+                bodyStr(b, "field_name"), bodyStr(b, "new_type"), str(q, "program")));
+
+        post("/embed_struct_field", "Embed a structure by value at a field offset",
+            params(bStr("parent_struct"), bStr("field_name"), bStr("embedded_struct"), pProg()),
+            (q, b) -> dataTypeService.embedStructField(bodyStr(b, "parent_struct"),
+                bodyStr(b, "field_name"), bodyStr(b, "embedded_struct"), str(q, "program")));
+
+        post("/resize_struct", "Grow or shrink an existing structure by byte size",
+            params(bStr("name"), bInt("new_size", 0), bBool("preserve_fields", true),
+                bBool("force", false), pProg()),
+            (q, b) -> dataTypeService.resizeStruct(bodyStr(b, "name"), bodyInt(b, "new_size", 0),
+                bodyBool(b, "preserve_fields", true), bodyBool(b, "force", false), str(q, "program")));
+
+        post("/recreate_struct", "Replace a structure with a new field layout (delete then create)",
+            params(bStr("name"), bJson("fields"), bInt("size", 0),
+                bBool("replace_placeholder", true), bBool("force", false), pProg()),
+            (q, b) -> dataTypeService.recreateStruct(bodyStr(b, "name"), bodyFieldsJson(b, "fields"),
+                bodyInt(b, "size", 0), bodyBool(b, "replace_placeholder", true),
+                bodyBool(b, "force", false), str(q, "program")));
 
         post("/add_struct_field", "Add a field to a structure",
             params(bStr("struct_name"), bStr("field_name"), bStr("field_type"), bInt("offset", -1), pProg()),
