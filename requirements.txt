@@ -2,7 +2,7 @@
 # Install with: pip install -r requirements.txt
 
 # Core MCP server framework
-mcp>=1.5.0,<2.0.0
+mcp>=1.27.2,<2.0.0
 
 # HTTP client library
 # 2.32.0 is the floor for CVE-2024-35195 (certificate verification bypass).
