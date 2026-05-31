@@ -153,7 +153,7 @@ jobs:
 
     - name: Upload coverage
       if: ${{ always() && hashFiles('coverage.xml', 'tests/coverage.xml') != '' }}
-      uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe  # v5
+      uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354  # v6.0.1
       with:
         files: ./coverage.xml,./tests/coverage.xml
         flags: unittests
