@@ -48,9 +48,14 @@ public class HeadlessManagementService {
         if (!file.exists()) {
             return Response.err("File not found: " + filePath);
         }
-        boolean hasLanguage = languageId != null && !languageId.trim().isEmpty();
+        // Normalize once so the provider call and the error messages all use the
+        // same trimmed values (a doc-copied " ARM:LE:32:Cortex " otherwise passes
+        // the non-empty check but fails lookup with a confusing message).
+        String normalizedLanguageId = (languageId == null) ? "" : languageId.trim();
+        String normalizedCompilerSpecId = (compilerSpecId == null) ? "" : compilerSpecId.trim();
+        boolean hasLanguage = !normalizedLanguageId.isEmpty();
         Program program = hasLanguage
-            ? programProvider.loadProgramFromFileWithLanguage(file, languageId, compilerSpecId)
+            ? programProvider.loadProgramFromFileWithLanguage(file, normalizedLanguageId, normalizedCompilerSpecId)
             : programProvider.loadProgramFromFile(file);
         if (program != null) {
             String langOut = program.getLanguageID() != null
@@ -60,7 +65,7 @@ public class HeadlessManagementService {
                 + ServiceUtils.escapeJson(langOut) + "\"}");
         }
         if (hasLanguage) {
-            return Response.err("Failed to load program with language '" + languageId
+            return Response.err("Failed to load program with language '" + normalizedLanguageId
                 + "' from: " + filePath);
         }
         return Response.err("Failed to load program from: " + filePath

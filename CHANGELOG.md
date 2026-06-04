@@ -6,6 +6,18 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+### Added
+
+- **`/load_program` accepts optional `language` and `compiler_spec`.**
+  Raw firmware blobs with no recognizable header (e.g. ARM Cortex-M
+  `.mem` dumps) can now be imported as raw binary with an explicit
+  processor by passing `language` (e.g. `ARM:LE:32:Cortex`) and
+  optionally `compiler_spec`; when `language` is omitted the loader
+  auto-detects the format as before. Both values are trimmed before
+  the `LanguageID` / `CompilerSpecID` lookup so doc-copied inputs like
+  `" ARM:LE:32:Cortex "` resolve instead of failing the lookup. The
+  success response now also echoes the resolved `language`.
+
 ### Fixed
 
 - **Headless: `/run_ghidra_script` and `/run_script_inline` crashed
@@ -34,6 +46,19 @@ Complete version history for the Ghidra MCP Server project.
   `JavaScriptProvider.activateAll()` output is appended to the error
   response under `--- BUILD/ACTIVATE OUTPUT ---`, so Felix compile
   errors are visible to the caller instead of being silently dropped.
+  The capturing `PrintWriter` is flushed before the buffer is read so
+  the surfaced text is complete, and the output is bounded to its last
+  16 KB (with a truncation notice) so a verbose compiler failure can't
+  blow up the response payload.
+
+- **Headless script init no longer registers a placeholder bundle when
+  the user script directory can't be created.** If `mkdirs()` fails on
+  the primary location the server now falls back to a writable temp
+  directory, and if that also fails it short-circuits BundleHost
+  acquisition entirely (script execution stays disabled) instead of
+  acquiring on a missing path and crashing later with
+  `ClassCastException: GhidraPlaceholderBundle cannot be cast to
+  GhidraSourceBundle`.
 
 ---
 

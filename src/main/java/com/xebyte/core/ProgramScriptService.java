@@ -32,6 +32,28 @@ public class ProgramScriptService {
     private final ThreadingStrategy threadingStrategy;
     private static final String AUTO_ANALYSIS_COMPLETION_MESSAGE = "Auto-analysis completed";
 
+    /**
+     * Upper bound on the OSGi build/activate output echoed back in an error
+     * response. Verbose compiler failures can run to many KB of repeated
+     * diagnostics; beyond this we keep only the tail (where the actual error
+     * usually is) and prepend a truncation notice.
+     */
+    private static final int MAX_BUILD_OUTPUT_CHARS = 16 * 1024;
+
+    /**
+     * Return {@code text} unchanged when it fits within {@code maxChars};
+     * otherwise return its last {@code maxChars} characters prefixed with a
+     * notice naming how many characters were dropped.
+     */
+    private static String boundTail(String text, int maxChars) {
+        if (text.length() <= maxChars) {
+            return text;
+        }
+        int dropped = text.length() - maxChars;
+        return "[... truncated " + dropped + " characters; showing last "
+                + maxChars + " ...]\n" + text.substring(dropped);
+    }
+
     public ProgramScriptService(ProgramProvider programProvider, ThreadingStrategy threadingStrategy) {
         this.programProvider = programProvider;
         this.threadingStrategy = threadingStrategy;
@@ -1147,9 +1169,12 @@ public class ProgramScriptService {
         // Track whether we copied the script (for cleanup)
         final File[] copiedScript = {null};
 
-        // Holder so the catch block can surface OSGi build/activate output
-        // captured into scriptWriter before a failure.
+        // Holders so the catch block can surface OSGi build/activate output
+        // captured into scriptWriter before a failure. The PrintWriter holder
+        // lets the failure path flush buffered output into the StringWriter
+        // before reading it, otherwise the captured text can be truncated.
         final StringWriter[] scriptWriterHolder = {null};
+        final PrintWriter[] scriptPrintWriterHolder = {null};
 
         // Get the PluginTool for script state (GUI mode only)
         final PluginTool pluginTool = getToolFromProvider();
@@ -1241,6 +1266,7 @@ public class ProgramScriptService {
                     StringWriter scriptWriter = new StringWriter();
                     PrintWriter scriptPrintWriter = new PrintWriter(scriptWriter);
                     scriptWriterHolder[0] = scriptWriter;
+                    scriptPrintWriterHolder[0] = scriptPrintWriter;
 
                     ghidra.app.script.GhidraScript script = provider.getScriptInstance(scriptFile, scriptPrintWriter);
                     if (script == null) {
@@ -1295,14 +1321,22 @@ public class ProgramScriptService {
 
                     // Surface any build/activate output that was captured into the
                     // script writer before the failure (e.g. OSGi/Felix compile
-                    // errors from JavaScriptProvider.activateAll()).
+                    // errors from JavaScriptProvider.activateAll()). Flush the
+                    // PrintWriter first so buffered text reaches the StringWriter,
+                    // and bound the result so a verbose compiler failure can't
+                    // blow up the response payload.
                     try {
+                        PrintWriter pw2 = scriptPrintWriterHolder[0];
+                        if (pw2 != null) {
+                            pw2.flush();
+                        }
                         StringWriter sw2 = scriptWriterHolder[0];
                         if (sw2 != null) {
                             String capturedBuild = sw2.toString();
                             if (!capturedBuild.isEmpty()) {
                                 resultMsg.append("--- BUILD/ACTIVATE OUTPUT ---\n")
-                                        .append(capturedBuild).append("\n");
+                                        .append(boundTail(capturedBuild, MAX_BUILD_OUTPUT_CHARS))
+                                        .append("\n");
                             }
                         }
                     } catch (Throwable ignore) { /* scriptWriter may be unavailable */ }

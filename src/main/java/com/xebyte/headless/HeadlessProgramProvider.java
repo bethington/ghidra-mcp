@@ -197,14 +197,19 @@ public class HeadlessProgramProvider implements ProgramProvider {
             Msg.error(this, "loadProgramFromFileWithLanguage requires a non-empty languageId");
             return null;
         }
+        // Normalize before constructing IDs: a doc-copied " ARM:LE:32:Cortex "
+        // passes the non-empty check above but fails the LanguageID lookup.
+        languageId = languageId.trim();
+        String normalizedCompilerSpecId =
+            (compilerSpecId == null) ? "" : compilerSpecId.trim();
 
         try {
             LanguageService langService = DefaultLanguageService.getLanguageService();
             Language language = langService.getLanguage(new LanguageID(languageId));
 
             CompilerSpec compilerSpec;
-            if (compilerSpecId != null && !compilerSpecId.trim().isEmpty()) {
-                compilerSpec = language.getCompilerSpecByID(new CompilerSpecID(compilerSpecId));
+            if (!normalizedCompilerSpecId.isEmpty()) {
+                compilerSpec = language.getCompilerSpecByID(new CompilerSpecID(normalizedCompilerSpecId));
             } else {
                 compilerSpec = language.getDefaultCompilerSpec();
             }
