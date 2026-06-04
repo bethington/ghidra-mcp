@@ -6,6 +6,18 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+### Security
+
+- **`/load_program` now enforces the `GHIDRA_MCP_FILE_ROOT` allow-list.**
+  The endpoint accepts an absolute filesystem path; when
+  `GHIDRA_MCP_FILE_ROOT` is configured the path is canonicalized through
+  `SecurityConfig.resolveWithinFileRoot(...)` (resolving symlinks and
+  `..`) and rejected with `Access denied` when it escapes the root,
+  before any disk access. Previously the allow-list helper existed but
+  was never wired to this endpoint, so an operator who set the root
+  expecting path-traversal protection could still have the agent read
+  any file on disk. With no root configured the behavior is unchanged.
+
 ### Added
 
 - **`/load_program` accepts optional `language` and `compiler_spec`.**

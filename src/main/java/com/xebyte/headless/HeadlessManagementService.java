@@ -4,6 +4,7 @@ import com.xebyte.core.*;
 import ghidra.program.model.listing.Program;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +45,19 @@ public class HeadlessManagementService {
         if (filePath == null || filePath.isEmpty()) {
             return Response.err("file path required");
         }
-        File file = new File(filePath);
+        // Enforce the GHIDRA_MCP_FILE_ROOT allow-list before touching the disk.
+        // resolveWithinFileRoot canonicalizes the path (resolving symlinks and
+        // `..`) and returns null when a root is configured and the path escapes
+        // it; with no root configured it returns the canonical path unchanged.
+        // filePath is non-null here, so a null result means "outside the root".
+        SecurityConfig security = SecurityConfig.getInstance();
+        Path resolved = security.resolveWithinFileRoot(filePath);
+        if (resolved == null) {
+            return Response.err("Access denied: '" + filePath
+                + "' is outside the configured GHIDRA_MCP_FILE_ROOT ("
+                + security.getFileRoot() + ")");
+        }
+        File file = resolved.toFile();
         if (!file.exists()) {
             return Response.err("File not found: " + filePath);
         }
