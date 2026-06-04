@@ -228,37 +228,26 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
                         ? new java.io.File(GhidraScriptUtil.USER_SCRIPTS_DIR)
                         : new java.io.File(System.getProperty("user.home"), "ghidra_scripts");
                 boolean scriptDirExisted = userScriptDir.exists();
-                if (!scriptDirExisted && !userScriptDir.mkdirs()) {
-                    // The primary location is not writable. Acquiring BundleHost
-                    // now would register a GhidraPlaceholderBundle for the missing
-                    // directory and crash JavaScriptProvider later with a
-                    // ClassCastException. Try a writable temp fallback instead.
-                    java.io.File fallback = new java.io.File(
-                            System.getProperty("java.io.tmpdir"), "ghidra_mcp_scripts");
-                    if (fallback.exists() || fallback.mkdirs()) {
-                        System.err.println(
-                                "Warning: could not create user script directory "
-                                        + userScriptDir.getAbsolutePath()
-                                        + "; falling back to " + fallback.getAbsolutePath());
-                        userScriptDir = fallback;
-                    } else {
-                        // No writable script directory at all: short-circuit so we
-                        // never acquire BundleHost on a placeholder path. Script
-                        // execution stays disabled, but the server keeps running.
-                        System.err.println(
-                                "Failed to create a writable user script directory ("
-                                        + userScriptDir.getAbsolutePath() + " and fallback "
-                                        + fallback.getAbsolutePath()
-                                        + "); skipping BundleHost init, script execution disabled.");
-                        return;
-                    }
-                } else if (scriptDirExisted) {
-                    System.out.println(
-                            "Using user script directory: " + userScriptDir.getAbsolutePath());
-                } else {
-                    System.out.println(
-                            "Created user script directory: " + userScriptDir.getAbsolutePath());
+                if (!scriptDirExisted) {
+                    userScriptDir.mkdirs();
                 }
+                // acquireBundleHostReference() registers GhidraScriptUtil.USER_SCRIPTS_DIR
+                // itself — not a local override — so a temp-dir fallback would still
+                // leave the canonical (missing) path registered as a
+                // GhidraPlaceholderBundle, which crashes JavaScriptProvider later with a
+                // ClassCastException. If the canonical directory isn't a real, writable
+                // directory after the mkdir attempt we therefore short-circuit: scripts
+                // stay disabled but the server keeps running, instead of acquiring on a
+                // placeholder path.
+                if (!userScriptDir.isDirectory() || !userScriptDir.canWrite()) {
+                    System.err.println(
+                            "User script directory is missing or not writable ("
+                                    + userScriptDir.getAbsolutePath()
+                                    + "); skipping BundleHost init, script execution disabled.");
+                    return;
+                }
+                System.out.println((scriptDirExisted ? "Using" : "Created")
+                        + " user script directory: " + userScriptDir.getAbsolutePath());
 
                 GhidraScriptUtil.acquireBundleHostReference();
                 scriptingBundleHostAcquired = true;

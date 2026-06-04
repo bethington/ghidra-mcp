@@ -2,6 +2,7 @@ package com.xebyte.headless;
 
 import com.xebyte.core.*;
 import ghidra.program.model.listing.Program;
+import ghidra.util.Msg;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -53,9 +54,13 @@ public class HeadlessManagementService {
         SecurityConfig security = SecurityConfig.getInstance();
         Path resolved = security.resolveWithinFileRoot(filePath);
         if (resolved == null) {
-            return Response.err("Access denied: '" + filePath
-                + "' is outside the configured GHIDRA_MCP_FILE_ROOT ("
+            // Log the configured root server-side for the operator, but keep it
+            // out of the client response so we don't disclose the filesystem
+            // layout to the (untrusted) caller.
+            Msg.warn(this, "Rejected /load_program for '" + filePath
+                + "': outside configured GHIDRA_MCP_FILE_ROOT ("
                 + security.getFileRoot() + ")");
+            return Response.err("Access denied: path is outside the configured file root");
         }
         File file = resolved.toFile();
         if (!file.exists()) {
@@ -73,9 +78,10 @@ public class HeadlessManagementService {
         if (program != null) {
             String langOut = program.getLanguageID() != null
                 ? program.getLanguageID().getIdAsString() : "";
-            return Response.text("{\"success\": true, \"program\": \""
-                + ServiceUtils.escapeJson(program.getName()) + "\", \"language\": \""
-                + ServiceUtils.escapeJson(langOut) + "\"}");
+            return Response.text(JsonHelper.toJson(JsonHelper.mapOf(
+                "success", true,
+                "program", program.getName(),
+                "language", langOut)));
         }
         if (hasLanguage) {
             return Response.err("Failed to load program with language '" + normalizedLanguageId

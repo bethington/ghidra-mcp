@@ -13,10 +13,13 @@ Complete version history for the Ghidra MCP Server project.
   `GHIDRA_MCP_FILE_ROOT` is configured the path is canonicalized through
   `SecurityConfig.resolveWithinFileRoot(...)` (resolving symlinks and
   `..`) and rejected with `Access denied` when it escapes the root,
-  before any disk access. Previously the allow-list helper existed but
-  was never wired to this endpoint, so an operator who set the root
-  expecting path-traversal protection could still have the agent read
-  any file on disk. With no root configured the behavior is unchanged.
+  before any disk access. The rejection message is generic (the
+  configured root is logged server-side, not echoed to the caller, to
+  avoid disclosing the filesystem layout). Previously the allow-list
+  helper existed but was never wired to this endpoint, so an operator
+  who set the root expecting path-traversal protection could still
+  have the agent read any file on disk. With no root configured the
+  behavior is unchanged.
 
 ### Added
 
@@ -64,11 +67,14 @@ Complete version history for the Ghidra MCP Server project.
   blow up the response payload.
 
 - **Headless script init no longer registers a placeholder bundle when
-  the user script directory can't be created.** If `mkdirs()` fails on
-  the primary location the server now falls back to a writable temp
-  directory, and if that also fails it short-circuits BundleHost
-  acquisition entirely (script execution stays disabled) instead of
-  acquiring on a missing path and crashing later with
+  the user script directory can't be created.** `acquireBundleHostReference()`
+  registers `GhidraScriptUtil.USER_SCRIPTS_DIR` itself, so a local temp-dir
+  fallback wouldn't change the path it registers and the missing canonical
+  directory would still become a `GhidraPlaceholderBundle`. The server now
+  ensures the canonical user script directory is a real, writable directory
+  (creating it if needed) and short-circuits BundleHost acquisition entirely
+  when it isn't (script execution stays disabled, the server keeps running)
+  instead of acquiring on a missing path and crashing later with
   `ClassCastException: GhidraPlaceholderBundle cannot be cast to
   GhidraSourceBundle`.
 
