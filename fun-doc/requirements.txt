@@ -10,7 +10,7 @@ pyyaml>=6.0.3
 # SQLAlchemy Core is the dialect-portable query layer; psycopg is only
 # needed for users who configure the Postgres backend. SQLite is stdlib.
 sqlalchemy>=2.0.50,<3.0
-psycopg[binary]>=3.1; python_version >= "3.10"
+psycopg[binary]>=3.3.4; python_version >= "3.10"
 
 # Gemini provider — no pip dependency needed.
 # The Gemini worker provider's SDK (gemini_agent_sdk) is vendored at
