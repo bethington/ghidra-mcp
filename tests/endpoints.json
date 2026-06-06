@@ -1,7 +1,7 @@
 {
   "version": "5.12.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 245,
+  "total_endpoints": 252,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -646,6 +646,7 @@
       "params": [
         "name",
         "fields",
+        "replace_placeholder",
         "program"
       ],
       "description": "Create structure. Body fields must be a JSON array of objects with name and type, plus optional decimal offset. Example fields: [{\"name\":\"dwId\",\"type\":\"uint\",\"offset\":0},{\"name\":\"pNext\",\"type\":\"void *\",\"offset\":4}]. Type may be any resolvable Ghidra data type or existing struct name."
@@ -850,6 +851,7 @@
       "category": "datatype",
       "params": [
         "type_name",
+        "resolve_demangler_duplicate",
         "program"
       ],
       "description": "Delete data type"
@@ -970,6 +972,18 @@
         "program"
       ],
       "description": "Disassemble function"
+    },
+    {
+      "path": "/embed_struct_field",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "parent_struct",
+        "field_name",
+        "embedded_struct",
+        "program"
+      ],
+      "description": "Replace a structure field with an embedded struct type by value (e.g. Rectangle inside LayoutNode). Uses modify_struct_field internally."
     },
     {
       "path": "/emulate_function",
@@ -1186,13 +1200,6 @@
       "description": "Get function at cursor (GUI only)"
     },
     {
-      "path": "/get_current_selection",
-      "method": "GET",
-      "category": "getter",
-      "params": [],
-      "description": "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted."
-    },
-    {
       "path": "/get_current_program_info",
       "method": "GET",
       "category": "program",
@@ -1200,6 +1207,13 @@
         "program"
       ],
       "description": "Get current program info"
+    },
+    {
+      "path": "/get_current_selection",
+      "method": "GET",
+      "category": "getter",
+      "params": [],
+      "description": "Get highlighted address ranges in the CodeBrowser listing (GUI only). Returns {program, is_empty, ranges:[{start,end,length}], min_address, max_address, num_addresses} or an empty-selection payload when nothing is highlighted."
     },
     {
       "path": "/get_data_type_size",
@@ -1872,6 +1886,18 @@
       "description": "Modify struct field"
     },
     {
+      "path": "/modify_struct_field_type",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "struct_name",
+        "field_name",
+        "new_type",
+        "program"
+      ],
+      "description": "Set a structure field's type by name or offset (offset:N). Same as modify_struct_field with new_type only."
+    },
+    {
       "path": "/move_data_type_to_category",
       "method": "POST",
       "category": "datatype",
@@ -1917,8 +1943,8 @@
       "method": "POST",
       "category": "headless",
       "params": [
-        "path",
         "headless",
+        "path",
         "program"
       ],
       "description": "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params."
@@ -1960,6 +1986,20 @@
         "program"
       ],
       "description": "Trigger full auto-analysis on a program"
+    },
+    {
+      "path": "/recreate_struct",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "name",
+        "fields",
+        "size",
+        "replace_placeholder",
+        "force",
+        "program"
+      ],
+      "description": "Replace a structure in one step: optionally remove an existing same-named type, then create with fields JSON (same shape as create_struct). Use when resize_struct cannot apply or you are rebuilding layout from get_struct_layout export. Set force=true to delete a non-stub type that is not referenced."
     },
     {
       "path": "/remove_function_tag",
@@ -2088,6 +2128,30 @@
         "program"
       ],
       "description": "Batch rename variables"
+    },
+    {
+      "path": "/resize_struct",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "name",
+        "new_size",
+        "preserve_fields",
+        "force",
+        "program"
+      ],
+      "description": "Grow or shrink an existing structure by total byte size. Defined fields whose end offset fits within new_size are preserved; growth pads with undefined filler. Refuses shrink that would clip defined fields unless force=true. See docs/STRUCT_RESIZE_WORKFLOW.md."
+    },
+    {
+      "path": "/resolve_duplicate_type",
+      "method": "POST",
+      "category": "datatype",
+      "params": [
+        "type_name",
+        "delete_demangler_stub",
+        "program"
+      ],
+      "description": "Find duplicate data types by simple name; delete unused /Demangler size-1 stubs when a larger canonical type exists. Helps fix 'Can't resolve datatype' and create_struct already exists on placeholders."
     },
     {
       "path": "/run_analysis",
@@ -2429,6 +2493,18 @@
       "description": "Set PRE_COMMENT"
     },
     {
+      "path": "/set_decompiler_variable_type",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "function_address",
+        "variable_name",
+        "new_type",
+        "program"
+      ],
+      "description": "Set a decompiler (high-level) variable or parameter type by name. Same as set_local_variable_type. For __thiscall 'this', prefer set_function_this_type."
+    },
+    {
       "path": "/set_disassembly_comment",
       "method": "POST",
       "category": "comment",
@@ -2472,6 +2548,17 @@
         "program"
       ],
       "description": "Update the comment/description on an existing program-wide function tag."
+    },
+    {
+      "path": "/set_function_this_type",
+      "method": "POST",
+      "category": "function",
+      "params": [
+        "function_address",
+        "this_type",
+        "program"
+      ],
+      "description": "Set the decompiler/database type of the implicit 'this' pointer (ECX on x86 __thiscall/__fastcall). Use after set_function_prototype when decompile still shows void* this or a wrong class. Accepts 'MyClass *' or 'MyClass'. On programs with multiple address spaces, prefix function_address with the space name (mem:1000)."
     },
     {
       "path": "/set_global",
