@@ -2,8 +2,10 @@ package com.xebyte.headless;
 
 import com.xebyte.core.*;
 import ghidra.program.model.listing.Program;
+import ghidra.util.Msg;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,21 +31,64 @@ public class HeadlessManagementService {
     // Program management
     // ========================================================================
 
-    @McpTool(path = "/load_program", method = "POST", description = "Load a binary file into the headless server for analysis", category = "headless")
+    @McpTool(path = "/load_program", method = "POST",
+            description = "Load a binary file into the headless server for analysis. "
+                + "For raw firmware (no recognizable header), pass `language` (e.g. 'ARM:LE:32:Cortex') "
+                + "and optionally `compiler_spec` (e.g. 'default'); the file is then imported as raw binary "
+                + "with the requested processor. When `language` is omitted, the loader auto-detects the format.",
+            category = "headless")
     public Response loadProgram(
-            @Param(value = "file", source = ParamSource.BODY, description = "Absolute path to the binary file") String filePath) {
+            @Param(value = "file", source = ParamSource.BODY, description = "Absolute path to the binary file") String filePath,
+            @Param(value = "language", source = ParamSource.BODY, defaultValue = "",
+                description = "Optional Ghidra language ID for raw binaries (e.g. 'ARM:LE:32:Cortex', 'x86:LE:64:default'). Leave empty to auto-detect.") String languageId,
+            @Param(value = "compiler_spec", source = ParamSource.BODY, defaultValue = "",
+                description = "Optional compiler-spec ID (e.g. 'default', 'gcc', 'windows'). Only consulted when `language` is set; falls back to the language default when empty.") String compilerSpecId) {
         if (filePath == null || filePath.isEmpty()) {
             return Response.err("file path required");
         }
-        File file = new File(filePath);
+        // Enforce the GHIDRA_MCP_FILE_ROOT allow-list before touching the disk.
+        // resolveWithinFileRoot canonicalizes the path (resolving symlinks and
+        // `..`) and returns null when a root is configured and the path escapes
+        // it; with no root configured it returns the canonical path unchanged.
+        // filePath is non-null here, so a null result means "outside the root".
+        SecurityConfig security = SecurityConfig.getInstance();
+        Path resolved = security.resolveWithinFileRoot(filePath);
+        if (resolved == null) {
+            // Log the configured root server-side for the operator, but keep it
+            // out of the client response so we don't disclose the filesystem
+            // layout to the (untrusted) caller.
+            Msg.warn(this, "Rejected /load_program for '" + filePath
+                + "': outside configured GHIDRA_MCP_FILE_ROOT ("
+                + security.getFileRoot() + ")");
+            return Response.err("Access denied: path is outside the configured file root");
+        }
+        File file = resolved.toFile();
         if (!file.exists()) {
             return Response.err("File not found: " + filePath);
         }
-        Program program = programProvider.loadProgramFromFile(file);
+        // Normalize once so the provider call and the error messages all use the
+        // same trimmed values (a doc-copied " ARM:LE:32:Cortex " otherwise passes
+        // the non-empty check but fails lookup with a confusing message).
+        String normalizedLanguageId = (languageId == null) ? "" : languageId.trim();
+        String normalizedCompilerSpecId = (compilerSpecId == null) ? "" : compilerSpecId.trim();
+        boolean hasLanguage = !normalizedLanguageId.isEmpty();
+        Program program = hasLanguage
+            ? programProvider.loadProgramFromFileWithLanguage(file, normalizedLanguageId, normalizedCompilerSpecId)
+            : programProvider.loadProgramFromFile(file);
         if (program != null) {
-            return Response.text("{\"success\": true, \"program\": \"" + ServiceUtils.escapeJson(program.getName()) + "\"}");
+            String langOut = program.getLanguageID() != null
+                ? program.getLanguageID().getIdAsString() : "";
+            return Response.text(JsonHelper.toJson(JsonHelper.mapOf(
+                "success", true,
+                "program", program.getName(),
+                "language", langOut)));
         }
-        return Response.err("Failed to load program from: " + filePath);
+        if (hasLanguage) {
+            return Response.err("Failed to load program with language '" + normalizedLanguageId
+                + "' from: " + filePath);
+        }
+        return Response.err("Failed to load program from: " + filePath
+            + " (auto-detect failed; for raw firmware pass `language`, e.g. 'ARM:LE:32:Cortex')");
     }
 
     // ========================================================================
