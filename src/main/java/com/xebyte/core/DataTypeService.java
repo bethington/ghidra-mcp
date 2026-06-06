@@ -1401,8 +1401,8 @@ public class DataTypeService {
         }
 
         if (!success.get() && resolveDemanglerDuplicate) {
-            resolveDuplicateType(typeName, true, programName);
-            return deleteDataType(typeName, false, programName);
+            Response resolved = resolveDuplicateType(typeName, true, programName);
+            return Response.text(result.toString() + "\n" + resolved.toJson());
         }
 
         return Response.text(result.toString());
