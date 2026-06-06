@@ -21,9 +21,11 @@ import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.EndpointDef;
 import com.xebyte.core.JsonHelper;
 import com.xebyte.core.ProgramProvider;
+import com.xebyte.core.SecurityConfig;
 import com.xebyte.core.ThreadingStrategy;
 import ghidra.GhidraApplicationLayout;
 import ghidra.GhidraLaunchable;
+import ghidra.app.script.GhidraScriptUtil;
 import ghidra.framework.Application;
 import ghidra.framework.ApplicationConfiguration;
 import ghidra.framework.HeadlessGhidraApplicationConfiguration;
@@ -62,6 +64,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     private int port = DEFAULT_PORT;
     private String bindAddress = DEFAULT_BIND_ADDRESS;
     private boolean running = false;
+    private boolean scriptingBundleHostAcquired = false;
 
     // Endpoint handler registry
     private HeadlessEndpointHandler endpointHandler;
@@ -201,6 +204,91 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
             ApplicationConfiguration config = new HeadlessGhidraApplicationConfiguration();
             Application.initializeApplication(layout, config);
             System.out.println("Ghidra initialized in headless mode");
+        }
+
+        // Initialize the OSGi/BundleHost subsystem used by GhidraScriptProvider.
+        // In GUI mode this is done by GhidraScriptMgrPlugin; in headless we must do it
+        // explicitly or every /run_ghidra_script and /run_script_inline call throws
+        // NullPointerException at JavaScriptProvider.getScriptInstance() because
+        // GhidraScriptUtil.bundleHost is null.
+        //
+        // Gated on GHIDRA_MCP_ALLOW_SCRIPTS (via SecurityConfig) to avoid the Felix
+        // OSGi framework startup cost (~hundreds of ms) when script execution is
+        // disabled (default since v5.4.1). Held for the lifetime of the server;
+        // released by stop().
+        if (SecurityConfig.getInstance().areScriptsAllowed()) {
+            try {
+                // BundleHost.add() inspects each path: an existing directory yields a
+                // GhidraSourceBundle, anything else (missing path, plain file) yields a
+                // GhidraPlaceholderBundle. A placeholder makes JavaScriptProvider crash
+                // later with `ClassCastException: GhidraPlaceholderBundle cannot be cast
+                // to GhidraSourceBundle`. Ensure the user script dir exists before
+                // acquire so it gets registered as a real source bundle.
+                java.io.File userScriptDir = GhidraScriptUtil.USER_SCRIPTS_DIR != null
+                        ? new java.io.File(GhidraScriptUtil.USER_SCRIPTS_DIR)
+                        : new java.io.File(System.getProperty("user.home"), "ghidra_scripts");
+                boolean scriptDirExisted = userScriptDir.exists();
+                if (!scriptDirExisted) {
+                    userScriptDir.mkdirs();
+                }
+                // acquireBundleHostReference() registers GhidraScriptUtil.USER_SCRIPTS_DIR
+                // itself — not a local override — so a temp-dir fallback would still
+                // leave the canonical (missing) path registered as a
+                // GhidraPlaceholderBundle, which crashes JavaScriptProvider later with a
+                // ClassCastException. If the canonical directory isn't a real, writable
+                // directory after the mkdir attempt we therefore short-circuit: scripts
+                // stay disabled but the server keeps running, instead of acquiring on a
+                // placeholder path.
+                if (!userScriptDir.isDirectory() || !userScriptDir.canWrite()) {
+                    System.err.println(
+                            "User script directory is missing or not writable ("
+                                    + userScriptDir.getAbsolutePath()
+                                    + "); skipping BundleHost init, script execution disabled.");
+                    return;
+                }
+                System.out.println((scriptDirExisted ? "Using" : "Created")
+                        + " user script directory: " + userScriptDir.getAbsolutePath());
+
+                GhidraScriptUtil.acquireBundleHostReference();
+                scriptingBundleHostAcquired = true;
+                System.out.println(
+                        "GhidraScriptUtil BundleHost acquired (script execution enabled)");
+
+                // acquireBundleHostReference() registers script directories but leaves
+                // them DISABLED. JavaScriptProvider.loadClass() then fails with
+                // "Failed to get OSGi bundle containing script" because the Felix
+                // framework refuses to resolve classes from disabled bundles.
+                // HeadlessAnalyzer explicitly calls bundleHost.add(paths, true, true)
+                // — we do the equivalent by enabling the user script dir bundle here.
+                try {
+                    ghidra.app.plugin.core.osgi.BundleHost bh =
+                            GhidraScriptUtil.getBundleHost();
+                    generic.jar.ResourceFile userScriptResource =
+                            new generic.jar.ResourceFile(userScriptDir);
+                    ghidra.app.plugin.core.osgi.GhidraBundle bundle =
+                            bh.getGhidraBundle(userScriptResource);
+                    if (bundle == null) {
+                        bh.add(userScriptResource, true, false);
+                        System.out.println(
+                                "Added user script directory bundle (enabled): "
+                                        + userScriptDir.getAbsolutePath());
+                    } else if (!bundle.isEnabled()) {
+                        bh.enable(bundle);
+                        System.out.println(
+                                "Enabled existing user script directory bundle: "
+                                        + userScriptDir.getAbsolutePath());
+                    }
+                } catch (Throwable t2) {
+                    System.err.println(
+                            "Failed to enable user script bundle: " + t2.getMessage());
+                    t2.printStackTrace();
+                }
+            } catch (Throwable t) {
+                System.err.println(
+                        "Failed to initialize GhidraScriptUtil BundleHost; script execution will fail: "
+                                + t.getMessage());
+                t.printStackTrace();
+            }
         }
     }
 
@@ -548,6 +636,17 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         if (programProvider != null) {
             System.out.println("Closing programs...");
             programProvider.closeAllPrograms();
+        }
+
+        if (scriptingBundleHostAcquired) {
+            try {
+                GhidraScriptUtil.releaseBundleHostReference();
+                scriptingBundleHostAcquired = false;
+                System.out.println("GhidraScriptUtil BundleHost released");
+            } catch (Throwable t) {
+                System.err.println(
+                        "Error releasing GhidraScriptUtil BundleHost: " + t.getMessage());
+            }
         }
 
         System.out.println("Server stopped");

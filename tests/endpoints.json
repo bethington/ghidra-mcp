@@ -1832,9 +1832,11 @@
       "method": "POST",
       "category": "headless",
       "params": [
-        "file"
+        "file",
+        "language",
+        "compiler_spec"
       ],
-      "description": "Load a binary file into the headless server for analysis"
+      "description": "Load a binary file into the headless server for analysis. For raw firmware (no recognizable header), pass `language` (e.g. 'ARM:LE:32:Cortex') and optionally `compiler_spec` (e.g. 'default'); the file is then imported as raw binary with the requested processor. When `language` is omitted, the loader auto-detects the format."
     },
     {
       "path": "/load_program_from_project",

@@ -163,6 +163,75 @@ def test_resolve_ghidra_user_dir_picks_public_when_dev_and_public_coexist(
     assert resolved != dev_loc
 
 
+def test_resolve_ghidra_user_dir_returns_public_when_only_dev_exists(tmp_path: Path):
+    """#217 regression: a freshly-installed Ghidra has no user-config
+    dir yet (Ghidra creates it lazily on first launch). If the deploy
+    target is ``ghidra_12.1_PUBLIC`` and only a leftover
+    ``ghidra_12.1_DEV`` sibling exists in ``%APPDATA%\\ghidra\\``, the
+    resolver must NOT silently fall back to the DEV dir — that
+    installs the extension where the running PUBLIC Ghidra never
+    looks. Return the (nonexistent) PUBLIC path; Ghidra will create
+    it."""
+    user_base = tmp_path / "ghidra"
+    dev_dir = user_base / "ghidra_12.1_DEV"
+    dev_dir.mkdir(parents=True)
+    # Note: no _PUBLIC dir created — the bug scenario.
+
+    resolved = resolve_ghidra_user_dir(Path("F:/ghidra_12.1_PUBLIC"), user_base)
+
+    assert resolved == user_base / "ghidra_12.1_PUBLIC"
+    assert resolved != dev_dir
+
+
+def test_resolve_ghidra_user_dir_returns_dev_when_install_is_dev(tmp_path: Path):
+    """Symmetric to the PUBLIC case: a DEV install resolves to the
+    DEV user dir, even when a PUBLIC sibling exists from a prior
+    install."""
+    user_base = tmp_path / "ghidra"
+    public_dir = user_base / "ghidra_12.1_PUBLIC"
+    public_dir.mkdir(parents=True)
+
+    resolved = resolve_ghidra_user_dir(Path("F:/ghidra_12.1_DEV"), user_base)
+
+    assert resolved == user_base / "ghidra_12.1_DEV"
+    assert resolved != public_dir
+
+
+def test_resolve_ghidra_user_dir_ignores_unrelated_appdata_dirs(tmp_path: Path):
+    """The resolver must not be influenced by sibling Ghidra-version
+    dirs from older installs when constructing the target dir name.
+    Previously the resolver globbed for ``ghidra_<version>*`` and
+    could match e.g. ``ghidra_12.1_DEV_location_ghidra`` (a Ghidra
+    locator file) instead of the proper user dir."""
+    user_base = tmp_path / "ghidra"
+    (user_base / "ghidra_12.0.4_PUBLIC").mkdir(parents=True)
+    (user_base / "ghidra_12.1_DEV_location_ghidra").mkdir(parents=True)
+
+    resolved = resolve_ghidra_user_dir(Path("F:/ghidra_12.1_PUBLIC"), user_base)
+
+    assert resolved == user_base / "ghidra_12.1_PUBLIC"
+
+
+def test_resolve_ghidra_user_dir_reads_application_properties_when_path_unnamed(
+    tmp_path: Path,
+):
+    """A custom install path that doesn't follow the standard
+    ``ghidra_<version>_<layout>`` naming falls back to reading
+    ``application.properties`` for the version. Layout is unknown in
+    that case; resolver defaults to PUBLIC since released Ghidras are
+    PUBLIC."""
+    install = tmp_path / "custom-ghidra-install"
+    (install / "Ghidra").mkdir(parents=True)
+    (install / "Ghidra" / "application.properties").write_text(
+        "application.version=12.1\n", encoding="utf-8"
+    )
+    user_base = tmp_path / "ghidra"
+
+    resolved = resolve_ghidra_user_dir(install, user_base)
+
+    assert resolved == user_base / "ghidra_12.1_PUBLIC"
+
+
 def test_resolve_ghidra_user_dir_falls_back_to_latest_existing_dir(tmp_path: Path):
     user_base = tmp_path / "ghidra"
     latest_dir = user_base / "ghidra_12.1.0_PUBLIC"

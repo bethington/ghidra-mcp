@@ -4,6 +4,82 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Security
+
+- **`/load_program` now enforces the `GHIDRA_MCP_FILE_ROOT` allow-list.**
+  The endpoint accepts an absolute filesystem path; when
+  `GHIDRA_MCP_FILE_ROOT` is configured the path is canonicalized through
+  `SecurityConfig.resolveWithinFileRoot(...)` (resolving symlinks and
+  `..`) and rejected with `Access denied` when it escapes the root,
+  before any disk access. The rejection message is generic (the
+  configured root is logged server-side, not echoed to the caller, to
+  avoid disclosing the filesystem layout). Previously the allow-list
+  helper existed but was never wired to this endpoint, so an operator
+  who set the root expecting path-traversal protection could still
+  have the agent read any file on disk. With no root configured the
+  behavior is unchanged.
+
+### Added
+
+- **`/load_program` accepts optional `language` and `compiler_spec`.**
+  Raw firmware blobs with no recognizable header (e.g. ARM Cortex-M
+  `.mem` dumps) can now be imported as raw binary with an explicit
+  processor by passing `language` (e.g. `ARM:LE:32:Cortex`) and
+  optionally `compiler_spec`; when `language` is omitted the loader
+  auto-detects the format as before. Both values are trimmed before
+  the `LanguageID` / `CompilerSpecID` lookup so doc-copied inputs like
+  `" ARM:LE:32:Cortex "` resolve instead of failing the lookup. The
+  success response now also echoes the resolved `language`.
+
+### Fixed
+
+- **Headless: `/run_ghidra_script` and `/run_script_inline` crashed
+  with `NullPointerException`** at
+  `JavaScriptProvider.getScriptInstance()` because
+  `GhidraScriptUtil.bundleHost` is never initialized outside the GUI
+  (in GUI mode `GhidraScriptMgrPlugin` does it). The headless server
+  now calls `GhidraScriptUtil.acquireBundleHostReference()` at startup
+  and `releaseBundleHostReference()` at shutdown when
+  `GHIDRA_MCP_ALLOW_SCRIPTS` is enabled (via
+  `SecurityConfig.areScriptsAllowed()`), then ensures the user script
+  directory is registered as an enabled `GhidraSourceBundle` so
+  `JavaScriptProvider.loadClass()` can resolve compiled scripts.
+  Gated on the existing opt-in flag to keep the ~hundreds-of-ms Felix
+  OSGi startup cost off the default path.
+
+- **Docker runtime image switched from `eclipse-temurin:21-jre` to
+  `eclipse-temurin:21-jdk`.** Ghidra's `GhidraScript` OSGi loader
+  invokes `javax.tools.ToolProvider.getSystemJavaCompiler()` to
+  compile `.java` scripts on the fly; that returns `null` on a JRE,
+  surfacing as `AssertException: Can't find java compiler` for any
+  Java script run inside the container.
+
+- **`ProgramScriptService` now surfaces OSGi build/activate output**
+  when script execution fails. The `StringWriter` capturing
+  `JavaScriptProvider.activateAll()` output is appended to the error
+  response under `--- BUILD/ACTIVATE OUTPUT ---`, so Felix compile
+  errors are visible to the caller instead of being silently dropped.
+  The capturing `PrintWriter` is flushed before the buffer is read so
+  the surfaced text is complete, and the output is bounded to its last
+  16 KB (with a truncation notice) so a verbose compiler failure can't
+  blow up the response payload.
+
+- **Headless script init no longer registers a placeholder bundle when
+  the user script directory can't be created.** `acquireBundleHostReference()`
+  registers `GhidraScriptUtil.USER_SCRIPTS_DIR` itself, so a local temp-dir
+  fallback wouldn't change the path it registers and the missing canonical
+  directory would still become a `GhidraPlaceholderBundle`. The server now
+  ensures the canonical user script directory is a real, writable directory
+  (creating it if needed) and short-circuits BundleHost acquisition entirely
+  when it isn't (script execution stays disabled, the server keeps running)
+  instead of acquiring on a missing path and crashing later with
+  `ClassCastException: GhidraPlaceholderBundle cannot be cast to
+  GhidraSourceBundle`.
+
+---
+
 ## v5.12.0 - 2026-05-23 (community-driven tools: /get_current_selection + GUI /open_project)
 
 Minor release. Two new endpoints filed/scoped by community feedback
