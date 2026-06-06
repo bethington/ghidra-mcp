@@ -1724,13 +1724,13 @@ public class DataTypeService {
         if (size <= 0) {
             return created;
         }
-       
-       if (!(ServiceUtils.findDataTypeByNameInAllCategories(dtm, name) instanceof Structure)) {
+
+        if (!(ServiceUtils.findDataTypeByNameInAllCategories(dtm, name) instanceof Structure)) {
             return created;
         }
 
         Response resized = resizeStruct(name, size, true, true, programName);
-        
+
         if (resized instanceof Response.Err) {
             return Response.err("Created struct but post-create resize failed: "
                     + ((Response.Err) resized).message());
