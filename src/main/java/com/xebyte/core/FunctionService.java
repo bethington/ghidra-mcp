@@ -1237,6 +1237,56 @@ public class FunctionService {
     // ========================================================================
 
     /**
+     * Build the decompiler-default-name guidance appended to a "variable not found"
+     * error from set_local_variable_type. Pure function of the requested name and the
+     * current high-symbol names, so it is unit-testable without a live decompile.
+     *
+     * <p>Ghidra default names follow {@code <prefix>Var<digits>} (uVar1, puVar3, iVar5,
+     * psVar7, ...). When such a name misses, there are two recoverable causes:
+     * <ul>
+     *   <li><b>SSA-renumber drift</b> — same-prefix default names still exist but with
+     *       different digits, because a previous set_local_variable_type call re-decompiled
+     *       and renumbered the temporaries. Fix: batch with set_variables.</li>
+     *   <li><b>Renamed-away / register-resident</b> — no default-named variables remain at
+     *       all (they were renamed, or the function is register/SIMD-heavy so Ghidra names
+     *       them local_&lt;REG&gt;_*). The caller is working from a stale decompilation. Fix:
+     *       re-decompile for current names, or batch with set_variables.</li>
+     * </ul>
+     *
+     * @return the hint sentence (with trailing space), or "" when no hint applies.
+     */
+    public static String buildVariableNameHint(String variableName, List<String> availableNames) {
+        if (variableName == null || !variableName.matches("^[a-z]+Var\\d+$")) {
+            return "";
+        }
+        if (availableNames == null) {
+            availableNames = java.util.Collections.emptyList();
+        }
+        String prefix = variableName.replaceAll("\\d+$", "");
+        boolean hasSamePrefix = availableNames.stream()
+                .anyMatch(n -> n != null && n.startsWith(prefix) && n.matches("^[a-z]+Var\\d+$"));
+        if (hasSamePrefix) {
+            return "Hint: this looks like SSA-renumber drift from a previous "
+                    + "set_local_variable_type call in the same function. "
+                    + "Use set_variables for ALL variable type+rename changes in one "
+                    + "atomic call to avoid this — individual set_local_variable_type "
+                    + "calls trigger re-decompilation that renumbers SSA temporaries. ";
+        }
+        boolean hasAnyDefaultName = availableNames.stream()
+                .anyMatch(n -> n != null && n.matches("^[a-z]+Var\\d+$"));
+        if (!hasAnyDefaultName) {
+            return "Hint: '" + variableName + "' is a Ghidra decompiler default name, but no "
+                    + "default-named (uVarN/iVarN/puVarN) variables remain in this function — "
+                    + "they have been renamed already, or the variables are register-resident "
+                    + "(e.g. local_ESI_*, local_MM*) in a register/SIMD-heavy function. You are "
+                    + "likely working from a stale decompilation: re-decompile to read the current "
+                    + "names from the Available list above, then retype — or use set_variables to "
+                    + "rename+retype in one atomic call. ";
+        }
+        return "";
+    }
+
+    /**
      * Set a local variable's type using HighFunctionDBUtil.updateDBVariable.
      */
     @McpTool(path = "/set_local_variable_type", method = "POST", description = "Set the data type of a local variable. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
@@ -1322,27 +1372,10 @@ public class FunctionService {
                                     .append(". ");
                         }
 
-                        // SSA churn hint: when the failed name follows the
-                        // <prefix><digit>+ pattern of a Ghidra SSA temporary
-                        // (iVar5, psVar7, puVar2, ...) and there is a similar
-                        // name in the available list with a *different* digit,
-                        // the most likely cause is that a previous
-                        // set_local_variable_type call retyped a variable in
-                        // the same function and re-decompilation renumbered
-                        // SSA temporaries. Recommend the atomic batch tool
-                        // explicitly rather than leaving the worker to guess.
-                        if (variableName.matches("^[a-z]+Var\\d+$")) {
-                            String prefix = variableName.replaceAll("\\d+$", "");
-                            boolean hasSamePrefix = availableNames.stream()
-                                    .anyMatch(n -> n.startsWith(prefix) && n.matches("^[a-z]+Var\\d+$"));
-                            if (hasSamePrefix) {
-                                resultMsg.append("Hint: this looks like SSA-renumber drift from a previous ")
-                                        .append("set_local_variable_type call in the same function. ")
-                                        .append("Use set_variables for ALL variable type+rename changes in one ")
-                                        .append("atomic call to avoid this — individual set_local_variable_type ")
-                                        .append("calls trigger re-decompilation that renumbers SSA temporaries. ");
-                            }
-                        }
+                        // Decompiler-default-name guidance (SSA churn / renamed-away /
+                        // register-resident). Pure function of the requested name + the
+                        // available high-symbol names — see buildVariableNameHint.
+                        resultMsg.append(buildVariableNameHint(variableName, availableNames));
 
                         // Check if variable exists in low-level API but not high-level (phantom variable)
                         Variable[] lowLevelVars = func.getLocalVariables();
