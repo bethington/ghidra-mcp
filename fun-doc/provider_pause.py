@@ -34,15 +34,70 @@ predictable.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import random
 import re
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+
+
+@contextlib.contextmanager
+def _interprocess_lock(lock_path: Path):
+    """Best-effort advisory lock serializing provider_pauses.json writes ACROSS processes.
+
+    install() runs inside spawned worker subprocesses (multiprocessing 'spawn'), each with
+    its own threading.Lock — which provides no cross-process mutual exclusion. This OS-level
+    lock serializes the read/replace critical section so two providers hitting a quota wall
+    at once cannot tear the file. It is fail-open: if OS locking is unavailable it proceeds
+    unlocked rather than hang or crash.
+    """
+    f = None
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        f = open(lock_path, "a+")
+        if os.name == "nt":
+            import msvcrt
+
+            # Non-blocking acquire with bounded retry so a stuck holder can't hang a worker.
+            for _ in range(50):
+                try:
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.1)
+        else:
+            import fcntl
+
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    except Exception:
+        pass  # fail open
+    try:
+        yield
+    finally:
+        if f is not None:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                f.close()
+            except Exception:
+                pass
 
 
 # Walls under this duration stay in retry logic (soft rate limits self-heal).
@@ -389,14 +444,27 @@ class ProviderPauseManager:
                 for (p, m), (until, reason) in self._entries.items()
             },
         }
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except (OSError, AttributeError):
-                pass
-        tmp.replace(path)
+        # Serialize across processes: each spawned worker has its own threading.Lock, so the
+        # OS-level lock is what actually prevents two writers from tearing the file.
+        with _interprocess_lock(path.with_suffix(".json.lock")):
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except (OSError, AttributeError):
+                    pass
+            # On Windows another process briefly holding the file open makes replace() raise
+            # PermissionError; retry like _atomic_write_state in fun_doc.py rather than lose
+            # the write.
+            for attempt in range(5):
+                try:
+                    tmp.replace(path)
+                    break
+                except PermissionError:
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
 
     def _compute_active_locked(self) -> tuple[list, bool]:
         """Return (snapshot, pruned). Acquires the lock once: prunes expired
