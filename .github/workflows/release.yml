@@ -112,6 +112,26 @@ jobs:
         mvn -q install:install-file -Dfile="${GHIDRA_DIR}/Ghidra/Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar"         -DgroupId=ghidra -DartifactId=Debugger-rmi-trace        -Dversion=${GV} -Dpackaging=jar
         echo "✅ Installed 18 Ghidra JARs to Maven local repository"
 
+    - name: Set up Python (offline test gate)
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Offline test gate (block release on red tests)
+      run: |
+        # A tagged release must not ship if the offline tiers are red. Integration
+        # tests need live Ghidra and stay on the self-hosted release-regression path;
+        # here we run everything that passes without a Ghidra server.
+        echo "Running offline Java tests..."
+        mvn -q test -Dtest='com.xebyte.offline.*Test'
+        echo "Running Python unit tests..."
+        python -m pip install --upgrade pip
+        pip install -q -r requirements-test.txt
+        pip install -q -r requirements.txt
+        python -m pytest tests/unit/ --no-cov -q
+        echo "✅ Offline test gate passed"
+
     - name: Build with Maven
       run: |
         echo "Building GhidraMCP with Maven..."

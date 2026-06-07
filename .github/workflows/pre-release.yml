@@ -106,6 +106,23 @@ jobs:
 
         echo "Installed 15 Ghidra JARs to Maven local repository"
 
+    - name: Set up Python (offline test gate)
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Offline test gate (block pre-release on red tests)
+      run: |
+        echo "Running offline Java tests..."
+        mvn -q test -Dtest='com.xebyte.offline.*Test'
+        echo "Running Python unit tests..."
+        python -m pip install --upgrade pip
+        pip install -q -r requirements-test.txt
+        pip install -q -r requirements.txt
+        python -m pytest tests/unit/ --no-cov -q
+        echo "✅ Offline test gate passed"
+
     - name: Build with Maven
       run: |
         echo "Building GhidraMCP pre-release..."
