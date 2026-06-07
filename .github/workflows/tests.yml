@@ -179,12 +179,13 @@ jobs:
         pip install -q -r requirements.txt
         pip install -q -r fun-doc/requirements.txt
 
-    - name: Run offline performance/regression tests (per-file isolation)
+    - name: Run offline performance/regression tests
       run: |
         # These suites guard fun-doc (fun_doc.py, storage/, audit/, library detector,
-        # selector, etc.) and run without a live Ghidra server. They share fun-doc module
-        # globals (e.g. the reentrant _state_lock) and leak across files when collected in
-        # one process, so each file is run in its own pytest process for isolation.
+        # selector, etc.) and run without a live Ghidra server. The autouse fixture in
+        # tests/performance/conftest.py isolates every test from the real fun-doc DB
+        # (forces FUN_DOC_DB_URL to a per-test SQLite + resets the repo singleton), so the
+        # whole suite is collectible in a single process — no per-file isolation needed.
         #
         # Excluded from this CI tier:
         #   * the four live-Ghidra files (need http://127.0.0.1:8089) — integration tier
@@ -192,26 +193,15 @@ jobs:
         #   * the benchmark tests — "manual only" by design (CLAUDE.md); they depend on local
         #     benchmark assets not tracked in the repo (e.g. fun-doc/benchmark/extract_truth.py),
         #     a live Ghidra (Benchmark.dll), or an LLM judge, none of which exist in CI.
-        # Do NOT use `set -e` here: it would stop at the first failing file and mask the rest.
-        # Collect every failure and fail once at the end.
-        EXCLUDE='batch_scoring_consistency|health_endpoint|http_concurrency|listing_consistency|test_benchmark_'
-        failed=""
-        for f in tests/performance/test_*.py; do
-          if echo "$f" | grep -Eq "$EXCLUDE"; then
-            echo "skip (live-Ghidra / manual-benchmark tier): $f"
-            continue
-          fi
-          echo "::group::$f"
-          if ! python -m pytest "$f" --no-cov -q; then
-            failed="$failed $f"
-            echo "::error::offline regression failed: $f"
-          fi
-          echo "::endgroup::"
-        done
-        if [ -n "$failed" ]; then
-          echo "❌ Offline regression failures:$failed"
-          exit 1
-        fi
+        python -m pytest tests/performance/ --no-cov -q \
+          --ignore=tests/performance/test_batch_scoring_consistency.py \
+          --ignore=tests/performance/test_health_endpoint.py \
+          --ignore=tests/performance/test_http_concurrency.py \
+          --ignore=tests/performance/test_listing_consistency.py \
+          --ignore=tests/performance/test_benchmark_extract_truth.py \
+          --ignore=tests/performance/test_benchmark_ghidra_bridge.py \
+          --ignore=tests/performance/test_benchmark_haiku_judge.py \
+          --ignore=tests/performance/test_benchmark_scorer.py
         echo "✅ Offline regression suite passed"
 
   code-quality:
