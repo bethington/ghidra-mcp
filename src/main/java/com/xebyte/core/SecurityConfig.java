@@ -26,12 +26,18 @@ import java.nio.file.Paths;
  *       Without an explicit opt-in they return 403. Scripts endpoints were
  *       always-on before v5.4.1; the flip to default-off is a deliberate
  *       breaking change in the security release.
- *   <li>{@code GHIDRA_MCP_FILE_ROOT} — if set to a directory path, every
- *       endpoint that takes a filesystem path ({@code /import_file},
- *       {@code /delete_file}, {@code /open_project}, etc.) canonicalizes the
- *       input and requires that the resolved path fall under this root.
- *       Prevents path traversal. When unset, paths are accepted as-is
- *       (pre-v5.4.1 behavior).
+ *   <li>{@code GHIDRA_MCP_FILE_ROOT} — if set to a directory path, endpoints that take a
+ *       real <em>filesystem</em> path canonicalize the input (via
+ *       {@link #resolveWithinFileRoot(String)}) and require that the resolved path fall
+ *       under this root, preventing path traversal. This applies to {@code /import_file}
+ *       (and the headless import path). When unset, paths are accepted as-is (pre-v5.4.1
+ *       behavior).
+ *       <p>Note: {@code /delete_file} and {@code /open_project} operate on Ghidra
+ *       <em>project domain</em> paths (e.g. {@code /Vanilla/1.00/D2Common.dll}), not
+ *       filesystem paths, so file-root canonicalization does not apply to them; their
+ *       analogous containment guard is project-folder scope
+ *       ({@link #isPathInProjectScope(String)}), which is enforced only when a project
+ *       scope is configured.</li>
  * </ul>
  *
  * Also enforces a bind-hardening rule at headless startup:
