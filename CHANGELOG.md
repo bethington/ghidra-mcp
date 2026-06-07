@@ -32,6 +32,13 @@ Complete version history for the Ghidra MCP Server project.
   `HeadlessPaths` is the single validation choke point; covered offline
   by `HeadlessPathsTest`.
 
+- **`/import_program` validates the caller-supplied `target_name`.** The
+  optional program name is now checked as a plain filename (rejecting
+  `/`, `\`, and `..` segments) before the project tree is touched, and
+  the import-folder resolver rejects `.`/`..` path segments, closing a
+  traversal vector that could place or overwrite a program outside the
+  intended folder. Covered offline by `GzfExportImportTest`.
+
 ### Added
 
 - **`/load_program` accepts optional `language` and `compiler_spec`.**
@@ -92,6 +99,15 @@ Complete version history for the Ghidra MCP Server project.
   install step.
 
 ### Fixed
+
+- **Headless: `/export_program` resolves the live program by an exact
+  name.** GZF export now looks the open program up by an exact (then
+  case-insensitive) match instead of the fuzzy substring lookup, so a
+  request for `Common.dll` can no longer pack a different open program
+  such as `D2Common.dll`. Program idempotency on re-open is scoped to
+  the project root rather than a recursive name search, avoiding
+  reopening a same-named file from an unintended folder. Covered offline
+  by `GzfExportImportTest`.
 
 - **Headless: file-loaded programs are materialised into the project so
   `/save_all_programs` and `/export_program` work.** `loadProgramFromFile`
