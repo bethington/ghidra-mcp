@@ -63,11 +63,18 @@ public final class HeadlessArchiveBridge {
      * Restore a {@code .gar} archive into a fresh on-disk project at
      * {@code destLocator}.
      *
-     * <p>{@link RestoreTask} normally fires {@code openRestoredProject} via
-     * its {@link ArchivePlugin} reference at the end of its run. We pass
-     * {@code null} for the plugin and intercept that lambda with a
-     * subclass override so headless callers can decide when (and via which
-     * code path) to open the restored project.
+     * <p>We construct {@link RestoreTask} with a {@code null}
+     * {@link ArchivePlugin} because there is no {@code PluginTool} in
+     * headless mode. {@link RestoreTask#run(TaskMonitor)} extracts the
+     * archive and writes the project marker file <em>before</em> its final
+     * {@code openRestoredProject()} step, which on the Swing thread
+     * dereferences the (null) plugin to auto-open the project in a
+     * front-end tool. That dereference throws a {@code NullPointerException},
+     * but {@code RestoreTask} catches it and only logs it — the restore
+     * itself (extraction + marker file) is already complete. The net effect
+     * is exactly what a headless caller wants: the project is materialised on
+     * disk and the GUI auto-open is skipped. Headless callers re-open through
+     * their own {@code /open_project} path.
      *
      * @throws Exception forwarded from {@link RestoreTask#run(TaskMonitor)}
      */
@@ -78,21 +85,8 @@ public final class HeadlessArchiveBridge {
         if (destLocator == null) {
             throw new IllegalArgumentException("destLocator required");
         }
-        RestoreTask task = new HeadlessRestoreTask(destLocator, garFile);
+        RestoreTask task = new RestoreTask(destLocator, garFile, null);
         task.run(monitor);
     }
-
-    /**
-     * Restore task variant that suppresses the GUI auto-open callback at
-     * the end of {@link RestoreTask#run(TaskMonitor)} \u2014 the base
-     * class would invoke {@code plugin.openProject(...)} on the (null)
-     * {@link ArchivePlugin} and NPE. Headless callers re-open through
-     * their own {@code /open_project} path, which already resets
-     * {@code project.prp} owner to the current user.
-     */
-    private static final class HeadlessRestoreTask extends RestoreTask {
-        HeadlessRestoreTask(ProjectLocator destLocator, File archiveFile) {
-            super(destLocator, archiveFile, null);
-        }
-    }
 }
+

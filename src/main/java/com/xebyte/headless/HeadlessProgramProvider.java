@@ -124,18 +124,33 @@ public class HeadlessProgramProvider implements ProgramProvider {
      * matches both count as "open".
      */
     private boolean isProgramOpen(String name) {
+        return exactOpenProgram(name) != null;
+    }
+
+    /**
+     * Exact (then case-insensitive) lookup of a loaded program by name.
+     *
+     * <p>Unlike {@link #getProgram(String)} this never falls back to fuzzy
+     * substring matching — callers that resolve a precise destination
+     * (overwrite protection, GZF export) must not silently act on a similarly
+     * named program.
+     *
+     * @return the matching open Program, or {@code null} when none matches
+     */
+    private Program exactOpenProgram(String name) {
         if (name == null || name.isEmpty()) {
-            return false;
+            return null;
         }
-        if (openPrograms.containsKey(name)) {
-            return true;
+        Program exact = openPrograms.get(name);
+        if (exact != null) {
+            return exact;
         }
-        for (String key : openPrograms.keySet()) {
-            if (key.equalsIgnoreCase(name)) {
-                return true;
+        for (Map.Entry<String, Program> entry : openPrograms.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(name)) {
+                return entry.getValue();
             }
         }
-        return false;
+        return null;
     }
 
     @Override
@@ -374,11 +389,12 @@ public class HeadlessProgramProvider implements ProgramProvider {
             Program cached = openPrograms.get(name);
             if (cached != null) return cached;
 
+            // Idempotency is scoped to the import location (root): the loaders
+            // always import under folder "/", so a recursive search could reopen
+            // a same-named program from a different folder and break the
+            // intended "reload the file I just imported" contract.
             ProjectData pd = project.getProjectData();
             DomainFile df = pd.getFile("/" + name);
-            if (df == null) {
-                df = findByName(pd.getRootFolder(), name);
-            }
             if (df == null) return null;
 
             Program program = (Program) df.getDomainObject(this, true, false, monitor);
@@ -937,6 +953,11 @@ public class HeadlessProgramProvider implements ProgramProvider {
             DomainFolder cur = pd.getRootFolder();
             for (String part : p.split("/")) {
                 if (part.isEmpty()) continue;
+                if (part.equals(".") || part.equals("..")) {
+                    Msg.warn(this, "resolveFolder rejecting traversal segment '"
+                        + part + "' in '" + folderPath + "'");
+                    return null;
+                }
                 DomainFolder next = cur.getFolder(part);
                 if (next == null) next = cur.createFolder(part);
                 cur = next;
@@ -978,7 +999,9 @@ public class HeadlessProgramProvider implements ProgramProvider {
         }
 
         // Prefer the live in-memory program — it includes unsaved analyst edits.
-        Program live = getProgram(programIdent);
+        // Exact match only: getProgram()'s fuzzy substring fallback could pack
+        // the wrong program when several open names overlap.
+        Program live = exactOpenProgram(programIdent);
         if (live != null) {
             try {
                 live.saveToPackedFile(output, monitor);
@@ -1018,6 +1041,15 @@ public class HeadlessProgramProvider implements ProgramProvider {
      * is true) or fails with a structured error.
      */
     public ImportResult importProgramFromGzf(File gzf, String targetFolder, String targetName, boolean overwrite) {
+        // Validate the caller-controlled destination name up front, before any
+        // project/file work, so it's reachable in offline tests and a separator
+        // or traversal segment never reaches resolveFolder/createFile.
+        if (targetName != null && !targetName.isEmpty()) {
+            String invalid = HeadlessPaths.validateFilename(targetName);
+            if (invalid != null) {
+                return ImportResult.failure("invalid target_name: " + invalid);
+            }
+        }
         if (project == null) {
             return ImportResult.failure("No project open. Call /open_project first.");
         }

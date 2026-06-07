@@ -199,6 +199,24 @@ The following entries were already on `main` since 5.12.0 and ship in this relea
   have the agent read any file on disk. With no root configured the
   behavior is unchanged.
 
+- **Headless GZF/GAR endpoints reject path traversal.** Caller-supplied
+  names (`output_name` on `/export_program` + `/archive_project`,
+  `project_name` on `/restore_project`) are validated to be plain
+  filenames — no `/`, `\`, or `..` — and the resolved output path is
+  canonicalised and confirmed to stay inside its target directory. The
+  default `.gzf` / `.gar` name is derived from the program/project
+  basename so a project path like `/Vanilla/1.13d/D2Common.dll` can no
+  longer leak separators into the written filename. New helper
+  `HeadlessPaths` is the single validation choke point; covered offline
+  by `HeadlessPathsTest`.
+
+- **`/import_program` validates the caller-supplied `target_name`.** The
+  optional program name is now checked as a plain filename (rejecting
+  `/`, `\`, and `..` segments) before the project tree is touched, and
+  the import-folder resolver rejects `.`/`..` path segments, closing a
+  traversal vector that could place or overwrite a program outside the
+  intended folder. Covered offline by `GzfExportImportTest`.
+
 ### Added
 
 - **`/load_program` accepts optional `language` and `compiler_spec`.**
@@ -212,6 +230,38 @@ The following entries were already on `main` since 5.12.0 and ship in this relea
   success response now also echoes the resolved `language`.
 
 ### Fixed
+
+- **Headless: `/export_program` resolves the live program by an exact
+  name.** GZF export now looks the open program up by an exact (then
+  case-insensitive) match instead of the fuzzy substring lookup, so a
+  request for `Common.dll` can no longer pack a different open program
+  such as `D2Common.dll`. Program idempotency on re-open is scoped to
+  the project root rather than a recursive name search, avoiding
+  reopening a same-named file from an unintended folder. Covered offline
+  by `GzfExportImportTest`.
+
+- **Headless: file-loaded programs are materialised into the project so
+  `/save_all_programs` and `/export_program` work.** `loadProgramFromFile`
+  and `loadProgramFromFileWithLanguage` now pass the active project to
+  `AutoImporter` and call `save(monitor)` on the result, turning the
+  transient `DomainFileProxy` into a real `DomainFile`. A same-named
+  re-load reopens the existing file (idempotent) instead of throwing
+  `DuplicateNameException`. With no project open the loader degrades to
+  the previous in-memory behaviour.
+
+- **Headless: the ANALYZED flag is persisted after `/run_analysis`.**
+  `GhidraProgramUtilities.markProgramAnalyzed(program)` is invoked inside
+  the write transaction so a re-opened program is not re-analyzed from
+  scratch.
+
+- **`/import_program` overwrite is no longer destructive on failure.**
+  With `overwrite=true` the existing `DomainFile` is renamed aside to a
+  `.bak-<ts>` backup and only deleted after the new file is created.
+  If the import fails (corrupt `.gzf`, I/O error) the original is renamed
+  back, so a failed overwrite never loses the prior program. An explicit
+  pre-check rejects overwriting a program that is currently loaded in
+  memory with a structured error before the project tree is touched,
+  instead of relying on a `FileInUseException` mid-rename.
 
 - **Headless: `/run_ghidra_script` and `/run_script_inline` crashed
   with `NullPointerException`** at
