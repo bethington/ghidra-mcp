@@ -26,13 +26,20 @@ deliberately rather than rushed — none is a release blocker.
 
 ## Correctness follow-ups (deferred from the shipped fixes)
 
-4. **`tests/performance/` cross-file isolation leak.** When the offline perf suite is
-   collected in one process, `test_state_atomicity.py` (×3) and
-   `test_state_lock_reentrant.py` fail with "the non-reentrant Lock deadlock has regressed";
-   each file passes in isolation. An earlier file leaves `fun_doc._state_lock` held by a
-   leaked daemon thread. CI now runs each file in its own process (`python-offline-regression`
-   job) to sidestep this, but the underlying leaked thread/lock should be root-caused and the
-   suite made collectible in one process.
+4. **`tests/performance/` cross-file isolation leak. — RESOLVED.** Symptom: in a single
+   process, `test_state_atomicity.py` (×3) and `test_state_lock_reentrant.py` failed with
+   "the non-reentrant Lock deadlock has regressed"; each passed in isolation. Real root cause
+   (not a leaked lock): `load_state()` goes through `_get_storage_repo()`, which fell back to
+   the developer's **real** `fun-doc/state.db` (the conftest size-guard correctly refuses to
+   delete a populated DB). Real multi-thousand-row queries + SQLite write-lock contention made
+   the 5s timeout trip under single-process load. It only reproduced on a dev machine with real
+   data (clean CI had none), which is why each file and clean CI passed. Fix: the autouse
+   `_isolate_storage_repo` fixture now forces `FUN_DOC_DB_URL` to a per-test throwaway SQLite,
+   so no test ever opens the real DB (also bulletproofs the documented data-loss incident). The
+   suite is now collectible in one process (428 passed, 0 failures even with live Ghidra + real
+   data), and CI runs it as a single invocation. A separate, purely local artifact remains: a
+   global-scorer test picks up the live Ghidra server's open programs when one is running — it
+   skips/mocks correctly in CI; left as-is.
 
 5. **`provider_pause.py` full cross-process lost-update.** The shipped fix serializes writes
    with an OS-level interprocess lock and retries `replace()` on Windows `PermissionError`,
