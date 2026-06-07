@@ -235,16 +235,12 @@ public class AnalysisService {
             int before = program.getFunctionManager().getFunctionCount();
 
             AutoAnalysisManager mgr = AutoAnalysisManager.getAnalysisManager(program);
-            int txId = program.startTransaction("Run Auto Analysis");
-            boolean success = false;
-            try {
+            threadingStrategy.executeWrite(program, "Run Auto Analysis", () -> {
                 mgr.initializeOptions();
                 mgr.reAnalyzeAll(program.getMemory().getLoadedAndInitializedAddressSet());
                 mgr.startAnalysis(TaskMonitor.DUMMY);
-                success = true;
-            } finally {
-                program.endTransaction(txId, success);
-            }
+                return null;
+            });
 
             long duration = System.currentTimeMillis() - start;
             int after = program.getFunctionManager().getFunctionCount();

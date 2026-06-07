@@ -797,6 +797,11 @@ def dispatch_post(
 
     data = _normalize_post_payload(endpoint, data)
     timeout = get_timeout(endpoint, data)
+    # POST endpoints are non-idempotent (rename/create/set/delete/batch writes). Unlike GET,
+    # they must NOT be blindly retried: if the request reached the server it may have already
+    # applied the write, so resending after a 5xx or a mid-flight drop risks double-applying.
+    # The only safe retry is re-establishing a connection that failed before the request was
+    # sent — attempted once on the first iteration. Everything else surfaces as an error.
     for attempt in range(retries):
         try:
             text, status = do_request(
@@ -804,22 +809,15 @@ def dispatch_post(
             )
             if status == 200:
                 return text.strip()
-            if status >= 500 and attempt < retries - 1:
-                time.sleep(1)
-                continue
+            # Request reached the server (got an HTTP status) — do not retry a write.
             return json.dumps({"error": f"HTTP {status}: {text.strip()}"})
         except (ConnectionError, OSError) as e:
-            # Connection lost — try reconnect once, then retry
+            # Pre-send connection failure: re-establish once and retry. A drop after the
+            # request was sent is indistinguishable here, so we only ever try this once.
             if attempt == 0 and _try_reconnect():
-                continue
-            if attempt < retries - 1:
-                time.sleep(1)
                 continue
             return json.dumps({"error": str(e)})
         except Exception as e:
-            if attempt < retries - 1:
-                time.sleep(1)
-                continue
             return json.dumps({"error": str(e)})
 
     return json.dumps({"error": "Max retries exceeded"})

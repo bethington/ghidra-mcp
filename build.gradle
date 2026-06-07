@@ -127,7 +127,7 @@ jar {
             'Plugin-Name':         'GhidraMCP',
             'Plugin-Version':      project.version.toString(),
             'Plugin-Author':       'Ben Ethington',
-            'Plugin-Description':  'GhidraMCP - HTTP server plugin with 222 MCP tools for reverse engineering automation',
+            'Plugin-Description':  'GhidraMCP - HTTP server plugin with MCP tools for reverse engineering automation',
         )
     }
 }

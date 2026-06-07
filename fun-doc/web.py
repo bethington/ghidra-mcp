@@ -1040,13 +1040,26 @@ def compute_skip_reason(func: dict, key: str, pinned_keys: set) -> str | None:
     return None
 
 
-def create_app(state_file, event_bus=None):
+def create_app(state_file, event_bus=None, dashboard_port=5000):
     app = Flask(__name__, template_folder=str(Path(__file__).parent / "templates"))
     app.config["STATE_FILE"] = Path(state_file)
     app.config["LOG_FILE"] = Path(__file__).parent / "logs" / "runs.jsonl"
     app.config["QUEUE_FILE"] = Path(__file__).parent / "priority_queue.json"
 
-    socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
+    # Scope WebSocket CORS to the localhost dashboard origin rather than "*". The dashboard
+    # binds 127.0.0.1 only, but cors_allowed_origins="*" still lets any website the operator
+    # visits open a socket to it (cross-site WebSocket hijack / DNS rebinding). Override via
+    # FUN_DOC_DASHBOARD_ORIGINS (comma-separated) for reverse-proxy / remote-access setups.
+    _origins_env = os.environ.get("FUN_DOC_DASHBOARD_ORIGINS", "").strip()
+    if _origins_env:
+        allowed_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+    else:
+        allowed_origins = [
+            f"http://127.0.0.1:{dashboard_port}",
+            f"http://localhost:{dashboard_port}",
+        ]
+
+    socketio = SocketIO(app, async_mode="threading", cors_allowed_origins=allowed_origins)
 
     # Wire EventBus -> SocketIO bridge
     bus = event_bus or get_bus()

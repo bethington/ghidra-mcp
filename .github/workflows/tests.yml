@@ -159,6 +159,61 @@ jobs:
         flags: unittests
         fail_ci_if_error: false
 
+  python-offline-regression:
+    name: Python Offline Regression (fun-doc)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -q -r requirements-test.txt
+        pip install -q -r requirements.txt
+        pip install -q -r fun-doc/requirements.txt
+
+    - name: Run offline performance/regression tests (per-file isolation)
+      run: |
+        # These suites guard fun-doc (fun_doc.py, storage/, audit/, library detector,
+        # selector, etc.) and run without a live Ghidra server. They share fun-doc module
+        # globals (e.g. the reentrant _state_lock) and leak across files when collected in
+        # one process, so each file is run in its own pytest process for isolation.
+        #
+        # Excluded from this CI tier:
+        #   * the four live-Ghidra files (need http://127.0.0.1:8089) — integration tier
+        #     (batch_scoring_consistency, health_endpoint, http_concurrency, listing_consistency)
+        #   * the benchmark tests — "manual only" by design (CLAUDE.md); they depend on local
+        #     benchmark assets not tracked in the repo (e.g. fun-doc/benchmark/extract_truth.py),
+        #     a live Ghidra (Benchmark.dll), or an LLM judge, none of which exist in CI.
+        # Do NOT use `set -e` here: it would stop at the first failing file and mask the rest.
+        # Collect every failure and fail once at the end.
+        EXCLUDE='batch_scoring_consistency|health_endpoint|http_concurrency|listing_consistency|test_benchmark_'
+        failed=""
+        for f in tests/performance/test_*.py; do
+          if echo "$f" | grep -Eq "$EXCLUDE"; then
+            echo "skip (live-Ghidra / manual-benchmark tier): $f"
+            continue
+          fi
+          echo "::group::$f"
+          if ! python -m pytest "$f" --no-cov -q; then
+            failed="$failed $f"
+            echo "::error::offline regression failed: $f"
+          fi
+          echo "::endgroup::"
+        done
+        if [ -n "$failed" ]; then
+          echo "❌ Offline regression failures:$failed"
+          exit 1
+        fi
+        echo "✅ Offline regression suite passed"
+
   code-quality:
     name: Code Quality Checks
     runs-on: ubuntu-latest
@@ -216,13 +271,13 @@ jobs:
   build-status:
     name: Build Status
     runs-on: ubuntu-latest
-    needs: [ java-build, python-tests, pester-tests ]
+    needs: [ java-build, python-tests, python-offline-regression, pester-tests ]
     if: always()
 
     steps:
     - name: Report Status
       run: |
-        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
+        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-offline-regression.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
           echo "✅ All tests passed"
           exit 0
         else

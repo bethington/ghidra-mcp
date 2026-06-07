@@ -825,7 +825,17 @@ public class ProgramScriptService {
             return Response.err("file_path is required");
         }
 
-        File file = new File(filePath);
+        // Enforce GHIDRA_MCP_FILE_ROOT (when configured) for this filesystem-path endpoint,
+        // matching the headless import path. No-op when the root is unset (paths accepted
+        // as-is), so default localhost behavior is unchanged.
+        SecurityConfig security = SecurityConfig.getInstance();
+        java.nio.file.Path resolved = security.resolveWithinFileRoot(filePath);
+        if (resolved == null) {
+            return Response.err("Path is outside the allowed file root ("
+                    + security.getFileRoot() + "): " + filePath);
+        }
+
+        File file = resolved.toFile();
         if (!file.exists()) {
             return Response.err("File not found: " + filePath);
         }

@@ -8653,7 +8653,7 @@ def main():
         from event_bus import get_bus
 
         bus = get_bus()
-        app, socketio = create_app(STATE_FILE, event_bus=bus)
+        app, socketio = create_app(STATE_FILE, event_bus=bus, dashboard_port=args.web_port)
         dashboard_url = f"http://127.0.0.1:{args.web_port}"
         print(f"Starting web dashboard at {dashboard_url}", flush=True)
 
@@ -8720,7 +8720,7 @@ def main():
             from event_bus import get_bus
 
             bus = get_bus()
-            dash_app, dash_socketio = create_app(STATE_FILE, event_bus=bus)
+            dash_app, dash_socketio = create_app(STATE_FILE, event_bus=bus, dashboard_port=dash_port)
             dashboard_url = f"http://127.0.0.1:{dash_port}"
 
             # Run Flask-SocketIO in a daemon thread (auto-exits when main process exits)
