@@ -1,7 +1,7 @@
 {
   "version": "5.12.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 252,
+  "total_endpoints": 248,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -147,22 +147,6 @@
         "program"
       ],
       "description": "Analyze documentation completeness"
-    },
-    {
-      "path": "/analyze_function_full",
-      "method": "GET",
-      "category": "analysis",
-      "params": [
-        "name",
-        "include_xrefs",
-        "include_callees",
-        "include_callers",
-        "include_disasm",
-        "include_variables",
-        "include_completeness",
-        "program"
-      ],
-      "description": "Complete function analysis"
     },
     {
       "path": "/analyze_struct_field_usage",
@@ -399,20 +383,6 @@
         "filter"
       ],
       "description": "Bulk cross-binary function matching"
-    },
-    {
-      "path": "/bulk_fuzzy_match_functions",
-      "method": "GET",
-      "category": "utility",
-      "params": [
-        "source_program",
-        "target_program",
-        "threshold",
-        "offset",
-        "limit",
-        "filter"
-      ],
-      "description": "Bulk fuzzy match functions across programs"
     },
     {
       "path": "/can_rename_at_address",
@@ -1087,19 +1057,6 @@
       "description": "Find similar functions"
     },
     {
-      "path": "/find_similar_functions_across_programs",
-      "method": "GET",
-      "category": "documentation",
-      "params": [
-        "address",
-        "source_program",
-        "target_program",
-        "threshold",
-        "limit"
-      ],
-      "description": "Find similar functions via fuzzy matching"
-    },
-    {
       "path": "/find_similar_functions_fuzzy",
       "method": "GET",
       "category": "documentation",
@@ -1121,16 +1078,6 @@
         "program"
       ],
       "description": "Find undocumented functions referencing string"
-    },
-    {
-      "path": "/find_undocumented_functions_by_strings",
-      "method": "GET",
-      "category": "documentation",
-      "params": [
-        "pattern",
-        "program"
-      ],
-      "description": "Report strings and their undocumented functions"
     },
     {
       "path": "/force_decompile",
