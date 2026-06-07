@@ -1,4 +1,4 @@
-package com.xebyte;
+package com.xebyte.offline;
 
 import com.xebyte.core.ServiceUtils;
 import ghidra.program.model.address.Address;
@@ -80,6 +80,55 @@ public class ServiceUtilsAddressTest {
         assertNotNull(err);
         assertTrue("Error should mention unknown space name", err.contains("foo"));
         assertTrue("Error should list available spaces", err.contains("ram") && err.contains("code"));
+    }
+
+    @Test
+    public void parseAddress_semicolonDelimitedList_failsFastWithHint() {
+        // Workers sometimes cram several addresses into the singular `address` field,
+        // semicolon-joined, when they meant to use the batch-comments inner lists.
+        Address result = ServiceUtils.parseAddress(program,
+                "10020295;100202af;100202c4;100202ca");
+        assertNull(result);
+        String err = ServiceUtils.getLastParseError();
+        assertNotNull(err);
+        assertTrue("Should explain it's not a single location: " + err,
+                err.contains("single location") || err.contains("not a list"));
+        assertTrue("Should point at the batch-comments inner lists: " + err,
+                err.contains("decompiler_comments") && err.contains("disassembly_comments"));
+        // Must NOT have tried (and failed) to resolve it as one address.
+        assertFalse("Should not emit the misleading space-suggestion error: " + err,
+                err.contains("Try <space>:<hex>"));
+    }
+
+    @Test
+    public void parseAddress_spacePrefixedList_failsFastNotUnknownSpace() {
+        // Regression for the reported two-error loop: after the first error suggested
+        // prepending the space, the retry "ram:..;ram:.." produced the contradictory
+        // "Unknown address space 'ram'. Available: ram". It must now fail fast as a list.
+        Address result = ServiceUtils.parseAddress(program,
+                "ram:10020295;ram:100202af;ram:100202c4");
+        assertNull(result);
+        String err = ServiceUtils.getLastParseError();
+        assertNotNull(err);
+        assertTrue("Should be the list hint: " + err,
+                err.contains("single location") || err.contains("not a list"));
+        assertFalse("Must not contradict itself with Unknown address space: " + err,
+                err.contains("Unknown address space"));
+    }
+
+    @Test
+    public void parseAddress_knownSpaceBadOffset_blamesOffsetNotSpace() {
+        // "ram:zzzz": ram IS a valid space, so the failure is the offset. The error must
+        // not claim the space is unknown (the old contradictory message).
+        when(factory.getAddress("ram:zzzz")).thenReturn(null);
+        Address result = ServiceUtils.parseAddress(program, "ram:zzzz");
+        assertNull(result);
+        String err = ServiceUtils.getLastParseError();
+        assertNotNull(err);
+        assertTrue("Should blame the offset: " + err, err.contains("Could not resolve offset"));
+        assertTrue("Should name the valid space: " + err, err.contains("ram"));
+        assertFalse("Must not call a valid space unknown: " + err,
+                err.contains("Unknown address space"));
     }
 
     @Test

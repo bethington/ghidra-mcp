@@ -608,6 +608,26 @@ public final class ServiceUtils {
             return null;
         }
 
+        // Detect a delimited multi-address string, e.g. "10020295;100202af;..." — another
+        // shape workers send when they meant to use the batch-comments inner lists. The plain
+        // "could not be resolved... try <space>:<hex>" message used to suggest prepending the
+        // space name to the WHOLE string, and the retry ("ram:..;ram:..") then produced a
+        // second, self-contradictory "Unknown address space 'ram'. Available: ram" error.
+        // Fail fast with the same structured hint as the array case instead. (addressStr is
+        // already stripped, so any remaining whitespace is internal — i.e. list-shaped.)
+        boolean looksLikeList = addressStr.indexOf(';') >= 0
+                || addressStr.indexOf(',') >= 0
+                || addressStr.chars().anyMatch(Character::isWhitespace);
+        if (looksLikeList) {
+            lastParseError.set("Address must be a single location, not a list. "
+                    + "Got: " + (addressStr.length() > 80 ? addressStr.substring(0, 80) + "..." : addressStr) + ". "
+                    + "If you're calling batch_set_comments, the top-level `address` is the "
+                    + "function entry only; per-line addresses go inside the `decompiler_comments` "
+                    + "and `disassembly_comments` arrays as objects like {\"address\": \"0x...\", \"comment\": \"...\"}. "
+                    + "If you're addressing a single location, pass one hex string like \"0x6ff6a4a0\".");
+            return null;
+        }
+
         // Detect if this is a segment:offset form for better error messages
         boolean hasColon = addressStr.contains(":");
 
@@ -634,8 +654,17 @@ public final class ServiceUtils {
         String available = buildAvailableSpacesHint(program);
         if (hasColon) {
             String spaceName = addressStr.substring(0, addressStr.indexOf(':'));
-            lastParseError.set("Unknown address space '" + spaceName + "' in '" + addressStr
-                + "'. Available spaces: " + available + ".");
+            String offsetPart = addressStr.substring(addressStr.indexOf(':') + 1);
+            if (isKnownSpace(program, spaceName)) {
+                // The space is valid; the failure is the offset. Don't blame the space
+                // (which produced the contradictory "Unknown space 'ram'. Available: ram").
+                lastParseError.set("Could not resolve offset '" + offsetPart
+                    + "' in address space '" + spaceName + "'. Check that it is valid hex "
+                    + "within that space's range. Available spaces: " + available + ".");
+            } else {
+                lastParseError.set("Unknown address space '" + spaceName + "' in '" + addressStr
+                    + "'. Available spaces: " + available + ".");
+            }
         } else {
             lastParseError.set("Address '" + addressStr
                 + "' could not be resolved in the default address space. "
@@ -680,6 +709,24 @@ public final class ServiceUtils {
             }
         }
         return count;
+    }
+
+    /**
+     * True if {@code spaceName} (case-insensitive) names a real physical address space
+     * (TYPE_RAM/TYPE_CODE, non-overlay) in the program. Used to distinguish a genuinely
+     * unknown space from a known space with a bad offset when building parse errors.
+     */
+    private static boolean isKnownSpace(Program program, String spaceName) {
+        if (spaceName == null || spaceName.isEmpty()) return false;
+        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
+            if (space.isOverlaySpace()) continue;
+            int type = space.getType();
+            if ((type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE)
+                    && space.getName().equalsIgnoreCase(spaceName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String buildAvailableSpacesHint(Program program) {
