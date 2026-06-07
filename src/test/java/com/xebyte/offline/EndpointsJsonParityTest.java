@@ -138,6 +138,49 @@ public class EndpointsJsonParityTest extends TestCase {
             declared, actual);
     }
 
+    /**
+     * Reverse parity: every entry in {@code tests/endpoints.json} must correspond to a
+     * route that still exists in the source. Otherwise a removed/renamed tool leaves a
+     * stale catalog entry that the forward test (scanned ⊆ catalog) can never catch, and
+     * the advertised tool count drifts upward.
+     *
+     * <p>A path is considered live if its quoted literal ({@code "/foo"}) appears anywhere
+     * in the plugin sources — covering every registration mechanism (@McpTool, direct
+     * {@code createContext}, the EndpointRegistry, server/tool/mcp routes). A catalog path
+     * present in no source file is a genuine orphan.
+     */
+    public void testNoOrphanCatalogEntries() throws IOException {
+        String allSrc = readAllJavaSources(Paths.get("src", "main", "java", "com", "xebyte"));
+        List<String> orphans = new ArrayList<>();
+        for (String path : catalog.keySet()) {
+            if (!allSrc.contains("\"" + path + "\"")) {
+                orphans.add(path);
+            }
+        }
+        if (!orphans.isEmpty()) {
+            java.util.Collections.sort(orphans);
+            StringBuilder msg = new StringBuilder();
+            msg.append(orphans.size()).append(" orphaned catalog entr(y/ies) in ")
+               .append(CATALOG_PATH)
+               .append(" — no matching route literal in source (removed/renamed tool). ")
+               .append("Delete the stale entry (and update total_endpoints) or fix its path:\n");
+            for (String o : orphans) {
+                msg.append("  - ").append(o).append("\n");
+            }
+            fail(msg.toString());
+        }
+    }
+
+    private static String readAllJavaSources(Path root) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+            for (Path p : (Iterable<Path>) paths.filter(f -> f.toString().endsWith(".java"))::iterator) {
+                sb.append(Files.readString(p)).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
     // ------------------------------------------------------------------
     // Catalog loader
     // ------------------------------------------------------------------
