@@ -17,14 +17,18 @@ deliberately rather than rushed — none is a release blocker.
    Flask blueprints and move the worker-loop body (`_run_worker_functions`,
    `_yield_for_quota_pause`) out of the closure so routes are testable per-blueprint.
 
-3. **Untested Java service layer** (~15K LOC) — *IN PROGRESS*. The
+3. **Untested Java service layer** (~15K LOC) — *MOSTLY DONE*. The
    `DatatypeMcpToolsHandlerValidationTest` stub-provider pattern (drive real service methods
-   to hit validation/early-error + no-program branches, no live Ghidra) is being extended.
-   **Done:** `AnalysisService`, `DocumentationHashService`, `XrefCallGraphService`,
-   `SymbolLabelService`, `CommentService` (offline validation + graceful-degradation suites).
-   **Remaining:** `MalwareSecurityService`, `BinaryComparisonService`, `EmulationService`,
-   `ListingService`, `ProgramScriptService`, plus deeper coverage of the large `AnalysisService`
-   surface beyond its validate-first branches.
+   to hit validation/early-error + no-program branches, no live Ghidra) was extended to every
+   previously-untested service: `AnalysisService`, `DocumentationHashService`,
+   `XrefCallGraphService`, `SymbolLabelService`, `CommentService`, `MalwareSecurityService`,
+   `EmulationService`, `ListingService` (incl. functional `convert_number`),
+   `ProgramScriptService` (required-param + GUI-mode + script-execution security gate), and
+   `BinaryComparisonService` (functional `computeSimilarity`). The offline Java suite grew
+   149 → 221 tests. **Remaining (optional, deeper):** these are validation/early-error +
+   graceful-degradation contracts, not full behavioral coverage of the happy paths (which
+   need a live program — see the integration tier). Deeper happy-path coverage of the large
+   `AnalysisService` surface could still be added against a live fixture.
 
 ## Correctness follow-ups (deferred from the shipped fixes)
 
