@@ -106,9 +106,8 @@ jobs:
         # Annotation-scanner and endpoints.json parity tests.
         # No Ghidra server needed — pure reflection + static catalog checks.
         # Integration tests (GhidraMCPPluginTest, EndpointRegistrationTest,
-        # AppTest) require a running Ghidra instance and are deliberately excluded
-        # from this run. ServiceUtilsAddressTest is mock-based (Mockito, no live
-        # Ghidra) and now lives in com.xebyte.offline so it runs here.
+        # AppTest, ServiceUtilsAddressTest) require a running Ghidra instance
+        # and are deliberately excluded from this run.
         mvn -q test -Dtest='com.xebyte.offline.*Test'
 
     - name: Verify build artifacts
