@@ -21,6 +21,17 @@ Complete version history for the Ghidra MCP Server project.
   have the agent read any file on disk. With no root configured the
   behavior is unchanged.
 
+- **Headless GZF/GAR endpoints reject path traversal.** Caller-supplied
+  names (`output_name` on `/export_program` + `/archive_project`,
+  `project_name` on `/restore_project`) are validated to be plain
+  filenames — no `/`, `\`, or `..` — and the resolved output path is
+  canonicalised and confirmed to stay inside its target directory. The
+  default `.gzf` / `.gar` name is derived from the program/project
+  basename so a project path like `/Vanilla/1.13d/D2Common.dll` can no
+  longer leak separators into the written filename. New helper
+  `HeadlessPaths` is the single validation choke point; covered offline
+  by `HeadlessPathsTest`.
+
 ### Added
 
 - **`/load_program` accepts optional `language` and `compiler_spec`.**
@@ -33,7 +44,77 @@ Complete version history for the Ghidra MCP Server project.
   `" ARM:LE:32:Cortex "` resolve instead of failing the lookup. The
   success response now also echoes the resolved `language`.
 
+- **Headless: GZF round-trip for single programs.** Two new endpoints
+  let callers pack/unpack a Ghidra Zip File (`.gzf`) without going
+  through a full project tarball:
+  - `POST /export_program` — accepts `{program_name, output_dir?, output_name?}`
+    and writes `<output_dir>/<output_name>.gzf`. Looks up the program
+    first in the open-programs map (so it works on programs loaded via
+    `/load_program` without a project) and falls back to the open
+    project's `DomainFile.packFile(...)` when not in memory.
+    Implementation uses `Program.saveToPackedFile(File, TaskMonitor)`
+    on the `DomainObject` interface — no cast to
+    `DomainObjectAdapterDB` (which drags `db.util.ErrorHandler` off
+    the headless classpath).
+  - `POST /import_program` — accepts `{gzf_path, target_folder?,
+    target_name?, overwrite?}` and creates a new `DomainFile` under
+    the given folder of the open project via
+    `DomainFolder.createFile(name, packedFile, monitor)`. Refuses to
+    overwrite a live in-memory program (would raise
+    `FileInUseException` from Ghidra).
+
+- **Headless: GAR round-trip for whole projects.** Two new endpoints
+  pack/unpack a Ghidra project archive (`.gar`) so analyst work can be
+  exported and restored across container teardowns:
+  - `POST /archive_project` — archives the currently open project to a
+    `.gar` file via `HeadlessArchiveBridge.archive(...)`.
+  - `POST /restore_project` — restores a `.gar` into a fresh on-disk
+    project at `parent_dir/project_name` via
+    `HeadlessArchiveBridge.restore(...)`. The bridge lives in
+    `ghidra.app.plugin.core.archive` to reach the package-private
+    `ArchiveTask` / `RestoreTask` constructors; it carries no
+    `@McpTool` so `AnnotationScanner` ignores it.
+
+- **Headless: `/save_all_programs` reports an `open_program_count`.**
+  The response now includes how many programs were in memory so a
+  caller can tell an empty save (nothing loaded) from a real one. A
+  program whose `DomainFile` is still a transient `DomainFileProxy`
+  (no writable project location) is reported as skipped with an
+  explicit error instead of throwing `ReadOnlyException`.
+
+### Changed
+
+- **Docker: the bundled Jython extension is now unpacked at build
+  time.** Starting with Ghidra 12.1 the Jython extension ships in the
+  distribution but is no longer enabled by default; the runtime image
+  unzips `*_Jython.zip` into `Ghidra/Extensions/` (adding `unzip` to
+  the runtime deps) so `.py` scripts run headless without a manual
+  install step.
+
 ### Fixed
+
+- **Headless: file-loaded programs are materialised into the project so
+  `/save_all_programs` and `/export_program` work.** `loadProgramFromFile`
+  and `loadProgramFromFileWithLanguage` now pass the active project to
+  `AutoImporter` and call `save(monitor)` on the result, turning the
+  transient `DomainFileProxy` into a real `DomainFile`. A same-named
+  re-load reopens the existing file (idempotent) instead of throwing
+  `DuplicateNameException`. With no project open the loader degrades to
+  the previous in-memory behaviour.
+
+- **Headless: the ANALYZED flag is persisted after `/run_analysis`.**
+  `GhidraProgramUtilities.markProgramAnalyzed(program)` is invoked inside
+  the write transaction so a re-opened program is not re-analyzed from
+  scratch.
+
+- **`/import_program` overwrite is no longer destructive on failure.**
+  With `overwrite=true` the existing `DomainFile` is renamed aside to a
+  `.bak-<ts>` backup and only deleted after the new file is created.
+  If the import fails (corrupt `.gzf`, I/O error) the original is renamed
+  back, so a failed overwrite never loses the prior program. An explicit
+  pre-check rejects overwriting a program that is currently loaded in
+  memory with a structured error before the project tree is touched,
+  instead of relying on a `FileInUseException` mid-rename.
 
 - **Headless: `/run_ghidra_script` and `/run_script_inline` crashed
   with `NullPointerException`** at
