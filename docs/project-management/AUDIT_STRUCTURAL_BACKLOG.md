@@ -17,12 +17,14 @@ deliberately rather than rushed — none is a release blocker.
    Flask blueprints and move the worker-loop body (`_run_worker_functions`,
    `_yield_for_quota_pause`) out of the closure so routes are testable per-blueprint.
 
-3. **Untested Java service layer** (~15K LOC with no behavioral tests): `AnalysisService`
-   (5,198 LOC — the largest file in the repo), `DocumentationHashService`,
-   `XrefCallGraphService`, and the Symbol/Comment/Malware/BinaryComparison/Emulation
-   services. The `DatatypeMcpToolsHandlerValidationTest` pattern (drive real service methods
-   with a stub provider to hit validation/early-error branches, no live Ghidra) is a proven
-   template that extends here cheaply.
+3. **Untested Java service layer** (~15K LOC) — *IN PROGRESS*. The
+   `DatatypeMcpToolsHandlerValidationTest` stub-provider pattern (drive real service methods
+   to hit validation/early-error + no-program branches, no live Ghidra) is being extended.
+   **Done:** `AnalysisService`, `DocumentationHashService`, `XrefCallGraphService`,
+   `SymbolLabelService`, `CommentService` (offline validation + graceful-degradation suites).
+   **Remaining:** `MalwareSecurityService`, `BinaryComparisonService`, `EmulationService`,
+   `ListingService`, `ProgramScriptService`, plus deeper coverage of the large `AnalysisService`
+   surface beyond its validate-first branches.
 
 ## Correctness follow-ups (deferred from the shipped fixes)
 
