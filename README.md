@@ -944,7 +944,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v5.13.0
+# Connection OK - GhidraMCP Headless Server v5.13.1
 ```
 
 ### Headless API Workflow
@@ -1010,7 +1010,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 5.13.0 |
+| **Version** | 5.13.1 |
 | **MCP Tools** | 249 fully implemented |
 | **GUI Endpoints** | 196 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |
