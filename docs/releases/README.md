@@ -9,7 +9,7 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.12.0 (Latest) — community-driven tools: /get_current_selection + GUI /open_project
+### v5.13.0 (Latest) — community-driven tools: /get_current_selection + GUI /open_project
 
 Minor release. Two new endpoints filed/scoped by community feedback,
 plus a quiet headless parity fix that surfaced while writing the
