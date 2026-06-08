@@ -2,6 +2,7 @@ package com.xebyte.headless;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 
 /**
  * Filesystem-name and path-containment guards for headless GZF/GAR endpoints.
@@ -25,9 +26,11 @@ public final class HeadlessPaths {
      * Reject a name that is null, empty, or carries any path component.
      *
      * <p>A safe name is a plain filename: no {@code ..} traversal segment,
-     * no {@code /}, and no {@code \\}. Traversal is checked before the
-     * separator check so a pure-traversal form like {@code "../x"} is
-     * categorised as traversal rather than as a separator violation.
+     * no {@code /}, and no {@code \\}. The name is split into path segments
+     * (on either separator) and any {@code ..} segment — leading
+     * ({@code "../x"}), trailing ({@code "a/.."}), or bare ({@code ".."}) — is
+     * categorised as traversal before the separator check, so a pure-traversal
+     * form is reported as traversal rather than as a separator violation.
      *
      * @return {@code null} when the name is safe, otherwise a human-readable
      *     error message naming the offending input.
@@ -36,8 +39,13 @@ public final class HeadlessPaths {
         if (name == null || name.isEmpty()) {
             return "name must not be empty";
         }
-        if (name.equals("..") || name.contains("../") || name.contains("..\\")) {
-            return "name must not contain traversal segments: " + name;
+        // Normalise both separators and inspect each segment so a ".." anywhere
+        // (leading, trailing, or bare) is caught regardless of position.
+        String normalised = name.replace('\\', '/');
+        for (String segment : normalised.split("/", -1)) {
+            if (segment.equals("..")) {
+                return "name must not contain traversal segments: " + name;
+            }
         }
         if (name.indexOf('/') >= 0 || name.indexOf('\\') >= 0) {
             return "name must not contain path separators: " + name;
@@ -71,9 +79,12 @@ public final class HeadlessPaths {
      * Confirm that {@code child} resolves to a location inside {@code dir}.
      *
      * <p>Canonicalises both paths (resolving {@code ..}, symlinks, and relative
-     * segments) and verifies the child sits at or beneath the directory. This
-     * is the defence-in-depth backstop behind {@link #validateFilename}: even a
-     * name that slipped the string check cannot escape the directory.
+     * segments) and verifies the child sits at or beneath the directory using
+     * element-wise {@link Path#startsWith(Path)} rather than string-prefix
+     * matching, so a sibling like {@code exports-evil} is not mistaken for a
+     * child of {@code exports}. This is the defence-in-depth backstop behind
+     * {@link #validateFilename}: even a name that slipped the string check
+     * cannot escape the directory.
      *
      * @return {@code true} when {@code child} is contained in {@code dir}.
      */
@@ -82,13 +93,9 @@ public final class HeadlessPaths {
             return false;
         }
         try {
-            String dirPath = dir.getCanonicalPath();
-            String childPath = child.getCanonicalPath();
-            if (childPath.equals(dirPath)) {
-                return true;
-            }
-            String prefix = dirPath.endsWith(File.separator) ? dirPath : dirPath + File.separator;
-            return childPath.startsWith(prefix);
+            Path dirPath = dir.getCanonicalFile().toPath();
+            Path childPath = child.getCanonicalFile().toPath();
+            return childPath.startsWith(dirPath);
         } catch (IOException e) {
             return false;
         }
