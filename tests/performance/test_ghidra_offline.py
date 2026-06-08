@@ -213,13 +213,15 @@ def test_check_ghidra_online_returns_true_when_reachable():
 
 
 # ---------------------------------------------------------------------------
-# Integration: process_function returns "failed" without calling the model
+# Integration: process_function returns "ghidra_offline" without calling the model
 # ---------------------------------------------------------------------------
 
 
 def test_process_function_skips_model_when_ghidra_offline(monkeypatch, tmp_path):
-    """process_function must return 'failed' and never reach the model when
-    Ghidra is not reachable, preserving last_result='ghidra_offline'."""
+    """process_function must return the distinct 'ghidra_offline' result and never
+    reach the model when Ghidra is unreachable. It must NOT park the function
+    (no sticky last_result) so the selector re-picks it once Ghidra recovers; the
+    distinct result lets the worker loop back off instead of churning the queue."""
     state = {"functions": {}}
     func = dict(_OFFLINE_FUNC)
     func_key = f"{func['program']}::{func['address']}"
@@ -244,9 +246,13 @@ def test_process_function_skips_model_when_ghidra_offline(monkeypatch, tmp_path)
     ):
         result = fun_doc.process_function(func_key, func, state)
 
-    assert result == "failed", f"Expected 'failed', got {result!r}"
+    assert result == "ghidra_offline", f"Expected 'ghidra_offline', got {result!r}"
     assert not model_invoked, "Model was invoked despite Ghidra being offline"
-    assert func.get("last_result") == "ghidra_offline"
+    # Must NOT park the function: leaving last_result unset keeps it re-pickable so
+    # it is retried automatically once Ghidra recovers (no manual refresh needed).
+    assert func.get("last_result") != "ghidra_offline", (
+        "function was parked as ghidra_offline; it should be left re-pickable"
+    )
     entry = json.loads(log_file.read_text(encoding="utf-8").splitlines()[0])
     assert entry["result"] == "ghidra_offline"
     assert entry["reason"] == f"server not reachable at {fun_doc.GHIDRA_URL}"

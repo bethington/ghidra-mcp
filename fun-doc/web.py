@@ -431,6 +431,7 @@ class WorkerManager:
                 _bump_handoff_counter,
                 get_auto_escalation_provider,
                 update_function_state,
+                check_ghidra_online,
             )
 
             worker["status"] = "running"
@@ -780,11 +781,40 @@ class WorkerManager:
                     if worker["stop_flag"].is_set():
                         break
                     continue  # retry with next function
+                elif result == "ghidra_offline":
+                    # Ghidra is unreachable. Don't churn the queue (pre-fix this spun ~100
+                    # runs/hour for hours and parked functions). Back off with capped
+                    # exponential delay while polling /check_connection, then resume — the
+                    # function was left re-pickable, so it is retried once Ghidra is back.
+                    streak = worker.get("_ghidra_offline_streak", 0) + 1
+                    worker["_ghidra_offline_streak"] = streak
+                    backoff = min(15 * (2 ** (streak - 1)), 300)  # 15,30,60,120,240,cap 300
+                    print(
+                        f"  Ghidra offline — waiting up to {backoff}s for recovery "
+                        f"(streak {streak})...",
+                        flush=True,
+                    )
+                    waited = 0
+                    while waited < backoff and not worker["stop_flag"].is_set():
+                        chunk = min(10, backoff - waited)
+                        worker["stop_flag"].wait(chunk)
+                        waited += chunk
+                        try:
+                            if check_ghidra_online():
+                                print("  Ghidra is back online — resuming.", flush=True)
+                                worker["_ghidra_offline_streak"] = 0
+                                break
+                        except Exception:
+                            pass
+                    if worker["stop_flag"].is_set():
+                        break
+                    continue  # leave function re-pickable; pick next once healthy
                 elif result in ("completed", "partial"):
                     worker["progress"]["completed"] += 1
                     session["completed"] += 1
                     session["functions"].append(key)
                     worker["_rate_limit_streak"] = 0  # reset on success
+                    worker["_ghidra_offline_streak"] = 0  # reset on success
                 elif result in ("skipped", "decompile_timeout", "library_code"):
                     worker["progress"]["skipped"] += 1
                     session["skipped"] += 1

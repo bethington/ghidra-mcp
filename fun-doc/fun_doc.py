@@ -7110,29 +7110,26 @@ def process_function(
                     "  Ghidra did not come online within 120s. Skipping function.",
                     flush=True,
                 )
-                func["last_result"] = "ghidra_offline"
-                func["last_processed"] = datetime.now().isoformat()
-                update_function_state(func_key, func)
+                # Environmental failure, not the function's fault — do NOT park it
+                # (no sticky last_result/last_processed) so the selector re-picks it
+                # once Ghidra recovers. Return the distinct "ghidra_offline" result so
+                # the worker loop backs off and waits instead of churning the queue.
                 bus_emit(
                     "function_complete",
                     {"key": func_key, "result": "ghidra_offline", "score": None},
                 )
                 return _finish(
-                    "failed",
-                    logged_result="ghidra_offline",
+                    "ghidra_offline",
                     reason="Ghidra did not come online within 120s",
                 )
         else:
-            func["last_result"] = "ghidra_offline"
-            func["last_processed"] = datetime.now().isoformat()
-            update_function_state(func_key, func)
+            # Environmental failure — do NOT park (see note above); leave re-pickable.
             bus_emit(
                 "function_complete",
                 {"key": func_key, "result": "ghidra_offline", "score": None},
             )
             return _finish(
-                "failed",
-                logged_result="ghidra_offline",
+                "ghidra_offline",
                 reason=f"server not reachable at {GHIDRA_URL}",
             )
 
@@ -7182,12 +7179,11 @@ def process_function(
     # recovery_pass_done.
     if data.get("ghidra_offline"):
         print(
-            f"  GHIDRA OFFLINE — cannot fetch function data. Skipping until Ghidra is reachable.",
+            f"  GHIDRA OFFLINE — cannot fetch function data. Will retry when Ghidra is reachable.",
             flush=True,
         )
-        func["last_result"] = "ghidra_offline"
-        func["last_processed"] = datetime.now().isoformat()
-        update_function_state(func_key, func)
+        # Environmental failure — do NOT park (see note above); leave re-pickable so
+        # the function is retried automatically once Ghidra recovers.
         bus_emit(
             "function_complete",
             {
@@ -7197,8 +7193,7 @@ def process_function(
             },
         )
         return _finish(
-            "failed",
-            logged_result="ghidra_offline",
+            "ghidra_offline",
             score_after=live_score,
             reason="cannot fetch function data",
         )
@@ -8925,7 +8920,7 @@ def main():
                         session["functions"].append(key)
                     elif result == "skipped":
                         session["skipped"] += 1
-                    elif result == "failed" or result == "blocked":
+                    elif result in ("failed", "blocked", "ghidra_offline"):
                         session["failed"] += 1
                     elif result == "partial":
                         session["partial"] += 1
@@ -8948,7 +8943,7 @@ def main():
                         session["functions"].append(key)
                     elif result == "skipped":
                         session["skipped"] += 1
-                    elif result == "failed" or result == "blocked":
+                    elif result in ("failed", "blocked", "ghidra_offline"):
                         session["failed"] += 1
                     elif result == "partial":
                         session["partial"] += 1
@@ -9007,7 +9002,7 @@ def main():
                 session["functions"].append(key)
             elif result == "skipped":
                 session["skipped"] += 1
-            elif result == "failed" or result == "blocked":
+            elif result in ("failed", "blocked", "ghidra_offline"):
                 session["failed"] += 1
             elif result == "partial":
                 session["partial"] += 1
