@@ -8,6 +8,29 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.13.1 - 2026-06-08 (patch: launch-noise fix + class-member listing)
+
+Patch release.
+
+### Fixed
+
+- **Module.manifest launch error** (#265): the shipped `Module.manifest` used
+  `GHIDRA_MODULE_NAME=` / `GHIDRA_MODULE_DESC=` lines, which aren't valid Ghidra
+  module-manifest syntax, so Ghidra logged `Module manifest file error on line 2 of file:
+  .../Extensions/GhidraMCP/Module.manifest` on every launch. Emptied it to match Ghidra's
+  Skeleton extension template (the name/description/version already come from
+  `extension.properties`).
+
+### Added
+
+- **`/list_class_members`** (#275): list the member functions of a C++ class. A function
+  counts as a member if it lives in the class's namespace (e.g. after `set_function_this_type`
+  re-parents it) or its implicit `this` parameter types as `<class> *`; each result reports how
+  it matched (`namespace` / `this_type` / `both`). Replaces the manual "search `__thiscall`
+  functions, then read each signature" workflow. 249 tools.
+
+---
+
 ## v5.13.0 - 2026-06-08 (audit hardening: correctness, resilience, test coverage)
 
 Minor release packaging a large project-audit hardening pass — service-layer threading and
