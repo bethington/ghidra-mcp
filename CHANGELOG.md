@@ -6,6 +6,65 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+---
+
+## v5.13.0 - 2026-06-08 (audit hardening: correctness, resilience, test coverage)
+
+Minor release packaging a large project-audit hardening pass — service-layer threading and
+transaction correctness, clearer address/variable error handling, a bounded on-demand program
+cache that ends the long-run Ghidra out-of-memory stalls, graceful offline/provider handling in
+the fun-doc dashboard, CI gates, and ~77 new offline tests. ~248 tools.
+
+### Fixed
+
+- **Service-layer threading/transactions** (#276): `DataTypeService` and `AnalysisService`
+  mutations now route through the injected `ThreadingStrategy` (EDT marshaling in GUI mode, the
+  global write lock in headless) instead of hand-rolled `invokeAndWait` + `startTransaction`. Fixes
+  off-EDT GUI writes (`create_enum`, `apply_data_type`, `run_analysis`) and the headless
+  write-lock bypass.
+- **`recreate_struct` no longer loses data on partial failure** (#276): it captures a restorable
+  copy of the original type before the destructive delete and re-adds it if the re-create fails.
+- **Address parsing** (#278): a multi-address string (`addr1;addr2;...`) in a single `address`
+  field now fails fast with a clear hint pointing at the comment-list arrays, instead of the old
+  misleading "try `<space>:<hex>`" suggestion that produced a contradictory "Unknown address
+  space" loop. A bad offset under a valid space now reports the offset, not the space.
+- **`set_local_variable_type`** (#279): when a decompiler default name (`uVarN`/`puVarN`) is
+  missing and none remain, the error explains the variables were renamed / are register-resident
+  and points to `set_variables`, instead of repeating an unrecoverable failure.
+- **fun-doc resilience**: workers back off and poll for recovery on `ghidra_offline` instead of
+  spinning the queue and parking functions (#284); the on-demand program cache is now LRU-bounded
+  (`GHIDRA_MCP_MAX_CACHED_PROGRAMS`, default 8) so long multi-binary runs no longer exhaust
+  Ghidra's memory and drop it offline for hours (#286).
+- **Security hardening** (#276): GUI `/import_file` now enforces `GHIDRA_MCP_FILE_ROOT`;
+  non-idempotent bridge POSTs are no longer blindly retried (double-apply safety); `provider_pause`
+  writes use an interprocess lock + Windows `PermissionError` retry; the dashboard's SocketIO CORS
+  is scoped to the localhost origin instead of `*`.
+- **Catalog accuracy** (#280): removed 4 stale `tests/endpoints.json` entries (old names of
+  renamed tools) and corrected the advertised tool count (252 → 248).
+
+### Changed
+
+- **fun-doc provider timeout** default lowered 900s → 300s (#286); a hung/slow provider call now
+  frees a worker in 5 min instead of 15–25 (complex/massive functions still get +300/+600).
+- **fun-doc `ghidra_http.jsonl`** logs errors/timeouts only by default (#285), with
+  `FUN_DOC_HTTP_LOG_VERBOSE=1` to record every call — cutting the ~1 GB success-event bulk.
+- **pytest coverage** now measures the real Python (`bridge_mcp_ghidra` / `tools` / `debugger`)
+  instead of the Java-only `src/` tree.
+
+### Added
+
+- **~77 offline tests**: validation + graceful-degradation suites for every previously-untested
+  service (#281, #282), address-parser regressions, the variable-type recovery hint, the
+  program-cache eviction logic, and a behavioral `set_function_this_type` integration test.
+- **CI**: a `python-offline-regression` job runs the fun-doc offline tier on PRs; the
+  release/pre-release paths are gated on offline tests before building; `ServiceUtilsAddressTest`
+  moved into the offline tier; a reverse catalog-parity check catches orphaned `endpoints.json`
+  entries.
+- **Docs/tooling**: a Ghidra 12.1 deprecation backlog, a structural/tech-debt backlog, and a
+  server health-check script.
+
+The following entries were already on `main` since 5.12.0 and ship in this release:
+
 ### Security
 
 - **`/load_program` now enforces the `GHIDRA_MCP_FILE_ROOT` allow-list.**
