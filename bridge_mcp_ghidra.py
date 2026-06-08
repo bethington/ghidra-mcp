@@ -1120,8 +1120,12 @@ def register_tools_from_schema(
     for name in _dynamic_tool_names:
         try:
             mcp._tool_manager._tools.pop(name, None)
-        except Exception:
-            pass
+        except Exception as e:
+            # Reaches into FastMCP internals; if its private structure changes this
+            # would silently leak tools across reloads. Log so the breakage is visible.
+            logger.warning(
+                "Failed to unregister dynamic tool %r via mcp._tool_manager._tools "
+                "(FastMCP internals may have changed): %s", name, e)
     _dynamic_tool_names.clear()
     _loaded_groups.clear()
 
@@ -1184,8 +1188,11 @@ def _unload_group(group_name: str) -> int:
         try:
             mcp._tool_manager._tools.pop(name, None)
             _dynamic_tool_names.remove(name)
-        except Exception:
-            pass
+        except Exception as e:
+            # See unregister note above: FastMCP-internals access, log on failure.
+            logger.warning(
+                "Failed to unload tool %r via mcp._tool_manager._tools "
+                "(FastMCP internals may have changed): %s", name, e)
 
     if to_remove:
         _loaded_groups.discard(group_name)

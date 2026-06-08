@@ -71,8 +71,34 @@ def _safe_clean_state_db() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_storage_repo():
-    """Reset the fun_doc storage repo singleton + clean stray state.db."""
+def _isolate_storage_repo(tmp_path, monkeypatch):
+    """Isolate every perf test from the real fun-doc database.
+
+    Two layers:
+
+    1. Force ``FUN_DOC_DB_URL`` to a per-test throwaway SQLite. ``resolve_config``
+       checks this env var first, so any call to ``_get_storage_repo()`` (including
+       from a freshly importlib-loaded ``fun_doc`` module, e.g. the state-lock test)
+       resolves to an empty isolated DB instead of the repo's real ``state.db``.
+
+       Without this, the size-guard below correctly REFUSES to delete a populated
+       real ``state.db`` (data-safety), so on a developer machine ``load_state()``
+       would fall back to the real, multi-thousand-row database. That produced
+       slow real-data queries and SQLite write-lock contention when the suite runs
+       in one process — surfacing as the spurious "_state_lock deadlock has
+       regressed" timeout and atomicity flakiness. Each file passed in isolation
+       and in clean CI (no real data), masking the cause. Forcing the env var makes
+       the tests hermetic regardless of the developer's real DB.
+
+       Tests that specifically assert the no-env fallback (test_sqlite_default_path)
+       ``monkeypatch.delenv`` it themselves; tests that build explicit repositories
+       pass an explicit config and ignore the env. So this override is safe.
+
+    2. Reset the cached repo singleton before/after each test so the next
+       ``_get_storage_repo()`` re-initializes against the isolated DB.
+    """
+    monkeypatch.setenv("FUN_DOC_DB_URL", f"sqlite:///{tmp_path / 'isolated_state.db'}")
+
     _safe_clean_state_db()
     # Pre-test: drop the cached repo so the next call re-initializes.
     if "fun_doc" in sys.modules:
