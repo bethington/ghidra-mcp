@@ -868,12 +868,18 @@ public class HeadlessProgramProvider implements ProgramProvider {
     // ========================================================================
 
     /**
-     * Resolve a DomainFile in the open project by exact path, by leading-slash path,
-     * or by bare program name (recursive walk). Returns null when no project is open
-     * or when no match is found.
+     * Resolve a DomainFile in the open project by exact path or by leading-slash
+     * path. When neither matches, fall back to a bare program-name search across
+     * all folders. Returns null when no project is open or when no match is
+     * found.
+     *
+     * @throws AmbiguousProgramException when a bare name matches files in more
+     *     than one folder \u2014 the caller must supply a full project path to
+     *     disambiguate rather than have us guess the wrong program.
      */
-    private DomainFile findDomainFile(String programIdent) {
+    private DomainFile findDomainFile(String programIdent) throws AmbiguousProgramException {
         if (project == null || programIdent == null || programIdent.isEmpty()) return null;
+        List<DomainFile> matches = new ArrayList<>();
         try {
             ProjectData pd = project.getProjectData();
             DomainFile f = pd.getFile(programIdent);
@@ -882,26 +888,41 @@ public class HeadlessProgramProvider implements ProgramProvider {
                 f = pd.getFile("/" + programIdent);
                 if (f != null) return f;
             }
-            return findByName(pd.getRootFolder(), programIdent);
+            collectByName(pd.getRootFolder(), programIdent, matches);
         } catch (Exception e) {
             Msg.warn(this, "findDomainFile failed for '" + programIdent + "': " + e.getMessage());
             return null;
         }
+        if (matches.isEmpty()) return null;
+        if (matches.size() > 1) {
+            throw new AmbiguousProgramException(programIdent, matches.size());
+        }
+        return matches.get(0);
     }
 
-    private DomainFile findByName(DomainFolder folder, String name) {
+    private void collectByName(DomainFolder folder, String name, List<DomainFile> out) {
         try {
             for (DomainFile f : folder.getFiles()) {
-                if (name.equals(f.getName())) return f;
+                if (name.equals(f.getName())) out.add(f);
             }
             for (DomainFolder sub : folder.getFolders()) {
-                DomainFile r = findByName(sub, name);
-                if (r != null) return r;
+                collectByName(sub, name, out);
             }
         } catch (Exception ignore) {
             // best-effort
         }
-        return null;
+    }
+
+    /**
+     * Raised when a bare program name matches files in multiple project folders,
+     * so resolving it would have to guess which one the caller meant.
+     */
+    private static final class AmbiguousProgramException extends Exception {
+        AmbiguousProgramException(String ident, int matchCount) {
+            super("'" + ident + "' is ambiguous: " + matchCount
+                + " programs share this filename in different project folders. "
+                + "Pass a full project path (e.g. /folder/" + ident + ") to disambiguate.");
+        }
     }
 
     /**
@@ -986,7 +1007,12 @@ public class HeadlessProgramProvider implements ProgramProvider {
             return ExportResult.failure("Program not loaded and no project open. "
                 + "Call /load_program (file) or /open_project + /load_program_from_project first.");
         }
-        DomainFile df = findDomainFile(programIdent);
+        DomainFile df;
+        try {
+            df = findDomainFile(programIdent);
+        } catch (AmbiguousProgramException e) {
+            return ExportResult.failure(e.getMessage());
+        }
         if (df == null) {
             return ExportResult.failure("Program not found in open programs or project: " + programIdent);
         }

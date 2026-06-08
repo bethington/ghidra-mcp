@@ -23,6 +23,7 @@ import ghidra.framework.model.ProjectLocator;
 import ghidra.util.task.TaskMonitor;
 
 import java.io.File;
+import java.io.IOException;
 
 /**
  * Static facade exposing Ghidra's native {@code .gar} create / restore
@@ -63,19 +64,25 @@ public final class HeadlessArchiveBridge {
      * Restore a {@code .gar} archive into a fresh on-disk project at
      * {@code destLocator}.
      *
-     * <p>We construct {@link RestoreTask} with a {@code null}
-     * {@link ArchivePlugin} because there is no {@code PluginTool} in
-     * headless mode. {@link RestoreTask#run(TaskMonitor)} extracts the
-     * archive and writes the project marker file <em>before</em> its final
-     * {@code openRestoredProject()} step, which on the Swing thread
-     * dereferences the (null) plugin to auto-open the project in a
-     * front-end tool. That dereference throws a {@code NullPointerException},
-     * but {@code RestoreTask} catches it and only logs it — the restore
-     * itself (extraction + marker file) is already complete. The net effect
-     * is exactly what a headless caller wants: the project is materialised on
-     * disk and the GUI auto-open is skipped. Headless callers re-open through
-     * their own {@code /open_project} path.
+     * <p>{@link RestoreTask} is built with a {@code null} {@link ArchivePlugin}
+     * because headless mode has no {@code PluginTool}. Its
+     * {@link RestoreTask#run(TaskMonitor)} extracts the archive and writes the
+     * project marker file, then attempts a GUI auto-open
+     * ({@code plugin.getTool()…openProject(…)}) on the Swing thread. That step
+     * cannot work headlessly, but Ghidra wraps it in its own
+     * {@code try/catch (Exception)} that logs "Failed to open newly restored
+     * project" and swallows the failure — so {@code run()} returns normally and
+     * the restore (extraction + marker file) is already complete. The single
+     * error log line on the success path is benign and originates inside
+     * Ghidra, not here.
      *
+     * <p>Rather than depend on that swallowed-exception behaviour remaining
+     * stable across Ghidra versions, we assert the real post-condition
+     * afterwards: the project must exist on disk, otherwise we fail loud.
+     * Headless callers then re-open the restored project through their own
+     * {@code /open_project} path.
+     *
+     * @throws IOException when the archive did not materialise a project on disk
      * @throws Exception forwarded from {@link RestoreTask#run(TaskMonitor)}
      */
     public static void restore(File garFile, ProjectLocator destLocator, TaskMonitor monitor) throws Exception {
@@ -87,6 +94,13 @@ public final class HeadlessArchiveBridge {
         }
         RestoreTask task = new RestoreTask(destLocator, garFile, null);
         task.run(monitor);
+        // Verify the project actually landed on disk instead of trusting that
+        // run() completed — the GUI auto-open failure above is swallowed by
+        // Ghidra, so a genuinely failed extraction must be caught here.
+        if (!destLocator.getMarkerFile().exists() && !destLocator.getProjectDir().exists()) {
+            throw new IOException("restore did not materialise a project at " + destLocator
+                + " (archive may be invalid or extraction failed)");
+        }
     }
 }
 

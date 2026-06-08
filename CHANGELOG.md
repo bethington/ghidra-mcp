@@ -28,9 +28,14 @@ Complete version history for the Ghidra MCP Server project.
   canonicalised and confirmed to stay inside its target directory. The
   default `.gzf` / `.gar` name is derived from the program/project
   basename so a project path like `/Vanilla/1.13d/D2Common.dll` can no
-  longer leak separators into the written filename. New helper
-  `HeadlessPaths` is the single validation choke point; covered offline
-  by `HeadlessPathsTest`.
+  longer leak separators into the written filename. `..` is rejected
+  segment-by-segment (catching leading, middle, and trailing `..`
+  segments such as `a/..`, not only the `../` prefix), and the
+  containment check compares canonical paths element-wise via
+  `java.nio.file.Path.startsWith` instead of a string prefix (so a
+  sibling like `exports-evil` is no longer accepted under `exports`).
+  New helper `HeadlessPaths` is the single validation choke point;
+  covered offline by `HeadlessPathsTest`.
 
 - **`/import_program` validates the caller-supplied `target_name`.** The
   optional program name is now checked as a plain filename (rejecting
@@ -99,6 +104,28 @@ Complete version history for the Ghidra MCP Server project.
   install step.
 
 ### Fixed
+
+- **Headless: `/export_program` refuses to guess on an ambiguous bare
+  name.** When a program name is given without a folder and the same
+  filename exists in several project folders, the resolver now fails
+  with an explicit "ambiguous" error listing how many matches were found
+  and asking for a full project path, instead of silently packing the
+  first match found by the folder walk. An exact / leading-slash path
+  still resolves directly.
+
+- **Headless: `/restore_project` verifies the project materialised on
+  disk.** `HeadlessArchiveBridge.restore` no longer relies on Ghidra's
+  headless GUI auto-open step being swallowed; after `RestoreTask`
+  returns it asserts the project marker / directory exists and fails
+  loud with an `IOException` otherwise, so a corrupt or partially
+  extracted archive is reported instead of returning a false success.
+  Offline validation branches covered by `GarArchiveRestoreTest`.
+
+- **`tests/endpoints.json` total reconciled to 252.** Merging the
+  upstream removal of 4 stale catalog entries with the 4 new headless
+  GZF/GAR endpoints left `total_endpoints` at the pre-merge `256` while
+  the array held 252, breaking `EndpointsJsonParityTest`. The field and
+  the tool-count references in the docs are back in sync at 252.
 
 - **Headless: `/export_program` resolves the live program by an exact
   name.** GZF export now looks the open program up by an exact (then
