@@ -4661,14 +4661,20 @@ def _wrap_result(result):
 
 
 def _provider_timeout_seconds(provider, complexity_tier=None):
+    # Base 300s (was 900s): a hung/slow provider call previously tied up a worker for
+    # 15-25 min, which surfaced as the bridge_counter_stall "workers active, no progress"
+    # pattern. 5 min is ample for a normal documentation pass; genuinely large functions
+    # still get the extra budget below (complex +300 -> 600s, massive +600 -> 900s).
+    # Override per-provider via FUNDOC_<PROVIDER>_TIMEOUT_SECS or globally via
+    # FUNDOC_PROVIDER_TIMEOUT_SECS.
     env_key = f"FUNDOC_{str(provider or AI_PROVIDER).upper()}_TIMEOUT_SECS"
     raw_timeout = os.environ.get(env_key) or os.environ.get(
-        "FUNDOC_PROVIDER_TIMEOUT_SECS", "900"
+        "FUNDOC_PROVIDER_TIMEOUT_SECS", "300"
     )
     try:
         timeout_secs = max(60, int(raw_timeout))
     except (TypeError, ValueError):
-        timeout_secs = 900
+        timeout_secs = 300
 
     if complexity_tier == "massive":
         timeout_secs += 600
