@@ -388,14 +388,30 @@ def _short_jsonish(value, limit=1000):
     return text[:limit] + ("..." if len(text) > limit else "")
 
 
-def _log_ghidra_http_event(entry):
-    """Persist detailed Ghidra HTTP diagnostics without cluttering stdout.
+def _http_log_verbose():
+    return os.environ.get("FUN_DOC_HTTP_LOG_VERBOSE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
-    Routed through log_rotation.write_jsonl_rotating so the file is
-    bounded — pre-rotation this log grew unbounded at ~50 MB/day and
-    hit 1+ GB on long-running workspaces.
+
+def _log_ghidra_http_event(entry):
+    """Persist Ghidra HTTP diagnostics without cluttering stdout.
+
+    Routed through log_rotation.write_jsonl_rotating so the file is bounded
+    (pre-rotation it grew unbounded at ~50 MB/day and hit 1+ GB).
+
+    Successful calls (ok=True) are the overwhelming bulk of this log and are
+    rarely useful after the fact — the diagnostic value (e.g. the 2026-04-24
+    bridge deadlock) lives in errors/timeouts/offline events, which are always
+    kept. Skip ok=True events by default to keep the series small; set
+    FUN_DOC_HTTP_LOG_VERBOSE=1 to record every call (e.g. for latency analysis).
     """
     from log_rotation import write_jsonl_rotating
+
+    if entry.get("ok") and not _http_log_verbose():
+        return
 
     try:
         line = json.dumps(entry, default=str)
