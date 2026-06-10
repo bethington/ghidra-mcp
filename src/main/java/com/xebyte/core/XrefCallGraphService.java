@@ -160,8 +160,6 @@ public class XrefCallGraphService {
                    description = "Operand index the reference attaches to. -1 = mnemonic/data operand.") int operandIndex,
             @Param(value = "set_primary", source = ParamSource.BODY, defaultValue = "false",
                    description = "If true, mark this reference as the primary reference for the operand.") boolean setPrimary,
-            @Param(value = "dry_run", source = ParamSource.BODY, defaultValue = "false",
-                   description = "If true, validate and report what would be created without writing.") boolean dryRun,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -187,20 +185,6 @@ public class XrefCallGraphService {
         } catch (Exception e) {
             return Response.err("Unknown source_type '" + sourceTypeStr
                     + "'. Valid values: USER_DEFINED, ANALYSIS, IMPORTED, DEFAULT.");
-        }
-
-        if (dryRun) {
-            Reference existing = program.getReferenceManager().getReference(fromAddr, toAddr, operandIndex);
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "dry_run",
-                    "would_create", existing == null,
-                    "already_exists", existing != null,
-                    "from_address", fromAddr.toString(),
-                    "to_address", toAddr.toString(),
-                    "ref_type", refType.getName(),
-                    "source_type", sourceType.toString(),
-                    "operand_index", operandIndex,
-                    "set_primary", setPrimary));
         }
 
         try {
@@ -248,8 +232,6 @@ public class XrefCallGraphService {
             @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
                    description = "Operand index to match. -1 (default) = remove references on any operand; "
                                + ">= 0 = remove only the reference on that operand.") int operandIndex,
-            @Param(value = "dry_run", source = ParamSource.BODY, defaultValue = "false",
-                   description = "If true, report which references would be removed without deleting them.") boolean dryRun,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -263,7 +245,7 @@ public class XrefCallGraphService {
         Address toAddr = ServiceUtils.parseAddress(program, toAddressStr);
         if (toAddr == null) return Response.err("to_address: " + ServiceUtils.getLastParseError());
 
-        // Collect the matching references up front (same for dry_run and the real delete).
+        // Collect the matching references up front, then delete inside the transaction.
         List<Reference> matches = new ArrayList<>();
         for (Reference ref : program.getReferenceManager().getReferencesFrom(fromAddr)) {
             if (!ref.getToAddress().equals(toAddr)) continue;
@@ -278,15 +260,6 @@ public class XrefCallGraphService {
                     "operand_index", ref.getOperandIndex(),
                     "ref_type", ref.getReferenceType().getName(),
                     "source_type", ref.getSource().toString()));
-        }
-
-        if (dryRun) {
-            return Response.ok(JsonHelper.mapOf(
-                    "status", "dry_run",
-                    "from_address", fromAddr.toString(),
-                    "to_address", toAddr.toString(),
-                    "match_count", matches.size(),
-                    "would_remove", details));
         }
 
         if (matches.isEmpty()) {

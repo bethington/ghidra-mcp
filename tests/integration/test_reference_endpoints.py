@@ -1,8 +1,8 @@
 """
-Integration tests for /add_memory_reference.
+Integration tests for /add_memory_reference and /remove_reference.
 
-Covers the user-defined cross-reference tool: catalog/parity, the non-mutating
-dry_run path, input validation, and a real create -> get_xrefs_to round-trip.
+Covers the user-defined cross-reference tools: catalog/parity, input validation,
+a real create -> get_xrefs_to -> remove round-trip, and the empty-match no-op.
 
 The catalog tests run without a server. The live tests auto-skip when the
 server/program is unavailable or when the endpoint isn't registered (older JAR).
@@ -52,7 +52,7 @@ def test_add_memory_reference_declares_core_params(endpoints):
     assert entry is not None
     params = set(entry.get("params", []))
     for required in ("from_address", "to_address", "ref_type", "source_type",
-                     "operand_index", "set_primary", "dry_run", "program"):
+                     "operand_index", "set_primary", "program"):
         assert required in params, f"{required} missing from catalog params {params}"
 
 
@@ -82,11 +82,9 @@ def require_server_and_program(server_available, program_loaded):
 
 @pytest.fixture
 def endpoint_available(http_client, require_server_and_program):
-    """Probe the endpoint with a harmless dry_run; skip if not registered."""
-    resp = http_client.post(
-        "/add_memory_reference",
-        json_data={"from_address": "0x0", "to_address": "0x0", "dry_run": True},
-    )
+    """Probe registration with an empty body (no mutation: returns the
+    'from_address is required' error if registered, 404 if not)."""
+    resp = http_client.post("/add_memory_reference", json_data={})
     if resp.status_code == 404:
         pytest.skip("/add_memory_reference not registered (deploy the updated JAR)")
     return True
@@ -123,7 +121,7 @@ def test_unknown_ref_type_rejected(http_client, endpoint_available):
     resp = http_client.post(
         "/add_memory_reference",
         json_data={"from_address": "0x1000", "to_address": "0x2000",
-                   "ref_type": "NOT_A_REAL_TYPE", "dry_run": True},
+                   "ref_type": "NOT_A_REAL_TYPE"},
     )
     assert resp.status_code == 200, resp.text
     assert "Unknown ref_type" in resp.text
@@ -133,7 +131,7 @@ def test_unknown_source_type_rejected(http_client, endpoint_available):
     resp = http_client.post(
         "/add_memory_reference",
         json_data={"from_address": "0x1000", "to_address": "0x2000",
-                   "source_type": "BOGUS", "dry_run": True},
+                   "source_type": "BOGUS"},
     )
     assert resp.status_code == 200, resp.text
     assert "Unknown source_type" in resp.text
@@ -142,37 +140,10 @@ def test_unknown_source_type_rejected(http_client, endpoint_available):
 def test_missing_to_address_rejected(http_client, endpoint_available):
     resp = http_client.post(
         "/add_memory_reference",
-        json_data={"from_address": "0x1000", "dry_run": True},
+        json_data={"from_address": "0x1000"},
     )
     assert resp.status_code == 200, resp.text
     assert "to_address is required" in resp.text
-
-
-# ---------- dry_run (no mutation) ----------
-
-
-def test_dry_run_reports_shape_without_writing(http_client, endpoint_available, two_addresses):
-    resp = http_client.post(
-        "/add_memory_reference",
-        json_data={
-            "from_address": two_addresses["from"],
-            "to_address": two_addresses["to"],
-            "ref_type": "DATA",
-            "dry_run": True,
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    body = json.loads(resp.text)
-    assert body.get("status") == "dry_run"
-    assert body.get("ref_type") == "DATA"
-    assert body.get("source_type") == "USER_DEFINED"
-    assert "would_create" in body and "already_exists" in body
-
-    # dry_run must not have created anything: the from-address should not yet
-    # appear in the target's xrefs (only meaningful when it didn't pre-exist).
-    if body.get("would_create"):
-        xrefs = http_client.get("/get_xrefs_to", params={"address": two_addresses["to"]})
-        assert _bare(two_addresses["from"]) not in xrefs.text.lower()
 
 
 # ---------- real create -> round-trip ----------
@@ -225,27 +196,26 @@ def test_create_then_remove_reference_round_trip(http_client, endpoint_available
     )
 
 
-def test_remove_reference_dry_run_shape(http_client, endpoint_available, two_addresses):
-    """remove_reference dry_run reports a consistent, non-mutating shape."""
+def test_remove_nonexistent_reference_is_clean_no_op(http_client, endpoint_available, two_addresses):
+    """Removing a reference that isn't there returns removed=0 without erroring
+    (the reversed direction is virtually never a real reference)."""
     resp = http_client.post(
         "/remove_reference",
         json_data={
             "from_address": two_addresses["to"],
             "to_address": two_addresses["from"],
-            "dry_run": True,
         },
     )
     assert resp.status_code == 200, resp.text
     body = json.loads(resp.text)
-    assert body.get("status") == "dry_run"
-    # match_count must agree with the detail list length (no mutation either way).
-    assert body.get("match_count") == len(body.get("would_remove", []))
+    assert body.get("status") == "success", f"unexpected: {body}"
+    assert body.get("removed", -1) == 0
 
 
 def test_remove_reference_missing_from_address_rejected(http_client, endpoint_available):
     resp = http_client.post(
         "/remove_reference",
-        json_data={"to_address": "0x1000", "dry_run": True},
+        json_data={"to_address": "0x1000"},
     )
     assert resp.status_code == 200, resp.text
     assert "from_address is required" in resp.text
