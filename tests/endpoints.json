@@ -1,7 +1,7 @@
 {
   "version": "5.13.1",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 249,
+  "total_endpoints": 250,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -30,6 +30,22 @@
         "program"
       ],
       "description": "Attach one or more tags to a function. Tags are comma-separated and will be auto-created if they do not already exist."
+    },
+    {
+      "path": "/add_memory_reference",
+      "method": "POST",
+      "category": "xref",
+      "params": [
+        "from_address",
+        "to_address",
+        "ref_type",
+        "source_type",
+        "operand_index",
+        "set_primary",
+        "dry_run",
+        "program"
+      ],
+      "description": "Create a user-defined cross-reference between two memory addresses that the auto-analyzer can't infer (runtime-populated pointer tables, vtables, late-bound function pointers, missed jump/switch tables). Leaves the underlying bytes untouched while adding proper bidirectional navigation. ref_type accepts any RefType name (DATA, READ, WRITE, COMPUTED_CALL, UNCONDITIONAL_JUMP, ...); source_type defaults to USER_DEFINED so refs are distinct from analyzer output and survive re-analysis. Supports dry_run and space-prefixed addresses (mem:1000)."
     },
     {
       "path": "/add_struct_field",
