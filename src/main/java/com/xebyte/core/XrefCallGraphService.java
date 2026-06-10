@@ -228,6 +228,93 @@ public class XrefCallGraphService {
     }
 
     /**
+     * Remove memory cross-reference(s) between two addresses — the inverse of
+     * {@link #addMemoryReference}. Useful for clearing references the analyzer got wrong
+     * or for undoing a manual reference.
+     */
+    @McpTool(path = "/remove_reference", method = "POST",
+            description = "Remove memory cross-reference(s) from one address to another (the inverse of "
+                        + "add_memory_reference). Removes every reference from_address -> to_address "
+                        + "regardless of operand by default; pass operand_index >= 0 to remove only the "
+                        + "reference on that operand. Removes both user-defined and analyzer-inferred "
+                        + "references — the response reports each removed reference's source_type. "
+                        + "On multi-space programs, prefix addresses with the space name (mem:1000).",
+            category = "xref")
+    public Response removeReference(
+            @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Source address the reference originates from. Accepts 0x<hex> or <space>:<hex>.") String fromAddressStr,
+            @Param(value = "to_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") String toAddressStr,
+            @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
+                   description = "Operand index to match. -1 (default) = remove references on any operand; "
+                               + ">= 0 = remove only the reference on that operand.") int operandIndex,
+            @Param(value = "dry_run", source = ParamSource.BODY, defaultValue = "false",
+                   description = "If true, report which references would be removed without deleting them.") boolean dryRun,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (fromAddressStr == null || fromAddressStr.isEmpty()) return Response.err("from_address is required");
+        if (toAddressStr == null || toAddressStr.isEmpty()) return Response.err("to_address is required");
+
+        Address fromAddr = ServiceUtils.parseAddress(program, fromAddressStr);
+        if (fromAddr == null) return Response.err("from_address: " + ServiceUtils.getLastParseError());
+        Address toAddr = ServiceUtils.parseAddress(program, toAddressStr);
+        if (toAddr == null) return Response.err("to_address: " + ServiceUtils.getLastParseError());
+
+        // Collect the matching references up front (same for dry_run and the real delete).
+        List<Reference> matches = new ArrayList<>();
+        for (Reference ref : program.getReferenceManager().getReferencesFrom(fromAddr)) {
+            if (!ref.getToAddress().equals(toAddr)) continue;
+            if (operandIndex >= 0 && ref.getOperandIndex() != operandIndex) continue;
+            matches.add(ref);
+        }
+
+        List<Map<String, Object>> details = new ArrayList<>();
+        for (Reference ref : matches) {
+            details.add(JsonHelper.mapOf(
+                    "to_address", ref.getToAddress().toString(),
+                    "operand_index", ref.getOperandIndex(),
+                    "ref_type", ref.getReferenceType().getName(),
+                    "source_type", ref.getSource().toString()));
+        }
+
+        if (dryRun) {
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "dry_run",
+                    "from_address", fromAddr.toString(),
+                    "to_address", toAddr.toString(),
+                    "match_count", matches.size(),
+                    "would_remove", details));
+        }
+
+        if (matches.isEmpty()) {
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "success",
+                    "removed", 0,
+                    "message", "No reference found from " + fromAddr + " to " + toAddr));
+        }
+
+        try {
+            return threadingStrategy.executeWrite(program, "Remove memory reference", () -> {
+                ReferenceManager refMgr = program.getReferenceManager();
+                for (Reference ref : matches) {
+                    refMgr.delete(ref);
+                }
+                return Response.ok(JsonHelper.mapOf(
+                        "status", "success",
+                        "from_address", fromAddr.toString(),
+                        "to_address", toAddr.toString(),
+                        "removed", matches.size(),
+                        "references", details));
+            });
+        } catch (Exception e) {
+            return Response.err("Error removing reference: " + e.getMessage());
+        }
+    }
+
+    /**
      * Resolve a case-insensitive {@link RefType} name to its static constant.
      * Reflects over RefType's public static fields so every valid name (data + flow types)
      * is accepted, matching the names callers see in the listing.

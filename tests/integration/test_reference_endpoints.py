@@ -56,6 +56,19 @@ def test_add_memory_reference_declares_core_params(endpoints):
         assert required in params, f"{required} missing from catalog params {params}"
 
 
+def test_remove_reference_in_endpoint_catalog(endpoints):
+    paths = {e["path"] for e in endpoints}
+    assert "/remove_reference" in paths, "remove_reference missing from endpoints.json"
+
+
+def test_remove_reference_categorized_as_xref_post(endpoints):
+    by_path = {e["path"]: e for e in endpoints}
+    entry = by_path.get("/remove_reference")
+    assert entry is not None
+    assert entry.get("category") == "xref"
+    assert entry.get("method") == "POST"
+
+
 # ---------- live fixtures ----------
 
 
@@ -165,14 +178,18 @@ def test_dry_run_reports_shape_without_writing(http_client, endpoint_available, 
 # ---------- real create -> round-trip ----------
 
 
-def test_create_reference_appears_in_xrefs_to(http_client, endpoint_available, two_addresses):
-    """Create a USER_DEFINED reference and confirm bidirectional navigation:
-    it shows up in get_xrefs_to for the target."""
+def test_create_then_remove_reference_round_trip(http_client, endpoint_available, two_addresses):
+    """Full round-trip: create a USER_DEFINED reference, confirm it shows up in
+    get_xrefs_to (bidirectional navigation), then remove it and confirm it's gone.
+    The remove step also leaves the test binary clean."""
+    src, dst = two_addresses["from"], two_addresses["to"]
+
+    # Create
     resp = http_client.post(
         "/add_memory_reference",
         json_data={
-            "from_address": two_addresses["from"],
-            "to_address": two_addresses["to"],
+            "from_address": src,
+            "to_address": dst,
             "ref_type": "DATA",
             "source_type": "USER_DEFINED",
             "set_primary": True,
@@ -184,9 +201,51 @@ def test_create_reference_appears_in_xrefs_to(http_client, endpoint_available, t
     assert body.get("ref_type") == "DATA"
     assert body.get("source_type") == "USER_DEFINED"
 
-    xrefs = http_client.get("/get_xrefs_to", params={"address": two_addresses["to"]})
-    assert xrefs.status_code == 200, xrefs.text
-    assert _bare(two_addresses["from"]) in xrefs.text.lower(), (
-        f"created reference from {two_addresses['from']} not found in "
-        f"get_xrefs_to({two_addresses['to']}): {xrefs.text[:300]}"
+    try:
+        xrefs = http_client.get("/get_xrefs_to", params={"address": dst})
+        assert xrefs.status_code == 200, xrefs.text
+        assert _bare(src) in xrefs.text.lower(), (
+            f"created reference from {src} not found in get_xrefs_to({dst}): {xrefs.text[:300]}"
+        )
+    finally:
+        # Remove (also serves as the dedicated remove_reference assertion + cleanup)
+        rm = http_client.post(
+            "/remove_reference",
+            json_data={"from_address": src, "to_address": dst},
+        )
+        assert rm.status_code == 200, rm.text
+        rm_body = json.loads(rm.text)
+        assert rm_body.get("status") == "success", f"unexpected: {rm_body}"
+        assert rm_body.get("removed", 0) >= 1, f"expected >=1 removed: {rm_body}"
+
+    # Confirm it's gone
+    xrefs_after = http_client.get("/get_xrefs_to", params={"address": dst})
+    assert _bare(src) not in xrefs_after.text.lower(), (
+        f"reference from {src} still present after remove_reference: {xrefs_after.text[:300]}"
     )
+
+
+def test_remove_reference_dry_run_shape(http_client, endpoint_available, two_addresses):
+    """remove_reference dry_run reports a consistent, non-mutating shape."""
+    resp = http_client.post(
+        "/remove_reference",
+        json_data={
+            "from_address": two_addresses["to"],
+            "to_address": two_addresses["from"],
+            "dry_run": True,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = json.loads(resp.text)
+    assert body.get("status") == "dry_run"
+    # match_count must agree with the detail list length (no mutation either way).
+    assert body.get("match_count") == len(body.get("would_remove", []))
+
+
+def test_remove_reference_missing_from_address_rejected(http_client, endpoint_available):
+    resp = http_client.post(
+        "/remove_reference",
+        json_data={"to_address": "0x1000", "dry_run": True},
+    )
+    assert resp.status_code == 200, resp.text
+    assert "from_address is required" in resp.text
