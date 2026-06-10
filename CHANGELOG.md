@@ -6,6 +6,19 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+### Added
+
+- **`/add_memory_reference`**: create a user-defined cross-reference between two memory
+  addresses that the auto-analyzer can't infer — runtime-populated dispatch tables, vtables,
+  late-bound function pointers, and missed jump/switch tables — with proper bidirectional
+  navigation and without touching the underlying bytes. Previously the only path was
+  `run_script_inline` with a Java snippet calling `ReferenceManager.addMemoryReference`, gated
+  behind `GHIDRA_MCP_ALLOW_SCRIPTS=1` (arbitrary Java execution). `ref_type` accepts any
+  case-insensitive `RefType` name (data refs `DATA`/`READ`/`WRITE` and flow refs
+  `COMPUTED_CALL`/`UNCONDITIONAL_JUMP`/...); `source_type` defaults to `USER_DEFINED` so added
+  refs stay visually distinct and survive re-analysis. Supports `set_primary`, `operand_index`,
+  `dry_run`, and space-prefixed addresses (`mem:1000`). 250 tools.
+
 ---
 
 ## v5.13.1 - 2026-06-08 (patch: launch-noise fix + class-member listing)
