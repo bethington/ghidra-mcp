@@ -16,8 +16,8 @@ Complete version history for the Ghidra MCP Server project.
   behind `GHIDRA_MCP_ALLOW_SCRIPTS=1` (arbitrary Java execution). `ref_type` accepts any
   case-insensitive `RefType` name (data refs `DATA`/`READ`/`WRITE` and flow refs
   `COMPUTED_CALL`/`UNCONDITIONAL_JUMP`/...); `source_type` defaults to `USER_DEFINED` so added
-  refs stay visually distinct and survive re-analysis. Supports `set_primary`, `operand_index`,
-  and space-prefixed addresses (`mem:1000`).
+  refs stay visually distinct and survive re-analysis. Supports `operand_index` and
+  space-prefixed addresses (`mem:1000`).
 - **`/remove_reference`**: the inverse of `add_memory_reference` — remove memory cross-reference(s)
   from one address to another. Removes every reference `from_address -> to_address` regardless of
   operand by default; pass `operand_index >= 0` to target a single operand. Reports each removed

@@ -52,7 +52,7 @@ def test_add_memory_reference_declares_core_params(endpoints):
     assert entry is not None
     params = set(entry.get("params", []))
     for required in ("from_address", "to_address", "ref_type", "source_type",
-                     "operand_index", "set_primary", "program"):
+                     "operand_index", "program"):
         assert required in params, f"{required} missing from catalog params {params}"
 
 
@@ -163,7 +163,6 @@ def test_create_then_remove_reference_round_trip(http_client, endpoint_available
             "to_address": dst,
             "ref_type": "DATA",
             "source_type": "USER_DEFINED",
-            "set_primary": True,
         },
     )
     assert resp.status_code == 200, resp.text

@@ -158,8 +158,6 @@ public class XrefCallGraphService {
                                + "re-analysis), ANALYSIS, IMPORTED, DEFAULT.") String sourceTypeStr,
             @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
                    description = "Operand index the reference attaches to. -1 = mnemonic/data operand.") int operandIndex,
-            @Param(value = "set_primary", source = ParamSource.BODY, defaultValue = "false",
-                   description = "If true, mark this reference as the primary reference for the operand.") boolean setPrimary,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -193,9 +191,6 @@ public class XrefCallGraphService {
                 Reference ref = refMgr.addMemoryReference(fromAddr, toAddr, refType, sourceType, operandIndex);
                 if (ref == null) {
                     return Response.err("Failed to create reference from " + fromAddr + " to " + toAddr);
-                }
-                if (setPrimary) {
-                    refMgr.setPrimary(ref, true);
                 }
                 return Response.ok(JsonHelper.mapOf(
                         "status", "success",

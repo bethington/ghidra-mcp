@@ -41,7 +41,6 @@
         "ref_type",
         "source_type",
         "operand_index",
-        "set_primary",
         "program"
       ],
       "description": "Create a user-defined cross-reference between two memory addresses that the auto-analyzer can't infer (runtime-populated pointer tables, vtables, late-bound function pointers, missed jump/switch tables). Leaves the underlying bytes untouched while adding proper bidirectional navigation. ref_type accepts any RefType name (DATA, READ, WRITE, COMPUTED_CALL, UNCONDITIONAL_JUMP, ...); source_type defaults to USER_DEFINED so refs are distinct from analyzer output and survive re-analysis. Accepts space-prefixed addresses (mem:1000)."
