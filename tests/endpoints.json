@@ -1,7 +1,7 @@
 {
   "version": "5.13.1",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 249,
+  "total_endpoints": 252,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -2679,6 +2679,50 @@
         "program"
       ],
       "description": "Validate function prototype"
+    },
+    {
+      "path": "/archive_project",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "output_dir",
+        "output_name"
+      ],
+      "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File → Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) — unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file. Callers should /save_all_programs first to flush pending in-memory edits."
+    },
+    {
+      "path": "/export_program",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "program_name",
+        "output_dir",
+        "output_name"
+      ],
+      "description": "Export an open or project-resident program to a Ghidra Zip File (.gzf). Looks up the program in the open-programs map first (so it works on file-loaded programs without a project), then falls back to the open project's DomainFile."
+    },
+    {
+      "path": "/import_program",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "gzf_path",
+        "target_folder",
+        "target_name",
+        "overwrite"
+      ],
+      "description": "Import a Ghidra Zip File (.gzf) into the currently open project as a new DomainFile under target_folder (default '/'). Refuses to overwrite a program that is currently loaded in memory."
+    },
+    {
+      "path": "/restore_project",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "gar_path",
+        "parent_dir",
+        "project_name"
+      ],
+      "description": "Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`. Closes any currently-open project first. The restored project is NOT re-opened automatically; follow up with /open_project so owner reset and project bookkeeping run via the same code path as a user-driven open. Fails loudly if the destination project already exists."
     }
   ]
 }

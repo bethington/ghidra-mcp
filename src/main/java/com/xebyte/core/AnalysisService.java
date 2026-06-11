@@ -239,6 +239,10 @@ public class AnalysisService {
                 mgr.initializeOptions();
                 mgr.reAnalyzeAll(program.getMemory().getLoadedAndInitializedAddressSet());
                 mgr.startAnalysis(TaskMonitor.DUMMY);
+                // Persist the ANALYZED flag so a later /save_all_programs + .gar
+                // export does not produce an archive that re-prompts "binary
+                // has not been analyzed" when restored in the GUI.
+                ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
                 return null;
             });
 
