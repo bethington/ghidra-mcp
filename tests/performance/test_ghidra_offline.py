@@ -236,10 +236,17 @@ def test_process_function_skips_model_when_ghidra_offline(monkeypatch, tmp_path)
         model_invoked.append(True)
         return "should not be called"
 
+    offline_events = []
+
+    def _capture_event(event, **fields):
+        if event == "ghidra.offline":
+            offline_events.append(fields)
+
     with (
         patch("fun_doc.requests.get", side_effect=_make_offline_requests_get),
         patch("fun_doc.update_function_state", return_value=None),
         patch("fun_doc.bus_emit", return_value=None),
+        patch("event_log.log_event", side_effect=_capture_event),
         patch("fun_doc._invoke_minimax", side_effect=_fake_invoke),
         patch("fun_doc.invoke_claude", side_effect=_fake_invoke),
         patch("fun_doc.try_launch_ghidra", return_value=False),
@@ -253,9 +260,18 @@ def test_process_function_skips_model_when_ghidra_offline(monkeypatch, tmp_path)
     assert func.get("last_result") != "ghidra_offline", (
         "function was parked as ghidra_offline; it should be left re-pickable"
     )
-    entry = json.loads(log_file.read_text(encoding="utf-8").splitlines()[0])
-    assert entry["result"] == "ghidra_offline"
-    assert entry["reason"] == f"server not reachable at {fun_doc.GHIDRA_URL}"
+    # An infra outage must NOT write a heavyweight run-log row — during a long
+    # outage that would flood runs.jsonl with hundreds of identical rows per
+    # function. The row is skipped; a single lightweight ghidra.offline event
+    # carries the audit trail instead.
+    assert not log_file.exists() or log_file.read_text(encoding="utf-8").strip() == "", (
+        "ghidra_offline must not append a run-log row"
+    )
+    assert offline_events, "expected a lightweight ghidra.offline event to be emitted"
+    assert offline_events[0].get("reason") == (
+        f"server not reachable at {fun_doc.GHIDRA_URL}"
+    )
+    assert offline_events[0].get("address") == func["address"]
 
 
 def test_process_function_resumes_after_ghidra_comes_online():

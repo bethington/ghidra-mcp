@@ -944,7 +944,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v5.12.0
+# Connection OK - GhidraMCP Headless Server v5.13.1
 ```
 
 ### Headless API Workflow

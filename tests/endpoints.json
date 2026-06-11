@@ -1,5 +1,5 @@
 {
-  "version": "5.12.0",
+  "version": "5.13.1",
   "description": "GhidraMCP REST API Endpoint Specification",
   "total_endpoints": 252,
   "categories": {
@@ -1553,6 +1553,18 @@
         "program"
       ],
       "description": "List available calling conventions"
+    },
+    {
+      "path": "/list_class_members",
+      "method": "GET",
+      "category": "function",
+      "params": [
+        "class_name",
+        "offset",
+        "limit",
+        "program"
+      ],
+      "description": "List the member functions of a C++ class. A function counts as a member if it lives in the class's namespace (e.g. after set_function_this_type re-parents it) OR its implicit 'this' parameter types as '<class> *'. Each result reports how it matched (namespace / this_type / both). Replaces the manual 'search __thiscall functions then read each signature' workflow."
     },
     {
       "path": "/list_classes",

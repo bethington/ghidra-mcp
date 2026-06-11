@@ -1669,6 +1669,90 @@ public class FunctionService {
         return ServiceUtils.resolveDataType(dtm, normalized);
     }
 
+    @McpTool(path = "/list_class_members", method = "GET",
+            description = "List the member functions of a C++ class. A function counts as a member if it lives in the class's namespace (e.g. after set_function_this_type re-parents it) OR its implicit 'this' parameter types as '<class> *'. Each result reports how it matched (namespace / this_type / both). Replaces the manual 'search __thiscall functions then read each signature' workflow.",
+            category = "function")
+    public Response listClassMembers(
+            @Param(value = "class_name",
+                   description = "Class / struct name, e.g. 'UnitAny'.") String className,
+            @Param(value = "offset", defaultValue = "0") int offset,
+            @Param(value = "limit", defaultValue = "200") int limit,
+            @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
+        if (className == null || className.trim().isEmpty()) {
+            return Response.err("class_name is required");
+        }
+        final String cls = className.trim();
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        try {
+            return threadingStrategy.executeRead(() -> {
+                SymbolTable st = program.getSymbolTable();
+                Namespace global = program.getGlobalNamespace();
+                Namespace classNs = st.getNamespace(cls, global);
+                boolean isGhidraClass = classNs instanceof GhidraClass;
+
+                List<Map<String, Object>> members = new ArrayList<>();
+                for (Function func : program.getFunctionManager().getFunctions(true)) {
+                    // (1) namespace membership: function lives under a non-global namespace
+                    //     named after the class (GhidraClass or plain namespace).
+                    Namespace parent = func.getParentNamespace();
+                    boolean byNamespace = parent != null && !parent.isGlobal()
+                            && cls.equals(parent.getName());
+
+                    // (2) this-type membership: the implicit 'this' points at the class struct.
+                    boolean byThis = false;
+                    String thisTypeName = null;
+                    Parameter thisParam = findAutoThisParameter(func);
+                    if (thisParam != null) {
+                        DataType dt = thisParam.getDataType();
+                        if (dt instanceof Pointer) {
+                            DataType base = ((Pointer) dt).getDataType();
+                            if (base != null && cls.equals(base.getName())) {
+                                byThis = true;
+                                thisTypeName = dt.getDisplayName();
+                            }
+                        }
+                    }
+
+                    if (byNamespace || byThis) {
+                        Map<String, Object> m = new LinkedHashMap<>();
+                        m.put("address", func.getEntryPoint().toString(false));
+                        m.put("name", func.getName(true));
+                        m.put("matched_by", (byNamespace && byThis) ? "both"
+                                : byNamespace ? "namespace" : "this_type");
+                        if (thisTypeName != null) m.put("this_type", thisTypeName);
+                        members.add(m);
+                    }
+                }
+
+                int total = members.size();
+                int from = Math.max(0, offset);
+                int pageLimit = Math.max(1, limit);
+                int to = Math.min(total, from + pageLimit);
+                List<Map<String, Object>> page = from < to
+                        ? new ArrayList<>(members.subList(from, to)) : new ArrayList<>();
+
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("class_name", cls);
+                result.put("class_namespace_exists", isGhidraClass);
+                result.put("total_members", total);
+                result.put("offset", from);
+                result.put("limit", pageLimit);
+                result.put("members", page);
+                if (total == 0) {
+                    result.put("note", "No members found. A function matches if it is in the '" + cls
+                            + "' namespace or its 'this' parameter types as '" + cls + " *'. Create the "
+                            + "struct (create_struct) and associate functions with set_function_this_type.");
+                }
+                return Response.ok(result);
+            });
+        } catch (Exception e) {
+            return Response.err("list_class_members failed: " + e.getMessage());
+        }
+    }
+
     /**
      * Find a high symbol by name in the given high function.
      */

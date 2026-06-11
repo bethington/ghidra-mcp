@@ -103,11 +103,11 @@ jobs:
 
     - name: Run offline Java tests
       run: |
-        # Annotation-scanner and endpoints.json parity tests.
-        # No Ghidra server needed — pure reflection + static catalog checks.
-        # Integration tests (GhidraMCPPluginTest, EndpointRegistrationTest,
-        # AppTest, ServiceUtilsAddressTest) require a running Ghidra instance
-        # and are deliberately excluded from this run.
+        # Annotation-scanner, endpoints.json parity, and mock-based unit tests
+        # (e.g. ServiceUtilsAddressTest) — pure reflection / static checks, no Ghidra
+        # server. The true integration tests (GhidraMCPPluginTest,
+        # EndpointRegistrationTest, AppTest) require a running Ghidra instance and are
+        # excluded from this run.
         mvn -q test -Dtest='com.xebyte.offline.*Test'
 
     - name: Verify build artifacts
@@ -122,6 +122,16 @@ jobs:
       with:
         name: java-test-results
         path: target/surefire-reports/
+
+    # Absorbs the former build.yml: publish the packaged extension zip so the build
+    # artifact stays available without a second workflow re-downloading Ghidra + rebuilding.
+    - name: Upload build artifact
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+      with:
+        name: GhidraMCP-artifact
+        path: target/GhidraMCP-*.zip
+        if-no-files-found: warn
 
   python-tests:
     name: Python Tests (pytest)
@@ -205,7 +215,11 @@ jobs:
         echo "✅ Offline regression suite passed"
 
   code-quality:
-    name: Code Quality Checks
+    # ADVISORY / non-blocking: every step below ends in `|| true` (or an echo
+    # fallback), so this job surfaces lint/format drift without ever failing CI.
+    # It is intentionally NOT a gate — `build-status` does not depend on it. To make
+    # it gating, drop the `|| true` once the tree is verified flake8/black-clean.
+    name: Code Quality (advisory, non-blocking)
     runs-on: ubuntu-latest
 
     steps:
@@ -227,7 +241,9 @@ jobs:
       run: black --check bridge_mcp_ghidra.py 2>/dev/null || echo "black check skipped"
 
   markdown-lint:
-    name: Documentation Quality
+    # ADVISORY / non-blocking: continue-on-error means findings never fail CI, and
+    # build-status does not depend on this job. Informational doc-lint only.
+    name: Documentation Quality (advisory, non-blocking)
     runs-on: ubuntu-latest
 
     steps:
