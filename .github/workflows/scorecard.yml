@@ -66,6 +66,6 @@ jobs:
       # Upload to GitHub's code-scanning so findings show up in the
       # repository's Security tab alongside Dependabot / CodeQL.
       - name: Upload to code-scanning
-        uses: github/codeql-action/upload-sarif@03e4368ac7daa2bd82b3e85262f3bf87ee112f57  # v3
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa  # v4.36.0
         with:
           sarif_file: results.sarif
