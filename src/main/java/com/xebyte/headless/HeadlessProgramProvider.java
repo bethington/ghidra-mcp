@@ -17,6 +17,7 @@ package com.xebyte.headless;
 
 import com.xebyte.core.ProgramProvider;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
+import ghidra.app.plugin.core.archive.HeadlessArchiveBridge;
 import ghidra.app.util.importer.AutoImporter;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.Loaded;
@@ -26,6 +27,9 @@ import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
 import ghidra.framework.model.ProjectData;
+import ghidra.framework.model.ProjectLocator;
+import ghidra.framework.model.ProjectManager;
+import ghidra.framework.project.DefaultProjectManager;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.lang.CompilerSpec;
 import ghidra.program.model.lang.CompilerSpecID;
@@ -111,6 +115,44 @@ public class HeadlessProgramProvider implements ProgramProvider {
         return null;
     }
 
+    /**
+     * Whether a program with exactly this name is currently loaded in memory.
+     *
+     * <p>Unlike {@link #getProgram(String)} this does <em>not</em> fall back to
+     * partial matching — overwrite protection must key off the precise
+     * destination name, not a fuzzy substring hit. Exact and case-insensitive
+     * matches both count as "open".
+     */
+    private boolean isProgramOpen(String name) {
+        return exactOpenProgram(name) != null;
+    }
+
+    /**
+     * Exact (then case-insensitive) lookup of a loaded program by name.
+     *
+     * <p>Unlike {@link #getProgram(String)} this never falls back to fuzzy
+     * substring matching — callers that resolve a precise destination
+     * (overwrite protection, GZF export) must not silently act on a similarly
+     * named program.
+     *
+     * @return the matching open Program, or {@code null} when none matches
+     */
+    private Program exactOpenProgram(String name) {
+        if (name == null || name.isEmpty()) {
+            return null;
+        }
+        Program exact = openPrograms.get(name);
+        if (exact != null) {
+            return exact;
+        }
+        for (Map.Entry<String, Program> entry : openPrograms.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(name)) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
     @Override
     public Program[] getAllOpenPrograms() {
         return openPrograms.values().toArray(new Program[0]);
@@ -138,15 +180,37 @@ public class HeadlessProgramProvider implements ProgramProvider {
         }
 
         try {
+            // When a project is open, prefer opening an existing DomainFile with
+            // the same name (idempotent re-load) over re-importing — AutoImporter
+            // would otherwise throw DuplicateNameException on subsequent calls.
+            if (project != null) {
+                Program existing = openExistingByName(file.getName());
+                if (existing != null) {
+                    Msg.info(this, "Reopened existing program from project: "
+                        + existing.getName() + " (" + file.getAbsolutePath() + ")");
+                    return existing;
+                }
+            }
+
             MessageLog log = new MessageLog();
             LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
                 file,
-                null,  // project (null for standalone)
-                "/",   // folder path
+                project,  // pass active project so the DomainFile has a real location
+                          // (was null → DomainFileProxy → df.save() throws
+                          // "Location does not exist for a save operation!")
+                "/",   // folder path (ignored when project is null → in-memory)
                 this,  // consumer
                 log,
                 monitor
             );
+
+            // AutoImporter returns Loaded<T> wrappers whose DomainFile is still a
+            // transient proxy until save() materialises them into the project tree.
+            // Without this step, /save_all_programs later throws ReadOnlyException:
+            // "Location does not exist for a save operation!".
+            if (loadResults != null && project != null) {
+                loadResults.save(monitor);
+            }
 
             Program program = null;
             if (loadResults != null) {
@@ -204,6 +268,18 @@ public class HeadlessProgramProvider implements ProgramProvider {
             (compilerSpecId == null) ? "" : compilerSpecId.trim();
 
         try {
+            // Same idempotency guard as loadProgramFromFile: if a project is
+            // open and a same-named DomainFile already exists, reopen it
+            // rather than re-importing (which would throw DuplicateNameException).
+            if (project != null) {
+                Program existing = openExistingByName(file.getName());
+                if (existing != null) {
+                    Msg.info(this, "Reopened existing raw binary from project: "
+                        + existing.getName() + " (" + file.getAbsolutePath() + ")");
+                    return existing;
+                }
+            }
+
             LanguageService langService = DefaultLanguageService.getLanguageService();
             Language language = langService.getLanguage(new LanguageID(languageId));
 
@@ -217,14 +293,22 @@ public class HeadlessProgramProvider implements ProgramProvider {
             MessageLog log = new MessageLog();
             Loaded<Program> loaded = AutoImporter.importAsBinary(
                 file,
-                null,   // project (null = in-memory, same model as loadProgramFromFile)
-                "/",    // folder path (ignored when project is null)
+                project, // pass active project so the DomainFile has a real location
+                         // (was null → DomainFileProxy → df.save() throws
+                         // "Location does not exist for a save operation!")
+                "/",    // folder path (ignored when project is null → in-memory)
                 language,
                 compilerSpec,
                 this,   // consumer
                 log,
                 monitor
             );
+
+            // Materialise the Loaded into the project tree — see twin block in
+            // loadProgramFromFile for the full rationale.
+            if (loaded != null && project != null) {
+                loaded.save(monitor);
+            }
 
             Program program = null;
             if (loaded != null) {
@@ -249,6 +333,48 @@ public class HeadlessProgramProvider implements ProgramProvider {
         } catch (Exception e) {
             Msg.error(this, "Error loading raw binary from file: " + file.getAbsolutePath()
                 + " (language=" + languageId + ")", e);
+            return null;
+        }
+    }
+
+    /**
+     * Look up a program already imported into the open project by file name and
+     * return an opened {@link Program} backed by its {@link DomainFile}.
+     *
+     * <p>Used by {@link #loadProgramFromFile(File)} and
+     * {@link #loadProgramFromFileWithLanguage(File, String, String)} to make
+     * repeated load calls idempotent — re-importing under the same name would
+     * otherwise throw {@code DuplicateNameException}.
+     *
+     * @param name DomainFile name (typically {@code file.getName()})
+     * @return the opened Program if an entry exists in the project tree, or
+     *         {@code null} when no project is open or no match is found
+     */
+    private Program openExistingByName(String name) {
+        if (project == null || name == null || name.isEmpty()) return null;
+        try {
+            // Hot path: already opened in this session.
+            Program cached = openPrograms.get(name);
+            if (cached != null) return cached;
+
+            // Idempotency is scoped to the import location (root): the loaders
+            // always import under folder "/", so a recursive search could reopen
+            // a same-named program from a different folder and break the
+            // intended "reload the file I just imported" contract.
+            ProjectData pd = project.getProjectData();
+            DomainFile df = pd.getFile("/" + name);
+            if (df == null) return null;
+
+            Program program = (Program) df.getDomainObject(this, true, false, monitor);
+            if (program != null) {
+                openPrograms.put(program.getName(), program);
+                if (currentProgram == null) {
+                    currentProgram = program;
+                }
+            }
+            return program;
+        } catch (Exception e) {
+            Msg.warn(this, "openExistingByName failed for '" + name + "': " + e.getMessage());
             return null;
         }
     }
@@ -623,10 +749,18 @@ public class HeadlessProgramProvider implements ProgramProvider {
                 closeProject();
             }
 
-            // Use GhidraProject API (designed for headless/scripting use)
-            // Use restore=true to bypass ownership checks (different user in Docker)
-            ghidraProject = GhidraProject.openProject(projectDir.getAbsolutePath(), projectName, true);
-            project = ghidraProject.getProject();
+            // Go through the low-level ProjectManager so we can pass
+            // resetOwner=true. GhidraProject.openProject(..., restore=true) only
+            // toggles restoreDefault and hard-codes resetOwner=false, leaving
+            // project.prp pinned to whichever username originally created the
+            // project. That breaks .tar.gz round-trips between hosts (or between
+            // a container running as root and a standalone Ghidra GUI). With
+            // resetOwner=true, project.prp is rewritten to the current user on
+            // every open.
+            ProjectLocator locator = new ProjectLocator(projectDir.getAbsolutePath(), projectName);
+            ProjectManager pm = new HeadlessProjectManager();
+            ghidraProject = null;
+            project = pm.openProject(locator, /*restoreDefault*/ true, /*resetOwner*/ true);
 
             if (project != null) {
                 Msg.info(this, "Opened project: " + projectName + " from " + projectDir.getAbsolutePath());
@@ -726,6 +860,444 @@ public class HeadlessProgramProvider implements ProgramProvider {
             this.path = path;
             this.contentType = contentType;
             this.readOnly = readOnly;
+        }
+    }
+
+    // ========================================================================
+    // GZF export / import (Ghidra packed-database format)
+    // ========================================================================
+
+    /**
+     * Resolve a DomainFile in the open project by exact path or by leading-slash
+     * path. When neither matches, fall back to a bare program-name search across
+     * all folders. Returns null when no project is open or when no match is
+     * found.
+     *
+     * @throws AmbiguousProgramException when a bare name matches files in more
+     *     than one folder \u2014 the caller must supply a full project path to
+     *     disambiguate rather than have us guess the wrong program.
+     */
+    private DomainFile findDomainFile(String programIdent) throws AmbiguousProgramException {
+        if (project == null || programIdent == null || programIdent.isEmpty()) return null;
+        List<DomainFile> matches = new ArrayList<>();
+        try {
+            ProjectData pd = project.getProjectData();
+            DomainFile f = pd.getFile(programIdent);
+            if (f != null) return f;
+            if (!programIdent.startsWith("/")) {
+                f = pd.getFile("/" + programIdent);
+                if (f != null) return f;
+            }
+            collectByName(pd.getRootFolder(), programIdent, matches);
+        } catch (Exception e) {
+            Msg.warn(this, "findDomainFile failed for '" + programIdent + "': " + e.getMessage());
+            return null;
+        }
+        if (matches.isEmpty()) return null;
+        if (matches.size() > 1) {
+            throw new AmbiguousProgramException(programIdent, matches.size());
+        }
+        return matches.get(0);
+    }
+
+    private void collectByName(DomainFolder folder, String name, List<DomainFile> out) {
+        try {
+            for (DomainFile f : folder.getFiles()) {
+                if (name.equals(f.getName())) out.add(f);
+            }
+            for (DomainFolder sub : folder.getFolders()) {
+                collectByName(sub, name, out);
+            }
+        } catch (Exception ignore) {
+            // best-effort
+        }
+    }
+
+    /**
+     * Raised when a bare program name matches files in multiple project folders,
+     * so resolving it would have to guess which one the caller meant.
+     */
+    private static final class AmbiguousProgramException extends Exception {
+        AmbiguousProgramException(String ident, int matchCount) {
+            super("'" + ident + "' is ambiguous: " + matchCount
+                + " programs share this filename in different project folders. "
+                + "Pass a full project path (e.g. /folder/" + ident + ") to disambiguate.");
+        }
+    }
+
+    /**
+     * Resolve a DomainFolder by path, optionally creating missing intermediate folders.
+     * Returns null when no project is open or when {@code createMissing} is false and the
+     * folder doesn't exist.
+     */
+    private DomainFolder resolveFolder(String folderPath, boolean createMissing) {
+        if (project == null) return null;
+        String p = (folderPath == null || folderPath.isEmpty()) ? "/" : folderPath;
+        if (!p.startsWith("/")) p = "/" + p;
+        try {
+            ProjectData pd = project.getProjectData();
+            DomainFolder existing = pd.getFolder(p);
+            if (existing != null) return existing;
+            if (!createMissing) return null;
+            DomainFolder cur = pd.getRootFolder();
+            for (String part : p.split("/")) {
+                if (part.isEmpty()) continue;
+                if (part.equals(".") || part.equals("..")) {
+                    Msg.warn(this, "resolveFolder rejecting traversal segment '"
+                        + part + "' in '" + folderPath + "'");
+                    return null;
+                }
+                DomainFolder next = cur.getFolder(part);
+                if (next == null) next = cur.createFolder(part);
+                cur = next;
+            }
+            return cur;
+        } catch (Exception e) {
+            Msg.warn(this, "resolveFolder failed for '" + folderPath + "': " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Export a program to a GZF (packed-database) file on disk.
+     *
+     * <p>Lookup order:
+     * <ol>
+     *   <li>An in-memory program (loaded via {@code /load_program} or
+     *       {@code /load_program_from_project}) — packed via
+     *       {@link ghidra.framework.data.DomainObjectAdapterDB#saveToPackedFile}.
+     *       This captures the live RAM state including any analyst edits.</li>
+     *   <li>A project DomainFile (not currently loaded) — packed via
+     *       {@link DomainFile#packFile}. This is the on-disk state.</li>
+     * </ol>
+     */
+    public ExportResult exportProgramToGzf(String programIdent, File output) {
+        if (programIdent == null || programIdent.isEmpty()) {
+            return ExportResult.failure("program identifier required");
+        }
+        if (output == null) {
+            return ExportResult.failure("output path required");
+        }
+        File parent = output.getParentFile();
+        if (parent == null || !parent.isDirectory()) {
+            return ExportResult.failure("output parent directory does not exist: "
+                + (parent == null ? "<none>" : parent.getAbsolutePath()));
+        }
+        if (output.exists()) {
+            return ExportResult.failure("output file already exists: " + output.getAbsolutePath());
+        }
+
+        // Prefer the live in-memory program — it includes unsaved analyst edits.
+        // Exact match only: getProgram()'s fuzzy substring fallback could pack
+        // the wrong program when several open names overlap.
+        Program live = exactOpenProgram(programIdent);
+        if (live != null) {
+            try {
+                live.saveToPackedFile(output, monitor);
+                return ExportResult.success(live.getName(), output.getAbsolutePath(), output.length());
+            } catch (Exception e) {
+                Msg.error(this, "saveToPackedFile failed for '" + programIdent + "'", e);
+                return ExportResult.failure("saveToPackedFile failed ("
+                    + e.getClass().getSimpleName() + "): " + e.getMessage());
+            }
+        }
+
+        // Fallback: the program isn't loaded but lives in the open project.
+        if (project == null) {
+            return ExportResult.failure("Program not loaded and no project open. "
+                + "Call /load_program (file) or /open_project + /load_program_from_project first.");
+        }
+        DomainFile df;
+        try {
+            df = findDomainFile(programIdent);
+        } catch (AmbiguousProgramException e) {
+            return ExportResult.failure(e.getMessage());
+        }
+        if (df == null) {
+            return ExportResult.failure("Program not found in open programs or project: " + programIdent);
+        }
+        try {
+            df.packFile(output, monitor);
+            return ExportResult.success(df.getName(), output.getAbsolutePath(), output.length());
+        } catch (Exception e) {
+            Msg.error(this, "packFile failed for '" + programIdent + "'", e);
+            return ExportResult.failure("packFile failed (" + e.getClass().getSimpleName()
+                + "): " + e.getMessage());
+        }
+    }
+
+    /**
+     * Import a GZF (packed-database) file into the open project under {@code targetFolder/targetName}.
+     *
+     * <p>Missing intermediate folders are created. When {@code targetName} is null or empty the
+     * GZF file's basename (sans {@code .gzf}) is used. When the destination already contains a
+     * file with the chosen name, the operation either deletes-and-replaces (when {@code overwrite}
+     * is true) or fails with a structured error.
+     */
+    public ImportResult importProgramFromGzf(File gzf, String targetFolder, String targetName, boolean overwrite) {
+        // Validate the caller-controlled destination name up front, before any
+        // project/file work, so it's reachable in offline tests and a separator
+        // or traversal segment never reaches resolveFolder/createFile.
+        if (targetName != null && !targetName.isEmpty()) {
+            String invalid = HeadlessPaths.validateFilename(targetName);
+            if (invalid != null) {
+                return ImportResult.failure("invalid target_name: " + invalid);
+            }
+        }
+        if (project == null) {
+            return ImportResult.failure("No project open. Call /open_project first.");
+        }
+        if (gzf == null || !gzf.isFile()) {
+            return ImportResult.failure("gzf file not found: "
+                + (gzf == null ? "<null>" : gzf.getAbsolutePath()));
+        }
+        if (!gzf.getName().toLowerCase().endsWith(".gzf")) {
+            return ImportResult.failure("not a .gzf file: " + gzf.getName());
+        }
+        DomainFolder folder = resolveFolder(targetFolder, true);
+        if (folder == null) {
+            return ImportResult.failure("could not resolve target_folder: " + targetFolder);
+        }
+        String chosenName = (targetName == null || targetName.isEmpty())
+            ? gzf.getName().replaceFirst("(?i)\\.gzf$", "")
+            : targetName;
+        try {
+            DomainFile existing = folder.getFile(chosenName);
+            if (existing != null && !overwrite) {
+                return ImportResult.failure("program already exists at "
+                    + folder.getPathname() + "/" + chosenName
+                    + " (pass overwrite=true to replace).");
+            }
+            // Enforce the "won't overwrite a loaded program" contract up front,
+            // before touching the project tree. Relying on FileInUseException
+            // from setName/delete would leave the file half-renamed depending
+            // on Ghidra's locking, so check the open-program bookkeeping first
+            // and fail with a clear structured error that mutates nothing.
+            if (existing != null && isProgramOpen(chosenName)) {
+                return ImportResult.failure("cannot overwrite '"
+                    + folder.getPathname() + "/" + chosenName
+                    + "': program is currently loaded in memory. "
+                    + "Close or switch away from it before re-importing.");
+            }
+            // Recoverable overwrite: move the original aside first and only
+            // delete it once the new file is created. If createFile fails
+            // (corrupt .gzf, I/O error) the original is renamed back, so the
+            // overwrite is never destructive on a failed import.
+            DomainFile backup = null;
+            if (existing != null) {
+                String backupName = chosenName + ".bak-" + System.currentTimeMillis();
+                existing.setName(backupName);
+                backup = existing;
+            }
+            try {
+                DomainFile created = folder.createFile(chosenName, gzf, monitor);
+                if (backup != null) {
+                    backup.delete();
+                }
+                return ImportResult.success(folder.getPathname(), created.getName(), created.getContentType());
+            } catch (Exception e) {
+                if (backup != null) {
+                    try {
+                        backup.setName(chosenName);
+                    } catch (Exception restoreEx) {
+                        Msg.error(this, "failed to restore '" + chosenName
+                            + "' after import failure (backup left at " + backup.getName() + ")", restoreEx);
+                    }
+                }
+                throw e;
+            }
+        } catch (Exception e) {
+            Msg.error(this, "GZF import failed for '" + gzf.getAbsolutePath() + "'", e);
+            return ImportResult.failure("import failed (" + e.getClass().getSimpleName()
+                + "): " + e.getMessage());
+        }
+    }
+
+    /**
+     * Archive the currently open project to a Ghidra-native {@code .gar} file.
+     *
+     * <p>Unlike {@link #exportProgramToGzf}, this captures the entire project
+     * (all programs, folders, tool settings, version-control metadata) in a
+     * format that Ghidra's GUI can re-import via <em>File &rarr; Restore Project</em>.
+     */
+    public ArchiveResult archiveCurrentProject(File garFile) {
+        if (project == null) {
+            return ArchiveResult.failure("No project open. Call /open_project first.");
+        }
+        if (garFile == null) {
+            return ArchiveResult.failure("output path required");
+        }
+        File parent = garFile.getParentFile();
+        if (parent == null || !parent.isDirectory()) {
+            return ArchiveResult.failure("output parent directory does not exist: "
+                + (parent == null ? "<none>" : parent.getAbsolutePath()));
+        }
+        if (garFile.exists()) {
+            return ArchiveResult.failure("output file already exists: " + garFile.getAbsolutePath());
+        }
+        if (!garFile.getName().toLowerCase().endsWith(HeadlessArchiveBridge.ARCHIVE_EXTENSION)) {
+            return ArchiveResult.failure("output must end in " + HeadlessArchiveBridge.ARCHIVE_EXTENSION
+                + ": " + garFile.getName());
+        }
+        try {
+            HeadlessArchiveBridge.archive(project, garFile, monitor);
+            return ArchiveResult.success(project.getName(), garFile.getAbsolutePath(), garFile.length());
+        } catch (Exception e) {
+            Msg.error(this, "archive failed for project '" + project.getName() + "'", e);
+            return ArchiveResult.failure("archive failed (" + e.getClass().getSimpleName()
+                + "): " + e.getMessage());
+        }
+    }
+
+    /**
+     * Restore a Ghidra {@code .gar} archive into a fresh on-disk project.
+     *
+     * <p>Any currently-open project is closed first. The new project is created
+     * at {@code parentDir/projectName.rep} + {@code projectName.gpr}; the
+     * restored project is <em>not</em> re-opened automatically \u2014 callers
+     * should follow up with {@link #openProject} so that owner reset and the
+     * usual project-open bookkeeping run via the same code path as a
+     * user-driven open.
+     */
+    public RestoreResult restoreProject(File garFile, String parentDir, String projectName) {
+        if (garFile == null || !garFile.isFile()) {
+            return RestoreResult.failure("gar file not found: "
+                + (garFile == null ? "<null>" : garFile.getAbsolutePath()));
+        }
+        if (!garFile.getName().toLowerCase().endsWith(HeadlessArchiveBridge.ARCHIVE_EXTENSION)) {
+            return RestoreResult.failure("not a " + HeadlessArchiveBridge.ARCHIVE_EXTENSION
+                + " file: " + garFile.getName());
+        }
+        if (parentDir == null || parentDir.isEmpty()) {
+            return RestoreResult.failure("parent_dir required");
+        }
+        if (projectName == null || projectName.isEmpty()) {
+            return RestoreResult.failure("project_name required");
+        }
+        String invalidName = HeadlessPaths.validateFilename(projectName);
+        if (invalidName != null) {
+            return RestoreResult.failure("invalid project_name: " + invalidName);
+        }
+        File parent = new File(parentDir);
+        if (!parent.isDirectory()) {
+            return RestoreResult.failure("parent_dir is not a directory: " + parent.getAbsolutePath());
+        }
+        ProjectLocator locator = new ProjectLocator(parent.getAbsolutePath(), projectName);
+        if (!HeadlessPaths.isWithin(parent, locator.getProjectDir())) {
+            return RestoreResult.failure("project_name escapes parent_dir: " + projectName);
+        }
+        if (locator.getProjectDir().exists() || locator.getMarkerFile().exists()) {
+            return RestoreResult.failure("destination project already exists: "
+                + locator.toString());
+        }
+        if (project != null) {
+            closeProject();
+        }
+        try {
+            HeadlessArchiveBridge.restore(garFile, locator, monitor);
+            return RestoreResult.success(projectName, locator.getProjectDir().getAbsolutePath());
+        } catch (Exception e) {
+            Msg.error(this, "restore failed for '" + garFile.getAbsolutePath() + "'", e);
+            return RestoreResult.failure("restore failed (" + e.getClass().getSimpleName()
+                + "): " + e.getMessage());
+        }
+    }
+
+    /** Structured result for {@link #archiveCurrentProject}. */
+    public static class ArchiveResult {
+        public final boolean success;
+        public final String error;          // null on success
+        public final String projectName;    // null on failure
+        public final String outputPath;     // null on failure
+        public final long sizeBytes;        // 0 on failure
+
+        private ArchiveResult(boolean success, String error, String projectName, String outputPath, long sizeBytes) {
+            this.success = success;
+            this.error = error;
+            this.projectName = projectName;
+            this.outputPath = outputPath;
+            this.sizeBytes = sizeBytes;
+        }
+
+        public static ArchiveResult success(String projectName, String outputPath, long sizeBytes) {
+            return new ArchiveResult(true, null, projectName, outputPath, sizeBytes);
+        }
+
+        public static ArchiveResult failure(String error) {
+            return new ArchiveResult(false, error, null, null, 0L);
+        }
+    }
+
+    /** Structured result for {@link #restoreProject}. */
+    public static class RestoreResult {
+        public final boolean success;
+        public final String error;          // null on success
+        public final String projectName;    // null on failure
+        public final String projectDir;     // null on failure
+
+        private RestoreResult(boolean success, String error, String projectName, String projectDir) {
+            this.success = success;
+            this.error = error;
+            this.projectName = projectName;
+            this.projectDir = projectDir;
+        }
+
+        public static RestoreResult success(String projectName, String projectDir) {
+            return new RestoreResult(true, null, projectName, projectDir);
+        }
+
+        public static RestoreResult failure(String error) {
+            return new RestoreResult(false, error, null, null);
+        }
+    }
+
+    /** Structured result for {@link #exportProgramToGzf}. */
+    public static class ExportResult {
+        public final boolean success;
+        public final String error;          // null on success
+        public final String programName;    // null on failure
+        public final String outputPath;     // null on failure
+        public final long sizeBytes;        // 0 on failure
+
+        private ExportResult(boolean success, String error, String programName, String outputPath, long sizeBytes) {
+            this.success = success;
+            this.error = error;
+            this.programName = programName;
+            this.outputPath = outputPath;
+            this.sizeBytes = sizeBytes;
+        }
+
+        public static ExportResult success(String programName, String outputPath, long sizeBytes) {
+            return new ExportResult(true, null, programName, outputPath, sizeBytes);
+        }
+
+        public static ExportResult failure(String error) {
+            return new ExportResult(false, error, null, null, 0L);
+        }
+    }
+
+    /** Structured result for {@link #importProgramFromGzf}. */
+    public static class ImportResult {
+        public final boolean success;
+        public final String error;          // null on success
+        public final String folderPath;     // null on failure
+        public final String programName;    // null on failure
+        public final String contentType;    // null on failure
+
+        private ImportResult(boolean success, String error, String folderPath, String programName, String contentType) {
+            this.success = success;
+            this.error = error;
+            this.folderPath = folderPath;
+            this.programName = programName;
+            this.contentType = contentType;
+        }
+
+        public static ImportResult success(String folderPath, String programName, String contentType) {
+            return new ImportResult(true, null, folderPath, programName, contentType);
+        }
+
+        public static ImportResult failure(String error) {
+            return new ImportResult(false, error, null, null, null);
         }
     }
 
@@ -1158,6 +1730,17 @@ public class HeadlessProgramProvider implements ProgramProvider {
             this.description = description;
             this.enabled = enabled;
             this.priority = priority;
+        }
+    }
+
+    /**
+     * Concrete handle on {@link DefaultProjectManager} \u2014 its constructor is
+     * protected so we cannot instantiate it directly. Mirrors the inner class
+     * used by Ghidra's own headless analyzer.
+     */
+    private static final class HeadlessProjectManager extends DefaultProjectManager {
+        HeadlessProjectManager() {
+            super();
         }
     }
 }

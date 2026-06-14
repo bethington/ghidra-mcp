@@ -249,6 +249,7 @@ public class ProgramScriptService {
             return Response.ok(JsonHelper.mapOf(
                 "success", true,
                 "saved_count", 0,
+                "open_program_count", 0,
                 "programs", List.of(),
                 "errors", List.of(),
                 "message", "No open programs to save"
@@ -275,6 +276,19 @@ public class ProgramScriptService {
                         continue;
                     }
                     info.put("path", df.getPathname());
+                    // A DomainFile that is not in a writable project is a proxy
+                    // (no on-disk location) \u2014 calling save() on it throws the
+                    // cryptic "Location does not exist for a save operation!".
+                    // Surface a specific message so callers know to re-load
+                    // with an active project open.
+                    if (!df.isInWritableProject()) {
+                        info.put("error",
+                            "Program is not attached to a writable project "
+                            + "(transient DomainFileProxy); re-load it with a "
+                            + "project open before saving.");
+                        errors.get().add(info);
+                        continue;
+                    }
                     df.save(new ConsoleTaskMonitor());
                     saved.get().add(info);
                 } catch (Throwable e) {
@@ -299,6 +313,7 @@ public class ProgramScriptService {
         return Response.ok(JsonHelper.mapOf(
             "success", errors.get().isEmpty(),
             "saved_count", saved.get().size(),
+            "open_program_count", programs.length,
             "programs", saved.get(),
             "errors", errors.get()
         ));
