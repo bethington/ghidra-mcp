@@ -100,8 +100,7 @@ public class FunctionService {
         Program program = pe.program();
         DecompInterface decomp = null;
         try {
-            decomp = new DecompInterface();
-            decomp.openProgram(program);
+            decomp = ServiceUtils.createConfiguredDecompiler(program);
             for (Function func : program.getFunctionManager().getFunctions(true)) {
                 if (func.getName().equals(name)) {
                     DecompileResults result =
@@ -149,8 +148,7 @@ public class FunctionService {
             Function func = ServiceUtils.resolveFunction(program, addressStr);
             if (func == null) return Response.err("No function found for " + addressStr);
 
-            decomp = new DecompInterface();
-            decomp.openProgram(program);
+            decomp = ServiceUtils.createConfiguredDecompiler(program);
             DecompileResults decompResult = decomp.decompileFunction(func, timeoutSeconds, new ConsoleTaskMonitor());
 
             if (decompResult == null) {
@@ -206,9 +204,7 @@ public class FunctionService {
     public DecompileResults decompileFunctionNoRetry(Function func, Program program) {
         DecompInterface decomp = null;
         try {
-            decomp = new DecompInterface();
-            decomp.openProgram(program);
-            decomp.setSimplificationStyle("decompile");
+            decomp = ServiceUtils.createConfiguredDecompiler(program);
             return decomp.decompileFunction(func, NO_RETRY_DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
         } catch (Exception e) {
             Msg.warn(this, "Single-attempt decompile failed for " + func.getName() + ": " + e.getMessage());
@@ -233,9 +229,7 @@ public class FunctionService {
 
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                decomp = new DecompInterface();
-                decomp.openProgram(program);
-                decomp.setSimplificationStyle("decompile");
+                decomp = ServiceUtils.createConfiguredDecompiler(program);
 
                 // On retry attempts, flush cache first and increase timeout
                 if (attempt > 1) {
@@ -322,8 +316,7 @@ public class FunctionService {
                 // Decompile the function
                 DecompInterface decompiler = null;
                 try {
-                    decompiler = new DecompInterface();
-                    decompiler.openProgram(program);
+                    decompiler = ServiceUtils.createConfiguredDecompiler(program);
                     DecompileResults decompResults = decompiler.decompileFunction(function, 30, null);
 
                     if (decompResults != null && decompResults.decompileCompleted()) {
@@ -388,8 +381,7 @@ public class FunctionService {
                     }
 
                     // Create new decompiler interface
-                    DecompInterface decompiler = new DecompInterface();
-                    decompiler.openProgram(program);
+                    DecompInterface decompiler = ServiceUtils.createConfiguredDecompiler(program);
 
                     try {
                         // Flush cached results to force fresh decompilation
@@ -650,10 +642,8 @@ public class FunctionService {
             return Response.err("Function name or address is required");
         }
 
-        DecompInterface decomp = new DecompInterface();
+        DecompInterface decomp = ServiceUtils.createConfiguredDecompiler(program);
         try {
-            decomp.openProgram(program);
-
             String functionRef = (functionAddress != null && !functionAddress.isEmpty()) ? functionAddress : functionName;
             Function func = ServiceUtils.resolveFunction(program, functionRef);
             if (func == null) {
@@ -2964,8 +2954,7 @@ public class FunctionService {
                         // Use decompiler to access SSA variables (the ones that appear in decompiled code)
                         DecompInterface decomp = null;
                         try {
-                            decomp = new DecompInterface();
-                            decomp.openProgram(program);
+                            decomp = ServiceUtils.createConfiguredDecompiler(program);
 
                             DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
                             if (decompResult != null && decompResult.decompileCompleted()) {
@@ -3092,8 +3081,7 @@ public class FunctionService {
                         try {
                             DecompInterface tempDecomp = null;
                             try {
-                                tempDecomp = new DecompInterface();
-                                tempDecomp.openProgram(program);
+                                tempDecomp = ServiceUtils.createConfiguredDecompiler(program);
                                 tempDecomp.flushCache();
                                 tempDecomp.decompileFunction(funcRef.get(), DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
                             } finally {
@@ -3300,8 +3288,7 @@ public class FunctionService {
                     // Phase 2: Decompile to get fresh SSA variables for renaming
                     DecompInterface decomp = null;
                     try {
-                        decomp = new DecompInterface();
-                        decomp.openProgram(program);
+                        decomp = ServiceUtils.createConfiguredDecompiler(program);
                         DecompileResults decompResult = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, new ConsoleTaskMonitor());
                         if (decompResult == null || !decompResult.decompileCompleted()) {
                             errors.add("Decompilation failed after type changes; renames skipped");
