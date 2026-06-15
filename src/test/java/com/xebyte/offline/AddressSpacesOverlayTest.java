@@ -68,10 +68,14 @@ public class AddressSpacesOverlayTest {
         Program program = mock(Program.class);
         AddressFactory factory = mock(AddressFactory.class);
         AddressSpace ram = physical("ram", AddressSpace.TYPE_RAM, true);
+        // OTHER-backed base space: not RAM/CODE, so it is NOT emitted as a
+        // physical entry — but it must still resolve as an overlay's base name.
+        AddressSpace other = physical("OTHER", AddressSpace.TYPE_OTHER, false);
         OverlayAddressSpace ov = overlay("cli.Initial", ram);
+        OverlayAddressSpace shstrtab = overlay(".shstrtab", other);
         when(program.getAddressFactory()).thenReturn(factory);
         when(factory.getDefaultAddressSpace()).thenReturn(ram);
-        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ram, ov});
+        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ram, other, ov, shstrtab});
 
         // Provider returns the mocked program for an empty (active-program) request.
         ProgramProvider provider = mock(ProgramProvider.class);
@@ -84,17 +88,34 @@ public class AddressSpacesOverlayTest {
         Map<String, Object> body = (Map<String, Object>) ((Response.Ok) resp).data();
         List<Map<String, Object>> spaces = (List<Map<String, Object>>) body.get("address_spaces");
 
-        // ram (physical) + cli.Initial (overlay)
-        assertEquals(2, spaces.size());
-        assertEquals(2, body.get("count"));
+        // ram (physical RAM) + cli.Initial (overlay) + .shstrtab (overlay).
+        // OTHER is NOT emitted (not RAM/CODE) but backs the .shstrtab overlay.
+        assertEquals(3, spaces.size());
+        assertEquals(3, body.get("count"));
+
         Map<String, Object> overlayEntry = spaces.stream()
             .filter(m -> "cli.Initial".equals(m.get("name"))).findFirst().orElse(null);
         assertNotNull("overlay space must be listed", overlayEntry);
         assertEquals(Boolean.TRUE, overlayEntry.get("is_overlay"));
         assertEquals("ram", overlayEntry.get("overlayed_space"));
+
+        // OTHER-backed overlay links to its OTHER base by name.
+        Map<String, Object> otherOverlayEntry = spaces.stream()
+            .filter(m -> ".shstrtab".equals(m.get("name"))).findFirst().orElse(null);
+        assertNotNull("OTHER-backed overlay space must be listed", otherOverlayEntry);
+        assertEquals(Boolean.TRUE, otherOverlayEntry.get("is_overlay"));
+        assertEquals("OTHER", otherOverlayEntry.get("overlayed_space"));
+
+        // The OTHER base itself is not surfaced as a physical entry.
+        assertNull("OTHER base must not be emitted as a physical space",
+            spaces.stream().filter(m -> "OTHER".equals(m.get("name"))).findFirst().orElse(null));
+
+        // Physical ram entry is unperturbed by the overlay append AND now carries
+        // the symmetric is_overlay=false flag (Fix 1) alongside its size_bytes.
         Map<String, Object> ramEntry = spaces.stream()
             .filter(m -> "ram".equals(m.get("name"))).findFirst().orElse(null);
         assertNotNull(ramEntry);
-        assertNotEquals(Boolean.TRUE, ramEntry.get("is_overlay"));
+        assertNotNull("physical entry must retain size_bytes", ramEntry.get("size_bytes"));
+        assertEquals(Boolean.FALSE, ramEntry.get("is_overlay"));
     }
 }

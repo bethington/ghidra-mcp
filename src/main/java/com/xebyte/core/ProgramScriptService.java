@@ -459,7 +459,8 @@ public class ProgramScriptService {
                 "addressable_unit_size", unitSize,
                 "size_bytes",            sizeBytes,
                 "address_size_bits",     space.getSize(),
-                "is_default",            space == defaultSpace
+                "is_default",            space == defaultSpace,
+                "is_overlay",            Boolean.FALSE
             ));
         }
         return spaces;
