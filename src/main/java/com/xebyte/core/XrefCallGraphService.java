@@ -133,6 +133,178 @@ public class XrefCallGraphService {
     }
 
     /**
+     * Create a user-defined memory cross-reference that the analyzer could not infer
+     * (e.g. runtime-populated dispatch tables, late-bound function pointers, missed jump tables).
+     */
+    @McpTool(path = "/add_memory_reference", method = "POST",
+            description = "Create a cross-reference between two memory addresses that the auto-analyzer "
+                        + "can't infer (runtime-populated pointer tables, vtables, late-bound function "
+                        + "pointers, missed jump/switch tables). Leaves the underlying bytes untouched and "
+                        + "adds proper bidirectional navigation. On programs with multiple address spaces "
+                        + "(e.g. embedded targets), prefix addresses with the space name (mem:1000).",
+            category = "xref")
+    public Response addMemoryReference(
+            @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Source address the reference originates from (the table slot / instruction). "
+                               + "Accepts 0x<hex> or <space>:<hex> (e.g. mem:1000).") String fromAddressStr,
+            @Param(value = "to_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") String toAddressStr,
+            @Param(value = "ref_type", source = ParamSource.BODY, defaultValue = "DATA",
+                   description = "Reference type (case-insensitive RefType name): DATA, READ, WRITE, READ_WRITE, "
+                               + "COMPUTED_CALL, UNCONDITIONAL_CALL, COMPUTED_JUMP, UNCONDITIONAL_JUMP, "
+                               + "CONDITIONAL_JUMP, INDIRECTION, etc.") String refTypeStr,
+            @Param(value = "source_type", source = ParamSource.BODY, defaultValue = "USER_DEFINED",
+                   description = "SourceType: USER_DEFINED (default — distinct from analyzer refs and survives "
+                               + "re-analysis), ANALYSIS, IMPORTED, DEFAULT.") String sourceTypeStr,
+            @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
+                   description = "Operand index the reference attaches to. -1 = mnemonic/data operand.") int operandIndex,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (fromAddressStr == null || fromAddressStr.isEmpty()) return Response.err("from_address is required");
+        if (toAddressStr == null || toAddressStr.isEmpty()) return Response.err("to_address is required");
+
+        Address fromAddr = ServiceUtils.parseAddress(program, fromAddressStr);
+        if (fromAddr == null) return Response.err("from_address: " + ServiceUtils.getLastParseError());
+        Address toAddr = ServiceUtils.parseAddress(program, toAddressStr);
+        if (toAddr == null) return Response.err("to_address: " + ServiceUtils.getLastParseError());
+
+        RefType refType = resolveMemoryRefType(refTypeStr);
+        if (refType == null) {
+            return Response.err("Unknown ref_type '" + refTypeStr + "'. Valid names include: "
+                    + "DATA, READ, WRITE, READ_WRITE, COMPUTED_CALL, UNCONDITIONAL_CALL, CONDITIONAL_CALL, "
+                    + "COMPUTED_JUMP, UNCONDITIONAL_JUMP, CONDITIONAL_JUMP, INDIRECTION");
+        }
+        SourceType sourceType;
+        try {
+            sourceType = SourceType.valueOf(sourceTypeStr == null ? "" : sourceTypeStr.trim().toUpperCase(Locale.ROOT));
+        } catch (Exception e) {
+            return Response.err("Unknown source_type '" + sourceTypeStr
+                    + "'. Valid values: USER_DEFINED, ANALYSIS, IMPORTED, DEFAULT.");
+        }
+
+        try {
+            return threadingStrategy.executeWrite(program, "Add memory reference", () -> {
+                ReferenceManager refMgr = program.getReferenceManager();
+                Reference ref = refMgr.addMemoryReference(fromAddr, toAddr, refType, sourceType, operandIndex);
+                if (ref == null) {
+                    return Response.err("Failed to create reference from " + fromAddr + " to " + toAddr);
+                }
+                return Response.ok(JsonHelper.mapOf(
+                        "status", "success",
+                        "from_address", fromAddr.toString(),
+                        "to_address", toAddr.toString(),
+                        "ref_type", refType.getName(),
+                        "source_type", sourceType.toString(),
+                        "operand_index", operandIndex,
+                        "is_primary", ref.isPrimary()));
+            });
+        } catch (Exception e) {
+            return Response.err("Error adding memory reference: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Remove memory cross-reference(s) between two addresses — the inverse of
+     * {@link #addMemoryReference}. Useful for clearing references the analyzer got wrong
+     * or for undoing a manual reference.
+     */
+    @McpTool(path = "/remove_reference", method = "POST",
+            description = "Remove memory cross-reference(s) from one address to another (the inverse of "
+                        + "add_memory_reference). Removes every reference from_address -> to_address "
+                        + "regardless of operand by default; pass operand_index >= 0 to remove only the "
+                        + "reference on that operand. Removes both user-defined and analyzer-inferred "
+                        + "references — the response reports each removed reference's source_type. "
+                        + "On multi-space programs, prefix addresses with the space name (mem:1000).",
+            category = "xref")
+    public Response removeReference(
+            @Param(value = "from_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Source address the reference originates from. Accepts 0x<hex> or <space>:<hex>.") String fromAddressStr,
+            @Param(value = "to_address", paramType = "address", source = ParamSource.BODY,
+                   description = "Target address the reference points to. Accepts 0x<hex> or <space>:<hex>.") String toAddressStr,
+            @Param(value = "operand_index", source = ParamSource.BODY, defaultValue = "-1",
+                   description = "Operand index to match. -1 (default) = remove references on any operand; "
+                               + ">= 0 = remove only the reference on that operand.") int operandIndex,
+            @Param(value = "program", defaultValue = "") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        if (fromAddressStr == null || fromAddressStr.isEmpty()) return Response.err("from_address is required");
+        if (toAddressStr == null || toAddressStr.isEmpty()) return Response.err("to_address is required");
+
+        Address fromAddr = ServiceUtils.parseAddress(program, fromAddressStr);
+        if (fromAddr == null) return Response.err("from_address: " + ServiceUtils.getLastParseError());
+        Address toAddr = ServiceUtils.parseAddress(program, toAddressStr);
+        if (toAddr == null) return Response.err("to_address: " + ServiceUtils.getLastParseError());
+
+        // Collect the matching references up front, then delete inside the transaction.
+        List<Reference> matches = new ArrayList<>();
+        for (Reference ref : program.getReferenceManager().getReferencesFrom(fromAddr)) {
+            if (!ref.getToAddress().equals(toAddr)) continue;
+            if (operandIndex >= 0 && ref.getOperandIndex() != operandIndex) continue;
+            matches.add(ref);
+        }
+
+        List<Map<String, Object>> details = new ArrayList<>();
+        for (Reference ref : matches) {
+            details.add(JsonHelper.mapOf(
+                    "to_address", ref.getToAddress().toString(),
+                    "operand_index", ref.getOperandIndex(),
+                    "ref_type", ref.getReferenceType().getName(),
+                    "source_type", ref.getSource().toString()));
+        }
+
+        if (matches.isEmpty()) {
+            return Response.ok(JsonHelper.mapOf(
+                    "status", "success",
+                    "removed", 0,
+                    "message", "No reference found from " + fromAddr + " to " + toAddr));
+        }
+
+        try {
+            return threadingStrategy.executeWrite(program, "Remove memory reference", () -> {
+                ReferenceManager refMgr = program.getReferenceManager();
+                for (Reference ref : matches) {
+                    refMgr.delete(ref);
+                }
+                return Response.ok(JsonHelper.mapOf(
+                        "status", "success",
+                        "from_address", fromAddr.toString(),
+                        "to_address", toAddr.toString(),
+                        "removed", matches.size(),
+                        "references", details));
+            });
+        } catch (Exception e) {
+            return Response.err("Error removing reference: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Resolve a case-insensitive {@link RefType} name to its static constant.
+     * Reflects over RefType's public static fields so every valid name (data + flow types)
+     * is accepted, matching the names callers see in the listing.
+     */
+    private static RefType resolveMemoryRefType(String name) {
+        if (name == null || name.trim().isEmpty()) return null;
+        String want = name.trim().toUpperCase(Locale.ROOT);
+        for (java.lang.reflect.Field f : RefType.class.getFields()) {
+            if (java.lang.reflect.Modifier.isStatic(f.getModifiers())
+                    && RefType.class.isAssignableFrom(f.getType())
+                    && f.getName().equals(want)) {
+                try {
+                    return (RefType) f.get(null);
+                } catch (IllegalAccessException e) {
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * Get all references to a specific function by name
      */
     @McpTool(path = "/get_function_xrefs", description = "Get cross-references to a function. Accepts function name or address (pass address as 'address' param, or as 'name').", category = "xref")
