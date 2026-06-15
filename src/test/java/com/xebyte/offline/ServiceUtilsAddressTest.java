@@ -44,11 +44,10 @@ public class ServiceUtilsAddressTest {
         when(codeSpace.getName()).thenReturn("code");
 
         // mem space: TYPE_RAM, not overlay, lowercase canonical name "mem"
-        AddressSpace memSpace = mock(AddressSpace.class);
+        memSpace = mock(AddressSpace.class);
         when(memSpace.getType()).thenReturn(AddressSpace.TYPE_RAM);
         when(memSpace.isOverlaySpace()).thenReturn(false);
         when(memSpace.getName()).thenReturn("mem");
-        this.memSpace = memSpace;
 
         when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace, codeSpace, memSpace});
         when(factory.getDefaultAddressSpace()).thenReturn(ramSpace);
@@ -137,6 +136,29 @@ public class ServiceUtilsAddressTest {
         assertTrue("Should name the valid space: " + err, err.contains("ram"));
         assertFalse("Must not call a valid space unknown: " + err,
                 err.contains("Unknown address space"));
+    }
+
+    @Test
+    public void parseAddress_knownOverlayBadOffset_blamesOffsetAndListsOverlay() {
+        // isKnownSpace + buildAvailableSpacesHint now include overlay spaces.
+        AddressSpace ovSpace = mock(AddressSpace.class);
+        when(ovSpace.isOverlaySpace()).thenReturn(true);
+        when(ovSpace.getName()).thenReturn("cli.Initial");
+        when(factory.getAddressSpaces()).thenReturn(
+            new AddressSpace[]{ramSpace, codeSpace, memSpace, ovSpace});
+        // Offset is unresolvable in the (known) overlay space.
+        when(factory.getAddress("cli.Initial::zzzz")).thenReturn(null);
+
+        Address result = ServiceUtils.parseAddress(program, "cli.Initial::zzzz");
+        assertNull(result);
+        String err = ServiceUtils.getLastParseError();
+        assertNotNull(err);
+        assertTrue("Should blame the offset: " + err, err.contains("Could not resolve offset"));
+        assertTrue("Should name the valid overlay space: " + err, err.contains("cli.Initial"));
+        assertFalse("Must not call a known overlay unknown: " + err,
+                err.contains("Unknown address space"));
+        assertTrue("Available-spaces hint should label overlays: " + err,
+                err.contains("[overlays]"));
     }
 
     @Test
