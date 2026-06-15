@@ -4,10 +4,19 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v5.14.0 - 2026-06-14 (minor: reference write tools, tool discovery, version-compat + overlay fixes)
+
+Minor release. Bundles two community PRs (#299, #297) plus tool-discovery and
+setup fixes responding to maintainer-feedback issues (#267, #153, #293).
 
 ### Added
 
+- **`search_tools(query, limit)`** (#267, #153): a bridge meta-tool that keyword-searches the
+  full Ghidra tool catalog — including tools whose group is not currently loaded — ranking by
+  name/description/category and returning the exact `load_tool_group(...)` call to enable any
+  unloaded match. Lets the bridge run `--lazy` with a small tool surface while agents discover
+  the rest on demand, cutting tool-context overhead. New README section documents the
+  `--lazy` + `search_tools`/`load_tool_group`/`check_tools` workflow; `ROADMAP.md` added.
 - **`/add_memory_reference`**: create a user-defined cross-reference between two memory
   addresses that the auto-analyzer can't infer — runtime-populated dispatch tables, vtables,
   late-bound function pointers, and missed jump/switch tables — with proper bidirectional
@@ -23,6 +32,19 @@ Complete version history for the Ghidra MCP Server project.
   operand by default; pass `operand_index >= 0` to target a single operand. Reports each removed
   reference's `source_type` (it can clear analyzer-inferred references too, not just user-defined
   ones). Accepts space-prefixed addresses. 251 tools.
+
+### Fixed
+
+- **Uppercase overlay address spaces** (#297, thanks @robbederks): `parseAddress` lowercased the
+  entire `space:offset` input, breaking banked-code binaries whose overlay spaces use uppercase
+  names (e.g. `CODE_BANK1`). It now resolves the canonical address-space name via `AddressFactory`
+  (exact match, then case-insensitive scan) and preserves its real case, while keeping the
+  lowercased fallback for the standard `mem:`/`MEM:` forms.
+- **Ghidra version preflight too strict** (#293, thanks @firefart): `verify-version` / `preflight`
+  compared the pom's pinned `ghidra.version` (e.g. `12.1`) against the installed version
+  (e.g. `12.1.2`) with exact string equality and hard-failed on patch drift. Compatibility is now
+  decided on the shared major.minor prefix — any patch release of the pinned minor series is
+  accepted, with an informational note when only the patch differs.
 
 ---
 
