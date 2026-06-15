@@ -1,9 +1,12 @@
 {
   "mcpServers": {
     "ghidra-mcp": {
-      "command": "python",
+      "command": "uv",
       "args": [
-        "bridge_mcp_ghidra.py",
+        "run",
+        "--directory",
+        "/Users/linted/ghidra-mcp",
+        "ghidra-mcp-bridge",
         "--transport",
         "stdio"
       ],

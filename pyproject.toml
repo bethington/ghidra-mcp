@@ -1,0 +1,31 @@
+[project]
+name = "ghidra-mcp-bridge"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "linted", email = "10934700+linted@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "fastmcp>=3,<4",
+]
+
+[project.scripts]
+ghidra-mcp-bridge = "ghidra_mcp_bridge:main"
+
+[build-system]
+requires = ["uv_build>=0.11.21,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "python"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+    "pyflakes>=3.4.0",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.15.17",
+]

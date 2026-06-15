@@ -2185,7 +2185,6 @@ def deploy_to_ghidra(
     archive_path = find_plugin_archive(repo_root)
     extensions_dir = ghidra_path / "Extensions" / "Ghidra"
     destination_archive = extensions_dir / archive_path.name
-    bridge_source = repo_root / "bridge_mcp_ghidra.py"
     requirements_source = repo_root / "requirements.txt"
     dotenv_source = repo_root / ".env"
     user_base_dir = ghidra_user_base_dir()
@@ -2202,10 +2201,6 @@ def deploy_to_ghidra(
             f"DRY RUN: remove existing archives matching {extensions_dir / 'GhidraMCP*.zip'}"
         )
         print(f"DRY RUN: copy {archive_path} -> {destination_archive}")
-        if bridge_source.is_file():
-            print(
-                f"DRY RUN: copy {bridge_source} -> {ghidra_path / bridge_source.name}"
-            )
         if requirements_source.is_file():
             print(
                 f"DRY RUN: copy {requirements_source} -> {ghidra_path / requirements_source.name}"
@@ -2233,12 +2228,6 @@ def deploy_to_ghidra(
 
     shutil.copy2(archive_path, destination_archive)
     print(f"Installed plugin archive to {destination_archive}")
-
-    if bridge_source.is_file():
-        bridge_destination = ghidra_path / bridge_source.name
-        bridge_destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(bridge_source, bridge_destination)
-        print(f"Copied bridge to {bridge_destination}")
 
     if requirements_source.is_file():
         requirements_destination = ghidra_path / requirements_source.name
