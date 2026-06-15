@@ -179,6 +179,26 @@ public class ServiceUtilsAddressTest {
     }
 
     @Test
+    public void parseAddress_overlaySpace_resolvesWithCanonicalCaseParser() throws Exception {
+        AddressSpace overlaySpace = mock(AddressSpace.class);
+        Address bank1Addr = mock(Address.class);
+
+        when(overlaySpace.getType()).thenReturn(AddressSpace.TYPE_RAM);
+        when(overlaySpace.isOverlaySpace()).thenReturn(true);
+        when(overlaySpace.getName()).thenReturn("CODE_BANK1");
+        when(bank1Addr.getAddressSpace()).thenReturn(overlaySpace);
+        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace, codeSpace, overlaySpace});
+        when(factory.getAddressSpace("CODE_BANK1")).thenReturn(overlaySpace);
+        when(factory.getAddress("CODE_BANK1:a066")).thenReturn(bank1Addr);
+
+        Address result = ServiceUtils.parseAddress(program, "CODE_BANK1:a066");
+
+        assertSame("Overlay address must resolve in the CODE_BANK1 space", bank1Addr, result);
+        assertEquals("CODE_BANK1", result.getAddressSpace().getName());
+        assertNull(ServiceUtils.getLastParseError());
+    }
+
+    @Test
     public void convertToMapList_acceptsStringifiedArrayPayload() {
         List<Map<String, String>> result = ServiceUtils.convertToMapList(
             "[{\"address\":\"0x401000\",\"comment\":\"alpha\"},{\"address\":\"0x401004\",\"comment\":\"beta\"}]"
