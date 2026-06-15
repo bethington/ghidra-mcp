@@ -238,12 +238,17 @@ class GhidraValidationError(Exception):
 
 # Input validation patterns
 HEX_ADDRESS_PATTERN = re.compile(r"^0x[0-9a-fA-F]+$")
-SEGMENT_ADDRESS_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*:[0-9a-fA-F]+$")
-# Handles space:0xHEX form (e.g., mem:0x1000, code:0xFF00).
-# Must be checked BEFORE SEGMENT_ADDRESS_PATTERN because the 'x' in '0x' is not
-# in [0-9a-fA-F], so the existing pattern rejects this form entirely.
+# Space-qualified address: space:HEX, space::HEX (overlay), with optional 0x.
+# Space names may contain dots and lead with '.'/'_' (overlay spaces such as
+# '.shstrtab', '_elfHeader', 'cli.Initial'). Ghidra's AddressFactory accepts
+# both single (':') and double ('::') colon separators and is case-sensitive
+# on the name (#184), so the bridge preserves case and never adds '0x' here.
+SEGMENT_ADDRESS_PATTERN = re.compile(r"^[A-Za-z_.][A-Za-z0-9_.]*::?[0-9a-fA-F]+$")
+# Handles the space::0xHEX / space:0xHEX form. Checked BEFORE SEGMENT_ADDRESS_PATTERN
+# because the 'x' in '0x' is not in [0-9a-fA-F]. Group 1 captures the name AND the
+# colon separator; group 2 captures the bare hex offset.
 SEGMENT_ADDR_WITH_0X_PATTERN = re.compile(
-    r"^([a-zA-Z_][a-zA-Z0-9_]*):0[xX]([0-9a-fA-F]+)$"
+    r"^([A-Za-z_.][A-Za-z0-9_.]*::?)0[xX]([0-9a-fA-F]+)$"
 )
 FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -741,10 +746,11 @@ def sanitize_address(address: str) -> str:
         return address
     address = address.strip()
 
-    # Step 1: handle space:0xHEX form (checked first — 'x' not in [0-9a-fA-F])
+    # Step 1: handle space:0xHEX / space::0xHEX form (checked first — 'x' not in
+    # [0-9a-fA-F]). Group 1 already includes the ':'/'::' separator.
     m = SEGMENT_ADDR_WITH_0X_PATTERN.match(address)
     if m:
-        return f"{m.group(1)}:{m.group(2)}"  # case preserved (#184)
+        return f"{m.group(1)}{m.group(2)}"  # case + separator preserved (#184, overlays)
 
     # Step 2: valid space:HEX — pass through unchanged (#184)
     if SEGMENT_ADDRESS_PATTERN.match(address):

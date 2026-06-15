@@ -61,6 +61,22 @@ class TestSanitizeAddress:
     def test_plain_hex_adds_prefix(self):
         assert sanitize_address("1000") == "0x1000"
 
+    # Overlay address forms (dotted / leading-dot names, :: separator)
+    def test_overlay_double_colon_passes_through(self):
+        assert sanitize_address("cli.Initial::00010000") == "cli.Initial::00010000"
+
+    def test_overlay_single_colon_passes_through(self):
+        assert sanitize_address("cli.Initial:00010000") == "cli.Initial:00010000"
+
+    def test_overlay_strips_0x_from_offset_preserving_case(self):
+        assert sanitize_address("cli.Initial::0x10000") == "cli.Initial::10000"
+
+    def test_overlay_leading_dot_name(self):
+        assert sanitize_address(".shstrtab::00000000") == ".shstrtab::00000000"
+
+    def test_overlay_leading_underscore_name(self):
+        assert sanitize_address("_elfHeader::0x33") == "_elfHeader::33"
+
 
 class TestValidateHexAddress:
     """validate_hex_address accepts post-sanitized forms only."""
@@ -83,6 +99,15 @@ class TestValidateHexAddress:
 
     def test_rejects_garbage(self):
         assert validate_hex_address("not_an_address") is False
+
+    def test_accepts_overlay_double_colon(self):
+        assert validate_hex_address("cli.Initial::00010000") is True
+
+    def test_accepts_overlay_leading_dot(self):
+        assert validate_hex_address(".shstrtab::0") is True
+
+    def test_accepts_overlay_with_0x_offset(self):
+        assert validate_hex_address("cli.Initial::0x10000") is True
 
 
 class TestBuildToolFunctionSanitization:
