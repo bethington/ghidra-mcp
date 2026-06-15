@@ -77,6 +77,10 @@ class TestSanitizeAddress:
     def test_overlay_leading_underscore_name(self):
         assert sanitize_address("_elfHeader::0x33") == "_elfHeader::33"
 
+    def test_overlay_preserves_case_and_strips_0x_together(self):
+        # Headline behavior: '::' separator preserved, 0x stripped, name case kept.
+        assert sanitize_address("cli.Initial::0xFEED") == "cli.Initial::FEED"
+
 
 class TestValidateHexAddress:
     """validate_hex_address accepts post-sanitized forms only."""

@@ -738,6 +738,7 @@ def sanitize_address(address: str) -> str:
 
     Handles:
     - space:0xHEX  -> space:HEX   (strip 0x; AddressFactory rejects 0x after colon)
+    - space::0xHEX -> space::HEX  (overlay; '::' separator and case preserved)
     - SPACE:HEX    -> SPACE:HEX   (preserve case — AddressFactory is case-sensitive; see #184)
     - 0xHEX        -> 0xhex       (lowercase)
     - HEX          -> 0xHEX       (add 0x prefix)
