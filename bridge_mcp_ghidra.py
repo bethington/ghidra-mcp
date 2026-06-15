@@ -931,6 +931,7 @@ STATIC_TOOL_NAMES = {
     "load_tool_group",
     "unload_tool_group",
     "check_tools",
+    "search_tools",
     "import_file",
     # Debugger tools (Phase 1+2+3)
     "debugger_attach",
@@ -1587,6 +1588,62 @@ async def check_tools(tools: str) -> str:
         {
             "results": results,
             "summary": f"{callable_count}/{len(tool_names)} callable",
+        }
+    )
+
+
+@mcp.tool()
+async def search_tools(query: str, limit: int = 15) -> str:
+    """
+    Search the full Ghidra tool catalog by keyword — including tools whose group
+    is not currently loaded. Use this to discover the right tool without paying
+    the context cost of loading all groups (run the bridge with --lazy and search
+    on demand). Matches against tool name, description, and category.
+
+    Each result reports whether the tool is callable right now; if not, it
+    includes the exact load_tool_group(...) call needed to make it callable.
+
+    Args:
+        query: Space-separated keywords, e.g. "rename function" or "xref struct".
+        limit: Maximum number of results to return (default 15).
+    """
+    terms = [t.lower() for t in query.split() if t.strip()]
+    if not terms:
+        return json.dumps({"error": "Provide one or more search keywords"})
+
+    scored: list[tuple[int, dict]] = []
+    for td in _full_schema:
+        name = td.get("name", "")
+        category = td.get("category", "unknown")
+        desc = td.get("description", "") or ""
+        haystack = f"{name} {category} {desc}".lower()
+        score = 0
+        for term in terms:
+            if term in name.lower():
+                score += 3  # name hits rank highest
+            elif term in haystack:
+                score += 1
+        if score == 0:
+            continue
+        loaded = name in _dynamic_tool_names or name in STATIC_TOOL_NAMES
+        result = {
+            "name": name,
+            "group": category,
+            "status": "callable" if loaded else "not_loaded",
+            "description": desc[:160],
+        }
+        if not loaded:
+            result["fix"] = f'load_tool_group("{category}")'
+        scored.append((score, result))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    matches = [r for _, r in scored[: max(1, limit)]]
+    return json.dumps(
+        {
+            "query": query,
+            "match_count": len(scored),
+            "returned": len(matches),
+            "matches": matches,
         }
     )
 

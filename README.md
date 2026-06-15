@@ -14,7 +14,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/bethington/ghidra-mcp?style=for-the-badge&logo=git&logoColor=white)](https://github.com/bethington/ghidra-mcp/commits/main)
 [![Discussions](https://img.shields.io/badge/discussions-join-7B68EE?style=for-the-badge&logo=github&logoColor=white)](https://github.com/bethington/ghidra-mcp/discussions)
 [![Issues](https://img.shields.io/github/issues/bethington/ghidra-mcp?style=for-the-badge&logo=github&logoColor=white&color=orange)](https://github.com/bethington/ghidra-mcp/issues)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/bethington/ghidra-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/bethington/ghidra-mcp)
+[![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/bethington/ghidra-mcp?style=for-the-badge&logo=securityscorecard&logoColor=white&label=OpenSSF%20Scorecard)](https://scorecard.dev/viewer/?uri=github.com/bethington/ghidra-mcp)
 
 > If you find this useful, please ⭐ star the repo — it helps others discover it!
 >
@@ -315,6 +315,24 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 | `--lazy` | off | Load only the default tool groups on connect. Faster startup, but MCP clients that don't support `tools/list_changed` will see an incomplete tool list. Not recommended for Claude Code. |
 | `--no-lazy` | (default) | Load all tool groups immediately on connect. Required for most AI clients. |
 | `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect when `--lazy` is set. |
+
+#### Reducing tool-context overhead
+
+The bridge exposes a large catalog. To keep the model's tool surface small, run
+with `--lazy` (loads only `listing,function,program` on connect) and let the
+model **discover** the rest on demand instead of registering everything:
+
+- `search_tools("rename function")` — keyword-search the **entire** catalog,
+  including tools whose group isn't loaded. Each result says whether it's
+  callable now and, if not, the exact `load_tool_group(...)` call to enable it.
+- `list_tool_groups()` — list all categories and their load state.
+- `load_tool_group("datatype")` / `unload_tool_group("datatype")` — load or
+  drop a category at runtime.
+- `check_tools("rename_or_label,batch_set_comments")` — confirm specific tools
+  are callable right now.
+
+`search_tools` works in both eager and `--lazy` modes, so agents that honor
+`tools/list_changed` get full discovery without the upfront context cost.
 
 #### Optional: Start the standalone debugger server
 ```bash
