@@ -6,6 +6,24 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+### Fixed
+
+- **PIC/GOT-indirected named globals rendered as `DAT_`**: `decompile_function`,
+  `decompile_function_by_name`, and every other decompiler-backed operation
+  constructed a bare `new DecompInterface()` and never applied
+  `DecompileOptions`. A fresh `DecompileOptions` leaves *"Respect Read-Only
+  Flags"* OFF (the C++ decompiler-core default), so a read-only GOT/relocation
+  slot stayed an opaque `DAT_<addr>` constant instead of being folded to the
+  named global it points at (e.g. `param_1 * 9.0 * DAT_001e9ebc` rather than
+  `... * ModSlashThickness`). This silently misled ports on PIC binaries
+  (observed on an ARM32 target). All 11 decompiler construction sites in
+  `FunctionService` and `DataTypeService` now route through a shared
+  `ServiceUtils.createConfiguredDecompiler(program)` factory that applies
+  `DecompileOptions.grabFromProgram(program)` before `openProgram`, exactly
+  matching the Ghidra GUI / analysis decompiler. `force_decompile`, which was
+  previously byte-identical to the broken output (a cache refresh with the same
+  bare options), now also resolves the named global. 249 tools.
+
 ---
 
 ## v5.13.1 - 2026-06-08 (patch: launch-noise fix + class-member listing)
