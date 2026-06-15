@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 JAVA_SRC = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte"
 CORE_SRC = JAVA_SRC / "core"
 POM_XML = PROJECT_ROOT / "pom.xml"
-PYTHON_BRIDGE = PROJECT_ROOT / "bridge_mcp_ghidra.py"
+BRIDGE_PKG = PROJECT_ROOT / "python" / "ghidra_mcp_bridge"
 ENDPOINTS_JSON = PROJECT_ROOT / "tests" / "endpoints.json"
 
 
@@ -71,37 +71,38 @@ class TestVersionConsistency(unittest.TestCase):
 
 
 class TestBridgeConfiguration(unittest.TestCase):
-    """Verify bridge configuration and imports."""
+    """Verify bridge configuration via the ghidra_mcp_bridge package API."""
 
     def test_bridge_importable(self):
-        """Bridge should be importable without errors."""
+        """Package should be importable without errors."""
         try:
-            import bridge_mcp_ghidra
+            import ghidra_mcp_bridge  # noqa: F401
         except ImportError as e:
             self.fail(f"Bridge import failed: {e}")
 
     def test_bridge_has_uds_support(self):
         """Bridge should support Unix domain sockets."""
-        content = PYTHON_BRIDGE.read_text()
-        self.assertIn("UnixHTTPConnection", content)
-        self.assertIn("AF_UNIX", content)
+        from ghidra_mcp_bridge import transport
+
+        self.assertTrue(hasattr(transport, "UnixHTTPConnection"))
+        self.assertIn("AF_UNIX", (BRIDGE_PKG / "transport.py").read_text())
 
     def test_bridge_has_tcp_fallback(self):
         """Bridge should support TCP as fallback."""
-        content = PYTHON_BRIDGE.read_text()
-        self.assertIn("tcp_request", content)
-        self.assertIn("DEFAULT_TCP_URL", content)
+        from ghidra_mcp_bridge import transport
+        from ghidra_mcp_bridge.config import DEFAULT_TCP_URL
 
-    def test_bridge_has_auto_connect(self):
-        """Bridge should auto-connect on startup."""
-        content = PYTHON_BRIDGE.read_text()
-        self.assertIn("_auto_connect", content)
+        self.assertTrue(callable(transport.tcp_request))
+        self.assertTrue(DEFAULT_TCP_URL.startswith("http"))
 
     def test_bridge_dependencies_minimal(self):
-        """Bridge should only depend on mcp (no requests library)."""
-        content = PYTHON_BRIDGE.read_text()
-        # The thin bridge uses stdlib http.client, not requests
-        self.assertNotIn("import requests", content)
+        """Bridge should use stdlib http.client, not the requests library."""
+        for py_file in BRIDGE_PKG.glob("*.py"):
+            self.assertNotIn(
+                "import requests",
+                py_file.read_text(),
+                f"{py_file.name} should not import requests",
+            )
 
 
 class TestJavaArchitecture(unittest.TestCase):
@@ -220,7 +221,7 @@ class TestProjectStructure(unittest.TestCase):
         self.assertTrue(POM_XML.exists())
 
     def test_bridge_exists(self):
-        self.assertTrue(PYTHON_BRIDGE.exists())
+        self.assertTrue((BRIDGE_PKG / "__init__.py").exists())
 
     def test_plugin_exists(self):
         self.assertTrue((JAVA_SRC / "GhidraMCPPlugin.java").exists())

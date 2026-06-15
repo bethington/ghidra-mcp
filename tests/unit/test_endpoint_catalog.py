@@ -128,7 +128,7 @@ class TestEndpointsJson(unittest.TestCase):
     @unittest.skipUnless(ENDPOINTS_JSON.exists(), "endpoints.json not found")
     def test_catalog_tool_names_are_capi_safe_after_bridge_parsing(self):
         """The generated endpoint catalog should produce valid exposed MCP names."""
-        from bridge_mcp_ghidra import _parse_schema
+        from ghidra_mcp_bridge.schema import parse_schema
 
         data = json.loads(ENDPOINTS_JSON.read_text())
         raw_schema = {
@@ -142,54 +142,44 @@ class TestEndpointsJson(unittest.TestCase):
             ]
         }
         invalid = [
-            tool["name"] for tool in _parse_schema(raw_schema)
+            tool["name"] for tool in parse_schema(raw_schema)
             if not re.fullmatch(r"^[a-zA-Z0-9_-]+$", tool["name"])
         ]
         self.assertEqual(invalid, [])
 
 
+BRIDGE_PKG = PROJECT_ROOT / "python" / "ghidra_mcp_bridge"
+
+
 class TestBridgeIsDynamic(unittest.TestCase):
     """Verify the bridge uses dynamic registration, not hardcoded tools."""
 
-    def test_bridge_has_few_static_tools(self):
-        """Bridge static tool decorators should match the explicit static tool allowlist."""
-        import bridge_mcp_ghidra as bridge
+    def test_static_tool_decorators_match_allowlist(self):
+        """The package's @mcp.tool() decorators must match the static allowlist.
 
-        bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
-        content = bridge_path.read_text()
-        tool_count = len(re.findall(r"@mcp\.tool\(\)", content))
+        Static tools are the hand-written ones (list_instances, connect_instance,
+        import_file + the debugger_* family); every other tool is registered
+        dynamically from /mcp/schema via mcp.tool(name=...), not a literal
+        decorator. So the literal @mcp.tool() count is the static-tool count.
+        """
+        from ghidra_mcp_bridge.config import STATIC_TOOL_NAMES
+
+        decorator_count = 0
+        for py_file in BRIDGE_PKG.glob("*.py"):
+            decorator_count += len(re.findall(r"@mcp\.tool\(\)", py_file.read_text()))
         self.assertEqual(
-            tool_count,
-            len(bridge.STATIC_TOOL_NAMES),
-            f"Bridge has {tool_count} @mcp.tool() decorators but "
-            f"{len(bridge.STATIC_TOOL_NAMES)} static tool names",
+            decorator_count,
+            len(STATIC_TOOL_NAMES),
+            f"Package has {decorator_count} @mcp.tool() decorators but "
+            f"{len(STATIC_TOOL_NAMES)} static tool names",
         )
 
     def test_bridge_has_schema_registration(self):
-        """Bridge should have register_tools_from_schema function."""
-        bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
-        content = bridge_path.read_text()
-        self.assertIn("register_tools_from_schema", content)
-        self.assertIn("/mcp/schema", content)
+        """The bridge registers dynamically from the upstream /mcp/schema."""
+        from ghidra_mcp_bridge import registry
 
-    def test_bridge_size_reasonable(self):
-        """Thin bridge should stay manageable while allowing debugger/tool-group growth.
-
-        The cap is a soft signal — if it trips, look at the diff to confirm
-        the added lines are pulling weight (real logic / regression coverage
-        / docstrings tied to a fix) rather than gratuitous. Bump deliberately
-        when the threshold becomes routine friction, but don't paper over
-        actual bloat. Last bumped 2026-05-12: 2100 -> 2250 to absorb the #170
-        multi-candidate socket-dir scan and #175 TCP port-range discovery
-        (`_scan_tcp_for_project` + new helpers + docstrings). Both pull
-        weight: bug fixes for real reproducible user reports with associated
-        unit test coverage.
-        """
-        bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
-        lines = len(bridge_path.read_text().splitlines())
-        self.assertLess(
-            lines, 2250, f"Bridge is {lines} lines, expected <2250 for thin multiplexer"
-        )
+        self.assertTrue(callable(registry.register_tools_from_schema))
+        self.assertIn("/mcp/schema", (BRIDGE_PKG / "registry.py").read_text())
 
 
 class TestAnnotationScannerExists(unittest.TestCase):

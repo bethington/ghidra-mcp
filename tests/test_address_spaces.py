@@ -2,18 +2,9 @@
 Tests for address space prefix support in the bridge.
 Tests are pure-Python and do not require a running Ghidra instance.
 """
-import sys
-import pytest
-
-# Import bridge functions under test
-sys.path.insert(0, ".")
-from bridge_mcp_ghidra import (
-    sanitize_address,
-    validate_hex_address,
-    SEGMENT_ADDRESS_PATTERN,
-    SEGMENT_ADDR_WITH_0X_PATTERN,
-    _build_tool_function,
-)
+from ghidra_mcp_bridge import connection
+from ghidra_mcp_bridge.schema import build_tool_function
+from ghidra_mcp_bridge.validation import sanitize_address, validate_hex_address
 
 
 class TestSanitizeAddress:
@@ -72,7 +63,7 @@ class TestValidateHexAddress:
         assert validate_hex_address("0x1000") is True
 
     def test_accepts_segment_with_0x_offset(self):
-        """Our validate_hex_address accepts space:0xHEX via SEGMENT_ADDR_WITH_0X_PATTERN."""
+        """validate_hex_address accepts space:0xHEX via SEGMENT_ADDR_WITH_0X_PATTERN."""
         assert validate_hex_address("mem:0x1000") is True
 
     def test_sanitize_then_validate_round_trip(self):
@@ -86,68 +77,53 @@ class TestValidateHexAddress:
 
 
 class TestBuildToolFunctionSanitization:
-    """_build_tool_function sanitizes address params before routing."""
+    """build_tool_function sanitizes address params before routing."""
 
     def _make_test_handler(self, address_params=("address",), method="GET"):
-        """Build a minimal tool handler via _build_tool_function and return it + a call recorder."""
+        """Build a tool handler and patch connection dispatch to record calls."""
         calls = []
 
-        # Build JSON Schema-style params_schema
-        properties = {}
-        required_list = list(address_params)
-        for p in address_params:
-            # The bridge gates address sanitization on `param_type` (snake_case);
-            # the original test set `paramType` (camelCase) which silently
-            # disabled sanitization on this code path. See #184 cleanup.
-            properties[p] = {"type": "string", "param_type": "address"}
-        # Add a non-address param for contrast
-        properties["label"] = {"type": "string"}
-
+        # build_tool_function gates address sanitization on `param_type` ==
+        # "address" (snake_case) in the property definition.
+        properties = {p: {"type": "string", "param_type": "address"} for p in address_params}
+        properties["label"] = {"type": "string"}  # non-address param for contrast
         params_schema = {
             "type": "object",
             "properties": properties,
-            "required": required_list,
+            "required": list(address_params),
         }
 
-        handler = _build_tool_function("/test_tool", method, params_schema)
+        handler = build_tool_function("/test_tool", method, params_schema)
 
-        import bridge_mcp_ghidra as bridge
-
-        original_get = bridge.dispatch_get
-        original_post = bridge.dispatch_post
+        original_get = connection.dispatch_get
+        original_post = connection.dispatch_post
 
         def mock_get(endpoint, params=None):
             calls.append(("GET", endpoint, dict(params) if params else {}))
             return "{}"
 
         def mock_post(endpoint, data=None, query_params=None):
-            # query_params kwarg was added when POST endpoints gained
-            # @Param(source=ParamSource.QUERY) support; the mock now mirrors
-            # the live signature so tests don't fail with TypeError.
             calls.append(("POST", endpoint, dict(data) if data else {}))
             return "{}"
 
-        bridge.dispatch_get = mock_get
-        bridge.dispatch_post = mock_post
+        connection.dispatch_get = mock_get
+        connection.dispatch_post = mock_post
 
-        return handler, calls, (original_get, original_post, bridge)
+        return handler, calls, (original_get, original_post)
 
     def test_get_tool_sanitizes_address_param(self):
-        handler, calls, (orig_get, orig_post, bridge) = \
-            self._make_test_handler(method="GET")
+        handler, calls, (orig_get, orig_post) = self._make_test_handler(method="GET")
         try:
             handler(address="mem:0x1000", label="test")
             assert len(calls) == 1
             _, _, params = calls[0]
-            assert params["address"] == "mem:1000", \
-                f"Expected mem:1000, got {params['address']}"
+            assert params["address"] == "mem:1000", f"Expected mem:1000, got {params['address']}"
         finally:
-            bridge.dispatch_get = orig_get
-            bridge.dispatch_post = orig_post
+            connection.dispatch_get = orig_get
+            connection.dispatch_post = orig_post
 
     def test_post_tool_sanitizes_address_param(self):
-        handler, calls, (orig_get, orig_post, bridge) = \
-            self._make_test_handler(method="POST")
+        handler, calls, (orig_get, orig_post) = self._make_test_handler(method="POST")
         try:
             handler(address="MEM:FF00", label="test")
             assert len(calls) == 1
@@ -157,30 +133,27 @@ class TestBuildToolFunctionSanitization:
             # declare them uppercase.
             assert body["address"] == "MEM:FF00"
         finally:
-            bridge.dispatch_get = orig_get
-            bridge.dispatch_post = orig_post
+            connection.dispatch_get = orig_get
+            connection.dispatch_post = orig_post
 
     def test_non_address_param_passes_through_unchanged(self):
-        handler, calls, (orig_get, orig_post, bridge) = \
-            self._make_test_handler(method="GET")
+        handler, calls, (orig_get, orig_post) = self._make_test_handler(method="GET")
         try:
             handler(address="mem:1000", label="DO_NOT_CHANGE")
             _, _, params = calls[0]
             assert params["label"] == "DO_NOT_CHANGE"
         finally:
-            bridge.dispatch_get = orig_get
-            bridge.dispatch_post = orig_post
+            connection.dispatch_get = orig_get
+            connection.dispatch_post = orig_post
 
     def test_uppercase_space_name_preserved(self):
-        """Issue #184: 8051 / other architectures with uppercase space names —
-        the bridge must NOT lowercase them. AddressFactory is case-sensitive
-        and those targets only know about CODE/RAM/INTMEM/EXTMEM as declared."""
-        handler, calls, (orig_get, orig_post, bridge) = \
-            self._make_test_handler(method="GET")
+        """Issue #184: uppercase space names (8051 CODE/RAM/INTMEM/EXTMEM) must
+        not be lowercased — AddressFactory is case-sensitive."""
+        handler, calls, (orig_get, orig_post) = self._make_test_handler(method="GET")
         try:
             handler(address="CODE:abcd")
             _, _, params = calls[0]
             assert params["address"] == "CODE:abcd"
         finally:
-            bridge.dispatch_get = orig_get
-            bridge.dispatch_post = orig_post
+            connection.dispatch_get = orig_get
+            connection.dispatch_post = orig_post

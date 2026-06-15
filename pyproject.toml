@@ -27,5 +27,7 @@ dev = [
     "pyflakes>=3.4.0",
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=7.1.0",
+    "requests>=2.32.0",
     "ruff>=0.15.17",
 ]
