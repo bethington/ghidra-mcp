@@ -13,9 +13,9 @@ import inspect
 import re
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from ghidra_mcp_bridge import connection, discovery, registry
+from ghidra_mcp_bridge import connection, discovery, registry, validation
 from ghidra_mcp_bridge.config import MAX_TOOL_NAME_LENGTH
 from ghidra_mcp_bridge.discovery import _scan_tcp_for_project, discover_instances
 from ghidra_mcp_bridge.schema import build_tool_function, parse_schema
@@ -484,6 +484,110 @@ class TestIsPidAlive(unittest.TestCase):
 
     def test_nonexistent_pid(self):
         self.assertFalse(is_pid_alive(4000000))
+
+
+class TestIsPidAliveWindows(unittest.TestCase):
+    """Windows liveness path (Copilot review): OpenProcess returns a 64-bit
+    HANDLE, so the kernel32 prototypes must be declared or ctypes truncates it
+    to c_int -- corrupting the result and the value handed to CloseHandle. The
+    failure code must come from get_last_error (use_last_error), not a value
+    ctypes may have clobbered. These run on any OS because kernel32 is mocked."""
+
+    def setUp(self):
+        # _win_kernel32_lib caches the configured lib; isolate each test.
+        self._saved_cache = validation._win_kernel32
+        validation._win_kernel32 = None
+
+        def _restore():
+            validation._win_kernel32 = self._saved_cache
+
+        self.addCleanup(_restore)
+
+    def test_kernel32_prototypes_are_handle_safe(self):
+        """_win_kernel32_lib must set 64-bit-safe restype/argtypes and request
+        use_last_error so handles aren't truncated on 64-bit Python."""
+        import ctypes
+        from ctypes import wintypes
+
+        recorded = {}
+
+        class FakeFunc:
+            pass
+
+        class FakeWinDLL:
+            def __init__(self, name, use_last_error=False):
+                recorded["name"] = name
+                recorded["use_last_error"] = use_last_error
+                self.OpenProcess = FakeFunc()
+                self.CloseHandle = FakeFunc()
+
+        with patch.object(ctypes, "WinDLL", FakeWinDLL, create=True):
+            lib = validation._win_kernel32_lib()
+
+        self.assertEqual(recorded["name"], "kernel32")
+        self.assertTrue(recorded["use_last_error"])
+        self.assertIs(lib.OpenProcess.restype, wintypes.HANDLE)
+        self.assertEqual(
+            lib.OpenProcess.argtypes,
+            (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD),
+        )
+        self.assertIs(lib.CloseHandle.restype, wintypes.BOOL)
+        self.assertEqual(lib.CloseHandle.argtypes, (wintypes.HANDLE,))
+
+    def test_kernel32_lib_is_cached(self):
+        import ctypes
+
+        calls = []
+
+        class FakeWinDLL:
+            def __init__(self, name, use_last_error=False):
+                calls.append(name)
+                self.OpenProcess = Mock()
+                self.CloseHandle = Mock()
+
+        with patch.object(ctypes, "WinDLL", FakeWinDLL, create=True):
+            first = validation._win_kernel32_lib()
+            second = validation._win_kernel32_lib()
+
+        self.assertIs(first, second)
+        self.assertEqual(len(calls), 1)  # configured once, then reused
+
+    def test_open_succeeds_returns_true_and_closes_exact_handle(self):
+        import ctypes
+
+        # A handle wider than 32 bits: the call path must hand this exact value
+        # to CloseHandle (the declared HANDLE restype prevents truncation).
+        big_handle = 0x1_2345_6789
+        fake = Mock()
+        fake.OpenProcess.return_value = big_handle
+        with patch.object(validation.os, "name", "nt"), patch.object(
+            validation, "_win_kernel32_lib", return_value=fake
+        ), patch.object(ctypes, "get_last_error", return_value=0, create=True):
+            self.assertTrue(validation.is_pid_alive(1234))
+        fake.OpenProcess.assert_called_once_with(0x1000, False, 1234)
+        fake.CloseHandle.assert_called_once_with(big_handle)
+
+    def test_access_denied_means_alive(self):
+        import ctypes
+
+        fake = Mock()
+        fake.OpenProcess.return_value = 0  # NULL handle
+        with patch.object(validation.os, "name", "nt"), patch.object(
+            validation, "_win_kernel32_lib", return_value=fake
+        ), patch.object(ctypes, "get_last_error", return_value=5, create=True):
+            self.assertTrue(validation.is_pid_alive(1234))  # ERROR_ACCESS_DENIED
+        fake.CloseHandle.assert_not_called()
+
+    def test_other_error_means_dead(self):
+        import ctypes
+
+        fake = Mock()
+        fake.OpenProcess.return_value = 0
+        with patch.object(validation.os, "name", "nt"), patch.object(
+            validation, "_win_kernel32_lib", return_value=fake
+        ), patch.object(ctypes, "get_last_error", return_value=87, create=True):
+            self.assertFalse(validation.is_pid_alive(1234))
+        fake.CloseHandle.assert_not_called()
 
 
 class TestGetTimeout(unittest.TestCase):

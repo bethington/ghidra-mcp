@@ -14,6 +14,33 @@ from .config import (
 )
 
 
+_win_kernel32 = None  # Lazily configured kernel32 handle (Windows only).
+
+
+def _win_kernel32_lib():
+    """Load kernel32 once with prototypes that are correct on 64-bit Python.
+
+    Without explicit ``restype``/``argtypes``, ctypes assumes a 32-bit ``c_int``
+    return, which truncates the 64-bit ``HANDLE`` that ``OpenProcess`` returns on
+    64-bit Python. A truncated handle corrupts the liveness result and gets
+    passed to ``CloseHandle`` (wrong-handle close / leak). ``use_last_error``
+    captures the Win32 error so ``ctypes.get_last_error()`` reads it reliably
+    instead of a value ctypes may have clobbered between foreign calls.
+    """
+    global _win_kernel32
+    if _win_kernel32 is None:
+        import ctypes
+        from ctypes import wintypes
+
+        lib = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]  # Windows-only
+        lib.OpenProcess.restype = wintypes.HANDLE
+        lib.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        lib.CloseHandle.restype = wintypes.BOOL
+        lib.CloseHandle.argtypes = (wintypes.HANDLE,)
+        _win_kernel32 = lib
+    return _win_kernel32
+
+
 def is_pid_alive(pid: int) -> bool:
     """Check if a process with the given PID is still running."""
     if pid <= 0:
@@ -22,7 +49,7 @@ def is_pid_alive(pid: int) -> bool:
     if os.name == "nt":
         import ctypes
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]  # Windows-only
+        kernel32 = _win_kernel32_lib()
         # PROCESS_QUERY_LIMITED_INFORMATION is enough for a liveness probe and
         # avoids the POSIX-only os.kill(pid, 0) behavior that can hang on Windows.
         handle = kernel32.OpenProcess(0x1000, False, pid)
@@ -30,7 +57,7 @@ def is_pid_alive(pid: int) -> bool:
             kernel32.CloseHandle(handle)
             return True
 
-        error = kernel32.GetLastError()
+        error = ctypes.get_last_error()
         if error == 5:  # ERROR_ACCESS_DENIED: alive but not queryable.
             return True
         return False
