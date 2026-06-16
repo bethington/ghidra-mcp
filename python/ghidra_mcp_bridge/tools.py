@@ -102,6 +102,12 @@ async def connect_instance(project: str) -> str:
                     pid=match.get("pid"),
                 )
             except Exception as e:
+                # Roll back the half-finished switch: drop the just-activated
+                # transport and tear down any stale dynamic tools so nothing
+                # dispatches against the new (broken) instance. reset() keeps
+                # _connected_project pointing at this instance for reconnect.
+                connection.reset()
+                registry.register_tools_from_schema([])
                 return json.dumps(
                     {"error": f"Schema fetch failed: {e}", "socket": match["socket"]}
                 )
@@ -161,7 +167,10 @@ async def connect_instance(project: str) -> str:
             "tcp", count, url=tcp_url, project=connection.connected_project()
         )
     except Exception as e:
+        # Same rollback as the UDS path: drop the transport and clear stale
+        # dynamic tools so the failed switch can't leave a mismatched state.
         connection.reset()
+        registry.register_tools_from_schema([])
         available = [inst.get("project", "unknown") for inst in instances]
         return json.dumps(
             {

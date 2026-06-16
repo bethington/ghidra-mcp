@@ -82,6 +82,11 @@ def register_tools_from_schema(schema: list[dict]) -> int:
     """
     global _full_schema
 
+    # Normalize first, before touching live state. If this raises we must not
+    # have already torn down the previously registered tools — that would leave
+    # the bridge with the old transport active but no tools registered.
+    normalized = _normalize_tool_def_names(schema)
+
     # Remove previously registered dynamic tools. fastmcp's public remove_tool
     # also emits the tools/list_changed notification for us.
     for name in _dynamic_tool_names:
@@ -91,8 +96,7 @@ def register_tools_from_schema(schema: list[dict]) -> int:
             logger.warning("Failed to unregister dynamic tool %r: %s", name, e)
     _dynamic_tool_names.clear()
 
-    # Store full schema (idempotent re-normalization).
-    _full_schema = _normalize_tool_def_names(schema)
+    _full_schema = normalized
 
     count = 0
     failures: list[str] = []
