@@ -150,9 +150,16 @@ async def connect_instance(project: str) -> str:
             }
         )
     try:
-        connection.activate_tcp(tcp_url)
+        # Resolve the instance's canonical project name so _connected_project
+        # tracks the TCP target instead of leaving a stale name from a prior
+        # UDS session (which would misdirect reconnect attempts/messages). Fall
+        # back to the requested project if instance_info can't be read.
+        resolved_project = discovery._resolve_tcp_project(tcp_url) or project
+        connection.activate_tcp(tcp_url, project=resolved_project)
         count = registry.fetch_and_register_schema()
-        return _connect_result("tcp", count, url=tcp_url)
+        return _connect_result(
+            "tcp", count, url=tcp_url, project=connection.connected_project()
+        )
     except Exception as e:
         connection.reset()
         available = [inst.get("project", "unknown") for inst in instances]

@@ -6,6 +6,7 @@ transport utilities, timeout logic, and discovery functions against the
 ``ghidra_mcp_bridge`` package.
 """
 
+import asyncio
 import json
 import os
 import inspect
@@ -154,6 +155,124 @@ class TestTcpPortScan(unittest.TestCase):
         than scan + match nothing."""
         self.assertIsNone(_scan_tcp_for_project(""))
         self.assertIsNone(_scan_tcp_for_project(None))
+
+
+class TestResolveTcpProject(unittest.TestCase):
+    """Test _resolve_tcp_project: reads the canonical project name from a TCP
+    instance's /mcp/instance_info so connect_instance's TCP path records the
+    project it actually reached, not a substring the caller typed or a stale
+    name from a prior UDS session."""
+
+    def test_returns_project_on_success(self):
+        with patch.object(discovery, "tcp_request",
+                          return_value=(json.dumps({"project": "Diablo2"}), 200)):
+            self.assertEqual(
+                discovery._resolve_tcp_project("http://127.0.0.1:8089"), "Diablo2"
+            )
+
+    def test_unwraps_data_wrapper(self):
+        with patch.object(discovery, "tcp_request",
+                          return_value=(json.dumps({"data": {"project": "Wrapped"}}), 200)):
+            self.assertEqual(
+                discovery._resolve_tcp_project("http://127.0.0.1:8089"), "Wrapped"
+            )
+
+    def test_non_200_returns_none(self):
+        with patch.object(discovery, "tcp_request", return_value=("nope", 500)):
+            self.assertIsNone(discovery._resolve_tcp_project("http://127.0.0.1:8089"))
+
+    def test_exception_returns_none(self):
+        with patch.object(discovery, "tcp_request",
+                          side_effect=ConnectionRefusedError("down")):
+            self.assertIsNone(discovery._resolve_tcp_project("http://127.0.0.1:8089"))
+
+    def test_missing_or_empty_project_returns_none(self):
+        with patch.object(discovery, "tcp_request",
+                          return_value=(json.dumps({"project": ""}), 200)):
+            self.assertIsNone(discovery._resolve_tcp_project("http://127.0.0.1:8089"))
+        with patch.object(discovery, "tcp_request",
+                          return_value=(json.dumps({"pid": 1}), 200)):
+            self.assertIsNone(discovery._resolve_tcp_project("http://127.0.0.1:8089"))
+
+
+class TestConnectInstanceTcpProject(unittest.TestCase):
+    """connect_instance's TCP fallback must update _connected_project to the
+    instance it reached, never leaving a stale name from a prior UDS session
+    (Copilot review item). Otherwise a dropped/reset TCP session would trigger
+    reconnect attempts/messages naming the wrong project."""
+
+    def setUp(self):
+        from ghidra_mcp_bridge import tools
+        self.tools = tools
+        # Snapshot and fully restore connection globals -- reset() deliberately
+        # preserves _connected_project, which would leak into other tests.
+        saved = (
+            connection._active_socket,
+            connection._active_tcp,
+            connection._transport_mode,
+            connection._connected_project,
+        )
+
+        def _restore():
+            (connection._active_socket, connection._active_tcp,
+             connection._transport_mode, connection._connected_project) = saved
+
+        self.addCleanup(_restore)
+        # Prime a stale UDS session so a leftover project name is present.
+        connection.activate_uds("/tmp/ghidra-stale.sock", "StaleUdsProject")
+
+    def _run(self, project):
+        return asyncio.run(self.tools.connect_instance(project))
+
+    @patch.dict(os.environ, {}, clear=False)
+    def test_tcp_connect_records_resolved_project(self):
+        os.environ.pop("GHIDRA_MCP_URL", None)
+        with patch.object(self.tools.discovery, "discover_instances", return_value=[]), \
+             patch.object(self.tools.discovery, "_scan_tcp_for_project",
+                          return_value="http://127.0.0.1:8090"), \
+             patch.object(self.tools.discovery, "_resolve_tcp_project",
+                          return_value="ResolvedProject"), \
+             patch.object(self.tools.registry, "fetch_and_register_schema", return_value=7):
+            result = json.loads(self._run("Resolved"))
+
+        self.assertTrue(result["connected"])
+        self.assertEqual(result["project"], "ResolvedProject")
+        self.assertEqual(connection.connected_project(), "ResolvedProject")
+        self.assertEqual(connection.transport_mode(), "tcp")
+        self.assertEqual(connection.active_tcp(), "http://127.0.0.1:8090")
+
+    @patch.dict(os.environ, {}, clear=False)
+    def test_tcp_connect_falls_back_to_requested_project(self):
+        """If instance_info can't be read, record the requested name -- still
+        better than a stale UDS leftover."""
+        os.environ.pop("GHIDRA_MCP_URL", None)
+        with patch.object(self.tools.discovery, "discover_instances", return_value=[]), \
+             patch.object(self.tools.discovery, "_scan_tcp_for_project",
+                          return_value="http://127.0.0.1:8090"), \
+             patch.object(self.tools.discovery, "_resolve_tcp_project", return_value=None), \
+             patch.object(self.tools.registry, "fetch_and_register_schema", return_value=3):
+            json.loads(self._run("Requested"))
+
+        self.assertEqual(connection.connected_project(), "Requested")
+
+    @patch.dict(os.environ, {}, clear=False)
+    def test_failed_tcp_connect_resets_to_fresh_project_not_stale(self):
+        """When the schema fetch fails the transport resets but preserves
+        _connected_project for reconnect -- it must be the project we just
+        tried (not the stale UDS leftover) so reconnect targets the right one."""
+        os.environ.pop("GHIDRA_MCP_URL", None)
+        with patch.object(self.tools.discovery, "discover_instances", return_value=[]), \
+             patch.object(self.tools.discovery, "_scan_tcp_for_project",
+                          return_value="http://127.0.0.1:8090"), \
+             patch.object(self.tools.discovery, "_resolve_tcp_project",
+                          return_value="FreshProject"), \
+             patch.object(self.tools.registry, "fetch_and_register_schema",
+                          side_effect=RuntimeError("schema boom")):
+            result = json.loads(self._run("Fresh"))
+
+        self.assertIn("error", result)
+        self.assertEqual(connection.transport_mode(), "none")
+        self.assertEqual(connection.connected_project(), "FreshProject")
 
 
 class TestGetSocketDirCandidates(unittest.TestCase):

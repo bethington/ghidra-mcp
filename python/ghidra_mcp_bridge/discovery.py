@@ -124,6 +124,30 @@ def _scan_tcp_for_project(
     return substring_url
 
 
+def _resolve_tcp_project(url: str, timeout: float = 2.0) -> str | None:
+    """Read the canonical project name for a TCP instance via /mcp/instance_info.
+
+    Used on the connect_instance TCP path so _connected_project reflects the
+    instance we actually reached -- not a substring the caller typed, and not a
+    stale name left over from a prior UDS session. Returns None if the instance
+    can't be queried or reports no project (callers fall back to the requested
+    name).
+    """
+    try:
+        text, status = tcp_request(url, "GET", "/mcp/instance_info", timeout=timeout)
+        if status != 200:
+            return None
+        info = _unwrap_response_data(text)
+    except Exception as e:
+        logger.debug(f"Could not resolve project for TCP instance {url}: {e}")
+        return None
+    if isinstance(info, dict):
+        project = info.get("project")
+        if project:
+            return project
+    return None
+
+
 def discover_active_tcp_instance() -> dict | None:
     """Return the active TCP fallback connection as an instance-like record."""
     active_tcp = connection.active_tcp()
