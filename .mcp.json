@@ -4,8 +4,6 @@
       "command": "uv",
       "args": [
         "run",
-        "--directory",
-        "/Users/linted/ghidra-mcp",
         "ghidra-mcp-bridge",
         "--transport",
         "stdio"
