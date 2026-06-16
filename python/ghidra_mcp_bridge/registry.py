@@ -66,7 +66,7 @@ def _report_tool_registration_failures(failures: list[str]) -> None:
     shown = "; ".join(failures[:8])
     suffix = "..." if len(failures) > 8 else ""
     sys.stderr.write(
-        f"[bridge_mcp_ghidra] {len(failures)} tool(s) failed to register: "
+        f"[ghidra_mcp_bridge] {len(failures)} tool(s) failed to register: "
         f"{shown}{suffix}\n"
     )
     sys.stderr.flush()
