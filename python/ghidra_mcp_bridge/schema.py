@@ -90,7 +90,8 @@ def build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     """Build a callable that dispatches to the Ghidra HTTP endpoint."""
     properties = params_schema.get("properties", {})
     required = set(params_schema.get("required", []))
-    is_post = http_method.upper() == "POST"
+    method = http_method.upper()
+    is_post = method == "POST"
     has_schema_dry_run = "dry_run" in properties
     use_synthetic_dry_run = is_post and not has_schema_dry_run
 
@@ -124,7 +125,7 @@ def build_tool_function(endpoint: str, http_method: str, params_schema: dict):
             for k, v in kwargs.items()
             if v is not None and not (isinstance(v, str) and v == "")
         }
-        if http_method == "GET":
+        if method == "GET":
             str_params = {k: str(v) for k, v in filtered.items()}
             if use_synthetic_dry_run and is_truthy(dry_run):
                 str_params["dry_run"] = "true"
