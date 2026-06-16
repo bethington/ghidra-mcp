@@ -22,11 +22,15 @@ _full_schema: list[dict] = []  # Complete parsed schema
 
 
 def full_schema() -> list[dict]:
-    return _full_schema
+    """Return a shallow copy of the parsed schema so callers can't mutate
+    registry state through the returned list."""
+    return list(_full_schema)
 
 
 def dynamic_tool_names() -> list[str]:
-    return _dynamic_tool_names
+    """Return a copy of the registered dynamic tool names so callers can't
+    mutate registry state through the returned list."""
+    return list(_dynamic_tool_names)
 
 
 # ==========================================================================
