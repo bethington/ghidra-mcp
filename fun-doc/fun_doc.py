@@ -7026,6 +7026,30 @@ def process_function(
         if run_log_written:
             return
         run_log_written = True
+        # Ghidra being offline is an infrastructure outage, not a documentation
+        # outcome. During a multi-hour outage the worker re-picks the same
+        # function on every backoff cycle (by design — it must stay re-pickable,
+        # not parked), so writing a full ~40-field run row per attempt floods
+        # runs.jsonl with hundreds of identical rows per function (one 2026-06-07
+        # outage wrote 210 rows for a single address) and spams the dashboard run
+        # feed. Record a single lightweight event for the audit trail and skip the
+        # row. The worker's own check_ghidra_online() backoff drives recovery, and
+        # the function_complete bus event (emitted at the call site) keeps the
+        # dashboard's offline state in sync.
+        if logged_result == "ghidra_offline":
+            try:
+                from event_log import log_event
+
+                log_event(
+                    "ghidra.offline",
+                    run_id=run_id,
+                    program=program,
+                    address=address,
+                    reason=reason,
+                )
+            except Exception:
+                pass
+            return
         final_score = new_score if score_after is None else score_after
         score_delta = (
             (final_score - live_score)

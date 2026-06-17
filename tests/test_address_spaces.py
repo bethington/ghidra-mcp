@@ -54,6 +54,18 @@ class TestSanitizeAddress:
     def test_8051_extmem_space_preserved(self):
         assert sanitize_address("EXTMEM:0xfeed") == "EXTMEM:feed"
 
+    # Overlay namespace "::" form — what search_functions returns for overlay
+    # functions (e.g. CODE_BANK1::e461). Must pass through, not get mangled into
+    # "0xcode_bank1::e461" by the plain-hex fallback.
+    def test_overlay_namespace_double_colon_preserved(self):
+        assert sanitize_address("CODE_BANK1::e461") == "CODE_BANK1::e461"
+
+    def test_overlay_namespace_double_colon_strips_0x(self):
+        assert sanitize_address("CODE_BANK1::0xe461") == "CODE_BANK1::e461"
+
+    def test_overlay_namespace_preserves_case(self):
+        assert sanitize_address("Code_Bank1::FF00") == "Code_Bank1::FF00"
+
     # Plain hex path (unchanged behaviour)
     def test_plain_hex_lowercase(self):
         assert sanitize_address("0xABCD") == "0xabcd"
@@ -80,6 +92,12 @@ class TestValidateHexAddress:
 
     def test_sanitize_uppercase_then_validate(self):
         assert validate_hex_address(sanitize_address("MEM:1000")) is True
+
+    def test_accepts_overlay_namespace_double_colon(self):
+        assert validate_hex_address("CODE_BANK1::e461") is True
+
+    def test_sanitize_then_validate_overlay_namespace(self):
+        assert validate_hex_address(sanitize_address("CODE_BANK1::0xe461")) is True
 
     def test_rejects_garbage(self):
         assert validate_hex_address("not_an_address") is False
