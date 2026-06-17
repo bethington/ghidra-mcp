@@ -12,7 +12,7 @@ public final class UnboundedCopyDetector implements VulnDetector {
     private static final int MAX_STEPS = 48;
 
     @Override public String id()           { return "unbounded_copy"; }
-    @Override public String description()  { return "memcpy/strcpy-family call writes into a bounded buffer without a dominating size check or with a non-constant length."; }
+    @Override public String description()  { return "memcpy/strcpy-family call writes into a bounded buffer without an observed size check or with a non-constant length."; }
     @Override public Set<String> sinkClasses() { return Set.of("copy"); }
 
     @Override
@@ -29,6 +29,8 @@ public final class UnboundedCopyDetector implements VulnDetector {
 
             Integer sizeIdx = s.entry().arg("size_arg");
             if (sizeIdx == null) {
+                // No src_arg role in the catalog schema yet; (dst, src) adjacency assumed
+                // for unsized-copy sinks (strcpy/strcat/wcscpy/lstrcpy*).
                 Varnode src = PcodeQuery.argVarnode(s.call(), dstIdx + 1);
                 if (src != null && !PcodeQuery.reachesConstantOnly(src, MAX_STEPS)) {
                     out.add(finding(s, fn, "high",
@@ -43,7 +45,7 @@ public final class UnboundedCopyDetector implements VulnDetector {
             if (size == null) continue;
             if (size.isConstant()) {
                 long k = size.getOffset();
-                if (k <= destSize) continue;
+                if (k >= 0 && k <= destSize) continue; // negative raw offset == huge unsigned → overflow
                 out.add(finding(s, fn, "high",
                     List.of("dest size = " + destSize + " bytes", "length constant = " + k),
                     "Constant-length copy of " + k + " bytes into " + destSize + "-byte buffer via " + s.entry().id()));

@@ -108,6 +108,39 @@ public class UnboundedCopyDetectorTest {
     }
 
     @Test
+    public void memcpy_paramSizeWithCompare_suppressesFinding() {
+        // hasDominatingCompare iterates hf.getPcodeOps(); one INT_LESS that reads
+        // the same `size` varnode → returns true → detector skips.
+        Varnode size = paramVn();
+        Varnode bound = constVn(64);
+        PcodeOpAST cmp = mock(PcodeOpAST.class);
+        when(cmp.getOpcode()).thenReturn(PcodeOp.INT_LESS);
+        when(cmp.getNumInputs()).thenReturn(2);
+        when(cmp.getInput(0)).thenReturn(size);
+        when(cmp.getInput(1)).thenReturn(bound);
+
+        HighFunction hf = mock(HighFunction.class);
+        Function f = mock(Function.class); when(f.getName()).thenReturn("F");
+        when(hf.getFunction()).thenReturn(f);
+        when(hf.getPcodeOps()).thenAnswer(inv -> List.of(cmp).iterator());
+
+        var d = new UnboundedCopyDetector();
+        var s = copySite(2, boundedDst(64), paramVn(), size);
+        assertTrue("compare on size should suppress the finding",
+            d.scan(hf, List.of(s)).isEmpty());
+    }
+
+    @Test
+    public void memcpy_negativeRawConstSize_flagsAsOverflow() {
+        // (size_t)-1 on 64-bit → getOffset() = -1L; must NOT be treated as safe.
+        var d = new UnboundedCopyDetector();
+        var s = copySite(2, boundedDst(64), paramVn(), constVn(-1L));
+        var out = d.scan(hfNoCompares("F"), List.of(s));
+        assertEquals(1, out.size());
+        assertEquals("high", out.get(0).confidence());
+    }
+
+    @Test
     public void memcpy_unknownDestSize_doesNotFlag() {
         var d = new UnboundedCopyDetector();
         Varnode dst = mock(Varnode.class); when(dst.getHigh()).thenReturn(null);
