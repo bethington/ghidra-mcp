@@ -47,6 +47,24 @@ public class NonConstArgDetectorTest {
         return v;
     }
 
+    private Varnode loadFromConstAddr() {
+        // LOAD(const_space_id, const_addr) → non-constant result; def chain has
+        // no input and no CALL → confidence should be "medium".
+        Varnode space = mock(Varnode.class);
+        when(space.isConstant()).thenReturn(true); when(space.getDef()).thenReturn(null);
+        Varnode addr = mock(Varnode.class);
+        when(addr.isConstant()).thenReturn(true); when(addr.getDef()).thenReturn(null);
+        PcodeOp load = mock(PcodeOp.class);
+        when(load.getOpcode()).thenReturn(PcodeOp.LOAD);
+        when(load.getNumInputs()).thenReturn(2);
+        when(load.getInput(0)).thenReturn(space);
+        when(load.getInput(1)).thenReturn(addr);
+        Varnode v = mock(Varnode.class);
+        when(v.isConstant()).thenReturn(false);
+        when(v.getDef()).thenReturn(load);
+        return v;
+    }
+
     private HighFunction hf(String fnName) {
         HighFunction hf = mock(HighFunction.class);
         Function f = mock(Function.class);
@@ -74,6 +92,15 @@ public class NonConstArgDetectorTest {
     }
 
     @Test
+    public void formatString_loadFromGlobal_emitsMediumConfidence() {
+        var d = new FormatStringDetector();
+        var s = site("printf", "format", "fmt_arg", 0, loadFromConstAddr());
+        List<Finding> out = d.scan(hf("F"), List.of(s));
+        assertEquals(1, out.size());
+        assertEquals("medium", out.get(0).confidence());
+    }
+
+    @Test
     public void commandInjection_paramCmd_emitsFinding() {
         var d = new CommandInjectionDetector();
         var s = site("system", "exec", "cmd_arg", 0, paramArg());
@@ -81,6 +108,7 @@ public class NonConstArgDetectorTest {
         assertEquals(1, out.size());
         assertEquals("command_injection", out.get(0).detectorId());
         assertEquals("exec", out.get(0).vulnClass());
+        assertEquals("high", out.get(0).confidence());
     }
 
     @Test
