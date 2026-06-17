@@ -26,8 +26,11 @@ import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.PcodeOpAST;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.symbol.Reference;
+import ghidra.program.model.symbol.ReferenceManager;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -179,6 +182,75 @@ public final class VulnAnalysisService {
                           + "list_vuln_detectors for the active catalog.");
         }
         return Response.ok(out);
+    }
+
+    @McpTool(path = "/enumerate_attack_surface", category = "security",
+             description = "Enumerate the program's attack surface: every function within max_depth "
+                         + "call-graph hops of a catalog SOURCE (network/file/env/cli/ipc), grouped by "
+                         + "source class. Sources are matched by import name, function-name regex, or "
+                         + "SOURCE_* tag — tag custom RTOS receive/ioctl handlers with SOURCE_NETWORK "
+                         + "etc. to include them.")
+    public Response enumerateAttackSurface(
+            @Param(value = "max_depth", defaultValue = "3",
+                   description = "BFS depth in the callers-of graph from each source.") int maxDepth,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit for active program)") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+        FunctionManager fm = program.getFunctionManager();
+        ReferenceManager rm = program.getReferenceManager();
+
+        Map<String, List<Map<String, Object>>> byClass = new LinkedHashMap<>();
+        int sourceCount = 0;
+
+        FunctionIterator it = fm.getFunctions(true);
+        while (it.hasNext()) {
+            Function f = it.next();
+            for (CatalogEntry e : catalog.resolve(f)) {
+                if (!"source".equals(e.kind())) continue;
+                sourceCount++;
+                bfsCallers(program, fm, rm, f, e, maxDepth, byClass);
+            }
+        }
+
+        return Response.ok(JsonHelper.mapOf(
+            "by_source_class", byClass,
+            "source_count",    sourceCount,
+            "max_depth",       maxDepth,
+            "catalog_status",  catalog.status() == null ? "ok" : catalog.status()));
+    }
+
+    private void bfsCallers(Program program, FunctionManager fm, ReferenceManager rm,
+            Function source, CatalogEntry entry, int maxDepth,
+            Map<String, List<Map<String, Object>>> byClass) {
+        Set<Function> seen = new HashSet<>();
+        Deque<Map.Entry<Function, Integer>> q = new ArrayDeque<>();
+        q.add(Map.entry(source, 0));
+        List<Map<String, Object>> bucket =
+            byClass.computeIfAbsent(entry.vulnClass(), k -> new ArrayList<>());
+        while (!q.isEmpty()) {
+            var cur = q.poll();
+            Function fn = cur.getKey();
+            int depth = cur.getValue();
+            if (!seen.add(fn)) continue;
+            if (depth > 0) {
+                Map<String, Object> row = new LinkedHashMap<>(
+                    ServiceUtils.addressToJson(fn.getEntryPoint(), program));
+                row.put("name", fn.getName());
+                row.put("hops", depth);
+                row.put("via_source", entry.id());
+                bucket.add(row);
+            }
+            if (depth >= maxDepth) continue;
+            var refs = rm.getReferencesTo(fn.getEntryPoint());
+            while (refs.hasNext()) {
+                var ref = refs.next();
+                if (!ref.getReferenceType().isCall()) continue;
+                Function caller = fm.getFunctionContaining(ref.getFromAddress());
+                if (caller != null && !seen.contains(caller)) q.add(Map.entry(caller, depth + 1));
+            }
+        }
     }
 
     // ---- core ----
