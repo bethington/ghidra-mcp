@@ -90,4 +90,37 @@ public class IntegerOverflowAllocDetectorTest {
         var s = allocSite(constVn(128));
         assertTrue(new IntegerOverflowAllocDetector().scan(hfNoCompares(), List.of(s)).isEmpty());
     }
+
+    @Test
+    public void mult_paramTimesConst_withCompare_suppressesFinding() {
+        // size = param*16; an INT_LESS reading `size` exists in hf → hasDominatingCompare → skip.
+        PcodeOp mul = op(PcodeOp.INT_MULT, paramVn(), constVn(16));
+        Varnode size = definedBy(mul);
+        Varnode bound = constVn(0x1000);
+        ghidra.program.model.pcode.PcodeOpAST cmp = mock(ghidra.program.model.pcode.PcodeOpAST.class);
+        when(cmp.getOpcode()).thenReturn(PcodeOp.INT_LESS);
+        when(cmp.getNumInputs()).thenReturn(2);
+        when(cmp.getInput(0)).thenReturn(size);
+        when(cmp.getInput(1)).thenReturn(bound);
+
+        HighFunction hf = mock(HighFunction.class);
+        Function f = mock(Function.class); when(f.getName()).thenReturn("F");
+        when(hf.getFunction()).thenReturn(f);
+        when(hf.getPcodeOps()).thenAnswer(inv -> java.util.List.of(cmp).iterator());
+
+        var s = allocSite(size);
+        assertTrue("compare on size should suppress the finding",
+            new IntegerOverflowAllocDetector().scan(hf, List.of(s)).isEmpty());
+    }
+
+    @Test
+    public void mult_throughCopy_intoMalloc_flags() {
+        // size = COPY(INT_MULT(param, 16)) — definingOps must walk past COPY to find MULT.
+        PcodeOp mul = op(PcodeOp.INT_MULT, paramVn(), constVn(16));
+        Varnode prod = definedBy(mul);
+        PcodeOp copy = op(PcodeOp.COPY, prod);
+        var s = allocSite(definedBy(copy));
+        var out = new IntegerOverflowAllocDetector().scan(hfNoCompares(), List.of(s));
+        assertEquals(1, out.size());
+    }
 }
