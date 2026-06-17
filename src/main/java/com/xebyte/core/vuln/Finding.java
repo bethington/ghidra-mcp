@@ -4,7 +4,11 @@ import com.xebyte.core.JsonHelper;
 import java.util.List;
 import java.util.Map;
 
-/** One vulnerability-candidate result. Immutable. */
+/**
+ * One vulnerability-candidate result. Immutable.
+ * {@code confidence} is one of "high" | "medium" | "low" (lowercase).
+ * Detectors must use these exact literals — see VulnDetector implementations.
+ */
 public record Finding(
         String detectorId,
         String vulnClass,
