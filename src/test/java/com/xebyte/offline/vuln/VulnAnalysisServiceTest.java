@@ -79,4 +79,17 @@ public class VulnAnalysisServiceTest {
         assertTrue(ran.contains("format_string"));
         assertTrue(ran.contains("unbounded_copy"));
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void detectVulnPatterns_unknownDetectorId_returnsError() {
+        Program p = mock(Program.class);
+        FunctionManager fm = mock(FunctionManager.class);
+        when(p.getFunctionManager()).thenReturn(fm);
+        Response r = svc(p).detectVulnPatterns("", "fmt_string", "", false, 0);
+        assertFalse("unknown detector id should NOT return Ok", r instanceof Response.Ok);
+        assertTrue("expected Response.Err for unknown detector id", r instanceof Response.Err);
+        String msg = ((Response.Err) r).message();
+        assertTrue(msg.contains("fmt_string"));
+    }
 }

@@ -25,8 +25,10 @@ import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.PcodeOpAST;
 import ghidra.program.model.pcode.Varnode;
+import ghidra.program.model.symbol.Reference;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -89,12 +91,13 @@ public final class VulnAnalysisService {
                          + "unbounded-copy, integer-overflow-into-alloc, command-injection. Returns findings with "
                          + "address, sink, confidence, evidence, and a one-line 'why'. Set write_bookmarks=true to "
                          + "drop SEVR/<class> bookmarks at each finding. Sinks are matched by import name, function-"
-                         + "name regex, or Ghidra function tag (SINK_*); use list_vuln_detectors to see the catalog.")
+                         + "name regex, or Ghidra function tag (SINK_*); use list_vuln_detectors to see the catalog. "
+                         + "Set 'detectors' to a comma-separated list of detector ids to limit the scan.")
     public Response detectVulnPatterns(
             @Param(value = "function", defaultValue = "",
                    description = "Function name or entry address. Empty = scan whole program.") String functionRef,
-            @Param(value = "classes", defaultValue = "",
-                   description = "Comma-separated detector ids (e.g. 'format_string,unbounded_copy'). Empty = all.") String classesCsv,
+            @Param(value = "detectors", defaultValue = "",
+                   description = "Comma-separated detector ids (e.g. 'format_string,unbounded_copy'). Empty = all.") String detectorsCsv,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit for active program)") String programName,
             @Param(value = "write_bookmarks", defaultValue = "false",
@@ -107,7 +110,7 @@ public final class VulnAnalysisService {
         Program program = pe.program();
 
         Set<String> wanted = new LinkedHashSet<>();
-        for (String s : classesCsv.split(",")) {
+        for (String s : detectorsCsv.split(",")) {
             s = s.strip();
             if (!s.isEmpty()) wanted.add(s);
         }
@@ -115,10 +118,21 @@ public final class VulnAnalysisService {
         for (VulnDetector d : detectors) {
             if (wanted.isEmpty() || wanted.contains(d.id())) active.add(d);
         }
+        if (!wanted.isEmpty()) {
+            Set<String> known = new HashSet<>();
+            for (VulnDetector d : detectors) known.add(d.id());
+            List<String> unknown = new ArrayList<>();
+            for (String w : wanted) if (!known.contains(w)) unknown.add(w);
+            if (!unknown.isEmpty()) {
+                return Response.err("Unknown detector id(s): " + String.join(", ", unknown)
+                    + ". Known: " + String.join(", ", known) + ".");
+            }
+        }
 
         List<Finding> findings = new ArrayList<>();
         int scanned = 0;
         int decompFail = 0;
+        int totalSites = 0;
 
         if (!functionRef.isBlank()) {
             Function f = resolveFunction(program, functionRef);
@@ -127,7 +141,9 @@ public final class VulnAnalysisService {
             findings.addAll(r.findings);
             scanned = 1;
             decompFail = r.decompFailed ? 1 : 0;
+            totalSites += r.siteCount;
         } else {
+            // TODO(perf): reuse one DecompInterface across the loop instead of spawning per function via decompileFunctionNoRetry.
             FunctionIterator it = program.getFunctionManager().getFunctions(true);
             while (it.hasNext()) {
                 if (maxFunctions > 0 && scanned >= maxFunctions) break;
@@ -136,6 +152,7 @@ public final class VulnAnalysisService {
                 ScanResult r = scanFunction(program, f, active);
                 findings.addAll(r.findings);
                 if (r.decompFailed) decompFail++;
+                totalSites += r.siteCount;
                 scanned++;
             }
         }
@@ -156,20 +173,24 @@ public final class VulnAnalysisService {
         out.put("decompile_failures", decompFail);
         out.put("detectors_run",      ran);
         out.put("catalog_status",     catalog.status() == null ? "ok" : catalog.status());
+        if (scanned > 0 && totalSites == 0) {
+            out.put("note", "no catalog sinks resolved — consider tagging functions with SINK_* "
+                          + "(e.g. SINK_COPY_SIZED, SINK_FORMAT, SINK_EXEC, SINK_ALLOC) or check "
+                          + "list_vuln_detectors for the active catalog.");
+        }
         return Response.ok(out);
     }
 
     // ---- core ----
 
-    private record ScanResult(List<Finding> findings, boolean decompFailed) {}
+    private record ScanResult(List<Finding> findings, boolean decompFailed, int siteCount) {}
 
     private ScanResult scanFunction(Program program, Function f, List<VulnDetector> active) {
         DecompileResults dr = functionService.decompileFunctionNoRetry(f, program);
         if (dr == null || !dr.decompileCompleted() || dr.getHighFunction() == null) {
-            return new ScanResult(List.of(), true);
+            return new ScanResult(List.of(), true, 0);
         }
         HighFunction hf = dr.getHighFunction();
-        FunctionManager fm = program.getFunctionManager();
 
         List<SinkCallSite> sites = new ArrayList<>();
         Iterator<PcodeOpAST> ops = hf.getPcodeOps();
@@ -177,7 +198,7 @@ public final class VulnAnalysisService {
             PcodeOpAST op = ops.next();
             int oc = op.getOpcode();
             if (oc != PcodeOp.CALL && oc != PcodeOp.CALLIND) continue;
-            Function callee = resolveCallee(op, fm);
+            Function callee = resolveCallee(op, program);
             if (callee == null) continue;
             for (CatalogEntry e : catalog.resolve(callee)) {
                 if (!"sink".equals(e.kind())) continue;
@@ -185,7 +206,7 @@ public final class VulnAnalysisService {
                 sites.add(new SinkCallSite(op, e, callee, addr));
             }
         }
-        if (sites.isEmpty()) return new ScanResult(List.of(), false);
+        if (sites.isEmpty()) return new ScanResult(List.of(), false, 0);
 
         List<Finding> all = new ArrayList<>();
         for (VulnDetector d : active) {
@@ -195,18 +216,29 @@ public final class VulnAnalysisService {
             }
             if (!mine.isEmpty()) all.addAll(d.scan(hf, mine));
         }
-        return new ScanResult(all, false);
+        return new ScanResult(all, false, sites.size());
     }
 
-    private Function resolveCallee(PcodeOp op, FunctionManager fm) {
+    private Function resolveCallee(PcodeOp op, Program program) {
         if (op.getNumInputs() == 0) return null;
+        FunctionManager fm = program.getFunctionManager();
         Varnode tgt = op.getInput(0);
-        if (tgt == null || !tgt.isAddress()) return null;
-        Function f = fm.getFunctionAt(tgt.getAddress());
-        if (f != null && f.isThunk()) {
-            Function real = f.getThunkedFunction(true);
-            if (real != null) return real;
+        Function f = null;
+        if (tgt != null && tgt.isAddress()) {
+            f = fm.getFunctionAt(tgt.getAddress());
         }
+        // CALLIND or unresolved direct: use the call-site reference (Ghidra
+        // populates COMPUTED_CALL refs for IAT/PLT slots).
+        if (f == null && op.getSeqnum() != null) {
+            Address site = op.getSeqnum().getTarget();
+            for (Reference ref : program.getReferenceManager().getReferencesFrom(site)) {
+                if (ref.getReferenceType().isCall()) {
+                    f = fm.getFunctionAt(ref.getToAddress());
+                    if (f != null) break;
+                }
+            }
+        }
+        // SinkCatalog.resolve already follows thunks; no need to unwrap here (M3).
         return f;
     }
 
@@ -216,6 +248,7 @@ public final class VulnAnalysisService {
      * {@code ServiceUtils.parseAddress}, which on this branch lowercases overlay
      * space names.
      */
+    // TODO(overlay-address-spaces): collapse into ServiceUtils.resolveFunction once that branch merges; the local AddressFactory path is only needed while parseAddress lowercases overlay names on main.
     private Function resolveFunction(Program program, String ref) {
         String r = ref.strip();
         try {
@@ -227,10 +260,13 @@ public final class VulnAnalysisService {
         } catch (Exception ignored) {
             // not an address — fall through to name match
         }
-        FunctionIterator it = program.getFunctionManager().getFunctions(true);
-        while (it.hasNext()) {
-            Function f = it.next();
-            if (f.getName().equalsIgnoreCase(r)) return f;
+        // Name fallback via SymbolTable (indexed) instead of O(n) FunctionIterator.
+        for (ghidra.program.model.symbol.Symbol s :
+                program.getSymbolTable().getSymbols(ref.strip())) {
+            if (s.getSymbolType() == ghidra.program.model.symbol.SymbolType.FUNCTION) {
+                Function f = program.getFunctionManager().getFunctionAt(s.getAddress());
+                if (f != null) return f;
+            }
         }
         return null;
     }
