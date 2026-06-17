@@ -1,0 +1,31 @@
+{
+  "sinks": [
+    { "id": "memcpy",  "class": "copy",   "size_arg": 2, "dst_arg": 0,
+      "match": { "import": ["memcpy","memmove","wmemcpy"],
+                 "regex":  ["(?i).*memcpy.*","(?i).*memmove.*"],
+                 "tag":    ["SINK_COPY_SIZED"] } },
+    { "id": "strcpy",  "class": "copy",   "size_arg": null, "dst_arg": 0,
+      "match": { "import": ["strcpy","strcat","wcscpy","lstrcpyA","lstrcpyW"],
+                 "regex":  ["(?i).*strcpy.*","(?i).*strcat.*"],
+                 "tag":    ["SINK_COPY_UNSIZED"] } },
+    { "id": "printf",  "class": "format", "fmt_arg": 0,
+      "match": { "import": ["printf","fprintf","sprintf","snprintf","vsnprintf","syslog"],
+                 "regex":  ["(?i).*printf.*"], "tag": ["SINK_FORMAT"] } },
+    { "id": "system",  "class": "exec",   "cmd_arg": 0,
+      "match": { "import": ["system","popen","execl","execvp","CreateProcessA","CreateProcessW","ShellExecuteA"],
+                 "regex":  ["(?i)^system$"], "tag": ["SINK_EXEC"] } },
+    { "id": "malloc",  "class": "alloc",  "size_arg": 0,
+      "match": { "import": ["malloc","calloc","realloc","HeapAlloc","operator new[]"],
+                 "regex":  ["(?i).*alloc.*"], "tag": ["SINK_ALLOC"] } }
+  ],
+  "sources": [
+    { "id": "recv",   "class": "network", "out_arg": 1,
+      "match": { "import": ["recv","recvfrom","read","WSARecv"], "tag": ["SOURCE_NETWORK"] } },
+    { "id": "fread",  "class": "file",    "out_arg": 0,
+      "match": { "import": ["fread","ReadFile","fgets"], "tag": ["SOURCE_FILE"] } },
+    { "id": "getenv", "class": "env",     "return": true,
+      "match": { "import": ["getenv","GetEnvironmentVariableA"], "tag": ["SOURCE_ENV"] } },
+    { "id": "argv",   "class": "cli",     "param": true,
+      "match": { "regex": ["^main$","^wmain$","^WinMain$"], "tag": ["SOURCE_CLI"] } }
+  ]
+}
