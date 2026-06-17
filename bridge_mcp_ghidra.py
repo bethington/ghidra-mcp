@@ -238,12 +238,19 @@ class GhidraValidationError(Exception):
 
 # Input validation patterns
 HEX_ADDRESS_PATTERN = re.compile(r"^0x[0-9a-fA-F]+$")
-SEGMENT_ADDRESS_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*:[0-9a-fA-F]+$")
-# Handles space:0xHEX form (e.g., mem:0x1000, code:0xFF00).
+# Space/segment-qualified addresses accept ONE or TWO colons between the space
+# name and the offset. Ghidra's overlay symbols render as "CODE_BANK1::e461"
+# (namespace "::" separator), which is exactly what search_functions returns and
+# what AddressFactory accepts — so the bridge must not mangle it (issue: the old
+# single-colon-only pattern fell through to the plain-hex branch and produced
+# "0xcode_bank1::e461", which Ghidra then rejected).
+SEGMENT_ADDRESS_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*:{1,2}[0-9a-fA-F]+$")
+# Handles space:0xHEX form (e.g., mem:0x1000, code:0xFF00, CODE_BANK1::0xe461).
 # Must be checked BEFORE SEGMENT_ADDRESS_PATTERN because the 'x' in '0x' is not
-# in [0-9a-fA-F], so the existing pattern rejects this form entirely.
+# in [0-9a-fA-F], so the existing pattern rejects this form entirely. Group 1
+# captures the space name *with* its colon(s) so the colon count is preserved.
 SEGMENT_ADDR_WITH_0X_PATTERN = re.compile(
-    r"^([a-zA-Z_][a-zA-Z0-9_]*):0[xX]([0-9a-fA-F]+)$"
+    r"^([a-zA-Z_][a-zA-Z0-9_]*:{1,2})0[xX]([0-9a-fA-F]+)$"
 )
 FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -732,21 +739,23 @@ def sanitize_address(address: str) -> str:
     """Normalize address format for Ghidra AddressFactory.
 
     Handles:
-    - space:0xHEX  -> space:HEX   (strip 0x; AddressFactory rejects 0x after colon)
-    - SPACE:HEX    -> SPACE:HEX   (preserve case — AddressFactory is case-sensitive; see #184)
-    - 0xHEX        -> 0xhex       (lowercase)
-    - HEX          -> 0xHEX       (add 0x prefix)
+    - space:0xHEX     -> space:HEX      (strip 0x; AddressFactory rejects 0x after colon)
+    - SPACE:HEX       -> SPACE:HEX      (preserve case — AddressFactory is case-sensitive; see #184)
+    - SPACE::HEX      -> SPACE::HEX     (overlay namespace "::" form, e.g. CODE_BANK1::e461)
+    - 0xHEX           -> 0xhex          (lowercase)
+    - HEX             -> 0xHEX          (add 0x prefix)
     """
     if not address:
         return address
     address = address.strip()
 
-    # Step 1: handle space:0xHEX form (checked first — 'x' not in [0-9a-fA-F])
+    # Step 1: handle space:0xHEX form (checked first — 'x' not in [0-9a-fA-F]).
+    # Group 1 already includes the colon(s), so the one-/two-colon form is preserved.
     m = SEGMENT_ADDR_WITH_0X_PATTERN.match(address)
     if m:
-        return f"{m.group(1)}:{m.group(2)}"  # case preserved (#184)
+        return f"{m.group(1)}{m.group(2)}"  # case + colon count preserved (#184)
 
-    # Step 2: valid space:HEX — pass through unchanged (#184)
+    # Step 2: valid space:HEX / space::HEX — pass through unchanged (#184)
     if SEGMENT_ADDRESS_PATTERN.match(address):
         return address
 
