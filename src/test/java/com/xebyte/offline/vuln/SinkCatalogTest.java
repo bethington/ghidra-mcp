@@ -93,4 +93,20 @@ public class SinkCatalogTest {
         assertNotNull(cat.status());
         assertTrue(cat.status().contains("override"));
     }
+
+    @Test
+    public void resolve_overrideRegex_unanchoredSubstringMatchesViaFind() throws Exception {
+        // .find() (not .matches()) so bare substrings in user overrides work.
+        java.io.File tmp = java.io.File.createTempFile("vuln_cat_re", ".json");
+        tmp.deleteOnExit();
+        java.nio.file.Files.writeString(tmp.toPath(),
+            "{\"sinks\":[{\"id\":\"custom_copy\",\"class\":\"copy\",\"dst_arg\":0," +
+            "\"match\":{\"regex\":[\"FastCopy\"]}}]}");
+        SinkCatalog cat = SinkCatalog.load(tmp.getAbsolutePath());
+        ghidra.program.model.listing.Function f = mock(ghidra.program.model.listing.Function.class);
+        when(f.isExternal()).thenReturn(false);
+        when(f.getName()).thenReturn("Rtos_FastCopy_Impl");
+        when(f.getTags()).thenReturn(java.util.Set.of());
+        assertTrue(cat.resolve(f).stream().anyMatch(e -> e.id().equals("custom_copy")));
+    }
 }

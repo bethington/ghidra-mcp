@@ -102,7 +102,7 @@ public final class SinkCatalog {
         if (regexes == null) return false;
         for (String r : regexes) {
             Pattern p = regexCache.computeIfAbsent(r, Pattern::compile);
-            if (p.matcher(name).matches()) return true;
+            if (p.matcher(name).find()) return true;
         }
         return false;
     }

@@ -25,7 +25,7 @@
       "match": { "import": ["fread","ReadFile","fgets"], "tag": ["SOURCE_FILE"] } },
     { "id": "getenv", "class": "env",     "return": true,
       "match": { "import": ["getenv","GetEnvironmentVariableA"], "tag": ["SOURCE_ENV"] } },
-    { "id": "argv",   "class": "cli",     "param": true,
+    { "id": "argv",   "class": "cli",
       "match": { "regex": ["^main$","^wmain$","^WinMain$"], "tag": ["SOURCE_CLI"] } }
   ]
 }
