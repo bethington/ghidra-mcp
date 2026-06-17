@@ -31,6 +31,7 @@ import ghidra.program.model.symbol.ReferenceManager;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -192,32 +193,41 @@ public final class VulnAnalysisService {
                          + "etc. to include them.")
     public Response enumerateAttackSurface(
             @Param(value = "max_depth", defaultValue = "3",
-                   description = "BFS depth in the callers-of graph from each source.") int maxDepth,
+                   description = "BFS depth in the callers-of graph from each source (clamped to [0,8]).") int maxDepth,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit for active program)") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
+        int depth = Math.max(0, Math.min(maxDepth, 8));
         FunctionManager fm = program.getFunctionManager();
         ReferenceManager rm = program.getReferenceManager();
 
         Map<String, List<Map<String, Object>>> byClass = new LinkedHashMap<>();
+        Map<Function, Set<String>> seenSourceClasses = new HashMap<>();
         int sourceCount = 0;
 
+        // Unlike detect_vuln_patterns, do NOT skip externals/thunks here: import
+        // thunks ARE where caller refs land, and catalog.resolve() follows the
+        // thunk to match the source entry.
         FunctionIterator it = fm.getFunctions(true);
         while (it.hasNext()) {
             Function f = it.next();
+            boolean isSourceFn = false;
             for (CatalogEntry e : catalog.resolve(f)) {
                 if (!"source".equals(e.kind())) continue;
-                sourceCount++;
-                bfsCallers(program, fm, rm, f, e, maxDepth, byClass);
+                isSourceFn = true;
+                Set<String> done = seenSourceClasses.computeIfAbsent(f, k -> new HashSet<>());
+                if (!done.add(e.vulnClass())) continue; // already BFS'd this (f, class) pair
+                bfsCallers(program, fm, rm, f, e, depth, byClass);
             }
+            if (isSourceFn) sourceCount++;
         }
 
         return Response.ok(JsonHelper.mapOf(
             "by_source_class", byClass,
             "source_count",    sourceCount,
-            "max_depth",       maxDepth,
+            "max_depth",       depth,
             "catalog_status",  catalog.status() == null ? "ok" : catalog.status()));
     }
 

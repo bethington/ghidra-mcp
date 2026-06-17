@@ -166,4 +166,104 @@ public class VulnAnalysisServiceTest {
         assertTrue(netFns.stream().anyMatch(m -> "HandlePacket".equals(((Map<?,?>)m).get("name"))));
         assertEquals(1, ((Number) body.get("source_count")).intValue());
     }
+
+    private ghidra.program.model.symbol.ReferenceIterator refIterOf(
+            ghidra.program.model.symbol.Reference... refs) {
+        ghidra.program.model.symbol.ReferenceIterator it =
+            mock(ghidra.program.model.symbol.ReferenceIterator.class);
+        Boolean[] hasNext = new Boolean[refs.length + 1];
+        for (int i = 0; i < refs.length; i++) hasNext[i] = true;
+        hasNext[refs.length] = false;
+        when(it.hasNext()).thenReturn(hasNext[0], java.util.Arrays.copyOfRange(hasNext, 1, hasNext.length));
+        if (refs.length > 0) {
+            when(it.next()).thenReturn(refs[0],
+                refs.length > 1 ? java.util.Arrays.copyOfRange(refs, 1, refs.length)
+                                : new ghidra.program.model.symbol.Reference[0]);
+        }
+        return it;
+    }
+
+    private ghidra.program.model.symbol.Reference callRef(
+            ghidra.program.model.address.Address from) {
+        ghidra.program.model.symbol.Reference ref = mock(ghidra.program.model.symbol.Reference.class);
+        ghidra.program.model.symbol.RefType rt = mock(ghidra.program.model.symbol.RefType.class);
+        when(rt.isCall()).thenReturn(true);
+        when(ref.getReferenceType()).thenReturn(rt);
+        when(ref.getFromAddress()).thenReturn(from);
+        return ref;
+    }
+
+    private Function fn(String name, ghidra.program.model.address.Address entry,
+                        ghidra.program.model.address.AddressSpace space) {
+        Function f = mock(Function.class);
+        when(f.getName()).thenReturn(name);
+        when(f.isThunk()).thenReturn(false);
+        when(f.getTags()).thenReturn(java.util.Set.of());
+        when(f.getEntryPoint()).thenReturn(entry);
+        when(entry.getAddressSpace()).thenReturn(space);
+        when(entry.toString(false)).thenReturn(name + "_addr");
+        return f;
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void enumerateAttackSurface_twoHopAndCycle() {
+        // recv (source) ← A ← B; B also calls recv (cycle back). max_depth=2.
+        Program p = mock(Program.class);
+        FunctionManager fm = mock(FunctionManager.class);
+        when(p.getFunctionManager()).thenReturn(fm);
+        ghidra.program.model.symbol.ReferenceManager rm =
+            mock(ghidra.program.model.symbol.ReferenceManager.class);
+        when(p.getReferenceManager()).thenReturn(rm);
+        ghidra.program.model.address.AddressFactory af =
+            mock(ghidra.program.model.address.AddressFactory.class);
+        when(af.getAddressSpaces()).thenReturn(new ghidra.program.model.address.AddressSpace[0]);
+        when(p.getAddressFactory()).thenReturn(af);
+        ghidra.program.model.address.AddressSpace ram =
+            mock(ghidra.program.model.address.AddressSpace.class);
+        when(ram.isOverlaySpace()).thenReturn(false);
+
+        ghidra.program.model.address.Address recvE = mock(ghidra.program.model.address.Address.class);
+        ghidra.program.model.address.Address aE = mock(ghidra.program.model.address.Address.class);
+        ghidra.program.model.address.Address bE = mock(ghidra.program.model.address.Address.class);
+        Function recv = fn("MyRecv", recvE, ram);
+        Function A = fn("A", aE, ram);
+        Function B = fn("B", bE, ram);
+        // recv is tagged SOURCE_NETWORK
+        ghidra.program.model.listing.FunctionTag tag = mock(ghidra.program.model.listing.FunctionTag.class);
+        when(tag.getName()).thenReturn("SOURCE_NETWORK");
+        when(recv.getTags()).thenReturn(java.util.Set.of(tag));
+
+        FunctionIterator fit = mock(FunctionIterator.class);
+        when(fit.hasNext()).thenReturn(true, false);
+        when(fit.next()).thenReturn(recv);
+        when(fm.getFunctions(true)).thenReturn(fit);
+
+        // recv has callers A and B (B = the cycle edge)
+        ghidra.program.model.address.Address fromA = mock(ghidra.program.model.address.Address.class);
+        ghidra.program.model.address.Address fromB1 = mock(ghidra.program.model.address.Address.class);
+        when(fm.getFunctionContaining(fromA)).thenReturn(A);
+        when(fm.getFunctionContaining(fromB1)).thenReturn(B);
+        when(rm.getReferencesTo(recvE)).thenAnswer(inv -> refIterOf(callRef(fromA), callRef(fromB1)));
+        // A has caller B (depth-2)
+        ghidra.program.model.address.Address fromB2 = mock(ghidra.program.model.address.Address.class);
+        when(fm.getFunctionContaining(fromB2)).thenReturn(B);
+        when(rm.getReferencesTo(aE)).thenAnswer(inv -> refIterOf(callRef(fromB2)));
+        // B has caller recv (cycle) — must NOT cause infinite loop or duplicate B
+        ghidra.program.model.address.Address fromRecv = mock(ghidra.program.model.address.Address.class);
+        when(fm.getFunctionContaining(fromRecv)).thenReturn(recv);
+        when(rm.getReferencesTo(bE)).thenAnswer(inv -> refIterOf(callRef(fromRecv)));
+
+        Response r = svc(p).enumerateAttackSurface(2, "");
+        Map<String,Object> body = (Map<String,Object>) ((Response.Ok) r).data();
+        List<Map<String,Object>> net =
+            (List<Map<String,Object>>) ((Map<?,?>) body.get("by_source_class")).get("network");
+        // A at hops=1, B at hops=1 (direct caller via cycle edge), each exactly once
+        assertEquals(2, net.size());
+        Map<String,Integer> hops = new java.util.HashMap<>();
+        for (Map<String,Object> row : net) hops.put((String)row.get("name"), (Integer)row.get("hops"));
+        assertEquals(Integer.valueOf(1), hops.get("A"));
+        assertEquals(Integer.valueOf(1), hops.get("B")); // shortest path wins
+        assertEquals(2, ((Number) body.get("max_depth")).intValue()); // not clamped (≤8)
+    }
 }
