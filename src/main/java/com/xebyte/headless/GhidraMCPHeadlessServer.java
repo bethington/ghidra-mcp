@@ -394,13 +394,16 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         // SHARED ENDPOINTS — Annotation-driven registration via AnnotationScanner
         // ==========================================================================
 
+        com.xebyte.core.vuln.VulnAnalysisService vulnAnalysisService =
+            new com.xebyte.core.vuln.VulnAnalysisService(endpointHandler.getProgramProvider(),
+                threadingStrategy, endpointHandler.getFunctionService());
         AnnotationScanner scanner = new AnnotationScanner(endpointHandler.getProgramProvider(),
             endpointHandler.getListingService(), endpointHandler.getFunctionService(),
             endpointHandler.getCommentService(), endpointHandler.getSymbolLabelService(),
             endpointHandler.getXrefCallGraphService(), endpointHandler.getDataTypeService(),
             endpointHandler.getAnalysisService(), endpointHandler.getDocumentationHashService(),
             endpointHandler.getMalwareSecurityService(), endpointHandler.getProgramScriptService(),
-            endpointHandler.getEmulationService(), managementService);
+            endpointHandler.getEmulationService(), managementService, vulnAnalysisService);
 
         for (EndpointDef ep : scanner.getEndpoints()) {
             safeContext(ep.path(), exchange -> {

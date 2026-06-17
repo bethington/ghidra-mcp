@@ -1,7 +1,7 @@
 {
   "version": "5.14.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 251,
+  "total_endpoints": 254,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -921,6 +921,19 @@
       "description": "Detect malware behaviors"
     },
     {
+      "path": "/detect_vuln_patterns",
+      "method": "GET",
+      "category": "security",
+      "params": [
+        "function",
+        "detectors",
+        "program",
+        "write_bookmarks",
+        "max_functions"
+      ],
+      "description": "Scan for intra-function vulnerability patterns (format-string, unbounded-copy, integer-overflow-into-alloc, command-injection) using PCode; optionally writes SEVR/<class> bookmarks"
+    },
+    {
       "path": "/diff_functions",
       "method": "GET",
       "category": "utility",
@@ -998,6 +1011,16 @@
         "program"
       ],
       "description": "Brute-force API hash resolution. Emulates a hash function with each candidate API name and returns the one that produces the target hash. Ideal for resolving ROR13, CRC32, djb2, FNV, and custom hash algorithms."
+    },
+    {
+      "path": "/enumerate_attack_surface",
+      "method": "GET",
+      "category": "security",
+      "params": [
+        "max_depth",
+        "program"
+      ],
+      "description": "Enumerate functions reachable (callers-of, BFS) from catalog SOURCE functions, grouped by source class (network/file/env/cli)"
     },
     {
       "path": "/exit_ghidra",
@@ -1799,6 +1822,15 @@
         "program"
       ],
       "description": "List defined strings"
+    },
+    {
+      "path": "/list_vuln_detectors",
+      "method": "GET",
+      "category": "security",
+      "params": [
+        "program"
+      ],
+      "description": "List registered vulnerability-pattern detectors and the active source/sink catalog"
     },
     {
       "path": "/load_program",

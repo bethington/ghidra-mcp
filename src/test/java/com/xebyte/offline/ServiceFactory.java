@@ -15,6 +15,7 @@ import com.xebyte.core.ProgramScriptService;
 import com.xebyte.core.SymbolLabelService;
 import com.xebyte.core.ThreadingStrategy;
 import com.xebyte.core.XrefCallGraphService;
+import com.xebyte.core.vuln.VulnAnalysisService;
 import com.xebyte.headless.GhidraServerManager;
 import com.xebyte.headless.HeadlessManagementService;
 import com.xebyte.headless.HeadlessProgramProvider;
@@ -58,6 +59,8 @@ public final class ServiceFactory {
         // method signatures, so a null tool is safe for offline scanning.
         DebuggerService debuggerService = new DebuggerService(provider, ts, null);
 
+        VulnAnalysisService vulnAnalysisService = new VulnAnalysisService(provider, ts, functionService);
+
         return new Object[] {
             listingService,
             functionService,
@@ -72,6 +75,7 @@ public final class ServiceFactory {
             emulationService,
             headlessManagementService,
             debuggerService,
+            vulnAnalysisService,
         };
     }
 
