@@ -109,4 +109,54 @@ public class SinkCatalogTest {
         when(f.getTags()).thenReturn(java.util.Set.of());
         assertTrue(cat.resolve(f).stream().anyMatch(e -> e.id().equals("custom_copy")));
     }
+
+    @Test
+    public void resolve_internalExactName_importMatchesWithoutExternalFlag() {
+        // I3: a non-external function literally named "recv" must import-match.
+        SinkCatalog cat = SinkCatalog.load(null);
+        Function f = mock(Function.class);
+        when(f.isThunk()).thenReturn(false);
+        when(f.isExternal()).thenReturn(false);
+        when(f.getName()).thenReturn("recv");
+        when(f.getTags()).thenReturn(java.util.Set.of());
+        assertTrue(cat.resolve(f).stream().anyMatch(e -> e.id().equals("recv")));
+    }
+
+    @Test
+    public void resolve_thunk_followsToReal() {
+        SinkCatalog cat = SinkCatalog.load(null);
+        Function real = mock(Function.class);
+        when(real.isThunk()).thenReturn(false);
+        when(real.getName()).thenReturn("system");
+        when(real.getTags()).thenReturn(java.util.Set.of());
+        Function thunk = mock(Function.class);
+        when(thunk.isThunk()).thenReturn(true);
+        when(thunk.getThunkedFunction(true)).thenReturn(real);
+        assertTrue(cat.resolve(thunk).stream().anyMatch(e -> e.id().equals("system")));
+    }
+
+    @Test
+    public void load_overrideWithBadRegex_skipsAndReportsInStatus() throws Exception {
+        // I2: invalid regex surfaces at load() time via status(), not at resolve().
+        java.io.File tmp = java.io.File.createTempFile("vuln_cat_badre", ".json");
+        tmp.deleteOnExit();
+        java.nio.file.Files.writeString(tmp.toPath(),
+            "{\"sinks\":[{\"id\":\"bad\",\"class\":\"copy\",\"match\":{\"regex\":[\"[\"]}}]}");
+        SinkCatalog cat = SinkCatalog.load(tmp.getAbsolutePath());
+        assertNotNull(cat.status());
+        assertTrue(cat.status().toLowerCase().contains("regex"));
+        // resolve must not throw for any name now
+        Function f = mock(Function.class);
+        when(f.isThunk()).thenReturn(false);
+        when(f.getName()).thenReturn("anything");
+        when(f.getTags()).thenReturn(java.util.Set.of());
+        cat.resolve(f); // no exception
+    }
+
+    @Test
+    public void all_isUnmodifiable() {
+        SinkCatalog cat = SinkCatalog.load(null);
+        try { cat.all().clear(); fail("all() must be unmodifiable"); }
+        catch (UnsupportedOperationException expected) {}
+    }
 }

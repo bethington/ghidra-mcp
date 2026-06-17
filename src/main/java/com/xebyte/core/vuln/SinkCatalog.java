@@ -23,11 +23,28 @@ public final class SinkCatalog {
         {"fmt_arg", "size_arg", "dst_arg", "cmd_arg", "out_arg"};
 
     private final Map<String, CatalogEntry> byId = new LinkedHashMap<>();
-    private final Map<String, Pattern> regexCache = new HashMap<>();
+    private final Map<String, Pattern> regexCache;
     private final String status;
 
     private SinkCatalog(List<CatalogEntry> entries, String status) {
         for (CatalogEntry e : entries) byId.put(e.id(), e);
+        Map<String, Pattern> rc = new HashMap<>();
+        StringBuilder badRe = null;
+        for (CatalogEntry e : byId.values()) {
+            for (String r : e.matchRegex()) {
+                if (rc.containsKey(r)) continue;
+                try { rc.put(r, Pattern.compile(r)); }
+                catch (java.util.regex.PatternSyntaxException ex) {
+                    if (badRe == null) badRe = new StringBuilder();
+                    if (badRe.length() > 0) badRe.append("; ");
+                    badRe.append("regex '" + r + "': " + ex.getDescription());
+                }
+            }
+        }
+        this.regexCache = Map.copyOf(rc);
+        if (badRe != null) {
+            status = (status == null ? "" : status + "; ") + "invalid regex skipped — " + badRe;
+        }
         this.status = status;
     }
 
@@ -60,28 +77,32 @@ public final class SinkCatalog {
         String env = System.getenv("GHIDRA_MCP_VULN_CATALOG");
         if (env != null && !env.isBlank()) return env;
         String home = System.getProperty("user.home");
+        if (home == null) return null;
         Path p = Path.of(home, ".ghidra-mcp", "vuln_catalog.json");
         return Files.isReadable(p) ? p.toString() : null;
     }
 
     public String status()                  { return status; }
     public CatalogEntry byId(String id)      { return byId.get(id); }
-    public Collection<CatalogEntry> all()    { return byId.values(); }
+    public Collection<CatalogEntry> all()    { return java.util.Collections.unmodifiableCollection(byId.values()); }
     public List<CatalogEntry> sinks()        { return filterKind("sink"); }
     public List<CatalogEntry> sources()      { return filterKind("source"); }
 
     public List<CatalogEntry> resolve(Function f) {
         if (f == null) return List.of();
+        if (f.isThunk()) {
+            Function real = f.getThunkedFunction(true);
+            if (real != null) f = real;
+        }
         String name = f.getName();
         Set<String> tags = new HashSet<>();
         for (FunctionTag t : f.getTags()) tags.add(t.getName());
-        boolean external = f.isExternal();
 
         List<CatalogEntry> hits = new ArrayList<>();
         for (CatalogEntry e : byId.values()) {
-            if (external && contains(e.matchImport(), name))            { hits.add(e); continue; }
-            if (matchesAnyRegex(e.matchRegex(), name))                   { hits.add(e); continue; }
-            if (!Collections.disjoint(tags, e.matchTag()))               { hits.add(e); continue; }
+            if (contains(e.matchImport(), name))            { hits.add(e); continue; }
+            if (matchesAnyRegex(e.matchRegex(), name))       { hits.add(e); continue; }
+            if (!Collections.disjoint(tags, e.matchTag()))   { hits.add(e); continue; }
         }
         return hits;
     }
@@ -101,8 +122,8 @@ public final class SinkCatalog {
     private boolean matchesAnyRegex(List<String> regexes, String name) {
         if (regexes == null) return false;
         for (String r : regexes) {
-            Pattern p = regexCache.computeIfAbsent(r, Pattern::compile);
-            if (p.matcher(name).find()) return true;
+            Pattern p = regexCache.get(r);
+            if (p != null && p.matcher(name).find()) return true;
         }
         return false;
     }
@@ -121,8 +142,12 @@ public final class SinkCatalog {
     private static List<CatalogEntry> parseList(List<Map<String, Object>> rows, String kind) {
         List<CatalogEntry> out = new ArrayList<>();
         for (Map<String, Object> row : rows) {
-            String id = String.valueOf(row.get("id"));
-            String cls = String.valueOf(row.get("class"));
+            Object idObj = row.get("id");
+            if (idObj == null) continue;
+            String id = String.valueOf(idObj);
+            Object clsObj = row.get("class");
+            if (clsObj == null) continue;
+            String cls = String.valueOf(clsObj);
             Map<String, Integer> roles = new LinkedHashMap<>();
             for (String k : ARG_ROLE_KEYS) {
                 Object v = row.get(k);
@@ -140,6 +165,7 @@ public final class SinkCatalog {
 
     @SuppressWarnings("unchecked")
     private static List<String> strList(Object o) {
+        if (o instanceof String s) return List.of(s);
         if (o instanceof List<?> l) {
             List<String> out = new ArrayList<>(l.size());
             for (Object x : l) out.add(String.valueOf(x));
