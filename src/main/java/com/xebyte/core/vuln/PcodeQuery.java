@@ -3,6 +3,7 @@ package com.xebyte.core.vuln;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.Pointer;
 import ghidra.program.model.pcode.HighFunction;
+import ghidra.program.model.pcode.HighSymbol;
 import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
@@ -39,7 +40,7 @@ public final class PcodeQuery {
         work.push(v);
         int steps = 0;
         while (!work.isEmpty()) {
-            if (steps++ > maxSteps) return false;
+            if (steps++ >= maxSteps) return false;
             Varnode cur = work.pop();
             if (!seen.add(cur)) continue;
             if (cur.isConstant()) continue;
@@ -52,9 +53,17 @@ public final class PcodeQuery {
                 case PcodeOp.INT_SEXT:
                     work.push(def.getInput(0));
                     break;
+                case PcodeOp.INDIRECT:
+                    // INDIRECT(prev, iop) — call/store may-alias barrier. Transparent
+                    // through input(0) per Ghidra's own ShowConstantUse semantics;
+                    // input(1) is an iop-ref constant and must NOT be walked.
+                    work.push(def.getInput(0));
+                    break;
                 case PcodeOp.PTRSUB:
                 case PcodeOp.PTRADD:
                 case PcodeOp.INT_ADD:
+                case PcodeOp.INT_SUB:
+                case PcodeOp.INT_MULT:
                     for (int i = 0; i < def.getNumInputs(); i++) work.push(def.getInput(i));
                     break;
                 default:
@@ -89,9 +98,15 @@ public final class PcodeQuery {
                 continue;
             }
             ops.add(def);
-            for (int i = 0; i < def.getNumInputs(); i++) {
-                Varnode in = def.getInput(i);
-                if (in != null) work.push(in);
+            if (oc == PcodeOp.INDIRECT) {
+                // Only the prior-value input is meaningful for backward provenance.
+                Varnode prev = def.getInput(0);
+                if (prev != null) work.push(prev);
+            } else {
+                for (int i = 0; i < def.getNumInputs(); i++) {
+                    Varnode in = def.getInput(i);
+                    if (in != null) work.push(in);
+                }
             }
         }
         return ops;
@@ -121,6 +136,11 @@ public final class PcodeQuery {
             int oc = def.getOpcode();
             if (oc == PcodeOp.CALL || oc == PcodeOp.CALLIND || oc == PcodeOp.CALLOTHER
                     || oc == PcodeOp.MULTIEQUAL) continue;
+            if (oc == PcodeOp.INDIRECT) {
+                Varnode prev = def.getInput(0);
+                if (prev != null) work.push(prev);
+                continue;
+            }
             for (int i = 0; i < def.getNumInputs(); i++) {
                 Varnode in = def.getInput(i);
                 if (in != null) work.push(in);
@@ -169,10 +189,28 @@ public final class PcodeQuery {
         if (dst == null) return -1;
         HighVariable hv = dst.getHigh();
         if (hv == null) return -1;
+        // Prefer the SYMBOL's declared type — for `char buf[64]` the use-site
+        // HighVariable type is `char*`, but HighSymbol.getDataType() is `char[64]`.
+        HighSymbol sym = hv.getSymbol();
+        DataType declared = (sym != null) ? sym.getDataType() : null;
+        int len = sizeOf(declared);
+        if (len > 0) return len;
+        // Fallback: HighVariable's use-site type. Unwrap one Pointer; if the
+        // pointed-to type is a primitive (≤ pointer width), we don't know the
+        // buffer extent — return unknown rather than the element size.
         DataType dt = hv.getDataType();
+        if (dt instanceof Pointer p && p.getDataType() != null) {
+            int inner = sizeOf(p.getDataType());
+            int ptrSize = (hf != null) ? hf.getFunction().getProgram()
+                    .getDefaultPointerSize() : 8;
+            return inner > ptrSize ? inner : -1;
+        }
+        return sizeOf(dt);
+    }
+
+    private static int sizeOf(DataType dt) {
         if (dt == null) return -1;
-        DataType target = (dt instanceof Pointer p && p.getDataType() != null) ? p.getDataType() : dt;
-        int len = target.getLength();
+        int len = dt.getLength();
         return len > 0 ? len : -1;
     }
 

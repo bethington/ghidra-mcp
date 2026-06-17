@@ -109,4 +109,53 @@ public class PcodeQueryTest {
         assertTrue(PcodeQuery.defChainHasCall(v, 16));
         assertFalse(PcodeQuery.defChainHasCall(constVn(0), 16));
     }
+
+    @Test
+    public void reachesConstantOnly_transparentThroughIndirect() {
+        // const → COPY → INDIRECT(prev, iop) — must still prove constant.
+        Varnode k = constVn(0x40a010);
+        PcodeOp copy = op(PcodeOp.COPY, k);
+        Varnode prev = definedBy(copy);
+        Varnode iop = constVn(0); // iop-ref is in const space
+        PcodeOp ind = op(PcodeOp.INDIRECT, prev, iop);
+        Varnode v = definedBy(ind);
+        assertTrue(PcodeQuery.reachesConstantOnly(v, 16));
+    }
+
+    @Test
+    public void reachesConstantOnly_intSubOfConstants_isConstant() {
+        // sizeof(buf)-1 pattern: INT_SUB(const, const)
+        PcodeOp sub = op(PcodeOp.INT_SUB, constVn(64), constVn(1));
+        assertTrue(PcodeQuery.reachesConstantOnly(definedBy(sub), 16));
+    }
+
+    @Test
+    public void destBufferSize_prefersDeclaredSymbolTypeOverPointerElement() {
+        // char buf[64] → HighSymbol DataType length 64; HighVariable type char* → element 1.
+        ghidra.program.model.pcode.HighSymbol sym = mock(ghidra.program.model.pcode.HighSymbol.class);
+        ghidra.program.model.data.DataType arr = mock(ghidra.program.model.data.DataType.class);
+        when(arr.getLength()).thenReturn(64);
+        when(sym.getDataType()).thenReturn(arr);
+        ghidra.program.model.pcode.HighVariable hv = mock(ghidra.program.model.pcode.HighVariable.class);
+        when(hv.getSymbol()).thenReturn(sym);
+        Varnode dst = mock(Varnode.class);
+        when(dst.getHigh()).thenReturn(hv);
+        assertEquals(64, PcodeQuery.destBufferSize(dst, null));
+    }
+
+    @Test
+    public void destBufferSize_pointerToPrimitive_returnsUnknown() {
+        // char* with no symbol → unwrap → char (len 1) → must return -1, not 1.
+        ghidra.program.model.data.DataType ch = mock(ghidra.program.model.data.DataType.class);
+        when(ch.getLength()).thenReturn(1);
+        ghidra.program.model.data.Pointer ptr = mock(ghidra.program.model.data.Pointer.class);
+        when(ptr.getDataType()).thenReturn(ch);
+        ghidra.program.model.pcode.HighVariable hv = mock(ghidra.program.model.pcode.HighVariable.class);
+        when(hv.getSymbol()).thenReturn(null);
+        when(hv.getDataType()).thenReturn(ptr);
+        Varnode dst = mock(Varnode.class);
+        when(dst.getHigh()).thenReturn(hv);
+        // hf=null → ptrSize defaults to 8 → 1 ≤ 8 → unknown
+        assertEquals(-1, PcodeQuery.destBufferSize(dst, null));
+    }
 }
