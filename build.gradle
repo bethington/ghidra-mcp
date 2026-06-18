@@ -276,7 +276,13 @@ def findRunningGhidraPids = {
         try {
             def cmd = ph.info().commandLine().orElse('')
             def hay = os.isWindows() ? cmd.toLowerCase() : cmd
-            if (hay.contains(needle) && cmd.toLowerCase().contains('ghidra')) {
+            def lc  = cmd.toLowerCase()
+            // Match the install path AND the Ghidra launcher signature
+            // (ghidra.Ghidra main class or ghidraRun script) — same
+            // discriminator as tools/setup/ghidra.py so we don't pick
+            // up an editor or shell that merely has the path in argv.
+            if (hay.contains(needle)
+                    && (lc.contains('ghidra.ghidra') || lc.contains('ghidrarun'))) {
                 pids << ph.pid()
             }
         } catch (Exception ignored) {}
@@ -450,7 +456,7 @@ tasks.register('installUserExtension') {
 
 tasks.register('patchGhidraUserConfig') {
     group       = 'deploy'
-    description = 'Patches FrontEndTool.xml to activate GhidraMCPPlugin; removes plugin from _code_browser.tcd.'
+    description = 'Patches FrontEndTool.xml to activate GhidraMCPPlugin; removes plugin from tool .tcd files.'
     doLast {
         requireGhidraInstallDir()
         // #217: restrict to the SINGLE versioned user dir — never recurse the
