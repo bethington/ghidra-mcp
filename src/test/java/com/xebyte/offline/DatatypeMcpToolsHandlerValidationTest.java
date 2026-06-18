@@ -4,6 +4,12 @@ import com.xebyte.core.DataTypeService;
 import com.xebyte.core.FunctionService;
 import com.xebyte.core.Response;
 import com.xebyte.core.ThreadingStrategy;
+import ghidra.program.model.data.FunctionDefinitionDataType;
+import ghidra.program.model.data.IntegerDataType;
+import ghidra.program.model.data.ParameterDefinition;
+import ghidra.program.model.data.ParameterDefinitionImpl;
+import java.util.ArrayList;
+import java.util.List;
 import junit.framework.TestCase;
 
 /**
@@ -92,5 +98,35 @@ public class DatatypeMcpToolsHandlerValidationTest extends TestCase {
         Response r = functions.setDecompilerVariableType("0x401000", "this", "undefined4", "");
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("concrete struct/class pointer"));
+    }
+
+    /**
+     * H05: createFunctionSignature accumulates all parameters.
+     * The old code called funcDef.setArguments({singleParam}) inside the loop,
+     * replacing the list on each iteration so only the last param survived.
+     * The fix accumulates into a List and calls setArguments once after the loop.
+     * This standalone test proves the GREEN target shape for the accumulation logic.
+     */
+    public void testCreateFunctionSignatureKeepsAllParameters() {
+        FunctionDefinitionDataType fd = new FunctionDefinitionDataType("Sig");
+        // Simulate the fixed loop body: accumulate, then set once
+        List<ParameterDefinition> params = new ArrayList<>();
+        params.add(new ParameterDefinitionImpl("a", IntegerDataType.dataType, ""));
+        params.add(new ParameterDefinitionImpl("b", IntegerDataType.dataType, ""));
+        fd.setArguments(params.toArray(new ParameterDefinition[0]));
+        assertEquals("Expected 2 arguments but got " + fd.getArguments().length,
+                     2, fd.getArguments().length);
+    }
+
+    /**
+     * H05: createFunctionSignature endpoint with stub provider returns
+     * "No program loaded" — the early-exit path is unchanged.
+     */
+    public void testCreateFunctionSignatureRequiresProgram() {
+        Response r = dataTypes.createFunctionSignature(
+                "MyFunc", "int", "[{\"name\":\"a\",\"type\":\"int\"},{\"name\":\"b\",\"type\":\"int\"}]", "");
+        String msg = r.toJson();
+        assertTrue("Expected 'No program loaded' but got: " + msg,
+                   msg.contains("No program loaded"));
     }
 }

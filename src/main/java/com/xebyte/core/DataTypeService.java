@@ -1103,19 +1103,23 @@ public class DataTypeService {
                                                            .replace("{", "").replace("}", "")
                                                            .split(",");
 
+                        List<ParameterDefinition> params = new ArrayList<>();
                         for (String paramPair : paramPairs) {
                             if (paramPair.trim().isEmpty()) continue;
 
                             String[] parts = paramPair.split(":");
                             if (parts.length >= 2) {
+                                String paramName = parts[0].replace("\"", "").trim();
                                 String paramType = parts[1].replace("\"", "").trim();
                                 DataType paramDataType = ServiceUtils.resolveDataType(dtm, paramType);
                                 if (paramDataType != null) {
-                                    funcDef.setArguments(new ParameterDefinition[] {
-                                        new ParameterDefinitionImpl(null, paramDataType, null)
-                                    });
+                                    params.add(new ParameterDefinitionImpl(
+                                        paramName.isEmpty() ? null : paramName, paramDataType, null));
                                 }
                             }
+                        }
+                        if (!params.isEmpty()) {
+                            funcDef.setArguments(params.toArray(new ParameterDefinition[0]));
                         }
                     } catch (Exception e) {
                         // If JSON parsing fails, continue without parameters
