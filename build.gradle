@@ -409,20 +409,27 @@ tasks.register('patchGhidraUserConfig') {
     description = 'Patches FrontEndTool.xml to activate GhidraMCPPlugin; removes plugin from _code_browser.tcd.'
     doLast {
         requireGhidraInstallDir()
-        def userBase = resolveGhidraUserDir().parentFile
-        if (!userBase?.isDirectory()) {
-            println "Ghidra user base dir not found (${userBase}) — skipping config patch"
+        // #217: restrict to the SINGLE versioned user dir — never recurse the
+        // parent. Recursing %APPDATA%\ghidra would stamp the plugin INCLUDE
+        // (and strip the Developer package block) into every sibling
+        // ghidra_<ver>_* dir, corrupting unrelated installs. Mirrors
+        // tools/setup/ghidra.py:patch_ghidra_user_configs(target_user_dir=…).
+        def userDir = resolveGhidraUserDir()
+        if (!userDir?.isDirectory()) {
+            println "Ghidra user dir not found (${userDir}) — skipping config patch"
             return
         }
-        def pycacheDirs = []
-        userBase.eachFileRecurse { f ->
-            if (f.name == 'FrontEndTool.xml') {
-                def (updated, modified) = patchFrontEndXml(f.text)
-                if (modified) { f.text = updated; println "Patched FrontEnd config: ${f}" }
-            }
-            if (f.name == '_code_browser.tcd') {
-                def (updated, modified) = patchCodeBrowserTcd(f.text)
-                if (modified) { f.text = updated; println "Cleaned CodeBrowser config: ${f}" }
+        println "Patching Ghidra user config under ${userDir} (single version dir only)"
+        def frontEnd = new File(userDir, 'FrontEndTool.xml')
+        if (frontEnd.isFile()) {
+            def (updated, modified) = patchFrontEndXml(frontEnd.text)
+            if (modified) { frontEnd.text = updated; println "Patched FrontEnd config: ${frontEnd}" }
+        }
+        def toolsDir = new File(userDir, 'tools')
+        if (toolsDir.isDirectory()) {
+            toolsDir.listFiles({ f -> f.isFile() && f.name.endsWith('.tcd') } as FileFilter)?.each { tcd ->
+                def (updated, modified) = patchCodeBrowserTcd(tcd.text)
+                if (modified) { tcd.text = updated; println "Cleaned tool config: ${tcd}" }
             }
         }
     }
