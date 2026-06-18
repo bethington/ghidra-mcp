@@ -27,6 +27,30 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.14.1 - 2026-06-18 (patch: full overlay address-space support)
+
+Patch release.
+
+### Fixed
+
+- **Overlay address-space support across all address-taking tools** (#313, thanks @PJ-Zetier):
+  tools could not operate on Ghidra overlay address spaces (e.g. `cli.Initial::00010000`)
+  — the space name was mangled (`0x` prepended, lowercased), `get_address_spaces` reported
+  only `ram`, and overlay addresses returned by tools came back as bare hex that re-resolved
+  into the wrong physical space. Fixed at three centralized chokepoints so overlays work
+  everywhere with no per-tool edits: the bridge `sanitize_address` regex now accepts any
+  Ghidra block name and the `::` separator (case preserved); `ServiceUtils.parseAddress` does
+  an exact-case attempt then a case-insensitive fallback (handling both `:` and `::`); and
+  enriched address responses emit `address_full`/`address_space` for overlay addresses so they
+  round-trip correctly. Supersedes and generalizes the v5.14.0 uppercase-overlay fix (#297).
+
+### Changed
+
+- Dependency bumps (Dependabot): `claude-agent-sdk` → 0.2.101 (root + `/fun-doc`, #303/#301),
+  `responses` → >=0.26.1 (#305).
+
+---
+
 ## v5.14.0 - 2026-06-18 (minor: Ghidra 12.1.2 retarget, reference write tools, tool discovery, version-compat + overlay fixes)
 
 Minor release. Retargets the extension at **Ghidra 12.1.2** (latest), bundles two
