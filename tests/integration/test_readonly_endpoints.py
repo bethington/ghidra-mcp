@@ -811,6 +811,7 @@ class TestOverlayAddressSpaces:
         assert ov.get("overlayed_space"), "overlay entry must name its base space"
         # Address the overlay at its start; read_memory must resolve it (no error).
         addr = f"{ov['name']}::{ov['start']}"
-        result = json.loads(http_client.get(
-            "/read_memory", params={"address": addr, "length": "4"}).text)
+        r = http_client.get("/read_memory", params={"address": addr, "length": "4"})
+        assert r.status_code == 200, r.text
+        result = json.loads(r.text)
         assert "error" not in result, f"overlay read failed for {addr}: {result}"

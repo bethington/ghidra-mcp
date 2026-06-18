@@ -693,8 +693,9 @@ public final class ServiceUtils {
     /**
      * Return enriched address fields as a Map for JSON responses.
      * Always includes "address" (plain hex, no space prefix).
-     * Includes "address_full" and "address_space" only when the program has >1 physical space.
-     * If program is null, emits only the "address" field.
+     * Includes "address_full" and "address_space" when the address is in an overlay
+     * space (so it round-trips correctly) OR when the program has >1 physical space.
+     * If program is null and the address is non-overlay, emits only "address".
      */
     public static Map<String, Object> addressToJson(Address address, Program program) {
         String plainHex = address.toString(false);
@@ -738,16 +739,7 @@ public final class ServiceUtils {
      * space from a known space with a bad offset when building parse errors.
      */
     private static boolean isKnownSpace(Program program, String spaceName) {
-        if (spaceName == null || spaceName.isEmpty()) return false;
-        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
-            boolean eligible = space.isOverlaySpace()
-                    || space.getType() == AddressSpace.TYPE_RAM
-                    || space.getType() == AddressSpace.TYPE_CODE;
-            if (eligible && space.getName().equalsIgnoreCase(spaceName)) {
-                return true;
-            }
-        }
-        return false;
+        return findSpaceIgnoreCase(program, spaceName) != null;
     }
 
     /**

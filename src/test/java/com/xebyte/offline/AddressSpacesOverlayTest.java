@@ -26,7 +26,7 @@ import static org.mockito.Mockito.*;
  */
 public class AddressSpacesOverlayTest {
 
-    private AddressSpace physical(String name, int type, boolean isDefault) {
+    private AddressSpace physical(String name, int type) {
         AddressSpace s = mock(AddressSpace.class);
         when(s.isOverlaySpace()).thenReturn(false);
         when(s.getType()).thenReturn(type);
@@ -67,10 +67,10 @@ public class AddressSpacesOverlayTest {
     public void getAddressSpaces_includesOverlaysMarked() {
         Program program = mock(Program.class);
         AddressFactory factory = mock(AddressFactory.class);
-        AddressSpace ram = physical("ram", AddressSpace.TYPE_RAM, true);
+        AddressSpace ram = physical("ram", AddressSpace.TYPE_RAM);
         // OTHER-backed base space: not RAM/CODE, so it is NOT emitted as a
         // physical entry — but it must still resolve as an overlay's base name.
-        AddressSpace other = physical("OTHER", AddressSpace.TYPE_OTHER, false);
+        AddressSpace other = physical("OTHER", AddressSpace.TYPE_OTHER);
         OverlayAddressSpace ov = overlay("cli.Initial", ram);
         OverlayAddressSpace shstrtab = overlay(".shstrtab", other);
         when(program.getAddressFactory()).thenReturn(factory);
