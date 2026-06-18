@@ -240,6 +240,50 @@ def resolveGhidraUserDir = {
 
 def pluginClass = 'com.xebyte.GhidraMCPPlugin'
 
+// ----------------------------------------------------------------------
+// stopGhidra: graceful exit + poll + force-kill. Mirrors
+// tools/setup/ghidra.py:close_running_ghidra_for_deploy. Required before
+// deploy because (a) on Windows the running JVM file-locks GhidraMCP-*.jar
+// so installUserExtension's overwrite fails, and (b) on any OS Ghidra
+// rewrites FrontEndTool.xml on exit, silently discarding patchGhidraUserConfig.
+// ----------------------------------------------------------------------
+
+def mcpUrl = (System.getenv('GHIDRA_MCP_URL') ?: 'http://127.0.0.1:8089').replaceAll('/+$', '')
+
+def httpRequest = { String path, int timeoutSec ->
+    try {
+        def url = new URI(mcpUrl + path).toURL()
+        def conn = url.openConnection()
+        conn.connectTimeout = 2000
+        conn.readTimeout    = timeoutSec * 1000
+        conn.requestMethod  = 'GET'
+        return conn.responseCode
+    } catch (Exception e) {
+        return -1  // unreachable / refused
+    }
+}
+
+def findRunningGhidraPids = {
+    if (!ghidraRoot) return [] as List<Long>
+    def installPath = ghidraRoot.canonicalPath
+    def os = org.gradle.internal.os.OperatingSystem.current()
+    // Path separators may differ in process command lines on Windows.
+    def needle = os.isWindows()
+        ? installPath.replace('/', '\\').toLowerCase()
+        : installPath
+    def pids = [] as List<Long>
+    ProcessHandle.allProcesses().forEach { ph ->
+        try {
+            def cmd = ph.info().commandLine().orElse('')
+            def hay = os.isWindows() ? cmd.toLowerCase() : cmd
+            if (hay.contains(needle) && cmd.toLowerCase().contains('ghidra')) {
+                pids << ph.pid()
+            }
+        } catch (Exception ignored) {}
+    }
+    return pids
+}
+
 // Returns [patchedContent, wasModified]. Mirrors patch_frontend_tool_config() in ghidra.py.
 def patchFrontEndXml = { String content ->
     def updated = content
@@ -435,10 +479,61 @@ tasks.register('patchGhidraUserConfig') {
     }
 }
 
+tasks.register('stopGhidra') {
+    group       = 'deploy'
+    description = 'Stops any Ghidra running from GHIDRA_INSTALL_DIR (graceful via /exit_ghidra, then poll, then force-kill).'
+    doLast {
+        requireGhidraInstallDir()
+        def pids = findRunningGhidraPids()
+        if (pids.isEmpty()) {
+            println "stopGhidra: no Ghidra process running from ${ghidraRoot}"
+            return
+        }
+        println "stopGhidra: detected running Ghidra PID(s) ${pids} from ${ghidraRoot}"
+        // Best-effort save + graceful exit via the MCP HTTP endpoint.
+        if (httpRequest('/save_all_programs', 60) >= 200) {
+            println "stopGhidra: requested save_all_programs via ${mcpUrl}"
+        }
+        if (httpRequest('/exit_ghidra', 10) >= 200) {
+            println "stopGhidra: requested graceful exit via ${mcpUrl}/exit_ghidra"
+        } else {
+            println "stopGhidra: ${mcpUrl}/exit_ghidra unreachable — will force-kill if needed"
+        }
+        // Poll for clean exit (default 30s; override with -PstopGhidraWaitSec=N).
+        int waitSec = (findProperty('stopGhidraWaitSec') ?: '30') as int
+        long deadline = System.currentTimeMillis() + waitSec * 1000L
+        while (System.currentTimeMillis() < deadline) {
+            if (findRunningGhidraPids().isEmpty()) {
+                println "stopGhidra: Ghidra exited cleanly"
+                return
+            }
+            Thread.sleep(1000)
+        }
+        // Force-kill survivors.
+        findRunningGhidraPids().each { pid ->
+            println "stopGhidra: force-killing Ghidra PID ${pid}"
+            ProcessHandle.of(pid).ifPresent { it.destroyForcibly() }
+        }
+        // Brief settle so file locks are released before install/overwrite.
+        Thread.sleep(1000)
+    }
+}
+
+// Deploy ordering: stopGhidra must run before anything writes into the
+// Ghidra install/user trees, and config patching must follow extension
+// installation. dependsOn alone imposes no order between siblings —
+// mustRunAfter makes the sequence explicit.
+tasks.named('deployExtension')      { dependsOn 'stopGhidra' }
+tasks.named('installUserExtension') { dependsOn 'stopGhidra' }
+tasks.named('patchGhidraUserConfig') {
+    dependsOn 'stopGhidra'
+    mustRunAfter 'deployExtension', 'installUserExtension'
+}
+
 tasks.register('deploy') {
     group       = 'deploy'
-    description = 'Full deploy: build extension, install to Ghidra install tree and user profile, patch configs.'
-    dependsOn 'deployExtension', 'installUserExtension', 'patchGhidraUserConfig'
+    description = 'Full deploy: stop Ghidra, build extension, install to Ghidra install tree and user profile, patch configs.'
+    dependsOn 'stopGhidra', 'deployExtension', 'installUserExtension', 'patchGhidraUserConfig'
 }
 
 tasks.register('startGhidra') {
