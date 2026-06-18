@@ -1764,7 +1764,14 @@ def _wildcard_allowed_hosts() -> list[str]:
                 pass
     except OSError:
         pass
-    return [f"{h}:*" for h in sorted(hosts)]
+    out: list[str] = []
+    for h in sorted(hosts):
+        out.append(f"{h}:*")
+        # RFC 3986: IPv6 literals are bracketed in Host headers
+        # (e.g. "[::1]:8089"); add the bracketed form so they match too.
+        if ":" in h and not h.startswith("["):
+            out.append(f"[{h}]:*")
+    return out
 
 
 def _auto_connect():
