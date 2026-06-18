@@ -101,6 +101,48 @@ def test_build_global_prompt_starts_with_program_mandatory_banner():
         assert tool in prompt, f"Banner / prompt should mention `{tool}` so the model knows program= applies to it."
 
 
+def test_process_global_uses_watchdog(monkeypatch):
+    """H24: process_global must route provider calls through invoke_claude
+    (→ _invoke_provider_with_watchdog), not _invoke_provider_direct.
+    A wedged provider call must not stall the globals worker indefinitely.
+    Matches the function-worker path that was already using the watchdog."""
+    called = {"watchdog": 0, "direct": 0}
+
+    def fake_watchdog(*a, **kw):
+        called["watchdog"] += 1
+        return ("ok", {"tool_calls": 0})
+
+    def fake_direct(*a, **kw):
+        called["direct"] += 1
+        return ("ok", {"tool_calls": 0})
+
+    monkeypatch.setattr(fun_doc, "_invoke_provider_with_watchdog", fake_watchdog)
+    monkeypatch.setattr(fun_doc, "_invoke_provider_direct", fake_direct)
+    # Stub everything else process_global touches.
+    monkeypatch.setattr(
+        fun_doc, "_audit_global_via_http",
+        lambda *a, **kw: {"name": "g_x", "score": 0, "issues": ["missing_prefix"]},
+        raising=False,
+    )
+    monkeypatch.setattr(fun_doc, "_build_global_prompt",
+                        lambda *a, **kw: "PROMPT", raising=False)
+    monkeypatch.setattr(fun_doc, "_append_run_log", lambda *a, **kw: None, raising=False)
+    monkeypatch.setattr(fun_doc, "bus_emit", lambda *a, **kw: None, raising=False)
+
+    fun_doc.process_global(
+        "/proj/Foo.exe", "00401000",
+        provider="test", model="test-model", max_turns=5,
+        worker_id="w-test",
+    )
+    assert called["direct"] == 0, (
+        "process_global still calls _invoke_provider_direct (no watchdog): "
+        "a hung provider call can stall the globals worker indefinitely (H24)"
+    )
+    assert called["watchdog"] == 1, (
+        "process_global must call _invoke_provider_with_watchdog exactly once per global"
+    )
+
+
 def test_process_global_skips_when_pre_audit_clean(isolated_run_log, monkeypatch):
     """Q8: a clean global short-circuits before invoking the provider —
     no provider call burned, runs.jsonl row tagged 'skipped'."""
@@ -111,7 +153,7 @@ def test_process_global_skips_when_pre_audit_clean(isolated_run_log, monkeypatch
     def _bad(*a, **k):
         invoked["called"] = True
         raise AssertionError("provider should not be invoked for clean globals")
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct", _bad)
+    monkeypatch.setattr(fun_doc, "invoke_claude", _bad)
 
     result = fun_doc.process_global(
         "/proj/A.dll", "0xffd0", provider="minimax", model="m1"
@@ -135,7 +177,7 @@ def test_process_global_completed_when_post_audit_clean(isolated_run_log, monkey
     ])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: next(audits))
     monkeypatch.setattr(
-        fun_doc, "_invoke_provider_direct",
+        fun_doc, "invoke_claude",
         lambda *a, **k: ("ok", {"tool_calls": 3, "tool_calls_known": True}),
     )
 
@@ -160,7 +202,7 @@ def test_process_global_no_change_when_provider_does_nothing(isolated_run_log, m
     ])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: next(audits))
     monkeypatch.setattr(
-        fun_doc, "_invoke_provider_direct",
+        fun_doc, "invoke_claude",
         lambda *a, **k: ("nope", {"tool_calls": 0, "tool_calls_known": True}),
     )
     result = fun_doc.process_global(
@@ -178,7 +220,7 @@ def test_process_global_blocked_on_quota_pause(isolated_run_log, monkeypatch):
     ])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: next(audits))
     monkeypatch.setattr(
-        fun_doc, "_invoke_provider_direct",
+        fun_doc, "invoke_claude",
         lambda *a, **k: (None, {
             "tool_calls": 0, "tool_calls_known": True,
             "quota_paused": True, "quota_paused_until": "2030-01-01T00:00:00",
@@ -215,7 +257,7 @@ def test_process_global_resolves_model_from_dashboard_config(
         captured["model"] = model
         captured["provider"] = provider
         return ("ok", {"tool_calls": 1, "tool_calls_known": True})
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct", _fake_provider)
+    monkeypatch.setattr(fun_doc, "invoke_claude", _fake_provider)
 
     result = fun_doc.process_global(
         "/proj/A.dll", "0xffd0", provider="minimax", model=None
@@ -223,7 +265,7 @@ def test_process_global_resolves_model_from_dashboard_config(
     assert result == "completed"
     assert captured["model"] == "MiniMax-M2.7", (
         "process_global should have resolved the configured FULL-mode model "
-        "for minimax instead of passing None to _invoke_provider_direct"
+        "for minimax instead of passing None to invoke_claude"
     )
 
 
@@ -238,7 +280,7 @@ def test_process_global_skips_function_label_by_name(isolated_run_log, monkeypat
         "issues": ["untyped", "missing_plate_comment"],
     }
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: audit)
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct",
+    monkeypatch.setattr(fun_doc, "invoke_claude",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("not invoked")))
     result = fun_doc.process_global(
         "/proj/A.dll", "0x6fc2287c", provider="minimax", model="m1"
@@ -263,7 +305,7 @@ def test_process_global_skips_when_audit_says_code_address(
         "is_code_address": True,
     }
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: audit)
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct",
+    monkeypatch.setattr(fun_doc, "invoke_claude",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("not invoked")))
     result = fun_doc.process_global(
         "/proj/A.dll", "0x6fc2287c", provider="minimax", model="m1"
@@ -306,7 +348,7 @@ def test_process_global_skips_os_canonical_label_by_name(isolated_run_log, monke
     def _bad(*a, **k):
         invoked["called"] = True
         raise AssertionError("provider must not be invoked for OS-canonical labels")
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct", _bad)
+    monkeypatch.setattr(fun_doc, "invoke_claude", _bad)
 
     result = fun_doc.process_global(
         "/proj/A.dll", "0xffdff000", provider="minimax", model="m1"
@@ -326,7 +368,7 @@ def test_process_global_skips_os_address_range_even_with_unknown_name(
     re-renaming an OS field."""
     audit = {"name": "Unknown_TibField", "type": "uint", "issues": ["name_missing_g_prefix"]}
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: audit)
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct",
+    monkeypatch.setattr(fun_doc, "invoke_claude",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("not invoked")))
     result = fun_doc.process_global(
         "/proj/A.dll", "0xffdff100", provider="minimax", model="m1"
@@ -358,7 +400,7 @@ def test_process_global_completed_when_only_soft_issues_remain(
         },
     ])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: next(audits))
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct",
+    monkeypatch.setattr(fun_doc, "invoke_claude",
                         lambda *a, **k: ("ok", {"tool_calls": 1, "tool_calls_known": True}))
 
     result = fun_doc.process_global(
@@ -392,7 +434,7 @@ def test_process_global_blocked_progress_uses_severity_when_present(
         },
     ])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: next(audits))
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct",
+    monkeypatch.setattr(fun_doc, "invoke_claude",
                         lambda *a, **k: ("ok", {"tool_calls": 1, "tool_calls_known": True}))
 
     result = fun_doc.process_global(
@@ -414,7 +456,7 @@ def test_process_global_falls_back_to_count_when_no_severity_summary(
         {"name": "g_pData", "type": "void *", "issues": []},
     ])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: next(audits))
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct",
+    monkeypatch.setattr(fun_doc, "invoke_claude",
                         lambda *a, **k: ("ok", {"tool_calls": 1, "tool_calls_known": True}))
 
     result = fun_doc.process_global(
@@ -434,7 +476,7 @@ def test_process_global_lateral_change_when_issue_set_differs(
         {"name": "g_dwFoo", "type": "byte", "issues": ["prefix_type_mismatch"]},
     ])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: next(audits))
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct",
+    monkeypatch.setattr(fun_doc, "invoke_claude",
                         lambda *a, **k: ("ok", {"tool_calls": 2, "tool_calls_known": True}))
 
     result = fun_doc.process_global(
@@ -453,7 +495,7 @@ def test_process_global_no_change_only_when_issue_set_matches(
         {"name": "FooBar", "type": "uint", "issues": ["c", "b", "a"]},  # reordered
     ])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: next(audits))
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct",
+    monkeypatch.setattr(fun_doc, "invoke_claude",
                         lambda *a, **k: ("ok", {"tool_calls": 0, "tool_calls_known": True}))
 
     result = fun_doc.process_global(
@@ -464,7 +506,7 @@ def test_process_global_no_change_only_when_issue_set_matches(
 
 def test_process_global_pre_audit_failure(isolated_run_log, monkeypatch):
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", lambda *a, **k: None)
-    monkeypatch.setattr(fun_doc, "_invoke_provider_direct", lambda *a, **k: ("x", {}))
+    monkeypatch.setattr(fun_doc, "invoke_claude", lambda *a, **k: ("x", {}))
     result = fun_doc.process_global(
         "/proj/A.dll", "0xffd0", provider="minimax", model="m1"
     )
@@ -491,7 +533,7 @@ def test_run_globals_worker_pass_respects_count_cap(isolated_run_log, monkeypatc
         return _stub_audit([] if n % 2 == 1 else ["untyped"])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", _audit)
     monkeypatch.setattr(
-        fun_doc, "_invoke_provider_direct",
+        fun_doc, "invoke_claude",
         lambda *a, **k: ("ok", {"tool_calls": 1, "tool_calls_known": True}),
     )
 
@@ -529,7 +571,7 @@ def test_run_globals_worker_pass_skipped_globals_dont_count(isolated_run_log, mo
         return _stub_audit(["untyped"])  # pre: needs work
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", _audit)
     monkeypatch.setattr(
-        fun_doc, "_invoke_provider_direct",
+        fun_doc, "invoke_claude",
         lambda *a, **k: ("ok", {"tool_calls": 1, "tool_calls_known": True}),
     )
 
@@ -560,7 +602,7 @@ def test_run_globals_worker_pass_stop_flag_interrupts(isolated_run_log, monkeypa
         return _stub_audit(["untyped"])  # always has issues so never short-circuits
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", _audit)
     monkeypatch.setattr(
-        fun_doc, "_invoke_provider_direct",
+        fun_doc, "invoke_claude",
         lambda *a, **k: ("ok", {"tool_calls": 1, "tool_calls_known": True}),
     )
     summary = fun_doc.run_globals_worker_pass(
@@ -607,7 +649,7 @@ def test_run_globals_worker_pass_continuous_ignores_count_cap(
         return _stub_audit([] if n % 2 == 1 else ["untyped"])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", _audit)
     monkeypatch.setattr(
-        fun_doc, "_invoke_provider_direct",
+        fun_doc, "invoke_claude",
         lambda *a, **k: ("ok", {"tool_calls": 1, "tool_calls_known": True}),
     )
 
@@ -663,7 +705,7 @@ def test_run_globals_worker_pass_continuous_advances_to_next_binary(
         return _stub_audit([] if n % 2 == 1 else ["untyped"])
     monkeypatch.setattr(fun_doc, "_audit_global_via_http", _audit)
     monkeypatch.setattr(
-        fun_doc, "_invoke_provider_direct",
+        fun_doc, "invoke_claude",
         lambda *a, **k: ("ok", {"tool_calls": 1, "tool_calls_known": True}),
     )
 

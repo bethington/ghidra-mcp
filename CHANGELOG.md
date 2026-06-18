@@ -54,6 +54,43 @@ maintainer-feedback issues (#267, #153, #293).
   decided on the shared major.minor prefix — any patch release of the pinned minor series is
   accepted, with an informational note when only the patch differs.
 
+### Fixed
+
+- **fun-doc selector blacklist flags now persist through SQL** (H22):
+  `recovery_pass_done`, `decompile_timeout`, and `not_a_function` were set on
+  the in-memory func dict but dropped by `_state_func_to_row`, so the selector
+  re-picked pathological functions forever (forced-recovery giants, 60s
+  decompile timeouts, data-not-code addresses). Migration `0004_selector_flags`
+  adds the columns with backfill from `decompile_timeout_at` / `last_result`.
+- **fun-doc `refresh_candidate_scores` writes to the SQL backend** (H23): the
+  save block called `_atomic_write_state` which targets the legacy `state.json`
+  the runtime no longer reads, so dashboard "Refresh Top N" and adaptive-refresh
+  computed fresh scores into a dead file. Now routes through
+  `_update_function_via_repo`, and clears blacklist flags with explicit
+  `False`/`None` so the cleared values reach the columns.
+- **fun-doc globals worker uses the subprocess watchdog** (H24):
+  `process_global` called `_invoke_provider_direct` (no subprocess isolation,
+  no deadline+terminate guard), so a single hung provider call stalled the
+  continuous-mode globals worker indefinitely. Now routes through
+  `invoke_claude` → `_invoke_provider_with_watchdog`, matching the function
+  worker. Also brings the globals-worker `last_heartbeat_at` writes under
+  `self._lock`.
+- **fun-doc worker watchdog no longer self-heartbeats** (H25): `_watchdog_loop`
+  wrote `last_heartbeat_at = now` on every tick, so `stale_sec` was always
+  ≈`HEARTBEAT_INTERVAL_SEC` and the stall-kill path was unreachable for any
+  worker that was ever healthy — the same failure mode as the 2026-04-24
+  four-deadlocked-workers incident the watchdog was added for. The heartbeat
+  write now lives in the worker loop (and the quota-pause wait loop); the
+  watchdog only observes.
+- **`migrate_state_to_sql.py` is idempotent for the `runs` table** (H26): the
+  runs loader issued plain INSERTs into a table with only an autoincrement PK,
+  so re-running the migration doubled every row. Now refuses with exit code 2
+  unless `--truncate-runs` is passed, which wipes-then-reloads.
+- **`test_worker_watchdog.py` fixture isolates from the real backend**: the
+  `fast_watchdog_env` fixture reloaded `web` without isolating the storage
+  repo, so module import resolved the live SQL backend and crashed on
+  environmental data before any test ran.
+
 ---
 
 ## v5.13.1 - 2026-06-08 (patch: launch-noise fix + class-member listing)

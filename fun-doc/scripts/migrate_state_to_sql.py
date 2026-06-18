@@ -63,6 +63,15 @@ DEFAULT_RUNS = _FUNDOC_DIR / "logs" / "runs.jsonl"
 DEFAULT_INVENTORY = _FUNDOC_DIR / "inventory.json"
 DEFAULT_GLOBAL_INVENTORY = _FUNDOC_DIR / "global_inventory.json"
 
+# ---------------------------------------------------------------------------
+# Module-level engine / repo — None in production (built inside migrate()).
+# Tests may monkeypatch these to inject a pre-built repository without
+# needing to supply --backend / --url CLI args.  migrate() checks these
+# before constructing its own connection.
+# ---------------------------------------------------------------------------
+engine = None  # type: ignore[assignment]
+repo = None  # type: ignore[assignment]
+
 
 # ---------------------------------------------------------------------------
 # Field mapping: state.json record → functions_workflow row
@@ -306,13 +315,21 @@ def migrate(
     *,
     state_path: Path,
     runs_path: Path,
-    inventory_path: Path,
-    global_inventory_path: Path,
-    backend: str,
+    inventory_path: Optional[Path] = None,
+    global_inventory_path: Optional[Path] = None,
+    backend: str = "sqlite",
     url: Optional[str] = None,
     dry_run: bool = False,
+    truncate_runs: bool = False,
 ) -> dict:
     """Run the migration end-to-end. Returns a summary dict of counts."""
+    import migrate_state_to_sql as _self_mod  # resolve module-level engine/repo
+
+    if inventory_path is None:
+        inventory_path = DEFAULT_INVENTORY
+    if global_inventory_path is None:
+        global_inventory_path = DEFAULT_GLOBAL_INVENTORY
+
     print(f"[migrate] reading state from {state_path}")
     state = load_state(state_path)
 
@@ -339,34 +356,58 @@ def migrate(
             "sessions": len(state.get("sessions", []) or []),
         }
 
-    # Build the repository — let resolve_config do path normalization
-    # (bare path → sqlite:/// URL) so a CLI ``--url C:/tmp/foo.db`` works.
-    from storage import make_engine, resolve_config
-    from storage.repository import Repository
+    # Use module-level engine/repo if injected (e.g. by tests via monkeypatch),
+    # otherwise build them from backend/url arguments.
+    _engine = _self_mod.engine
+    _repo = _self_mod.repo
+    if _engine is None or _repo is None:
+        # Build the repository — let resolve_config do path normalization
+        # (bare path → sqlite:/// URL) so a CLI ``--url C:/tmp/foo.db`` works.
+        from storage import make_engine, resolve_config
+        from storage.repository import Repository
 
-    cfg_block: dict[str, Any] = {"backend": backend}
-    if url is not None:
-        cfg_block["url"] = url
-    cfg = resolve_config(cfg_block)
-    engine = make_engine(cfg)
-    repo = Repository(engine, cfg)
-    repo.bootstrap_schema()
+        cfg_block: dict[str, Any] = {"backend": backend}
+        if url is not None:
+            cfg_block["url"] = url
+        cfg = resolve_config(cfg_block)
+        _engine = make_engine(cfg)
+        _repo = Repository(_engine, cfg)
+        _repo.bootstrap_schema()
+
+    # ----- runs idempotency guard (H26) -----
+    # The runs table has only an autoincrement PK and no natural unique key,
+    # so a plain re-insert duplicates every row. Refuse unless explicitly
+    # told to truncate.
+    existing_runs = _repo.count_runs()
+    if existing_runs > 0:
+        if not truncate_runs:
+            print(
+                f"[migrate] ABORT: runs table already has {existing_runs} rows. "
+                "Re-running would duplicate every row. Pass --truncate-runs to "
+                "wipe and reload, or drop the table manually first.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        print(f"[migrate] --truncate-runs: deleting {existing_runs} existing rows…")
+        from sqlalchemy import delete
+        with _engine.begin() as conn:
+            conn.execute(delete(_repo.t_runs))
 
     # ----- functions -----
     rows = (function_record_to_row(rec) for rec in functions.values())
-    n_funcs = repo.bulk_upsert_functions(rows, chunk_size=500)
+    n_funcs = _repo.bulk_upsert_functions(rows, chunk_size=500)
     print(f"[migrate] wrote {n_funcs} functions_workflow rows")
 
     # Index the rows we just wrote, keyed by (program_path, address) → id, so
     # we can attach runs efficiently. One bulk query, no N+1.
     print("[migrate] indexing function ids for runs attach…")
-    fn_id_index = repo.all_function_ids()
+    fn_id_index = _repo.all_function_ids()
     print(f"[migrate] indexed {len(fn_id_index)} function ids")
 
     # ----- runs (jsonl + inline attempts) -----
     n_runs = 0
     n_runs_skipped = 0
-    with engine.begin() as conn:
+    with _engine.begin() as conn:
         from sqlalchemy import insert
 
         batch: list[dict] = []
@@ -379,7 +420,7 @@ def migrate(
             for r in b:
                 all_keys.update(r.keys())
             normalized = [{k: r.get(k) for k in all_keys} for r in b]
-            conn.execute(insert(repo.t_runs), normalized)
+            conn.execute(insert(_repo.t_runs), normalized)
             return len(b)
 
         for entry in iter_runs_jsonl(runs_path):
@@ -453,7 +494,7 @@ def migrate(
 
     # ----- inventory -----
     for path, info in inventory_binaries.items():
-        repo.upsert_inventory(
+        _repo.upsert_inventory(
             {
                 "program_path": path,
                 "binary_name": info.get("name") or derive_binary_name(path),
@@ -467,7 +508,7 @@ def migrate(
 
     # ----- global_inventory -----
     for path, info in global_inventory_binaries.items():
-        repo.upsert_global_inventory(
+        _repo.upsert_global_inventory(
             {
                 "program_path": path,
                 "binary_name": info.get("name") or derive_binary_name(path),
@@ -480,7 +521,7 @@ def migrate(
     print(f"[migrate] wrote {len(global_inventory_binaries)} global_inventory rows")
 
     # ----- meta -----
-    repo.set_meta(
+    _repo.set_meta(
         project_folder=state.get("project_folder"),
         last_scan=parse_ts(state.get("last_scan")),
         current_session=state.get("current_session"),
@@ -501,7 +542,7 @@ def migrate(
         if not sid:
             continue
         sid = str(sid)
-        repo.upsert_session(
+        _repo.upsert_session(
             sid,
             started_at=parse_ts(sess.get("started")),
             ended_at=parse_ts(sess.get("ended")),
@@ -547,6 +588,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--inventory", default=str(DEFAULT_INVENTORY))
     p.add_argument("--global-inventory", default=str(DEFAULT_GLOBAL_INVENTORY))
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument(
+        "--truncate-runs", action="store_true",
+        help="Wipe the runs table before loading. Required when re-running "
+             "the migration against a non-empty runs table (H26).",
+    )
     args = p.parse_args(argv)
 
     summary = migrate(
@@ -557,6 +603,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         backend=args.backend,
         url=args.url,
         dry_run=args.dry_run,
+        truncate_runs=args.truncate_runs,
     )
     print(json.dumps(summary, indent=2))
     return 0

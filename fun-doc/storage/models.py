@@ -99,6 +99,11 @@ def build_metadata(schema: str | None = None) -> MetaData:
         Column("is_external", Boolean, default=False),
         # transient worker state
         Column("is_thrashing", Boolean, default=False),
+        # selector one-shot blacklist flags (H22) — without these the
+        # selector re-picks pathological functions on every iteration.
+        Column("recovery_pass_done", Boolean, default=False),
+        Column("decompile_timeout", Boolean, default=False),
+        Column("not_a_function", Boolean, default=False),
         Column("decompile_timeout_at", DateTime(timezone=True)),
         Column("library_code", Boolean, default=False),
         Column("library_code_at", DateTime(timezone=True)),
