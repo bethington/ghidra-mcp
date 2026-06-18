@@ -4,6 +4,29 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- Headless `stop()` now closes the open project after releasing programs,
+  so the `.rep` project lock is released on shutdown — previously even a
+  clean exit left the project locked and the next `/open_project` (or GUI
+  open) failed with "project is locked"
+- Headless `setUserPermissions` merges the target user into the existing
+  repository ACL instead of replacing the entire user list with a single
+  entry; preserves the current anonymous-access flag. Response now
+  includes `total_users` and `anonymous_access`
+- Headless `checkinFile` / `undoCheckout` now return an explicit
+  `not_implemented` error with a hint pointing at the `DomainFile` path,
+  instead of reporting `checked_in` / `checkout_undone` without performing
+  any operation
+- `HeadlessProgramProvider` releases a previously-tracked `Program` when a
+  newly-loaded one collides on `getName()` (same leaf filename), instead
+  of silently leaking the displaced handle's DomainObject consumer
+  reference and DB buffers
+
+---
+
 ## v5.14.1 - 2026-06-18 (patch: full overlay address-space support)
 
 Patch release.
