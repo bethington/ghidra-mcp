@@ -238,17 +238,18 @@ class GhidraValidationError(Exception):
 
 # Input validation patterns
 HEX_ADDRESS_PATTERN = re.compile(r"^0x[0-9a-fA-F]+$")
-# Space-qualified address: space:HEX, space::HEX (overlay), with optional 0x.
-# Space names may contain dots and lead with '.'/'_' (overlay spaces such as
-# '.shstrtab', '_elfHeader', 'cli.Initial'). Ghidra's AddressFactory accepts
-# both single (':') and double ('::') colon separators and is case-sensitive
+# Space-qualified address: space:HEX or space::HEX (overlay), with optional 0x.
+# Ghidra memory-block (and therefore overlay-space) names are essentially
+# unconstrained, so the space-name class is "anything except colon or
+# whitespace" — the ':'/'::' separator is what distinguishes this from plain
+# hex. Ghidra's AddressFactory accepts both ':' and '::' and is case-sensitive
 # on the name (#184), so the bridge preserves case and never adds '0x' here.
-SEGMENT_ADDRESS_PATTERN = re.compile(r"^[A-Za-z_.][A-Za-z0-9_.]*::?[0-9a-fA-F]+$")
+SEGMENT_ADDRESS_PATTERN = re.compile(r"^[^\s:]+::?[0-9a-fA-F]+$")
 # Handles the space::0xHEX / space:0xHEX form. Checked BEFORE SEGMENT_ADDRESS_PATTERN
 # because the 'x' in '0x' is not in [0-9a-fA-F]. Group 1 captures the name AND the
 # colon separator; group 2 captures the bare hex offset.
 SEGMENT_ADDR_WITH_0X_PATTERN = re.compile(
-    r"^([A-Za-z_.][A-Za-z0-9_.]*::?)0[xX]([0-9a-fA-F]+)$"
+    r"^([^\s:]+::?)0[xX]([0-9a-fA-F]+)$"
 )
 FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
