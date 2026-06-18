@@ -733,6 +733,20 @@ public final class ServiceUtils {
     }
 
     /**
+     * Count the program's overlay address spaces (regardless of base type).
+     * Overlay addresses must be qualified with their space name; this is
+     * orthogonal to {@link #getPhysicalSpaceCount} (which measures physical
+     * ambiguity for plain hex addresses).
+     */
+    public static int getOverlaySpaceCount(Program program) {
+        int count = 0;
+        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
+            if (space.isOverlaySpace()) count++;
+        }
+        return count;
+    }
+
+    /**
      * True if {@code spaceName} (case-insensitive) names a known address space in the
      * program — a physical RAM/CODE space OR an overlay space (overlays carry their own
      * types, e.g. TYPE_OTHER for ".shstrtab"). Used to distinguish a genuinely unknown
