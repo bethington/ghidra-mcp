@@ -4,6 +4,7 @@ import com.xebyte.core.FunctionService;
 import com.xebyte.core.JsonHelper;
 import com.xebyte.core.McpTool;
 import com.xebyte.core.Param;
+import com.xebyte.core.ParamSource;
 import com.xebyte.core.ProgramProvider;
 import com.xebyte.core.Response;
 import com.xebyte.core.ServiceUtils;
@@ -98,15 +99,15 @@ public final class VulnAnalysisService {
                          + "name regex, or Ghidra function tag (SINK_*); use list_vuln_detectors to see the catalog. "
                          + "Set 'detectors' to a comma-separated list of detector ids to limit the scan.")
     public Response detectVulnPatterns(
-            @Param(value = "function", defaultValue = "",
+            @Param(value = "function", source = ParamSource.BODY, defaultValue = "",
                    description = "Function name or entry address. Empty = scan whole program.") String functionRef,
-            @Param(value = "detectors", defaultValue = "",
+            @Param(value = "detectors", source = ParamSource.BODY, defaultValue = "",
                    description = "Comma-separated detector ids (e.g. 'format_string,unbounded_copy'). Empty = all.") String detectorsCsv,
             @Param(value = "program", defaultValue = "",
                    description = "Target program name (omit for active program)") String programName,
-            @Param(value = "write_bookmarks", defaultValue = "false",
+            @Param(value = "write_bookmarks", source = ParamSource.BODY, defaultValue = "false",
                    description = "When true, write a SEVR/<class> bookmark at each finding's address.") boolean writeBookmarks,
-            @Param(value = "max_functions", defaultValue = "0",
+            @Param(value = "max_functions", source = ParamSource.BODY, defaultValue = "0",
                    description = "Cap on functions scanned in whole-program mode (0 = no cap).") int maxFunctions) {
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
