@@ -610,11 +610,21 @@ public final class NamingConventions {
     public static String autoFixFieldPrefix(String fieldName, String typeName) {
         if (fieldName == null || fieldName.isEmpty() || typeName == null) return fieldName;
 
-        // Determine the correct prefix for this type
+        // Determine the correct prefix for this type.
+        // Order matters: check the more-specific pointer shapes first so that
+        // a caller-supplied pp/pfn/a prefix is never degraded to bare 'p'.
         String correctPrefix;
-        boolean isPointer = typeName.contains("*") || typeName.contains("[");
-        if (isPointer) {
-            // Pointer types get 'p' prefix
+        boolean isFnPtr = typeName.contains("(*") || typeName.contains("(__");
+        boolean isArray = typeName.contains("[") && !isFnPtr;
+        int ptrDepth = (int) typeName.chars().filter(ch -> ch == '*').count();
+        boolean isPointer = ptrDepth > 0 || isFnPtr || isArray;
+        if (isFnPtr) {
+            correctPrefix = "pfn";
+        } else if (isArray) {
+            correctPrefix = "a";
+        } else if (ptrDepth >= 2) {
+            correctPrefix = "pp";
+        } else if (ptrDepth == 1) {
             correctPrefix = "p";
         } else {
             correctPrefix = TYPE_TO_PREFIX.get(typeName);
@@ -628,10 +638,32 @@ public final class NamingConventions {
             }
         }
 
-        // Check if the field already has the correct prefix
+        // Early exit: name already starts with the correct prefix followed by uppercase.
+        // This handles prefixes like 'a' that extractHungarianPrefix may not recognize.
+        if (fieldName.startsWith(correctPrefix)
+                && fieldName.length() > correctPrefix.length()
+                && Character.isUpperCase(fieldName.charAt(correctPrefix.length()))) {
+            return fieldName; // Already correct
+        }
+
+        // Check if the field already has the correct prefix (via the extractor)
         String existingPrefix = extractHungarianPrefix(fieldName);
         if (existingPrefix != null && existingPrefix.equals(correctPrefix)) {
             return fieldName; // Already correct
+        }
+
+        // If the caller already supplied a pointer-family prefix that is at least
+        // as specific as what we would derive (e.g. pfnCallback for a function pointer,
+        // ppNext for a double pointer, aItems for an array), keep it unchanged.
+        // We only override when the existing prefix is the generic bare 'p' and the
+        // type warrants something more specific, or when the prefix is genuinely wrong.
+        if (isPointer && existingPrefix != null) {
+            java.util.Set<String> ptrFamily = java.util.Set.of("p", "pp", "pfn", "lp", "ap", "a");
+            if (ptrFamily.contains(existingPrefix) && ptrFamily.contains(correctPrefix)
+                    && !existingPrefix.equals("p")) {
+                // Caller supplied a more-specific pointer-family prefix — don't downgrade it
+                return fieldName;
+            }
         }
 
         // Check if field already starts with a different known prefix — strip it first
