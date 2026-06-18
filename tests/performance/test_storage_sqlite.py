@@ -159,6 +159,46 @@ def test_refresh_candidate_scores_persists_to_sql(sqlite_repo, monkeypatch):
     assert (fetched.get("stagnation_runs") or 0) == 0
 
 
+def test_migrate_runs_idempotent(sqlite_repo, tmp_path, monkeypatch):
+    """H26: re-running the migration must not duplicate runs rows."""
+    import json
+    from sqlalchemy import select, func as sa_func
+    sys.path.insert(0, str(_FUNDOC_DIR / "scripts"))
+    import migrate_state_to_sql as mig
+
+    # Minimal state.json + runs.jsonl with one entry.
+    state_json = tmp_path / "state.json"
+    state_json.write_text(json.dumps({
+        "functions": {"/p/Foo.exe::00401000": {
+            "program": "/p/Foo.exe", "address": "00401000", "name": "FUN_00401000"
+        }}
+    }))
+    runs_jsonl = tmp_path / "runs.jsonl"
+    runs_jsonl.write_text(json.dumps({
+        "program": "/p/Foo.exe", "address": "00401000",
+        "timestamp": "2026-01-01T00:00:00", "provider": "p", "model": "m",
+        "result": "completed",
+    }) + "\n")
+
+    repo, _db_path = sqlite_repo
+    monkeypatch.setattr(mig, "engine", repo._engine, raising=False)
+    monkeypatch.setattr(mig, "repo", repo, raising=False)
+
+    mig.migrate(state_path=state_json, runs_path=runs_jsonl, truncate_runs=False)
+    n1 = repo.count_runs()
+    assert n1 == 1
+
+    # Second run without --truncate-runs must refuse, not duplicate.
+    import pytest as _pytest
+    with _pytest.raises(SystemExit):
+        mig.migrate(state_path=state_json, runs_path=runs_jsonl, truncate_runs=False)
+    assert repo.count_runs() == 1
+
+    # With --truncate-runs, second run replaces (count stays 1).
+    mig.migrate(state_path=state_json, runs_path=runs_jsonl, truncate_runs=True)
+    assert repo.count_runs() == 1
+
+
 def test_selector_blacklist_flags_round_trip(sqlite_repo):
     """H22: recovery_pass_done / decompile_timeout / not_a_function must
     survive _state_func_to_row → repo → _row_to_state_func, otherwise the
