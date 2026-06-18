@@ -55,6 +55,14 @@ def fast_watchdog_env(monkeypatch, tmp_path):
     if str(FUN_DOC_DIR) not in sys.path:
         sys.path.insert(0, str(FUN_DOC_DIR))
 
+    # Isolate from the real state.db / Postgres: force the legacy in-memory
+    # path so reloading web doesn't try to materialize the live SQL backend.
+    monkeypatch.setenv("FUN_DOC_DB_URL", f"sqlite:///{tmp_path}/test_state.db")
+    import fun_doc
+    monkeypatch.setattr(fun_doc, "_storage_repo", None, raising=False)
+    monkeypatch.setattr(fun_doc, "_storage_repo_failed", True, raising=False)
+    monkeypatch.setattr(fun_doc, "STATE_FILE", tmp_path / "state.json", raising=False)
+
     # Redirect events.jsonl for this test run by patching event_log's
     # module-level constant. This is safer than touching the real file.
     import event_log
