@@ -26,6 +26,8 @@ import ghidra.util.Msg;
 import ghidra.util.task.ConsoleTaskMonitor;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.swing.SwingUtilities;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -40,6 +42,10 @@ import java.util.concurrent.atomic.AtomicReference;
 public class FunctionService {
 
     private static final int DECOMPILE_TIMEOUT_SECONDS = 60;  // Increased from 30s to 60s for large functions
+
+    /** Matches any of the five Windows calling-convention keywords. */
+    private static final Pattern CALLING_CONV_PATTERN = Pattern.compile(
+            "\\b(__cdecl|__stdcall|__thiscall|__fastcall|__vectorcall)\\b");
 
     // Shorter cap for the no-retry scoring/analysis path. Keeps EDT-holding
     // decompiles under Ghidra's 20-second Swing deadlock threshold so internal
@@ -943,6 +949,39 @@ public class FunctionService {
     // ========================================================================
 
     /**
+     * Extract the function-level calling convention (the token between the return type and
+     * the function name) from a C prototype string.
+     *
+     * <p>Only the substring <em>before</em> the first {@code '('} is scanned so that
+     * conventions embedded inside callback parameter types — e.g. the {@code __cdecl} in
+     * {@code int __stdcall Foo(void (__cdecl *cb)(int))} — are left intact in the cleaned
+     * prototype.
+     *
+     * @param prototype the raw C prototype string (may be empty or {@code null}-safe)
+     * @return a two-element array {@code {convention, cleanedPrototype}} where
+     *         {@code convention} is the matched keyword or {@code ""} if none was found,
+     *         and {@code cleanedPrototype} has that single occurrence removed and whitespace
+     *         normalised.
+     */
+    public static String[] extractCallingConvention(String prototype) {
+        if (prototype == null || prototype.isEmpty()) {
+            return new String[]{"", prototype == null ? "" : prototype};
+        }
+        // Only look at the part before the first '(' so callback-param conventions survive.
+        int paren = prototype.indexOf('(');
+        String head = paren >= 0 ? prototype.substring(0, paren) : prototype;
+        Matcher m = CALLING_CONV_PATTERN.matcher(head);
+        if (!m.find()) {
+            return new String[]{"", prototype};
+        }
+        String cc = m.group(1);
+        // Remove only this single occurrence from the head; leave the parameter list alone.
+        String cleanedHead = head.substring(0, m.start()) + head.substring(m.end());
+        String cleaned = paren >= 0 ? cleanedHead + prototype.substring(paren) : cleanedHead;
+        return new String[]{cc, cleaned.replaceAll("\\s+", " ").trim()};
+    }
+
+    /**
      * Set a function's prototype with proper error handling using ApplyFunctionSignatureCmd.
      */
     public PrototypeResult setFunctionPrototype(String functionAddrStr, String prototype) {
@@ -971,20 +1010,15 @@ public class FunctionService {
             return new PrototypeResult(false, "Function prototype is required");
         }
 
-        // v3.0.1: Extract inline calling convention from prototype string if present
+        // v3.0.1 / v5.13.x: Extract inline calling convention from prototype string if present.
         // Handles cases like "void __cdecl MyFunc(int x)" -> prototype="void MyFunc(int x)", cc="__cdecl"
-        String cleanPrototype = prototype;
-        String resolvedConvention = callingConvention;
-        String[] knownConventions = {"__cdecl", "__stdcall", "__thiscall", "__fastcall", "__vectorcall"};
-        for (String cc : knownConventions) {
-            if (cleanPrototype.contains(cc)) {
-                cleanPrototype = cleanPrototype.replace(cc, "").replaceAll("\\s+", " ").trim();
-                if (resolvedConvention == null || resolvedConvention.isEmpty()) {
-                    resolvedConvention = cc;
-                }
-                Msg.info(this, "Extracted calling convention '" + cc + "' from prototype string");
-                break;
-            }
+        // The helper only scans before the first '(' so conventions inside callback param types survive.
+        String[] ccResult = extractCallingConvention(prototype);
+        String cleanPrototype = ccResult[1];
+        String resolvedConvention = (callingConvention != null && !callingConvention.isEmpty())
+                ? callingConvention : ccResult[0];
+        if (!ccResult[0].isEmpty()) {
+            Msg.info(this, "Extracted calling convention '" + ccResult[0] + "' from prototype string");
         }
         final String finalPrototype = cleanPrototype;
         final String finalConvention = resolvedConvention;
