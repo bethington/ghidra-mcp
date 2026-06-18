@@ -114,31 +114,51 @@ def _read_events(path):
 
 
 def test_watchdog_emits_periodic_heartbeats(fast_watchdog_env):
-    """The watchdog must emit a heartbeat for every live worker each tick."""
+    """The watchdog must emit a heartbeat for every live worker each tick.
+
+    After the H25 fix the worker loop — not the watchdog — writes
+    last_heartbeat_at.  We simulate that here with a background thread
+    that advances the field every 0.4s (faster than the 1s watchdog
+    cadence), keeping stale_sec well below the 2s kill threshold so the
+    watchdog only emits heartbeat events and never fires a kill.
+    """
     web, test_log = fast_watchdog_env
     mgr, bus, _ = _make_mgr(web)
+    stop_sim = threading.Event()
     try:
         now_iso = datetime.now().isoformat()
+        worker_dict = {
+            "id": "test-hb",
+            "provider": "mock",
+            "count": 1,
+            "continuous": False,
+            "model": None,
+            "binary": None,
+            "thread": None,
+            "stop_flag": threading.Event(),
+            "started_at": now_iso,
+            "status": "running",
+            "timeout_count": 0,
+            "last_alert": None,
+            "phase": "process_function",
+            "phase_since": now_iso,
+            "stall_kill_fired": False,
+            "last_heartbeat_at": now_iso,
+            "progress": {"completed": 0, "skipped": 0, "failed": 0, "current": None},
+        }
         with mgr._lock:
-            mgr._workers["test-hb"] = {
-                "id": "test-hb",
-                "provider": "mock",
-                "count": 1,
-                "continuous": False,
-                "model": None,
-                "binary": None,
-                "thread": None,
-                "stop_flag": threading.Event(),
-                "started_at": now_iso,
-                "status": "running",
-                "timeout_count": 0,
-                "last_alert": None,
-                "phase": "process_function",
-                "phase_since": now_iso,
-                "stall_kill_fired": False,
-                "last_heartbeat_at": now_iso,
-                "progress": {"completed": 0, "skipped": 0, "failed": 0, "current": None},
-            }
+            mgr._workers["test-hb"] = worker_dict
+
+        # Simulate the worker loop: update last_heartbeat_at every 0.4s
+        # so stale_sec stays below the 2s kill threshold (H25: only the
+        # worker loop may write this field — the watchdog only reads it).
+        def _sim_worker_loop():
+            while not stop_sim.wait(0.4):
+                with mgr._lock:
+                    worker_dict["last_heartbeat_at"] = datetime.now().isoformat()
+
+        sim_thread = threading.Thread(target=_sim_worker_loop, daemon=True)
+        sim_thread.start()
 
         # Wait long enough for at least 2 heartbeat cycles at 1s cadence.
         time.sleep(2.6)
@@ -159,6 +179,7 @@ def test_watchdog_emits_periodic_heartbeats(fast_watchdog_env):
             assert hb["status"] == "running"
             assert "stale_sec" in hb
     finally:
+        stop_sim.set()
         mgr._watchdog_stop.set()
 
 
@@ -312,3 +333,56 @@ def test_subprocess_registry_tracks_and_kills(monkeypatch):
     # No-op safety: unknown worker id returns 0.
     assert fun_doc.kill_worker_subprocesses("never-registered") == 0
     assert fun_doc.kill_worker_subprocesses(None) == 0
+
+
+def test_watchdog_does_not_self_heartbeat(fast_watchdog_env):
+    """H25: the watchdog must OBSERVE last_heartbeat_at, not write it.
+    Before the fix, the watchdog reset last_heartbeat_at = now on every
+    non-kill tick, keeping stale_sec permanently ≈ HEARTBEAT_INTERVAL_SEC
+    so the kill threshold was unreachable for any initially-healthy worker.
+
+    This test seeds a worker with a fresh heartbeat (not pre-stale) so
+    the watchdog must tick ≥2× before the threshold is crossed. With the
+    bug, each tick resets the clock, so the kill never fires. After the
+    fix, only the worker loop may write last_heartbeat_at, so the clock
+    advances and the kill fires once stale_sec > STALL_KILL_THRESHOLD_SEC.
+    """
+    web, _log = fast_watchdog_env
+    mgr, _, _ = _make_mgr(web)
+    # Fresh heartbeat — the worker is healthy right now. With the bug the
+    # watchdog resets this on every tick so it never goes stale enough
+    # (threshold=2s, interval=1s → stale_sec stays ≈1s forever).
+    seed = datetime.now().isoformat()
+    worker = {
+        "id": "w-test",
+        "provider": "test",
+        "count": 1,
+        "continuous": False,
+        "model": None,
+        "binary": None,
+        "thread": None,
+        "stop_flag": threading.Event(),
+        "started_at": seed,
+        "status": "running",
+        "timeout_count": 0,
+        "last_alert": None,
+        "phase": "process_function",
+        "phase_since": seed,
+        "stall_kill_fired": False,
+        "last_heartbeat_at": seed,
+        "progress": {"completed": 0, "skipped": 0, "failed": 0, "current": None},
+    }
+    with mgr._lock:
+        mgr._workers["w-test"] = worker
+    # Sleep 4.5s — well past the 2s threshold. With the bug, stale_sec
+    # stays at ≈1s (reset each tick) and the kill never fires. After the
+    # fix, stale_sec grows to >2s and the kill fires after the second tick.
+    time.sleep(4.5)
+    # The watchdog must NOT have advanced the heartbeat — only the worker
+    # loop is allowed to. With STALL_KILL_THRESHOLD_SEC=2 and a heartbeat
+    # frozen at seed, the kill MUST have fired well before now.
+    assert worker.get("stall_kill_fired") is True, (
+        "watchdog never fired — it is still self-heartbeating "
+        f"(last_heartbeat_at={worker.get('last_heartbeat_at')!r}, seed={seed!r})"
+    )
+    mgr._watchdog_stop.set()
