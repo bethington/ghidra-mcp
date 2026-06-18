@@ -441,12 +441,20 @@ public class GhidraServerManager {
             if (item == null) {
                 return "{\"error\": \"File not found in repository: " + escapeJson(filePath) + "\"}";
             }
-            // Note: actual checkin is performed via DomainFile.checkin() on the client side.
-            // Repository adapter does not expose a direct checkin() method.
-            // Return advisory message instead.
-            if (item == null) return "{\"error\": \"Item check was null\"}"; // suppress lint
-            return "{\"status\": \"checked_in\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"path\": \"" + escapeJson(filePath) + "\", \"keep_checked_out\": " + keepCheckedOut + "}";
+            // RepositoryAdapter does not expose a direct checkin(); the
+            // operation must go through DomainFile.checkin() on an open
+            // project. Returning a success status here would mislead an
+            // automated caller into believing the checkin happened —
+            // edits would remain un-checked-in and (per the shared-server
+            // persistence model) silently lost. Return an explicit error
+            // so the caller knows to use the project-level path instead.
+            return "{\"error\": \"checkin not supported via repository adapter\"" +
+                   ", \"status\": \"not_implemented\"" +
+                   ", \"repository\": \"" + escapeJson(repoName) + "\"" +
+                   ", \"path\": \"" + escapeJson(filePath) + "\"" +
+                   ", \"item_exists\": " + (item != null) +
+                   ", \"hint\": \"open the project and use DomainFile.checkin() — " +
+                   "in this server: /open_project then /save_program then checkin via the project file\"}";
         } catch (Exception e) {
             lastError = e.getMessage();
             return "{\"error\": \"Checkin failed: " + escapeJson(e.getMessage()) + "\"}";
@@ -472,11 +480,19 @@ public class GhidraServerManager {
             int lastSlash = filePath.lastIndexOf('/');
             String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
             String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
-            // undoCheckout is performed via DomainFile on the client side
-            // Return advisory - the checkout record can be terminated via terminateCheckout
-            if (repo == null) return "{\"error\": \"Repo not found\"}"; // suppress lint
-            return "{\"status\": \"checkout_undone\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"path\": \"" + escapeJson(filePath) + "\"}";
+            // RepositoryAdapter does not expose undoCheckout; the operation
+            // must go through DomainFile.undoCheckout() on an open project
+            // (or terminateCheckout for an admin force-undo). Returning a
+            // success status here would leave the checkout live on the
+            // server while the caller believes it was undone.
+            return "{\"error\": \"undoCheckout not supported via repository adapter\"" +
+                   ", \"status\": \"not_implemented\"" +
+                   ", \"repository\": \"" + escapeJson(repoName) + "\"" +
+                   ", \"path\": \"" + escapeJson(filePath) + "\"" +
+                   ", \"parent\": \"" + escapeJson(parentPath) + "\"" +
+                   ", \"file\": \"" + escapeJson(fileName) + "\"" +
+                   ", \"hint\": \"open the project and use DomainFile.undoCheckout(), " +
+                   "or use /server/admin/terminate_checkout for an admin force-undo\"}";
         } catch (Exception e) {
             lastError = e.getMessage();
             return "{\"error\": \"Undo checkout failed: " + escapeJson(e.getMessage()) + "\"}";
