@@ -4,10 +4,18 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## v5.14.0 - 2026-06-14 (minor: reference write tools, tool discovery, version-compat + overlay fixes)
+## v5.14.0 - 2026-06-14 (minor: Ghidra 12.1.2 retarget, reference write tools, tool discovery, version-compat + overlay fixes)
 
-Minor release. Bundles two community PRs (#299, #297) plus tool-discovery and
-setup fixes responding to maintainer-feedback issues (#267, #153, #293).
+Minor release. Retargets the extension at **Ghidra 12.1.2** (latest), bundles two
+community PRs (#299, #297), and adds tool-discovery plus setup fixes responding to
+maintainer-feedback issues (#267, #153, #293).
+
+### Changed
+
+- **Retargeted to Ghidra 12.1.2** (#296): bumped `ghidra.version` 12.1 → 12.1.2 so the
+  built extension's `extension.properties` declares 12.1.2 and loads in the latest Ghidra
+  (Ghidra enforces an exact extension-version gate at load time). Rebuilt + offline Java
+  suite re-run against the 12.1.2 jars. README badge, docs, and install-path examples updated.
 
 ### Added
 

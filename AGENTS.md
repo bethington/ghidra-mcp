@@ -39,6 +39,6 @@ You are a coding agent working on **ghidra-mcp**, a Model Context Protocol serve
 - Build: `mvn clean package assembly:single -DskipTests`
 - Quick compile: `mvn clean compile -q`
 - Test (Python): `pytest tests/unit/ -v --no-cov`
-- Preflight: `python -m tools.setup preflight --ghidra-path F:\ghidra_12.1_PUBLIC`
-- Deploy: `python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.1_PUBLIC` then `python -m tools.setup build` then `python -m tools.setup deploy --ghidra-path F:\ghidra_12.1_PUBLIC`
+- Preflight: `python -m tools.setup preflight --ghidra-path F:\ghidra_12.1.2_PUBLIC`
+- Deploy: `python -m tools.setup ensure-prereqs --ghidra-path F:\ghidra_12.1.2_PUBLIC` then `python -m tools.setup build` then `python -m tools.setup deploy --ghidra-path F:\ghidra_12.1.2_PUBLIC`
 - Version bump: `python -m tools.setup bump-version --new X.Y.Z`
