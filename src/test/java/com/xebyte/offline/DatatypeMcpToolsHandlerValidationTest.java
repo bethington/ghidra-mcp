@@ -4,13 +4,6 @@ import com.xebyte.core.DataTypeService;
 import com.xebyte.core.FunctionService;
 import com.xebyte.core.Response;
 import com.xebyte.core.ThreadingStrategy;
-import ghidra.program.model.data.FunctionDefinitionDataType;
-import ghidra.program.model.data.IntegerDataType;
-import ghidra.program.model.data.ParameterDefinition;
-import ghidra.program.model.data.ParameterDefinitionImpl;
-import ghidra.program.model.data.Pointer;
-import java.util.ArrayList;
-import java.util.List;
 import junit.framework.TestCase;
 
 /**
@@ -101,67 +94,20 @@ public class DatatypeMcpToolsHandlerValidationTest extends TestCase {
         assertTrue(((Response.Err) r).message().contains("concrete struct/class pointer"));
     }
 
-    /**
-     * H05: createFunctionSignature accumulates all parameters.
-     * The old code called funcDef.setArguments({singleParam}) inside the loop,
-     * replacing the list on each iteration so only the last param survived.
-     * The fix accumulates into a List and calls setArguments once after the loop.
-     * This standalone test proves the GREEN target shape for the accumulation logic.
-     */
-    public void testCreateFunctionSignatureKeepsAllParameters() {
-        FunctionDefinitionDataType fd = new FunctionDefinitionDataType("Sig");
-        // Simulate the fixed loop body: accumulate, then set once
-        List<ParameterDefinition> params = new ArrayList<>();
-        params.add(new ParameterDefinitionImpl("a", IntegerDataType.dataType, ""));
-        params.add(new ParameterDefinitionImpl("b", IntegerDataType.dataType, ""));
-        fd.setArguments(params.toArray(new ParameterDefinition[0]));
-        assertEquals("Expected 2 arguments but got " + fd.getArguments().length,
-                     2, fd.getArguments().length);
-    }
-
-    /**
-     * H06: create_typedef preserves multi-level pointers.
-     * The old code used baseType.replace("*", "") which stripped ALL asterisks then
-     * wrapped in exactly one PointerDataType — so "int **" produced Pointer(int)
-     * instead of Pointer(Pointer(int)).
-     * The fix delegates to ServiceUtils.resolveDataType which recurses one '*' at a time.
-     *
-     * StandAloneDataTypeManager / BuiltInDataTypeManager both require
-     * Application.initializeApplication() which is unavailable in offline tests.
-     * Instead we test the shape of PointerDataType nesting directly — the same
-     * chain that resolveDataType constructs — to prove Pointer(Pointer(int)) is
-     * representable and distinguishable from the buggy Pointer(int).
-     */
-    public void testResolveDataTypePreservesPointerDepth() {
-        // Construct the correct shape manually (no DTM needed for PointerDataType).
-        // This is the chain resolveDataType("int **") returns after the fix.
-        ghidra.program.model.data.DataType intType = IntegerDataType.dataType;
-        ghidra.program.model.data.PointerDataType pInt   = new ghidra.program.model.data.PointerDataType(intType);
-        ghidra.program.model.data.PointerDataType ppInt  = new ghidra.program.model.data.PointerDataType(pInt);
-
-        // Verify the double-pointer chain shape (Pointer → Pointer → int)
-        assertTrue("ppInt must be a Pointer", ppInt instanceof Pointer);
-        assertTrue("ppInt.getDataType() must be a Pointer", ppInt.getDataType() instanceof Pointer);
-        assertTrue("inner.getDataType() must be IntegerDataType",
-                   ((Pointer) ppInt.getDataType()).getDataType() instanceof IntegerDataType);
-
-        // The buggy path produced Pointer(int) — verify it is NOT equal to Pointer(Pointer(int))
-        assertFalse("Pointer(int) must differ from Pointer(Pointer(int))",
-                    pInt.isEquivalent(ppInt));
-    }
-
-    /**
-     * H06: single pointer "int *" must still resolve to Pointer(int).
-     * Verify the one-level case (regression guard).
-     */
-    public void testResolveDataTypeSinglePointerUnchanged() {
-        ghidra.program.model.data.DataType intType = IntegerDataType.dataType;
-        ghidra.program.model.data.PointerDataType pInt = new ghidra.program.model.data.PointerDataType(intType);
-
-        assertTrue("Pointer(int) must be Pointer", pInt instanceof Pointer);
-        assertTrue("Pointer(int).getDataType() must be IntegerDataType",
-                   ((Pointer) pInt).getDataType() instanceof IntegerDataType);
-    }
+    // Note on H05/H06 test coverage: the production fixes for
+    // create_function_signature (accumulate params, call setArguments once
+    // after the loop) and create_typedef (delegate to
+    // ServiceUtils.resolveDataType for pointer-depth recursion) cannot be
+    // exercised in this offline Maven suite because instantiating Ghidra
+    // DataType classes (IntegerDataType, FunctionDefinitionDataType,
+    // PointerDataType) class-inits SettingsImpl which transitively pulls
+    // commons-lang3, javax.help, and further bundled JARs that the Maven
+    // offline classpath intentionally does not include. Earlier proxy tests
+    // that constructed these types standalone were removed after CI showed
+    // the unbounded transitive chain; they tested Ghidra's API contract
+    // rather than the endpoint fix anyway. The endpoint-path test below
+    // (testCreateFunctionSignatureRequiresProgram) and the integration suite
+    // (tests/integration/test_safe_write_endpoints.py) provide coverage.
 
     /**
      * H05: createFunctionSignature endpoint with stub provider returns
