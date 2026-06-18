@@ -1109,12 +1109,10 @@ public class DataTypeService {
 
                             String[] parts = paramPair.split(":");
                             if (parts.length >= 2) {
-                                String paramName = parts[0].replace("\"", "").trim();
                                 String paramType = parts[1].replace("\"", "").trim();
                                 DataType paramDataType = ServiceUtils.resolveDataType(dtm, paramType);
                                 if (paramDataType != null) {
-                                    params.add(new ParameterDefinitionImpl(
-                                        paramName.isEmpty() ? null : paramName, paramDataType, null));
+                                    params.add(new ParameterDefinitionImpl(null, paramDataType, null));
                                 }
                             }
                         }
