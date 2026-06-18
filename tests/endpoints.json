@@ -17,7 +17,8 @@
     "server": "Server connection and version control",
     "script": "Script execution",
     "utility": "Utility endpoints",
-    "emulation": "P-code emulation (run functions with controlled inputs)"
+    "emulation": "P-code emulation (run functions with controlled inputs)",
+    "security": "Vulnerability pattern detection and attack-surface enumeration (PCode-based)"
   },
   "endpoints": [
     {
