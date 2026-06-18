@@ -53,7 +53,7 @@ public class VulnAnalysisServiceTest {
         when(empty.hasNext()).thenReturn(false);
         when(fm.getFunctions(true)).thenReturn(empty);
 
-        Response r = svc(p).detectVulnPatterns("", "", "", false, 0);
+        Response r = svc(p).detectVulnPatterns("", "", "", false, 0, "", 0);
         assertTrue(r instanceof Response.Ok);
         Map<String, Object> body = (Map<String, Object>) ((Response.Ok) r).data();
         assertEquals(0, ((List<?>) body.get("findings")).size());
@@ -73,7 +73,7 @@ public class VulnAnalysisServiceTest {
         when(empty.hasNext()).thenReturn(false);
         when(fm.getFunctions(true)).thenReturn(empty);
 
-        Response r = svc(p).detectVulnPatterns("", "format_string,unbounded_copy", "", false, 0);
+        Response r = svc(p).detectVulnPatterns("", "format_string,unbounded_copy", "", false, 0, "", 0);
         Map<String, Object> body = (Map<String, Object>) ((Response.Ok) r).data();
         List<?> ran = (List<?>) body.get("detectors_run");
         assertEquals(2, ran.size());
@@ -87,7 +87,7 @@ public class VulnAnalysisServiceTest {
         Program p = mock(Program.class);
         FunctionManager fm = mock(FunctionManager.class);
         when(p.getFunctionManager()).thenReturn(fm);
-        Response r = svc(p).detectVulnPatterns("", "fmt_string", "", false, 0);
+        Response r = svc(p).detectVulnPatterns("", "fmt_string", "", false, 0, "", 0);
         assertFalse("unknown detector id should NOT return Ok", r instanceof Response.Ok);
         assertTrue("expected Response.Err for unknown detector id", r instanceof Response.Err);
         String msg = ((Response.Err) r).message();
@@ -265,5 +265,67 @@ public class VulnAnalysisServiceTest {
         assertEquals(Integer.valueOf(1), hops.get("A"));
         assertEquals(Integer.valueOf(1), hops.get("B")); // shortest path wins
         assertEquals(2, ((Number) body.get("max_depth")).intValue()); // not clamped (≤8)
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void detectVulnPatterns_scopeAttackSurface_scansOnlySurfaceFunctions() {
+        // Reuse the recv ← A ← B graph from enumerateAttackSurface_twoHopAndCycle.
+        // With scope="attack_surface" max_depth=2, only A and B should be scanned
+        // (recv is the source, depth 0). The mock FunctionService returns null →
+        // both count as decompile_failures, proving they were attempted.
+        // (Building a real HighFunction chain is out of scope for an offline test.)
+        Program p = mock(Program.class);
+        FunctionManager fm = mock(FunctionManager.class);
+        when(p.getFunctionManager()).thenReturn(fm);
+        ghidra.program.model.symbol.ReferenceManager rm =
+            mock(ghidra.program.model.symbol.ReferenceManager.class);
+        when(p.getReferenceManager()).thenReturn(rm);
+        ghidra.program.model.address.AddressFactory af =
+            mock(ghidra.program.model.address.AddressFactory.class);
+        when(af.getAddressSpaces()).thenReturn(new ghidra.program.model.address.AddressSpace[0]);
+        when(p.getAddressFactory()).thenReturn(af);
+        ghidra.program.model.address.AddressSpace ram =
+            mock(ghidra.program.model.address.AddressSpace.class);
+        when(ram.isOverlaySpace()).thenReturn(false);
+
+        ghidra.program.model.address.Address recvE = mock(ghidra.program.model.address.Address.class);
+        ghidra.program.model.address.Address aE = mock(ghidra.program.model.address.Address.class);
+        ghidra.program.model.address.Address bE = mock(ghidra.program.model.address.Address.class);
+        Function recv = fn("MyRecv", recvE, ram);
+        Function A = fn("A", aE, ram);
+        Function B = fn("B", bE, ram);
+        ghidra.program.model.listing.FunctionTag tag = mock(ghidra.program.model.listing.FunctionTag.class);
+        when(tag.getName()).thenReturn("SOURCE_NETWORK");
+        when(recv.getTags()).thenReturn(java.util.Set.of(tag));
+
+        FunctionIterator fit = mock(FunctionIterator.class);
+        when(fit.hasNext()).thenReturn(true, false);
+        when(fit.next()).thenReturn(recv);
+        // collectAttackSurfaceFunctions iterates getFunctions(true) once;
+        // detectVulnPatterns(scope=attack_surface) does NOT iterate it again.
+        when(fm.getFunctions(true)).thenAnswer(inv -> {
+            FunctionIterator i = mock(FunctionIterator.class);
+            when(i.hasNext()).thenReturn(true, false);
+            when(i.next()).thenReturn(recv);
+            return i;
+        });
+
+        ghidra.program.model.address.Address fromA = mock(ghidra.program.model.address.Address.class);
+        when(fm.getFunctionContaining(fromA)).thenReturn(A);
+        when(rm.getReferencesTo(recvE)).thenAnswer(inv -> refIterOf(callRef(fromA)));
+        ghidra.program.model.address.Address fromB = mock(ghidra.program.model.address.Address.class);
+        when(fm.getFunctionContaining(fromB)).thenReturn(B);
+        when(rm.getReferencesTo(aE)).thenAnswer(inv -> refIterOf(callRef(fromB)));
+        when(rm.getReferencesTo(bE)).thenAnswer(inv -> refIterOf());
+
+        Response r = svc(p).detectVulnPatterns("", "", "", false, 0, "attack_surface", 2);
+        Map<String,Object> body = (Map<String,Object>) ((Response.Ok) r).data();
+        assertEquals("attack_surface", body.get("scope"));
+        assertEquals(2, ((Number) body.get("attack_surface_function_count")).intValue());
+        // Both A and B were scanned; FunctionService mock returns null → both
+        // count as decompile failures.
+        assertEquals(2, ((Number) body.get("scanned_functions")).intValue());
+        assertEquals(2, ((Number) body.get("decompile_failures")).intValue());
     }
 }

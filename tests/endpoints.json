@@ -930,7 +930,9 @@
         "detectors",
         "program",
         "write_bookmarks",
-        "max_functions"
+        "max_functions",
+        "scope",
+        "max_depth"
       ],
       "description": "Scan for intra-function vulnerability patterns (format-string, unbounded-copy, integer-overflow-into-alloc, command-injection) using PCode; optionally writes SEVR/<class> bookmarks"
     },

@@ -13,6 +13,7 @@ import com.xebyte.core.vuln.detectors.CommandInjectionDetector;
 import com.xebyte.core.vuln.detectors.FormatStringDetector;
 import com.xebyte.core.vuln.detectors.IntegerOverflowAllocDetector;
 import com.xebyte.core.vuln.detectors.UnboundedCopyDetector;
+import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Bookmark;
@@ -28,9 +29,11 @@ import ghidra.program.model.pcode.PcodeOpAST;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceManager;
+import ghidra.util.task.TaskMonitor;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -108,7 +111,13 @@ public final class VulnAnalysisService {
             @Param(value = "write_bookmarks", source = ParamSource.BODY, defaultValue = "false",
                    description = "When true, write a SEVR/<class> bookmark at each finding's address.") boolean writeBookmarks,
             @Param(value = "max_functions", source = ParamSource.BODY, defaultValue = "0",
-                   description = "Cap on functions scanned in whole-program mode (0 = no cap).") int maxFunctions) {
+                   description = "Cap on functions scanned in whole-program mode (0 = no cap).") int maxFunctions,
+            @Param(value = "scope", source = ParamSource.BODY, defaultValue = "",
+                   description = "'' (default) = whole program / single function. "
+                               + "'attack_surface' = scan only functions reachable (callers-of) "
+                               + "within max_depth hops of any catalog SOURCE.") String scope,
+            @Param(value = "max_depth", source = ParamSource.BODY, defaultValue = "3",
+                   description = "BFS depth for scope=attack_surface (clamped to [0,8]).") int maxDepth) {
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -118,6 +127,7 @@ public final class VulnAnalysisService {
         // "optional → null when absent" (see resolveBodyParam). Normalize here.
         if (functionRef == null)  functionRef = "";
         if (detectorsCsv == null) detectorsCsv = "";
+        if (scope == null)        scope = "";
 
         Set<String> wanted = new LinkedHashSet<>();
         for (String s : detectorsCsv.split(",")) {
@@ -125,9 +135,8 @@ public final class VulnAnalysisService {
             if (!s.isEmpty()) wanted.add(s);
         }
         List<VulnDetector> active = new ArrayList<>();
-        for (VulnDetector d : detectors) {
-            if (wanted.isEmpty() || wanted.contains(d.id())) active.add(d);
-        }
+        for (VulnDetector d : detectors) if (wanted.isEmpty() || wanted.contains(d.id())) active.add(d);
+
         if (!wanted.isEmpty()) {
             Set<String> known = new HashSet<>();
             for (VulnDetector d : detectors) known.add(d.id());
@@ -140,30 +149,49 @@ public final class VulnAnalysisService {
         }
 
         List<Finding> findings = new ArrayList<>();
-        int scanned = 0;
-        int decompFail = 0;
-        int totalSites = 0;
+        int scanned = 0, decompFail = 0, totalSites = 0;
+        Integer surfaceCount = null;
 
         if (!functionRef.isBlank()) {
+            // Single function — keep the simple no-retry helper.
             Function f = ServiceUtils.resolveFunction(program, functionRef);
             if (f == null) return Response.err("Function not found: " + functionRef);
-            ScanResult r = scanFunction(program, f, active);
-            findings.addAll(r.findings);
-            scanned = 1;
-            decompFail = r.decompFailed ? 1 : 0;
-            totalSites += r.siteCount;
+            ScanResult r = scanFunction(program, f, active, null);
+            findings.addAll(r.findings); scanned = 1;
+            decompFail = r.decompFailed ? 1 : 0; totalSites = r.siteCount;
         } else {
-            // TODO(perf): reuse one DecompInterface across the loop instead of spawning per function via decompileFunctionNoRetry.
-            FunctionIterator it = program.getFunctionManager().getFunctions(true);
-            while (it.hasNext()) {
-                if (maxFunctions > 0 && scanned >= maxFunctions) break;
-                Function f = it.next();
-                if (f.isExternal() || f.isThunk()) continue;
-                ScanResult r = scanFunction(program, f, active);
-                findings.addAll(r.findings);
-                if (r.decompFailed) decompFail++;
-                totalSites += r.siteCount;
-                scanned++;
+            // Multi-function: choose target set, then share one DecompInterface.
+            Collection<Function> targets;
+            if ("attack_surface".equalsIgnoreCase(scope)) {
+                int depth = Math.max(0, Math.min(maxDepth, 8));
+                Set<Function> surface = collectAttackSurfaceFunctions(program, depth);
+                surfaceCount = surface.size();
+                targets = surface;
+            } else {
+                List<Function> all = new ArrayList<>();
+                FunctionIterator it = program.getFunctionManager().getFunctions(true);
+                while (it.hasNext()) {
+                    Function f = it.next();
+                    if (f.isExternal() || f.isThunk()) continue;
+                    all.add(f);
+                    if (maxFunctions > 0 && all.size() >= maxFunctions) break;
+                }
+                targets = all;
+            }
+
+            DecompInterface decomp = openDecompiler(program);
+            try {
+                for (Function f : targets) {
+                    if (f.isExternal() || f.isThunk()) continue;
+                    ScanResult r = scanFunction(program, f, active, decomp);
+                    findings.addAll(r.findings);
+                    if (r.decompFailed) decompFail++;
+                    totalSites += r.siteCount;
+                    scanned++;
+                    if (maxFunctions > 0 && scanned >= maxFunctions) break;
+                }
+            } finally {
+                if (decomp != null) try { decomp.dispose(); } catch (Exception ignored) {}
             }
         }
 
@@ -183,6 +211,10 @@ public final class VulnAnalysisService {
         out.put("decompile_failures", decompFail);
         out.put("detectors_run",      ran);
         out.put("catalog_status",     catalog.status() == null ? "ok" : catalog.status());
+        if (surfaceCount != null) {
+            out.put("scope", "attack_surface");
+            out.put("attack_surface_function_count", surfaceCount);
+        }
         if (scanned > 0 && totalSites == 0) {
             out.put("note", "no catalog sinks resolved — consider tagging functions with SINK_* "
                           + "(e.g. SINK_COPY_SIZED, SINK_FORMAT, SINK_EXEC, SINK_ALLOC) or check "
@@ -318,8 +350,31 @@ public final class VulnAnalysisService {
 
     private record ScanResult(List<Finding> findings, boolean decompFailed, int siteCount) {}
 
-    private ScanResult scanFunction(Program program, Function f, List<VulnDetector> active) {
-        DecompileResults dr = functionService.decompileFunctionNoRetry(f, program);
+    private DecompInterface openDecompiler(Program program) {
+        try {
+            DecompInterface d = new DecompInterface();
+            d.openProgram(program);
+            d.setSimplificationStyle("decompile");
+            return d;
+        } catch (Exception e) {
+            return null; // Fall back to per-call decompileFunctionNoRetry.
+        }
+    }
+
+    private static final int DECOMP_TIMEOUT_SECONDS = 12;
+
+    private ScanResult scanFunction(Program program, Function f,
+            List<VulnDetector> active, DecompInterface sharedDecomp) {
+        DecompileResults dr;
+        if (sharedDecomp != null) {
+            try {
+                dr = sharedDecomp.decompileFunction(f, DECOMP_TIMEOUT_SECONDS, TaskMonitor.DUMMY);
+            } catch (Exception e) {
+                dr = null;
+            }
+        } else {
+            dr = functionService.decompileFunctionNoRetry(f, program);
+        }
         if (dr == null || !dr.decompileCompleted() || dr.getHighFunction() == null) {
             return new ScanResult(List.of(), true, 0);
         }
