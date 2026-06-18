@@ -760,16 +760,49 @@ public class GhidraServerManager {
             if (repo == null) {
                 return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
             }
-            // Find user and set access level - create/update user entry
-            repo.setUserList(new User[]{
-                new User(userName, accessLevel)
-            }, false);
+            // setUserList REPLACES the repository ACL wholesale — passing a
+            // single-element array would silently strip every other user
+            // (including admins) from the repo. Fetch the existing list,
+            // merge/replace the one entry, and preserve the current
+            // anonymous-access flag.
+            User[] existing = repo.getUserList();
+            boolean anon = repo.anonymousAccessAllowed();
+            User[] merged = mergeUserPermission(existing, userName, accessLevel);
+            repo.setUserList(merged, anon);
             return "{\"status\": \"permissions_set\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"user\": \"" + escapeJson(userName) + "\", \"access_level\": " + accessLevel + "}";
+                   "\", \"user\": \"" + escapeJson(userName) + "\", \"access_level\": " + accessLevel +
+                   ", \"total_users\": " + merged.length +
+                   ", \"anonymous_access\": " + anon + "}";
         } catch (Exception e) {
             lastError = e.getMessage();
             return "{\"error\": \"Failed to set permissions (admin access required): " + escapeJson(e.getMessage()) + "\"}";
         }
+    }
+
+    /**
+     * Merge a single user's permission into an existing ACL array.
+     * <p>
+     * If a user with {@code userName} already exists, that entry is replaced
+     * with the new access level and all other entries are preserved in their
+     * original order. If no such user exists, a new entry is appended.
+     * Returns a fresh array; the input is not mutated.
+     */
+    public static User[] mergeUserPermission(User[] existing, String userName, int accessLevel) {
+        User updated = new User(userName, accessLevel);
+        if (existing == null || existing.length == 0) {
+            return new User[]{ updated };
+        }
+        for (int i = 0; i < existing.length; i++) {
+            if (existing[i] != null && userName.equals(existing[i].getName())) {
+                User[] out = existing.clone();
+                out[i] = updated;
+                return out;
+            }
+        }
+        User[] out = new User[existing.length + 1];
+        System.arraycopy(existing, 0, out, 0, existing.length);
+        out[existing.length] = updated;
+        return out;
     }
 
     public boolean isConnected() {
