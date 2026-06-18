@@ -63,6 +63,10 @@ DEFAULT_BENCHMARK_FOLDER = "/testing/benchmark"
 DEFAULT_BENCHMARK_PROGRAM = f"{DEFAULT_BENCHMARK_FOLDER}/Benchmark.dll"
 DEFAULT_BENCHMARK_DEBUG_PROGRAM = f"{DEFAULT_BENCHMARK_FOLDER}/BenchmarkDebug.exe"
 DEFAULT_BENCHMARK_FUNCTION = "calc_crc16"
+# Max seconds to wait for post-import benchmark analysis to settle before the
+# YAML regression asserts. Sized for a cold install (freshly-created Ghidra
+# user-config dir), where the first analysis pass runs well past a minute.
+BENCHMARK_ANALYSIS_TIMEOUT_S = 240
 BENCHMARK_DEPLOY_TEST_MODES = {
     "benchmark-read",
     "benchmark-write",
@@ -1808,7 +1812,13 @@ def _bench_ensure_full_analysis(repo_root: Path, mcp_url: str, program_path: str
     /run_analysis returns in milliseconds — analysis happens on a background
     thread. Without polling for completion the YAML asserts race the analyzer
     and see partial state. Poll /analysis_status.analyzing until it flips
-    back to false (or 60s timeout).
+    back to false (or BENCHMARK_ANALYSIS_TIMEOUT_S timeout).
+
+    The timeout must cover a *cold* install: on a freshly-created Ghidra
+    user-config dir (e.g. the first deploy to a newly-installed Ghidra patch
+    release) the initial analysis of Benchmark.dll + BenchmarkDebug.exe can run
+    well past a minute, so a 60s cap raced the analyzer and produced spurious
+    `param_count: 0` / `undefined` signature failures.
     """
     try:
         _, _ = _mcp_request(repo_root, mcp_url, "/run_analysis",
@@ -1818,7 +1828,7 @@ def _bench_ensure_full_analysis(repo_root: Path, mcp_url: str, program_path: str
         print(f"WARNING: /run_analysis on {program_path} failed: {exc}")
         return
 
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + BENCHMARK_ANALYSIS_TIMEOUT_S
     while time.monotonic() < deadline:
         try:
             _, status = _mcp_request(repo_root, mcp_url, "/analysis_status",
@@ -1828,8 +1838,9 @@ def _bench_ensure_full_analysis(repo_root: Path, mcp_url: str, program_path: str
             continue
         if isinstance(status, dict) and status.get("analyzing") is False:
             return
-        time.sleep(1)
-    print(f"WARNING: /analysis_status on {program_path} still busy after 60s; proceeding anyway")
+        time.sleep(2)
+    print(f"WARNING: /analysis_status on {program_path} still busy after "
+          f"{BENCHMARK_ANALYSIS_TIMEOUT_S}s; proceeding anyway")
 
 
 def run_benchmark_yaml_regression(repo_root: Path, mcp_url: str) -> None:
