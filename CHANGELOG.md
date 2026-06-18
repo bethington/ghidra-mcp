@@ -4,6 +4,27 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- Gradle `deploy` now stops any Ghidra running from `GHIDRA_INSTALL_DIR`
+  before installing the extension or patching `FrontEndTool.xml` (graceful
+  `/save_all_programs` + `/exit_ghidra` via the MCP endpoint, poll for
+  process death matching the install path, force-kill survivors). Previously
+  on Windows the running JVM file-locked `GhidraMCP-*.jar` so the install
+  failed, and on any OS Ghidra rewrites `FrontEndTool.xml` on exit so the
+  config patch was silently discarded. Also adds explicit `mustRunAfter`
+  ordering so `patchGhidraUserConfig` runs after the extension is installed.
+- Gradle `patchGhidraUserConfig` now restricts its file walk to the single
+  versioned Ghidra user directory instead of recursing the parent
+  (`%APPDATA%\ghidra`), which was stamping the plugin INCLUDE — and stripping
+  the `Developer` PACKAGE block — into every sibling `ghidra_<ver>_*`
+  directory, corrupting unrelated installs. Brings the Gradle backend in line
+  with the Maven backend's #217 fix.
+
+---
+
 ## v5.14.1 - 2026-06-18 (patch: full overlay address-space support)
 
 Patch release.
