@@ -441,12 +441,20 @@ public class GhidraServerManager {
             if (item == null) {
                 return "{\"error\": \"File not found in repository: " + escapeJson(filePath) + "\"}";
             }
-            // Note: actual checkin is performed via DomainFile.checkin() on the client side.
-            // Repository adapter does not expose a direct checkin() method.
-            // Return advisory message instead.
-            if (item == null) return "{\"error\": \"Item check was null\"}"; // suppress lint
-            return "{\"status\": \"checked_in\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"path\": \"" + escapeJson(filePath) + "\", \"keep_checked_out\": " + keepCheckedOut + "}";
+            // RepositoryAdapter does not expose a direct checkin(); the
+            // operation must go through DomainFile.checkin() on an open
+            // project. Returning a success status here would mislead an
+            // automated caller into believing the checkin happened —
+            // edits would remain un-checked-in and (per the shared-server
+            // persistence model) silently lost. Return an explicit error
+            // so the caller knows to use the project-level path instead.
+            return "{\"error\": \"checkin not supported via repository adapter\"" +
+                   ", \"status\": \"not_implemented\"" +
+                   ", \"repository\": \"" + escapeJson(repoName) + "\"" +
+                   ", \"path\": \"" + escapeJson(filePath) + "\"" +
+                   ", \"item_exists\": " + (item != null) +
+                   ", \"hint\": \"open the project and use DomainFile.checkin() — " +
+                   "in this server: /open_project then /save_program then checkin via the project file\"}";
         } catch (Exception e) {
             lastError = e.getMessage();
             return "{\"error\": \"Checkin failed: " + escapeJson(e.getMessage()) + "\"}";
@@ -472,11 +480,19 @@ public class GhidraServerManager {
             int lastSlash = filePath.lastIndexOf('/');
             String parentPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : "/";
             String fileName = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
-            // undoCheckout is performed via DomainFile on the client side
-            // Return advisory - the checkout record can be terminated via terminateCheckout
-            if (repo == null) return "{\"error\": \"Repo not found\"}"; // suppress lint
-            return "{\"status\": \"checkout_undone\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"path\": \"" + escapeJson(filePath) + "\"}";
+            // RepositoryAdapter does not expose undoCheckout; the operation
+            // must go through DomainFile.undoCheckout() on an open project
+            // (or terminateCheckout for an admin force-undo). Returning a
+            // success status here would leave the checkout live on the
+            // server while the caller believes it was undone.
+            return "{\"error\": \"undoCheckout not supported via repository adapter\"" +
+                   ", \"status\": \"not_implemented\"" +
+                   ", \"repository\": \"" + escapeJson(repoName) + "\"" +
+                   ", \"path\": \"" + escapeJson(filePath) + "\"" +
+                   ", \"parent\": \"" + escapeJson(parentPath) + "\"" +
+                   ", \"file\": \"" + escapeJson(fileName) + "\"" +
+                   ", \"hint\": \"open the project and use DomainFile.undoCheckout(), " +
+                   "or use /server/admin/terminate_checkout for an admin force-undo\"}";
         } catch (Exception e) {
             lastError = e.getMessage();
             return "{\"error\": \"Undo checkout failed: " + escapeJson(e.getMessage()) + "\"}";
@@ -760,16 +776,49 @@ public class GhidraServerManager {
             if (repo == null) {
                 return "{\"error\": \"Repository not found: " + escapeJson(repoName) + "\"}";
             }
-            // Find user and set access level - create/update user entry
-            repo.setUserList(new User[]{
-                new User(userName, accessLevel)
-            }, false);
+            // setUserList REPLACES the repository ACL wholesale — passing a
+            // single-element array would silently strip every other user
+            // (including admins) from the repo. Fetch the existing list,
+            // merge/replace the one entry, and preserve the current
+            // anonymous-access flag.
+            User[] existing = repo.getUserList();
+            boolean anon = repo.anonymousAccessAllowed();
+            User[] merged = mergeUserPermission(existing, userName, accessLevel);
+            repo.setUserList(merged, anon);
             return "{\"status\": \"permissions_set\", \"repository\": \"" + escapeJson(repoName) +
-                   "\", \"user\": \"" + escapeJson(userName) + "\", \"access_level\": " + accessLevel + "}";
+                   "\", \"user\": \"" + escapeJson(userName) + "\", \"access_level\": " + accessLevel +
+                   ", \"total_users\": " + merged.length +
+                   ", \"anonymous_access\": " + anon + "}";
         } catch (Exception e) {
             lastError = e.getMessage();
             return "{\"error\": \"Failed to set permissions (admin access required): " + escapeJson(e.getMessage()) + "\"}";
         }
+    }
+
+    /**
+     * Merge a single user's permission into an existing ACL array.
+     * <p>
+     * If a user with {@code userName} already exists, that entry is replaced
+     * with the new access level and all other entries are preserved in their
+     * original order. If no such user exists, a new entry is appended.
+     * Returns a fresh array; the input is not mutated.
+     */
+    public static User[] mergeUserPermission(User[] existing, String userName, int accessLevel) {
+        User updated = new User(userName, accessLevel);
+        if (existing == null || existing.length == 0) {
+            return new User[]{ updated };
+        }
+        for (int i = 0; i < existing.length; i++) {
+            if (existing[i] != null && userName.equals(existing[i].getName())) {
+                User[] out = existing.clone();
+                out[i] = updated;
+                return out;
+            }
+        }
+        User[] out = new User[existing.length + 1];
+        System.arraycopy(existing, 0, out, 0, existing.length);
+        out[existing.length] = updated;
+        return out;
     }
 
     public boolean isConnected() {
