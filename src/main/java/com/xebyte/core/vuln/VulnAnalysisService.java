@@ -114,6 +114,11 @@ public final class VulnAnalysisService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
+        // AnnotationScanner treats @Param(defaultValue = "") on a String as
+        // "optional → null when absent" (see resolveBodyParam). Normalize here.
+        if (functionRef == null)  functionRef = "";
+        if (detectorsCsv == null) detectorsCsv = "";
+
         Set<String> wanted = new LinkedHashSet<>();
         for (String s : detectorsCsv.split(",")) {
             s = s.strip();
