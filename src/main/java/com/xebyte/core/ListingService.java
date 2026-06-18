@@ -292,9 +292,9 @@ public class ListingService {
                 "defined", "all", 1, false, programName);
     }
 
-    @McpTool(path = "/search_functions", description = "Search functions by name pattern. Omit name_pattern to list all functions.", category = "listing")
+    @McpTool(path = "/search_functions", description = "Search functions by name substring (case-insensitive). name_pattern is REQUIRED — use list_functions to enumerate all functions.", category = "listing")
     public Response searchFunctionsByName(
-            @Param(value = "name_pattern", description = "Substring to match against function names (omit or leave empty to return all functions)", defaultValue = "") String searchTerm,
+            @Param(value = "name_pattern", description = "Substring to match against function names (case-insensitive). Required.", defaultValue = "") String searchTerm,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
