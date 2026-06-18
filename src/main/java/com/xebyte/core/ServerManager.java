@@ -117,6 +117,7 @@ public class ServerManager {
             java.util.function.Consumer<UdsHttpServer> guiEndpoints) throws IOException {
         Path socketDir = getSocketDir();
         Files.createDirectories(socketDir);
+        hardenSocketDir(socketDir);
         Path socketPath = socketDir.resolve(getSocketName());
 
         server = new UdsHttpServer(socketPath);
@@ -302,6 +303,42 @@ public class ServerManager {
             }
         } catch (IOException e) {
             Msg.warn(this, "Failed to clean stale files: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Verify the socket directory is owned by the current user and lock it
+     * to mode {@code 0700}. The {@code /tmp/ghidra-mcp-<user>} fallback path
+     * is predictable; on a multi-user host an attacker can pre-create it
+     * (sticky {@code /tmp} allows new entries) and {@code createDirectories}
+     * silently succeeds on an existing dir regardless of owner. Binding a
+     * socket inside an attacker-owned directory lets them delete/replace it
+     * and intercept bridge connections — full unauthenticated access to the
+     * RE endpoints. Refuse to start in that case.
+     * <p>
+     * No-op on platforms without POSIX file attributes (Windows).
+     */
+    private void hardenSocketDir(Path socketDir) throws IOException {
+        if (!socketDir.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            return;
+        }
+        java.nio.file.attribute.PosixFileAttributes attrs =
+            Files.readAttributes(socketDir, java.nio.file.attribute.PosixFileAttributes.class);
+        String owner = attrs.owner().getName();
+        String me = System.getProperty("user.name");
+        if (me != null && !me.equals(owner)) {
+            throw new IOException(
+                "Refusing to bind UDS socket: directory " + socketDir
+                + " is owned by '" + owner + "' (expected '" + me + "'). "
+                + "This may be a socket-hijack attempt. Remove the directory "
+                + "or set XDG_RUNTIME_DIR to a private location.");
+        }
+        try {
+            Files.setPosixFilePermissions(socketDir,
+                java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+        } catch (IOException e) {
+            Msg.warn(this, "Could not chmod socket dir " + socketDir
+                + " to 0700: " + e.getMessage());
         }
     }
 
