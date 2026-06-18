@@ -89,7 +89,7 @@ public final class VulnAnalysisService {
         return Response.ok(JsonHelper.mapOf("detectors", ds, "catalog", cat));
     }
 
-    @McpTool(path = "/detect_vuln_patterns", category = "security",
+    @McpTool(path = "/detect_vuln_patterns", method = "POST", category = "security",
              description = "Scan one function (or, if 'function' is empty, every function in the program up to "
                          + "max_functions) for intra-function vulnerability patterns using PCode: format-string, "
                          + "unbounded-copy, integer-overflow-into-alloc, command-injection. Returns findings with "

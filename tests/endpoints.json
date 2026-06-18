@@ -922,7 +922,7 @@
     },
     {
       "path": "/detect_vuln_patterns",
-      "method": "GET",
+      "method": "POST",
       "category": "security",
       "params": [
         "function",
