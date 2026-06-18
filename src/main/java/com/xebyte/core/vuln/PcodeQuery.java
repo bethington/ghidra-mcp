@@ -30,8 +30,10 @@ public final class PcodeQuery {
 
     /**
      * True iff the backward def-chain from {@code v} reaches only constants
-     * through transparent ops (COPY/CAST/INT_ZEXT/INT_SEXT/PTRSUB/PTRADD/INT_ADD).
-     * False on any input (no-def), CALL*, LOAD, MULTIEQUAL, or step exhaustion.
+     * through transparent ops (COPY/CAST/INT_ZEXT/INT_SEXT/PTRSUB/PTRADD/INT_ADD/MULTIEQUAL).
+     * A MULTIEQUAL (phi) is transparent iff all its inputs prove constant; loop-carried
+     * back-edges are bounded by the seen-set so the walk always terminates.
+     * False on any input (no-def), CALL*, LOAD, or step exhaustion.
      */
     public static boolean reachesConstantOnly(Varnode v, int maxSteps) {
         if (v == null) return false;
@@ -64,6 +66,9 @@ public final class PcodeQuery {
                 case PcodeOp.INT_ADD:
                 case PcodeOp.INT_SUB:
                 case PcodeOp.INT_MULT:
+                case PcodeOp.MULTIEQUAL:
+                    // A phi of constants is constant. Loop-carried phis are
+                    // bounded by the seen-set (the back-edge input is skipped).
                     for (int i = 0; i < def.getNumInputs(); i++) work.push(def.getInput(i));
                     break;
                 default:

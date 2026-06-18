@@ -158,4 +158,40 @@ public class PcodeQueryTest {
         // hf=null → ptrSize defaults to 8 → 1 ≤ 8 → unknown
         assertEquals(-1, PcodeQuery.destBufferSize(dst, null));
     }
+
+    @Test
+    public void reachesConstantOnly_multiequalAllConst_isConstant() {
+        // err_str = phi("literal A", "literal B") — both branches constant.
+        Varnode a = constVn(0x40a000);
+        Varnode b = constVn(0x40a020);
+        PcodeOp phi = op(PcodeOp.MULTIEQUAL, a, b);
+        assertTrue(PcodeQuery.reachesConstantOnly(definedBy(phi), 16));
+    }
+
+    @Test
+    public void reachesConstantOnly_multiequalOneNonConst_isNotConstant() {
+        // One branch is a parameter (no def) — phi is NOT provably constant.
+        Varnode a = constVn(0x40a000);
+        Varnode param = mock(Varnode.class);
+        when(param.isConstant()).thenReturn(false);
+        when(param.getDef()).thenReturn(null);
+        PcodeOp phi = op(PcodeOp.MULTIEQUAL, a, param);
+        assertFalse(PcodeQuery.reachesConstantOnly(definedBy(phi), 16));
+    }
+
+    @Test
+    public void reachesConstantOnly_multiequalLoopPhi_terminates() {
+        // Loop-carried phi: x = MULTIEQUAL(const, x) — seen-set must terminate.
+        Varnode k = constVn(0);
+        PcodeOp phi = mock(PcodeOp.class);
+        Varnode x = mock(Varnode.class);
+        when(x.isConstant()).thenReturn(false);
+        when(x.getDef()).thenReturn(phi);
+        when(phi.getOpcode()).thenReturn(PcodeOp.MULTIEQUAL);
+        when(phi.getNumInputs()).thenReturn(2);
+        when(phi.getInput(0)).thenReturn(k);
+        when(phi.getInput(1)).thenReturn(x);
+        // Walk: x → phi → push k, x; x already seen → only k → constant. So TRUE.
+        assertTrue(PcodeQuery.reachesConstantOnly(x, 16));
+    }
 }
