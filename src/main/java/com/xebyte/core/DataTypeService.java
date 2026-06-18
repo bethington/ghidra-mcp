@@ -863,23 +863,11 @@ public class DataTypeService {
                 DataTypeManager dtm = program.getDataTypeManager();
                 DataType base = null;
 
-                // Handle pointer syntax (e.g., "UnitAny *")
-                if (baseType.endsWith(" *") || baseType.endsWith("*")) {
-                    String baseTypeName = baseType.replace(" *", "").replace("*", "").trim();
-                    DataType baseDataType = ServiceUtils.findDataTypeByNameInAllCategories(dtm, baseTypeName);
-                    if (baseDataType != null) {
-                        base = new PointerDataType(baseDataType);
-                    } else {
-                        result.append("Base type not found for pointer: ").append(baseTypeName);
-                        return null;
-                    }
-                } else {
-                    // Regular type lookup
-                    base = ServiceUtils.findDataTypeByNameInAllCategories(dtm, baseType);
-                }
-
+                // Delegate to resolveDataType which handles pointer chains (int**),
+                // arrays (type[N]), well-known C types, and DTM lookups recursively.
+                base = ServiceUtils.resolveDataType(dtm, baseType);
                 if (base == null) {
-                    result.append("Base type not found: ").append(baseType);
+                    result.append("Could not resolve base type: ").append(baseType);
                     return null;
                 }
 
