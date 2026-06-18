@@ -9,7 +9,7 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.13.1 (Latest) — community-driven tools: /get_current_selection + GUI /open_project
+### v5.14.0 (Latest) — community-driven tools: /get_current_selection + GUI /open_project
 
 Minor release. Two new endpoints filed/scoped by community feedback,
 plus a quiet headless parity fix that surfaced while writing the
@@ -206,7 +206,7 @@ community-reported fixes plus the gemini-cli-sdk reconciliation.
   pom bumped 12.0.4 → 12.1; CI / release / Docker download metadata
   pointed at the Ghidra 12.1 20260513 upstream asset; setup docs,
   examples, defaults, and compatibility tests refreshed for
-  `ghidra_12.1_PUBLIC`. Documents the 12.1 shared-server requirement
+  `ghidra_12.1.2_PUBLIC`. Documents the 12.1 shared-server requirement
   (clients on 12.1 need server 12.1 or 12.0.5+) and that Jython is
   optional in 12.1 (install via File → Install Extensions if you run
   `.py` Ghidra scripts).

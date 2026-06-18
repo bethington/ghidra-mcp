@@ -184,11 +184,16 @@ class TestBridgeIsDynamic(unittest.TestCase):
         (`_scan_tcp_for_project` + new helpers + docstrings). Both pull
         weight: bug fixes for real reproducible user reports with associated
         unit test coverage.
+
+        Bumped 2026-06-14: 2250 -> 2300 to add `search_tools`, a catalog-search
+        meta-tool (#267/#153) that lets the bridge run --lazy with a small tool
+        surface while still letting agents discover unloaded tools by keyword.
+        Pulls weight: directly addresses the context-overhead complaints.
         """
         bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
         lines = len(bridge_path.read_text().splitlines())
         self.assertLess(
-            lines, 2250, f"Bridge is {lines} lines, expected <2250 for thin multiplexer"
+            lines, 2300, f"Bridge is {lines} lines, expected <2300 for thin multiplexer"
         )
 
 

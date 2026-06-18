@@ -74,3 +74,29 @@ def infer_ghidra_install_meta(ghidra_path: Path) -> tuple[str | None, str | None
 
 def infer_ghidra_version_from_path(ghidra_path: Path) -> str | None:
     return infer_ghidra_install_meta(ghidra_path)[0]
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for chunk in version.strip().split("."):
+        match = re.match(r"\d+", chunk)
+        if not match:
+            break
+        parts.append(int(match.group()))
+    return tuple(parts)
+
+
+def is_ghidra_version_compatible(required: str, installed: str) -> bool:
+    """Return True when an installed Ghidra version satisfies the pom requirement.
+
+    The pom pins ``ghidra.version`` to a major.minor series (e.g. ``12.1``).
+    Ghidra's API is stable within a minor series, so any patch release of that
+    series — ``12.1.0``, ``12.1.2``, ... — is compatible (see #293: ``12.1``
+    pinned vs a ``12.1.2`` install should not error). Compatibility is decided
+    on the shared major.minor prefix; patch and build components are ignored.
+    """
+    req = _version_tuple(required)[:2]
+    inst = _version_tuple(installed)[:2]
+    if not req or not inst:
+        return required.strip() == installed.strip()
+    return req == inst

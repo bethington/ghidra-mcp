@@ -4,7 +4,55 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## Unreleased
+## v5.14.0 - 2026-06-18 (minor: Ghidra 12.1.2 retarget, reference write tools, tool discovery, version-compat + overlay fixes)
+
+Minor release. Retargets the extension at **Ghidra 12.1.2** (latest), bundles two
+community PRs (#299, #297), and adds tool-discovery plus setup fixes responding to
+maintainer-feedback issues (#267, #153, #293).
+
+### Changed
+
+- **Retargeted to Ghidra 12.1.2** (#296): bumped `ghidra.version` 12.1 → 12.1.2 so the
+  built extension's `extension.properties` declares 12.1.2 and loads in the latest Ghidra
+  (Ghidra enforces an exact extension-version gate at load time). Rebuilt + offline Java
+  suite re-run against the 12.1.2 jars. README badge, docs, and install-path examples updated.
+
+### Added
+
+- **`search_tools(query, limit)`** (#267, #153): a bridge meta-tool that keyword-searches the
+  full Ghidra tool catalog — including tools whose group is not currently loaded — ranking by
+  name/description/category and returning the exact `load_tool_group(...)` call to enable any
+  unloaded match. Lets the bridge run `--lazy` with a small tool surface while agents discover
+  the rest on demand, cutting tool-context overhead. New README section documents the
+  `--lazy` + `search_tools`/`load_tool_group`/`check_tools` workflow; `ROADMAP.md` added.
+- **`/add_memory_reference`**: create a user-defined cross-reference between two memory
+  addresses that the auto-analyzer can't infer — runtime-populated dispatch tables, vtables,
+  late-bound function pointers, and missed jump/switch tables — with proper bidirectional
+  navigation and without touching the underlying bytes. Previously the only path was
+  `run_script_inline` with a Java snippet calling `ReferenceManager.addMemoryReference`, gated
+  behind `GHIDRA_MCP_ALLOW_SCRIPTS=1` (arbitrary Java execution). `ref_type` accepts any
+  case-insensitive `RefType` name (data refs `DATA`/`READ`/`WRITE` and flow refs
+  `COMPUTED_CALL`/`UNCONDITIONAL_JUMP`/...); `source_type` defaults to `USER_DEFINED` so added
+  refs stay visually distinct and survive re-analysis. Supports `operand_index` and
+  space-prefixed addresses (`mem:1000`).
+- **`/remove_reference`**: the inverse of `add_memory_reference` — remove memory cross-reference(s)
+  from one address to another. Removes every reference `from_address -> to_address` regardless of
+  operand by default; pass `operand_index >= 0` to target a single operand. Reports each removed
+  reference's `source_type` (it can clear analyzer-inferred references too, not just user-defined
+  ones). Accepts space-prefixed addresses. 251 tools.
+
+### Fixed
+
+- **Uppercase overlay address spaces** (#297, thanks @robbederks): `parseAddress` lowercased the
+  entire `space:offset` input, breaking banked-code binaries whose overlay spaces use uppercase
+  names (e.g. `CODE_BANK1`). It now resolves the canonical address-space name via `AddressFactory`
+  (exact match, then case-insensitive scan) and preserves its real case, while keeping the
+  lowercased fallback for the standard `mem:`/`MEM:` forms.
+- **Ghidra version preflight too strict** (#293, thanks @firefart): `verify-version` / `preflight`
+  compared the pom's pinned `ghidra.version` (e.g. `12.1`) against the installed version
+  (e.g. `12.1.2`) with exact string equality and hard-failed on patch drift. Compatibility is now
+  decided on the shared major.minor prefix — any patch release of the pinned minor series is
+  accepted, with an informational note when only the patch differs.
 
 ---
 
