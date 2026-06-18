@@ -634,8 +634,24 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         }
 
         if (programProvider != null) {
-            System.out.println("Closing programs...");
-            programProvider.closeAllPrograms();
+            try {
+                System.out.println("Closing programs...");
+                programProvider.closeAllPrograms();
+            } finally {
+                // Release the .rep project lock. closeAllPrograms() only
+                // releases Program handles; the project lock acquired by
+                // GhidraProject.openProject() is freed by closeProject().
+                // Without this, even a clean shutdown leaves the project
+                // locked and the next /open_project (or GUI open) fails
+                // with "project is locked". try/finally so a release
+                // failure on one program doesn't skip the lock release.
+                System.out.println("Closing project...");
+                try {
+                    programProvider.closeProject();
+                } catch (Exception e) {
+                    System.err.println("Error closing project: " + e.getMessage());
+                }
+            }
         }
 
         if (scriptingBundleHostAcquired) {
