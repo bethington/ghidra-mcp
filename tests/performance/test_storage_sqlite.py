@@ -162,7 +162,6 @@ def test_refresh_candidate_scores_persists_to_sql(sqlite_repo, monkeypatch):
 def test_migrate_runs_idempotent(sqlite_repo, tmp_path, monkeypatch):
     """H26: re-running the migration must not duplicate runs rows."""
     import json
-    from sqlalchemy import select, func as sa_func
     sys.path.insert(0, str(_FUNDOC_DIR / "scripts"))
     import migrate_state_to_sql as mig
 
@@ -190,8 +189,9 @@ def test_migrate_runs_idempotent(sqlite_repo, tmp_path, monkeypatch):
 
     # Second run without --truncate-runs must refuse, not duplicate.
     import pytest as _pytest
-    with _pytest.raises(SystemExit):
+    with _pytest.raises(SystemExit) as exc_info:
         mig.migrate(state_path=state_json, runs_path=runs_jsonl, truncate_runs=False)
+    assert exc_info.value.code == 2
     assert repo.count_runs() == 1
 
     # With --truncate-runs, second run replaces (count stays 1).
