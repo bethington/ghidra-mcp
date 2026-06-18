@@ -4,7 +4,7 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## v5.14.0 - 2026-06-14 (minor: Ghidra 12.1.2 retarget, reference write tools, tool discovery, version-compat + overlay fixes)
+## v5.14.0 - 2026-06-18 (minor: Ghidra 12.1.2 retarget, reference write tools, tool discovery, version-compat + overlay fixes)
 
 Minor release. Retargets the extension at **Ghidra 12.1.2** (latest), bundles two
 community PRs (#299, #297), and adds tool-discovery plus setup fixes responding to
