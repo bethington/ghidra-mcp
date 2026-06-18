@@ -2268,14 +2268,16 @@ public class DataTypeService {
         if (categoryPath == null || categoryPath.isEmpty()) return Response.text("Category path is required");
 
         try {
-            DataTypeManager dtm = program.getDataTypeManager();
-            CategoryPath catPath = new CategoryPath(categoryPath);
-            Category category = dtm.createCategory(catPath);
+            return threadingStrategy.executeWrite(program, "Create category " + categoryPath, () -> {
+                DataTypeManager dtm = program.getDataTypeManager();
+                CategoryPath catPath = new CategoryPath(categoryPath);
+                Category category = dtm.createCategory(catPath);
 
-            return Response.ok(JsonHelper.mapOf(
-                "status", "success",
-                "message", "Successfully created category: " + category.getCategoryPathName()
-            ));
+                return Response.ok(JsonHelper.mapOf(
+                    "status", "success",
+                    "message", "Successfully created category: " + category.getCategoryPathName()
+                ));
+            });
         } catch (Exception e) {
             return Response.err("Error creating category: " + e.getMessage());
         }
