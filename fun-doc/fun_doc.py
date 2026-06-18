@@ -1031,6 +1031,10 @@ _STATE_DIRECT_FIELDS = (
     "is_thunk",
     "is_external",
     "is_thrashing",
+    # selector one-shot blacklist flags — see select_candidates() L2983/2992/3028
+    "recovery_pass_done",
+    "decompile_timeout",
+    "not_a_function",
     "library_code",
     "deductions",
     "callees",

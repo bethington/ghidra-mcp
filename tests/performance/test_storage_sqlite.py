@@ -91,3 +91,34 @@ def test_env_var_overrides_config(tmp_path, monkeypatch):
     )
     assert cfg.backend == "sqlite"
     assert "env.db" in cfg.url
+
+
+def test_selector_blacklist_flags_round_trip(sqlite_repo):
+    """H22: recovery_pass_done / decompile_timeout / not_a_function must
+    survive _state_func_to_row → repo → _row_to_state_func, otherwise the
+    selector re-picks pathological functions forever."""
+    import fun_doc
+
+    repo, _db_path = sqlite_repo
+
+    key = "/proj/Foo.exe::00401000"
+    rec = {
+        "program": "/proj/Foo.exe",
+        "address": "00401000",
+        "name": "FUN_00401000",
+        "score": 12,
+        "recovery_pass_done": True,
+        "decompile_timeout": True,
+        "not_a_function": True,
+    }
+    row = fun_doc._state_func_to_row(key, rec)
+    assert row.get("recovery_pass_done") is True
+    assert row.get("decompile_timeout") is True
+    assert row.get("not_a_function") is True
+
+    repo.upsert_function(row)
+    fetched = repo.get_function("/proj/Foo.exe", "00401000")
+    back = fun_doc._row_to_state_func(fetched)
+    assert back.get("recovery_pass_done") is True
+    assert back.get("decompile_timeout") is True
+    assert back.get("not_a_function") is True
