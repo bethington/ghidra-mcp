@@ -1110,7 +1110,7 @@
       "params": [
         "program"
       ],
-      "description": "List all physical address spaces in the program"
+      "description": "List all physical and overlay address spaces in the program (overlays include is_overlay flag and overlayed_space name)"
     },
     {
       "path": "/get_assembly_context",

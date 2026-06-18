@@ -793,3 +793,25 @@ class TestResponseFormats:
         assert response.status_code == 200
         # Should be non-empty
         assert len(response.text) > 0
+
+
+class TestOverlayAddressSpaces:
+    """Overlay-space round-trip. Auto-skips on programs without overlay spaces."""
+
+    def test_get_address_spaces_lists_overlays_and_round_trips(self, http_client):
+        import json
+        resp = http_client.get("/get_address_spaces")
+        assert resp.status_code == 200
+        spaces = json.loads(resp.text)["address_spaces"]
+        overlays = [s for s in spaces if s.get("is_overlay")]
+        if not overlays:
+            pytest.skip("program has no overlay address spaces")
+
+        ov = overlays[0]
+        assert ov.get("overlayed_space"), "overlay entry must name its base space"
+        # Address the overlay at its start; read_memory must resolve it (no error).
+        addr = f"{ov['name']}::{ov['start']}"
+        r = http_client.get("/read_memory", params={"address": addr, "length": "4"})
+        assert r.status_code == 200, r.text
+        result = json.loads(r.text)
+        assert "error" not in result, f"overlay read failed for {addr}: {result}"

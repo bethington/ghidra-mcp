@@ -631,45 +631,49 @@ public final class ServiceUtils {
         // Detect if this is a segment:offset form for better error messages
         boolean hasColon = addressStr.contains(":");
 
-        // Normalize space:offset form: AddressFactory is case-sensitive and rejects "0x" prefix.
-        // Resolve the canonical space name first so overlays like "CODE_BANK1" keep their case.
+        // Build a resolution candidate. AddressFactory rejects a "0x" prefix on the
+        // OFFSET, so strip it from the part after the last colon. The SPACE NAME is
+        // left untouched — overlay space names (e.g. "cli.Initial") are case-sensitive
+        // and Ghidra accepts both ':' and '::' separators.
+        String candidate = addressStr;
         if (hasColon) {
-            int colonIdx = addressStr.indexOf(':');
-            String rawSpace = addressStr.substring(0, colonIdx);
-            String spaceName = rawSpace.toLowerCase();
-            String offset = addressStr.substring(colonIdx + 1);
+            int lastColon = addressStr.lastIndexOf(':');
+            String prefix = addressStr.substring(0, lastColon + 1); // includes ':' or trailing of '::'
+            String offset = addressStr.substring(lastColon + 1);
             if (offset.startsWith("0x") || offset.startsWith("0X")) {
                 offset = offset.substring(2);
             }
-
-            AddressSpace matchedSpace = program.getAddressFactory().getAddressSpace(rawSpace);
-            if (matchedSpace == null) {
-                for (AddressSpace candidate : program.getAddressFactory().getAddressSpaces()) {
-                    if (candidate.getName().equalsIgnoreCase(rawSpace)) {
-                        matchedSpace = candidate;
-                        break;
-                    }
-                }
-            }
-            if (matchedSpace != null) {
-                spaceName = matchedSpace.getName();
-            }
-            addressStr = spaceName + ":" + offset;
+            candidate = prefix + offset;
         }
 
+        // 1) Exact-case attempt (handles overlays and correctly-cased physical spaces).
         try {
-            Address addr = program.getAddressFactory().getAddress(addressStr);
+            Address addr = program.getAddressFactory().getAddress(candidate);
             if (addr != null) return addr;
         } catch (Exception ignored) {}
 
-        // Build a rich error message listing available spaces
+        // 2) Case-insensitive space-name fallback. Preserves the forgiving behavior for
+        //    physical input like "MEM:0x1000" without blindly lowercasing (which would
+        //    break case-sensitive overlay names).
+        if (hasColon) {
+            int firstColon = candidate.indexOf(':');
+            String spaceName = candidate.substring(0, firstColon);
+            String offset = candidate.substring(candidate.lastIndexOf(':') + 1);
+            AddressSpace match = findSpaceIgnoreCase(program, spaceName);
+            if (match != null && !match.getName().equals(spaceName)) {
+                try {
+                    Address addr = program.getAddressFactory().getAddress(match.getName() + ":" + offset);
+                    if (addr != null) return addr;
+                } catch (Exception ignored) {}
+            }
+        }
+
+        // Build a rich error message listing available spaces (including overlays)
         String available = buildAvailableSpacesHint(program);
         if (hasColon) {
-            String spaceName = addressStr.substring(0, addressStr.indexOf(':'));
-            String offsetPart = addressStr.substring(addressStr.indexOf(':') + 1);
+            String spaceName = candidate.substring(0, candidate.indexOf(':'));
+            String offsetPart = candidate.substring(candidate.lastIndexOf(':') + 1);
             if (isKnownSpace(program, spaceName)) {
-                // The space is valid; the failure is the offset. Don't blame the space
-                // (which produced the contradictory "Unknown space 'ram'. Available: ram").
                 lastParseError.set("Could not resolve offset '" + offsetPart
                     + "' in address space '" + spaceName + "'. Check that it is valid hex "
                     + "within that space's range. Available spaces: " + available + ".");
@@ -689,12 +693,17 @@ public final class ServiceUtils {
     /**
      * Return enriched address fields as a Map for JSON responses.
      * Always includes "address" (plain hex, no space prefix).
-     * Includes "address_full" and "address_space" only when the program has >1 physical space.
-     * If program is null, emits only the "address" field.
+     * Includes "address_full" and "address_space" when the address is in an overlay
+     * space (so it round-trips correctly) OR when the program has >1 physical space.
+     * If program is null and the address is non-overlay, emits only "address".
      */
     public static Map<String, Object> addressToJson(Address address, Program program) {
         String plainHex = address.toString(false);
-        if (program == null || getPhysicalSpaceCount(program) <= 1) {
+        boolean isOverlay = address.getAddressSpace().isOverlaySpace();
+        // Overlay addresses must ALWAYS carry the qualifier: their bare hex re-resolves
+        // into the underlying physical space, not the overlay. For non-overlay addresses
+        // keep the existing rule (qualify only when there is real physical ambiguity).
+        if (!isOverlay && (program == null || getPhysicalSpaceCount(program) <= 1)) {
             return JsonHelper.mapOf("address", plainHex);
         }
         String spaceName = address.getAddressSpace().getName();
@@ -724,34 +733,55 @@ public final class ServiceUtils {
     }
 
     /**
-     * True if {@code spaceName} (case-insensitive) names a real physical address space
-     * (TYPE_RAM/TYPE_CODE, non-overlay) in the program. Used to distinguish a genuinely
-     * unknown space from a known space with a bad offset when building parse errors.
+     * True if {@code spaceName} (case-insensitive) names a known address space in the
+     * program — a physical RAM/CODE space OR an overlay space (overlays carry their own
+     * types, e.g. TYPE_OTHER for ".shstrtab"). Used to distinguish a genuinely unknown
+     * space from a known space with a bad offset when building parse errors.
      */
     private static boolean isKnownSpace(Program program, String spaceName) {
-        if (spaceName == null || spaceName.isEmpty()) return false;
+        return findSpaceIgnoreCase(program, spaceName) != null;
+    }
+
+    /**
+     * Find the address space whose name matches {@code spaceName} case-insensitively.
+     * Considers overlay spaces (any type) and physical RAM/CODE spaces. Returns null
+     * if none match. Used by parseAddress's case-insensitive fallback.
+     */
+    private static AddressSpace findSpaceIgnoreCase(Program program, String spaceName) {
+        if (spaceName == null || spaceName.isEmpty()) return null;
         for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
-            if (space.isOverlaySpace()) continue;
-            int type = space.getType();
-            if ((type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE)
-                    && space.getName().equalsIgnoreCase(spaceName)) {
-                return true;
+            boolean eligible = space.isOverlaySpace()
+                    || space.getType() == AddressSpace.TYPE_RAM
+                    || space.getType() == AddressSpace.TYPE_CODE;
+            if (eligible && space.getName().equalsIgnoreCase(spaceName)) {
+                return space;
             }
         }
-        return false;
+        return null;
     }
 
     private static String buildAvailableSpacesHint(Program program) {
-        StringBuilder sb = new StringBuilder();
+        StringBuilder physical = new StringBuilder();
+        StringBuilder overlays = new StringBuilder();
         for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
-            if (space.isOverlaySpace()) continue;
+            if (space.isOverlaySpace()) {
+                if (overlays.length() > 0) overlays.append(", ");
+                overlays.append(space.getName());
+                continue;
+            }
             int type = space.getType();
             if (type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE) {
-                if (sb.length() > 0) sb.append(", ");
-                sb.append(space.getName());
+                if (physical.length() > 0) physical.append(", ");
+                physical.append(space.getName());
             }
         }
-        return sb.length() > 0 ? sb.toString() : "(none)";
+        if (physical.length() == 0 && overlays.length() == 0) return "(none)";
+        StringBuilder out = new StringBuilder(physical.length() > 0 ? physical.toString() : "");
+        if (overlays.length() > 0) {
+            if (out.length() > 0) out.append(", ");
+            out.append("[overlays] ").append(overlays);
+        }
+        return out.toString();
     }
 
     private static String buildSpaceSuggestion(Program program, String rawOffset) {
