@@ -501,14 +501,39 @@ public class XrefCallGraphService {
     /**
      * Helper method to build call graph for callees (what this function calls)
      */
+    /**
+     * Graph-identity key for a function. Namespace-qualified name plus entry
+     * address — unique across namespaces, overloads, and overlay spaces while
+     * keeping text-format output (dot/mermaid/adjacency) human-readable.
+     * Bare {@code getName()} collapsed distinct same-named functions: the
+     * second was skipped by {@code visited}, its callee set was overwritten by
+     * {@code callGraph.put}, and SCC/cycle results were computed on a merged
+     * pseudo-node.
+     */
+    private static String graphKey(Function f) {
+        return f.getName(true) + "@" + f.getEntryPoint();
+    }
+
+    /**
+     * Resolve a user-supplied function name (or address) to its graph key.
+     * Returns the input unchanged if resolution fails so a caller who already
+     * passes a {@code name@addr} key still matches.
+     */
+    private static String resolveToGraphKey(Program program, String nameOrAddr) {
+        if (nameOrAddr == null || nameOrAddr.isEmpty()) return nameOrAddr;
+        FunctionRef.Result r = FunctionRef.ofNameOrAddress(nameOrAddr, null).tryResolve(program);
+        return r.isSuccess() ? graphKey(r.function()) : nameOrAddr;
+    }
+
     private void buildCallGraphCallees(Function function, int depth, Set<String> visited,
                                      Map<String, Set<String>> callGraph, FunctionManager functionManager,
                                      Program program) {
-        if (depth <= 0 || visited.contains(function.getName())) {
+        String key = graphKey(function);
+        if (depth <= 0 || visited.contains(key)) {
             return;
         }
 
-        visited.add(function.getName());
+        visited.add(key);
         Set<String> callees = new HashSet<>();
 
         // Find callees of this function
@@ -527,7 +552,7 @@ public class XrefCallGraphService {
                         Address targetAddr = ref.getToAddress();
                         Function targetFunc = functionManager.getFunctionAt(targetAddr);
                         if (targetFunc != null) {
-                            callees.add(targetFunc.getName());
+                            callees.add(graphKey(targetFunc));
                             // Recursively build graph for callees
                             buildCallGraphCallees(targetFunc, depth - 1, visited, callGraph, functionManager, program);
                         }
@@ -537,7 +562,7 @@ public class XrefCallGraphService {
         }
 
         if (!callees.isEmpty()) {
-            callGraph.put(function.getName(), callees);
+            callGraph.put(key, callees);
         }
     }
 
@@ -547,11 +572,12 @@ public class XrefCallGraphService {
     private void buildCallGraphCallers(Function function, int depth, Set<String> visited,
                                      Map<String, Set<String>> callGraph, FunctionManager functionManager,
                                      Program program) {
-        if (depth <= 0 || visited.contains(function.getName())) {
+        String key = graphKey(function);
+        if (depth <= 0 || visited.contains(key)) {
             return;
         }
 
-        visited.add(function.getName());
+        visited.add(key);
         ReferenceManager refManager = program.getReferenceManager();
 
         // Find callers of this function
@@ -562,8 +588,7 @@ public class XrefCallGraphService {
                 Address fromAddr = ref.getFromAddress();
                 Function callerFunc = functionManager.getFunctionContaining(fromAddr);
                 if (callerFunc != null) {
-                    String callerName = callerFunc.getName();
-                    callGraph.computeIfAbsent(callerName, k -> new HashSet<>()).add(function.getName());
+                    callGraph.computeIfAbsent(graphKey(callerFunc), k -> new HashSet<>()).add(key);
                     // Recursively build graph for callers
                     buildCallGraphCallers(callerFunc, depth - 1, visited, callGraph, functionManager, program);
                 }
@@ -603,9 +628,14 @@ public class XrefCallGraphService {
                 break;
             }
 
-            String functionName = function.getName();
+            String functionKey = graphKey(function);
             String callerAddr = function.getEntryPoint().toString();
             Set<String> callees = new HashSet<>();
+            // Dedupe json_edges on callee ADDRESS, independent of the
+            // name-based callees set used by the text formats — otherwise a
+            // call to a *different* function that happens to share a name
+            // would be dropped from json_edges too.
+            Set<String> calleeAddrs = addressEdges != null ? new HashSet<>() : null;
 
             // Find all functions called by this function
             AddressSetView functionBody = function.getBody();
@@ -621,16 +651,21 @@ public class XrefCallGraphService {
                             Address targetAddr = ref.getToAddress();
                             Function targetFunc = functionManager.getFunctionAt(targetAddr);
                             if (targetFunc != null) {
-                                String calleeName = targetFunc.getName();
-                                // Deduplicate: only count each caller→callee pair once
-                                if (callees.add(calleeName)) {
+                                String calleeKey = graphKey(targetFunc);
+                                String calleeAddr = targetFunc.getEntryPoint().toString();
+                                // Deduplicate: only count each caller→callee pair once.
+                                // For json_edges, dedupe on address (the stable id);
+                                // for text formats, dedupe on the graph key.
+                                boolean newForText = callees.add(calleeKey);
+                                boolean newForJson = calleeAddrs != null && calleeAddrs.add(calleeAddr);
+                                if (newForText || newForJson) {
                                     relationshipCount++;
-                                    if (addressEdges != null) {
+                                    if (newForJson) {
                                         addressEdges.add(Map.of(
                                             "caller_addr", callerAddr,
-                                            "callee_addr", targetFunc.getEntryPoint().toString(),
-                                            "caller_name", functionName,
-                                            "callee_name", calleeName
+                                            "callee_addr", calleeAddr,
+                                            "caller_name", function.getName(),
+                                            "callee_name", targetFunc.getName()
                                         ));
                                     }
                                     if (relationshipCount >= effectiveLimit) {
@@ -644,7 +679,7 @@ public class XrefCallGraphService {
             }
 
             if (!callees.isEmpty()) {
-                callGraph.put(functionName, callees);
+                callGraph.put(functionKey, callees);
             }
         }
 
@@ -734,8 +769,8 @@ public class XrefCallGraphService {
             for (Function func : functionManager.getFunctions(true)) {
                 if (func.isThunk()) continue;
 
-                String funcName = func.getName();
-                functionAddresses.put(funcName, func.getEntryPoint().toString());
+                String funcKey = graphKey(func);
+                functionAddresses.put(funcKey, func.getEntryPoint().toString());
                 Set<String> callees = new HashSet<>();
 
                 Listing listing = program.getListing();
@@ -748,7 +783,7 @@ public class XrefCallGraphService {
                             if (ref.getReferenceType().isCall()) {
                                 Function calledFunc = functionManager.getFunctionAt(ref.getToAddress());
                                 if (calledFunc != null && !calledFunc.isThunk()) {
-                                    callees.add(calledFunc.getName());
+                                    callees.add(graphKey(calledFunc));
                                 }
                             }
                         }
@@ -756,7 +791,7 @@ public class XrefCallGraphService {
                 }
 
                 if (!callees.isEmpty()) {
-                    callGraph.put(funcName, callees);
+                    callGraph.put(funcKey, callees);
                 }
             }
 
@@ -783,8 +818,13 @@ public class XrefCallGraphService {
                 ));
 
             } else if ("path".equals(analysisType) && startFunction != null && endFunction != null) {
+                // Resolve user-supplied names to graph keys so they match the
+                // callGraph's name@addr keying. Falls back to the raw input so
+                // a caller who already passes a fully-qualified key still works.
+                String startKey = resolveToGraphKey(program, startFunction);
+                String endKey = resolveToGraphKey(program, endFunction);
                 // Find shortest path between two functions using BFS
-                List<String> path = findShortestPath(callGraph, startFunction, endFunction);
+                List<String> path = findShortestPath(callGraph, startKey, endKey);
 
                 if (path != null) {
                     return Response.ok(JsonHelper.mapOf(
