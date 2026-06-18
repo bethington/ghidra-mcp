@@ -237,6 +237,7 @@ public final class VulnAnalysisService {
             "catalog_status",  catalog.status() == null ? "ok" : catalog.status()));
     }
 
+    // keep in sync with collectAttackSurfaceFunctions
     private void bfsCallers(Program program, FunctionManager fm, ReferenceManager rm,
             Function source, CatalogEntry entry, int maxDepth,
             Map<String, List<Map<String, Object>>> byClass) {
@@ -267,6 +268,50 @@ public final class VulnAnalysisService {
                 if (caller != null && !seen.contains(caller)) q.add(Map.entry(caller, depth + 1));
             }
         }
+    }
+
+    /**
+     * Unique set of functions reachable (callers-of, BFS) within {@code maxDepth}
+     * hops from any catalog SOURCE. Same traversal as enumerateAttackSurface but
+     * without per-class bucketing or row JSON — used by detect_vuln_patterns
+     * scope="attack_surface" to decide what to scan.
+     *
+     * // keep in sync with bfsCallers
+     */
+    private Set<Function> collectAttackSurfaceFunctions(Program program, int maxDepth) {
+        FunctionManager fm = program.getFunctionManager();
+        ReferenceManager rm = program.getReferenceManager();
+        Set<Function> surface = new LinkedHashSet<>();
+        Map<Function, Set<String>> seenSourceClasses = new HashMap<>();
+
+        FunctionIterator it = fm.getFunctions(true);
+        while (it.hasNext()) {
+            Function f = it.next();
+            for (CatalogEntry e : catalog.resolve(f)) {
+                if (!"source".equals(e.kind())) continue;
+                Set<String> done = seenSourceClasses.computeIfAbsent(f, k -> new HashSet<>());
+                if (!done.add(e.vulnClass())) continue;
+                // BFS callers-of from this source, collecting depth>0 functions.
+                Set<Function> seen = new HashSet<>();
+                Deque<Map.Entry<Function, Integer>> q = new ArrayDeque<>();
+                q.add(Map.entry(f, 0));
+                while (!q.isEmpty()) {
+                    var cur = q.poll();
+                    Function fn = cur.getKey(); int depth = cur.getValue();
+                    if (!seen.add(fn)) continue;
+                    if (depth > 0) surface.add(fn);
+                    if (depth >= maxDepth) continue;
+                    var refs = rm.getReferencesTo(fn.getEntryPoint());
+                    while (refs.hasNext()) {
+                        var ref = refs.next();
+                        if (!ref.getReferenceType().isCall()) continue;
+                        Function caller = fm.getFunctionContaining(ref.getFromAddress());
+                        if (caller != null && !seen.contains(caller)) q.add(Map.entry(caller, depth + 1));
+                    }
+                }
+            }
+        }
+        return surface;
     }
 
     // ---- core ----
