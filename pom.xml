@@ -134,6 +134,17 @@
             <version>5.23.0</version>
             <scope>test</scope>
         </dependency>
+        <!-- commons-lang3 (test only) — Ghidra's DataType classes need it at
+             <clinit> via DataUtilities.isValidDataTypeName. Ghidra bundles it
+             in Framework/Generic/lib/ and Gradle picks it up via flatDir, but
+             Maven CI installs only the explicit ghidra:* JARs. Version matches
+             Ghidra 12.1's bundled JAR. -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.20.0</version>
+            <scope>test</scope>
+        </dependency>
         <!-- Ghidra DB (test only) — needed so Mockito can instrument Program's type hierarchy -->
         <dependency>
             <groupId>ghidra</groupId>
