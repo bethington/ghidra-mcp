@@ -189,11 +189,18 @@ class TestBridgeIsDynamic(unittest.TestCase):
         meta-tool (#267/#153) that lets the bridge run --lazy with a small tool
         surface while still letting agents discover unloaded tools by keyword.
         Pulls weight: directly addresses the context-overhead complaints.
+
+        Bumped 2026-06-18: 2300 -> 2350 for the wildcard-bind DNS-rebinding
+        fix — `_wildcard_allowed_hosts()` helper + the 0.0.0.0/:: branch
+        rewrite that keeps protection ON with a derived allowed-Host list
+        instead of disabling it. Pulls weight: security fix; previously
+        any page in the user's browser could DNS-rebind to the bridge
+        and drive every Ghidra tool.
         """
         bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
         lines = len(bridge_path.read_text().splitlines())
         self.assertLess(
-            lines, 2300, f"Bridge is {lines} lines, expected <2300 for thin multiplexer"
+            lines, 2350, f"Bridge is {lines} lines, expected <2350 for thin multiplexer"
         )
 
 
