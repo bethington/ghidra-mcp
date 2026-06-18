@@ -8,11 +8,11 @@
 vuln_findings:
   Vuln_AllocMul:
     detector_id: integer_overflow_alloc
-    vuln_class: memory
+    vuln_class: alloc
     confidence_min: medium
   Vuln_AllocAdd:
     detector_id: integer_overflow_alloc
-    vuln_class: memory
+    vuln_class: alloc
     confidence_min: low
   Safe_AllocConst:
     detector_id: null

@@ -13,7 +13,6 @@ Endpoints covered:
 """
 
 import pytest
-import json
 
 
 # Mark all tests as readonly integration tests
@@ -38,7 +37,7 @@ class TestVulnEndpoints:
     def test_list_vuln_detectors(self, http_client):
         r = http_client.get("/list_vuln_detectors")
         assert r.status_code == 200
-        body = json.loads(r.text)
+        body = r.json()
         ids = {d["id"] for d in body["detectors"]}
         assert {"format_string", "unbounded_copy",
                 "integer_overflow_alloc", "command_injection"} <= ids
@@ -52,7 +51,7 @@ class TestVulnEndpoints:
                              json_data={"max_functions": 200,
                                         "write_bookmarks": False})
         assert r.status_code == 200
-        body = json.loads(r.text)
+        body = r.json()
         assert "findings" in body and "scanned_functions" in body
         assert "decompile_failures" in body and "detectors_run" in body
         if body.get("note", "").startswith("no catalog sinks resolved"):
@@ -67,7 +66,7 @@ class TestVulnEndpoints:
         r = http_client.get("/enumerate_attack_surface",
                             params={"max_depth": "2"})
         assert r.status_code == 200
-        body = json.loads(r.text)
+        body = r.json()
         assert "by_source_class" in body
         assert "source_count" in body
         assert body["max_depth"] <= 8  # clamped
