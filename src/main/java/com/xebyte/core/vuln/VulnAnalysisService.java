@@ -140,7 +140,7 @@ public final class VulnAnalysisService {
         int totalSites = 0;
 
         if (!functionRef.isBlank()) {
-            Function f = resolveFunction(program, functionRef);
+            Function f = ServiceUtils.resolveFunction(program, functionRef);
             if (f == null) return Response.err("Function not found: " + functionRef);
             ScanResult r = scanFunction(program, f, active);
             findings.addAll(r.findings);
@@ -326,38 +326,7 @@ public final class VulnAnalysisService {
     }
 
     /**
-     * Resolve a function by address-or-name. Uses {@code AddressFactory.getAddress}
-     * directly (overlay-safe: accepts {@code name::offset}) rather than
-     * {@code ServiceUtils.parseAddress}, which on this branch lowercases overlay
-     * space names.
-     */
-    // TODO(overlay-address-spaces): collapse into ServiceUtils.resolveFunction once that branch merges; the local AddressFactory path is only needed while parseAddress lowercases overlay names on main.
-    private Function resolveFunction(Program program, String ref) {
-        String r = ref.strip();
-        try {
-            Address a = program.getAddressFactory().getAddress(r);
-            if (a != null) {
-                Function f = program.getFunctionManager().getFunctionContaining(a);
-                if (f != null) return f;
-            }
-        } catch (Exception ignored) {
-            // not an address — fall through to name match
-        }
-        // Name fallback via SymbolTable (indexed) instead of O(n) FunctionIterator.
-        for (ghidra.program.model.symbol.Symbol s :
-                program.getSymbolTable().getSymbols(ref.strip())) {
-            if (s.getSymbolType() == ghidra.program.model.symbol.SymbolType.FUNCTION) {
-                Function f = program.getFunctionManager().getFunctionAt(s.getAddress());
-                if (f != null) return f;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Drop SEVR/{@code <class>} bookmarks at each finding's address. Address
-     * resolution intentionally bypasses {@code ServiceUtils.parseAddress} —
-     * see {@link #resolveFunction} for the overlay-safety rationale.
+     * Drop SEVR/{@code <class>} bookmarks at each finding's address.
      */
     private void writeBookmarks(Program program, List<Finding> findings) {
         threading.executeWriteUnchecked(program, "SEVR bookmarks", () -> {
