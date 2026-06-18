@@ -3188,25 +3188,19 @@ def refresh_candidate_scores(
             func["is_leaf"] = info["is_leaf"]
             func["classification"] = info["classification"]
             func["deductions"] = info["deductions"]
-            # Clear recovery-pass one-shot flag so the user can re-run these
-            # functions after a refresh — the refresh gesture is an explicit
-            # "look at everything fresh" signal.
-            func.pop("recovery_pass_done", None)
-            func.pop("recovery_pass_score", None)
-            func.pop("recovery_pass_at", None)
-            # Same for decompile-timeout: refresh clears the blacklist so the
-            # user can retry after e.g. Ghidra analysis improvements.
-            func.pop("decompile_timeout", None)
-            func.pop("decompile_timeout_at", None)
-            # Library-code auto-classification clears on refresh too — the
-            # detector is conservative but not perfect, and the explicit
-            # refresh gesture is the user saying "look at everything fresh."
-            func.pop("library_code", None)
-            func.pop("library_code_at", None)
-            func.pop("library_code_reasons", None)
-            # And the stagnation counter: a refresh is the user saying
-            # "re-score this from scratch, I'm willing to try again."
-            func.pop("stagnation_runs", None)
+            # Clear one-shot blacklist flags. Explicit False/None (not pop)
+            # so _state_func_to_row forwards the cleared value to the SQL
+            # column — pop() would just omit the key and leave the column
+            # at its old True. (H23)
+            func["recovery_pass_done"] = False
+            func["recovery_pass_score"] = None
+            func["recovery_pass_at"] = None
+            func["decompile_timeout"] = False
+            func["decompile_timeout_at"] = None
+            func["library_code"] = False
+            func["library_code_at"] = None
+            func["library_code_reasons"] = None
+            func["stagnation_runs"] = 0
             prog_refreshed += 1
             if abs(info["score"] - old_score) >= 5:
                 prog_stale += 1
@@ -3216,25 +3210,30 @@ def refresh_candidate_scores(
             by_program_stats[prog] = {"refreshed": prog_refreshed, "stale": prog_stale}
 
     if save and refreshed > 0:
-        # Read-modify-write: re-read the latest state from disk before saving
-        # so we don't clobber functions that were added (e.g. by a concurrent
-        # state merge) between when this refresh started and now. Only the
-        # specific function entries we scored get overwritten.
         refreshed_funcs = {
             c["key"]: c["func"]
             for prog_items in by_prog.values()
             for c in prog_items
             if c["func"].get("score") is not None
         }
+        repo = _get_storage_repo()
         with _state_lock:
-            latest = load_state()
-            latest_funcs = latest.setdefault("functions", {})
-            for key, func in refreshed_funcs.items():
-                if key in latest_funcs:
-                    latest_funcs[key].update(func)
-                else:
-                    latest_funcs[key] = func
-            _atomic_write_state(latest)
+            if repo is not None:
+                # H23: write to the SQL backend, not the dead state.json.
+                # Mirror update_function_state's repo path per-key so the
+                # accumulator-merge + run-history semantics stay identical.
+                for key, func in refreshed_funcs.items():
+                    _update_function_via_repo(repo, key, func)
+            else:
+                # Legacy fallback (test-only) — preserve old RMW behavior.
+                latest = load_state()
+                latest_funcs = latest.setdefault("functions", {})
+                for key, func in refreshed_funcs.items():
+                    if key in latest_funcs:
+                        latest_funcs[key].update(func)
+                    else:
+                        latest_funcs[key] = func
+                _atomic_write_state(latest)
         bus_emit("state_changed")
 
     # Record refresh metadata on the queue so the dashboard can display it

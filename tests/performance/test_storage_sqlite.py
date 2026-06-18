@@ -93,6 +93,72 @@ def test_env_var_overrides_config(tmp_path, monkeypatch):
     assert "env.db" in cfg.url
 
 
+def test_refresh_candidate_scores_persists_to_sql(sqlite_repo, monkeypatch):
+    """H23: refresh must write to the SQL backend, not the dead state.json,
+    and must clear the one-shot blacklist flags so the user's 'Refresh Top N'
+    gesture actually re-arms blacklisted functions."""
+    import fun_doc
+
+    repo, _db_path = sqlite_repo
+    monkeypatch.setattr(fun_doc, "_get_storage_repo", lambda: repo)
+
+    # Seed the SQL row with a stale score + blacklist flags set.
+    # upsert_function expects the row shape (program_path, not program).
+    repo.upsert_function({
+        "program_path": "/proj/Foo.exe",
+        "binary_name": "Foo.exe",
+        "address": "00401000",
+        "name": "FUN_00401000",
+        "score": 10,
+        "fixable": 0.5,
+        "recovery_pass_done": True,
+        "decompile_timeout": True,
+        "library_code": True,
+        "stagnation_runs": 7,
+    })
+
+    # Stub _batch_score (the internal helper refresh_candidate_scores calls)
+    # so no real Ghidra HTTP request is needed.
+    monkeypatch.setattr(
+        fun_doc, "_batch_score",
+        lambda addresses, prog_path=None, **kw: {
+            "00401000": {
+                "score": 42, "fixable": 0.5, "has_custom_name": False,
+                "has_plate_comment": False, "is_leaf": True,
+                "classification": "leaf", "deductions": [],
+            }
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(fun_doc, "load_priority_queue",
+                        lambda: {"meta": {}, "config": {}}, raising=False)
+    monkeypatch.setattr(fun_doc, "save_priority_queue", lambda q: None, raising=False)
+
+    # Build a selectable state dict without blacklist flags so select_candidates
+    # includes the function.  Blacklist flags live in SQL (set above); after
+    # refresh the explicit-clear block sets them to False in the func dict, and
+    # _update_function_via_repo writes those cleared values back to SQL.
+    state = {
+        "functions": {
+            "/proj/Foo.exe::00401000": {
+                "program": "/proj/Foo.exe",
+                "address": "00401000",
+                "name": "FUN_00401000",
+                "score": 10,
+                "fixable": 0.5,
+            }
+        }
+    }
+    fun_doc.refresh_candidate_scores(state, count=10, save=True)
+
+    fetched = repo.get_function("/proj/Foo.exe", "00401000")
+    assert fetched["score"] == 42, "refreshed score never reached SQL"
+    assert not fetched.get("recovery_pass_done"), "blacklist flag not cleared in SQL"
+    assert not fetched.get("decompile_timeout")
+    assert not fetched.get("library_code")
+    assert (fetched.get("stagnation_runs") or 0) == 0
+
+
 def test_selector_blacklist_flags_round_trip(sqlite_repo):
     """H22: recovery_pass_done / decompile_timeout / not_a_function must
     survive _state_func_to_row → repo → _row_to_state_func, otherwise the
