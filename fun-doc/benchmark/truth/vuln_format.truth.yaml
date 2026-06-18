@@ -1,0 +1,19 @@
+# Ground truth for src/vuln_format.c — VulnAnalysisService Phase-1 detector validation.
+#
+# This file does NOT use the fun-doc semantic-truth schema (function / name_synonyms /
+# canonical_plate / weights) because the TU exports multiple functions and is graded
+# by detector hit/miss, not by documentation quality. The vuln benchmark scorer reads
+# only the self-contained `vuln_findings` block below.
+#
+# Schema — vuln_findings: maps exported function name → expected detector outcome.
+#   detector_id     : id from /list_vuln_detectors that MUST fire, or null = no finding allowed
+#   vuln_class      : Finding.vuln_class the detector should report (omit when detector_id is null)
+#   confidence_min  : lowest acceptable confidence tier (low < medium < high)
+
+vuln_findings:
+  Vuln_FormatFromArg:
+    detector_id: format_string
+    vuln_class: format
+    confidence_min: medium
+  Safe_FormatLiteral:
+    detector_id: null

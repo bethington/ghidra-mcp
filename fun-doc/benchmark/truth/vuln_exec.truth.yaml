@@ -1,0 +1,14 @@
+# Ground truth for src/vuln_exec.c — VulnAnalysisService Phase-1 detector validation.
+#
+# Schema — vuln_findings: maps exported function name → expected detector outcome.
+#   detector_id     : id from /list_vuln_detectors that MUST fire, or null = no finding allowed
+#   vuln_class      : Finding.vuln_class the detector should report (omit when detector_id is null)
+#   confidence_min  : lowest acceptable confidence tier (low < medium < high)
+
+vuln_findings:
+  Vuln_ExecArg:
+    detector_id: command_injection
+    vuln_class: exec
+    confidence_min: high
+  Safe_ExecLiteral:
+    detector_id: null
