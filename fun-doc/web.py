@@ -971,7 +971,8 @@ class WorkerManager:
                     "skipped" if result == "skipped" else "failed"
                 )
                 worker["progress"][bucket] = worker["progress"].get(bucket, 0) + 1
-                worker["last_heartbeat_at"] = datetime.now().isoformat()
+                with self._lock:
+                    worker["last_heartbeat_at"] = datetime.now().isoformat()
                 self._emit_status()
 
             # Set the worker pane's "current item" title with the real
@@ -988,7 +989,8 @@ class WorkerManager:
                     "address": address.lstrip("0x"),
                     "program": Path(prog_path).name,
                 }
-                worker["last_heartbeat_at"] = datetime.now().isoformat()
+                with self._lock:
+                    worker["last_heartbeat_at"] = datetime.now().isoformat()
                 self._emit_status()
 
             def _exclude_binaries():

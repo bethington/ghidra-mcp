@@ -9521,7 +9521,11 @@ def process_global(
     print(f"  {'-' * 50}")
 
     prompt = _build_global_prompt(prog_path, address, audit_before)
-    text, meta = _invoke_provider_direct(
+    # H24: route through the subprocess watchdog so a wedged provider call
+    # can't stall the globals worker indefinitely (matches function-worker
+    # path at L7826). invoke_claude → _invoke_provider_with_watchdog has the
+    # same (text, meta) return shape as _invoke_provider_direct.
+    text, meta = invoke_claude(
         prompt,
         model=model,
         max_turns=max_turns,
