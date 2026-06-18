@@ -121,7 +121,39 @@ public class HeadlessProgramProvider implements ProgramProvider {
         if (program != null) {
             this.currentProgram = program;
             // Ensure it's in our map
-            openPrograms.put(program.getName(), program);
+            registerProgram(program);
+        }
+    }
+
+    /**
+     * Track a newly-opened Program in {@link #openPrograms}, releasing any
+     * prior different instance held under the same name.
+     * <p>
+     * {@code Program.getName()} is just the leaf filename (e.g.
+     * {@code D2Client.dll}), so importing two versions of the same binary —
+     * or the same filename from two folders — would otherwise overwrite the
+     * earlier map entry without {@code release()}ing it. The orphaned
+     * Program's DomainObject consumer reference and DB buffers then stay
+     * live for the JVM's lifetime, invisibly accumulating toward the
+     * ~5-open-program crash ceiling.
+     */
+    private void registerProgram(Program program) {
+        String name = program.getName();
+        Program prior = openPrograms.put(name, program);
+        if (prior != null && prior != program) {
+            Msg.warn(this, "Program name collision on '" + name
+                + "' — releasing previously-tracked instance to avoid a leak. "
+                + "Consider closing the earlier program explicitly before "
+                + "loading another with the same filename.");
+            try {
+                prior.release(this);
+            } catch (Exception e) {
+                Msg.warn(this, "Error releasing displaced program '" + name
+                    + "': " + e.getMessage());
+            }
+            if (currentProgram == prior) {
+                currentProgram = program;
+            }
         }
     }
 
@@ -154,7 +186,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
             }
 
             if (program != null) {
-                openPrograms.put(program.getName(), program);
+                registerProgram(program);
                 if (currentProgram == null) {
                     currentProgram = program;
                 }
@@ -232,7 +264,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
             }
 
             if (program != null) {
-                openPrograms.put(program.getName(), program);
+                registerProgram(program);
                 if (currentProgram == null) {
                     currentProgram = program;
                 }
@@ -338,7 +370,7 @@ public class HeadlessProgramProvider implements ProgramProvider {
                     "domainFile.getDomainObject returned null for: " + projectPath
                     + (serverHint.isEmpty() ? "" : " (" + serverHint + ")"));
             }
-            openPrograms.put(program.getName(), program);
+            registerProgram(program);
             if (currentProgram == null) {
                 currentProgram = program;
             }
