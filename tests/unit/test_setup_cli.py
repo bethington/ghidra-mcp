@@ -28,8 +28,6 @@ def _args(**kwargs) -> argparse.Namespace:
         with_debugger=False,
         force=False,
         test=[],
-        requirements=[],
-        python=None,
         env_file=None,
         new=None,
         old=None,
@@ -839,6 +837,30 @@ def test_parser_deploy_subcommand_recognized():
 
     args = build_parser().parse_args(["deploy"])
     assert args.command == "deploy"
+
+
+def test_parser_install_python_deps_rejects_obsolete_flags():
+    # --requirements / --python were vestiges of the old pip flow; uv sync
+    # ignored their values, so they're removed rather than left to silently
+    # mask misconfigured automation.
+    from tools.setup.cli import build_parser
+
+    parser = build_parser()
+    for flag, value in (("--requirements", "requirements.txt"), ("--python", "python3")):
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["install-python-deps", flag, value])
+        assert exc_info.value.code != 0
+
+
+def test_parser_install_python_deps_accepts_supported_flags():
+    from tools.setup.cli import build_parser
+
+    args = build_parser().parse_args(
+        ["install-python-deps", "--with-debugger", "--env-file", ".env.local"]
+    )
+    assert args.command == "install-python-deps"
+    assert args.with_debugger is True
+    assert args.env_file == Path(".env.local")
 
 
 def test_parser_bump_version_parses_new_flag():

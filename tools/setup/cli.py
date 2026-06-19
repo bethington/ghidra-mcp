@@ -45,13 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     install_parser = subparsers.add_parser(
         "install-python-deps",
-        help="Install one or more Python requirements files",
-    )
-    install_parser.add_argument(
-        "--requirements",
-        action="append",
-        default=[],
-        help="Requirements file relative to the repo root. May be passed multiple times.",
+        help="Install the repo's Python dependency groups via uv sync",
     )
     install_parser.add_argument(
         "--use-debugger-toggle",
@@ -62,11 +56,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--with-debugger",
         action="store_true",
         help="Force-install debugger requirements regardless of .env.",
-    )
-    install_parser.add_argument(
-        "--python",
-        type=Path,
-        help="Interpreter to use for pip installs. Defaults to the repo venv when present.",
     )
     install_parser.add_argument(
         "--env-file",
