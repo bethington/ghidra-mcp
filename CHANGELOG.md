@@ -67,6 +67,17 @@ Complete version history for the Ghidra MCP Server project.
   (plain text) and `json.loads()`'d it, which always raised, was silently
   swallowed, and the Ghidra↔runtime address map was never seeded on
   attach. Now logs whether the sync fired.
+- `emulate_function` now honors `max_steps` with a bounded step loop.
+  Previously `effectiveMaxSteps` was computed but never used — `emu.run()`
+  was unbounded, so an infinite-looping target would hang the HTTP handler
+  thread forever. Response now includes `steps_executed`, `max_steps`, and
+  `stop_reason`.
+- `debugger_set_breakpoint type="hardware"` now arms a debug register
+  (`DEBUG_BREAKPOINT_DATA` + `DEBUG_BREAK_EXECUTE`) instead of planting a
+  software `int3`. Previously the HARDWARE branch passed
+  `DEBUG_BREAKPOINT_CODE` and only re-enabled it, so anti-debug-aware
+  targets would detect the int3 and checksummed/self-modifying code
+  regions would be corrupted exactly where a HW bp was requested.
 
 ---
 
