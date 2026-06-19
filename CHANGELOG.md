@@ -78,6 +78,21 @@ Complete version history for the Ghidra MCP Server project.
   `DEBUG_BREAKPOINT_CODE` and only re-enabled it, so anti-debug-aware
   targets would detect the int3 and checksummed/self-modifying code
   regions would be corrupted exactly where a HW bp was requested.
+- When the CodeBrowser window that started the shared TCP server is closed
+  while other windows survive, the server is now restarted on a surviving
+  window so its route handlers re-bind to live services. Previously the
+  routes stayed bound to the disposed window's `PluginTool` and every
+  subsequent HTTP request executed against stale services. Each disposed
+  instance also now releases its own `programProvider` (previously only
+  the last one did).
+
+### Performance
+
+- `analyze_for_documentation` now walks only references originating inside
+  the function body (`getReferenceSourceIterator(body, true)`) instead of
+  iterating every reference from the function's start address through the
+  end of the program. For functions near the start of a large binary this
+  was millions of references per call.
 
 ---
 
