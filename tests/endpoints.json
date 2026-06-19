@@ -1,7 +1,7 @@
 {
   "version": "5.14.1",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 254,
+  "total_endpoints": 255,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -932,7 +932,9 @@
         "write_bookmarks",
         "max_functions",
         "scope",
-        "max_depth"
+        "max_depth",
+        "taint",
+        "taint_max_depth"
       ],
       "description": "Scan for intra-function vulnerability patterns (format-string, unbounded-copy, integer-overflow-into-alloc, command-injection) using PCode; optionally writes SEVR/<class> bookmarks"
     },
@@ -1108,6 +1110,20 @@
         "limit"
       ],
       "description": "Cross-binary fuzzy function matching. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution."
+    },
+    {
+      "path": "/find_taint_path",
+      "method": "GET",
+      "category": "security",
+      "params": [
+        "address",
+        "arg_role",
+        "arg_index",
+        "max_call_depth",
+        "max_functions",
+        "program"
+      ],
+      "description": "Backward inter-procedural taint trace from one sink call-site argument; reports the first catalog SOURCE reached (or terminal reason)"
     },
     {
       "path": "/find_undocumented_by_string",
