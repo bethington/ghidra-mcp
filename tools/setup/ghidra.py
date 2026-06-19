@@ -2121,6 +2121,54 @@ def test_write_access(path_to_test: Path) -> bool:
         return False
 
 
+def _has_dependency_group(pyproject: Path, group: str) -> bool:
+    """Return True if ``pyproject.toml`` defines ``group`` under
+    ``[dependency-groups]``.
+
+    A plain substring scan is too loose — the word could appear in a comment or
+    an unrelated section — and too strict, since it wouldn't confirm the entry
+    is one ``uv sync --group <group>`` can actually resolve. Parse the TOML and
+    look for the real key.
+    """
+    if not pyproject.is_file():
+        return False
+
+    try:
+        import tomllib  # Python 3.11+
+    except ModuleNotFoundError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ModuleNotFoundError:
+            tomllib = None  # type: ignore[assignment]
+
+    if tomllib is not None:
+        try:
+            with pyproject.open("rb") as handle:
+                data = tomllib.load(handle)
+        except (OSError, ValueError):
+            return False
+        groups = data.get("dependency-groups")
+        return isinstance(groups, dict) and group in groups
+
+    # Python 3.10 without tomli: fall back to a section-scoped scan so the word
+    # only counts when it's a key inside [dependency-groups].
+    try:
+        text = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    in_section = False
+    key_re = re.compile(rf"^\s*(?:{re.escape(group)}|[\"']{re.escape(group)}[\"'])\s*=")
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0]
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_section = stripped == "[dependency-groups]"
+            continue
+        if in_section and key_re.match(line):
+            return True
+    return False
+
+
 def collect_preflight_issues(
     repo_root: Path,
     ghidra_path: Path,
@@ -2155,9 +2203,7 @@ def collect_preflight_issues(
 
     if install_debugger:
         pyproject = repo_root / "pyproject.toml"
-        if not pyproject.is_file() or "debugger" not in pyproject.read_text(
-            encoding="utf-8"
-        ):
+        if not _has_dependency_group(pyproject, "debugger"):
             issues.append(
                 "Debugger dependency group not found in pyproject.toml "
                 "(expected a [dependency-groups] 'debugger' entry)"
