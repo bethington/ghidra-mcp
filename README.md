@@ -1030,8 +1030,8 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 |--------|-------|
 | **Version** | 5.14.1 |
 | **MCP Tools** | 255 fully implemented |
-| **GUI Endpoints** | 196 (GhidraMCPPlugin) |
-| **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |
+| **GUI Endpoints** | 197 (GhidraMCPPlugin) |
+| **Headless Endpoints** | 196 (GhidraMCPHeadlessServer) |
 | **Compilation** | ✅ 100% success |
 | **Batch Efficiency** | 93% API call reduction |
 | **AI Workflows** | 7 proven documentation workflows |

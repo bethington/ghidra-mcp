@@ -242,9 +242,12 @@ public final class VulnAnalysisService {
             Map<String, Object> j = new LinkedHashMap<>(f.toJson());
             TaintResult tr = taintByFinding.get(f);
             if (tr != null) {
+                Map<String, Object> tj = tr.toJson();
                 j.put("taint_source", tr.source() == null ? null : tr.source().id());
                 j.put("taint_terminal", tr.terminalReason());
-                j.put("taint_path", tr.toJson().get("path"));
+                j.put("taint_path", tj.get("path"));
+                j.put("taint_path_truncated", tj.get("path_truncated"));
+                j.put("taint_functions_visited", tr.functionsVisited());
                 if (tr.source() != null) j.put("confidence", "high");
             }
             fjson.add(j);
@@ -364,11 +367,7 @@ public final class VulnAnalysisService {
             if (call == null) return Response.err("No CALL op at " + addressStr);
             // Resolve arg index
             int idx = argIndex;
-            Function callee = null;
-            if (call.getNumInputs() > 0 && call.getInput(0) != null
-                    && call.getInput(0).isAddress()) {
-                callee = program.getFunctionManager().getFunctionAt(call.getInput(0).getAddress());
-            }
+            Function callee = tracer.resolveCallee(call, program.getFunctionManager());
             if ((argRole != null && !argRole.isBlank()) && callee != null) {
                 for (CatalogEntry e : catalog.resolve(callee)) {
                     Integer i = e.arg(argRole);

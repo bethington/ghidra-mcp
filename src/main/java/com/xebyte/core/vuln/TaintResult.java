@@ -23,10 +23,11 @@ public record TaintResult(CatalogEntry source, List<TaintStep> path,
             : JsonHelper.mapOf("id", source.id(), "class", source.vulnClass(),
                                "kind", source.kind()));
         List<Map<String,Object>> steps = new ArrayList<>();
-        int n = Math.min(path.size(), PATH_JSON_CAP);
-        for (int i = 0; i < n; i++) steps.add(path.get(i).toJson());
+        int total = path.size();
+        int from = Math.max(0, total - PATH_JSON_CAP);
+        for (int i = from; i < total; i++) steps.add(path.get(i).toJson());
         out.put("path", steps);
-        out.put("path_truncated", path.size() > PATH_JSON_CAP);
+        out.put("path_truncated", from > 0);
         out.put("terminal_reason", terminalReason);
         out.put("functions_visited", functionsVisited);
         out.put("call_depth_reached", callDepthReached);

@@ -149,8 +149,6 @@ public final class TaintTracer implements AutoCloseable {
     public TaintResult trace(HighFunction startHf, PcodeOp sinkCall, int argIdx,
             int maxCallDepth, int maxFunctions) {
         int depthCap = Math.max(1, Math.min(maxCallDepth, 10));
-        // allow 0 only when caller explicitly passed 0 (used by budget test)
-        if (maxCallDepth <= 0) depthCap = 0;
         int fnCap = Math.max(1, Math.min(maxFunctions, 256));
 
         Varnode start = PcodeQuery.argVarnode(sinkCall, argIdx);
@@ -280,7 +278,7 @@ public final class TaintTracer implements AutoCloseable {
                         cur = next; break;
                     default:
                         if (path.size() >= best.path().size())
-                            best = new Dead(List.copyOf(path), "op_" + oc);
+                            best = new Dead(List.copyOf(path), "op_" + PcodeQuery.mnemonic(def));
                         cur = null;
                 }
             }

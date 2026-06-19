@@ -283,26 +283,97 @@ public class TaintTracerTest {
     }
 
     @Test
-    public void trace_budgetExhausted_returnsBudgetReason() {
-        // n = param0; Sink has 0 callers but maxCallDepth=0 → can't cross → budget.
+    public void trace_callDepthCap_stopsAtBoundary() {
+        // Sink(param0) ← Mid calls Sink(midParam0) ← Top calls Mid(...).
+        // maxCallDepth=1: hop Sink→Mid (depth 1); Mid's param0 hits the cap
+        // before crossing to Top → terminal "call_depth", callDepthReached=1.
         Program p = mock(Program.class);
-        when(p.getFunctionManager()).thenReturn(mock(FunctionManager.class));
+        FunctionManager fm = mock(FunctionManager.class);
+        when(p.getFunctionManager()).thenReturn(fm);
         ReferenceManager rm = mock(ReferenceManager.class);
         when(p.getReferenceManager()).thenReturn(rm);
-        Function fnF = fn("F", mock(Address.class));
-        ReferenceIterator rit = mock(ReferenceIterator.class);
-        when(rit.hasNext()).thenReturn(false);
-        when(rm.getReferencesTo(any(Address.class))).thenReturn(rit);
+
+        Address aSink = mock(Address.class), aMid = mock(Address.class),
+                callSite = mock(Address.class);
+        Function sinkFn = fn("Sink", aSink), midFn = fn("Mid", aMid);
+        when(fm.getFunctionAt(aSink)).thenReturn(sinkFn);
+
+        // Sink: memcpy(dst, src, n) where n = param0
         Varnode n = paramVn(0);
         PcodeOpAST sinkCall = callOp(mock(Address.class),
             addrTgt(mock(Address.class)), null,
             mock(Varnode.class), mock(Varnode.class), n);
-        HighFunction hf = hfOf(fnF, sinkCall);
-        TaintTracer t = new TaintTracer(p, catalog(), decompOf(Map.of(fnF, hf)));
-        TaintResult r = t.trace(hf, sinkCall, 2, /*maxCallDepth*/ 0, 64);
+        HighFunction hfSink = hfOf(sinkFn, sinkCall);
+
+        // Mid: Sink(midParam0) — arg0 is Mid's own param0, so the next hop
+        // would need another caller crossing (which the cap forbids).
+        Varnode midParam0 = paramVn(0);
+        PcodeOpAST callSink = callOp(callSite, addrTgt(aSink), null, midParam0);
+        HighFunction hfMid = hfOf(midFn, callSink);
+        when(hfMid.getPcodeOps(callSite)).thenAnswer(inv -> List.of(callSink).iterator());
+
+        // Sink's sole caller is Mid at callSite.
+        Reference ref = mock(Reference.class);
+        RefType rt = mock(RefType.class);
+        when(rt.isCall()).thenReturn(true);
+        when(ref.getReferenceType()).thenReturn(rt);
+        when(ref.getFromAddress()).thenReturn(callSite);
+        ReferenceIterator rit = mock(ReferenceIterator.class);
+        when(rit.hasNext()).thenReturn(true, false);
+        when(rit.next()).thenReturn(ref);
+        when(rm.getReferencesTo(aSink)).thenReturn(rit);
+        when(fm.getFunctionContaining(callSite)).thenReturn(midFn);
+
+        TaintTracer t = new TaintTracer(p, catalog(),
+            decompOf(Map.of(sinkFn, hfSink, midFn, hfMid)));
+        TaintResult r = t.trace(hfSink, sinkCall, 2, /*maxCallDepth*/ 1, 64);
         assertNull(r.source());
-        // depth 0 → cannot cross param boundary → "call_depth"
         assertEquals("call_depth", r.terminalReason());
+        assertEquals(1, r.callDepthReached());
+        t.close();
+    }
+
+    @Test
+    public void trace_callReturn_recursesIntoCalleeReturn() {
+        // Sink: n = Helper(); memcpy(dst, src, n).
+        // Helper: return recv(...). Backward: n → CALL Helper (not a source)
+        // → enqueueReturns → Helper's RETURN.input(1) = recvRet → CALL recv → source.
+        Program p = mock(Program.class);
+        FunctionManager fm = mock(FunctionManager.class);
+        when(p.getFunctionManager()).thenReturn(fm);
+        when(p.getReferenceManager()).thenReturn(mock(ReferenceManager.class));
+
+        Address aHelper = mock(Address.class), aRecv = mock(Address.class);
+        Function sinkFn = fn("Sink", mock(Address.class));
+        Function helperFn = fn("Helper", aHelper);
+        Function recvFn = fn("recv", aRecv);
+        when(fm.getFunctionAt(aHelper)).thenReturn(helperFn);
+        when(fm.getFunctionAt(aRecv)).thenReturn(recvFn);
+
+        // Helper body: recvRet = recv(...); RETURN(space, recvRet);
+        PcodeOpAST callRecv = callOp(mock(Address.class), addrTgt(aRecv), null,
+            mock(Varnode.class), mock(Varnode.class), mock(Varnode.class));
+        Varnode recvRet = vn(callRecv);
+        PcodeOpAST retOp = mock(PcodeOpAST.class);
+        when(retOp.getOpcode()).thenReturn(PcodeOp.RETURN);
+        when(retOp.getNumInputs()).thenReturn(2);
+        when(retOp.getInput(1)).thenReturn(recvRet);
+        HighFunction hfHelper = hfOf(helperFn, callRecv, retOp);
+
+        // Sink body: n = Helper(); memcpy(_, _, n);
+        PcodeOpAST callHelper = callOp(mock(Address.class), addrTgt(aHelper), null);
+        Varnode n = vn(callHelper);
+        PcodeOpAST sinkCall = callOp(mock(Address.class),
+            addrTgt(mock(Address.class)), null,
+            mock(Varnode.class), mock(Varnode.class), n);
+        HighFunction hfSink = hfOf(sinkFn, callHelper, sinkCall);
+
+        TaintTracer t = new TaintTracer(p, catalog(),
+            decompOf(Map.of(sinkFn, hfSink, helperFn, hfHelper)));
+        TaintResult r = t.trace(hfSink, sinkCall, 2, 5, 64);
+        assertNotNull("should reach recv via callee RETURN", r.source());
+        assertEquals("recv", r.source().id());
+        assertEquals("source", r.terminalReason());
         t.close();
     }
 

@@ -37,8 +37,12 @@ public class TaintResultTest {
         var steps = new java.util.ArrayList<TaintStep>();
         for (int i = 0; i < 50; i++) steps.add(new TaintStep("F","0","op","step"+i));
         TaintResult r = new TaintResult(null, steps, "budget", 1, 1);
-        List<?> path = (List<?>) r.toJson().get("path");
+        List<Map<String,Object>> path = (List<Map<String,Object>>) r.toJson().get("path");
         assertEquals(32, path.size());
         assertTrue((Boolean) r.toJson().get("path_truncated"));
+        // Truncation keeps the TAIL (source/terminal end), drops the head.
+        assertEquals("step49", path.get(path.size() - 1).get("detail"));
+        assertEquals("step18", path.get(0).get("detail"));
+        for (Map<String,Object> s : path) assertNotEquals("step0", s.get("detail"));
     }
 }
