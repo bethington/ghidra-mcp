@@ -348,4 +348,49 @@ public class TaintTracerTest {
         assertEquals("no_path", r.terminalReason());
         t.close();
     }
+
+    @Test
+    public void trace_loopCarriedPhi_terminates() {
+        // n = MULTIEQUAL(init, INT_ADD(n, 1)) — loop accumulator into memcpy size.
+        // `init` is a non-const local input so the phi forks: each frame that
+        // reaches φ enqueues a new frame at `body`, which walks back to φ and
+        // forks again → unbounded worklist without a per-function varnode
+        // seen-set. INTRA_STEP_CAP bounds each frame but not the frame count.
+        Program p = mock(Program.class);
+        when(p.getFunctionManager()).thenReturn(mock(FunctionManager.class));
+        when(p.getReferenceManager()).thenReturn(mock(ReferenceManager.class));
+        Function fnF = fn("F", mock(Address.class));
+
+        // init: non-const, no def, no HighVariable → "input" terminal when reached.
+        Varnode init = mock(Varnode.class);
+        when(init.isConstant()).thenReturn(false);
+        when(init.getDef()).thenReturn(null);
+        when(init.getHigh()).thenReturn(null);
+        // body = INT_ADD(n, 1) where n is the phi output → cycle.
+        PcodeOp phi = mock(PcodeOp.class);
+        Varnode n = vn(phi);
+        Varnode one = konst(1);
+        PcodeOp add = mock(PcodeOp.class);
+        when(add.getOpcode()).thenReturn(PcodeOp.INT_ADD);
+        when(add.getNumInputs()).thenReturn(2);
+        when(add.getInput(0)).thenReturn(n);
+        when(add.getInput(1)).thenReturn(one);
+        Varnode body = vn(add);
+        when(phi.getOpcode()).thenReturn(PcodeOp.MULTIEQUAL);
+        when(phi.getNumInputs()).thenReturn(2);
+        when(phi.getInput(0)).thenReturn(init);
+        when(phi.getInput(1)).thenReturn(body);
+
+        PcodeOpAST sinkCall = callOp(mock(Address.class), addrTgt(mock(Address.class)),
+            null, mock(Varnode.class), mock(Varnode.class), n);
+        HighFunction hf = hfOf(fnF, sinkCall);
+
+        TaintTracer t = new TaintTracer(p, catalog(), decompOf(Map.of(fnF, hf)));
+        long start = System.nanoTime();
+        TaintResult r = t.trace(hf, sinkCall, 2, 5, 64);
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        assertNull(r.source());
+        assertTrue("must terminate quickly (was " + ms + "ms)", ms < 5000);
+        t.close();
+    }
 }

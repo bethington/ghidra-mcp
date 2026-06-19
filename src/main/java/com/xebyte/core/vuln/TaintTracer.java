@@ -135,9 +135,16 @@ public final class TaintTracer implements AutoCloseable {
 
     // ---- trace() — backward inter-procedural walk ----
 
-    /** One worklist frame. */
+    /**
+     * One worklist frame. {@code seen} is the per-function varnode visited
+     * set: intra-function forks SHARE the parent's set (bounding loop-carried
+     * phi cycles); inter-procedural enqueues get a fresh set.
+     */
     private record Frame(HighFunction hf, Varnode v, int depth,
-            List<TaintStep> path, Set<Function> onPath) {}
+            List<TaintStep> path, Set<Function> onPath, Set<Varnode> seen) {}
+
+    /** Longest dead-end path with its own terminal reason (kept paired). */
+    private record Dead(List<TaintStep> path, String reason) {}
 
     public TaintResult trace(HighFunction startHf, PcodeOp sinkCall, int argIdx,
             int maxCallDepth, int maxFunctions) {
@@ -151,11 +158,11 @@ public final class TaintTracer implements AutoCloseable {
         hfCache.putIfAbsent(startHf.getFunction(), startHf);
 
         Deque<Frame> work = new ArrayDeque<>();
-        work.add(new Frame(startHf, start, 0,
-            new ArrayList<>(), new LinkedHashSet<>(Set.of(startHf.getFunction()))));
+        work.add(new Frame(startHf, start, 0, new ArrayList<>(),
+            new LinkedHashSet<>(Set.of(startHf.getFunction())),
+            new LinkedHashSet<>()));
 
-        String aggTerminal = "no_path";
-        List<TaintStep> longestPath = List.of();
+        Dead best = new Dead(List.of(), "no_path");
         int maxDepthReached = 0;
 
         FunctionManager fm = program.getFunctionManager();
@@ -168,12 +175,20 @@ public final class TaintTracer implements AutoCloseable {
 
             // ---- intra-function backward walk to a boundary ----
             Varnode cur = fr.v;
+            Set<Varnode> seen = fr.seen();
             List<TaintStep> path = new ArrayList<>(fr.path);
             int steps = 0;
             while (cur != null && steps++ < INTRA_STEP_CAP) {
+                if (!seen.add(cur)) {
+                    // Already visited in this function (loop-carried phi or
+                    // diamond join) — treat as a cycle terminal.
+                    if (path.size() >= best.path().size())
+                        best = new Dead(List.copyOf(path), "cycle");
+                    cur = null; break;
+                }
                 if (cur.isConstant()) {
-                    aggTerminal = "constant";
-                    if (path.size() > longestPath.size()) longestPath = path;
+                    if (path.size() >= best.path().size())
+                        best = new Dead(List.copyOf(path), "constant");
                     cur = null; break;
                 }
                 PcodeOp def = cur.getDef();
@@ -186,14 +201,14 @@ public final class TaintTracer implements AutoCloseable {
                         path.add(step(fnName, sinkAddr(def, fr.hf), "param",
                             "param_" + slot + " → callers"));
                         if (fr.depth >= depthCap) {
-                            aggTerminal = "call_depth";
-                            if (path.size() > longestPath.size()) longestPath = path;
+                            if (path.size() >= best.path().size())
+                                best = new Dead(List.copyOf(path), "call_depth");
                         } else {
                             enqueueCallers(work, fr, slot, path, fm, rm, fnCap);
                         }
                     } else {
-                        aggTerminal = "input";
-                        if (path.size() > longestPath.size()) longestPath = path;
+                        if (path.size() >= best.path().size())
+                            best = new Dead(List.copyOf(path), "input");
                     }
                     cur = null; break;
                 }
@@ -202,6 +217,7 @@ public final class TaintTracer implements AutoCloseable {
                     Function callee = resolveCallee(def, fm);
                     path.add(step(fnName, opAddr(def), "call_return",
                         callee != null ? callee.getName() : "<indirect>"));
+                    String term = null;
                     if (callee != null) {
                         for (CatalogEntry e : catalog.resolve(callee)) {
                             if ("source".equals(e.kind())) {
@@ -211,17 +227,18 @@ public final class TaintTracer implements AutoCloseable {
                         }
                         if (fr.depth >= depthCap || fr.onPath.contains(callee)
                                 || functionsVisited() >= fnCap) {
-                            aggTerminal = fr.onPath.contains(callee) ? "recursion"
+                            term = fr.onPath.contains(callee) ? "recursion"
                                 : (fr.depth >= depthCap ? "call_depth" : "budget");
                         } else {
                             HighFunction chf = decompile(callee);
-                            if (chf == null) { aggTerminal = "decompile_failed"; }
+                            if (chf == null) term = "decompile_failed";
                             else enqueueReturns(work, fr, chf, callee, path);
                         }
                     } else {
-                        aggTerminal = "indirect_call";
+                        term = "indirect_call";
                     }
-                    if (path.size() > longestPath.size()) longestPath = path;
+                    if (term != null && path.size() >= best.path().size())
+                        best = new Dead(List.copyOf(path), term);
                     cur = null; break;
                 }
                 if (oc == PcodeOp.LOAD) {
@@ -234,8 +251,8 @@ public final class TaintTracer implements AutoCloseable {
                         return new TaintResult(hit, path, "tainted_load",
                             functionsVisited(), maxDepthReached);
                     }
-                    aggTerminal = "load_unknown_provenance";
-                    if (path.size() > longestPath.size()) longestPath = path;
+                    if (path.size() >= best.path().size())
+                        best = new Dead(List.copyOf(path), "load_unknown_provenance");
                     cur = null; break;
                 }
                 // transparent ops — record and continue through input(s)
@@ -248,24 +265,27 @@ public final class TaintTracer implements AutoCloseable {
                     case PcodeOp.PTRSUB: case PcodeOp.PTRADD:
                     case PcodeOp.INT_ADD: case PcodeOp.INT_SUB: case PcodeOp.INT_MULT:
                     case PcodeOp.MULTIEQUAL:
-                        // follow the first non-constant input; enqueue the rest
+                        // follow the first non-constant input; fork the rest.
+                        // Forked frames share `seen` so loop-carried inputs are
+                        // visited at most once across the whole function.
                         Varnode next = null;
                         for (int i = 0; i < def.getNumInputs(); i++) {
                             Varnode in = def.getInput(i);
                             if (in == null || in.isConstant()) continue;
                             if (next == null) next = in;
-                            else work.add(new Frame(fr.hf, in, fr.depth,
-                                new ArrayList<>(path), fr.onPath));
+                            else if (!seen.contains(in))
+                                work.add(new Frame(fr.hf, in, fr.depth,
+                                    new ArrayList<>(path), fr.onPath, seen));
                         }
                         cur = next; break;
                     default:
-                        aggTerminal = "op_" + oc;
-                        if (path.size() > longestPath.size()) longestPath = path;
+                        if (path.size() >= best.path().size())
+                            best = new Dead(List.copyOf(path), "op_" + oc);
                         cur = null;
                 }
             }
         }
-        return new TaintResult(null, longestPath, aggTerminal,
+        return new TaintResult(null, best.path(), best.reason(),
             functionsVisited(), maxDepthReached);
     }
 
@@ -298,7 +318,7 @@ public final class TaintTracer implements AutoCloseable {
             List<TaintStep> p = new ArrayList<>(path);
             p.add(step(caller.getName(), ref.getFromAddress().toString(),
                 "caller_arg", "arg" + slot + " at call to " + self.getName()));
-            work.add(new Frame(chf, arg, fr.depth + 1, p, on));
+            work.add(new Frame(chf, arg, fr.depth + 1, p, on, new LinkedHashSet<>()));
             taken++;
         }
     }
@@ -317,7 +337,7 @@ public final class TaintTracer implements AutoCloseable {
             List<TaintStep> p = new ArrayList<>(path);
             p.add(step(callee.getName(), opAddr(op), "into_callee_return",
                 "RETURN value of " + callee.getName()));
-            work.add(new Frame(chf, rv, fr.depth + 1, p, on));
+            work.add(new Frame(chf, rv, fr.depth + 1, p, on, new LinkedHashSet<>()));
         }
     }
 
