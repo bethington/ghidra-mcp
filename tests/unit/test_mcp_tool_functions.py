@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 class TestGetToolDispatch(unittest.TestCase):
     """Test that GET tool functions dispatch correctly."""
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_with_required_param(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
         mock_get.return_value = '{"result": "ok"}'
@@ -36,7 +36,7 @@ class TestGetToolDispatch(unittest.TestCase):
         )
         self.assertEqual(result, '{"result": "ok"}')
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_with_optional_param_none(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
         mock_get.return_value = '{"data": []}'
@@ -54,7 +54,7 @@ class TestGetToolDispatch(unittest.TestCase):
         # None values should be filtered out
         mock_get.assert_called_once_with("/list_functions", params=None)
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_with_no_params(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
         mock_get.return_value = '{"version": "4.2.0"}'
@@ -69,7 +69,7 @@ class TestGetToolDispatch(unittest.TestCase):
 class TestPostToolDispatch(unittest.TestCase):
     """Test that POST tool functions dispatch correctly."""
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_with_json_body(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"success": true}'
@@ -88,7 +88,7 @@ class TestPostToolDispatch(unittest.TestCase):
             "/rename_function", data={"address": "0x401000", "name": "main"}, query_params=None
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_filters_none_values(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"success": true}'
@@ -107,7 +107,7 @@ class TestPostToolDispatch(unittest.TestCase):
             "/rename_function", data={"address": "0x401000"}, query_params=None
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_integer_params(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"data": []}'
@@ -125,7 +125,7 @@ class TestPostToolDispatch(unittest.TestCase):
         # POST sends native types, not strings
         mock_post.assert_called_once_with("/search", data={"offset": 0, "limit": 50}, query_params=None)
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_synthetic_dry_run_only_for_true_values(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"success": true}'
@@ -154,7 +154,7 @@ class TestPostToolDispatch(unittest.TestCase):
             query_params={"dry_run": "true"},
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_schema_declared_query_dry_run_does_not_duplicate_signature(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"dry_run": true}'
@@ -182,7 +182,7 @@ class TestPostToolDispatch(unittest.TestCase):
             query_params={"program": "pwahelper.exe", "dry_run": "false"},
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_schema_declared_body_dry_run_uses_body_source(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"dry_run": true}'
@@ -257,7 +257,7 @@ class TestSchemaEdgeCases(unittest.TestCase):
 class TestToolRegistrationRoundTrip(unittest.TestCase):
     """Test full schema → registration → dispatch round trip."""
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_full_roundtrip(self, mock_get):
         from bridge_mcp_ghidra import register_tools_from_schema, mcp
         mock_get.return_value = '{"functions": []}'

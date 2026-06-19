@@ -357,13 +357,13 @@ class TestDiscoverInstancesMultiDir(unittest.TestCase):
             # Patch both `get_socket_dir_candidates` and the UDS info query so
             # the test doesn't actually try to connect.
             with patch.object(
-                bridge, "get_socket_dir_candidates",
+                bridge.transport, "get_socket_dir_candidates",
                 return_value=[Path(d1), Path(d2)],
             ), patch.object(
-                bridge, "uds_request",
+                bridge.transport, "uds_request",
                 return_value=("{}", 500),  # info query fails — that's fine
             ), patch.object(
-                bridge, "is_pid_alive",
+                bridge.validation, "is_pid_alive",
                 side_effect=lambda p: p == pid_alive,
             ):
                 instances = discover_instances()
@@ -387,13 +387,13 @@ class TestDiscoverInstancesMultiDir(unittest.TestCase):
             import bridge_mcp_ghidra as bridge
 
             with patch.object(
-                bridge, "get_socket_dir_candidates",
+                bridge.transport, "get_socket_dir_candidates",
                 return_value=[Path(d), Path(d)],  # same dir twice
             ), patch.object(
-                bridge, "uds_request",
+                bridge.transport, "uds_request",
                 return_value=("{}", 500),
             ), patch.object(
-                bridge, "is_pid_alive",
+                bridge.validation, "is_pid_alive",
                 side_effect=lambda p: p == pid_alive,
             ):
                 instances = discover_instances()
@@ -549,7 +549,7 @@ class TestBuildToolFunction(unittest.TestCase):
         }
         fn = _build_tool_function("/set_function_prototype", "POST", schema)
 
-        with patch("bridge_mcp_ghidra.dispatch_post") as mock_dispatch_post:
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_post") as mock_dispatch_post:
             mock_dispatch_post.return_value = "ok"
             result = fn(
                 function_address="6FA26FD0",
@@ -771,9 +771,9 @@ class TestRegisterToolsFromSchema(unittest.TestCase):
                 count = bridge.register_tools_from_schema(schema)
 
             self.assertEqual(count, 2)
-            self.assertIn("issue_212_valid_before", bridge._dynamic_tool_names)
-            self.assertIn("issue_212_valid_after", bridge._dynamic_tool_names)
-            self.assertNotIn("issue_212_bad_signature", bridge._dynamic_tool_names)
+            self.assertIn("issue_212_valid_before", bridge.state._dynamic_tool_names)
+            self.assertIn("issue_212_valid_after", bridge.state._dynamic_tool_names)
+            self.assertNotIn("issue_212_bad_signature", bridge.state._dynamic_tool_names)
             message = mock_stderr.write.call_args.args[0]
             self.assertIn("1 tool(s) failed to register", message)
             self.assertIn("issue_212_bad_signature", message)
@@ -815,27 +815,27 @@ class TestDispatchErrors(unittest.TestCase):
     def test_dispatch_get_no_connection(self):
         import bridge_mcp_ghidra as bridge
 
-        old = bridge._transport_mode
-        bridge._transport_mode = "none"
+        old = bridge.state._transport_mode
+        bridge.state._transport_mode = "none"
         try:
             result = bridge.dispatch_get("/test")
             data = json.loads(result)
             self.assertIn("error", data)
             self.assertIn("connect_instance", data["error"])
         finally:
-            bridge._transport_mode = old
+            bridge.state._transport_mode = old
 
     def test_dispatch_post_no_connection(self):
         import bridge_mcp_ghidra as bridge
 
-        old = bridge._transport_mode
-        bridge._transport_mode = "none"
+        old = bridge.state._transport_mode
+        bridge.state._transport_mode = "none"
         try:
             result = bridge.dispatch_post("/test", {"key": "value"})
             data = json.loads(result)
             self.assertIn("error", data)
         finally:
-            bridge._transport_mode = old
+            bridge.state._transport_mode = old
 
 
 class TestUnixHTTPConnection(unittest.TestCase):

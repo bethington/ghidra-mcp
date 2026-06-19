@@ -263,7 +263,9 @@ def test_collect_preflight_issues_reports_missing_jar_and_debugger_requirements(
     )
 
     assert any("Missing required Ghidra dependency" in issue for issue in issues)
-    assert any("Debugger requirements file not found" in issue for issue in issues)
+    assert any(
+        "Debugger dependency group not found" in issue for issue in issues
+    )
 
 
 def _stub_version(
@@ -330,8 +332,8 @@ def test_collect_preflight_issues_passes_with_required_files(
         jar_path.parent.mkdir(parents=True, exist_ok=True)
         jar_path.write_text("jar", encoding="utf-8")
 
-    (tmp_path / "requirements-debugger.txt").write_text(
-        "pybag==1.0\n", encoding="utf-8"
+    (tmp_path / "pyproject.toml").write_text(
+        "[dependency-groups]\ndebugger = [\"pybag==2.2.16\"]\n", encoding="utf-8"
     )
     user_base = tmp_path / "user-ghidra"
     (user_base / "ghidra_12.1_PUBLIC").mkdir(parents=True)

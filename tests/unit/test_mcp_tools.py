@@ -26,19 +26,19 @@ class TestTransportModes(unittest.TestCase):
         """Transport mode should be set after module init (may auto-connect)."""
         import bridge_mcp_ghidra as bridge
 
-        self.assertIn(bridge._transport_mode, ("none", "uds", "tcp"))
+        self.assertIn(bridge.state._transport_mode, ("none", "uds", "tcp"))
 
     def test_do_request_raises_when_disconnected(self):
         """do_request should raise ConnectionError when no transport active."""
         import bridge_mcp_ghidra as bridge
 
-        old_mode = bridge._transport_mode
-        bridge._transport_mode = "none"
+        old_mode = bridge.state._transport_mode
+        bridge.state._transport_mode = "none"
         try:
             with self.assertRaises(ConnectionError):
                 bridge.do_request("GET", "/test")
         finally:
-            bridge._transport_mode = old_mode
+            bridge.state._transport_mode = old_mode
 
 
 class TestStaticTools(unittest.TestCase):
@@ -74,7 +74,7 @@ class TestToolGroupManagement(unittest.TestCase):
     def test_lazy_loading_disabled_by_default(self):
         import bridge_mcp_ghidra as bridge
 
-        self.assertFalse(bridge._lazy_mode)
+        self.assertFalse(bridge.state._lazy_mode)
 
     def test_list_tool_groups_registered(self):
         import bridge_mcp_ghidra as bridge
@@ -189,10 +189,10 @@ class TestToolGroupManagement(unittest.TestCase):
                 loaded = bridge._load_group("grp_beta")
 
             self.assertEqual(loaded, ["issue_212_lazy_valid_after"])
-            self.assertIn("grp_beta", bridge._loaded_groups)
-            self.assertIn("issue_212_lazy_valid_after", bridge._dynamic_tool_names)
+            self.assertIn("grp_beta", bridge.state._loaded_groups)
+            self.assertIn("issue_212_lazy_valid_after", bridge.state._dynamic_tool_names)
             self.assertNotIn(
-                "issue_212_lazy_bad_signature", bridge._dynamic_tool_names
+                "issue_212_lazy_bad_signature", bridge.state._dynamic_tool_names
             )
             message = mock_stderr.write.call_args.args[0]
             self.assertIn("1 tool(s) failed to register", message)
@@ -231,25 +231,25 @@ class TestConnectInstance(unittest.TestCase):
             request_context=SimpleNamespace(session=session),
         )
 
-        old_lazy_mode = bridge._lazy_mode
-        old_active_socket = bridge._active_socket
-        old_active_tcp = bridge._active_tcp
-        old_transport_mode = bridge._transport_mode
-        old_connected_project = bridge._connected_project
-        old_dynamic_names = list(bridge._dynamic_tool_names)
-        old_full_schema = list(bridge._full_schema)
-        old_loaded_groups = set(bridge._loaded_groups)
+        old_lazy_mode = bridge.state._lazy_mode
+        old_active_socket = bridge.state._active_socket
+        old_active_tcp = bridge.state._active_tcp
+        old_transport_mode = bridge.state._transport_mode
+        old_connected_project = bridge.state._connected_project
+        old_dynamic_names = list(bridge.state._dynamic_tool_names)
+        old_full_schema = list(bridge.state._full_schema)
+        old_loaded_groups = set(bridge.state._loaded_groups)
 
         try:
-            bridge._lazy_mode = False
+            bridge.state._lazy_mode = False
             with mock.patch.object(
-                bridge,
+                bridge.discovery,
                 "discover_instances",
                 return_value=[
                     {"project": "TestProject", "socket": "/tmp/test.sock", "pid": 42}
                 ],
             ), mock.patch.object(
-                bridge,
+                bridge.transport,
                 "do_request",
                 return_value=(json.dumps(schema), 200),
             ):
@@ -264,17 +264,17 @@ class TestConnectInstance(unittest.TestCase):
             self.assertEqual(result["note"], "Loaded all 2 tools on connect.")
             session.send_tool_list_changed.assert_awaited_once()
         finally:
-            for name in list(bridge._dynamic_tool_names):
+            for name in list(bridge.state._dynamic_tool_names):
                 bridge.mcp._tool_manager._tools.pop(name, None)
-            bridge._dynamic_tool_names[:] = old_dynamic_names
-            bridge._full_schema[:] = old_full_schema
-            bridge._loaded_groups.clear()
-            bridge._loaded_groups.update(old_loaded_groups)
-            bridge._lazy_mode = old_lazy_mode
-            bridge._active_socket = old_active_socket
-            bridge._active_tcp = old_active_tcp
-            bridge._transport_mode = old_transport_mode
-            bridge._connected_project = old_connected_project
+            bridge.state._dynamic_tool_names[:] = old_dynamic_names
+            bridge.state._full_schema[:] = old_full_schema
+            bridge.state._loaded_groups.clear()
+            bridge.state._loaded_groups.update(old_loaded_groups)
+            bridge.state._lazy_mode = old_lazy_mode
+            bridge.state._active_socket = old_active_socket
+            bridge.state._active_tcp = old_active_tcp
+            bridge.state._transport_mode = old_transport_mode
+            bridge.state._connected_project = old_connected_project
 
 
 class TestEndpointTimeouts(unittest.TestCase):

@@ -792,21 +792,15 @@ def test_cmd_ensure_prereqs_dry_run_prints_plan(tmp_path, monkeypatch, capsys):
     from tools.setup import cli
     from tools.setup.requirements import InstallPlan
 
-    req_file = tmp_path / "requirements.txt"
-    req_file.write_text("requests\n")
-
     fake_plan = InstallPlan(
-        python_executable=Path("python"),
-        requirements_files=[req_file],
+        repo_root=tmp_path,
+        groups=("dev",),
         install_debugger=False,
-        debugger_requirements_file=tmp_path / "requirements-debugger.txt",
     )
 
     monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
     monkeypatch.setattr(cli, "_get_backend", lambda: "gradle")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
-    monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
-    monkeypatch.setattr(cli, "resolve_requirements_files", lambda root, raw: [req_file])
     monkeypatch.setattr(cli, "make_install_plan", lambda *a, **kw: fake_plan)
     monkeypatch.setattr(cli, "execute_install_plan", lambda plan: None)
     monkeypatch.setattr(cli, "run_gradle", lambda root, tasks, **kw: 0)
