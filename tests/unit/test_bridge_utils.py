@@ -401,6 +401,77 @@ class TestDiscoverInstancesMultiDir(unittest.TestCase):
             self.assertEqual(len(instances), 1)
 
 
+class TestAutoConnectMultiInstance(unittest.TestCase):
+    """When discover_instances() finds >1 UDS instance, _auto_connect must
+    log the choose-one message and STOP — not fall through to the TCP
+    fallback and silently connect to whatever's on port 8089."""
+
+    def test_multi_uds_does_not_fall_through_to_tcp(self):
+        import bridge_mcp_ghidra as bridge
+
+        two = [
+            {"project": "ProjA", "socket": "/tmp/a.sock", "pid": 111},
+            {"project": "ProjB", "socket": "/tmp/b.sock", "pid": 222},
+        ]
+        fetch_calls = []
+        with patch.object(bridge, "discover_instances", return_value=two), \
+             patch.object(bridge, "_fetch_and_register_schema",
+                          side_effect=lambda *a, **kw: fetch_calls.append(1) or 0):
+            # Reset connection state so the test is hermetic.
+            bridge._active_socket = None
+            bridge._active_tcp = None
+            bridge._transport_mode = "none"
+            bridge._auto_connect()
+
+        self.assertEqual(
+            fetch_calls, [],
+            "schema fetch was called — _auto_connect fell through to TCP "
+            "after the multi-UDS warning"
+        )
+        self.assertEqual(bridge._transport_mode, "none")
+        self.assertIsNone(bridge._active_tcp)
+
+
+class TestDebuggerAttachAddressSync(unittest.TestCase):
+    """debugger_attach must read image_base directly from
+    /list_open_programs entries (not the plain-text /get_metadata
+    endpoint, where json.loads() always failed and the auto-sync
+    silently never fired)."""
+
+    def test_uses_image_base_from_list_open_programs(self):
+        import bridge_mcp_ghidra as bridge
+
+        programs_payload = json.dumps([
+            {"path": "/proj/Foo.exe", "name": "Foo.exe", "image_base": "0x400000"},
+            {"path": "/proj/Bar.dll", "name": "Bar.dll", "image_base": "0x10000000"},
+        ])
+        debugger_calls = []
+
+        def fake_debugger_request(method, path, body=None, **kw):
+            debugger_calls.append((method, path, body))
+            return '{"status":"ok"}'
+
+        def fake_dispatch_get(path, params=None):
+            if path == "/list_open_programs":
+                return programs_payload
+            raise AssertionError(
+                f"unexpected GET {path} — auto-sync must not call "
+                "/get_metadata or any other endpoint"
+            )
+
+        with patch.object(bridge, "_debugger_request",
+                          side_effect=fake_debugger_request), \
+             patch.object(bridge, "dispatch_get", side_effect=fake_dispatch_get), \
+             patch.object(bridge, "_transport_mode", "tcp"):
+            bridge.debugger_attach("12345")
+
+        sync = [c for c in debugger_calls if c[1] == "/debugger/sync_modules"]
+        self.assertEqual(len(sync), 1, "auto-sync did not fire")
+        bases = sync[0][2].get("ghidra_bases", {})
+        self.assertEqual(bases.get("/proj/Foo.exe"), "0x400000")
+        self.assertEqual(bases.get("/proj/Bar.dll"), "0x10000000")
+
+
 class TestIsPidAlive(unittest.TestCase):
     """Test PID liveness check."""
 

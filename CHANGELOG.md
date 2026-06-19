@@ -57,6 +57,16 @@ Complete version history for the Ghidra MCP Server project.
   newly-loaded one collides on `getName()` (same leaf filename), instead
   of silently leaking the displaced handle's DomainObject consumer
   reference and DB buffers
+- Bridge `_auto_connect` no longer falls through to the TCP fallback after
+  logging "Multiple UDS instances found — use `connect_instance()` to
+  choose"; previously it would silently connect to whichever Ghidra was on
+  port 8089 right after telling the user it hadn't. The log now includes
+  the instance names.
+- `debugger_attach` address-map auto-sync now reads `image_base` directly
+  from `/list_open_programs` entries. Previously it fetched `/get_metadata`
+  (plain text) and `json.loads()`'d it, which always raised, was silently
+  swallowed, and the Ghidra↔runtime address map was never seeded on
+  attach. Now logs whether the sync fired.
 
 ---
 
