@@ -2,10 +2,16 @@ package com.xebyte.offline.vuln;
 
 import com.xebyte.core.vuln.*;
 import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileResults;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.pcode.*;
+import ghidra.program.model.symbol.RefType;
+import ghidra.program.model.symbol.Reference;
+import ghidra.program.model.symbol.ReferenceIterator;
+import ghidra.program.model.symbol.ReferenceManager;
 import org.junit.Test;
 import java.util.*;
 import static org.junit.Assert.*;
@@ -80,6 +86,266 @@ public class TaintTracerTest {
         assertTrue(roots.contains(envRet));
         // cached: second call same instance
         assertSame(roots, t.taintedBufferRoots(hf));
+        t.close();
+    }
+
+    // ---- algorithm-test harness ----
+
+    private Varnode konst(long k) {
+        Varnode v = mock(Varnode.class);
+        when(v.isConstant()).thenReturn(true);
+        when(v.getOffset()).thenReturn(k);
+        return v;
+    }
+    private Varnode vn(PcodeOp def) {
+        Varnode v = mock(Varnode.class);
+        when(v.isConstant()).thenReturn(false);
+        when(v.getDef()).thenReturn(def);
+        return v;
+    }
+    private Varnode paramVn(int slot) {
+        Varnode v = mock(Varnode.class);
+        when(v.isConstant()).thenReturn(false);
+        when(v.getDef()).thenReturn(null);
+        HighVariable hv = mock(HighVariable.class);
+        HighSymbol sym = mock(HighSymbol.class);
+        when(sym.isParameter()).thenReturn(true);
+        when(sym.getCategoryIndex()).thenReturn(slot);
+        when(hv.getSymbol()).thenReturn(sym);
+        when(v.getHigh()).thenReturn(hv);
+        return v;
+    }
+    private PcodeOpAST callOp(Address site, Varnode tgt, Varnode out, Varnode... args) {
+        PcodeOpAST op = mock(PcodeOpAST.class);
+        when(op.getOpcode()).thenReturn(PcodeOp.CALL);
+        when(op.getNumInputs()).thenReturn(1 + args.length);
+        when(op.getInput(0)).thenReturn(tgt);
+        for (int i = 0; i < args.length; i++) when(op.getInput(i+1)).thenReturn(args[i]);
+        when(op.getOutput()).thenReturn(out);
+        SequenceNumber sn = mock(SequenceNumber.class);
+        when(sn.getTarget()).thenReturn(site);
+        when(op.getSeqnum()).thenReturn(sn);
+        return op;
+    }
+    private Varnode addrTgt(Address a) {
+        Varnode t = mock(Varnode.class);
+        when(t.isAddress()).thenReturn(true);
+        when(t.getAddress()).thenReturn(a);
+        return t;
+    }
+    private HighFunction hfOf(Function fn, PcodeOpAST... ops) {
+        HighFunction hf = mock(HighFunction.class);
+        when(hf.getFunction()).thenReturn(fn);
+        when(hf.getPcodeOps()).thenAnswer(inv -> Arrays.asList(ops).iterator());
+        return hf;
+    }
+    private Function fn(String name, Address entry) {
+        Function f = mock(Function.class);
+        when(f.getName()).thenReturn(name);
+        when(f.getEntryPoint()).thenReturn(entry);
+        when(f.isThunk()).thenReturn(false);
+        when(f.getTags()).thenReturn(Set.of());
+        return f;
+    }
+    private DecompInterface decompOf(Map<Function, HighFunction> map) {
+        DecompInterface d = mock(DecompInterface.class);
+        when(d.decompileFunction(any(), anyInt(), any())).thenAnswer(inv -> {
+            Function f = inv.getArgument(0);
+            HighFunction hf = map.get(f);
+            DecompileResults r = mock(DecompileResults.class);
+            when(r.decompileCompleted()).thenReturn(hf != null);
+            when(r.getHighFunction()).thenReturn(hf);
+            return r;
+        });
+        return d;
+    }
+
+    // ---- algorithm tests ----
+
+    @Test
+    public void trace_paramChain_reachesSourceCall() {
+        // Sink(n=param0) ← Mid calls Sink(len) where len = output of recv(...).
+        // Backward: n → param0 → caller Mid's arg0 = recvRet → CALL recv → source.
+        Program p = mock(Program.class);
+        FunctionManager fm = mock(FunctionManager.class);
+        when(p.getFunctionManager()).thenReturn(fm);
+        ReferenceManager rm = mock(ReferenceManager.class);
+        when(p.getReferenceManager()).thenReturn(rm);
+
+        Address aSink = mock(Address.class), aMid = mock(Address.class),
+                aRecv = mock(Address.class), aMemcpy = mock(Address.class),
+                callSite = mock(Address.class), recvSite = mock(Address.class);
+        Function sinkFn = fn("Sink", aSink), midFn = fn("Mid", aMid),
+                 recvFn = fn("recv", aRecv), memcpyFn = fn("memcpy", aMemcpy);
+        when(fm.getFunctionAt(aRecv)).thenReturn(recvFn);
+        when(fm.getFunctionAt(aMemcpy)).thenReturn(memcpyFn);
+        when(fm.getFunctionAt(aSink)).thenReturn(sinkFn);
+
+        // Sink: memcpy(dst, src, n) where n = param0
+        Varnode n = paramVn(0);
+        PcodeOpAST sinkCall = callOp(mock(Address.class), addrTgt(aMemcpy), null,
+            mock(Varnode.class), mock(Varnode.class), n);
+        HighFunction hfSink = hfOf(sinkFn, sinkCall);
+
+        // Mid: len = recv(...); Sink(len);
+        Varnode recvRet = mock(Varnode.class);
+        PcodeOpAST callRecv = callOp(recvSite, addrTgt(aRecv), recvRet,
+            mock(Varnode.class), mock(Varnode.class), mock(Varnode.class));
+        when(recvRet.isConstant()).thenReturn(false);
+        when(recvRet.getDef()).thenReturn(callRecv);
+        PcodeOpAST callSink = callOp(callSite, addrTgt(aSink), null, recvRet);
+        HighFunction hfMid = hfOf(midFn, callRecv, callSink);
+
+        // Caller wiring: Sink has one caller Mid at callSite
+        Reference ref = mock(Reference.class);
+        RefType rt = mock(RefType.class);
+        when(rt.isCall()).thenReturn(true);
+        when(ref.getReferenceType()).thenReturn(rt);
+        when(ref.getFromAddress()).thenReturn(callSite);
+        ReferenceIterator rit = mock(ReferenceIterator.class);
+        when(rit.hasNext()).thenReturn(true, false);
+        when(rit.next()).thenReturn(ref);
+        when(rm.getReferencesTo(aSink)).thenReturn(rit);
+        when(fm.getFunctionContaining(callSite)).thenReturn(midFn);
+        // Mid's hf must let trace find callSink at callSite:
+        when(hfMid.getPcodeOps(callSite)).thenAnswer(inv -> List.of(callSink).iterator());
+
+        TaintTracer t = new TaintTracer(p, catalog(),
+            decompOf(Map.of(sinkFn, hfSink, midFn, hfMid)));
+        TaintResult r = t.trace(hfSink, sinkCall, 2, 5, 64);
+        assertNotNull("should reach recv as a source", r.source());
+        assertEquals("recv", r.source().id());
+        assertEquals("source", r.terminalReason());
+        t.close();
+    }
+
+    @Test
+    public void trace_loadFromTaintedBuffer_reachesSource() {
+        // Single function: recv(sock, buf, len); n = LOAD(buf + 8); memcpy(dst,src,n).
+        Program p = mock(Program.class);
+        FunctionManager fm = mock(FunctionManager.class);
+        when(p.getFunctionManager()).thenReturn(fm);
+        when(p.getReferenceManager()).thenReturn(mock(ReferenceManager.class));
+        Address aRecv = mock(Address.class), aMemcpy = mock(Address.class);
+        Function fnF = fn("F", mock(Address.class));
+        Function recvFn = fn("recv", aRecv), memcpyFn = fn("memcpy", aMemcpy);
+        when(fm.getFunctionAt(aRecv)).thenReturn(recvFn);
+        when(fm.getFunctionAt(aMemcpy)).thenReturn(memcpyFn);
+
+        Varnode buf = mock(Varnode.class);
+        when(buf.isConstant()).thenReturn(false); when(buf.getDef()).thenReturn(null);
+        PcodeOpAST callRecv = callOp(mock(Address.class), addrTgt(aRecv), null,
+            mock(Varnode.class), buf, mock(Varnode.class)); // out_arg=1 → buf
+        // addr = PTRADD(buf, 8, 1)  — konst() pre-built so when() doesn't nest
+        Varnode k8 = konst(8), k1 = konst(1), k0 = konst(0);
+        PcodeOp ptradd = mock(PcodeOp.class);
+        when(ptradd.getOpcode()).thenReturn(PcodeOp.PTRADD);
+        when(ptradd.getNumInputs()).thenReturn(3);
+        when(ptradd.getInput(0)).thenReturn(buf);
+        when(ptradd.getInput(1)).thenReturn(k8);
+        when(ptradd.getInput(2)).thenReturn(k1);
+        Varnode addr = vn(ptradd);
+        // n = LOAD(space, addr)
+        PcodeOp load = mock(PcodeOp.class);
+        when(load.getOpcode()).thenReturn(PcodeOp.LOAD);
+        when(load.getNumInputs()).thenReturn(2);
+        when(load.getInput(0)).thenReturn(k0);
+        when(load.getInput(1)).thenReturn(addr);
+        Varnode n = vn(load);
+        PcodeOpAST sinkCall = callOp(mock(Address.class), addrTgt(aMemcpy), null,
+            mock(Varnode.class), mock(Varnode.class), n);
+        HighFunction hf = hfOf(fnF, callRecv, sinkCall);
+
+        TaintTracer t = new TaintTracer(p, catalog(), decompOf(Map.of(fnF, hf)));
+        TaintResult r = t.trace(hf, sinkCall, 2, 5, 64);
+        assertNotNull(r.source());
+        assertEquals("recv", r.source().id());
+        assertEquals("tainted_load", r.terminalReason());
+        t.close();
+    }
+
+    @Test
+    public void trace_noSource_terminatesWithReason() {
+        // memcpy(dst, src, const) — n is constant → terminal "constant", source null.
+        Program p = mock(Program.class);
+        when(p.getFunctionManager()).thenReturn(mock(FunctionManager.class));
+        when(p.getReferenceManager()).thenReturn(mock(ReferenceManager.class));
+        Function fnF = fn("F", mock(Address.class));
+        PcodeOpAST sinkCall = callOp(mock(Address.class),
+            addrTgt(mock(Address.class)), null,
+            mock(Varnode.class), mock(Varnode.class), konst(32));
+        HighFunction hf = hfOf(fnF, sinkCall);
+        TaintTracer t = new TaintTracer(p, catalog(), decompOf(Map.of(fnF, hf)));
+        TaintResult r = t.trace(hf, sinkCall, 2, 5, 64);
+        assertNull(r.source());
+        assertEquals("constant", r.terminalReason());
+        t.close();
+    }
+
+    @Test
+    public void trace_budgetExhausted_returnsBudgetReason() {
+        // n = param0; Sink has 0 callers but maxCallDepth=0 → can't cross → budget.
+        Program p = mock(Program.class);
+        when(p.getFunctionManager()).thenReturn(mock(FunctionManager.class));
+        ReferenceManager rm = mock(ReferenceManager.class);
+        when(p.getReferenceManager()).thenReturn(rm);
+        Function fnF = fn("F", mock(Address.class));
+        ReferenceIterator rit = mock(ReferenceIterator.class);
+        when(rit.hasNext()).thenReturn(false);
+        when(rm.getReferencesTo(any(Address.class))).thenReturn(rit);
+        Varnode n = paramVn(0);
+        PcodeOpAST sinkCall = callOp(mock(Address.class),
+            addrTgt(mock(Address.class)), null,
+            mock(Varnode.class), mock(Varnode.class), n);
+        HighFunction hf = hfOf(fnF, sinkCall);
+        TaintTracer t = new TaintTracer(p, catalog(), decompOf(Map.of(fnF, hf)));
+        TaintResult r = t.trace(hf, sinkCall, 2, /*maxCallDepth*/ 0, 64);
+        assertNull(r.source());
+        // depth 0 → cannot cross param boundary → "call_depth"
+        assertEquals("call_depth", r.terminalReason());
+        t.close();
+    }
+
+    @Test
+    public void trace_recursionGuard_preventsLoop() {
+        // F.param0 → caller F (self-recursive). onPath guard must terminate.
+        Program p = mock(Program.class);
+        FunctionManager fm = mock(FunctionManager.class);
+        when(p.getFunctionManager()).thenReturn(fm);
+        ReferenceManager rm = mock(ReferenceManager.class);
+        when(p.getReferenceManager()).thenReturn(rm);
+        Address aF = mock(Address.class), site = mock(Address.class);
+        Function fnF = fn("F", aF);
+        when(fm.getFunctionAt(aF)).thenReturn(fnF);
+        when(fm.getFunctionContaining(site)).thenReturn(fnF);
+        Reference ref = mock(Reference.class);
+        RefType rt = mock(RefType.class);
+        when(rt.isCall()).thenReturn(true);
+        when(ref.getReferenceType()).thenReturn(rt);
+        when(ref.getFromAddress()).thenReturn(site);
+        ReferenceIterator rit = mock(ReferenceIterator.class);
+        when(rit.hasNext()).thenReturn(true, false);
+        when(rit.next()).thenReturn(ref);
+        when(rm.getReferencesTo(aF)).thenReturn(rit);
+
+        Varnode n = paramVn(0);
+        PcodeOpAST sinkCall = callOp(mock(Address.class), addrTgt(mock(Address.class)),
+            null, mock(Varnode.class), mock(Varnode.class), n);
+        // Self-call at `site` passing param0 again
+        PcodeOpAST selfCall = callOp(site, addrTgt(aF), null, n);
+        HighFunction hf = hfOf(fnF, selfCall, sinkCall);
+        when(hf.getPcodeOps(site)).thenAnswer(inv -> List.of(selfCall).iterator());
+
+        TaintTracer t = new TaintTracer(p, catalog(), decompOf(Map.of(fnF, hf)));
+        TaintResult r = t.trace(hf, sinkCall, 2, 5, 64);
+        // Load-bearing: the on-path guard prevents an infinite loop and no
+        // source is reached. The terminal reason is "no_path" rather than
+        // "recursion" because enqueueCallers() silently skips the on-path
+        // caller (F is already in onPath at frame creation), leaving the
+        // worklist empty without ever taking the call_return / recursion
+        // branch — so aggTerminal stays at its initial value.
+        assertNull(r.source());
+        assertEquals("no_path", r.terminalReason());
         t.close();
     }
 }

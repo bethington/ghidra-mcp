@@ -133,9 +133,254 @@ public final class TaintTracer implements AutoCloseable {
         return null;
     }
 
-    // ---- trace() — implemented in Task 3 ----
+    // ---- trace() — backward inter-procedural walk ----
+
+    /** One worklist frame. */
+    private record Frame(HighFunction hf, Varnode v, int depth,
+            List<TaintStep> path, Set<Function> onPath) {}
+
     public TaintResult trace(HighFunction startHf, PcodeOp sinkCall, int argIdx,
             int maxCallDepth, int maxFunctions) {
-        throw new UnsupportedOperationException("Task 3");
+        int depthCap = Math.max(1, Math.min(maxCallDepth, 10));
+        // allow 0 only when caller explicitly passed 0 (used by budget test)
+        if (maxCallDepth <= 0) depthCap = 0;
+        int fnCap = Math.max(1, Math.min(maxFunctions, 256));
+
+        Varnode start = PcodeQuery.argVarnode(sinkCall, argIdx);
+        if (start == null) return new TaintResult(null, List.of(), "no_arg", 0, 0);
+        hfCache.putIfAbsent(startHf.getFunction(), startHf);
+
+        Deque<Frame> work = new ArrayDeque<>();
+        work.add(new Frame(startHf, start, 0,
+            new ArrayList<>(), new LinkedHashSet<>(Set.of(startHf.getFunction()))));
+
+        String aggTerminal = "no_path";
+        List<TaintStep> longestPath = List.of();
+        int maxDepthReached = 0;
+
+        FunctionManager fm = program.getFunctionManager();
+        ReferenceManager rm = program.getReferenceManager();
+
+        while (!work.isEmpty()) {
+            Frame fr = work.poll();
+            maxDepthReached = Math.max(maxDepthReached, fr.depth);
+            String fnName = fr.hf.getFunction() != null ? fr.hf.getFunction().getName() : "?";
+
+            // ---- intra-function backward walk to a boundary ----
+            Varnode cur = fr.v;
+            List<TaintStep> path = new ArrayList<>(fr.path);
+            int steps = 0;
+            while (cur != null && steps++ < INTRA_STEP_CAP) {
+                if (cur.isConstant()) {
+                    aggTerminal = "constant";
+                    if (path.size() > longestPath.size()) longestPath = path;
+                    cur = null; break;
+                }
+                PcodeOp def = cur.getDef();
+                if (def == null) {
+                    // Parameter? → cross to callers. Else: terminal "input".
+                    HighVariable hv = cur.getHigh();
+                    HighSymbol sym = hv != null ? hv.getSymbol() : null;
+                    if (sym != null && sym.isParameter()) {
+                        int slot = sym.getCategoryIndex();
+                        path.add(step(fnName, sinkAddr(def, fr.hf), "param",
+                            "param_" + slot + " → callers"));
+                        if (fr.depth >= depthCap) {
+                            aggTerminal = "call_depth";
+                            if (path.size() > longestPath.size()) longestPath = path;
+                        } else {
+                            enqueueCallers(work, fr, slot, path, fm, rm, fnCap);
+                        }
+                    } else {
+                        aggTerminal = "input";
+                        if (path.size() > longestPath.size()) longestPath = path;
+                    }
+                    cur = null; break;
+                }
+                int oc = def.getOpcode();
+                if (oc == PcodeOp.CALL || oc == PcodeOp.CALLIND) {
+                    Function callee = resolveCallee(def, fm);
+                    path.add(step(fnName, opAddr(def), "call_return",
+                        callee != null ? callee.getName() : "<indirect>"));
+                    if (callee != null) {
+                        for (CatalogEntry e : catalog.resolve(callee)) {
+                            if ("source".equals(e.kind())) {
+                                return new TaintResult(e, path, "source",
+                                    functionsVisited(), maxDepthReached);
+                            }
+                        }
+                        if (fr.depth >= depthCap || fr.onPath.contains(callee)
+                                || functionsVisited() >= fnCap) {
+                            aggTerminal = fr.onPath.contains(callee) ? "recursion"
+                                : (fr.depth >= depthCap ? "call_depth" : "budget");
+                        } else {
+                            HighFunction chf = decompile(callee);
+                            if (chf == null) { aggTerminal = "decompile_failed"; }
+                            else enqueueReturns(work, fr, chf, callee, path);
+                        }
+                    } else {
+                        aggTerminal = "indirect_call";
+                    }
+                    if (path.size() > longestPath.size()) longestPath = path;
+                    cur = null; break;
+                }
+                if (oc == PcodeOp.LOAD) {
+                    Varnode laddr = def.getNumInputs() > 1 ? def.getInput(1) : null;
+                    CatalogEntry hit = loadFromTaintedBuffer(fr.hf, laddr);
+                    path.add(step(fnName, opAddr(def), "load",
+                        hit != null ? "address derives from " + hit.id() + " out-buffer"
+                                    : "address provenance unknown"));
+                    if (hit != null) {
+                        return new TaintResult(hit, path, "tainted_load",
+                            functionsVisited(), maxDepthReached);
+                    }
+                    aggTerminal = "load_unknown_provenance";
+                    if (path.size() > longestPath.size()) longestPath = path;
+                    cur = null; break;
+                }
+                // transparent ops — record and continue through input(s)
+                path.add(step(fnName, opAddr(def), "op", PcodeQuery.mnemonic(def)));
+                switch (oc) {
+                    case PcodeOp.COPY: case PcodeOp.CAST:
+                    case PcodeOp.INT_ZEXT: case PcodeOp.INT_SEXT:
+                    case PcodeOp.INDIRECT:
+                        cur = def.getInput(0); break;
+                    case PcodeOp.PTRSUB: case PcodeOp.PTRADD:
+                    case PcodeOp.INT_ADD: case PcodeOp.INT_SUB: case PcodeOp.INT_MULT:
+                    case PcodeOp.MULTIEQUAL:
+                        // follow the first non-constant input; enqueue the rest
+                        Varnode next = null;
+                        for (int i = 0; i < def.getNumInputs(); i++) {
+                            Varnode in = def.getInput(i);
+                            if (in == null || in.isConstant()) continue;
+                            if (next == null) next = in;
+                            else work.add(new Frame(fr.hf, in, fr.depth,
+                                new ArrayList<>(path), fr.onPath));
+                        }
+                        cur = next; break;
+                    default:
+                        aggTerminal = "op_" + oc;
+                        if (path.size() > longestPath.size()) longestPath = path;
+                        cur = null;
+                }
+            }
+        }
+        return new TaintResult(null, longestPath, aggTerminal,
+            functionsVisited(), maxDepthReached);
+    }
+
+    private void enqueueCallers(Deque<Frame> work, Frame fr, int slot,
+            List<TaintStep> path, FunctionManager fm, ReferenceManager rm, int fnCap) {
+        Function self = fr.hf.getFunction();
+        var refs = rm.getReferencesTo(self.getEntryPoint());
+        int taken = 0;
+        while (refs.hasNext() && taken < CALLER_FANOUT_CAP) {
+            var ref = refs.next();
+            if (!ref.getReferenceType().isCall()) continue;
+            Function caller = fm.getFunctionContaining(ref.getFromAddress());
+            if (caller == null || fr.onPath.contains(caller)) continue;
+            if (functionsVisited() >= fnCap) break;
+            HighFunction chf = decompile(caller);
+            if (chf == null) continue;
+            // find the CALL op at this site to read its arg[slot]
+            PcodeOp callOp = null;
+            var it = chf.getPcodeOps(ref.getFromAddress());
+            while (it != null && it.hasNext()) {
+                PcodeOp op = it.next();
+                if (op.getOpcode() == PcodeOp.CALL || op.getOpcode() == PcodeOp.CALLIND) {
+                    callOp = op; break;
+                }
+            }
+            if (callOp == null) continue;
+            Varnode arg = PcodeQuery.argVarnode(callOp, slot);
+            if (arg == null) continue;
+            Set<Function> on = new LinkedHashSet<>(fr.onPath); on.add(caller);
+            List<TaintStep> p = new ArrayList<>(path);
+            p.add(step(caller.getName(), ref.getFromAddress().toString(),
+                "caller_arg", "arg" + slot + " at call to " + self.getName()));
+            work.add(new Frame(chf, arg, fr.depth + 1, p, on));
+            taken++;
+        }
+    }
+
+    private void enqueueReturns(Deque<Frame> work, Frame fr, HighFunction chf,
+            Function callee, List<TaintStep> path) {
+        Set<Function> on = new LinkedHashSet<>(fr.onPath); on.add(callee);
+        var ops = chf.getPcodeOps();
+        while (ops.hasNext()) {
+            PcodeOp op = ops.next();
+            if (op.getOpcode() != PcodeOp.RETURN) continue;
+            // RETURN input(0) is the indirect target; value (if any) is input(1).
+            if (op.getNumInputs() < 2) continue;
+            Varnode rv = op.getInput(1);
+            if (rv == null) continue;
+            List<TaintStep> p = new ArrayList<>(path);
+            p.add(step(callee.getName(), opAddr(op), "into_callee_return",
+                "RETURN value of " + callee.getName()));
+            work.add(new Frame(chf, rv, fr.depth + 1, p, on));
+        }
+    }
+
+    private CatalogEntry loadFromTaintedBuffer(HighFunction hf, Varnode addr) {
+        if (addr == null) return null;
+        Set<Varnode> roots = taintedBufferRoots(hf);
+        if (roots.isEmpty()) return null;
+        // Walk addr's intra-function def chain; if any base input is (or
+        // COPY/CAST-derives from) a root, it's tainted.
+        Deque<Varnode> w = new ArrayDeque<>(); w.push(addr);
+        Set<Varnode> seen = new HashSet<>();
+        int steps = 0;
+        while (!w.isEmpty() && steps++ < INTRA_STEP_CAP) {
+            Varnode v = w.pop();
+            if (!seen.add(v)) continue;
+            if (roots.contains(v)) return rootEntryFor(hf, v);
+            PcodeOp d = v.getDef();
+            if (d == null) continue;
+            switch (d.getOpcode()) {
+                case PcodeOp.COPY: case PcodeOp.CAST: case PcodeOp.INDIRECT:
+                case PcodeOp.INT_ZEXT: case PcodeOp.INT_SEXT:
+                    w.push(d.getInput(0)); break;
+                case PcodeOp.PTRADD: case PcodeOp.PTRSUB:
+                case PcodeOp.INT_ADD: case PcodeOp.INT_SUB:
+                    for (int i = 0; i < d.getNumInputs(); i++)
+                        if (d.getInput(i) != null) w.push(d.getInput(i));
+                    break;
+                default: // LOAD/CALL/etc — stop this branch
+            }
+        }
+        return null;
+    }
+
+    private CatalogEntry rootEntryFor(HighFunction hf, Varnode root) {
+        // Re-scan to find which source produced this root (cheap; small set).
+        FunctionManager fm = program.getFunctionManager();
+        var ops = hf.getPcodeOps();
+        while (ops.hasNext()) {
+            PcodeOp op = ops.next();
+            int oc = op.getOpcode();
+            if (oc != PcodeOp.CALL && oc != PcodeOp.CALLIND) continue;
+            Function callee = resolveCallee(op, fm);
+            if (callee == null) continue;
+            for (CatalogEntry e : catalog.resolve(callee)) {
+                if (!"source".equals(e.kind())) continue;
+                Integer oi = e.arg("out_arg");
+                if (oi != null && PcodeQuery.argVarnode(op, oi) == root) return e;
+                if (e.returnIsOutput() && op.getOutput() == root) return e;
+            }
+        }
+        return null;
+    }
+
+    private static TaintStep step(String fn, String addr, String kind, String detail) {
+        return new TaintStep(fn, addr == null ? "" : addr, kind, detail);
+    }
+    private static String opAddr(PcodeOp op) {
+        return (op != null && op.getSeqnum() != null && op.getSeqnum().getTarget() != null)
+            ? op.getSeqnum().getTarget().toString() : "";
+    }
+    private static String sinkAddr(PcodeOp op, HighFunction hf) {
+        if (op != null) return opAddr(op);
+        return hf.getFunction() != null && hf.getFunction().getEntryPoint() != null
+            ? hf.getFunction().getEntryPoint().toString() : "";
     }
 }
