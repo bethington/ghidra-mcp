@@ -22,5 +22,5 @@ pytest-json-report>=1.5.0
 pyyaml>=6.0.0
 
 # Benchmark truth extraction (libclang-backed C parser)
-clang>=18.1.8
+clang>=21.1.7
 libclang>=18.1.1
