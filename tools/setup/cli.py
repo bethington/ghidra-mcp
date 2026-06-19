@@ -18,10 +18,10 @@ from .ghidra import (
 from .python_env import detect_repo_root, find_repo_python
 from .maven import find_maven_command, run_gradle, run_maven
 from .requirements import (
+    ensure_uv_available,
     execute_install_plan,
     make_install_plan,
-    pip_command,
-    resolve_requirements_files,
+    uv_sync_command,
 )
 from .version_bump import apply_version_bump
 from .versioning import (
@@ -291,11 +291,7 @@ def cmd_install_python_deps(args: argparse.Namespace) -> int:
         args.use_debugger_toggle and get_env_flag(env_values, "INSTALL_DEBUGGER_DEPS")
     )
 
-    python_executable = find_repo_python(repo_root, args.python)
-    requirements_files = resolve_requirements_files(repo_root, args.requirements)
-    plan = make_install_plan(
-        repo_root, python_executable, requirements_files, install_debugger
-    )
+    plan = make_install_plan(repo_root, install_debugger)
     execute_install_plan(plan)
 
     if install_debugger:
@@ -384,12 +380,12 @@ def cmd_preflight(args: argparse.Namespace) -> int:
 
     if _get_backend() == "gradle":
         try:
-            pip_command(python_executable)
+            ensure_uv_available()
         except FileNotFoundError as exc:
             print(str(exc), file=sys.stderr)
             return 1
         print(f"Python: {python_executable}")
-        print("pip: available")
+        print("uv: available")
         ghidra_path = _resolve_ghidra_path(repo_root, args.ghidra_path)
         return run_gradle(repo_root, ["preflight"], ghidra_path=ghidra_path)
 
@@ -401,11 +397,11 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     print(f"Python: {python_executable}")
     print(f"Maven: {maven_command}")
     try:
-        pip_command(python_executable)
+        ensure_uv_available()
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    print("pip: available")
+    print("uv: available")
     if shutil.which("java") is None:
         print("Java not found on PATH.", file=sys.stderr)
         return 1
@@ -523,19 +519,10 @@ def cmd_ensure_prereqs(args: argparse.Namespace) -> int:
     repo_root = detect_repo_root()
     env_values = _load_repo_env(repo_root)
     install_debugger = _should_install_debugger(env_values, args)
-    python_executable = find_repo_python(repo_root)
-    requirements_files = resolve_requirements_files(repo_root, [])
-    plan = make_install_plan(
-        repo_root, python_executable, requirements_files, install_debugger
-    )
+    plan = make_install_plan(repo_root, install_debugger)
 
     if args.dry_run:
-        for requirements_file in plan.requirements_files:
-            print(f"DRY RUN: install python requirements from {requirements_file}")
-        if plan.install_debugger:
-            print(
-                f"DRY RUN: install debugger requirements from {plan.debugger_requirements_file}"
-            )
+        print(f"DRY RUN: {' '.join(uv_sync_command(plan))}")
     else:
         execute_install_plan(plan)
         print("Python dependencies are ready.")

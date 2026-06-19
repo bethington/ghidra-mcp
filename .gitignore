@@ -272,6 +272,8 @@ replay_pid*
 *.gpr
 *.rep/
 *.lock
+# ...but the uv dependency lockfile is intentionally committed.
+!uv.lock
 
 # Ghidra analysis files
 *.gzf

@@ -258,7 +258,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
      "mcpServers": {
        "ghidra": {
          "command": "uv",
-         "args": ["run", "--script", "/path/to/ghidra-mcp/bridge_mcp_ghidra.py"]
+         "args": ["run", "--directory", "/path/to/ghidra-mcp", "bridge-mcp-ghidra"]
        }
      }
    }
@@ -281,12 +281,12 @@ yay -S ghidra-mcp        # or ghidra-mcp-git
 
 #### Option 1: Stdio Transport (Recommended for AI tools)
 ```bash
-python bridge_mcp_ghidra.py
+uv run bridge-mcp-ghidra          # or: python -m bridge_mcp_ghidra
 ```
 
 #### Option 2: Streamable HTTP Transport (Recommended for web/HTTP clients)
 ```bash
-python bridge_mcp_ghidra.py --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 8081
+uv run bridge-mcp-ghidra --transport streamable-http --mcp-host 127.0.0.1 --mcp-port 8081
 ```
 
 MCP client config for the HTTP transport (add to your client's MCP config file):
@@ -302,7 +302,7 @@ MCP client config for the HTTP transport (add to your client's MCP config file):
 
 #### Option 3: SSE Transport (Deprecated — use streamable-http instead)
 ```bash
-python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
+uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 ```
 
 #### Bridge advanced flags
@@ -336,8 +336,8 @@ model **discover** the rest on demand instead of registering everything:
 
 #### Optional: Start the standalone debugger server
 ```bash
-python -m pip install -r requirements-debugger.txt
-python -m debugger
+uv sync --group debugger
+uv run python -m debugger
 ```
 
 The debugger server listens on `http://127.0.0.1:8099/` by default and is
@@ -464,12 +464,12 @@ If no password is found, Ghidra shows its normal GUI prompt. Set these in `.env`
 ### `python -m debugger` fails with `ModuleNotFoundError` for `pybag` or `comtypes`
 
 **Cause:** The standalone debugger server uses optional Windows-only Python
-dependencies that are not installed by the base requirements file.
+dependencies that are not installed by default.
 
 **Solution:**
 ```text
-python -m pip install -r requirements-debugger.txt
-python -m debugger
+uv sync --group debugger
+uv run python -m debugger
 ```
 
 If you have both a global Python and a project venv, make sure you install
@@ -767,7 +767,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ### Components
 
-- **bridge_mcp_ghidra.py** — Python MCP server that translates MCP protocol to HTTP calls (225 catalog entries)
+- **python/bridge_mcp_ghidra/** — Python MCP server package (ships as the `ghidra-mcp-bridge` wheel; `bridge-mcp-ghidra` console script) that translates MCP protocol to HTTP calls (225 catalog entries)
 - **GhidraMCP.jar** — Ghidra plugin that exposes analysis capabilities via HTTP (175 GUI endpoints)
 - **GhidraMCPHeadlessServer** — Standalone headless server — 183 endpoints, no GUI required
 - **ghidra_scripts/** — Collection of automation scripts for common tasks
@@ -799,7 +799,7 @@ The authoritative build system today is Maven. `tools.setup`, the VS Code tasks,
 | `clean` | Remove Maven/Gradle build outputs (`target/`, `build/`). |
 | `clean-all` | Remove build outputs plus local cache artifacts (`.m2` Ghidra JARs, etc.). |
 | `install-ghidra-deps` | Install only the Ghidra JARs into `~/.m2`. Useful when the build environment changes. |
-| `install-python-deps` | Install only the Python requirements files. |
+| `install-python-deps` | Install the Python dependency groups via `uv sync`. |
 | `run-tests` | Run the Java offline test suite (no live Ghidra needed). |
 | `verify-version` | Check that version strings are consistent across `pom.xml`, `CHANGELOG.md`, and `README.md`. |
 | `bump-version --new X.Y.Z` | Atomically update all version references. Pass `--tag` to create a git tag. |
@@ -845,7 +845,8 @@ python -m tools.setup --help
 ### Project Structure
 ```
 ghidra-mcp/
-├── bridge_mcp_ghidra.py     # MCP server (Python, 225 catalog entries)
+├── pyproject.toml           # uv project (ghidra-mcp-bridge wheel + dependency groups)
+├── python/bridge_mcp_ghidra/ # MCP server package (Python, 225 catalog entries)
 ├── src/main/java/           # Ghidra plugin + headless server (Java)
 │   └── com/xebyte/
 │       ├── GhidraMCPPlugin.java         # GUI plugin (196 endpoints)

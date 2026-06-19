@@ -2130,12 +2130,12 @@ def collect_preflight_issues(
     strict: bool = False,
     user_base_dir: Path | None = None,
 ) -> list[str]:
-    from .requirements import pip_command
+    from .requirements import ensure_uv_available
 
     issues: list[str] = []
 
     try:
-        pip_command(python_executable)
+        ensure_uv_available()
     except FileNotFoundError as exc:
         issues.append(str(exc))
 
@@ -2154,10 +2154,13 @@ def collect_preflight_issues(
             issues.append(f"Missing required Ghidra dependency: {jar_path}")
 
     if install_debugger:
-        debugger_requirements = repo_root / "requirements-debugger.txt"
-        if not debugger_requirements.is_file():
+        pyproject = repo_root / "pyproject.toml"
+        if not pyproject.is_file() or "debugger" not in pyproject.read_text(
+            encoding="utf-8"
+        ):
             issues.append(
-                f"Debugger requirements file not found: {debugger_requirements}"
+                "Debugger dependency group not found in pyproject.toml "
+                "(expected a [dependency-groups] 'debugger' entry)"
             )
 
     extensions_dir = ghidra_path / "Extensions" / "Ghidra"
@@ -2186,6 +2189,28 @@ def collect_preflight_issues(
     return issues
 
 
+def build_bridge_wheel(repo_root: Path, *, dry_run: bool = False) -> Path | None:
+    """Build the bridge wheel with ``uv build`` and return its path.
+
+    The Python bridge ships as a wheel (``ghidra_mcp_bridge-*.whl``) rather than
+    a loose ``bridge_mcp_ghidra.py`` script. Returns the newest built wheel, or
+    None on a dry run / when no wheel is produced.
+    """
+    from .requirements import uv_executable
+
+    dist_dir = repo_root / "dist"
+    if dry_run:
+        print(f"DRY RUN: uv build --wheel (-> {dist_dir})")
+        return None
+    subprocess.run(
+        [uv_executable(), "build", "--wheel"], check=True, cwd=str(repo_root)
+    )
+    wheels = sorted(
+        dist_dir.glob("ghidra_mcp_bridge-*.whl"), key=lambda p: p.stat().st_mtime
+    )
+    return wheels[-1] if wheels else None
+
+
 def deploy_to_ghidra(
     repo_root: Path,
     ghidra_path: Path,
@@ -2196,8 +2221,6 @@ def deploy_to_ghidra(
     archive_path = find_plugin_archive(repo_root)
     extensions_dir = ghidra_path / "Extensions" / "Ghidra"
     destination_archive = extensions_dir / archive_path.name
-    bridge_source = repo_root / "bridge_mcp_ghidra.py"
-    requirements_source = repo_root / "requirements.txt"
     dotenv_source = repo_root / ".env"
     user_base_dir = ghidra_user_base_dir()
     mcp_url = resolve_mcp_url(repo_root)
@@ -2213,14 +2236,8 @@ def deploy_to_ghidra(
             f"DRY RUN: remove existing archives matching {extensions_dir / 'GhidraMCP*.zip'}"
         )
         print(f"DRY RUN: copy {archive_path} -> {destination_archive}")
-        if bridge_source.is_file():
-            print(
-                f"DRY RUN: copy {bridge_source} -> {ghidra_path / bridge_source.name}"
-            )
-        if requirements_source.is_file():
-            print(
-                f"DRY RUN: copy {requirements_source} -> {ghidra_path / requirements_source.name}"
-            )
+        build_bridge_wheel(repo_root, dry_run=True)
+        print(f"DRY RUN: copy built bridge wheel -> {ghidra_path}")
         if dotenv_source.is_file():
             print(
                 f"DRY RUN: copy {dotenv_source} -> {ghidra_path / dotenv_source.name}"
@@ -2245,16 +2262,12 @@ def deploy_to_ghidra(
     shutil.copy2(archive_path, destination_archive)
     print(f"Installed plugin archive to {destination_archive}")
 
-    if bridge_source.is_file():
-        bridge_destination = ghidra_path / bridge_source.name
-        bridge_destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(bridge_source, bridge_destination)
-        print(f"Copied bridge to {bridge_destination}")
-
-    if requirements_source.is_file():
-        requirements_destination = ghidra_path / requirements_source.name
-        shutil.copy2(requirements_source, requirements_destination)
-        print(f"Copied requirements to {requirements_destination}")
+    bridge_wheel = build_bridge_wheel(repo_root)
+    if bridge_wheel is not None and bridge_wheel.is_file():
+        wheel_destination = ghidra_path / bridge_wheel.name
+        wheel_destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(bridge_wheel, wheel_destination)
+        print(f"Copied bridge wheel to {wheel_destination}")
 
     if dotenv_source.is_file():
         dotenv_destination = ghidra_path / dotenv_source.name
