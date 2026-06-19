@@ -53,7 +53,7 @@ public class VulnAnalysisServiceTest {
         when(empty.hasNext()).thenReturn(false);
         when(fm.getFunctions(true)).thenReturn(empty);
 
-        Response r = svc(p).detectVulnPatterns("", "", "", false, 0, "", 0);
+        Response r = svc(p).detectVulnPatterns("", "", "", false, 0, "", 0, false, 0);
         assertTrue(r instanceof Response.Ok);
         Map<String, Object> body = (Map<String, Object>) ((Response.Ok) r).data();
         assertEquals(0, ((List<?>) body.get("findings")).size());
@@ -73,7 +73,7 @@ public class VulnAnalysisServiceTest {
         when(empty.hasNext()).thenReturn(false);
         when(fm.getFunctions(true)).thenReturn(empty);
 
-        Response r = svc(p).detectVulnPatterns("", "format_string,unbounded_copy", "", false, 0, "", 0);
+        Response r = svc(p).detectVulnPatterns("", "format_string,unbounded_copy", "", false, 0, "", 0, false, 0);
         Map<String, Object> body = (Map<String, Object>) ((Response.Ok) r).data();
         List<?> ran = (List<?>) body.get("detectors_run");
         assertEquals(2, ran.size());
@@ -87,7 +87,7 @@ public class VulnAnalysisServiceTest {
         Program p = mock(Program.class);
         FunctionManager fm = mock(FunctionManager.class);
         when(p.getFunctionManager()).thenReturn(fm);
-        Response r = svc(p).detectVulnPatterns("", "fmt_string", "", false, 0, "", 0);
+        Response r = svc(p).detectVulnPatterns("", "fmt_string", "", false, 0, "", 0, false, 0);
         assertFalse("unknown detector id should NOT return Ok", r instanceof Response.Ok);
         assertTrue("expected Response.Err for unknown detector id", r instanceof Response.Err);
         String msg = ((Response.Err) r).message();
@@ -319,7 +319,7 @@ public class VulnAnalysisServiceTest {
         when(rm.getReferencesTo(aE)).thenAnswer(inv -> refIterOf(callRef(fromB)));
         when(rm.getReferencesTo(bE)).thenAnswer(inv -> refIterOf());
 
-        Response r = svc(p).detectVulnPatterns("", "", "", false, 0, "attack_surface", 2);
+        Response r = svc(p).detectVulnPatterns("", "", "", false, 0, "attack_surface", 2, false, 0);
         Map<String,Object> body = (Map<String,Object>) ((Response.Ok) r).data();
         assertEquals("attack_surface", body.get("scope"));
         assertEquals(2, ((Number) body.get("attack_surface_function_count")).intValue());
@@ -327,6 +327,46 @@ public class VulnAnalysisServiceTest {
         // count as decompile failures.
         assertEquals(2, ((Number) body.get("scanned_functions")).intValue());
         assertEquals(2, ((Number) body.get("decompile_failures")).intValue());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void detectVulnPatterns_taintTrue_acceptedWithNoFindings() {
+        // taint=true with zero findings: params accepted, no error, taint
+        // block short-circuits on empty findings (no TaintTracer opened).
+        Program p = mock(Program.class);
+        FunctionManager fm = mock(FunctionManager.class);
+        when(p.getFunctionManager()).thenReturn(fm);
+        FunctionIterator empty = mock(FunctionIterator.class);
+        when(empty.hasNext()).thenReturn(false);
+        when(fm.getFunctions(true)).thenReturn(empty);
+
+        Response r = svc(p).detectVulnPatterns("", "", "", false, 0, "", 0, true, 3);
+        assertTrue(r instanceof Response.Ok);
+        Map<String,Object> body = (Map<String,Object>) ((Response.Ok) r).data();
+        assertEquals(0, ((List<?>) body.get("findings")).size());
+        assertEquals(4, ((List<?>) body.get("detectors_run")).size());
+    }
+
+    @Test
+    public void argRoleFor_picksClassSpecificArg() throws Exception {
+        // Reflectively exercise the per-class arg-role selector that taint=true
+        // uses to pick which sink arg to trace. Covers the switch arms without
+        // needing a live HighFunction.
+        java.lang.reflect.Method m = VulnAnalysisService.class
+            .getDeclaredMethod("argRoleFor", com.xebyte.core.vuln.CatalogEntry.class);
+        m.setAccessible(true);
+        java.util.function.BiFunction<String, java.util.Map<String,Integer>, com.xebyte.core.vuln.CatalogEntry> mk =
+            (cls, roles) -> new com.xebyte.core.vuln.CatalogEntry(
+                "x", "sink", cls, roles, false,
+                java.util.List.of(), java.util.List.of(), java.util.List.of());
+        assertEquals(2, m.invoke(null, mk.apply("copy",   java.util.Map.of("size_arg", 2))));
+        assertEquals(0, m.invoke(null, mk.apply("alloc",  java.util.Map.of("size_arg", 0))));
+        assertEquals(1, m.invoke(null, mk.apply("format", java.util.Map.of("fmt_arg",  1))));
+        assertEquals(0, m.invoke(null, mk.apply("exec",   java.util.Map.of("cmd_arg",  0))));
+        assertNull(m.invoke(null, mk.apply("other",  java.util.Map.of("size_arg", 2))));
+        // missing role key → null (skip trace)
+        assertNull(m.invoke(null, mk.apply("copy",   java.util.Map.of())));
     }
 
     @Test

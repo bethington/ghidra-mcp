@@ -118,7 +118,14 @@ public final class VulnAnalysisService {
                                + "within max_depth hops of any catalog SOURCE. Ignored when "
                                + "'function' is non-empty (single-function takes precedence).") String scope,
             @Param(value = "max_depth", source = ParamSource.BODY, defaultValue = "3",
-                   description = "BFS depth for scope=attack_surface (clamped to [0,8]).") int maxDepth) {
+                   description = "BFS depth for scope=attack_surface (clamped to [0,8]).") int maxDepth,
+            @Param(value = "taint", source = ParamSource.BODY, defaultValue = "false",
+                   description = "When true, run a backward inter-procedural taint trace on each "
+                               + "finding's relevant arg (size_arg for copy/alloc, fmt_arg for format, "
+                               + "cmd_arg for exec). Findings that reach a catalog SOURCE are bumped "
+                               + "to confidence='high' and gain taint_source/taint_path fields.") boolean taint,
+            @Param(value = "taint_max_depth", source = ParamSource.BODY, defaultValue = "5",
+                   description = "Call-depth cap for taint tracing (clamped to [1,10]).") int taintMaxDepth) {
 
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -150,50 +157,80 @@ public final class VulnAnalysisService {
         }
 
         List<Finding> findings = new ArrayList<>();
+        Map<Finding, SinkCallSite> siteByFindingAll = new LinkedHashMap<>();
+        Map<Finding, HighFunction> hfByFinding = new LinkedHashMap<>();
+        Map<Finding, TaintResult> taintByFinding = new LinkedHashMap<>();
         int scanned = 0, decompFail = 0, totalSites = 0;
         Integer surfaceCount = null;
 
-        if (!functionRef.isBlank()) {
-            // Single function — keep the simple no-retry helper.
-            Function f = ServiceUtils.resolveFunction(program, functionRef);
-            if (f == null) return Response.err("Function not found: " + functionRef);
-            ScanResult r = scanFunction(program, f, active, null);
-            findings.addAll(r.findings); scanned = 1;
-            decompFail = r.decompFailed ? 1 : 0; totalSites = r.siteCount;
-        } else {
-            // Multi-function: choose target set, then share one DecompInterface.
-            Collection<Function> targets;
-            if ("attack_surface".equalsIgnoreCase(scope)) {
-                int depth = Math.max(0, Math.min(maxDepth, 8));
-                Set<Function> surface = collectAttackSurfaceFunctions(program, depth);
-                surfaceCount = surface.size();
-                targets = surface;
+        // decomp lives at method scope so the post-scan taint pass can reuse the
+        // multi-function shared DecompInterface (TaintTracer shared-ctor doesn't
+        // dispose it). Single-function path leaves it null and TaintTracer opens
+        // its own.
+        DecompInterface decomp = null;
+        try {
+            if (!functionRef.isBlank()) {
+                // Single function — keep the simple no-retry helper.
+                Function f = ServiceUtils.resolveFunction(program, functionRef);
+                if (f == null) return Response.err("Function not found: " + functionRef);
+                ScanResult r = scanFunction(program, f, active, null);
+                findings.addAll(r.findings); scanned = 1;
+                decompFail = r.decompFailed ? 1 : 0; totalSites = r.siteCount;
+                siteByFindingAll.putAll(r.siteByFinding);
+                for (Finding ff : r.findings) hfByFinding.put(ff, r.hf);
             } else {
-                List<Function> all = new ArrayList<>();
-                FunctionIterator it = program.getFunctionManager().getFunctions(true);
-                while (it.hasNext()) {
-                    Function f = it.next();
-                    if (f.isExternal() || f.isThunk()) continue;
-                    all.add(f);
-                    if (maxFunctions > 0 && all.size() >= maxFunctions) break;
+                // Multi-function: choose target set, then share one DecompInterface.
+                Collection<Function> targets;
+                if ("attack_surface".equalsIgnoreCase(scope)) {
+                    int depth = Math.max(0, Math.min(maxDepth, 8));
+                    Set<Function> surface = collectAttackSurfaceFunctions(program, depth);
+                    surfaceCount = surface.size();
+                    targets = surface;
+                } else {
+                    List<Function> all = new ArrayList<>();
+                    FunctionIterator it = program.getFunctionManager().getFunctions(true);
+                    while (it.hasNext()) {
+                        Function f = it.next();
+                        if (f.isExternal() || f.isThunk()) continue;
+                        all.add(f);
+                        if (maxFunctions > 0 && all.size() >= maxFunctions) break;
+                    }
+                    targets = all;
                 }
-                targets = all;
-            }
 
-            DecompInterface decomp = openDecompiler(program);
-            try {
+                decomp = openDecompiler(program);
                 for (Function f : targets) {
                     if (f.isExternal() || f.isThunk()) continue;
                     ScanResult r = scanFunction(program, f, active, decomp);
                     findings.addAll(r.findings);
+                    siteByFindingAll.putAll(r.siteByFinding);
+                    for (Finding ff : r.findings) hfByFinding.put(ff, r.hf);
                     if (r.decompFailed) decompFail++;
                     totalSites += r.siteCount;
                     scanned++;
                     if (maxFunctions > 0 && scanned >= maxFunctions) break;
                 }
-            } finally {
-                if (decomp != null) try { decomp.dispose(); } catch (Exception ignored) {}
             }
+
+            if (taint && !findings.isEmpty()) {
+                int depth = Math.max(1, Math.min(taintMaxDepth, 10));
+                try (TaintTracer tracer = (decomp != null)
+                        ? new TaintTracer(program, catalog, decomp)
+                        : new TaintTracer(program, catalog)) {
+                    for (var e : siteByFindingAll.entrySet()) {
+                        Finding f = e.getKey();
+                        SinkCallSite s = e.getValue();
+                        if (s == null) continue;
+                        Integer idx = argRoleFor(s.entry());
+                        if (idx == null) continue;
+                        HighFunction hf = hfByFinding.get(f);
+                        if (hf == null) continue;
+                        taintByFinding.put(f, tracer.trace(hf, s.call(), idx, depth, 64));
+                    }
+                }
+            }
+        } finally {
+            if (decomp != null) try { decomp.dispose(); } catch (Exception ignored) {}
         }
 
         if (writeBookmarks && !findings.isEmpty()) {
@@ -201,7 +238,17 @@ public final class VulnAnalysisService {
         }
 
         List<Map<String, Object>> fjson = new ArrayList<>();
-        for (Finding f : findings) fjson.add(f.toJson());
+        for (Finding f : findings) {
+            Map<String, Object> j = new LinkedHashMap<>(f.toJson());
+            TaintResult tr = taintByFinding.get(f);
+            if (tr != null) {
+                j.put("taint_source", tr.source() == null ? null : tr.source().id());
+                j.put("taint_terminal", tr.terminalReason());
+                j.put("taint_path", tr.toJson().get("path"));
+                if (tr.source() != null) j.put("confidence", "high");
+            }
+            fjson.add(j);
+        }
 
         List<String> ran = new ArrayList<>();
         for (VulnDetector d : active) ran.add(d.id());
@@ -420,7 +467,22 @@ public final class VulnAnalysisService {
 
     // ---- core ----
 
-    private record ScanResult(List<Finding> findings, boolean decompFailed, int siteCount) {}
+    private record ScanResult(List<Finding> findings, boolean decompFailed,
+            int siteCount, HighFunction hf, Map<Finding, SinkCallSite> siteByFinding) {}
+
+    /**
+     * Per-vuln-class arg role to trace when {@code taint=true}: the catalog
+     * arg index whose data-flow provenance answers "is this attacker-controlled?".
+     * Returns null for classes/entries with no traceable role (skip trace).
+     */
+    private static Integer argRoleFor(CatalogEntry e) {
+        return switch (e.vulnClass()) {
+            case "copy", "alloc" -> e.arg("size_arg");
+            case "format"        -> e.arg("fmt_arg");
+            case "exec"          -> e.arg("cmd_arg");
+            default              -> null;
+        };
+    }
 
     private DecompInterface openDecompiler(Program program) {
         try {
@@ -448,7 +510,7 @@ public final class VulnAnalysisService {
             dr = functionService.decompileFunctionNoRetry(f, program);
         }
         if (dr == null || !dr.decompileCompleted() || dr.getHighFunction() == null) {
-            return new ScanResult(List.of(), true, 0);
+            return new ScanResult(List.of(), true, 0, null, Map.of());
         }
         HighFunction hf = dr.getHighFunction();
 
@@ -466,17 +528,26 @@ public final class VulnAnalysisService {
                 sites.add(new SinkCallSite(op, e, callee, addr));
             }
         }
-        if (sites.isEmpty()) return new ScanResult(List.of(), false, 0);
+        if (sites.isEmpty()) return new ScanResult(List.of(), false, 0, hf, Map.of());
 
         List<Finding> all = new ArrayList<>();
+        Map<Finding, SinkCallSite> siteByFinding = new LinkedHashMap<>();
         for (VulnDetector d : active) {
             List<SinkCallSite> mine = new ArrayList<>();
             for (SinkCallSite s : sites) {
                 if (d.sinkClasses().contains(s.entry().vulnClass())) mine.add(s);
             }
-            if (!mine.isEmpty()) all.addAll(d.scan(hf, mine));
+            if (mine.isEmpty()) continue;
+            // Map each finding back to the call-site it came from so the taint
+            // pass can recover (PcodeOp call, CatalogEntry) without re-parsing
+            // string addresses. Detectors emit Finding.address == callAddr.toString().
+            Map<String, SinkCallSite> byAddr = new HashMap<>();
+            for (SinkCallSite s : mine) byAddr.put(s.callAddr().toString(), s);
+            List<Finding> got = d.scan(hf, mine);
+            for (Finding ff : got) siteByFinding.put(ff, byAddr.get(ff.address()));
+            all.addAll(got);
         }
-        return new ScanResult(all, false, sites.size());
+        return new ScanResult(all, false, sites.size(), hf, siteByFinding);
     }
 
     private Function resolveCallee(PcodeOp op, Program program) {
