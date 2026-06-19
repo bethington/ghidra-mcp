@@ -45,6 +45,33 @@ def test_ensure_uv_available_raises_when_missing(monkeypatch):
     assert "uv is not available" in str(exc.value)
 
 
+def test_ensure_uv_available_raises_when_not_on_path(monkeypatch):
+    # subprocess.run raises FileNotFoundError before any returncode when the
+    # binary isn't on PATH — must funnel through the actionable message.
+    monkeypatch.setattr(req.shutil, "which", lambda _: None)
+
+    def _boom(*a, **k):
+        raise FileNotFoundError(2, "No such file or directory", "uv")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    with pytest.raises(FileNotFoundError) as exc:
+        req.ensure_uv_available()
+    assert "uv is not available" in str(exc.value)
+
+
+def test_ensure_uv_available_raises_when_not_executable(monkeypatch):
+    # A non-executable uv surfaces as PermissionError (also an OSError).
+    monkeypatch.setattr(req.shutil, "which", lambda _: "/opt/bin/uv")
+
+    def _boom(*a, **k):
+        raise PermissionError(13, "Permission denied", "uv")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    with pytest.raises(FileNotFoundError) as exc:
+        req.ensure_uv_available()
+    assert "uv is not available" in str(exc.value)
+
+
 def test_make_install_plan_dev_group_by_default():
     plan = req.make_install_plan(Path("/repo"), install_debugger=False)
     assert plan.groups == ("dev",)

@@ -19,9 +19,17 @@ def uv_executable() -> str:
 def ensure_uv_available() -> str:
     """Return the uv executable, raising FileNotFoundError if it can't run."""
     uv = uv_executable()
-    probe = subprocess.run(
-        [uv, "--version"], capture_output=True, text=True, check=False
-    )
+    try:
+        probe = subprocess.run(
+            [uv, "--version"], capture_output=True, text=True, check=False
+        )
+    except OSError as exc:
+        # uv isn't on PATH / isn't executable — subprocess.run raises before we
+        # ever see a returncode. Funnel it through the same actionable message.
+        raise FileNotFoundError(
+            "uv is not available — `uv --version` could not be run. Install uv: "
+            "https://docs.astral.sh/uv/getting-started/installation/"
+        ) from exc
     if probe.returncode != 0:
         raise FileNotFoundError(
             "uv is not available — `uv --version` did not respond. Install uv: "
