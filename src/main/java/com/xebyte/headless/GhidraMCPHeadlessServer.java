@@ -717,7 +717,11 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     private void sendResponse(HttpExchange exchange, String response) throws IOException {
         byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+        // No Access-Control-Allow-Origin: the bridge is a same-host CLI
+        // client, not a browser. Emitting ACAO:* on a no-auth loopback
+        // server lets any web page the user visits read decompiled code
+        // and drive write endpoints via fetch(). The GUI plugin's TCP
+        // server has never emitted this header; aligning with it.
         exchange.sendResponseHeaders(200, bytes.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(bytes);

@@ -6,6 +6,25 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+### Security
+
+- Headless server no longer emits `Access-Control-Allow-Origin: *`. With
+  the no-auth loopback default, any web page could `fetch()` against
+  `http://127.0.0.1:8089` and read decompiled code / drive write endpoints
+  cross-origin. The bridge is a same-host CLI client; browsers have no
+  legitimate reason to call this server directly.
+- UDS socket directory is now ownership-verified and locked to mode `0700`
+  (and the bound socket to `0600`) on POSIX systems. The
+  `/tmp/ghidra-mcp-<user>` fallback path is predictable; an attacker who
+  pre-created it could intercept bridge connections. The server now
+  refuses to start if the directory is owned by another user.
+- Bridge `--mcp-host 0.0.0.0` / `::` now keeps DNS-rebinding protection
+  enabled with `allowed_hosts` derived from the machine's hostname/FQDN/
+  interface IPs (previously it disabled protection entirely on the
+  most-exposed bind). Extend with `GHIDRA_MCP_ALLOWED_HOSTS=host1,host2`;
+  opt back into unprotected behavior with
+  `GHIDRA_MCP_DISABLE_REBIND_PROTECTION=1` (logs a warning).
+
 ### Fixed
 
 - Gradle `deploy` now stops any Ghidra running from `GHIDRA_INSTALL_DIR`
