@@ -270,6 +270,78 @@ public final class VulnAnalysisService {
             "catalog_status",  catalog.status() == null ? "ok" : catalog.status()));
     }
 
+    @McpTool(path = "/find_taint_path", category = "security",
+             description = "Backward inter-procedural taint trace from one sink call-site argument. "
+                         + "Starts at the given address (a CALL instruction), walks the named arg "
+                         + "backward across CALL-return and parameter boundaries, and reports the "
+                         + "first catalog SOURCE reached (or the terminal reason if none). Use this "
+                         + "to triage a detect_vuln_patterns finding: does its dangerous arg actually "
+                         + "come from attacker-controlled input?")
+    public Response findTaintPath(
+            @Param(value = "address", paramType = "address",
+                   description = "Sink call-site address (overlay-aware).") String addressStr,
+            @Param(value = "arg_role", defaultValue = "",
+                   description = "Catalog arg role at the callee (size_arg|fmt_arg|cmd_arg|dst_arg). "
+                               + "Resolved against the callee's catalog entry.") String argRole,
+            @Param(value = "arg_index", defaultValue = "-1",
+                   description = "Raw 0-based arg index; used when arg_role is empty or callee "
+                               + "isn't in the catalog.") int argIndex,
+            @Param(value = "max_call_depth", defaultValue = "5",
+                   description = "Clamped to [1,10].") int maxCallDepth,
+            @Param(value = "max_functions", defaultValue = "64",
+                   description = "Clamped to [1,256].") int maxFunctions,
+            @Param(value = "program", defaultValue = "",
+                   description = "Target program name (omit for active program)") String programName) {
+        ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
+        if (pe.hasError()) return pe.error();
+        Program program = pe.program();
+
+        Address site = program.getAddressFactory().getAddress(
+            addressStr == null ? null : addressStr.strip());
+        if (site == null) return Response.err("Could not resolve address: " + addressStr);
+        Function fn = program.getFunctionManager().getFunctionContaining(site);
+        if (fn == null) return Response.err("No function contains address " + addressStr);
+
+        try (TaintTracer tracer = new TaintTracer(program, catalog)) {
+            HighFunction hf = tracer.decompile(fn);
+            if (hf == null) return Response.err("Decompile failed for " + fn.getName());
+            // Find the CALL op at this site
+            PcodeOp call = null;
+            var it = hf.getPcodeOps(site);
+            while (it != null && it.hasNext()) {
+                PcodeOp op = it.next();
+                if (op.getOpcode() == PcodeOp.CALL || op.getOpcode() == PcodeOp.CALLIND) {
+                    call = op; break;
+                }
+            }
+            if (call == null) return Response.err("No CALL op at " + addressStr);
+            // Resolve arg index
+            int idx = argIndex;
+            Function callee = null;
+            if (call.getNumInputs() > 0 && call.getInput(0) != null
+                    && call.getInput(0).isAddress()) {
+                callee = program.getFunctionManager().getFunctionAt(call.getInput(0).getAddress());
+            }
+            if ((argRole != null && !argRole.isBlank()) && callee != null) {
+                for (CatalogEntry e : catalog.resolve(callee)) {
+                    Integer i = e.arg(argRole);
+                    if (i != null) { idx = i; break; }
+                }
+            }
+            if (idx < 0) return Response.err(
+                "Could not determine arg index — supply arg_index or a valid arg_role for a catalog sink.");
+
+            int depth = Math.max(1, Math.min(maxCallDepth, 10));
+            int cap   = Math.max(1, Math.min(maxFunctions, 256));
+            TaintResult r = tracer.trace(hf, call, idx, depth, cap);
+            Map<String, Object> out = new LinkedHashMap<>(r.toJson());
+            out.put("address", site.toString());
+            out.put("callee", callee != null ? callee.getName() : null);
+            out.put("arg_index_used", idx);
+            return Response.ok(out);
+        }
+    }
+
     // keep in sync with collectAttackSurfaceFunctions
     private void bfsCallers(Program program, FunctionManager fm, ReferenceManager rm,
             Function source, CatalogEntry entry, int maxDepth,

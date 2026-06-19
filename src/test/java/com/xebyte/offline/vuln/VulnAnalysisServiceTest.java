@@ -328,4 +328,26 @@ public class VulnAnalysisServiceTest {
         assertEquals(2, ((Number) body.get("scanned_functions")).intValue());
         assertEquals(2, ((Number) body.get("decompile_failures")).intValue());
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void findTaintPath_shapeAndClamps() {
+        Program p = mock(Program.class);
+        ghidra.program.model.address.AddressFactory af =
+            mock(ghidra.program.model.address.AddressFactory.class);
+        when(p.getAddressFactory()).thenReturn(af);
+        when(af.getAddress(anyString())).thenReturn(null); // unresolved → error
+        Response r = svc(p).findTaintPath("00401000", "size_arg", -1, 999, 9999, "");
+        // address unresolved → error
+        assertTrue(r instanceof Response.Err);
+
+        // resolved address but no function there → error
+        ghidra.program.model.address.Address a = mock(ghidra.program.model.address.Address.class);
+        when(af.getAddress("00401000")).thenReturn(a);
+        FunctionManager fm = mock(FunctionManager.class);
+        when(p.getFunctionManager()).thenReturn(fm);
+        when(fm.getFunctionContaining(a)).thenReturn(null);
+        Response r2 = svc(p).findTaintPath("00401000", "size_arg", -1, 999, 9999, "");
+        assertTrue(r2 instanceof Response.Err);
+    }
 }
