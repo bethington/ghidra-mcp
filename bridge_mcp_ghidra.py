@@ -1758,9 +1758,19 @@ def _auto_connect():
             _active_socket = None
             _transport_mode = "none"
     elif len(instances) > 1:
-        logger.info(
-            f"Multiple UDS instances found ({len(instances)}). Use connect_instance() to choose."
+        names = ", ".join(
+            i.get("project") or i.get("socket") or "?" for i in instances
         )
+        logger.info(
+            f"Multiple UDS instances found ({len(instances)}: {names}). "
+            "Use connect_instance() to choose."
+        )
+        # Do NOT fall through to the TCP fallback — that would silently
+        # connect to whichever Ghidra happened to bind 8089 (possibly a
+        # third instance entirely) right after telling the user to choose.
+        # Stay unconnected until connect_instance() is called explicitly,
+        # matching connect_instance's own multi-instance refusal logic.
+        return
 
     # Try TCP fallback
     tcp_url = os.getenv("GHIDRA_MCP_URL", DEFAULT_TCP_URL)
@@ -1853,27 +1863,40 @@ def debugger_attach(target: str) -> str:
                     if isinstance(programs_data, list)
                     else programs_data.get("programs", [])
                 )
+                # image_base is already present on each /list_open_programs
+                # entry (ProgramScriptService.listOpenPrograms emits it) —
+                # use it directly. The previous /get_metadata round-trip
+                # was dead: that endpoint returns plain text, so
+                # json.loads() always raised, the bare except swallowed
+                # it, and ghidra_bases stayed empty so auto-sync never
+                # fired.
                 ghidra_bases = {}
                 for prog in programs:
-                    prog_path = (
-                        prog
-                        if isinstance(prog, str)
-                        else prog.get("path", prog.get("name", ""))
-                    )
-                    if prog_path:
-                        try:
-                            meta_text = dispatch_get(
-                                "/get_metadata", params={"program": prog_path}
-                            )
-                            meta = json.loads(meta_text)
-                            image_base = meta.get("imageBase", meta.get("image_base"))
-                            if image_base:
-                                ghidra_bases[prog_path] = image_base
-                        except Exception:
-                            pass
+                    if isinstance(prog, str):
+                        # Legacy plain-string list shape — no image_base
+                        # available without a second call. Skip; the
+                        # operator can run debugger_resolve_ordinal /
+                        # sync manually.
+                        continue
+                    prog_path = prog.get("path") or prog.get("name") or ""
+                    image_base = prog.get("image_base") or prog.get("imageBase")
+                    if prog_path and image_base:
+                        ghidra_bases[prog_path] = image_base
                 if ghidra_bases:
                     _debugger_request(
                         "POST", "/debugger/sync_modules", {"ghidra_bases": ghidra_bases}
+                    )
+                    logger.info(
+                        "debugger_attach: auto-synced %d Ghidra image base(s) "
+                        "to the debugger address map",
+                        len(ghidra_bases),
+                    )
+                else:
+                    logger.info(
+                        "debugger_attach: no Ghidra image bases available "
+                        "from /list_open_programs — address-map auto-sync "
+                        "skipped (set up manually via debugger_resolve_ordinal "
+                        "or /debugger/sync_modules)"
                     )
         except Exception as e:
             logger.warning(f"Auto-sync address map failed (non-fatal): {e}")
