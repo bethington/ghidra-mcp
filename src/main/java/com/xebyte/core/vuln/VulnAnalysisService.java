@@ -115,7 +115,8 @@ public final class VulnAnalysisService {
             @Param(value = "scope", source = ParamSource.BODY, defaultValue = "",
                    description = "'' (default) = whole program / single function. "
                                + "'attack_surface' = scan only functions reachable (callers-of) "
-                               + "within max_depth hops of any catalog SOURCE.") String scope,
+                               + "within max_depth hops of any catalog SOURCE. Ignored when "
+                               + "'function' is non-empty (single-function takes precedence).") String scope,
             @Param(value = "max_depth", source = ParamSource.BODY, defaultValue = "3",
                    description = "BFS depth for scope=attack_surface (clamped to [0,8]).") int maxDepth) {
 
@@ -307,9 +308,8 @@ public final class VulnAnalysisService {
      * hops from any catalog SOURCE. Same traversal as enumerateAttackSurface but
      * without per-class bucketing or row JSON — used by detect_vuln_patterns
      * scope="attack_surface" to decide what to scan.
-     *
-     * // keep in sync with bfsCallers
      */
+    // keep in sync with bfsCallers
     private Set<Function> collectAttackSurfaceFunctions(Program program, int maxDepth) {
         FunctionManager fm = program.getFunctionManager();
         ReferenceManager rm = program.getReferenceManager();

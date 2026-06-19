@@ -15,8 +15,11 @@ import java.util.Set;
 
 /**
  * Static PCode query helpers shared by all VulnDetectors. Intra-function only:
- * walks stop at CALL/CALLIND/CALLOTHER, MULTIEQUAL (phi), constants, and inputs
- * (no def). Mirrors the termination rules of AnalysisService.analyze_dataflow.
+ * provenance walks ({@code definingOps}, {@code defChainHasInput}) stop at
+ * CALL/CALLIND/CALLOTHER, MULTIEQUAL (phi), constants, and inputs (no def);
+ * {@code reachesConstantOnly} additionally treats MULTIEQUAL as transparent
+ * (a phi of constants is constant). Mirrors the termination rules of
+ * AnalysisService.analyze_dataflow.
  */
 public final class PcodeQuery {
     private PcodeQuery() {}
