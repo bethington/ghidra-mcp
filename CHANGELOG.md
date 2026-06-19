@@ -8,8 +8,7 @@ Complete version history for the Ghidra MCP Server project.
 
 ### Fixed
 
-- **PIC/GOT-indirected named globals rendered as `DAT_`**: `decompile_function`,
-  `decompile_function_by_name`, and every other decompiler-backed operation
+- **PIC/GOT-indirected named globals rendered as `DAT_`**: `decompile_function` and every other decompiler-backed operation
   constructed a bare `new DecompInterface()` and never applied
   `DecompileOptions`. A fresh `DecompileOptions` leaves *"Respect Read-Only
   Flags"* OFF (the C++ decompiler-core default), so a read-only GOT/relocation
