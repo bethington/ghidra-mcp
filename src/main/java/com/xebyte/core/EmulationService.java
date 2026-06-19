@@ -48,6 +48,7 @@ import java.util.*;
 public class EmulationService {
 
     private static final int DEFAULT_TIMEOUT_MS = 10_000;
+    private static final int DEFAULT_MAX_STEPS = 10_000;
     private static final int MAX_STEPS = 100_000;
     private static final int MAX_CANDIDATES = 10_000;
     // Scratch memory for writing candidate strings during emulation
@@ -163,22 +164,57 @@ public class EmulationService {
                     }
                 }
 
-                // Run emulation
-                int effectiveMaxSteps = Math.min(maxSteps, MAX_STEPS);
-                emu.setBreakpoint(program.getAddressFactory()
-                        .getDefaultAddressSpace().getAddress(returnSentinel));
+                // Run emulation with a hard step bound. emu.run(...) is
+                // unbounded — it loops until a breakpoint or fault — so a
+                // target with an infinite loop (or one that never executes
+                // RET to hit the returnSentinel) would hang the HTTP
+                // handler thread forever. Step explicitly so the advertised
+                // max_steps parameter is actually honored.
+                int effectiveMaxSteps = Math.min(
+                        maxSteps > 0 ? maxSteps : DEFAULT_MAX_STEPS, MAX_STEPS);
+                ghidra.util.task.TaskMonitor monitor =
+                        new ghidra.util.task.ConsoleTaskMonitor();
 
-                boolean success = emu.run(entryAddr, null, new ghidra.util.task.ConsoleTaskMonitor());
+                // Position PC at the entry point, then step.
+                emu.writeRegister(emu.getPCRegister(), entryAddr.getOffset());
+
+                int steps = 0;
+                boolean success = true;
+                boolean hitReturn = false;
+                String stopReason = "max_steps_exceeded";
+                Address pc = null;
+                while (steps < effectiveMaxSteps) {
+                    steps++;
+                    if (!emu.step(monitor)) {
+                        success = false;
+                        stopReason = "fault: " + emu.getLastError();
+                        break;
+                    }
+                    pc = emu.getExecutionAddress();
+                    if (pc != null && pc.getOffset() == returnSentinel) {
+                        hitReturn = true;
+                        stopReason = "return";
+                        break;
+                    }
+                }
+                if (steps >= effectiveMaxSteps && !hitReturn && success) {
+                    // Step cap reached without RET or fault — likely an
+                    // infinite loop or a path that never returns.
+                    success = false;
+                }
 
                 // Collect results
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("success", success);
                 result.put("function", func.getName());
                 result.put("entry_address", entryAddr.toString());
+                result.put("steps_executed", steps);
+                result.put("max_steps", effectiveMaxSteps);
+                result.put("stop_reason", stopReason);
 
-                Address pc = emu.getExecutionAddress();
+                pc = emu.getExecutionAddress();
                 result.put("final_pc", pc != null ? pc.toString() : "unknown");
-                result.put("hit_return", pc != null && pc.getOffset() == returnSentinel);
+                result.put("hit_return", hitReturn);
 
                 // Read registers
                 Map<String, String> regValues = new LinkedHashMap<>();
