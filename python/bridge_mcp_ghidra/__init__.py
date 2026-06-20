@@ -21,7 +21,6 @@ through that module.
 from . import config  # noqa: F401
 from . import state  # noqa: F401
 from . import server  # noqa: F401
-from . import exceptions  # noqa: F401
 from . import validation  # noqa: F401
 from . import transport  # noqa: F401
 from . import discovery  # noqa: F401
@@ -40,19 +39,12 @@ from .config import (  # noqa: F401
     DEFAULT_TCP_PORT,
     DEFAULT_TCP_URL,
     ENDPOINT_TIMEOUTS,
-    REQUEST_TIMEOUT,
     STATIC_TOOL_NAMES,
     TCP_PORT_SCAN_RANGE,
     logger,
 )
-from .exceptions import (  # noqa: F401
-    GhidraAnalysisError,
-    GhidraConnectionError,
-    GhidraValidationError,
-)
 from .server import Context, mcp  # noqa: F401
 from .validation import (  # noqa: F401
-    FUNCTION_NAME_PATTERN,
     HEX_ADDRESS_PATTERN,
     MAX_TOOL_NAME_LENGTH,
     SEGMENT_ADDR_WITH_0X_PATTERN,

@@ -19,7 +19,6 @@ SEGMENT_ADDRESS_PATTERN = re.compile(r"^[^\s:]+::?[0-9a-fA-F]+$")
 SEGMENT_ADDR_WITH_0X_PATTERN = re.compile(
     r"^([^\s:]+::?)0[xX]([0-9a-fA-F]+)$"
 )
-FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 MAX_TOOL_NAME_LENGTH = 64
 INVALID_TOOL_NAME_CHARS = re.compile(r"[^a-zA-Z0-9_-]+")

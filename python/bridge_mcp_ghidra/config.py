@@ -7,8 +7,6 @@ import os
 # Request timeouts
 # ==========================================================================
 
-REQUEST_TIMEOUT = 30
-
 # Per-endpoint timeout overrides for expensive operations
 ENDPOINT_TIMEOUTS = {
     "rename_variables": 120,
