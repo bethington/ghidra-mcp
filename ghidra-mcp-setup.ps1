@@ -555,6 +555,42 @@ function Test-TruthyValue {
     return @("1", "true", "yes", "on") -contains $Value.Trim().ToLowerInvariant()
 }
 
+function Test-DependencyGroup {
+    # Return $true only when $Group is a real key under [dependency-groups] in the
+    # given pyproject.toml. A plain substring scan is too loose (the word could
+    # appear in a comment or another section) and too strict (it wouldn't confirm
+    # the entry is one `uv sync --group <group>` can resolve). PowerShell has no
+    # TOML parser, so do the same section-scoped scan as the Python fallback.
+    param(
+        [Parameter(Mandatory = $true)][string]$PyprojectPath,
+        [Parameter(Mandatory = $true)][string]$Group
+    )
+
+    if (-not (Test-Path -LiteralPath $PyprojectPath)) { return $false }
+
+    try {
+        $lines = Get-Content -LiteralPath $PyprojectPath -ErrorAction Stop
+    } catch {
+        return $false
+    }
+
+    $escaped = [regex]::Escape($Group)
+    $keyPattern = "^\s*(?:$escaped|[`"']$escaped[`"'])\s*="
+    $inSection = $false
+    foreach ($raw in $lines) {
+        $line = ($raw -split '#', 2)[0]
+        $stripped = $line.Trim()
+        if ($stripped.StartsWith('[') -and $stripped.EndsWith(']')) {
+            $inSection = $stripped -eq '[dependency-groups]'
+            continue
+        }
+        if ($inSection -and ($line -match $keyPattern)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Install-PythonRequirementsFile {
     param(
         [Parameter(Mandatory = $true)]$PythonCommand,
@@ -688,9 +724,8 @@ function Invoke-PreflightChecks {
 
     if ($InstallDebuggerDeps) {
         $pyprojectPath = Join-Path $PSScriptRoot "pyproject.toml"
-        if (-not (Test-Path $pyprojectPath) -or
-            -not (Select-String -Path $pyprojectPath -Pattern "debugger" -Quiet)) {
-            $issues.Add("Debugger dependency group not found in pyproject.toml")
+        if (-not (Test-DependencyGroup -PyprojectPath $pyprojectPath -Group "debugger")) {
+            $issues.Add("Debugger dependency group not found in pyproject.toml (expected a [dependency-groups] 'debugger' entry)")
         } else {
             Write-LogSuccess "Debugger dependency group found in pyproject.toml."
         }
