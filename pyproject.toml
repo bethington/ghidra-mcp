@@ -1,0 +1,148 @@
+[project]
+name = "ghidra-mcp-bridge"
+version = "5.14.1"
+description = "GhidraMCP bridge — a thin MCP↔HTTP multiplexer exposing Ghidra reverse-engineering tools to AI clients."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "xebyte" }]
+keywords = ["ghidra", "mcp", "reverse-engineering", "model-context-protocol"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    # Core MCP server framework
+    "mcp>=1.27.2,<2.0.0",
+]
+# NOTE: the bridge package talks to Ghidra over stdlib http.client, so the wheel
+# has no `requests` runtime dependency. `requests` is only needed by the repo's
+# unshipped subsystems (fun-doc, the test suite) and is declared in those
+# dependency groups instead — see [dependency-groups] below.
+
+[project.scripts]
+bridge-mcp-ghidra = "bridge_mcp_ghidra.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/bethington/ghidra-mcp"
+Repository = "https://github.com/bethington/ghidra-mcp"
+Changelog = "https://github.com/bethington/ghidra-mcp/blob/main/CHANGELOG.md"
+
+# ---------------------------------------------------------------------------
+# Build backend — the wheel ships ONLY the bridge package, which lives under
+# python/ rather than the repo root.
+# ---------------------------------------------------------------------------
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/bridge_mcp_ghidra"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "python/bridge_mcp_ghidra",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+]
+
+# ---------------------------------------------------------------------------
+# Dependency groups (PEP 735). Install with: uv sync --group <name>.
+# uv installs the `dev` group by default.
+# ---------------------------------------------------------------------------
+[dependency-groups]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
+    "pytest-timeout>=2.4.0",
+    "pytest-mock>=3.10.0",
+    "pytest-asyncio>=1.4.0",
+    # requests drives the HTTP integration/perf tests; 2.32.0 floors CVE-2024-35195.
+    "requests>=2.32.0,<3.0.0",
+    "responses>=0.26.1",
+    "requests-mock>=1.12.1",
+    "coverage>=7.0.0",
+    "pytest-json-report>=1.5.0",
+    "pyyaml>=6.0.0",
+    "clang>=18.1.8",
+    "libclang>=18.1.1",
+]
+# Standalone debugger server + Ghidra TraceRmi backend (Windows-only bits).
+debugger = [
+    "pybag==2.2.16 ; sys_platform == 'win32'",
+    "comtypes==1.4.16 ; sys_platform == 'win32'",
+    "protobuf>=6.31.0",
+]
+# fun-doc curation subsystem (not part of the shipped wheel).
+fun-doc = [
+    # HTTP client for the Ghidra bridge + provider calls; 2.32.0 floors CVE-2024-35195.
+    "requests>=2.32.0,<3.0.0",
+    "flask>=3.1.3",
+    "flask-socketio>=5.6.1",
+    "python-dotenv>=1.2.2",
+    "openai>=2.41.1",
+    "claude-agent-sdk>=0.2.101",
+    "pyyaml>=6.0.3",
+    "sqlalchemy>=2.0.50,<3.0",
+    "psycopg[binary]>=3.3.4 ; python_version >= '3.10'",
+]
+dev = [
+    { include-group = "test" },
+    "flake8>=6.0.0",
+    "black>=24.0.0",
+]
+
+# ---------------------------------------------------------------------------
+# pytest configuration (migrated from pytest.ini)
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = """
+-ra
+-q
+--strict-markers
+--strict-config
+--tb=short
+--cov=bridge_mcp_ghidra
+--cov=tools
+--cov=debugger
+--cov-report=term-missing:skip-covered
+--cov-report=html:tests/coverage
+--cov-report=xml:tests/coverage.xml
+--junit-xml=tests/junit.xml
+"""
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "functional: marks tests as functional tests",
+    "unit: marks tests as unit tests",
+    "api: marks tests as API endpoint tests",
+    "requires_ghidra: marks tests that require Ghidra server to be running",
+    "requires_binary: marks tests that require a loaded binary in Ghidra",
+    "readonly: marks tests that only read data and do not modify Ghidra state",
+    "safe_write: marks tests that write data but use identity operations (write same value back)",
+    "requires_program: mark test as requiring a loaded program",
+    "requires_server: mark test as requiring server connection",
+    "write: mark test as performing write operations",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.black]
+line-length = 120
+target-version = ["py310"]
+
+[tool.uv]
+# The bridge package is the project's distribution; install it editable.
+package = true

@@ -164,8 +164,8 @@ class TestBuildToolFunctionSanitization:
 
         import bridge_mcp_ghidra as bridge
 
-        original_get = bridge.dispatch_get
-        original_post = bridge.dispatch_post
+        original_get = bridge.dispatch.dispatch_get
+        original_post = bridge.dispatch.dispatch_post
 
         def mock_get(endpoint, params=None):
             calls.append(("GET", endpoint, dict(params) if params else {}))
@@ -178,8 +178,8 @@ class TestBuildToolFunctionSanitization:
             calls.append(("POST", endpoint, dict(data) if data else {}))
             return "{}"
 
-        bridge.dispatch_get = mock_get
-        bridge.dispatch_post = mock_post
+        bridge.dispatch.dispatch_get = mock_get
+        bridge.dispatch.dispatch_post = mock_post
 
         return handler, calls, (original_get, original_post, bridge)
 
@@ -193,8 +193,8 @@ class TestBuildToolFunctionSanitization:
             assert params["address"] == "mem:1000", \
                 f"Expected mem:1000, got {params['address']}"
         finally:
-            bridge.dispatch_get = orig_get
-            bridge.dispatch_post = orig_post
+            bridge.dispatch.dispatch_get = orig_get
+            bridge.dispatch.dispatch_post = orig_post
 
     def test_post_tool_sanitizes_address_param(self):
         handler, calls, (orig_get, orig_post, bridge) = \
@@ -208,8 +208,8 @@ class TestBuildToolFunctionSanitization:
             # declare them uppercase.
             assert body["address"] == "MEM:FF00"
         finally:
-            bridge.dispatch_get = orig_get
-            bridge.dispatch_post = orig_post
+            bridge.dispatch.dispatch_get = orig_get
+            bridge.dispatch.dispatch_post = orig_post
 
     def test_non_address_param_passes_through_unchanged(self):
         handler, calls, (orig_get, orig_post, bridge) = \
@@ -219,8 +219,8 @@ class TestBuildToolFunctionSanitization:
             _, _, params = calls[0]
             assert params["label"] == "DO_NOT_CHANGE"
         finally:
-            bridge.dispatch_get = orig_get
-            bridge.dispatch_post = orig_post
+            bridge.dispatch.dispatch_get = orig_get
+            bridge.dispatch.dispatch_post = orig_post
 
     def test_uppercase_space_name_preserved(self):
         """Issue #184: 8051 / other architectures with uppercase space names —
@@ -233,5 +233,5 @@ class TestBuildToolFunctionSanitization:
             _, _, params = calls[0]
             assert params["address"] == "CODE:abcd"
         finally:
-            bridge.dispatch_get = orig_get
-            bridge.dispatch_post = orig_post
+            bridge.dispatch.dispatch_get = orig_get
+            bridge.dispatch.dispatch_post = orig_post

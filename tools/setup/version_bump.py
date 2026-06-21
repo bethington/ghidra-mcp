@@ -44,6 +44,18 @@ def build_rules(
             rf"\g<1>{new_version}\g<2>",
         ),
         ReplacementRule(repo_root / "pom.xml", rf"v{escaped_old}:", f"v{new_version}:"),
+        # Python distribution version (source of truth for the wheel).
+        ReplacementRule(
+            repo_root / "pyproject.toml",
+            rf'(?m)^(version = "){escaped_old}(")',
+            rf"\g<1>{new_version}\g<2>",
+        ),
+        # Bridge package __version__ fallback (used when running from source).
+        ReplacementRule(
+            repo_root / "python/bridge_mcp_ghidra/__init__.py",
+            r'(__version__ = ")\d+\.\d+\.\d+(")',
+            rf"\g<1>{new_version}\g<2>",
+        ),
         ReplacementRule(
             repo_root / "src/main/resources/META-INF/MANIFEST.MF",
             rf"(Plugin-Version:\s*){escaped_old}",

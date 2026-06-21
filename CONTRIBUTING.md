@@ -125,7 +125,7 @@ Priority: Medium - helpful for malware analysis
 
 **Steps**:
 
-1. Understand tool categories in `bridge_mcp_ghidra.py`:
+1. Understand tool categories in `python/bridge_mcp_ghidra/` (static tools live in `static_tools.py` / `debugger.py`):
    ```python
    @mcp.tool()
    def my_new_tool(param1: str, param2: int = 0) -> dict:
@@ -246,7 +246,7 @@ private String analyzeFunction(String functionName) {
 }
 ```
 
-### Python (bridge_mcp_ghidra.py)
+### Python (python/bridge_mcp_ghidra/)
 
 ```python
 @mcp.tool()
@@ -412,7 +412,7 @@ python -m tools.setup ensure-prereqs --ghidra-path "C:\path\to\ghidra"
 python -m tools.setup build
 
 # 5. Run MCP server
-python bridge_mcp_ghidra.py
+uv run bridge-mcp-ghidra      # or: python -m bridge_mcp_ghidra
 
 # 6. Run tests
 python -m tools.setup run-tests

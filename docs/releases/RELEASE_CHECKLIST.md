@@ -65,10 +65,18 @@ Run the cheap gates before any live Ghidra work:
 ```text
 python -m tools.setup preflight --ghidra-path "F:\ghidra_12.1_PUBLIC"
 python -m tools.setup build
-pytest tests/unit/ -v --no-cov
+uv build                                  # build the ghidra-mcp-bridge wheel (-> dist/)
+uv run pytest tests/unit/ -v --no-cov
 git diff --check
 git diff --cached --check
 ```
+
+`bump-version` keeps `pyproject.toml` (the wheel version) and the
+`python/bridge_mcp_ghidra/__init__.py` `__version__` fallback in lockstep with
+`pom.xml`; `test_project_consistency.py::test_pyproject_version_matches_pom`
+guards the wheel version, and CI builds + attaches
+`ghidra_mcp_bridge-X.Y.Z-py3-none-any.whl` as the release asset (the raw
+bridge script is no longer shipped).
 
 For setup/version/catalog changes, also run:
 

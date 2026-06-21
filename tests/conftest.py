@@ -5,9 +5,17 @@ GhidraMCP Test Configuration and Fixtures
 import json
 import os
 import re
+import sys
 import pytest
 import requests
 from pathlib import Path
+
+# The bridge package lives under python/ (split out of the historical
+# single-file bridge_mcp_ghidra.py). Make it importable as `bridge_mcp_ghidra`
+# even when tests run without an editable `uv sync` install.
+_PYTHON_DIR = Path(__file__).resolve().parent.parent / "python"
+if str(_PYTHON_DIR) not in sys.path:
+    sys.path.insert(0, str(_PYTHON_DIR))
 
 
 # =============================================================================

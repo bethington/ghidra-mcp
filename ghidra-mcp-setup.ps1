@@ -555,6 +555,42 @@ function Test-TruthyValue {
     return @("1", "true", "yes", "on") -contains $Value.Trim().ToLowerInvariant()
 }
 
+function Test-DependencyGroup {
+    # Return $true only when $Group is a real key under [dependency-groups] in the
+    # given pyproject.toml. A plain substring scan is too loose (the word could
+    # appear in a comment or another section) and too strict (it wouldn't confirm
+    # the entry is one `uv sync --group <group>` can resolve). PowerShell has no
+    # TOML parser, so do the same section-scoped scan as the Python fallback.
+    param(
+        [Parameter(Mandatory = $true)][string]$PyprojectPath,
+        [Parameter(Mandatory = $true)][string]$Group
+    )
+
+    if (-not (Test-Path -LiteralPath $PyprojectPath)) { return $false }
+
+    try {
+        $lines = Get-Content -LiteralPath $PyprojectPath -ErrorAction Stop
+    } catch {
+        return $false
+    }
+
+    $escaped = [regex]::Escape($Group)
+    $keyPattern = "^\s*(?:$escaped|[`"']$escaped[`"'])\s*="
+    $inSection = $false
+    foreach ($raw in $lines) {
+        $line = ($raw -split '#', 2)[0]
+        $stripped = $line.Trim()
+        if ($stripped.StartsWith('[') -and $stripped.EndsWith(']')) {
+            $inSection = $stripped -eq '[dependency-groups]'
+            continue
+        }
+        if ($inSection -and ($line -match $keyPattern)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Install-PythonRequirementsFile {
     param(
         [Parameter(Mandatory = $true)]$PythonCommand,
@@ -576,17 +612,25 @@ function Install-PythonRequirementsFile {
 }
 
 function Install-PythonPackages {
-    $requirementsPath = Join-Path $PSScriptRoot "requirements.txt"
-    if (-not (Test-Path $requirementsPath)) {
-        Write-LogWarning "requirements.txt not found, skipping Python dependency installation."
+    # Dependencies are managed by uv via the root pyproject.toml / uv.lock
+    # (PEP 735 dependency groups). Sync the dev group, plus debugger if requested.
+    $pyprojectPath = Join-Path $PSScriptRoot "pyproject.toml"
+    if (-not (Test-Path $pyprojectPath)) {
+        Write-LogWarning "pyproject.toml not found, skipping Python dependency installation."
         return
     }
 
-    $py = Get-PythonCommand
-    Install-PythonRequirementsFile -PythonCommand $py -RequirementsPath $requirementsPath -Description "Ensuring Python dependencies"
+    $syncArgs = @("sync", "--group", "dev")
     if ($InstallDebuggerDeps) {
-        $debuggerRequirementsPath = Join-Path $PSScriptRoot "requirements-debugger.txt"
-        Install-PythonRequirementsFile -PythonCommand $py -RequirementsPath $debuggerRequirementsPath -Description "Ensuring debugger Python dependencies"
+        $syncArgs += @("--group", "debugger")
+    }
+    Push-Location $PSScriptRoot
+    try {
+        Invoke-CommandChecked -Command "uv" -Arguments $syncArgs -Description "Ensuring Python dependencies (uv sync)"
+    } finally {
+        Pop-Location
+    }
+    if ($InstallDebuggerDeps) {
         Write-LogSuccess "Debugger Python dependencies are ready."
     }
     Write-LogSuccess "Python dependencies are ready."
@@ -679,11 +723,11 @@ function Invoke-PreflightChecks {
     }
 
     if ($InstallDebuggerDeps) {
-        $debuggerRequirementsPath = Join-Path $PSScriptRoot "requirements-debugger.txt"
-        if (-not (Test-Path $debuggerRequirementsPath)) {
-            $issues.Add("Debugger requirements file not found: $debuggerRequirementsPath")
+        $pyprojectPath = Join-Path $PSScriptRoot "pyproject.toml"
+        if (-not (Test-DependencyGroup -PyprojectPath $pyprojectPath -Group "debugger")) {
+            $issues.Add("Debugger dependency group not found in pyproject.toml (expected a [dependency-groups] 'debugger' entry)")
         } else {
-            Write-LogSuccess "Debugger requirements file found."
+            Write-LogSuccess "Debugger dependency group found in pyproject.toml."
         }
     }
 
@@ -1022,42 +1066,37 @@ try {
     }
 }
 
-# Copy Python MCP bridge to Ghidra root
-$bridgeSourcePath = "$PSScriptRoot\bridge_mcp_ghidra.py"
-$requirementsSourcePath = "$PSScriptRoot\requirements.txt"
+# Build the Python MCP bridge wheel and copy it to the Ghidra root.
+# The bridge is now a package (python/bridge_mcp_ghidra/) shipped as the
+# ghidra-mcp-bridge wheel; install it with `uv tool install <wheel>` or pip.
+$pyprojectPath = "$PSScriptRoot\pyproject.toml"
 
-if (Test-Path $bridgeSourcePath) {
+if (Test-Path $pyprojectPath) {
     try {
-        $bridgeDestinationPath = Join-Path $GhidraPath "bridge_mcp_ghidra.py"
-
-        # Remove existing bridge if it exists
-        if (Test-Path $bridgeDestinationPath) {
-            if ($PSCmdlet.ShouldProcess($bridgeDestinationPath, "Remove existing Python bridge")) {
-                Remove-Item $bridgeDestinationPath -Force
-                Write-LogSuccess "Removed existing bridge"
-            }
+        if ($PSCmdlet.ShouldProcess("$PSScriptRoot\dist", "Build bridge wheel with uv")) {
+            Push-Location $PSScriptRoot
+            try { uv build --wheel } finally { Pop-Location }
         }
 
-        if ($PSCmdlet.ShouldProcess($bridgeDestinationPath, "Copy Python bridge to Ghidra root")) {
-            Copy-Item $bridgeSourcePath $bridgeDestinationPath -Force
-            Write-LogSuccess "Installed: bridge_mcp_ghidra.py → $GhidraPath"
-        }
+        $bridgeWheel = Get-ChildItem "$PSScriptRoot\dist\ghidra_mcp_bridge-*.whl" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime | Select-Object -Last 1
 
-        # Also copy requirements.txt for convenience
-        if (Test-Path $requirementsSourcePath) {
-            $requirementsDestinationPath = Join-Path $GhidraPath "requirements.txt"
-            if ($PSCmdlet.ShouldProcess($requirementsDestinationPath, "Copy requirements.txt to Ghidra root")) {
-                Copy-Item $requirementsSourcePath $requirementsDestinationPath -Force
-                Write-LogSuccess "Installed: requirements.txt → $GhidraPath"
+        if ($bridgeWheel) {
+            $wheelDestinationPath = Join-Path $GhidraPath $bridgeWheel.Name
+            if ($PSCmdlet.ShouldProcess($wheelDestinationPath, "Copy bridge wheel to Ghidra root")) {
+                Copy-Item $bridgeWheel.FullName $wheelDestinationPath -Force
+                Write-LogSuccess "Installed: $($bridgeWheel.Name) → $GhidraPath"
             }
+        } else {
+            Write-LogWarning "Bridge wheel not found in dist/ after build"
         }
 
     } catch {
-        Write-LogWarning "Failed to copy Python bridge: $($_.Exception.Message)"
-        Write-LogInfo "You can manually copy bridge_mcp_ghidra.py to your Ghidra installation"
+        Write-LogWarning "Failed to build/copy Python bridge wheel: $($_.Exception.Message)"
+        Write-LogInfo "You can build it manually with: uv build --wheel"
     }
 } else {
-    Write-LogWarning "Python bridge not found: $bridgeSourcePath"
+    Write-LogWarning "pyproject.toml not found: $pyprojectPath"
 }
 
 # Auto-activate GhidraMCP in FrontEnd (Project Manager) configuration
@@ -1163,14 +1202,13 @@ Write-Host "   Plugin ZIP: $destinationPath"
 if ($userExtensionsDir) {
     Write-Host "   User Extension: $userExtensionsDir"
 }
-Write-Host "   Python Bridge: $GhidraPath\bridge_mcp_ghidra.py"
-Write-Host "   Requirements: $GhidraPath\requirements.txt"
+Write-Host "   Python Bridge wheel: $GhidraPath\ghidra_mcp_bridge-*.whl"
 Write-Host ""
 Write-LogInfo "Next Steps:"
 if ($NoAutoPrereqs) {
-    Write-Host "1. If needed (first time only), install Python dependencies: pip install -r requirements.txt"
+    Write-Host "1. If needed (first time only), install Python dependencies: uv sync"
     if ($InstallDebuggerDeps) {
-        Write-Host "   Debugger deps enabled: pip install -r requirements-debugger.txt"
+        Write-Host "   Debugger deps enabled: uv sync --group debugger"
     }
 } else {
     Write-Host "1. Python dependencies were auto-checked/installed."
@@ -1187,7 +1225,7 @@ Write-Host "      - In CodeBrowser: Edit > Tool Options > GhidraMCP HTTP Server"
 Write-Host ""
 Write-LogInfo "Usage:"
 Write-Host "   Ghidra: Tools > GhidraMCP > Start MCP Server"
-Write-Host "   Python: python bridge_mcp_ghidra.py (from project root or Ghidra directory)"
+Write-Host "   Python: uv run bridge-mcp-ghidra (from the project root), or 'python -m bridge_mcp_ghidra'"
 if ($InstallDebuggerDeps) {
     Write-Host "   Debugger: python -m debugger (from project root)"
 }

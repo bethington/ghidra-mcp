@@ -19,8 +19,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 JAVA_SRC = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte"
 CORE_SRC = JAVA_SRC / "core"
 POM_XML = PROJECT_ROOT / "pom.xml"
-PYTHON_BRIDGE = PROJECT_ROOT / "bridge_mcp_ghidra.py"
+PYPROJECT_TOML = PROJECT_ROOT / "pyproject.toml"
+# The bridge is now a package split across modules under python/.
+BRIDGE_PKG = PROJECT_ROOT / "python" / "bridge_mcp_ghidra"
 ENDPOINTS_JSON = PROJECT_ROOT / "tests" / "endpoints.json"
+
+
+def bridge_source_text() -> str:
+    """Concatenated text of every bridge module."""
+    return "\n".join(p.read_text() for p in sorted(BRIDGE_PKG.glob("*.py")))
 
 
 def get_pom_version() -> str:
@@ -31,6 +38,14 @@ def get_pom_version() -> str:
     return version.text if version is not None else ""
 
 
+def get_pyproject_version() -> str:
+    """Extract the [project] version from pyproject.toml."""
+    match = re.search(
+        r'(?m)^version = "(\d+\.\d+\.\d+)"', PYPROJECT_TOML.read_text(encoding="utf-8")
+    )
+    return match.group(1) if match else ""
+
+
 class TestVersionConsistency(unittest.TestCase):
     """Verify version strings are consistent across sources."""
 
@@ -38,6 +53,14 @@ class TestVersionConsistency(unittest.TestCase):
         version = get_pom_version()
         self.assertTrue(version, "pom.xml should have a version")
         self.assertRegex(version, r'\d+\.\d+\.\d+')
+
+    def test_pyproject_version_matches_pom(self):
+        """The wheel's version (pyproject.toml) must track pom.xml."""
+        self.assertEqual(
+            get_pyproject_version(),
+            get_pom_version(),
+            "pyproject.toml [project] version != pom.xml version",
+        )
 
     def test_java_version_matches_pom(self):
         """VersionInfo in GhidraMCPPlugin.java should match pom.xml."""
@@ -82,24 +105,24 @@ class TestBridgeConfiguration(unittest.TestCase):
 
     def test_bridge_has_uds_support(self):
         """Bridge should support Unix domain sockets."""
-        content = PYTHON_BRIDGE.read_text()
+        content = bridge_source_text()
         self.assertIn("UnixHTTPConnection", content)
         self.assertIn("AF_UNIX", content)
 
     def test_bridge_has_tcp_fallback(self):
         """Bridge should support TCP as fallback."""
-        content = PYTHON_BRIDGE.read_text()
+        content = bridge_source_text()
         self.assertIn("tcp_request", content)
         self.assertIn("DEFAULT_TCP_URL", content)
 
     def test_bridge_has_auto_connect(self):
         """Bridge should auto-connect on startup."""
-        content = PYTHON_BRIDGE.read_text()
+        content = bridge_source_text()
         self.assertIn("_auto_connect", content)
 
     def test_bridge_dependencies_minimal(self):
-        """Bridge should only depend on mcp (no requests library)."""
-        content = PYTHON_BRIDGE.read_text()
+        """Bridge code should use stdlib http.client, not the requests library."""
+        content = bridge_source_text()
         # The thin bridge uses stdlib http.client, not requests
         self.assertNotIn("import requests", content)
 
@@ -220,7 +243,7 @@ class TestProjectStructure(unittest.TestCase):
         self.assertTrue(POM_XML.exists())
 
     def test_bridge_exists(self):
-        self.assertTrue(PYTHON_BRIDGE.exists())
+        self.assertTrue((BRIDGE_PKG / "__init__.py").exists())
 
     def test_plugin_exists(self):
         self.assertTrue((JAVA_SRC / "GhidraMCPPlugin.java").exists())
