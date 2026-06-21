@@ -111,3 +111,29 @@ def test_execute_install_plan_runs_uv_sync(monkeypatch, tmp_path):
     assert captured["cmd"][:2] == ["uv", "sync"]
     assert "dev" in captured["cmd"]
     assert captured["cwd"] == str(tmp_path)
+
+
+def test_execute_install_plan_validates_uv_before_sync(monkeypatch, tmp_path):
+    # Regression: execute_install_plan must surface the actionable
+    # ensure_uv_available message — not a raw OSError/CalledProcessError — and
+    # must not attempt `uv sync` when uv can't run. The guard lives at this
+    # execution chokepoint so no caller can bypass it.
+    monkeypatch.setattr(req.shutil, "which", lambda _: None)
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        # Simulate uv missing from PATH for every invocation, including the
+        # `uv --version` probe inside ensure_uv_available.
+        raise FileNotFoundError(2, "No such file or directory", "uv")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    plan = req.make_install_plan(tmp_path, install_debugger=False)
+    with pytest.raises(FileNotFoundError) as exc:
+        req.execute_install_plan(plan)
+
+    assert "uv is not available" in str(exc.value)
+    # Only the `uv --version` probe ran; `uv sync` was never attempted.
+    assert calls == [["uv", "--version"]]

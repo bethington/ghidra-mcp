@@ -76,5 +76,12 @@ def uv_sync_command(plan: InstallPlan) -> list[str]:
 
 
 def execute_install_plan(plan: InstallPlan) -> None:
-    """Run ``uv sync`` for the plan's dependency groups."""
+    """Run ``uv sync`` for the plan's dependency groups.
+
+    Validate uv at the point of execution so every install path raises the same
+    actionable :func:`ensure_uv_available` message instead of a raw
+    ``OSError``/``CalledProcessError`` — callers must not have to remember to
+    pre-check.
+    """
+    ensure_uv_available()
     subprocess.run(uv_sync_command(plan), check=True, cwd=str(plan.repo_root))
