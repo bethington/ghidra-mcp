@@ -565,7 +565,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -635,7 +635,6 @@ version = "5.14.1"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
-    { name = "requests" },
 ]
 
 [package.dev-dependencies]
@@ -658,6 +657,7 @@ dev = [
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "requests-mock" },
     { name = "responses" },
 ]
@@ -669,6 +669,7 @@ fun-doc = [
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "sqlalchemy" },
 ]
 test = [
@@ -683,15 +684,13 @@ test = [
     { name = "pytest-timeout" },
     { name = "pytest-xdist" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "requests-mock" },
     { name = "responses" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "mcp", specifier = ">=1.27.2,<2.0.0" },
-    { name = "requests", specifier = ">=2.32.0,<3.0.0" },
-]
+requires-dist = [{ name = "mcp", specifier = ">=1.27.2,<2.0.0" }]
 
 [package.metadata.requires-dev]
 debugger = [
@@ -713,6 +712,7 @@ dev = [
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
+    { name = "requests", specifier = ">=2.32.0,<3.0.0" },
     { name = "requests-mock", specifier = ">=1.12.1" },
     { name = "responses", specifier = ">=0.26.1" },
 ]
@@ -724,6 +724,7 @@ fun-doc = [
     { name = "psycopg", extras = ["binary"], marker = "python_full_version >= '3.10'", specifier = ">=3.3.4" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "requests", specifier = ">=2.32.0,<3.0.0" },
     { name = "sqlalchemy", specifier = ">=2.0.50,<3.0" },
 ]
 test = [
@@ -738,6 +739,7 @@ test = [
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "pyyaml", specifier = ">=6.0.0" },
+    { name = "requests", specifier = ">=2.32.0,<3.0.0" },
     { name = "requests-mock", specifier = ">=1.12.1" },
     { name = "responses", specifier = ">=0.26.1" },
 ]
@@ -1328,10 +1330,10 @@ name = "pybag"
 version = "2.2.16"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "capstone" },
-    { name = "comtypes" },
-    { name = "pywin32" },
-    { name = "win32more" },
+    { name = "capstone", marker = "sys_platform == 'win32'" },
+    { name = "comtypes", marker = "sys_platform == 'win32'" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "win32more", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e1/84/1053510186c0f9a37daad1287194c1b57167590fb065f33ed2d481db58e3/pybag-2.2.16.tar.gz", hash = "sha256:64066f4e5c6581fa9cf778d8e6cf5ce33d3f431961557365c465905ca79b2966", size = 152913, upload-time = "2025-06-26T02:24:59.073Z" }
 wheels = [
@@ -2378,14 +2380,14 @@ name = "win32more"
 version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "win32more-appsdk" },
-    { name = "win32more-core" },
-    { name = "win32more-microsoft-graphics-win2d" },
-    { name = "win32more-microsoft-web-webview2" },
-    { name = "win32more-microsoft-windows-sdk-contracts" },
-    { name = "win32more-microsoft-windows-sdk-win32metadata" },
-    { name = "win32more-microsoft-windows-wdk-win32metadata" },
-    { name = "win32more-microsoft-windowsappsdk" },
+    { name = "win32more-appsdk", marker = "sys_platform == 'win32'" },
+    { name = "win32more-core", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-graphics-win2d", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-web-webview2", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-windows-sdk-contracts", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-windows-sdk-win32metadata", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-windows-wdk-win32metadata", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-windowsappsdk", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/54/b2/296ede14cdd2bd0bfb90fef262e945918480f43e0211744427c6d7e9f721/win32more-0.8.1.tar.gz", hash = "sha256:07cea83d8b1b27cb807448a8683428e17865827059bd5c844d07e89c68367dda", size = 4845, upload-time = "2026-05-20T12:15:46.246Z" }
 wheels = [
@@ -2397,7 +2399,7 @@ name = "win32more-appsdk"
 version = "0.8.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "win32more-core" },
+    { name = "win32more-core", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/4b/ab/cced60a7a2041f4c8a416e65de4aef1246ac241b88447e024e511cb22fa9/win32more_appsdk-0.8.3.tar.gz", hash = "sha256:c0aac4e383c9aa4e8eb20196ad7771bb92e91b1aab0abbf215d443d3adba8c71", size = 11308, upload-time = "2026-05-15T15:01:34.936Z" }
 wheels = [
@@ -2418,8 +2420,8 @@ name = "win32more-microsoft-graphics-win2d"
 version = "0.8.1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "win32more-core" },
-    { name = "win32more-microsoft-windowsappsdk" },
+    { name = "win32more-core", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-windowsappsdk", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/44/c1/d9b7c0cfd9292efb45fbdf23aa758c4c0727469dd7a3cc77e50536cb914f/win32more_microsoft_graphics_win2d-0.8.1.4.0.tar.gz", hash = "sha256:d95197936a8ba96014b26f496b983b47b450bf365dd3ca5bf624867ac5be27b5", size = 1911025, upload-time = "2026-03-20T06:59:49.349Z" }
 wheels = [
@@ -2431,8 +2433,8 @@ name = "win32more-microsoft-web-webview2"
 version = "0.8.1.0.4022.49"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "win32more-core" },
-    { name = "win32more-microsoft-windows-sdk-contracts" },
+    { name = "win32more-core", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-windows-sdk-contracts", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8c/8b/5b05095e9c988ef6eeb4bb42b0942a9b99d852f9e07a25071091063b1f30/win32more_microsoft_web_webview2-0.8.1.0.4022.49.tar.gz", hash = "sha256:398d1903a70e254bf41414c99e5f3b874b637b58b22e6f3bb730600dbae90b9d", size = 889538, upload-time = "2026-06-11T10:19:25.087Z" }
 wheels = [
@@ -2444,7 +2446,7 @@ name = "win32more-microsoft-windows-sdk-contracts"
 version = "0.8.10.0.28000.1839"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "win32more-core" },
+    { name = "win32more-core", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6b/74/5ec1e63d52693ab1e0de39b085862282ef624aaee66443a5ec6c95c8f0da/win32more_microsoft_windows_sdk_contracts-0.8.10.0.28000.1839.tar.gz", hash = "sha256:6409b5c7592e0f3a405c4295c77e5717eb77fd57ed7c20baaf2f2da6baa2f1b1", size = 1644791, upload-time = "2026-05-01T09:42:17.892Z" }
 wheels = [
@@ -2456,8 +2458,8 @@ name = "win32more-microsoft-windows-sdk-win32metadata"
 version = "0.8.70.0.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "win32more-core" },
-    { name = "win32more-microsoft-windows-sdk-contracts" },
+    { name = "win32more-core", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-windows-sdk-contracts", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a9/be/5638282bc091de1574c04f3ab9d07e47e09d6bc92166c5299c274bbad023/win32more_microsoft_windows_sdk_win32metadata-0.8.70.0.11.tar.gz", hash = "sha256:83313195f796aa8de66d4e5b7fb654b3df320f483aabdcacf3bf9e3b3dd734c5", size = 3894843, upload-time = "2026-03-23T09:15:17.913Z" }
 wheels = [
@@ -2469,8 +2471,8 @@ name = "win32more-microsoft-windows-wdk-win32metadata"
 version = "0.8.0.13.25"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "win32more-core" },
-    { name = "win32more-microsoft-windows-sdk-win32metadata" },
+    { name = "win32more-core", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-windows-sdk-win32metadata", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/34/98/c1900d0393c757d39bcf4db4e74e1b80b19b71f16a57e3b090dec9dfd66a/win32more_microsoft_windows_wdk_win32metadata-0.8.0.13.25.tar.gz", hash = "sha256:4b42783c57caaabcd731535ab31039f84f08af6d5dbd8e86a097e70953253df6", size = 259270, upload-time = "2026-05-20T12:12:28.273Z" }
 wheels = [
@@ -2482,10 +2484,10 @@ name = "win32more-microsoft-windowsappsdk"
 version = "0.8.2.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "win32more-appsdk" },
-    { name = "win32more-core" },
-    { name = "win32more-microsoft-web-webview2" },
-    { name = "win32more-microsoft-windows-sdk-contracts" },
+    { name = "win32more-appsdk", marker = "sys_platform == 'win32'" },
+    { name = "win32more-core", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-web-webview2", marker = "sys_platform == 'win32'" },
+    { name = "win32more-microsoft-windows-sdk-contracts", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f1/ea/4146ecc309460b9ad8fe4b5a5022ef8fab457f7380e493931a0329e83a73/win32more_microsoft_windowsappsdk-0.8.2.2.0.tar.gz", hash = "sha256:97ec03987a167c10761d50cf289922076cb6b05ef6486219d1a46eccf2891989", size = 1169604, upload-time = "2026-06-10T11:38:55.283Z" }
 wheels = [
