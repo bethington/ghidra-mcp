@@ -2242,15 +2242,14 @@ def build_bridge_wheel(repo_root: Path, *, dry_run: bool = False) -> Path | None
     a loose ``bridge_mcp_ghidra.py`` script. Returns the newest built wheel, or
     None on a dry run / when no wheel is produced.
     """
-    from .requirements import uv_executable
+    from .requirements import ensure_uv_available
 
     dist_dir = repo_root / "dist"
     if dry_run:
         print(f"DRY RUN: uv build --wheel (-> {dist_dir})")
         return None
-    subprocess.run(
-        [uv_executable(), "build", "--wheel"], check=True, cwd=str(repo_root)
-    )
+    uv = ensure_uv_available()
+    subprocess.run([uv, "build", "--wheel"], check=True, cwd=str(repo_root))
     wheels = sorted(
         dist_dir.glob("ghidra_mcp_bridge-*.whl"), key=lambda p: p.stat().st_mtime
     )
