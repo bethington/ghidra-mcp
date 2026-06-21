@@ -45,7 +45,7 @@ def _debugger_request(
         return json.dumps(
             {
                 "error": f"Debugger server not running at {DEBUGGER_URL}. "
-                "Start it with: python -m debugger"
+                "Start it with: uv run python -m debugger (or: python -m debugger)"
             }
         )
     except Exception as e:
