@@ -62,10 +62,29 @@ def is_pid_alive(pid: int) -> bool:
 
 
 def validate_server_url(url: str) -> bool:
-    """Validate that the server URL is safe to use"""
+    """Validate that a TCP server URL is both safe (local-only) and usable.
+
+    The TCP transport (``transport.tcp_request``) feeds this URL straight into a
+    stdlib ``http.client.HTTPConnection(parsed.hostname, parsed.port)`` — plain
+    HTTP, no TLS, and no port inference. So a URL that passes here must match how
+    it will actually be dialed; otherwise validation reports "safe" and the
+    request fails (or silently dials the wrong port) at connection time:
+
+    - scheme must be ``http`` — ``https`` would be accepted then fail (the
+      transport never negotiates TLS).
+    - host must be loopback (``127.0.0.1``/``localhost``/``::1``).
+    - port must be explicit — a missing port silently defaults to 80 in
+      ``HTTPConnection``, never the Ghidra server's actual port.
+    """
     try:
         parsed = urlparse(url)
-        return parsed.hostname in ("127.0.0.1", "localhost", "::1")
+        if parsed.scheme != "http":
+            return False
+        if parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+            return False
+        if parsed.port is None:
+            return False
+        return True
     except Exception:
         return False
 

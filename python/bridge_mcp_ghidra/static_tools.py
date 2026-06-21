@@ -148,7 +148,7 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     if not validate_server_url(tcp_url):
         return json.dumps(
             {
-                "error": f"Refusing to connect to non-local URL: {tcp_url}. Only 127.0.0.1, localhost, and ::1 are allowed."
+                "error": f"Refusing to connect to invalid TCP URL: {tcp_url}. Expected http://<127.0.0.1|localhost|::1>:<port> (http scheme and an explicit port are required)."
             }
         )
     try:

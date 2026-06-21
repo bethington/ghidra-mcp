@@ -415,6 +415,43 @@ class TestIsPidAlive(unittest.TestCase):
         self.assertFalse(is_pid_alive(4000000))
 
 
+class TestValidateServerUrl(unittest.TestCase):
+    """Test TCP server URL validation.
+
+    The contract must match how transport.tcp_request dials the URL: plain
+    http.client.HTTPConnection(hostname, port) — no TLS, no port inference.
+    """
+
+    def _validate(self, url):
+        from bridge_mcp_ghidra import validate_server_url
+
+        return validate_server_url(url)
+
+    def test_accepts_loopback_http_with_explicit_port(self):
+        self.assertTrue(self._validate("http://127.0.0.1:8089"))
+        self.assertTrue(self._validate("http://localhost:8089"))
+        self.assertTrue(self._validate("http://[::1]:8089"))
+
+    def test_rejects_https_scheme(self):
+        # The transport never negotiates TLS — https would pass then fail at
+        # connection time, so it must be rejected up front.
+        self.assertFalse(self._validate("https://127.0.0.1:8089"))
+
+    def test_rejects_missing_port(self):
+        # HTTPConnection silently defaults a missing port to 80, never the
+        # Ghidra server's actual port.
+        self.assertFalse(self._validate("http://127.0.0.1"))
+        self.assertFalse(self._validate("http://localhost"))
+
+    def test_rejects_non_local_host(self):
+        self.assertFalse(self._validate("http://10.0.10.30:8089"))
+        self.assertFalse(self._validate("http://evil.example.com:8089"))
+
+    def test_rejects_malformed_url(self):
+        self.assertFalse(self._validate("not a url"))
+        self.assertFalse(self._validate(""))
+
+
 class TestGetTimeout(unittest.TestCase):
     """Test per-endpoint timeout calculation."""
 
