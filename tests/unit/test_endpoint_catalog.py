@@ -189,11 +189,14 @@ class TestBridgeIsDynamic(unittest.TestCase):
         meta-tool (#267/#153) that lets the bridge run --lazy with a small tool
         surface while still letting agents discover unloaded tools by keyword.
         Pulls weight: directly addresses the context-overhead complaints.
+
+        Bumped 2026-06-21: 2300 -> 2350 for GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS,
+        an opt-in mode that refuses program-scoped calls omitting a program selector.
         """
         bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
         lines = len(bridge_path.read_text().splitlines())
         self.assertLess(
-            lines, 2300, f"Bridge is {lines} lines, expected <2300 for thin multiplexer"
+            lines, 2350, f"Bridge is {lines} lines, expected <2350 for thin multiplexer"
         )
 
 

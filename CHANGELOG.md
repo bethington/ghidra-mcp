@@ -4,6 +4,24 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Strict program routing in the bridge** (`GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS`): set the env
+  var to `1` and the bridge refuses any program-scoped call that omits a program selector,
+  returning a clear error instead of letting the call ride the server's shared "current
+  program" (the one `switch_program` and the active GUI tab move). Catches a forgotten selector
+  as a loud failure on the first bad call instead of a silent write to the wrong binary. Covers
+  every selector that picks an open program: plain `program=` plus the cross-program tools'
+  `source_program`/`target_program` and `program_a`/`program_b` (which the server otherwise
+  resolves to the current program when left empty). Useful when several programs are open at
+  once, especially when more than one client shares a server. Off by default: with the variable
+  unset the bridge sends calls unchanged. Tools with no program selector (`open_program` and
+  `close_program` take `path`/`name`) are unaffected.
+
+---
+
 ## v5.14.1 - 2026-06-18 (patch: full overlay address-space support)
 
 Patch release.
