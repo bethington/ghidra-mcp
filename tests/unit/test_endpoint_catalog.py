@@ -220,11 +220,15 @@ class TestBridgeIsDynamic(unittest.TestCase):
         fixes: CORS header removal, IPv6 support, multi-UDS handling, emulation
         max_steps bounding, plugin lifecycle handoff. Pulls weight: cumulative
         hardening and API completeness.
+
+        Bumped 2026-06-26: 2500 -> 2550 for `GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS`
+        strict mode (#339): opt-in program selector enforcement, multi-program
+        call safety. Pulls weight: addresses tool-surface safety concerns from #307.
         """
         bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
         lines = len(bridge_path.read_text().splitlines())
         self.assertLess(
-            lines, 2500, f"Bridge is {lines} lines, expected <2500 for thin multiplexer"
+            lines, 2550, f"Bridge is {lines} lines, expected <2550 for thin multiplexer"
         )
 
 
