@@ -316,6 +316,33 @@ python bridge_mcp_ghidra.py --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 | `--no-lazy` | (default) | Load all tool groups immediately on connect. Required for most AI clients. |
 | `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect when `--lazy` is set. |
 
+#### Strict program routing (multi-program safety)
+
+Set `GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1` to make the bridge refuse any program-scoped
+call that omits a program selector, returning a clear error instead of letting the call
+ride the server's shared "current program" (the one `switch_program` and the
+active GUI tab move).
+
+```bash
+export GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1
+python bridge_mcp_ghidra.py
+```
+
+Without this, a call that leaves `program=` out runs against whichever program
+is current, which is fine for a single-program workflow but a hazard once
+several programs are open: the call can read or edit the wrong binary with no
+error. The hazard is worse when more than one client shares a server, since
+each one moves that current-program global out from under the others.
+
+With strict mode on, every program-scoped call must name its target. This
+covers every selector that picks an open program: plain `program=` and the
+cross-program tools' `source_program`/`target_program` or `program_a`/`program_b`
+(declared required, but the server still falls back to the current program when
+one arrives empty). A forgotten selector surfaces as a loud error on the first
+bad call instead of a silent write to the wrong binary. Tools with no program
+selector (`open_program` and `close_program` take `path`/`name`) are unaffected.
+Off by default: with the variable unset the bridge sends calls unchanged.
+
 #### Reducing tool-context overhead
 
 The bridge exposes a large catalog. To keep the model's tool surface small, run
