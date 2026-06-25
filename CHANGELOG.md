@@ -4,6 +4,25 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Unreleased
+
+### Changed
+
+- The WinDbg debugger proxy tools (the 22 `debugger_*` tools backed by the
+  standalone `debugger/server.py`, which wraps dbgeng via `pybag` and only
+  runs on Windows) are now **registered conditionally** via `_debugger_enabled()`.
+  On a non-Windows host with a local `GHIDRA_DEBUGGER_URL` they are no longer
+  registered — previously ~22 tools that could never work cluttered the tool
+  list and returned connection errors on every call. They still register on
+  Windows, when `GHIDRA_DEBUGGER_URL` points at a remote (Windows) host, or
+  when `GHIDRA_DEBUGGER_TOOLS=1` forces them on. The proxy *functions* remain
+  importable/callable; only their MCP registration is gated.
+- As a result, on non-Windows hosts Ghidra's own in-process TraceRmi debugger
+  tools (`DebuggerService`, e.g. `/debugger/status`, `/debugger/set_breakpoint`)
+  now register under their **clean names** instead of `_2` suffixes, because the
+  suppressed dbgeng proxies no longer reserve those names. On Linux this is the
+  `gdb`-backed live-debugging path; see `docs/prompts/TOOL_USAGE_GUIDE.md`.
+
 ## v5.14.1 - 2026-06-18 (patch: full overlay address-space support)
 
 Patch release.
