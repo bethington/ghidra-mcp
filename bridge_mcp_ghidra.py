@@ -1364,18 +1364,18 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     # Try TCP fallback. The behavior depends on what UDS discovery returned:
     #
     #   * If GHIDRA_MCP_URL is set, it always wins (explicit user override).
-    #   * If UDS found one or more instances and none matched the project,
-    #     refuse to fall back to TCP -- that's how we previously silently
-    #     connected to the wrong instance (Copilot #196 review item).
-    #   * If UDS found NOTHING (no instances at all), scan the TCP port range
+    #   * If UDS found one or more instances with project metadata and none
+    #     matched the project, refuse to fall back to TCP -- that's how we
+    #     previously silently connected to the wrong instance (Copilot #196
+    #     review item).
+    #   * If UDS found no usable project metadata, scan the TCP port range
     #     looking for a /mcp/instance_info that matches the project. Handles
-    #     the TCP-only multi-instance case (e.g. Windows pre-1803 without
-    #     AF_UNIX).
+    #     TCP-only and native Windows cases where AF_UNIX is unavailable.
     #   * If no scan match either, try the default port as a last resort.
     env_tcp = os.getenv("GHIDRA_MCP_URL")
     if env_tcp:
         tcp_url = env_tcp
-    elif instances:
+    elif instances and any(inst.get("project") for inst in instances):
         # UDS found instances but none matched the requested project. Don't
         # randomly pick another instance's tcp_port — that connects to the
         # wrong project. Return the "no match" error directly.
@@ -1392,9 +1392,9 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
             }
         )
     else:
-        # No UDS instances. Scan the TCP port range to find one matching
-        # the project. _scan_tcp_for_project returns the URL of the first
-        # matching instance, or None if nothing matched.
+        # No usable UDS project metadata. Scan the TCP port range to find one
+        # matching the project. _scan_tcp_for_project returns the URL of the
+        # first matching instance, or None if nothing matched.
         scanned = _scan_tcp_for_project(project)
         tcp_url = scanned if scanned else DEFAULT_TCP_URL
     if not validate_server_url(tcp_url):
