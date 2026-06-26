@@ -10,6 +10,7 @@ import os
 import inspect
 import re
 import unittest
+import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
@@ -170,6 +171,53 @@ class TestTcpPortScan(unittest.TestCase):
 
         self.assertIsNone(bridge._scan_tcp_for_project(""))
         self.assertIsNone(bridge._scan_tcp_for_project(None))
+
+
+class TestConnectInstanceTcpFallback(unittest.TestCase):
+    """Test connect_instance project matching across UDS and TCP discovery."""
+
+    def test_projectless_uds_instances_fall_back_to_tcp_scan(self):
+        import bridge_mcp_ghidra as bridge
+
+        instances = [{"socket": "/tmp/ghidra-123.sock", "pid": 123}]
+
+        with patch.object(bridge, "discover_instances", return_value=instances), \
+             patch.object(bridge, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090") as scan, \
+             patch.object(bridge, "validate_server_url", return_value=True), \
+             patch.object(bridge, "_fetch_and_register_schema", return_value=0), \
+             patch.object(bridge, "os") as mock_os:
+            mock_os.getenv.return_value = None
+            bridge._full_schema = []
+            bridge._loaded_groups.clear()
+
+            result = asyncio.run(bridge.connect_instance("wanted"))
+
+        data = json.loads(result)
+        self.assertTrue(data["connected"])
+        self.assertEqual(data["transport"], "tcp")
+        self.assertEqual(data["url"], "http://127.0.0.1:8090")
+        scan.assert_called_once_with("wanted")
+
+    def test_real_nonmatching_uds_projects_refuse_tcp_fallback(self):
+        import bridge_mcp_ghidra as bridge
+
+        instances = [
+            {"socket": "/tmp/ghidra-123.sock", "pid": 123, "project": "other"},
+            {"socket": "/tmp/ghidra-456.sock", "pid": 456, "project": "also_other"},
+        ]
+
+        with patch.object(bridge, "discover_instances", return_value=instances), \
+             patch.object(bridge, "_scan_tcp_for_project") as scan, \
+             patch.object(bridge, "os") as mock_os:
+            mock_os.getenv.return_value = None
+
+            result = asyncio.run(bridge.connect_instance("wanted"))
+
+        data = json.loads(result)
+        self.assertIn("error", data)
+        self.assertIn("No instance matching 'wanted'", data["error"])
+        self.assertEqual(data["available"], ["other", "also_other"])
+        scan.assert_not_called()
 
 
 class TestGetSocketDirCandidates(unittest.TestCase):
