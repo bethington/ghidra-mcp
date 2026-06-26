@@ -238,12 +238,18 @@ class GhidraValidationError(Exception):
 
 # Input validation patterns
 HEX_ADDRESS_PATTERN = re.compile(r"^0x[0-9a-fA-F]+$")
-SEGMENT_ADDRESS_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*:[0-9a-fA-F]+$")
-# Handles space:0xHEX form (e.g., mem:0x1000, code:0xFF00).
-# Must be checked BEFORE SEGMENT_ADDRESS_PATTERN because the 'x' in '0x' is not
-# in [0-9a-fA-F], so the existing pattern rejects this form entirely.
+# Space-qualified address: space:HEX or space::HEX (overlay), with optional 0x.
+# Ghidra memory-block (and therefore overlay-space) names are essentially
+# unconstrained, so the space-name class is "anything except colon or
+# whitespace" — the ':'/'::' separator is what distinguishes this from plain
+# hex. Ghidra's AddressFactory accepts both ':' and '::' and is case-sensitive
+# on the name (#184), so the bridge preserves case and never adds '0x' here.
+SEGMENT_ADDRESS_PATTERN = re.compile(r"^[^\s:]+::?[0-9a-fA-F]+$")
+# Handles the space::0xHEX / space:0xHEX form. Checked BEFORE SEGMENT_ADDRESS_PATTERN
+# because the 'x' in '0x' is not in [0-9a-fA-F]. Group 1 captures the name AND the
+# colon separator; group 2 captures the bare hex offset.
 SEGMENT_ADDR_WITH_0X_PATTERN = re.compile(
-    r"^([a-zA-Z_][a-zA-Z0-9_]*):0[xX]([0-9a-fA-F]+)$"
+    r"^([^\s:]+::?)0[xX]([0-9a-fA-F]+)$"
 )
 FUNCTION_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -733,6 +739,7 @@ def sanitize_address(address: str) -> str:
 
     Handles:
     - space:0xHEX  -> space:HEX   (strip 0x; AddressFactory rejects 0x after colon)
+    - space::0xHEX -> space::HEX  (overlay; '::' separator and case preserved)
     - SPACE:HEX    -> SPACE:HEX   (preserve case — AddressFactory is case-sensitive; see #184)
     - 0xHEX        -> 0xhex       (lowercase)
     - HEX          -> 0xHEX       (add 0x prefix)
@@ -741,10 +748,11 @@ def sanitize_address(address: str) -> str:
         return address
     address = address.strip()
 
-    # Step 1: handle space:0xHEX form (checked first — 'x' not in [0-9a-fA-F])
+    # Step 1: handle space:0xHEX / space::0xHEX form (checked first — 'x' not in
+    # [0-9a-fA-F]). Group 1 already includes the ':'/'::' separator.
     m = SEGMENT_ADDR_WITH_0X_PATTERN.match(address)
     if m:
-        return f"{m.group(1)}:{m.group(2)}"  # case preserved (#184)
+        return f"{m.group(1)}{m.group(2)}"  # case + separator preserved (#184, overlays)
 
     # Step 2: valid space:HEX — pass through unchanged (#184)
     if SEGMENT_ADDRESS_PATTERN.match(address):
@@ -844,6 +852,9 @@ _TYPE_MAP = {
 def _normalize_tool_def_names(schema: list[dict]) -> list[dict]:
     """Normalize and de-duplicate MCP-visible names while keeping HTTP endpoints intact."""
     normalized_schema: list[dict] = []
+    # Collision detection uses the ACTIVE static set: when the WinDbg debugger
+    # proxies are suppressed on this host, their names are free, so Ghidra's own
+    # TraceRmi /debugger/* endpoints (System B) keep clean names instead of _2.
     used_names = set(STATIC_TOOL_NAMES)
 
     for tool_def in schema:
@@ -856,7 +867,7 @@ def _normalize_tool_def_names(schema: list[dict]) -> list[dict]:
 
         # Preserve the existing behavior for valid dynamic names that exactly
         # overlap a static bridge tool: _register_tool_def will skip them.
-        if sanitized_name in STATIC_TOOL_NAMES and sanitized_name == raw_name:
+        if sanitized_name in _ALL_STATIC_TOOL_NAMES and sanitized_name == raw_name:
             name = sanitized_name
         else:
             name = _allocate_tool_name(sanitized_name, used_names)
@@ -924,15 +935,24 @@ def _parse_schema(raw: dict) -> list[dict]:
 # ==========================================================================
 
 # Static tool names that should not be overwritten by dynamic registration
-STATIC_TOOL_NAMES = {
+MANAGEMENT_TOOL_NAMES = {
     "list_instances",
     "connect_instance",
     "list_tool_groups",
     "load_tool_group",
     "unload_tool_group",
     "check_tools",
+    "search_tools",
     "import_file",
-    # Debugger tools (Phase 1+2+3)
+}
+
+# WinDbg debugger proxy tools (Phase 1+2+3). The standalone debugger server
+# (debugger/server.py) wraps dbgeng via pybag and only runs on Windows, so these
+# are registered conditionally — see _debugger_enabled(). The names stay reserved
+# in _ALL_STATIC_TOOL_NAMES on every platform so dynamic-tool naming is identical
+# everywhere (a Ghidra /debugger/status endpoint -> debugger_status_2 regardless
+# of whether our proxy is active on this host).
+DEBUGGER_TOOL_NAMES = {
     "debugger_attach",
     "debugger_detach",
     "debugger_status",
@@ -957,7 +977,16 @@ STATIC_TOOL_NAMES = {
     "debugger_watch_log",
 }
 
-for _static_tool_name in STATIC_TOOL_NAMES:
+# Full structural set: every tool name the bridge may define. Used for
+# name-collision detection / reservation so dynamic tool names are platform-stable.
+_ALL_STATIC_TOOL_NAMES = MANAGEMENT_TOOL_NAMES | DEBUGGER_TOOL_NAMES
+
+# Active set: static tools actually registered with this process. Debugger names
+# are added below (once DEBUGGER_URL is known) only when the debugger backend is
+# usable on this host. Used for runtime availability reporting (check_tools etc.).
+STATIC_TOOL_NAMES = set(MANAGEMENT_TOOL_NAMES)
+
+for _static_tool_name in _ALL_STATIC_TOOL_NAMES:
     validate_tool_name(_static_tool_name)
 
 _dynamic_tool_names: list[str] = []
@@ -1074,7 +1103,7 @@ def _register_tool_def(tool_def: dict) -> bool:
     name = tool_def["name"]
     validate_tool_name(name)
     if name in STATIC_TOOL_NAMES:
-        return False  # Don't overwrite static tools
+        return False  # Don't overwrite an *active* static tool of the same name
     description = tool_def.get("description", "")
     endpoint = tool_def["endpoint"]
     http_method = tool_def.get("http_method", "GET")
@@ -1355,18 +1384,18 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     # Try TCP fallback. The behavior depends on what UDS discovery returned:
     #
     #   * If GHIDRA_MCP_URL is set, it always wins (explicit user override).
-    #   * If UDS found one or more instances and none matched the project,
-    #     refuse to fall back to TCP -- that's how we previously silently
-    #     connected to the wrong instance (Copilot #196 review item).
-    #   * If UDS found NOTHING (no instances at all), scan the TCP port range
+    #   * If UDS found one or more instances with project metadata and none
+    #     matched the project, refuse to fall back to TCP -- that's how we
+    #     previously silently connected to the wrong instance (Copilot #196
+    #     review item).
+    #   * If UDS found no usable project metadata, scan the TCP port range
     #     looking for a /mcp/instance_info that matches the project. Handles
-    #     the TCP-only multi-instance case (e.g. Windows pre-1803 without
-    #     AF_UNIX).
+    #     TCP-only and native Windows cases where AF_UNIX is unavailable.
     #   * If no scan match either, try the default port as a last resort.
     env_tcp = os.getenv("GHIDRA_MCP_URL")
     if env_tcp:
         tcp_url = env_tcp
-    elif instances:
+    elif instances and any(inst.get("project") for inst in instances):
         # UDS found instances but none matched the requested project. Don't
         # randomly pick another instance's tcp_port — that connects to the
         # wrong project. Return the "no match" error directly.
@@ -1383,9 +1412,9 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
             }
         )
     else:
-        # No UDS instances. Scan the TCP port range to find one matching
-        # the project. _scan_tcp_for_project returns the URL of the first
-        # matching instance, or None if nothing matched.
+        # No usable UDS project metadata. Scan the TCP port range to find one
+        # matching the project. _scan_tcp_for_project returns the URL of the
+        # first matching instance, or None if nothing matched.
         scanned = _scan_tcp_for_project(project)
         tcp_url = scanned if scanned else DEFAULT_TCP_URL
     if not validate_server_url(tcp_url):
@@ -1592,6 +1621,62 @@ async def check_tools(tools: str) -> str:
 
 
 @mcp.tool()
+async def search_tools(query: str, limit: int = 15) -> str:
+    """
+    Search the full Ghidra tool catalog by keyword — including tools whose group
+    is not currently loaded. Use this to discover the right tool without paying
+    the context cost of loading all groups (run the bridge with --lazy and search
+    on demand). Matches against tool name, description, and category.
+
+    Each result reports whether the tool is callable right now; if not, it
+    includes the exact load_tool_group(...) call needed to make it callable.
+
+    Args:
+        query: Space-separated keywords, e.g. "rename function" or "xref struct".
+        limit: Maximum number of results to return (default 15).
+    """
+    terms = [t.lower() for t in query.split() if t.strip()]
+    if not terms:
+        return json.dumps({"error": "Provide one or more search keywords"})
+
+    scored: list[tuple[int, dict]] = []
+    for td in _full_schema:
+        name = td.get("name", "")
+        category = td.get("category", "unknown")
+        desc = td.get("description", "") or ""
+        haystack = f"{name} {category} {desc}".lower()
+        score = 0
+        for term in terms:
+            if term in name.lower():
+                score += 3  # name hits rank highest
+            elif term in haystack:
+                score += 1
+        if score == 0:
+            continue
+        loaded = name in _dynamic_tool_names or name in STATIC_TOOL_NAMES
+        result = {
+            "name": name,
+            "group": category,
+            "status": "callable" if loaded else "not_loaded",
+            "description": desc[:160],
+        }
+        if not loaded:
+            result["fix"] = f'load_tool_group("{category}")'
+        scored.append((score, result))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    matches = [r for _, r in scored[: max(1, limit)]]
+    return json.dumps(
+        {
+            "query": query,
+            "match_count": len(scored),
+            "returned": len(matches),
+            "matches": matches,
+        }
+    )
+
+
+@mcp.tool()
 async def import_file(
     file_path: str,
     project_folder: str = "/",
@@ -1722,6 +1807,62 @@ def _auto_connect():
 
 DEBUGGER_URL = os.getenv("GHIDRA_DEBUGGER_URL", "http://127.0.0.1:8099")
 
+# Hosts for which a debugger server is local to this machine. On a non-Windows
+# host a local debugger server can never run (dbgeng/WinDbg is Windows-only), so
+# debugger proxy tools pointing at one of these are not registered.
+_LOCAL_DEBUGGER_HOSTS = {"", "127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
+
+def _debugger_enabled(
+    url: str = DEBUGGER_URL,
+    platform: str = sys.platform,
+    override: str | None = None,
+) -> bool:
+    """Whether to register the WinDbg debugger proxy tools on this host.
+
+    The standalone debugger server (debugger/server.py) wraps dbgeng/WinDbg via
+    pybag and only runs on Windows. Registering ~22 proxy tools that can never
+    work just clutters the tool list, so registration is gated:
+
+      - GHIDRA_DEBUGGER_TOOLS=1/0 (or true/false/yes/no/on/off) forces on/off.
+      - On Windows the server can run locally -> enabled.
+      - On non-Windows a *local* DEBUGGER_URL can never be served -> disabled;
+        a *remote* host (a Windows box running the server) -> enabled.
+
+    The tool *functions* are always defined regardless; only their MCP
+    registration is gated. Call-time failures (server down) are handled
+    separately by _debugger_request().
+    """
+    if override is None:
+        override = os.getenv("GHIDRA_DEBUGGER_TOOLS")
+    if override is not None and override.strip():
+        return override.strip().lower() in {"1", "true", "yes", "on"}
+    if platform.startswith("win"):
+        return True
+    host = (urlparse(url).hostname or "").lower()
+    return host not in _LOCAL_DEBUGGER_HOSTS
+
+
+_DEBUGGER_ACTIVE = _debugger_enabled()
+if _DEBUGGER_ACTIVE:
+    STATIC_TOOL_NAMES |= DEBUGGER_TOOL_NAMES
+
+
+def _debugger_tool(*dargs, **dkwargs):
+    """Decorator: register a debugger proxy tool only when the backend is usable.
+
+    When the debugger is inactive on this host the decorated function is left
+    untouched (still importable / directly callable / unit-testable) but is not
+    exposed as an MCP tool, keeping the tool list uncluttered on non-Windows.
+    """
+    if _DEBUGGER_ACTIVE:
+        return mcp.tool(*dargs, **dkwargs)
+
+    def _skip(fn):
+        return fn
+
+    return _skip
+
 
 def _debugger_request(
     method: str,
@@ -1763,7 +1904,7 @@ def _debugger_request(
         conn.close()
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_attach(target: str) -> str:
     """Attach the debugger to a running process for live dynamic analysis.
 
@@ -1816,19 +1957,19 @@ def debugger_attach(target: str) -> str:
     return result
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_detach() -> str:
     """Detach from the debugged process. The process continues running."""
     return _debugger_request("POST", "/debugger/detach")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_status() -> str:
     """Get debugger connection status, loaded modules, active traces/watches."""
     return _debugger_request("GET", "/debugger/status")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_modules() -> str:
     """List loaded modules (DLLs) with runtime and Ghidra base addresses.
 
@@ -1838,7 +1979,7 @@ def debugger_modules() -> str:
     return _debugger_request("GET", "/debugger/modules")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
     """Resolve a DLL ordinal export to its runtime and Ghidra addresses.
 
@@ -1854,7 +1995,7 @@ def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_set_breakpoint(
     ghidra_address: str,
     module: str = "",
@@ -1881,7 +2022,7 @@ def debugger_set_breakpoint(
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_remove_breakpoint(bp_id: int) -> str:
     """Remove a breakpoint by its ID.
 
@@ -1891,13 +2032,13 @@ def debugger_remove_breakpoint(bp_id: int) -> str:
     return _debugger_request("DELETE", f"/debugger/breakpoint/{bp_id}")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_list_breakpoints() -> str:
     """List all active breakpoints with their addresses and status."""
     return _debugger_request("GET", "/debugger/breakpoints")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_continue() -> str:
     """Resume execution of the debugged process.
 
@@ -1907,7 +2048,7 @@ def debugger_continue() -> str:
     return _debugger_request("POST", "/debugger/go")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_step_into(count: int = 1) -> str:
     """Single-step into the next instruction(s). Follows calls.
 
@@ -1917,7 +2058,7 @@ def debugger_step_into(count: int = 1) -> str:
     return _debugger_request("POST", "/debugger/step_into", {"count": count})
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_step_over(count: int = 1) -> str:
     """Step over the next instruction(s). Steps over calls.
 
@@ -1927,7 +2068,7 @@ def debugger_step_over(count: int = 1) -> str:
     return _debugger_request("POST", "/debugger/step_over", {"count": count})
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_registers() -> str:
     """Read all CPU registers. Must be stopped at a breakpoint.
 
@@ -1936,7 +2077,7 @@ def debugger_registers() -> str:
     return _debugger_request("GET", "/debugger/registers")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_read_memory(
     address: str, size: int = 64, address_type: str = "runtime", module: str = ""
 ) -> str:
@@ -1962,7 +2103,7 @@ def debugger_read_memory(
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_stack_trace(depth: int = 20) -> str:
     """Get the call stack backtrace with return addresses mapped to Ghidra symbols.
 
@@ -1972,7 +2113,7 @@ def debugger_stack_trace(depth: int = 20) -> str:
     return _debugger_request("GET", "/debugger/stack", query={"depth": str(depth)})
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_read_args(
     convention: str = "__stdcall", count: int = 4, arg_names: str = ""
 ) -> str:
@@ -1993,7 +2134,7 @@ def debugger_read_args(
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_trace_function(
     ghidra_address: str,
     module: str = "",
@@ -2033,7 +2174,7 @@ def debugger_trace_function(
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_trace_stop(trace_id: int = -1) -> str:
     """Stop a function trace. Use trace_id=-1 to stop all traces.
 
@@ -2043,7 +2184,7 @@ def debugger_trace_stop(trace_id: int = -1) -> str:
     return _debugger_request("POST", "/debugger/trace/stop", {"trace_id": trace_id})
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_trace_log(trace_id: int = -1, last_n: int = 50) -> str:
     """Read the trace log. Shows timestamped function calls with arguments.
 
@@ -2058,13 +2199,13 @@ def debugger_trace_log(trace_id: int = -1, last_n: int = 50) -> str:
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_trace_list() -> str:
     """List all active and completed traces with hit counts."""
     return _debugger_request("GET", "/debugger/trace/list")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_watch_memory(
     ghidra_address: str, size: int = 4, access: str = "write", module: str = ""
 ) -> str:
@@ -2091,7 +2232,7 @@ def debugger_watch_memory(
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_watch_stop(watch_id: int = -1) -> str:
     """Stop a memory watchpoint. Use watch_id=-1 to stop all.
 
@@ -2101,7 +2242,7 @@ def debugger_watch_stop(watch_id: int = -1) -> str:
     return _debugger_request("POST", "/debugger/watch/stop", {"watch_id": watch_id})
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_watch_log(watch_id: int = -1, last_n: int = 50) -> str:
     """Read the watchpoint hit log. Shows memory accesses with values and accessors.
 

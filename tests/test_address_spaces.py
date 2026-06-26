@@ -61,6 +61,48 @@ class TestSanitizeAddress:
     def test_plain_hex_adds_prefix(self):
         assert sanitize_address("1000") == "0x1000"
 
+    # Overlay address forms (dotted / leading-dot names, :: separator)
+    def test_overlay_double_colon_passes_through(self):
+        assert sanitize_address("cli.Initial::00010000") == "cli.Initial::00010000"
+
+    def test_overlay_single_colon_passes_through(self):
+        assert sanitize_address("cli.Initial:00010000") == "cli.Initial:00010000"
+
+    def test_overlay_strips_0x_from_offset_preserving_case(self):
+        assert sanitize_address("cli.Initial::0x10000") == "cli.Initial::10000"
+
+    def test_overlay_leading_dot_name(self):
+        assert sanitize_address(".shstrtab::00000000") == ".shstrtab::00000000"
+
+    def test_overlay_leading_underscore_name(self):
+        assert sanitize_address("_elfHeader::0x33") == "_elfHeader::33"
+
+    def test_overlay_preserves_case_and_strips_0x_together(self):
+        # Headline behavior: '::' separator preserved, 0x stripped, name case kept.
+        assert sanitize_address("cli.Initial::0xFEED") == "cli.Initial::FEED"
+
+    # Space names may contain ANY non-colon, non-whitespace char (Ghidra
+    # memory-block names are unconstrained; overlay names derive from them).
+    def test_overlay_hyphenated_name(self):
+        assert sanitize_address("BANK-2::0x1000") == "BANK-2::1000"
+
+    def test_overlay_name_with_dollar(self):
+        assert sanitize_address("seg$init::00") == "seg$init::00"
+
+    def test_overlay_name_with_at_sign(self):
+        assert sanitize_address("rom@v2:1000") == "rom@v2:1000"
+
+    def test_overlay_name_with_leading_digit(self):
+        # A space name MAY start with a digit (e.g. "8051_BANK1"); the ':'
+        # separator is what distinguishes it from plain hex.
+        assert sanitize_address("8051_BANK1::0xff") == "8051_BANK1::ff"
+
+    def test_plain_hex_with_no_colon_still_unaffected(self):
+        # Regression guard: broadening the name class must NOT capture
+        # colon-free hex strings (they have no ':' so the pattern can't match).
+        assert sanitize_address("deadbeef") == "0xdeadbeef"
+        assert sanitize_address("0xCAFE") == "0xcafe"
+
 
 class TestValidateHexAddress:
     """validate_hex_address accepts post-sanitized forms only."""
@@ -83,6 +125,15 @@ class TestValidateHexAddress:
 
     def test_rejects_garbage(self):
         assert validate_hex_address("not_an_address") is False
+
+    def test_accepts_overlay_double_colon(self):
+        assert validate_hex_address("cli.Initial::00010000") is True
+
+    def test_accepts_overlay_leading_dot(self):
+        assert validate_hex_address(".shstrtab::0") is True
+
+    def test_accepts_overlay_with_0x_offset(self):
+        assert validate_hex_address("cli.Initial::0x10000") is True
 
 
 class TestBuildToolFunctionSanitization:

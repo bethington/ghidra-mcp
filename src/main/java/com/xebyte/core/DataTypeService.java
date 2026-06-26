@@ -2417,8 +2417,7 @@ public class DataTypeService {
 
                     // CRITICAL FIX #2: Resource management with try-finally
                     try {
-                        decomp = new DecompInterface();
-                        decomp.openProgram(program);
+                        decomp = ServiceUtils.createConfiguredDecompiler(program);
 
                         long analysisStart = System.currentTimeMillis();
                         Msg.info(this, "Analyzing struct at " + addressStr + " with " + functionsToAnalyze.size() + " functions");

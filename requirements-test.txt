@@ -11,7 +11,7 @@ pytest-asyncio>=1.4.0
 
 # HTTP testing
 requests>=2.32.0
-responses>=0.22.0
+responses>=0.26.1
 requests-mock>=1.12.1
 
 # Test reporting
