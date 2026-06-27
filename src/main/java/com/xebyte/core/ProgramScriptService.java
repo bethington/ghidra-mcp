@@ -4,6 +4,7 @@ import ghidra.app.services.ProgramManager;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
+import ghidra.program.model.address.OverlayAddressSpace;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
@@ -319,6 +320,7 @@ public class ProgramScriptService {
         List<Map<String, Object>> programList = new ArrayList<>();
         for (Program prog : programs) {
             int physicalSpaceCount = ServiceUtils.getPhysicalSpaceCount(prog);
+            int overlaySpaceCount  = ServiceUtils.getOverlaySpaceCount(prog);
             programList.add(JsonHelper.mapOf(
                 "name", prog.getName(),
                 "path", prog.getDomainFile().getPathname(),
@@ -329,7 +331,12 @@ public class ProgramScriptService {
                 "image_base", prog.getImageBase().toString(),
                 "memory_size", prog.getMemory().getSize(),
                 "function_count", prog.getFunctionManager().getFunctionCount(),
-                "has_multiple_address_spaces", physicalSpaceCount > 1
+                // Physical-space ambiguity (true on 8051/AVR with separate
+                // CODE/RAM spaces). Overlays do NOT make plain hex ambiguous,
+                // so this stays false on single-RAM programs with overlays.
+                "has_multiple_address_spaces", physicalSpaceCount > 1,
+                "has_overlay_spaces",          overlaySpaceCount > 0,
+                "overlay_space_count",         overlaySpaceCount
             ));
         }
 
@@ -403,10 +410,10 @@ public class ProgramScriptService {
     }
 
     /**
-     * List all physical address spaces in the program.
-     * Returns only RAM and CODE spaces; excludes pseudo-spaces (EXTERNAL, STACK, etc.)
-     * and overlay spaces. Useful for embedded/microcontroller targets where multiple
-     * address spaces exist and plain hex addresses may be ambiguous.
+     * List the program's address spaces. Returns physical RAM/CODE spaces plus
+     * overlay spaces (marked is_overlay). Excludes pseudo-spaces (EXTERNAL, STACK,
+     * etc.). Useful for embedded/microcontroller and overlay-bearing targets where
+     * plain hex addresses may be ambiguous.
      */
     @McpTool(path = "/get_address_spaces",
              description = "List all physical address spaces in the program. On programs with multiple "
@@ -415,7 +422,10 @@ public class ProgramScriptService {
                          + "Also check addressable_unit_size: a value > 1 means the space is word-addressed "
                          + "(e.g., AVR code space uses 2-byte words). MCP tools and Ghidra both use word "
                          + "addresses natively for such spaces — code:001478 is word 0x1478, not byte 0x1478. "
-                         + "Do NOT multiply or divide addresses seen in Ghidra output; use them as-is.",
+                         + "Do NOT multiply or divide addresses seen in Ghidra output; use them as-is. "
+                         + "Overlay spaces are also listed, each marked is_overlay=true with its "
+                         + "overlayed_space (base). Address an overlay location as <overlay>::<hex> "
+                         + "(e.g., cli.Initial::00010000) — overlay names are case-sensitive.",
              category = "program")
     public Response getAddressSpaces(
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -424,6 +434,7 @@ public class ProgramScriptService {
         Program program = pe.program();
 
         List<Map<String, Object>> spaces = buildAddressSpacesList(program);
+        spaces.addAll(buildOverlaySpacesList(program));
         return Response.ok(JsonHelper.mapOf("address_spaces", spaces, "count", spaces.size()));
     }
 
@@ -454,7 +465,37 @@ public class ProgramScriptService {
                 "addressable_unit_size", unitSize,
                 "size_bytes",            sizeBytes,
                 "address_size_bits",     space.getSize(),
-                "is_default",            space == defaultSpace
+                "is_default",            space == defaultSpace,
+                "is_overlay",            Boolean.FALSE
+            ));
+        }
+        return spaces;
+    }
+
+    /**
+     * Build JSON entries for the program's overlay address spaces, each marked
+     * is_overlay=true with the name of the physical space it overlays. Kept
+     * SEPARATE from buildAddressSpacesList so get_current_program_info's
+     * has_multiple_address_spaces flag continues to reflect PHYSICAL ambiguity only.
+     */
+    private List<Map<String, Object>> buildOverlaySpacesList(Program program) {
+        List<Map<String, Object>> spaces = new ArrayList<>();
+        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
+            if (!space.isOverlaySpace()) continue;
+            String base = "";
+            if (space instanceof OverlayAddressSpace) {
+                AddressSpace overlayed = ((OverlayAddressSpace) space).getOverlayedSpace();
+                if (overlayed != null) base = overlayed.getName();
+            }
+            int unitSize = space.getAddressableUnitSize();
+            spaces.add(JsonHelper.mapOf(
+                "name",                  space.getName(),
+                "start",                 space.getMinAddress().toString(false),
+                "end",                   space.getMaxAddress().toString(false),
+                "addressable_unit_size", unitSize,
+                "address_size_bits",     space.getSize(),
+                "is_overlay",            Boolean.TRUE,
+                "overlayed_space",       base
             ));
         }
         return spaces;
@@ -476,6 +517,11 @@ public class ProgramScriptService {
 
         List<Map<String, Object>> addressSpaces = buildAddressSpacesList(program);
         boolean multiSpace = addressSpaces.size() > 1;
+        List<Map<String, Object>> overlaySpaces = buildOverlaySpacesList(program);
+        // Combine for the address_spaces array so overlays are visible here too
+        // (matches /get_address_spaces). multiSpace is computed BEFORE the
+        // append so it continues to reflect physical ambiguity only.
+        addressSpaces.addAll(overlaySpaces);
 
         Map<String, Object> info = new java.util.LinkedHashMap<>();
         info.put("name", program.getName());
@@ -496,11 +542,18 @@ public class ProgramScriptService {
         info.put("memory_block_count", program.getMemory().getBlocks().length);
         info.put("address_spaces", addressSpaces);
         info.put("has_multiple_address_spaces", multiSpace);
+        info.put("has_overlay_spaces", !overlaySpaces.isEmpty());
+        info.put("overlay_space_count", overlaySpaces.size());
         if (multiSpace) {
             info.put("address_space_warning",
-                "This program has multiple address spaces. Plain hex addresses will resolve to the "
-                + "default space and may be incorrect. Use <space>:<hex> format (e.g., mem:1000) "
+                "This program has multiple physical address spaces. Plain hex addresses will resolve "
+                + "to the default space and may be incorrect. Use <space>:<hex> format (e.g., mem:1000) "
                 + "or call get_address_spaces first.");
+        } else if (!overlaySpaces.isEmpty()) {
+            info.put("address_space_warning",
+                "This program has overlay address spaces. Overlay addresses must be qualified as "
+                + "<overlay>::<hex> (e.g., " + overlaySpaces.get(0).get("name") + "::<hex>) — overlay "
+                + "names are case-sensitive. Plain hex resolves to the default physical space.");
         }
         return Response.ok(info);
     }

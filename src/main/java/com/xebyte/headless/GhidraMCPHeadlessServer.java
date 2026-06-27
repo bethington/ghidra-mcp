@@ -54,7 +54,7 @@ import java.util.*;
  */
 public class GhidraMCPHeadlessServer implements GhidraLaunchable {
 
-    private static final String VERSION = "5.13.1-headless";
+    private static final String VERSION = "5.14.1-headless";
     private static final int DEFAULT_PORT = 8089;
     private static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
 
@@ -634,8 +634,24 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
         }
 
         if (programProvider != null) {
-            System.out.println("Closing programs...");
-            programProvider.closeAllPrograms();
+            try {
+                System.out.println("Closing programs...");
+                programProvider.closeAllPrograms();
+            } finally {
+                // Release the .rep project lock. closeAllPrograms() only
+                // releases Program handles; the project lock acquired by
+                // GhidraProject.openProject() is freed by closeProject().
+                // Without this, even a clean shutdown leaves the project
+                // locked and the next /open_project (or GUI open) fails
+                // with "project is locked". try/finally so a release
+                // failure on one program doesn't skip the lock release.
+                System.out.println("Closing project...");
+                try {
+                    programProvider.closeProject();
+                } catch (Exception e) {
+                    System.err.println("Error closing project: " + e.getMessage());
+                }
+            }
         }
 
         if (scriptingBundleHostAcquired) {
@@ -698,7 +714,11 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
     private void sendResponse(HttpExchange exchange, String response) throws IOException {
         byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
-        exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+        // No Access-Control-Allow-Origin: the bridge is a same-host CLI
+        // client, not a browser. Emitting ACAO:* on a no-auth loopback
+        // server lets any web page the user visits read decompiled code
+        // and drive write endpoints via fetch(). The GUI plugin's TCP
+        // server has never emitted this header; aligning with it.
         exchange.sendResponseHeaders(200, bytes.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(bytes);

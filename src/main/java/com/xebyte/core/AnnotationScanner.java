@@ -241,7 +241,13 @@ public class AnnotationScanner {
             return parseIntSafe(value, defaultVal);
 
         } else if (type == Integer.class) {
-            if (value == null || value.isEmpty()) return null;
+            if (value == null || value.isEmpty()) {
+                if (hasDef) {
+                    try { return Integer.valueOf(def); }
+                    catch (NumberFormatException e) { return null; }
+                }
+                return null;
+            }
             try { return Integer.parseInt(value); } catch (NumberFormatException e) { return null; }
 
         } else if (type == boolean.class) {
@@ -250,7 +256,9 @@ public class AnnotationScanner {
             return "true".equalsIgnoreCase(value);
 
         } else if (type == Boolean.class) {
-            if (value == null || value.isEmpty()) return null;
+            if (value == null || value.isEmpty()) {
+                return hasDef ? Boolean.valueOf(def) : null;
+            }
             return Boolean.parseBoolean(value);
 
         } else if (type == double.class) {
@@ -287,7 +295,13 @@ public class AnnotationScanner {
             return JsonHelper.getInt(raw, defaultVal);
 
         } else if (type == Integer.class) {
-            if (raw == null) return null;
+            if (raw == null) {
+                if (hasDef) {
+                    try { return Integer.valueOf(def); }
+                    catch (NumberFormatException e) { return null; }
+                }
+                return null;
+            }
             return JsonHelper.getInt(raw, 0);
 
         } else if (type == long.class) {
@@ -304,7 +318,9 @@ public class AnnotationScanner {
             return "true".equalsIgnoreCase(String.valueOf(raw));
 
         } else if (type == Boolean.class) {
-            if (raw == null) return null;
+            if (raw == null) {
+                return hasDef ? Boolean.valueOf(def) : null;
+            }
             if (raw instanceof Boolean b) return b;
             return Boolean.parseBoolean(String.valueOf(raw));
 

@@ -69,6 +69,18 @@ public class UdsHttpServer {
         serverChannel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
         serverChannel.bind(UnixDomainSocketAddress.of(socketPath));
 
+        // Lock the socket file to owner-only. With a permissive umask
+        // (e.g. 002) the bound socket would otherwise be group-writable,
+        // letting any group member connect directly. No-op on non-POSIX.
+        if (socketPath.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+            try {
+                Files.setPosixFilePermissions(socketPath,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            } catch (IOException e) {
+                // Best-effort; the dir is already 0700 via ServerManager.
+            }
+        }
+
         executor = Executors.newCachedThreadPool(r -> {
             Thread t = new Thread(r, "GhidraMCP-UDS-Worker");
             t.setDaemon(true);

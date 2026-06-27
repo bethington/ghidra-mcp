@@ -17,11 +17,11 @@ on:
       ghidra_path:
         description: 'Ghidra path for live regression self-hosted runner'
         required: false
-        default: 'F:\ghidra_12.1_PUBLIC'
+        default: 'F:\ghidra_12.1.2_PUBLIC'
 
 env:
-  GHIDRA_VERSION: 12.1
-  GHIDRA_DATE: 20260513
+  GHIDRA_VERSION: 12.1.2
+  GHIDRA_DATE: 20260605
 
 # OSSF Scorecard Token-Permissions: default to read-only. The
 # create-prerelease job elevates to contents:write for the GitHub

@@ -320,17 +320,65 @@ Brute-force API-hash resolution. Iterates a candidate list through a hash functi
 
 Workflow: locate the hash function (`search_byte_patterns`, `detect_crypto_constants`, or `search_functions`), identify input/output registers (`get_function_variables` or `analyze_dataflow`), supply a candidate list per suspected source DLL, feed the target hash from the call site.
 
-### `debugger_*` family (22 tools, GUI-only)
+### `debugger_*` families (GUI-only)
 
-Proxied to a standalone Python debugger server via `GHIDRA_DEBUGGER_URL` (default `http://127.0.0.1:8099`). Wraps Ghidra's `DebuggerTraceManagerService`, `DebuggerLogicalBreakpointService`, and `TraceRmiLauncherService`. Backend depends on the TraceRmi launcher chosen at attach time:
+There are **two independent debugger tool families** with different backends. Pick by
+platform/target. Both require a CodeBrowser with the **Window > Debugger** view open.
 
-- Windows PE targets: `dbgeng` (WinDbg engine)
-- Linux ELF: `gdb`
-- macOS Mach-O: `lldb`
+#### A. TraceRmi family — in-process, cross-platform (use this on Linux/macOS)
 
-Covers: `debugger_attach`, `debugger_status`, `debugger_step_{into,over,out}`, `debugger_{set,remove,list}_breakpoints`, `debugger_registers`, `debugger_read_memory`, `debugger_stack_trace`, `debugger_modules`, `debugger_trace_{function,start,stop,log,list}`, `debugger_watch_{memory,stop,log}`, `debugger_resolve_ordinal`, `debugger_read_args`, `debugger_continue`, `debugger_detach`.
+Server-side `@McpTool` endpoints (`/debugger/*` in `DebuggerService.java`) that drive
+**Ghidra's own native debugger** via `TraceRmiLauncherService`. The launcher chosen at
+launch time selects the backend:
 
-Use for: ground-truth validation after static analysis. After emulation resolves a hash, set a breakpoint on the resolved API and confirm the process actually calls it.
+- Linux ELF: `gdb`  ·  macOS Mach-O: `lldb`  ·  Windows PE: `dbgeng`
+
+Tools: `debugger_launch`, `debugger_launch_offers`, `debugger_status`, `debugger_resume`,
+`debugger_interrupt`, `debugger_step_{into,over,out}`, `debugger_{set,remove,list}_breakpoints`,
+`debugger_registers`, `debugger_read_memory`, `debugger_stack_trace`, `debugger_modules`,
+`debugger_traces`, `debugger_static_to_dynamic`, `debugger_dynamic_to_static`.
+
+These ship with the plugin and need no extra processes — they appear in `/mcp/schema`
+on every platform.
+
+**gdb-on-Linux workflow:**
+
+```text
+1. In CodeBrowser: Window > Debugger  (one-time, GUI — TraceRmi is GUI-only)
+2. debugger_launch_offers()                  # lists gdb local/remote/ssh launchers
+3. debugger_launch(executable_path="...")    # starts the target under gdb
+4. debugger_set_breakpoint(...) / debugger_registers() / debugger_read_memory(...)
+5. debugger_step_into() / debugger_resume() / debugger_interrupt()
+6. debugger_static_to_dynamic(...) maps a Ghidra (static) address to the live
+   process; debugger_dynamic_to_static(...) goes the other way.
+```
+
+#### B. WinDbg proxy family — standalone dbgeng server (Windows only)
+
+22 static bridge tools proxied to a standalone Python server via `GHIDRA_DEBUGGER_URL`
+(default `http://127.0.0.1:8099`), which wraps **dbgeng/WinDbg via `pybag`** —
+**Windows-only** (`pybag` requires `pywin32`). Adds dbgeng-specific capabilities the
+TraceRmi family doesn't have: attach-by-process-name, ordinal resolution, argument
+reads, and the trace/watch loops.
+
+Tools: `debugger_attach`, `debugger_detach`, `debugger_continue`,
+`debugger_resolve_ordinal`, `debugger_read_args`, `debugger_trace_{function,stop,log,list}`,
+`debugger_watch_{memory,stop,log}` (plus dbgeng versions of status/step/breakpoint/
+registers/memory/stack/modules).
+
+**Registration is platform-gated** (`_debugger_enabled()` in the bridge): on non-Windows
+hosts with a local `GHIDRA_DEBUGGER_URL` these tools are **not registered** (they could
+never work), which also frees the shared `debugger_*` names for the TraceRmi family above.
+They register when: running on Windows, `GHIDRA_DEBUGGER_URL` points at a remote
+(Windows) host running the server, or `GHIDRA_DEBUGGER_TOOLS=1` forces them on.
+
+> Naming note: where the two families share a name (e.g. `debugger_status`), only one
+> can hold the clean name. On non-Windows the TraceRmi tool wins; on Windows (both
+> active) the dbgeng proxy holds the clean name and the TraceRmi endpoint is suffixed
+> `_2` (e.g. `debugger_status_2`).
+
+Use either family for: ground-truth validation after static analysis. After emulation
+resolves a hash, set a breakpoint on the resolved API and confirm the process calls it.
 
 ## Function Tagging
 

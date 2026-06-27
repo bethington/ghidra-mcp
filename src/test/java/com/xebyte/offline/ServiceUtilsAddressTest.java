@@ -20,6 +20,7 @@ public class ServiceUtilsAddressTest {
     private AddressFactory factory;
     private AddressSpace ramSpace;
     private AddressSpace codeSpace;
+    private AddressSpace memSpace;
     private Address mockAddr;
 
     @Before
@@ -42,7 +43,13 @@ public class ServiceUtilsAddressTest {
         when(codeSpace.isOverlaySpace()).thenReturn(false);
         when(codeSpace.getName()).thenReturn("code");
 
-        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace, codeSpace});
+        // mem space: TYPE_RAM, not overlay, lowercase canonical name "mem"
+        memSpace = mock(AddressSpace.class);
+        when(memSpace.getType()).thenReturn(AddressSpace.TYPE_RAM);
+        when(memSpace.isOverlaySpace()).thenReturn(false);
+        when(memSpace.getName()).thenReturn("mem");
+
+        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace, codeSpace, memSpace});
         when(factory.getDefaultAddressSpace()).thenReturn(ramSpace);
 
         // Mock address behaviour
@@ -132,6 +139,29 @@ public class ServiceUtilsAddressTest {
     }
 
     @Test
+    public void parseAddress_knownOverlayBadOffset_blamesOffsetAndListsOverlay() {
+        // isKnownSpace + buildAvailableSpacesHint now include overlay spaces.
+        AddressSpace ovSpace = mock(AddressSpace.class);
+        when(ovSpace.isOverlaySpace()).thenReturn(true);
+        when(ovSpace.getName()).thenReturn("cli.Initial");
+        when(factory.getAddressSpaces()).thenReturn(
+            new AddressSpace[]{ramSpace, codeSpace, memSpace, ovSpace});
+        // Offset is unresolvable in the (known) overlay space.
+        when(factory.getAddress("cli.Initial::zzzz")).thenReturn(null);
+
+        Address result = ServiceUtils.parseAddress(program, "cli.Initial::zzzz");
+        assertNull(result);
+        String err = ServiceUtils.getLastParseError();
+        assertNotNull(err);
+        assertTrue("Should blame the offset: " + err, err.contains("Could not resolve offset"));
+        assertTrue("Should name the valid overlay space: " + err, err.contains("cli.Initial"));
+        assertFalse("Must not call a known overlay unknown: " + err,
+                err.contains("Unknown address space"));
+        assertTrue("Available-spaces hint should label overlays: " + err,
+                err.contains("[overlays]"));
+    }
+
+    @Test
     public void parseAddress_outOfRangePlainHex_returnsNullWithSuggestion() {
         when(factory.getAddress("0xfffffffff")).thenReturn(null);
         Address result = ServiceUtils.parseAddress(program, "0xfffffffff");
@@ -151,18 +181,21 @@ public class ServiceUtilsAddressTest {
     }
 
     @Test
-    public void parseAddress_uppercaseSpaceWithHex_normalizesAndResolves() {
-        // Batch endpoints pass raw user input like "MEM:1000" bypassing bridge sanitization.
-        // parseAddress must lowercase the space name before calling AddressFactory.
+    public void parseAddress_uppercaseSpace_resolvesViaCaseInsensitiveFallback() {
+        // Exact case is tried first (getAddress("MEM:1000") -> null here), then a
+        // case-insensitive match against real program spaces retries with the
+        // canonical name "mem". Space names are NOT blindly lowercased anymore.
+        when(factory.getAddress("MEM:1000")).thenReturn(null);
         when(factory.getAddress("mem:1000")).thenReturn(mockAddr);
         Address result = ServiceUtils.parseAddress(program, "MEM:1000");
-        assertNotNull("Uppercase space name must be normalized to lowercase", result);
+        assertNotNull("Uppercase space name must resolve via case-insensitive fallback", result);
         assertNull(ServiceUtils.getLastParseError());
     }
 
     @Test
-    public void parseAddress_uppercaseSpaceWith0xOffset_stripsPrefix() {
-        // Input like "MEM:0x1000" must become "mem:1000" before hitting AddressFactory.
+    public void parseAddress_uppercaseSpaceWith0xOffset_stripsPrefixThenFallback() {
+        // "MEM:0x1000" -> strip 0x -> exact "MEM:1000" (null) -> fallback "mem:1000".
+        when(factory.getAddress("MEM:1000")).thenReturn(null);
         when(factory.getAddress("mem:1000")).thenReturn(mockAddr);
         Address result = ServiceUtils.parseAddress(program, "MEM:0x1000");
         assertNotNull("0x prefix in space:offset form must be stripped", result);
@@ -170,11 +203,56 @@ public class ServiceUtilsAddressTest {
     }
 
     @Test
-    public void parseAddress_lowercase0XVariant_stripsPrefix() {
-        // "0X" (uppercase X) must also be stripped.
+    public void parseAddress_mixedCase0XVariant_stripsPrefixThenFallback() {
+        // "Code:0XFF00" -> strip 0X -> exact "Code:FF00" (null) -> fallback "code:FF00".
+        when(factory.getAddress("Code:FF00")).thenReturn(null);
         when(factory.getAddress("code:FF00")).thenReturn(mockAddr);
         Address result = ServiceUtils.parseAddress(program, "Code:0XFF00");
-        assertNotNull("0X (uppercase X) prefix must also be stripped", result);
+        assertNotNull("0X (uppercase X) prefix must be stripped and resolve via fallback", result);
+        assertNull(ServiceUtils.getLastParseError());
+    }
+
+    @Test
+    public void parseAddress_exactCaseOverlay_resolvesWithoutLowercasing() {
+        // Overlay names are case-sensitive: "cli.Initial::10000" must be tried verbatim.
+        Address ovAddr = mock(Address.class);
+        AddressSpace ovSpace = mock(AddressSpace.class);
+        when(ovSpace.isOverlaySpace()).thenReturn(true);
+        when(ovSpace.getName()).thenReturn("cli.Initial");
+        when(ovAddr.getAddressSpace()).thenReturn(ovSpace);
+        when(factory.getAddress("cli.Initial::10000")).thenReturn(ovAddr);
+        Address result = ServiceUtils.parseAddress(program, "cli.Initial::10000");
+        assertNotNull("Exact-case overlay address must resolve", result);
+        assertTrue(result.getAddressSpace().isOverlaySpace());
+        assertNull(ServiceUtils.getLastParseError());
+    }
+
+    @Test
+    public void parseAddress_overlay0xOffset_strippedAndResolved() {
+        Address ovAddr = mock(Address.class);
+        when(factory.getAddress("cli.Initial::10000")).thenReturn(ovAddr);
+        Address result = ServiceUtils.parseAddress(program, "cli.Initial::0x10000");
+        assertNotNull("0x in overlay offset must be stripped", result);
+        assertNull(ServiceUtils.getLastParseError());
+    }
+
+    @Test
+    public void parseAddress_overlaySpace_resolvesWithCanonicalCaseParser() throws Exception {
+        AddressSpace overlaySpace = mock(AddressSpace.class);
+        Address bank1Addr = mock(Address.class);
+
+        when(overlaySpace.getType()).thenReturn(AddressSpace.TYPE_RAM);
+        when(overlaySpace.isOverlaySpace()).thenReturn(true);
+        when(overlaySpace.getName()).thenReturn("CODE_BANK1");
+        when(bank1Addr.getAddressSpace()).thenReturn(overlaySpace);
+        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace, codeSpace, overlaySpace});
+        when(factory.getAddressSpace("CODE_BANK1")).thenReturn(overlaySpace);
+        when(factory.getAddress("CODE_BANK1:a066")).thenReturn(bank1Addr);
+
+        Address result = ServiceUtils.parseAddress(program, "CODE_BANK1:a066");
+
+        assertSame("Overlay address must resolve in the CODE_BANK1 space", bank1Addr, result);
+        assertEquals("CODE_BANK1", result.getAddressSpace().getName());
         assertNull(ServiceUtils.getLastParseError());
     }
 
@@ -223,6 +301,25 @@ public class ServiceUtilsAddressTest {
     }
 
     @Test
+    public void addressToJson_overlayAddress_alwaysEmitsQualifier() {
+        // Even on a single-physical-space program, an overlay address must round-trip:
+        // emit address_full (cli.Initial::00010000) and address_space.
+        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace});
+        AddressSpace ovSpace = mock(AddressSpace.class);
+        when(ovSpace.isOverlaySpace()).thenReturn(true);
+        when(ovSpace.getName()).thenReturn("cli.Initial");
+        Address ovAddr = mock(Address.class);
+        when(ovAddr.getAddressSpace()).thenReturn(ovSpace);
+        when(ovAddr.toString(false)).thenReturn("00010000");
+        when(ovAddr.toString()).thenReturn("cli.Initial::00010000");
+
+        Map<String, Object> result = ServiceUtils.addressToJson(ovAddr, program);
+        assertEquals("00010000", result.get("address"));
+        assertEquals("cli.Initial::00010000", result.get("address_full"));
+        assertEquals("cli.Initial", result.get("address_space"));
+    }
+
+    @Test
     public void addressToJson_nullProgram_emitsOnlyAddressField() {
         Map<String, Object> result = ServiceUtils.addressToJson(mockAddr, null);
         assertEquals("00001000", result.get("address"));
@@ -255,5 +352,26 @@ public class ServiceUtilsAddressTest {
     public void getPhysicalSpaceCount_singlePhysicalSpace_returnsOne() {
         when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace});
         assertEquals(1, ServiceUtils.getPhysicalSpaceCount(program));
+    }
+
+    @Test
+    public void getOverlaySpaceCount_countsOnlyOverlays() {
+        AddressSpace ov1 = mock(AddressSpace.class);
+        when(ov1.isOverlaySpace()).thenReturn(true);
+        AddressSpace ov2 = mock(AddressSpace.class);
+        when(ov2.isOverlaySpace()).thenReturn(true);
+        AddressSpace ext = mock(AddressSpace.class);
+        when(ext.isOverlaySpace()).thenReturn(false);
+        when(factory.getAddressSpaces()).thenReturn(
+            new AddressSpace[]{ramSpace, codeSpace, ov1, ov2, ext});
+        assertEquals(2, ServiceUtils.getOverlaySpaceCount(program));
+        // Physical count unchanged by overlays
+        assertEquals(2, ServiceUtils.getPhysicalSpaceCount(program));
+    }
+
+    @Test
+    public void getOverlaySpaceCount_zeroWhenNone() {
+        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace});
+        assertEquals(0, ServiceUtils.getOverlaySpaceCount(program));
     }
 }

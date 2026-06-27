@@ -24,7 +24,11 @@ from .requirements import (
     resolve_requirements_files,
 )
 from .version_bump import apply_version_bump
-from .versioning import infer_ghidra_version_from_path, read_pom_versions
+from .versioning import (
+    infer_ghidra_version_from_path,
+    is_ghidra_version_compatible,
+    read_pom_versions,
+)
 
 
 def _get_backend() -> str:
@@ -358,12 +362,17 @@ def cmd_verify_version(args: argparse.Namespace) -> int:
         print("Unable to infer Ghidra version from the provided path.")
         return 1
     print(f"Ghidra version from path: {inferred_version}")
-    if inferred_version != versions.ghidra_version:
+    if not is_ghidra_version_compatible(versions.ghidra_version, inferred_version):
         print(
             "Version mismatch detected between pom.xml and Ghidra path.",
             file=sys.stderr,
         )
         return 1
+    if inferred_version != versions.ghidra_version:
+        print(
+            f"Note: Ghidra path is {inferred_version}, pom.xml pins "
+            f"{versions.ghidra_version} — same minor series, treated as compatible."
+        )
     print("Version check passed.")
     return 0
 
@@ -414,12 +423,17 @@ def cmd_preflight(args: argparse.Namespace) -> int:
         print("Unable to infer Ghidra version from the provided path.", file=sys.stderr)
         return 1
     print(f"Ghidra version from path: {inferred_version}")
-    if inferred_version != repo_versions.ghidra_version:
+    if not is_ghidra_version_compatible(repo_versions.ghidra_version, inferred_version):
         print(
             "Version mismatch detected between pom.xml and Ghidra path.",
             file=sys.stderr,
         )
         return 1
+    if inferred_version != repo_versions.ghidra_version:
+        print(
+            f"Note: Ghidra path is {inferred_version}, pom.xml pins "
+            f"{repo_versions.ghidra_version} — same minor series, treated as compatible."
+        )
     issues = collect_preflight_issues(
         repo_root,
         ghidra_path,
