@@ -46,12 +46,42 @@ def test_gradlew_tasks_lists_all_custom_tasks():
         "deployExtension",
         "installUserExtension",
         "patchGhidraUserConfig",
+        "stopGhidra",
         "deploy",
         "startGhidra",
         "cleanAll",
     ]
     missing = [t for t in expected if t not in result.stdout]
     assert not missing, f"Custom Gradle tasks not found in task list: {missing}"
+
+
+@pytest.mark.slow
+def test_gradlew_deploy_task_order():
+    """`./gradlew deploy --dry-run` must schedule stopGhidra before any
+    write-into-Ghidra task, and patchGhidraUserConfig after the extension
+    is installed. Without the stop, Windows holds a file lock on
+    GhidraMCP-*.jar (install fails) and Ghidra rewrites FrontEndTool.xml
+    on exit (config patch silently discarded)."""
+    result = _run_gradlew("deploy", "--dry-run", "-PGHIDRA_INSTALL_DIR=nonexistent")
+    assert result.returncode == 0, (
+        f"deploy --dry-run failed:\n{result.stdout}\n{result.stderr}"
+    )
+    plan = [
+        ln.split()[0].lstrip(":")
+        for ln in result.stdout.splitlines()
+        if ln.startswith(":")
+    ]
+
+    def idx(t):
+        assert t in plan, f"task :{t} not in deploy plan: {plan}"
+        return plan.index(t)
+
+    assert idx("stopGhidra") < idx("deployExtension")
+    assert idx("stopGhidra") < idx("installUserExtension")
+    assert idx("stopGhidra") < idx("patchGhidraUserConfig")
+    assert idx("installUserExtension") < idx("patchGhidraUserConfig"), (
+        "config patch must run AFTER extension is installed"
+    )
 
 
 @pytest.mark.slow

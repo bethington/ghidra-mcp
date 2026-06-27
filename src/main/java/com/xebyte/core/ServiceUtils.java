@@ -1,5 +1,7 @@
 package com.xebyte.core;
 
+import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileOptions;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.*;
@@ -504,6 +506,39 @@ public final class ServiceUtils {
     }
 
     // ========================================================================
+    // Decompiler
+    // ========================================================================
+
+    /**
+     * Create a {@link DecompInterface} configured to match the Ghidra GUI /
+     * analysis decompiler. Applies the program's saved {@link DecompileOptions}
+     * via {@link DecompileOptions#grabFromProgram(Program)} — most importantly
+     * the "Respect Read-Only Flags" option — so that PIC/GOT- and
+     * relocation-indirected accesses fold to their named globals instead of
+     * rendering as opaque {@code DAT_} constants.
+     *
+     * <p>A bare {@code new DecompInterface()} leaves "Respect Read-Only Flags"
+     * at the C++ decompiler-core default (OFF), which makes a read-only GOT slot
+     * stay an opaque {@code DAT_} rather than being propagated and folded to the
+     * symbol it points at. {@code grabFromProgram} restores the GUI-faithful
+     * behavior while still respecting any per-program override.
+     *
+     * <p>{@code setOptions} is applied <em>before</em> {@code openProgram}, per
+     * Ghidra's decompiler contract. The returned interface is already opened on
+     * {@code program}; the caller owns its lifecycle and must call
+     * {@link DecompInterface#dispose()} when finished.
+     */
+    public static DecompInterface createConfiguredDecompiler(Program program) {
+        DecompInterface decomp = new DecompInterface();
+        DecompileOptions opts = new DecompileOptions();
+        opts.grabFromProgram(program);              // GUI-faithful; respects per-program setting
+        decomp.setOptions(opts);
+        decomp.setSimplificationStyle("decompile"); // default style; explicit for consistency
+        decomp.openProgram(program);                // openProgram AFTER setOptions
+        return decomp;
+    }
+
+    // ========================================================================
     // Program Resolution
     // ========================================================================
 
@@ -728,6 +763,20 @@ public final class ServiceUtils {
             if (type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE) {
                 count++;
             }
+        }
+        return count;
+    }
+
+    /**
+     * Count the program's overlay address spaces (regardless of base type).
+     * Overlay addresses must be qualified with their space name; this is
+     * orthogonal to {@link #getPhysicalSpaceCount} (which measures physical
+     * ambiguity for plain hex addresses).
+     */
+    public static int getOverlaySpaceCount(Program program) {
+        int count = 0;
+        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
+            if (space.isOverlaySpace()) count++;
         }
         return count;
     }
