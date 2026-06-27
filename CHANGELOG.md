@@ -6,6 +6,12 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+---
+
+## v5.14.2 - 2026-06-27 (patch: TCP fallback + PIC/GOT fixes)
+
+Patch release fixing Windows UDS/TCP fallback regression and decompiler output accuracy for PIC binaries.
+
 ### Added
 
 - **Parameter aliases for API naming consistency** (Issue #210): endpoints now accept alternative
@@ -42,8 +48,15 @@ Complete version history for the Ghidra MCP Server project.
 
 ### Fixed
 
-- **PIC/GOT-indirected named globals rendered as `DAT_`**: `decompile_function` and every other
-  decompiler-backed operation constructed a bare `new DecompInterface()` and never applied
+- **TCP fallback for projectless Windows UDS discovery** (#344): the headless server's UDS socket
+  discovery on Windows was attempting a fallback to TCP only after the entire UDS socket dir scan
+  had exhausted the system temp path and project paths, leaving many users with live instances
+  unreachable until the UDS dir expanded. Discovery now checks UDS *and* TCP in parallel on first
+  attempt, listing both protocol results and letting the caller choose, so a UDP-only Ghidra
+  instance is immediately visible alongside any UDS instances. Fixes discovery hangs on clean
+  Windows systems where UDS dirs are sparse.
+- **PIC/GOT-indirected named globals rendered as `DAT_`** (#319): `decompile_function` and every
+  other decompiler-backed operation constructed a bare `new DecompInterface()` and never applied
   `DecompileOptions`. A fresh `DecompileOptions` leaves *"Respect Read-Only Flags"* OFF (the C++
   decompiler-core default), so a read-only GOT/relocation slot stayed an opaque `DAT_<addr>`
   constant instead of being folded to the named global it points at (e.g. `param_1 * 9.0 *
