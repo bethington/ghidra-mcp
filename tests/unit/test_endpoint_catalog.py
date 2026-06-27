@@ -215,11 +215,16 @@ class TestBridgeIsDynamic(unittest.TestCase):
         instead of disabling it. Pulls weight: security fix; previously
         any page in the user's browser could DNS-rebind to the bridge
         and drive every Ghidra tool.
+
+        Bumped 2026-06-26: 2350 -> 2500 for tier 1+2 security and correctness
+        fixes: CORS header removal, IPv6 support, multi-UDS handling, emulation
+        max_steps bounding, plugin lifecycle handoff. Pulls weight: cumulative
+        hardening and API completeness.
         """
         bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
         lines = len(bridge_path.read_text().splitlines())
         self.assertLess(
-            lines, 2350, f"Bridge is {lines} lines, expected <2350 for thin multiplexer"
+            lines, 2500, f"Bridge is {lines} lines, expected <2500 for thin multiplexer"
         )
 
 
