@@ -152,17 +152,36 @@ class TestBridgeIsDynamic(unittest.TestCase):
     """Verify the bridge uses dynamic registration, not hardcoded tools."""
 
     def test_bridge_has_few_static_tools(self):
-        """Bridge static tool decorators should match the explicit static tool allowlist."""
+        """Bridge static tool decorators should match the full static tool allowlist.
+
+        Management tools use @mcp.tool(); the WinDbg debugger proxy tools use
+        @_debugger_tool() (registered conditionally — see _debugger_enabled).
+        Every name in _ALL_STATIC_TOOL_NAMES must have exactly one decorator,
+        independent of whether the debugger is active on this host.
+        """
         import bridge_mcp_ghidra as bridge
 
         bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
         content = bridge_path.read_text()
-        tool_count = len(re.findall(r"@mcp\.tool\(\)", content))
+        mgmt_count = len(re.findall(r"@mcp\.tool\(\)", content))
+        debugger_count = len(re.findall(r"@_debugger_tool\(\)", content))
+        tool_count = mgmt_count + debugger_count
         self.assertEqual(
             tool_count,
-            len(bridge.STATIC_TOOL_NAMES),
-            f"Bridge has {tool_count} @mcp.tool() decorators but "
-            f"{len(bridge.STATIC_TOOL_NAMES)} static tool names",
+            len(bridge._ALL_STATIC_TOOL_NAMES),
+            f"Bridge has {mgmt_count} @mcp.tool() + {debugger_count} "
+            f"@_debugger_tool() decorators ({tool_count}) but "
+            f"{len(bridge._ALL_STATIC_TOOL_NAMES)} static tool names",
+        )
+        self.assertEqual(
+            mgmt_count,
+            len(bridge.MANAGEMENT_TOOL_NAMES),
+            "management @mcp.tool() decorators should match MANAGEMENT_TOOL_NAMES",
+        )
+        self.assertEqual(
+            debugger_count,
+            len(bridge.DEBUGGER_TOOL_NAMES),
+            "@_debugger_tool() decorators should match DEBUGGER_TOOL_NAMES",
         )
 
     def test_bridge_has_schema_registration(self):
