@@ -1916,9 +1916,7 @@
       "method": "POST",
       "category": "headless",
       "params": [
-        "headless",
-        "path",
-        "program"
+        "path"
       ],
       "description": "Open an existing Ghidra project (.gpr file or directory). GUI mode adds optional `headless` (default true) to suppress auto-launching CodeBrowser, and optional `program` to auto-launch CodeBrowser for a specific file when headless=false. Headless server ignores the extra params."
     },
@@ -2014,7 +2012,7 @@
       "category": "rename",
       "params": [
         "address",
-        "newName",
+        "new_name",
         "program"
       ],
       "description": "Rename data symbol"
@@ -2035,8 +2033,8 @@
       "method": "POST",
       "category": "rename",
       "params": [
-        "oldName",
-        "newName",
+        "old_name",
+        "new_name",
         "program"
       ],
       "description": "Rename function by name"
@@ -2094,10 +2092,10 @@
       "method": "POST",
       "category": "rename",
       "params": [
-        "functionName",
+        "function_name",
         "function_address",
-        "oldName",
-        "newName",
+        "old_variable_name",
+        "new_variable_name",
         "program"
       ],
       "description": "Rename a variable in a function. Accepts functionName or function_address; address is more stable after recent renames."

@@ -562,8 +562,8 @@ public class FunctionService {
      */
     @McpTool(path = "/rename_function", method = "POST", description = "Rename function by old and new name", category = "function")
     public Response renameFunction(
-            @Param(value = "oldName", source = ParamSource.BODY) String oldName,
-            @Param(value = "newName", source = ParamSource.BODY) String newName,
+            @Param(value = "old_name", source = ParamSource.BODY, aliases = {"oldName"}) String oldName,
+            @Param(value = "new_name", source = ParamSource.BODY, aliases = {"newName"}) String newName,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -633,12 +633,12 @@ public class FunctionService {
     /**
      * Rename a variable in a function.
      */
-    @McpTool(path = "/rename_variable", method = "POST", description = "Rename a variable in a function. Accepts functionName or function_address; address is more stable after recent renames.", category = "function")
+    @McpTool(path = "/rename_variable", method = "POST", description = "Rename a variable in a function. Accepts function_name or function_address; address is more stable after recent renames.", category = "function")
     public Response renameVariableInFunction(
-            @Param(value = "functionName", source = ParamSource.BODY, defaultValue = "") String functionName,
+            @Param(value = "function_name", source = ParamSource.BODY, aliases = {"functionName"}, defaultValue = "") String functionName,
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY, defaultValue = "") String functionAddress,
-            @Param(value = "oldName", source = ParamSource.BODY) String oldVarName,
-            @Param(value = "newName", source = ParamSource.BODY) String newVarName,
+            @Param(value = "old_variable_name", source = ParamSource.BODY, aliases = {"oldName"}) String oldVarName,
+            @Param(value = "new_variable_name", source = ParamSource.BODY, aliases = {"newName"}) String newVarName,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -1321,8 +1321,8 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
-            @Param(value = "variable_name", source = ParamSource.BODY) String variableName,
-            @Param(value = "new_type", source = ParamSource.BODY) String newType,
+            @Param(value = "variable_name", source = ParamSource.BODY, aliases = {"variableName"}) String variableName,
+            @Param(value = "new_type", source = ParamSource.BODY, aliases = {"newType"}) String newType,
             @Param(value = "program", defaultValue = "") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -1512,8 +1512,8 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddress,
-            @Param(value = "parameter_name", source = ParamSource.BODY) String parameterName,
-            @Param(value = "new_type", source = ParamSource.BODY) String newType,
+            @Param(value = "parameter_name", source = ParamSource.BODY, aliases = {"parameterName"}) String parameterName,
+            @Param(value = "new_type", source = ParamSource.BODY, aliases = {"newType"}) String newType,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         if ("this".equals(parameterName)) {
             return setFunctionThisType(functionAddress, newType, programName);
@@ -1531,7 +1531,7 @@ public class FunctionService {
     public Response setFunctionThisType(
             @Param(value = "function_address", paramType = "address", source = ParamSource.BODY,
                    description = "Function entry address (0x<hex> or <space>:<hex>).") String functionAddrStr,
-            @Param(value = "this_type", source = ParamSource.BODY,
+            @Param(value = "this_type", source = ParamSource.BODY, aliases = {"thisType"},
                    description = "Class type for this, e.g. 'MyWidget *' or 'MyWidget'. The base struct name becomes the function's class.") String thisType,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
 
@@ -1898,7 +1898,7 @@ public class FunctionService {
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String functionAddrStr,
-            @Param(value = "no_return", source = ParamSource.BODY) boolean noReturn,
+            @Param(value = "no_return", source = ParamSource.BODY, aliases = {"noReturn"}) boolean noReturn,
             @Param(value = "program", defaultValue = "") String programName) {
         // Input validation
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);

@@ -226,7 +226,14 @@ public class AnnotationScanner {
     }
 
     private static Object resolveQueryParam(ParamBinding binding, Map<String, String> query) {
+        // Try canonical name first, then aliases
         String value = query.get(binding.param.value());
+        if (value == null && binding.aliases != null) {
+            for (String alias : binding.aliases) {
+                value = query.get(alias);
+                if (value != null) break;
+            }
+        }
         Class<?> type = binding.javaType;
         String def = binding.param.defaultValue();
         boolean hasDef = !NO_DEFAULT.equals(def);
@@ -276,7 +283,14 @@ public class AnnotationScanner {
 
     @SuppressWarnings("unchecked")
     private static Object resolveBodyParam(ParamBinding binding, Map<String, Object> body) {
+        // Try canonical name first, then aliases
         Object raw = body.get(binding.param.value());
+        if (raw == null && binding.aliases != null) {
+            for (String alias : binding.aliases) {
+                raw = body.get(alias);
+                if (raw != null) break;
+            }
+        }
         Class<?> type = binding.javaType;
         String def = binding.param.defaultValue();
         boolean hasDef = !NO_DEFAULT.equals(def);
@@ -480,5 +494,9 @@ public class AnnotationScanner {
     // Internal binding record
     // ==================================================================
 
-    private record ParamBinding(Param param, Class<?> javaType) {}
+    private record ParamBinding(Param param, Class<?> javaType, String[] aliases) {
+        ParamBinding(Param param, Class<?> javaType) {
+            this(param, javaType, param.aliases());
+        }
+    }
 }

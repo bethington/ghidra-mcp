@@ -611,12 +611,13 @@ public class SymbolLabelService {
     @McpTool(path = "/rename_data", method = "POST", description = "Rename data at address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "symbol")
     public Response renameDataAtAddress(
             @Param(value = "address", paramType = "address", source = ParamSource.BODY,
+                   aliases = {"function_address"},
                    description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
                                + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
                                + "embedded/microcontroller targets — are not address-space-agnostic; "
                                + "use get_address_spaces to discover spaces before assuming a plain hex "
                                + "address is unambiguous.") String addressStr,
-            @Param(value = "newName", source = ParamSource.BODY) String newName,
+            @Param(value = "new_name", source = ParamSource.BODY, aliases = {"newName"}) String newName,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
