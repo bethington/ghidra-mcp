@@ -353,4 +353,25 @@ public class ServiceUtilsAddressTest {
         when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace});
         assertEquals(1, ServiceUtils.getPhysicalSpaceCount(program));
     }
+
+    @Test
+    public void getOverlaySpaceCount_countsOnlyOverlays() {
+        AddressSpace ov1 = mock(AddressSpace.class);
+        when(ov1.isOverlaySpace()).thenReturn(true);
+        AddressSpace ov2 = mock(AddressSpace.class);
+        when(ov2.isOverlaySpace()).thenReturn(true);
+        AddressSpace ext = mock(AddressSpace.class);
+        when(ext.isOverlaySpace()).thenReturn(false);
+        when(factory.getAddressSpaces()).thenReturn(
+            new AddressSpace[]{ramSpace, codeSpace, ov1, ov2, ext});
+        assertEquals(2, ServiceUtils.getOverlaySpaceCount(program));
+        // Physical count unchanged by overlays
+        assertEquals(2, ServiceUtils.getPhysicalSpaceCount(program));
+    }
+
+    @Test
+    public void getOverlaySpaceCount_zeroWhenNone() {
+        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace});
+        assertEquals(0, ServiceUtils.getOverlaySpaceCount(program));
+    }
 }

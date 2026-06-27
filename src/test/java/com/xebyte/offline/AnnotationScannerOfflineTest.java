@@ -6,12 +6,18 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.xebyte.core.AnnotationScanner;
 import com.xebyte.core.EndpointDef;
+import com.xebyte.core.McpTool;
+import com.xebyte.core.Param;
+import com.xebyte.core.ParamSource;
 import com.xebyte.core.ProgramProvider;
+import com.xebyte.core.Response;
 import junit.framework.TestCase;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -172,5 +178,86 @@ public class AnnotationScannerOfflineTest extends TestCase {
             }
         }
         assertTrue("Schema param descriptors missing required fields: " + broken, broken.isEmpty());
+    }
+
+    /**
+     * Boxed Integer/Boolean params with {@code defaultValue} must return the
+     * parsed default — not {@code null} — when no value is supplied, for both
+     * QUERY and BODY sources.
+     *
+     * <p>This is a regression test for H13: the {@code Integer.class} and
+     * {@code Boolean.class} branches in {@code resolveQueryParam} /
+     * {@code resolveBodyParam} were ignoring {@code hasDef}/{@code def} and
+     * returning {@code null}, unlike the primitive {@code int}/{@code boolean}
+     * branches which already honored it.
+     */
+    public void testBoxedParamHonorsDefaultValue() throws Exception {
+        BoxedDefaultFixture fixture = new BoxedDefaultFixture();
+        AnnotationScanner fixtureScanner = new AnnotationScanner(fixture);
+        List<EndpointDef> endpoints = fixtureScanner.getEndpoints();
+
+        // Find GET (QUERY source) and POST (BODY source) handlers
+        EndpointDef getEndpoint = null;
+        EndpointDef postEndpoint = null;
+        for (EndpointDef ep : endpoints) {
+            if ("/test_boxed_query".equals(ep.path())) getEndpoint = ep;
+            if ("/test_boxed_body".equals(ep.path()))  postEndpoint = ep;
+        }
+        assertNotNull("GET fixture endpoint not found", getEndpoint);
+        assertNotNull("POST fixture endpoint not found", postEndpoint);
+
+        // Invoke GET handler with no query parameters
+        Map<String, String> emptyQuery = Collections.emptyMap();
+        Map<String, Object> emptyBody  = Collections.emptyMap();
+        getEndpoint.handler().handle(emptyQuery, emptyBody);
+
+        assertEquals("QUERY: boxed Integer with defaultValue=\"0\" and absent value should return 0",
+            Integer.valueOf(0), fixture.lastLength);
+        assertEquals("QUERY: boxed Boolean with defaultValue=\"true\" and absent value should return Boolean.TRUE",
+            Boolean.TRUE, fixture.lastStrict);
+
+        // Invoke POST handler with no body parameters
+        postEndpoint.handler().handle(emptyQuery, emptyBody);
+
+        assertEquals("BODY: boxed Integer with defaultValue=\"5\" and absent value should return 5",
+            Integer.valueOf(5), fixture.lastBodyLength);
+        assertEquals("BODY: boxed Boolean with defaultValue=\"false\" and absent value should return Boolean.FALSE",
+            Boolean.FALSE, fixture.lastBodyStrict);
+    }
+
+    /**
+     * Tiny fixture service scanned by {@link #testBoxedParamHonorsDefaultValue}.
+     * The two {@code @McpTool} methods capture their resolved arguments so the test
+     * can assert the values without needing to parse the Response JSON.
+     */
+    static class BoxedDefaultFixture {
+
+        // Captured by the QUERY handler
+        volatile Integer lastLength;
+        volatile Boolean lastStrict;
+
+        // Captured by the BODY handler
+        volatile Integer lastBodyLength;
+        volatile Boolean lastBodyStrict;
+
+        @McpTool(path = "/test_boxed_query", method = "GET",
+                 description = "Fixture: boxed Integer/Boolean via QUERY source")
+        public Response queryBoxed(
+                @Param(value = "length", defaultValue = "0") Integer length,
+                @Param(value = "strict", defaultValue = "true") Boolean strict) {
+            lastLength = length;
+            lastStrict = strict;
+            return Response.ok("ok");
+        }
+
+        @McpTool(path = "/test_boxed_body", method = "POST",
+                 description = "Fixture: boxed Integer/Boolean via BODY source")
+        public Response bodyBoxed(
+                @Param(value = "length", source = ParamSource.BODY, defaultValue = "5") Integer length,
+                @Param(value = "strict", source = ParamSource.BODY, defaultValue = "false") Boolean strict) {
+            lastBodyLength = length;
+            lastBodyStrict = strict;
+            return Response.ok("ok");
+        }
     }
 }
