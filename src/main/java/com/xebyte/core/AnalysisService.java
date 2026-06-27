@@ -4406,8 +4406,10 @@ public class AnalysisService {
                     }
                     data.put("dat_global_count", datGlobalCount);
 
-                    // Compact completeness score
-                    Response completenessResponse = analyzeFunctionCompleteness(func.getEntryPoint().toString(), true);
+                    // Compact completeness score. Forward programName so the
+                    // nested call resolves the same program the caller asked
+                    // for via ?program=, not the active one (matches L2383).
+                    Response completenessResponse = analyzeFunctionCompleteness(func.getEntryPoint().toString(), true, programName);
                     if (completenessResponse instanceof Response.Ok ok) {
                         data.put("completeness", ok.data());
                     }
