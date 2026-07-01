@@ -610,7 +610,13 @@ public class HeadlessProgramProvider implements ProgramProvider {
             file = prog.getDomainFile();
             path = file.getPathname();
         } else {
-            file = projectData.getFile(path);
+            try {
+                file = projectData.getFile(path);
+            } catch (Exception e) {
+                out.put("success", false);
+                out.put("error", "Path lookup failed: " + e.getMessage());
+                return out;
+            }
             if (file == null) {
                 out.put("success", false);
                 out.put("error", "File not found in project: " + path);
