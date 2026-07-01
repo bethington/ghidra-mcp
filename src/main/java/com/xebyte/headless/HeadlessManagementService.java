@@ -186,6 +186,18 @@ public class HeadlessManagementService {
         return Response.ok(body);
     }
 
+    @McpTool(path = "/checkin_program", method = "POST", description = "Check a program back in to the shared Ghidra Server as a new version (the write-back path GhidraServerManager.checkinFile can't provide — see #119). Requires a shared (server-bound) project opened via /open_project and the file checked out. Saves pending edits and releases the open program first so keep_checked_out=false can actually drop the server checkout. Returns version_before/version/version_bumped.", category = "headless")
+    public Response checkinProgram(
+            @Param(value = "path", source = ParamSource.BODY, description = "Project path of the file (e.g. '/scratch/writetest'); empty uses the current program") String path,
+            @Param(value = "comment", source = ParamSource.BODY, description = "Checkin comment") String comment,
+            @Param(value = "keep_checked_out", source = ParamSource.BODY, defaultValue = "false", description = "Keep the file checked out after the new version lands") boolean keepCheckedOut) {
+        if (!programProvider.hasProject()) {
+            return Response.err("No project open. Call /open_project first.");
+        }
+        Map<String, Object> res = programProvider.checkinProgram(path, comment, keepCheckedOut);
+        return Response.ok(res);
+    }
+
     @McpTool(path = "/get_project_info", description = "Get info about the currently open project, including server-binding state. A shared (server-bound) project is required for /server/version_control/checkout to deliver content the headless can open; if `project_server_bound` is false, the open project is local-only.", category = "headless")
     public Response getProjectInfo() {
         if (!programProvider.hasProject()) {
