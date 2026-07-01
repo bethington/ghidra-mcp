@@ -1,7 +1,7 @@
 {
   "version": "5.14.2",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 251,
+  "total_endpoints": 252,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -1435,6 +1435,17 @@
       "category": "headless",
       "params": [],
       "description": "Get info about the currently open project"
+    },
+    {
+      "path": "/checkin_program",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "path",
+        "comment",
+        "keep_checked_out"
+      ],
+      "description": "Check an open program back in to the shared Ghidra Server as a new version"
     },
     {
       "path": "/get_struct_layout",
