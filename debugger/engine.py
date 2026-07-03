@@ -236,6 +236,8 @@ class DebugEngine:
         # and it doesn't conclude a debugger is present. Off by default so
         # attach/normal debugging behave as usual.
         self._pass_exceptions = False
+        self._call_guard = False   # True during an in-process call (crash-guard)
+        self._call_fault = None     # exception code caught during a guarded call
 
         # Work queue and worker thread
         self._work_queue: queue.SimpleQueue = queue.SimpleQueue()
@@ -562,9 +564,37 @@ class DebugEngine:
         detect us. Our OWN breakpoints arrive via the separate BREAKPOINT event
         and are unaffected. Off -> NO_CHANGE (default dbgeng behaviour)."""
         first_chance = (len(args) < 2) or bool(args[1])
+        # Crash-guard: during an in-process call_function(), a fault in the called
+        # code (e.g. access violation 0xC0000005) must NOT reach the target's SEH
+        # (could crash the process). Break into the debugger so call_function can
+        # roll back the saved context. Still PASS the anti-debug INT3 flood
+        # (0x80000003) from other threads so it can't detect us.
+        if self._call_guard and first_chance:
+            code = self._exc_code(args)
+            if code == 0x80000003:
+                return DbgEng.DEBUG_STATUS_GO_NOT_HANDLED
+            self._call_fault = code
+            return DbgEng.DEBUG_STATUS_NO_CHANGE
         if self._pass_exceptions and first_chance:
             return DbgEng.DEBUG_STATUS_GO_NOT_HANDLED
         return DbgEng.DEBUG_STATUS_NO_CHANGE
+
+    @staticmethod
+    def _exc_code(args):
+        """Best-effort extract the exception code from an dbgeng exception event's
+        args (structure varies by pybag version). 0 if unknown."""
+        try:
+            rec = args[0]
+            for attr in ("ExceptionCode", "exception_code", "code"):
+                if hasattr(rec, attr):
+                    return int(getattr(rec, attr)) & 0xFFFFFFFF
+            if hasattr(rec, "ExceptionRecord"):
+                return int(rec.ExceptionRecord.ExceptionCode) & 0xFFFFFFFF
+            if isinstance(rec, dict):
+                return int(rec.get("ExceptionCode", rec.get("code", 0))) & 0xFFFFFFFF
+        except Exception:
+            pass
+        return 0
 
     def step_into(self, count: int = 1) -> dict:
         """Single-step into (trace)."""
@@ -763,9 +793,30 @@ class DebugEngine:
                 self._base.reg._set_register(name.lower(), int(val) & 0xFFFFFFFF)
             self._base.reg._set_register("esp", new_esp)
             self._base.reg._set_register("eip", int(address))
-        res = self._go_wait_impl(timeout_ms)
+        # run under the crash-guard so a fault in the called code is caught and
+        # rolled back (via the context restore below) instead of crashing the
+        # target. Register the exception handler if pass-through isn't already on.
+        exc_was_registered = self._pass_exceptions
+        if not exc_was_registered:
+            try:
+                self._base.events.exception(self._on_exception)
+            except Exception:
+                pass
+        self._call_fault = None
+        self._call_guard = True
+        try:
+            res = self._go_wait_impl(timeout_ms)
+        finally:
+            self._call_guard = False
+            if not exc_was_registered:
+                try:
+                    self._base.events.noexception()
+                except Exception:
+                    pass
         out = {k.lower(): v for k, v in self._collect_registers_impl().items()}
-        # restore the saved context (puts the target back exactly where it was)
+        faulted = (self._call_fault is not None) or (out.get("eip", 0) != int(ret_catch))
+        # restore the saved context (puts the target back exactly where it was;
+        # this is also the rollback when the call faulted or timed out)
         with self._wow64_x86_context():
             for name in ("eax", "ebx", "ecx", "edx", "esi", "edi",
                          "esp", "ebp", "eip", "eflags"):
@@ -782,6 +833,8 @@ class DebugEngine:
             "returned_to": f"0x{out.get('eip', 0):08X}",
             "ret_catch": f"0x{int(ret_catch):08X}",
             "timeout": res.get("timeout"),
+            "faulted": bool(faulted),
+            "fault_code": f"0x{(self._call_fault or 0):08X}",
         }
 
     def set_breakpoint(self, address: int,
