@@ -3036,6 +3036,34 @@ def create_app(state_file, event_bus=None, dashboard_port=5000):
             }
         )
 
+    @app.route("/api/conformance/coverage", methods=["GET"])
+    def conformance_coverage():
+        """Implementation-coverage: which PD2-S12 functions have a linked OpenD2
+        port (and which are conformance-proven). Source of truth = the OpenD2
+        repo's @PD2S12 markers, scanned by conformance_workbench."""
+        try:
+            import conformance_workbench as cw
+
+            return jsonify(cw.coverage_summary())
+        except Exception as exc:  # noqa: BLE001 - report, don't 500 the dashboard
+            return jsonify({"error": str(exc), "total_ported": 0, "by_program": {}})
+
+    @app.route("/api/conformance/sidebyside", methods=["GET"])
+    def conformance_sidebyside():
+        """3-pane data for one function: original ASSEMBLY + decompiled
+        PSEUDOCODE (live from the Ghidra plugin) + the linked OpenD2
+        implementation. Query params: program, address."""
+        program = request.args.get("program", "")
+        address = request.args.get("address", "")
+        if not program or not address:
+            return jsonify({"error": "program and address required"}), 400
+        try:
+            import conformance_workbench as cw
+
+            return jsonify(cw.get_sidebyside(program, address))
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 500
+
     @app.route("/api/context/binary", methods=["POST"])
     def set_active_binary():
         data = request.json
