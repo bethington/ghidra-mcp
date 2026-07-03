@@ -356,6 +356,90 @@ class TestModulesEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Tests: write_memory
+# ---------------------------------------------------------------------------
+
+class TestWriteMemoryEndpoint:
+
+    def test_write_memory_missing_address_returns_400(self, debug_server):
+        base, _ = debug_server
+        status, body = _post(base, "/debugger/write_memory", {"data": "9090c3"})
+        assert status == 400
+        assert "error" in body
+
+    def test_write_memory_missing_data_returns_400(self, debug_server):
+        base, _ = debug_server
+        status, body = _post(base, "/debugger/write_memory", {"address": "0x401000"})
+        assert status == 400
+        assert "error" in body
+
+    def test_write_memory_calls_engine_with_int_address_and_bytes(self, debug_server):
+        base, ds = debug_server
+        ds.engine.write_memory.return_value = 3
+        status, body = _post(base, "/debugger/write_memory",
+                              {"address": "0x401000", "data": "9090c3"})
+        assert status == 200
+        ds.engine.write_memory.assert_called_once_with(0x401000, b"\x90\x90\xc3")
+
+    def test_write_memory_response_shape(self, debug_server):
+        base, ds = debug_server
+        ds.engine.write_memory.return_value = 2
+        _, body = _post(base, "/debugger/write_memory",
+                         {"address": "0x401000", "data": "9090"})
+        assert body["address"] == "0x00401000"
+        assert body["bytes_written"] == 2
+
+    def test_write_memory_ghidra_address_type_translates_via_mapper(self, debug_server):
+        base, ds = debug_server
+        ds.mapper.update_from_modules(
+            [ModuleInfo(name="game.exe", runtime_base=0x10000000, size=0x100000)],
+            {"game.exe": 0x400000},
+        )
+        ds.engine.write_memory.return_value = 1
+        status, _ = _post(base, "/debugger/write_memory",
+                           {"address": "0x401000", "data": "90",
+                            "address_type": "ghidra", "module": "game.exe"})
+        assert status == 200
+        ds.engine.write_memory.assert_called_once_with(0x10001000, b"\x90")
+
+    def test_write_memory_unmapped_ghidra_address_returns_500(self, debug_server):
+        base, _ = debug_server
+        status, body = _post(base, "/debugger/write_memory",
+                              {"address": "0x401000", "data": "90",
+                               "address_type": "ghidra"})
+        assert status == 500
+        assert "error" in body
+
+
+# ---------------------------------------------------------------------------
+# Tests: write_registers
+# ---------------------------------------------------------------------------
+
+class TestWriteRegistersEndpoint:
+
+    def test_write_registers_missing_dict_returns_400(self, debug_server):
+        base, _ = debug_server
+        status, body = _post(base, "/debugger/write_registers", {})
+        assert status == 400
+        assert "error" in body
+
+    def test_write_registers_calls_engine_with_parsed_ints(self, debug_server):
+        base, ds = debug_server
+        ds.engine.write_registers.return_value = {"EIP": 0x401000, "EAX": 5}
+        status, _ = _post(base, "/debugger/write_registers",
+                           {"registers": {"eip": "0x401000", "eax": 5}})
+        assert status == 200
+        ds.engine.write_registers.assert_called_once_with({"eip": 0x401000, "eax": 5})
+
+    def test_write_registers_response_shape(self, debug_server):
+        base, ds = debug_server
+        ds.engine.write_registers.return_value = {"EIP": 0x401000}
+        _, body = _post(base, "/debugger/write_registers",
+                         {"registers": {"eip": "0x401000"}})
+        assert body["applied"] == {"EIP": "0x00401000"}
+
+
+# ---------------------------------------------------------------------------
 # Tests: routing
 # ---------------------------------------------------------------------------
 
