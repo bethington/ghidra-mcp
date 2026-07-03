@@ -1,9 +1,10 @@
 """
-Unit tests for tools.setup.requirements — pip command resolution.
+Unit tests for tools.setup.requirements — uv-driven dependency install.
 
-Covers the nix / Linux case where ``python -m pip`` fails but a bare
-``pip`` exists on PATH (#190). All tests stub subprocess and shutil so no
-real pip invocation happens.
+The project's Python dependencies are managed through uv + the root
+``pyproject.toml`` / ``uv.lock`` (PEP 735 dependency groups). Setup commands
+sync them with ``uv sync`` rather than ``pip install -r requirements*.txt``.
+All tests stub subprocess and shutil so no real uv invocation happens.
 """
 
 from __future__ import annotations
@@ -16,131 +17,123 @@ import pytest
 from tools.setup import requirements as req
 
 
-@pytest.fixture(autouse=True)
-def _clear_pip_cache():
-    """Reset the resolved-pip cache between tests so each scenario gets a
-    fresh probe."""
-    req._PIP_COMMAND_CACHE.clear()
-    yield
-    req._PIP_COMMAND_CACHE.clear()
-
-
 def _completed(returncode: int) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(args=[], returncode=returncode, stdout="", stderr="")
 
 
-def test_pip_command_prefers_python_dash_m_pip(monkeypatch):
-    """The happy path on Windows / Mac / most Linux: ``python -m pip`` works."""
-
-    def fake_run(cmd, **kwargs):
-        assert "-m" in cmd and "pip" in cmd, cmd
-        return _completed(0)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr(req.shutil, "which", lambda _: None)  # don't fall through
-
-    py = Path("/usr/bin/python3")
-    assert req.pip_command(py) == [str(py), "-m", "pip"]
+def test_uv_executable_prefers_path(monkeypatch):
+    monkeypatch.setattr(req.shutil, "which", lambda name: "/opt/bin/uv" if name == "uv" else None)
+    assert req.uv_executable() == "/opt/bin/uv"
 
 
-def test_pip_command_falls_back_to_bare_pip_on_nix(monkeypatch):
-    """The nix case: ``python -m pip`` fails but bare ``pip`` works.
-
-    This is the #190 regression — without the fallback, setup commands
-    failed on nix-managed Python environments where pip is exposed as a
-    binary but not importable from the active interpreter.
-    """
-    calls = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        if "-m" in cmd and "pip" in cmd:
-            return _completed(1)  # python -m pip fails
-        if cmd[0] == "/usr/bin/pip":
-            return _completed(0)  # bare pip works
-        raise AssertionError(f"unexpected probe: {cmd}")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr(req.shutil, "which", lambda name: "/usr/bin/pip" if name == "pip" else None)
-
-    py = Path("/nix/store/abc/bin/python3")
-    result = req.pip_command(py)
-    assert result == ["/usr/bin/pip"]
-    # Probed both forms before settling on the fallback.
-    assert any("-m" in c and "pip" in c for c in calls)
-    assert ["/usr/bin/pip", "--version"] in calls
+def test_uv_executable_falls_back_to_bare_name(monkeypatch):
+    monkeypatch.setattr(req.shutil, "which", lambda _: None)
+    assert req.uv_executable() == "uv"
 
 
-def test_pip_command_raises_when_neither_form_works(monkeypatch):
+def test_ensure_uv_available_returns_executable(monkeypatch):
+    monkeypatch.setattr(req.shutil, "which", lambda _: "/opt/bin/uv")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed(0))
+    assert req.ensure_uv_available() == "/opt/bin/uv"
+
+
+def test_ensure_uv_available_raises_when_missing(monkeypatch):
+    monkeypatch.setattr(req.shutil, "which", lambda _: None)
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _completed(1))
-    monkeypatch.setattr(req.shutil, "which", lambda _: None)
-
-    py = Path("/usr/bin/python3")
     with pytest.raises(FileNotFoundError) as exc:
-        req.pip_command(py)
-    msg = str(exc.value)
-    # Path renders with native separators (/ on POSIX, \ on Windows); check
-    # the str(py) form to stay portable.
-    assert str(py) in msg
-    assert "pip is not available" in msg
+        req.ensure_uv_available()
+    assert "uv is not available" in str(exc.value)
 
 
-def test_pip_command_cached_per_python_executable(monkeypatch):
-    """Resolving twice for the same interpreter must not re-probe subprocess."""
-    probe_count = 0
-
-    def fake_run(cmd, **kwargs):
-        nonlocal probe_count
-        probe_count += 1
-        return _completed(0)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
+def test_ensure_uv_available_raises_when_not_on_path(monkeypatch):
+    # subprocess.run raises FileNotFoundError before any returncode when the
+    # binary isn't on PATH — must funnel through the actionable message.
     monkeypatch.setattr(req.shutil, "which", lambda _: None)
 
-    py = Path("/usr/bin/python3")
-    first = req.pip_command(py)
-    second = req.pip_command(py)
-    assert first == second
-    assert probe_count == 1, "second call should hit the cache, not re-probe"
-    # Caller mutating the returned list must not poison the cache.
-    first.append("--mutated")
-    third = req.pip_command(py)
-    assert "--mutated" not in third
+    def _boom(*a, **k):
+        raise FileNotFoundError(2, "No such file or directory", "uv")
+
+    monkeypatch.setattr(subprocess, "run", _boom)
+    with pytest.raises(FileNotFoundError) as exc:
+        req.ensure_uv_available()
+    assert "uv is not available" in str(exc.value)
 
 
-def test_pip_command_per_interpreter_isolation(monkeypatch):
-    """Different python executables get independent cache entries."""
+def test_ensure_uv_available_raises_when_not_executable(monkeypatch):
+    # A non-executable uv surfaces as PermissionError (also an OSError).
+    monkeypatch.setattr(req.shutil, "which", lambda _: "/opt/bin/uv")
 
-    def fake_run(cmd, **kwargs):
-        # Both interpreters succeed at python -m pip
-        return _completed(0)
+    def _boom(*a, **k):
+        raise PermissionError(13, "Permission denied", "uv")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr(req.shutil, "which", lambda _: None)
-
-    py_a = Path("/usr/bin/python3.11")
-    py_b = Path("/usr/bin/python3.12")
-    assert req.pip_command(py_a)[0] == str(py_a)
-    assert req.pip_command(py_b)[0] == str(py_b)
-    assert req.pip_command(py_a)[0] == str(py_a)  # cache wasn't overwritten by py_b
+    monkeypatch.setattr(subprocess, "run", _boom)
+    with pytest.raises(FileNotFoundError) as exc:
+        req.ensure_uv_available()
+    assert "uv is not available" in str(exc.value)
 
 
-def test_install_requirements_file_uses_resolved_pip_command(monkeypatch, tmp_path):
-    """install_requirements_file must go through pip_command, not the old
-    hardcoded ``python -m pip`` invocation."""
+def test_make_install_plan_dev_group_by_default():
+    plan = req.make_install_plan(Path("/repo"), install_debugger=False)
+    assert plan.groups == ("dev",)
+    assert plan.install_debugger is False
+
+
+def test_make_install_plan_adds_debugger_group():
+    plan = req.make_install_plan(Path("/repo"), install_debugger=True)
+    assert "debugger" in plan.groups
+    assert plan.install_debugger is True
+
+
+def test_uv_sync_command_includes_each_group(monkeypatch):
+    monkeypatch.setattr(req, "uv_executable", lambda: "uv")
+    plan = req.make_install_plan(Path("/repo"), install_debugger=True)
+    cmd = req.uv_sync_command(plan)
+    assert cmd[:2] == ["uv", "sync"]
+    assert "--group" in cmd
+    assert "dev" in cmd
+    assert "debugger" in cmd
+
+
+def test_execute_install_plan_runs_uv_sync(monkeypatch, tmp_path):
     captured = {}
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
+        captured["cwd"] = kwargs.get("cwd")
         return _completed(0)
 
+    monkeypatch.setattr(req, "uv_executable", lambda: "uv")
     monkeypatch.setattr(subprocess, "run", fake_run)
+
+    plan = req.make_install_plan(tmp_path, install_debugger=False)
+    req.execute_install_plan(plan)
+
+    assert captured["cmd"][:2] == ["uv", "sync"]
+    assert "dev" in captured["cmd"]
+    assert captured["cwd"] == str(tmp_path)
+
+
+def test_execute_install_plan_validates_uv_before_sync(monkeypatch, tmp_path):
+    # Regression: execute_install_plan must surface the actionable
+    # ensure_uv_available message — not a raw OSError/CalledProcessError — and
+    # must not attempt `uv sync` when uv can't run. The guard lives at this
+    # execution chokepoint so no caller can bypass it.
     monkeypatch.setattr(req.shutil, "which", lambda _: None)
-    # Force the bare-pip fallback so we can assert the command prefix matches.
-    req._PIP_COMMAND_CACHE[str(Path("/nix/python"))] = ["/usr/bin/pip"]
 
-    reqs = tmp_path / "requirements.txt"
-    reqs.write_text("requests\n")
-    req.install_requirements_file(Path("/nix/python"), reqs)
+    calls: list[list[str]] = []
 
-    assert captured["cmd"][:3] == ["/usr/bin/pip", "install", "-r"]
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        # Simulate uv missing from PATH for every invocation, including the
+        # `uv --version` probe inside ensure_uv_available.
+        raise FileNotFoundError(2, "No such file or directory", "uv")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    plan = req.make_install_plan(tmp_path, install_debugger=False)
+    with pytest.raises(FileNotFoundError) as exc:
+        req.execute_install_plan(plan)
+
+    assert "uv is not available" in str(exc.value)
+    # Only the `uv --version` probe ran; `uv sync` was never attempted.
+    assert calls == [["uv", "--version"]]

@@ -28,8 +28,6 @@ def _args(**kwargs) -> argparse.Namespace:
         with_debugger=False,
         force=False,
         test=[],
-        requirements=[],
-        python=None,
         env_file=None,
         new=None,
         old=None,
@@ -792,21 +790,15 @@ def test_cmd_ensure_prereqs_dry_run_prints_plan(tmp_path, monkeypatch, capsys):
     from tools.setup import cli
     from tools.setup.requirements import InstallPlan
 
-    req_file = tmp_path / "requirements.txt"
-    req_file.write_text("requests\n")
-
     fake_plan = InstallPlan(
-        python_executable=Path("python"),
-        requirements_files=[req_file],
+        repo_root=tmp_path,
+        groups=("dev",),
         install_debugger=False,
-        debugger_requirements_file=tmp_path / "requirements-debugger.txt",
     )
 
     monkeypatch.setattr(cli, "detect_repo_root", lambda: tmp_path)
     monkeypatch.setattr(cli, "_get_backend", lambda: "gradle")
     monkeypatch.setattr(cli, "_load_repo_env", lambda root: {})
-    monkeypatch.setattr(cli, "find_repo_python", lambda root: Path("python"))
-    monkeypatch.setattr(cli, "resolve_requirements_files", lambda root, raw: [req_file])
     monkeypatch.setattr(cli, "make_install_plan", lambda *a, **kw: fake_plan)
     monkeypatch.setattr(cli, "execute_install_plan", lambda plan: None)
     monkeypatch.setattr(cli, "run_gradle", lambda root, tasks, **kw: 0)
@@ -845,6 +837,30 @@ def test_parser_deploy_subcommand_recognized():
 
     args = build_parser().parse_args(["deploy"])
     assert args.command == "deploy"
+
+
+def test_parser_install_python_deps_rejects_obsolete_flags():
+    # --requirements / --python were vestiges of the old pip flow; uv sync
+    # ignored their values, so they're removed rather than left to silently
+    # mask misconfigured automation.
+    from tools.setup.cli import build_parser
+
+    parser = build_parser()
+    for flag, value in (("--requirements", "requirements.txt"), ("--python", "python3")):
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["install-python-deps", flag, value])
+        assert exc_info.value.code != 0
+
+
+def test_parser_install_python_deps_accepts_supported_flags():
+    from tools.setup.cli import build_parser
+
+    args = build_parser().parse_args(
+        ["install-python-deps", "--with-debugger", "--env-file", ".env.local"]
+    )
+    assert args.command == "install-python-deps"
+    assert args.with_debugger is True
+    assert args.env_file == Path(".env.local")
 
 
 def test_parser_bump_version_parses_new_flag():

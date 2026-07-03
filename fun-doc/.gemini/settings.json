@@ -1,9 +1,12 @@
 {
   "mcpServers": {
     "ghidra-mcp": {
-      "command": "python",
+      "command": "uv",
       "args": [
-        "bridge_mcp_ghidra.py"
+        "run",
+        "bridge-mcp-ghidra",
+        "--transport",
+        "stdio"
       ],
       "cwd": "c:\\Users\\benam\\source\\mcp\\ghidra-mcp",
       "env": {

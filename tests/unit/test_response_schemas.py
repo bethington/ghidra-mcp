@@ -20,26 +20,26 @@ class TestDispatchErrorResponses(unittest.TestCase):
 
     def test_get_no_connection_returns_json(self):
         import bridge_mcp_ghidra as bridge
-        old = bridge._transport_mode
-        bridge._transport_mode = "none"
+        old = bridge.state._transport_mode
+        bridge.state._transport_mode = "none"
         try:
             result = bridge.dispatch_get("/test_endpoint")
             data = json.loads(result)
             self.assertIn("error", data)
             self.assertIsInstance(data["error"], str)
         finally:
-            bridge._transport_mode = old
+            bridge.state._transport_mode = old
 
     def test_post_no_connection_returns_json(self):
         import bridge_mcp_ghidra as bridge
-        old = bridge._transport_mode
-        bridge._transport_mode = "none"
+        old = bridge.state._transport_mode
+        bridge.state._transport_mode = "none"
         try:
             result = bridge.dispatch_post("/test_endpoint", {"key": "val"})
             data = json.loads(result)
             self.assertIn("error", data)
         finally:
-            bridge._transport_mode = old
+            bridge.state._transport_mode = old
 
 
 class TestUdsRequestFormat(unittest.TestCase):

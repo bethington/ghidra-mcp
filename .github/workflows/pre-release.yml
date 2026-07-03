@@ -106,21 +106,20 @@ jobs:
 
         echo "Installed 15 Ghidra JARs to Maven local repository"
 
-    - name: Set up Python (offline test gate)
-      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+    - name: Install uv (Python build + test gate)
+      uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
       with:
-        python-version: '3.12'
-        cache: 'pip'
+        enable-cache: true
+
+    - name: Set up Python (offline test gate)
+      run: uv python install 3.12
 
     - name: Offline test gate (block pre-release on red tests)
       run: |
         echo "Running offline Java tests..."
         mvn -q test -Dtest='com.xebyte.offline.*Test'
         echo "Running Python unit tests..."
-        python -m pip install --upgrade pip
-        pip install -q -r requirements-test.txt
-        pip install -q -r requirements.txt
-        python -m pytest tests/unit/ --no-cov -q
+        uv run --python 3.12 --group test python -m pytest tests/unit/ --no-cov -q
         echo "✅ Offline test gate passed"
 
     - name: Build with Maven
@@ -129,6 +128,12 @@ jobs:
         mvn clean package assembly:single -DskipTests
         echo "Build complete."
         ls -la target/GhidraMCP-*.zip 2>/dev/null || ls -la target/*.zip
+
+    - name: Build Python bridge wheel
+      run: |
+        echo "Building bridge wheel with uv..."
+        uv build
+        ls -la dist/
 
     - name: Create pre-release tag
       run: |
@@ -165,9 +170,8 @@ jobs:
           fi
         fi
 
-        # Copy essential files
-        cp bridge_mcp_ghidra.py release/
-        cp requirements.txt release/
+        # Copy essential files (bridge ships as a wheel)
+        cp dist/ghidra_mcp_bridge-*.whl release/
         cp README.md release/
         [ -f LICENSE ] && cp LICENSE release/
 
@@ -178,7 +182,7 @@ jobs:
       run: |
         VERSION="${{ github.event.inputs.version }}"
         BRANCH="${{ github.event.inputs.branch }}"
-        MCP_TOOLS=$(grep -c '@mcp.tool()' bridge_mcp_ghidra.py 2>/dev/null || echo "unknown")
+        MCP_TOOLS=$(python3 -c "import json; print(json.load(open('tests/endpoints.json'))['total_endpoints'])" 2>/dev/null || echo "unknown")
 
         cat > release_notes.md << GENEOF
         # GhidraMCP ${VERSION} Pre-Release
@@ -203,8 +207,8 @@ jobs:
         Same as stable releases:
         1. In Ghidra: **File > Install Extensions > Add** and select the ZIP
         2. Restart Ghidra, enable plugin
-        3. \`pip install -r requirements.txt\`
-        4. \`python bridge_mcp_ghidra.py\`
+        3. \`uv tool install ./ghidra_mcp_bridge-${VERSION}-py3-none-any.whl\` (or \`pip install\` the wheel)
+        4. \`bridge-mcp-ghidra\` (or \`python -m bridge_mcp_ghidra\`)
 
         ---
 

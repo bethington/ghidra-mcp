@@ -10,6 +10,7 @@ from tools.setup.ghidra import (
     DEFAULT_MCP_URL,
     PLUGIN_CLASS,
     REQUIRED_GHIDRA_JARS,
+    _has_dependency_group,
     collect_preflight_issues,
     find_plugin_archive,
     mark_extension_known_in_tool_config,
@@ -263,7 +264,50 @@ def test_collect_preflight_issues_reports_missing_jar_and_debugger_requirements(
     )
 
     assert any("Missing required Ghidra dependency" in issue for issue in issues)
-    assert any("Debugger requirements file not found" in issue for issue in issues)
+    assert any(
+        "Debugger dependency group not found" in issue for issue in issues
+    )
+
+
+class TestHasDependencyGroup:
+    def test_true_for_real_entry(self, tmp_path: Path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "[dependency-groups]\ndebugger = [\"pybag==2.2.16\"]\n",
+            encoding="utf-8",
+        )
+        assert _has_dependency_group(pyproject, "debugger") is True
+
+    def test_true_for_quoted_key(self, tmp_path: Path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "[dependency-groups]\n\"debugger\" = [\"pybag\"]\n",
+            encoding="utf-8",
+        )
+        assert _has_dependency_group(pyproject, "debugger") is True
+
+    def test_false_when_word_only_in_comment(self, tmp_path: Path):
+        # The reviewer's false-positive case: "debugger" appears as prose but
+        # there is no resolvable dependency group, so uv sync would fail.
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "# TODO: add a debugger dependency group later\n"
+            "[dependency-groups]\ntest = [\"pytest\"]\n",
+            encoding="utf-8",
+        )
+        assert _has_dependency_group(pyproject, "debugger") is False
+
+    def test_false_when_key_in_other_section(self, tmp_path: Path):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(
+            "[tool.something]\ndebugger = true\n"
+            "[dependency-groups]\ntest = [\"pytest\"]\n",
+            encoding="utf-8",
+        )
+        assert _has_dependency_group(pyproject, "debugger") is False
+
+    def test_false_when_file_missing(self, tmp_path: Path):
+        assert _has_dependency_group(tmp_path / "nope.toml", "debugger") is False
 
 
 def _stub_version(
@@ -330,8 +374,8 @@ def test_collect_preflight_issues_passes_with_required_files(
         jar_path.parent.mkdir(parents=True, exist_ok=True)
         jar_path.write_text("jar", encoding="utf-8")
 
-    (tmp_path / "requirements-debugger.txt").write_text(
-        "pybag==1.0\n", encoding="utf-8"
+    (tmp_path / "pyproject.toml").write_text(
+        "[dependency-groups]\ndebugger = [\"pybag==2.2.16\"]\n", encoding="utf-8"
     )
     user_base = tmp_path / "user-ghidra"
     (user_base / "ghidra_12.1_PUBLIC").mkdir(parents=True)

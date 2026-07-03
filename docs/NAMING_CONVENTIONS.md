@@ -112,7 +112,7 @@ Python files use **snake_case** following PEP 8:
 ✅ GOOD
 analyze_functions.py
 create_struct_workflow.py
-bridge_mcp_ghidra.py
+library_code_detector.py
 ordinal_auto_fixer.py
 
 ❌ AVOID
@@ -159,10 +159,13 @@ snake_case Python scripts.
 
 ```
 ✅ GOOD
-bridge_mcp_ghidra.py
+fun_doc.py
 ordinal_auto_fixer.py
 inventory_scorer.py
 ```
+
+The bridge itself is now a package (`python/bridge_mcp_ghidra/`) exposed as
+the `bridge-mcp-ghidra` console script / `python -m bridge_mcp_ghidra`.
 
 ### Environment-Native Wrappers
 Generated or environment-specific launchers may still exist where required by
@@ -176,7 +179,7 @@ logic. Examples include container entrypoints and generated build-tool wrappers.
 ### Format: lowercase with dots
 ```
 .mcp.json                     — MCP server configuration (Claude Code auto-discovery)
-pytest.ini                    — Python test configuration
+pyproject.toml                — Python build, dependencies, and test configuration
 .gitignore                    — Git ignore rules
 .env.template                 — Environment variable template
 ```

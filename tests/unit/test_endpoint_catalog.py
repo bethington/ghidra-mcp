@@ -21,6 +21,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 JAVA_SRC = PROJECT_ROOT / "src" / "main" / "java" / "com" / "xebyte"
 CORE_SRC = JAVA_SRC / "core"
 ENDPOINTS_JSON = PROJECT_ROOT / "tests" / "endpoints.json"
+# The bridge is now a package split across multiple modules under python/.
+BRIDGE_PKG = PROJECT_ROOT / "python" / "bridge_mcp_ghidra"
+
+
+def _bridge_sources() -> list[Path]:
+    """All Python source files that make up the bridge package."""
+    return sorted(BRIDGE_PKG.glob("*.py"))
+
+
+def _bridge_source_text() -> str:
+    """Concatenated text of every bridge module (for catalog-content checks)."""
+    return "\n".join(p.read_text() for p in _bridge_sources())
 
 
 def count_mcptool_annotations() -> int:
@@ -161,8 +173,7 @@ class TestBridgeIsDynamic(unittest.TestCase):
         """
         import bridge_mcp_ghidra as bridge
 
-        bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
-        content = bridge_path.read_text()
+        content = _bridge_source_text()
         mgmt_count = len(re.findall(r"@mcp\.tool\(\)", content))
         debugger_count = len(re.findall(r"@_debugger_tool\(\)", content))
         tool_count = mgmt_count + debugger_count
@@ -186,50 +197,36 @@ class TestBridgeIsDynamic(unittest.TestCase):
 
     def test_bridge_has_schema_registration(self):
         """Bridge should have register_tools_from_schema function."""
-        bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
-        content = bridge_path.read_text()
+        content = _bridge_source_text()
         self.assertIn("register_tools_from_schema", content)
         self.assertIn("/mcp/schema", content)
 
-    def test_bridge_size_reasonable(self):
-        """Thin bridge should stay manageable while allowing debugger/tool-group growth.
+    def test_bridge_modules_stay_focused(self):
+        """No single bridge module should balloon — the split exists to keep
+        each module readable. The cap is a soft signal: if it trips, look at
+        the diff and confirm the added lines pull weight (real logic /
+        regression coverage / docstrings tied to a fix). Split the module or
+        bump deliberately rather than papering over bloat.
 
-        The cap is a soft signal — if it trips, look at the diff to confirm
-        the added lines are pulling weight (real logic / regression coverage
-        / docstrings tied to a fix) rather than gratuitous. Bump deliberately
-        when the threshold becomes routine friction, but don't paper over
-        actual bloat. Last bumped 2026-05-12: 2100 -> 2250 to absorb the #170
-        multi-candidate socket-dir scan and #175 TCP port-range discovery
-        (`_scan_tcp_for_project` + new helpers + docstrings). Both pull
-        weight: bug fixes for real reproducible user reports with associated
-        unit test coverage.
-
-        Bumped 2026-06-14: 2250 -> 2300 to add `search_tools`, a catalog-search
-        meta-tool (#267/#153) that lets the bridge run --lazy with a small tool
-        surface while still letting agents discover unloaded tools by keyword.
-        Pulls weight: directly addresses the context-overhead complaints.
-
-        Bumped 2026-06-18: 2300 -> 2350 for the wildcard-bind DNS-rebinding
-        fix — `_wildcard_allowed_hosts()` helper + the 0.0.0.0/:: branch
-        rewrite that keeps protection ON with a derived allowed-Host list
-        instead of disabling it. Pulls weight: security fix; previously
-        any page in the user's browser could DNS-rebind to the bridge
-        and drive every Ghidra tool.
-
-        Bumped 2026-06-26: 2350 -> 2500 for tier 1+2 security and correctness
-        fixes: CORS header removal, IPv6 support, multi-UDS handling, emulation
-        max_steps bounding, plugin lifecycle handoff. Pulls weight: cumulative
-        hardening and API completeness.
-
-        Bumped 2026-06-26: 2500 -> 2550 for `GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS`
-        strict mode (#339): opt-in program selector enforcement, multi-program
-        call safety. Pulls weight: addresses tool-surface safety concerns from #307.
+        History (pre-split, single file): 2100 (2026-05-12) -> 2250 (#170/#175
+        socket-dir scan + TCP port-range discovery) -> 2300 (2026-06-14,
+        search_tools) -> 2350 (2026-06-18, wildcard-bind DNS-rebinding fix) ->
+        2500 (2026-06-26, tier 1+2 security/correctness: CORS header removal,
+        IPv6 support, multi-UDS handling, emulation max_steps bounding, plugin
+        lifecycle handoff) -> 2550 (2026-06-26, GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS
+        strict mode, #339). Split into the python/bridge_mcp_ghidra package on
+        2026-06-19 (carrying the accumulated history above forward into the new
+        module layout); now enforced per-module.
         """
-        bridge_path = PROJECT_ROOT / "bridge_mcp_ghidra.py"
-        lines = len(bridge_path.read_text().splitlines())
-        self.assertLess(
-            lines, 2550, f"Bridge is {lines} lines, expected <2550 for thin multiplexer"
-        )
+        per_module_cap = 800
+        for module in _bridge_sources():
+            lines = len(module.read_text().splitlines())
+            self.assertLess(
+                lines,
+                per_module_cap,
+                f"{module.name} is {lines} lines, expected <{per_module_cap}; "
+                "split it or bump the cap deliberately.",
+            )
 
 
 class TestAnnotationScannerExists(unittest.TestCase):

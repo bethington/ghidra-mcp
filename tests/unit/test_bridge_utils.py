@@ -181,14 +181,14 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
 
         instances = [{"socket": "/tmp/ghidra-123.sock", "pid": 123}]
 
-        with patch.object(bridge, "discover_instances", return_value=instances), \
-             patch.object(bridge, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090") as scan, \
-             patch.object(bridge, "validate_server_url", return_value=True), \
-             patch.object(bridge, "_fetch_and_register_schema", return_value=0), \
-             patch.object(bridge, "os") as mock_os:
+        with patch.object(bridge.discovery, "discover_instances", return_value=instances), \
+             patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090") as scan, \
+             patch.object(bridge.static_tools, "validate_server_url", return_value=True), \
+             patch.object(bridge.registry, "_fetch_and_register_schema", return_value=0), \
+             patch.object(bridge.static_tools, "os") as mock_os:
             mock_os.getenv.return_value = None
-            bridge._full_schema = []
-            bridge._loaded_groups.clear()
+            bridge.state._full_schema = []
+            bridge.state._loaded_groups.clear()
 
             result = asyncio.run(bridge.connect_instance("wanted"))
 
@@ -206,9 +206,9 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
             {"socket": "/tmp/ghidra-456.sock", "pid": 456, "project": "also_other"},
         ]
 
-        with patch.object(bridge, "discover_instances", return_value=instances), \
-             patch.object(bridge, "_scan_tcp_for_project") as scan, \
-             patch.object(bridge, "os") as mock_os:
+        with patch.object(bridge.discovery, "discover_instances", return_value=instances), \
+             patch.object(bridge.discovery, "_scan_tcp_for_project") as scan, \
+             patch.object(bridge.static_tools, "os") as mock_os:
             mock_os.getenv.return_value = None
 
             result = asyncio.run(bridge.connect_instance("wanted"))
@@ -405,13 +405,13 @@ class TestDiscoverInstancesMultiDir(unittest.TestCase):
             # Patch both `get_socket_dir_candidates` and the UDS info query so
             # the test doesn't actually try to connect.
             with patch.object(
-                bridge, "get_socket_dir_candidates",
+                bridge.transport, "get_socket_dir_candidates",
                 return_value=[Path(d1), Path(d2)],
             ), patch.object(
-                bridge, "uds_request",
+                bridge.transport, "uds_request",
                 return_value=("{}", 500),  # info query fails — that's fine
             ), patch.object(
-                bridge, "is_pid_alive",
+                bridge.validation, "is_pid_alive",
                 side_effect=lambda p: p == pid_alive,
             ):
                 instances = discover_instances()
@@ -435,13 +435,13 @@ class TestDiscoverInstancesMultiDir(unittest.TestCase):
             import bridge_mcp_ghidra as bridge
 
             with patch.object(
-                bridge, "get_socket_dir_candidates",
+                bridge.transport, "get_socket_dir_candidates",
                 return_value=[Path(d), Path(d)],  # same dir twice
             ), patch.object(
-                bridge, "uds_request",
+                bridge.transport, "uds_request",
                 return_value=("{}", 500),
             ), patch.object(
-                bridge, "is_pid_alive",
+                bridge.validation, "is_pid_alive",
                 side_effect=lambda p: p == pid_alive,
             ):
                 instances = discover_instances()
@@ -462,13 +462,18 @@ class TestAutoConnectMultiInstance(unittest.TestCase):
             {"project": "ProjB", "socket": "/tmp/b.sock", "pid": 222},
         ]
         fetch_calls = []
-        with patch.object(bridge, "discover_instances", return_value=two), \
-             patch.object(bridge, "_fetch_and_register_schema",
+        # Patch the MODULE-QUALIFIED call sites _auto_connect actually uses
+        # (static_tools calls discovery.discover_instances() and
+        # registry._fetch_and_register_schema(); it reads/writes state._*).
+        # Patching the flat bridge.* re-exports would NOT intercept those, so
+        # the test would pass vacuously regardless of the code under test.
+        with patch.object(bridge.discovery, "discover_instances", return_value=two), \
+             patch.object(bridge.registry, "_fetch_and_register_schema",
                           side_effect=lambda *a, **kw: fetch_calls.append(1) or 0):
             # Reset connection state so the test is hermetic.
-            bridge._active_socket = None
-            bridge._active_tcp = None
-            bridge._transport_mode = "none"
+            bridge.state._active_socket = None
+            bridge.state._active_tcp = None
+            bridge.state._transport_mode = "none"
             bridge._auto_connect()
 
         self.assertEqual(
@@ -476,8 +481,8 @@ class TestAutoConnectMultiInstance(unittest.TestCase):
             "schema fetch was called — _auto_connect fell through to TCP "
             "after the multi-UDS warning"
         )
-        self.assertEqual(bridge._transport_mode, "none")
-        self.assertIsNone(bridge._active_tcp)
+        self.assertEqual(bridge.state._transport_mode, "none")
+        self.assertIsNone(bridge.state._active_tcp)
 
 
 class TestDebuggerAttachAddressSync(unittest.TestCase):
@@ -507,10 +512,10 @@ class TestDebuggerAttachAddressSync(unittest.TestCase):
                 "/get_metadata or any other endpoint"
             )
 
-        with patch.object(bridge, "_debugger_request",
+        with patch.object(bridge.debugger, "_debugger_request",
                           side_effect=fake_debugger_request), \
-             patch.object(bridge, "dispatch_get", side_effect=fake_dispatch_get), \
-             patch.object(bridge, "_transport_mode", "tcp"):
+             patch.object(bridge.dispatch, "dispatch_get", side_effect=fake_dispatch_get), \
+             patch.object(bridge.state, "_transport_mode", "tcp"):
             bridge.debugger_attach("12345")
 
         sync = [c for c in debugger_calls if c[1] == "/debugger/sync_modules"]
@@ -532,6 +537,43 @@ class TestIsPidAlive(unittest.TestCase):
         from bridge_mcp_ghidra import is_pid_alive
 
         self.assertFalse(is_pid_alive(4000000))
+
+
+class TestValidateServerUrl(unittest.TestCase):
+    """Test TCP server URL validation.
+
+    The contract must match how transport.tcp_request dials the URL: plain
+    http.client.HTTPConnection(hostname, port) — no TLS, no port inference.
+    """
+
+    def _validate(self, url):
+        from bridge_mcp_ghidra import validate_server_url
+
+        return validate_server_url(url)
+
+    def test_accepts_loopback_http_with_explicit_port(self):
+        self.assertTrue(self._validate("http://127.0.0.1:8089"))
+        self.assertTrue(self._validate("http://localhost:8089"))
+        self.assertTrue(self._validate("http://[::1]:8089"))
+
+    def test_rejects_https_scheme(self):
+        # The transport never negotiates TLS — https would pass then fail at
+        # connection time, so it must be rejected up front.
+        self.assertFalse(self._validate("https://127.0.0.1:8089"))
+
+    def test_rejects_missing_port(self):
+        # HTTPConnection silently defaults a missing port to 80, never the
+        # Ghidra server's actual port.
+        self.assertFalse(self._validate("http://127.0.0.1"))
+        self.assertFalse(self._validate("http://localhost"))
+
+    def test_rejects_non_local_host(self):
+        self.assertFalse(self._validate("http://10.0.10.30:8089"))
+        self.assertFalse(self._validate("http://evil.example.com:8089"))
+
+    def test_rejects_malformed_url(self):
+        self.assertFalse(self._validate("not a url"))
+        self.assertFalse(self._validate(""))
 
 
 class TestGetTimeout(unittest.TestCase):
@@ -668,7 +710,7 @@ class TestBuildToolFunction(unittest.TestCase):
         }
         fn = _build_tool_function("/set_function_prototype", "POST", schema)
 
-        with patch("bridge_mcp_ghidra.dispatch_post") as mock_dispatch_post:
+        with patch("bridge_mcp_ghidra.dispatch.dispatch_post") as mock_dispatch_post:
             mock_dispatch_post.return_value = "ok"
             result = fn(
                 function_address="6FA26FD0",
@@ -893,9 +935,9 @@ class TestRegisterToolsFromSchema(unittest.TestCase):
                 count = bridge.register_tools_from_schema(schema)
 
             self.assertEqual(count, 2)
-            self.assertIn("issue_212_valid_before", bridge._dynamic_tool_names)
-            self.assertIn("issue_212_valid_after", bridge._dynamic_tool_names)
-            self.assertNotIn("issue_212_bad_signature", bridge._dynamic_tool_names)
+            self.assertIn("issue_212_valid_before", bridge.state._dynamic_tool_names)
+            self.assertIn("issue_212_valid_after", bridge.state._dynamic_tool_names)
+            self.assertNotIn("issue_212_bad_signature", bridge.state._dynamic_tool_names)
             message = mock_stderr.write.call_args.args[0]
             self.assertIn("1 tool(s) failed to register", message)
             self.assertIn("issue_212_bad_signature", message)
@@ -937,27 +979,27 @@ class TestDispatchErrors(unittest.TestCase):
     def test_dispatch_get_no_connection(self):
         import bridge_mcp_ghidra as bridge
 
-        old = bridge._transport_mode
-        bridge._transport_mode = "none"
+        old = bridge.state._transport_mode
+        bridge.state._transport_mode = "none"
         try:
             result = bridge.dispatch_get("/test")
             data = json.loads(result)
             self.assertIn("error", data)
             self.assertIn("connect_instance", data["error"])
         finally:
-            bridge._transport_mode = old
+            bridge.state._transport_mode = old
 
     def test_dispatch_post_no_connection(self):
         import bridge_mcp_ghidra as bridge
 
-        old = bridge._transport_mode
-        bridge._transport_mode = "none"
+        old = bridge.state._transport_mode
+        bridge.state._transport_mode = "none"
         try:
             result = bridge.dispatch_post("/test", {"key": "value"})
             data = json.loads(result)
             self.assertIn("error", data)
         finally:
-            bridge._transport_mode = old
+            bridge.state._transport_mode = old
 
 
 class TestUnixHTTPConnection(unittest.TestCase):

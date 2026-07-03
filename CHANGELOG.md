@@ -6,6 +6,27 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+### Changed
+
+- **Bridge restructured into a package + uv-native packaging.** The historical
+  single-file `bridge_mcp_ghidra.py` (~2,270 lines) is split into a focused-module
+  package under `python/bridge_mcp_ghidra/` (`config`, `state`, `server`,
+  `validation`, `transport`, `discovery`, `schema`, `dispatch`, `registry`,
+  `static_tools`, `debugger`, `cli`). Behavior is unchanged; cross-module calls
+  are module-qualified and mutable runtime state lives in `state.py`.
+- **uv is now the Python toolchain.** A root `pyproject.toml` + `uv.lock` define
+  the shippable `ghidra-mcp-bridge` wheel (console script `bridge-mcp-ghidra`)
+  and PEP 735 dependency groups (`test`, `debugger`, `fun-doc`, `dev`). The
+  `requirements*.txt` files and `pytest.ini` were removed (folded into
+  `pyproject.toml`); `tools.setup` installs deps via `uv sync` and deploys the
+  built wheel.
+- **CI builds and attaches a wheel.** Release / pre-release workflows build the
+  bridge wheel with `uv build` and publish `ghidra_mcp_bridge-X.Y.Z-py3-none-any.whl`
+  as the GitHub Release asset instead of the raw bridge script. Test/lint jobs run
+  through uv.
+- **Run the bridge with** `uv run bridge-mcp-ghidra` or `python -m bridge_mcp_ghidra`
+  (the old `python bridge_mcp_ghidra.py` invocation is gone).
+
 ---
 
 ## v5.15.0 - 2026-07-02 (minor: headless GZF/GAR round-trip + debugger write primitives)

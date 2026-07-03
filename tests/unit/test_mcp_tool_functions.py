@@ -20,21 +20,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 def setUpModule():
     """Force strict mode off for tests that don't manage it explicitly.
 
-    The bridge reads GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS at module import. If
-    the variable happens to be set in the surrounding shell or CI, that import
-    would flip _require_selectors=True and leak into tests that assume the
-    default off state (i.e. every test outside TestProgramRequired). Clamp the
-    module state here so the suite is deterministic regardless of the
-    environment; TestProgramRequired manages its own state via setUp/tearDown.
+    The bridge reads GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS at import (via
+    bridge_mcp_ghidra.state._init_require_selectors()). If the variable happens
+    to be set in the surrounding shell or CI, that import would flip
+    state._require_selectors=True and leak into tests that assume the default
+    off state (i.e. every test outside TestProgramRequired). Clamp the module
+    state here so the suite is deterministic regardless of the environment;
+    TestProgramRequired manages its own state via setUp/tearDown.
     """
     import bridge_mcp_ghidra
-    bridge_mcp_ghidra._require_selectors = False
+    bridge_mcp_ghidra.state._require_selectors = False
 
 
 class TestGetToolDispatch(unittest.TestCase):
     """Test that GET tool functions dispatch correctly."""
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_with_required_param(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
         mock_get.return_value = '{"result": "ok"}'
@@ -51,7 +52,7 @@ class TestGetToolDispatch(unittest.TestCase):
         )
         self.assertEqual(result, '{"result": "ok"}')
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_with_optional_param_none(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
         mock_get.return_value = '{"data": []}'
@@ -69,7 +70,7 @@ class TestGetToolDispatch(unittest.TestCase):
         # None values should be filtered out
         mock_get.assert_called_once_with("/list_functions", params=None)
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_with_no_params(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
         mock_get.return_value = '{"version": "4.2.0"}'
@@ -84,7 +85,7 @@ class TestGetToolDispatch(unittest.TestCase):
 class TestPostToolDispatch(unittest.TestCase):
     """Test that POST tool functions dispatch correctly."""
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_with_json_body(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"success": true}'
@@ -103,7 +104,7 @@ class TestPostToolDispatch(unittest.TestCase):
             "/rename_function", data={"address": "0x401000", "name": "main"}, query_params=None
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_filters_none_values(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"success": true}'
@@ -122,7 +123,7 @@ class TestPostToolDispatch(unittest.TestCase):
             "/rename_function", data={"address": "0x401000"}, query_params=None
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_integer_params(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"data": []}'
@@ -140,7 +141,7 @@ class TestPostToolDispatch(unittest.TestCase):
         # POST sends native types, not strings
         mock_post.assert_called_once_with("/search", data={"offset": 0, "limit": 50}, query_params=None)
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_post_synthetic_dry_run_only_for_true_values(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"success": true}'
@@ -169,7 +170,7 @@ class TestPostToolDispatch(unittest.TestCase):
             query_params={"dry_run": "true"},
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_schema_declared_query_dry_run_does_not_duplicate_signature(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"dry_run": true}'
@@ -197,7 +198,7 @@ class TestPostToolDispatch(unittest.TestCase):
             query_params={"program": "pwahelper.exe", "dry_run": "false"},
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_schema_declared_body_dry_run_uses_body_source(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
         mock_post.return_value = '{"dry_run": true}'
@@ -272,7 +273,7 @@ class TestSchemaEdgeCases(unittest.TestCase):
 class TestToolRegistrationRoundTrip(unittest.TestCase):
     """Test full schema → registration → dispatch round trip."""
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_full_roundtrip(self, mock_get):
         from bridge_mcp_ghidra import register_tools_from_schema, mcp
         mock_get.return_value = '{"functions": []}'
@@ -306,10 +307,10 @@ class TestProgramRequired(unittest.TestCase):
     def setUp(self):
         import bridge_mcp_ghidra as bridge
         self.bridge = bridge
-        self._saved = bridge._require_selectors
+        self._saved = bridge.state._require_selectors
 
     def tearDown(self):
-        self.bridge._require_selectors = self._saved
+        self.bridge.state._require_selectors = self._saved
 
     _OPTIONAL_PROGRAM_TOOL = {
         "properties": {
@@ -319,10 +320,10 @@ class TestProgramRequired(unittest.TestCase):
         "required": ["address"],
     }
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_refuses_when_program_omitted(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
-        self.bridge._require_selectors = True
+        self.bridge.state._require_selectors = True
 
         fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
         result = fn(address="0x401000")
@@ -333,11 +334,11 @@ class TestProgramRequired(unittest.TestCase):
         self.assertIn("program=", data["error"])
         self.assertIn("GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS", data["error"])
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_get_allows_explicit_program(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
         mock_get.return_value = "{}"
-        self.bridge._require_selectors = True
+        self.bridge.state._require_selectors = True
 
         fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
         fn(address="0x401000", program="game.exe")
@@ -347,11 +348,11 @@ class TestProgramRequired(unittest.TestCase):
             params={"address": "0x401000", "program": "game.exe"},
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_pass_through_when_strict_mode_disabled(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
         mock_get.return_value = "{}"
-        self.bridge._require_selectors = False
+        self.bridge.state._require_selectors = False
 
         fn = _build_tool_function("/decompile_function", "GET", self._OPTIONAL_PROGRAM_TOOL)
         fn(address="0x401000")
@@ -360,11 +361,11 @@ class TestProgramRequired(unittest.TestCase):
             "/decompile_function", params={"address": "0x401000"}
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_no_refusal_for_tools_without_program_param(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
         mock_get.return_value = "{}"
-        self.bridge._require_selectors = True
+        self.bridge.state._require_selectors = True
 
         # Some tools have no program= selector at all.
         schema = {"properties": {"address": {"type": "string"}}, "required": ["address"]}
@@ -373,10 +374,10 @@ class TestProgramRequired(unittest.TestCase):
 
         mock_get.assert_called_once_with("/some_tool", params={"address": "0x401000"})
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_empty_program_counts_as_omitted(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
-        self.bridge._require_selectors = True
+        self.bridge.state._require_selectors = True
 
         # An empty string is filtered upstream of the strict check, so the
         # check should treat it as a missing program=.
@@ -412,10 +413,10 @@ class TestProgramRequired(unittest.TestCase):
         "required": ["address_a", "address_b", "program_a", "program_b"],
     }
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_multi_program_refuses_when_both_selectors_empty(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
-        self.bridge._require_selectors = True
+        self.bridge.state._require_selectors = True
 
         fn = _build_tool_function("/bulk_fuzzy_match", "GET", self._FUZZY_SCHEMA)
         result = fn(address="0x401000", source_program="", target_program="")
@@ -425,10 +426,10 @@ class TestProgramRequired(unittest.TestCase):
         self.assertIn("source_program=", data["error"])
         self.assertIn("target_program=", data["error"])
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_multi_program_refuses_when_one_selector_empty(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
-        self.bridge._require_selectors = True
+        self.bridge.state._require_selectors = True
 
         fn = _build_tool_function("/bulk_fuzzy_match", "GET", self._FUZZY_SCHEMA)
         result = fn(address="0x401000", source_program="game.exe", target_program="")
@@ -439,11 +440,11 @@ class TestProgramRequired(unittest.TestCase):
         self.assertIn("target_program=", data["error"])
         self.assertNotIn("source_program=", data["error"])
 
-    @patch("bridge_mcp_ghidra.dispatch_get")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_get")
     def test_multi_program_allows_when_all_present(self, mock_get):
         from bridge_mcp_ghidra import _build_tool_function
         mock_get.return_value = "{}"
-        self.bridge._require_selectors = True
+        self.bridge.state._require_selectors = True
 
         fn = _build_tool_function("/bulk_fuzzy_match", "GET", self._FUZZY_SCHEMA)
         fn(address="0x401000", source_program="game.exe", target_program="test.dll")
@@ -457,10 +458,10 @@ class TestProgramRequired(unittest.TestCase):
             },
         )
 
-    @patch("bridge_mcp_ghidra.dispatch_post")
+    @patch("bridge_mcp_ghidra.dispatch.dispatch_post")
     def test_program_a_b_pattern_enforced(self, mock_post):
         from bridge_mcp_ghidra import _build_tool_function
-        self.bridge._require_selectors = True
+        self.bridge.state._require_selectors = True
 
         fn = _build_tool_function("/diff_functions", "POST", self._DIFF_SCHEMA)
         result = fn(address_a="0x401000", address_b="0x402000", program_a="", program_b="")
@@ -472,32 +473,32 @@ class TestProgramRequired(unittest.TestCase):
 
     def test_init_value_1_enables_strict_mode(self):
         for val in ("1", " 1 "):  # only "1" (surrounding whitespace tolerated)
-            self.bridge._require_selectors = False
+            self.bridge.state._require_selectors = False
             with patch.dict("os.environ", {"GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS": val}):
                 # assertLogs captures the enable-time INFO line (keeping it out
                 # of test output) and doubles as an assertion that it fires.
                 with self.assertLogs("bridge_mcp_ghidra", level="INFO"):
-                    self.bridge._init_require_selectors()
+                    self.bridge.state._init_require_selectors()
             self.assertTrue(
-                self.bridge._require_selectors, f"{val!r} should enable strict mode"
+                self.bridge.state._require_selectors, f"{val!r} should enable strict mode"
             )
 
     def test_init_non_1_values_leave_strict_mode_off(self):
         # Only "1" enables; other spellings (true/yes/on) and falsy values don't.
         for val in ("true", "yes", "on", "TRUE", "0", "2", "", "anything"):
-            self.bridge._require_selectors = True
+            self.bridge.state._require_selectors = True
             with patch.dict("os.environ", {"GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS": val}):
-                self.bridge._init_require_selectors()
+                self.bridge.state._init_require_selectors()
             self.assertFalse(
-                self.bridge._require_selectors, f"{val!r} should not enable strict mode"
+                self.bridge.state._require_selectors, f"{val!r} should not enable strict mode"
             )
 
     def test_init_unset_env_leaves_strict_mode_off(self):
-        self.bridge._require_selectors = True
+        self.bridge.state._require_selectors = True
         env = {k: v for k, v in os.environ.items() if k != "GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS"}
         with patch.dict("os.environ", env, clear=True):
-            self.bridge._init_require_selectors()
-        self.assertFalse(self.bridge._require_selectors)
+            self.bridge.state._init_require_selectors()
+        self.assertFalse(self.bridge.state._require_selectors)
 
 
 if __name__ == "__main__":

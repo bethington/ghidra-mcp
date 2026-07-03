@@ -143,23 +143,20 @@ jobs:
     steps:
     - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
-    - name: Set up Python
-      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+    - name: Install uv
+      uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
       with:
-        python-version: ${{ matrix.python-version }}
-        cache: 'pip'
+        enable-cache: true
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -q -r requirements-test.txt 2>/dev/null || echo "requirements-test.txt not found"
-        pip install -q -r requirements.txt 2>/dev/null || echo "requirements.txt not found"
+    - name: Set up Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
 
     - name: Run Python unit tests
       run: |
-        # Run only unit tests (integration tests require a running MCP server)
-        # Includes: tool function tests, endpoint catalog consistency, response schema validation
-        pytest tests/unit/ -v --no-cov --tb=short
+        # Run only unit tests (integration tests require a running MCP server).
+        # uv installs the bridge package (editable) + test group from the lock.
+        uv run --python ${{ matrix.python-version }} --group test \
+          pytest tests/unit/ -v --no-cov --tb=short
 
     - name: Upload coverage
       if: ${{ always() && hashFiles('coverage.xml', 'tests/coverage.xml') != '' }}
@@ -176,20 +173,17 @@ jobs:
     steps:
     - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
-    - name: Set up Python
-      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+    - name: Install uv
+      uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
       with:
-        python-version: '3.12'
-        cache: 'pip'
+        enable-cache: true
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -q -r requirements-test.txt
-        pip install -q -r requirements.txt
-        pip install -q -r fun-doc/requirements.txt
+    - name: Set up Python
+      run: uv python install 3.12
 
     - name: Run offline performance/regression tests
+      env:
+        UV_RUN: uv run --python 3.12 --group test --group fun-doc
       run: |
         # These suites guard fun-doc (fun_doc.py, storage/, audit/, library detector,
         # selector, etc.) and run without a live Ghidra server. The autouse fixture in
@@ -203,7 +197,7 @@ jobs:
         #   * the benchmark tests — "manual only" by design (CLAUDE.md); they depend on local
         #     benchmark assets not tracked in the repo (e.g. fun-doc/benchmark/extract_truth.py),
         #     a live Ghidra (Benchmark.dll), or an LLM judge, none of which exist in CI.
-        python -m pytest tests/performance/ --no-cov -q \
+        $UV_RUN python -m pytest tests/performance/ --no-cov -q \
           --ignore=tests/performance/test_batch_scoring_consistency.py \
           --ignore=tests/performance/test_health_endpoint.py \
           --ignore=tests/performance/test_http_concurrency.py \
@@ -225,20 +219,16 @@ jobs:
     steps:
     - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
-    - name: Set up Python
-      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+    - name: Install uv
+      uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
       with:
-        python-version: '3.10'
-
-    - name: Install quality tools
-      run: |
-        pip install -q pylint flake8 black isort 2>/dev/null || true
+        enable-cache: true
 
     - name: Run flake8
-      run: flake8 bridge_mcp_ghidra.py --max-line-length=120 --ignore=E501,W503 || true
+      run: uvx flake8 python/bridge_mcp_ghidra/ --max-line-length=120 --ignore=E501,W503 || true
 
     - name: Check formatting with black
-      run: black --check bridge_mcp_ghidra.py 2>/dev/null || echo "black check skipped"
+      run: uvx black --check python/bridge_mcp_ghidra/ 2>/dev/null || echo "black check skipped"
 
   markdown-lint:
     # ADVISORY / non-blocking: continue-on-error means findings never fail CI, and
