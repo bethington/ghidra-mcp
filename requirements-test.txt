@@ -15,7 +15,7 @@ responses>=0.26.1
 requests-mock>=1.12.1
 
 # Test reporting
-coverage>=7.0.0
+coverage>=7.15.0
 pytest-json-report>=1.5.0
 
 # YAML parsing (workflow validation tests)
