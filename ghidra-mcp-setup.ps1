@@ -591,26 +591,6 @@ function Test-DependencyGroup {
     return $false
 }
 
-function Install-PythonRequirementsFile {
-    param(
-        [Parameter(Mandatory = $true)]$PythonCommand,
-        [Parameter(Mandatory = $true)][string]$RequirementsPath,
-        [Parameter(Mandatory = $true)][string]$Description
-    )
-
-    if (-not (Test-Path $RequirementsPath)) {
-        Write-LogWarning "$RequirementsPath not found, skipping $Description."
-        return
-    }
-
-    $pipParameters = @($PythonCommand.PrefixParameters) + @("-m", "pip", "install")
-    if ($VerbosePreference -ne 'Continue') {
-        $pipParameters += @("-q", "--disable-pip-version-check")
-    }
-    $pipParameters += @("-r", $RequirementsPath)
-    Invoke-CommandChecked -Command $PythonCommand.Command -Arguments $pipParameters -Description $Description
-}
-
 function Install-PythonPackages {
     # Dependencies are managed by uv via the root pyproject.toml / uv.lock
     # (PEP 735 dependency groups). Sync the dev group, plus debugger if requested.
