@@ -35,20 +35,39 @@ def _module_to_program(module):
     return "Game.exe" if module.lower() == "game" else f"{module}.dll"
 
 
+def _find_def_after(lines, marker_line_1based, max_ahead=15):
+    """Scan forward from a @PD2S12 marker (which sits directly above its C++
+    function) for the first function-definition signature. Returns
+    (symbol, def_line_1based) or (None, None). The OpenD2 C++ symbol differs
+    from the Ghidra name (e.g. D2Seed_Advance vs SEED_GetRandomNumberAlt), so we
+    read it from the code, not the marker."""
+    ctrl = {"if", "for", "while", "switch", "return", "sizeof", "catch", "do"}
+    for i in range(marker_line_1based, min(len(lines), marker_line_1based + max_ahead)):
+        s = lines[i].strip()
+        if not s or s.startswith(("//", "/*", "*", "#")):
+            continue
+        m = re.search(r"([A-Za-z_]\w*)\s*\(", s)
+        if m and m.group(1) not in ctrl:
+            return m.group(1), i + 1
+    return None, None
+
+
 def build_index(repo=None):
     """Scan the OpenD2 repo for @PD2S12 markers. Returns a list of dicts:
-    {program, module, address, symbol, file, line, state}. `address` is
-    lowercase hex without the 0x prefix (matches fun-doc's key format)."""
+    {program, module, address, ghidra_name, symbol, file, line, state}.
+    `symbol` is the OpenD2 C++ function (read from the line below the marker);
+    `ghidra_name` is the PD2-S12 function name. `address` is lowercase hex
+    without the 0x prefix (matches fun-doc's key format)."""
     repo = Path(repo or OPEND2_REPO)
     out = []
     seen = set()
     for pattern in _SRC_GLOBS:
         for path in repo.glob(pattern):
             try:
-                text = path.read_text(encoding="utf-8", errors="replace")
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
             except OSError:
                 continue
-            for lineno, line in enumerate(text.splitlines(), 1):
+            for idx, line in enumerate(lines):
                 m = _MARKER_RE.search(line)
                 if not m:
                     continue
@@ -58,13 +77,15 @@ def build_index(repo=None):
                 if key in seen:
                     continue
                 seen.add(key)
+                opend2_symbol, def_line = _find_def_after(lines, idx + 1)
                 out.append({
                     "program": program,
                     "module": m.group("module"),
                     "address": addr,
-                    "symbol": m.group("symbol"),
+                    "ghidra_name": m.group("symbol"),
+                    "symbol": opend2_symbol or m.group("symbol"),
                     "file": str(path.relative_to(repo)).replace("\\", "/"),
-                    "line": lineno,
+                    "line": def_line or (idx + 1),
                     "state": (m.group("state") or "PORTED").upper(),
                 })
     return out
@@ -79,7 +100,12 @@ def coverage_summary(repo=None):
         p["ported"] += 1
         if e["state"] == "PROVEN":
             p["proven"] += 1
-        p["symbols"].append({"symbol": e["symbol"], "address": e["address"], "state": e["state"]})
+        p["symbols"].append({
+            "symbol": e["symbol"],
+            "ghidra_name": e.get("ghidra_name"),
+            "address": e["address"],
+            "state": e["state"],
+        })
     return {"total_ported": len(idx), "by_program": by_program}
 
 
