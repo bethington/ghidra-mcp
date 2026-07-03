@@ -868,7 +868,14 @@ public class ListingService {
                     Map<String, Object> entry = new LinkedHashMap<>();
                     entry.put("name", extLoc.getLabel());
                     entry.put("library", libName);
-                    entry.put("address", extLoc.getAddress().toString(false));
+                    Address address = extLoc.getAddress();
+                    if (address != null) {
+                        entry.putAll(ServiceUtils.addressToJson(address, program));
+                        entry.putIfAbsent("address_full", address.toString());
+                        entry.putIfAbsent("address_space", address.getAddressSpace().getName());
+                    } else {
+                        entry.put("address", null);
+                    }
                     String original = extLoc.getOriginalImportedName();
                     if (original != null && !original.isEmpty() && !original.equals(extLoc.getLabel())) {
                         entry.put("original_imported_name", original);
@@ -897,15 +904,18 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        Address addr = ServiceUtils.parseAddress(program, address);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
         ExternalManager extMgr = program.getExternalManager();
+        Address addr = null;
+        if (address != null && !address.isBlank()) {
+            addr = ServiceUtils.parseAddress(program, address);
+            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        }
 
         if (dllName != null && !dllName.isEmpty()) {
             ExternalLocationIterator iter = extMgr.getExternalLocations(dllName);
             while (iter.hasNext()) {
                 ExternalLocation extLoc = iter.next();
-                if (extLoc.getAddress().equals(addr)) {
+                if (matchesExternalLocation(extLoc, addr, null)) {
                     return Response.ok(externalLocationToMap(extLoc, dllName));
                 }
             }
@@ -916,7 +926,7 @@ public class ListingService {
                 ExternalLocationIterator iter = extMgr.getExternalLocations(libName);
                 while (iter.hasNext()) {
                     ExternalLocation extLoc = iter.next();
-                    if (extLoc.getAddress().equals(addr)) {
+                    if (matchesExternalLocation(extLoc, addr, address)) {
                         return Response.ok(externalLocationToMap(extLoc, libName));
                     }
                 }
@@ -931,7 +941,14 @@ public class ListingService {
 
     private static Map<String, Object> externalLocationToMap(ExternalLocation extLoc, String libName) {
         Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("address", extLoc.getAddress().toString());
+        Address address = extLoc.getAddress();
+        if (address != null) {
+            entry.putAll(ServiceUtils.addressToJson(address, null));
+            entry.putIfAbsent("address_full", address.toString());
+            entry.putIfAbsent("address_space", address.getAddressSpace().getName());
+        } else {
+            entry.put("address", null);
+        }
         entry.put("dll_name", libName);
         entry.put("label", extLoc.getLabel());
         String original = extLoc.getOriginalImportedName();
@@ -939,6 +956,17 @@ public class ListingService {
             entry.put("original_imported_name", original);
         }
         return entry;
+    }
+
+    private static boolean matchesExternalLocation(ExternalLocation extLoc, Address addr, String rawAddress) {
+        Address extAddr = extLoc.getAddress();
+        if (addr != null) {
+            return extAddr != null && extAddr.equals(addr);
+        }
+        if (rawAddress == null || rawAddress.isBlank()) {
+            return false;
+        }
+        return extAddr != null && extAddr.toString().equalsIgnoreCase(rawAddress.strip());
     }
 
     // ======================================================================
