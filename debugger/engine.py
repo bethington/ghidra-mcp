@@ -230,6 +230,12 @@ class DebugEngine:
         self._is_wow64 = False
         self._protected_base: Optional[AllDbg] = None
         self._events = EngineEventHandler()
+        # Anti-anti-debug: when enabled, pass first-chance exceptions (notably
+        # the INT3/STATUS_BREAKPOINT flood PD2 throws) to the TARGET's own SEH
+        # instead of the debugger swallowing them, so the target's handler runs
+        # and it doesn't conclude a debugger is present. Off by default so
+        # attach/normal debugging behave as usual.
+        self._pass_exceptions = False
 
         # Work queue and worker thread
         self._work_queue: queue.SimpleQueue = queue.SimpleQueue()
@@ -311,7 +317,14 @@ class DebugEngine:
 
     def _attach_impl(self, target: str) -> dict:
         if self._state not in (DebuggerState.DETACHED, DebuggerState.EXITED):
-            raise RuntimeError(f"Cannot attach in state {self._state.value}")
+            # Already attached — detach first so re-attach is robust/idempotent
+            # (fixes "Cannot attach in state stopped" and clears stale
+            # breakpoint objects that otherwise E_NOINTERFACE on removal).
+            logger.info(f"Already {self._state.value}; detaching before re-attach")
+            try:
+                self._detach_impl()
+            except Exception as e:
+                logger.warning(f"pre-attach detach failed (continuing): {e}")
 
         base = self._base
         target_name = target
@@ -463,6 +476,54 @@ class DebugEngine:
         self._run_on_engine(_impl)
         return {"state": "running"}
 
+    def go_wait(self, timeout_ms: int = 4000) -> dict:
+        """Resume execution and BLOCK until a breakpoint/event or timeout.
+
+        Unlike go_nowait (which only sets DEBUG_STATUS_GO and relies on the
+        idle DispatchCallbacks pump — that does not actually advance the
+        target), this pumps WaitForEvent on the engine thread, which is what
+        makes dbgeng run the debuggee and deliver breakpoint events. On timeout
+        it interrupts so control is regained. Returns {state, pc, timeout?}.
+        """
+        return self._run_on_engine(self._go_wait_impl, timeout_ms)
+
+    def _go_wait_impl(self, timeout_ms: int) -> dict:
+        self._require_stopped()
+        self._state = DebuggerState.RUNNING
+        self._executing = True
+        # A FINITE WaitForEvent timeout faults (AV) in non-standalone mode, and
+        # the engine's single worker can't be interrupted from within its own
+        # blocked wait. So run the proven infinite wait and self-bound it with a
+        # timer thread that issues SetInterrupt (thread-safe, unblocks
+        # WaitForEvent) — go_wait always returns within ~timeout_ms.
+        bomb_state = {"timed_out": False}
+
+        def _bomb():
+            bomb_state["timed_out"] = True
+            try:
+                if self._protected_base is not None:
+                    self._protected_base._control.SetInterrupt(
+                        DbgEng.DEBUG_INTERRUPT_ACTIVE)
+            except Exception:
+                pass
+
+        timer = threading.Timer(max(0.05, timeout_ms / 1000.0), _bomb)
+        timer.daemon = True
+        timer.start()
+        try:
+            self._base.go()   # SetExecutionStatus(GO) + wait(WAIT_INFINITE)
+        finally:
+            timer.cancel()
+            self._state = DebuggerState.STOPPED
+            self._executing = False
+        pc = 0
+        try:
+            pc = self._read_pc_impl()
+        except Exception:
+            pass
+        return {"state": "stopped", "timeout": bomb_state["timed_out"],
+                "pc": f"0x{pc:08X}"}
+
     def interrupt(self) -> dict:
         """Break into the debugger (interrupt execution)."""
         # interrupt() can be called from any thread
@@ -472,6 +533,38 @@ class DebugEngine:
         self._state = DebuggerState.STOPPED
         self._executing = False
         return {"state": "stopped"}
+
+    # -- Anti-anti-debug: first-chance exception pass-through ----------------
+
+    def set_pass_exceptions(self, enabled: bool) -> dict:
+        """Enable/disable handing first-chance exceptions to the target's own
+        SEH instead of the debugger swallowing them. Defeats INT3-based
+        anti-debug (e.g. PD2's breakpoint-exception flood)."""
+        return self._run_on_engine(self._set_pass_exceptions_impl, bool(enabled))
+
+    def _set_pass_exceptions_impl(self, enabled: bool) -> dict:
+        self._pass_exceptions = enabled
+        try:
+            if enabled:
+                self._base.events.exception(self._on_exception)
+            else:
+                self._base.events.noexception()
+        except Exception as e:
+            logger.warning(f"exception pass-through toggle failed: {e}")
+        logger.info(f"Exception pass-through {'ENABLED' if enabled else 'disabled'}")
+        return {"pass_exceptions": self._pass_exceptions}
+
+    def _on_exception(self, *args):
+        """dbgeng EXCEPTION-event callback. args[0]=ExceptionRecord,
+        args[1]=first-chance flag. When pass-through is on, first-chance
+        exceptions (notably the INT3/STATUS_BREAKPOINT anti-debug flood) are
+        continued as NOT-handled so the target's own handler runs and it can't
+        detect us. Our OWN breakpoints arrive via the separate BREAKPOINT event
+        and are unaffected. Off -> NO_CHANGE (default dbgeng behaviour)."""
+        first_chance = (len(args) < 2) or bool(args[1])
+        if self._pass_exceptions and first_chance:
+            return DbgEng.DEBUG_STATUS_GO_NOT_HANDLED
+        return DbgEng.DEBUG_STATUS_NO_CHANGE
 
     def step_into(self, count: int = 1) -> dict:
         """Single-step into (trace)."""
