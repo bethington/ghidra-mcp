@@ -44,6 +44,7 @@ import ghidra.util.task.TaskMonitor;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -682,6 +683,131 @@ public class HeadlessProgramProvider implements ProgramProvider {
      */
     public TaskMonitor getMonitor() {
         return monitor;
+    }
+
+    /**
+     * Check a program back in to the shared Ghidra Server, creating a new
+     * server version. This closes the #119 gap: GhidraServerManager.checkinFile
+     * cannot commit (RepositoryAdapter exposes no checkin), so a checkin must
+     * run through DomainFile.checkin() on the open shared project.
+     *
+     * Any pending edits on the open DomainObject are saved into the local
+     * project database, then the object is released BEFORE checkin. Releasing
+     * first matters: checking in while the program is still open forces
+     * keepCheckedOut=true regardless of the handler (Ghidra logs "File
+     * currently open - must keep checked-out"), so keepCheckedOut=false only
+     * actually drops the server checkout once the object is closed.
+     *
+     * @param path            project path of the file (e.g. "/scratch/writetest");
+     *                        null/empty uses the current program's own file
+     * @param comment         checkin comment (also used for the pre-checkin save)
+     * @param keepCheckedOut  keep the file checked out after the new version lands
+     * @return result map with status/version_before/version/version_bumped, or error
+     */
+    public Map<String, Object> checkinProgram(String path, String comment, boolean keepCheckedOut) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (project == null) {
+            out.put("success", false);
+            out.put("error", "No project open. Call /open_project first.");
+            return out;
+        }
+        if (comment == null) {
+            comment = "";
+        }
+
+        ProjectData projectData;
+        try {
+            projectData = project.getProjectData();
+        } catch (Exception e) {
+            out.put("success", false);
+            out.put("error", "Could not access project data: " + e.getMessage());
+            return out;
+        }
+
+        Program prog;
+        DomainFile file;
+        if (path == null || path.isEmpty()) {
+            prog = currentProgram;
+            if (prog == null) {
+                out.put("success", false);
+                out.put("error", "No current program open; supply 'path'.");
+                return out;
+            }
+            file = prog.getDomainFile();
+            path = file.getPathname();
+        } else {
+            try {
+                file = projectData.getFile(path);
+            } catch (Exception e) {
+                out.put("success", false);
+                out.put("error", "Path lookup failed: " + e.getMessage());
+                return out;
+            }
+            if (file == null) {
+                out.put("success", false);
+                out.put("error", "File not found in project: " + path);
+                return out;
+            }
+            // Only treat a same-named open program as ours if its DomainFile matches.
+            Program candidate = openPrograms.get(file.getName());
+            prog = (candidate != null && file.equals(candidate.getDomainFile())) ? candidate : null;
+        }
+
+        if (!file.isVersioned()) {
+            out.put("success", false);
+            out.put("error", "File is not under version control: " + path
+                + " (add it first, or check out a versioned file)");
+            return out;
+        }
+        if (!file.isCheckedOut()) {
+            out.put("success", false);
+            out.put("error", "File is not checked out: " + path);
+            return out;
+        }
+
+        try {
+            // Save pending edits into the local project DB, then release the
+            // open object so the checkout can be dropped on checkin.
+            if (prog != null) {
+                try {
+                    if (prog.isChanged()) {
+                        prog.save(comment.isEmpty() ? "checkin" : comment, monitor);
+                    }
+                } catch (Exception e) {
+                    out.put("success", false);
+                    out.put("error", "Save before checkin failed: " + e.getMessage());
+                    return out;
+                }
+                closeProgram(prog);
+            }
+
+            int versionBefore = file.getVersion();
+            final String cmt = comment;
+            final boolean keep = keepCheckedOut;
+            file.checkin(new ghidra.framework.data.CheckinHandler() {
+                public boolean keepCheckedOut() { return keep; }
+                public String getComment() { return cmt; }
+                public boolean createKeepFile() { return false; }
+            }, monitor);
+            int versionAfter = file.getVersion();
+
+            out.put("success", true);
+            out.put("status", "checked_in");
+            out.put("path", path);
+            out.put("version_before", versionBefore);
+            out.put("version", versionAfter);
+            out.put("version_bumped", versionAfter > versionBefore);
+            out.put("checked_out", file.isCheckedOut());
+            out.put("comment", comment);
+            out.put("keep_checked_out", keepCheckedOut);
+            Msg.info(this, "Checked in " + path + " (v" + versionBefore + " -> v" + versionAfter + ")");
+            return out;
+        } catch (Exception e) {
+            Msg.error(this, "Checkin failed for " + path, e);
+            out.put("success", false);
+            out.put("error", "Checkin failed (" + e.getClass().getSimpleName() + "): " + e.getMessage());
+            return out;
+        }
     }
 
     /**
