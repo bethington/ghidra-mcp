@@ -215,6 +215,183 @@ public class HeadlessManagementService {
     }
 
     // ========================================================================
+    // GZF export / import
+    // ========================================================================
+
+    @McpTool(path = "/export_program", method = "POST",
+            description = "Export a program to a GZF (Ghidra packed-database) file on disk. The resulting .gzf "
+                + "can be imported into any Ghidra GUI (File \u2192 Import) or back into a project via "
+                + "/import_program. Resolution order: (1) the in-memory program with that name (captures live "
+                + "analyst edits); (2) a DomainFile in the open project (on-disk state). Output is written to "
+                + "`output_dir/output_name` (defaults: /data/exports and `<program>.gzf`). Refuses to overwrite "
+                + "an existing file.",
+            category = "headless")
+    public Response exportProgram(
+            @Param(value = "program_name", source = ParamSource.BODY,
+                description = "Program name or project path (e.g. 'myprog' or '/myprog').") String programName,
+            @Param(value = "output_dir", source = ParamSource.BODY, defaultValue = "/data/exports",
+                description = "Directory the .gzf will be written to. Must already exist.") String outputDir,
+            @Param(value = "output_name", source = ParamSource.BODY, defaultValue = "",
+                description = "Output file name. Defaults to `<program>.gzf`. `.gzf` is appended if missing.") String outputName) {
+        if (programName == null || programName.isEmpty()) {
+            return Response.err("program_name required");
+        }
+        String dirPath = (outputDir == null || outputDir.isEmpty()) ? "/data/exports" : outputDir;
+        File dir = new File(dirPath);
+        if (!dir.isDirectory()) {
+            return Response.err("output_dir not a directory: " + dir.getAbsolutePath());
+        }
+        String name;
+        if (outputName == null || outputName.isEmpty()) {
+            name = HeadlessPaths.safeBasename(programName) + ".gzf";
+        } else {
+            String invalid = HeadlessPaths.validateFilename(outputName);
+            if (invalid != null) {
+                return Response.err("invalid output_name: " + invalid);
+            }
+            name = outputName;
+        }
+        if (!name.toLowerCase().endsWith(".gzf")) {
+            name = name + ".gzf";
+        }
+        File out = new File(dir, name);
+        if (!HeadlessPaths.isWithin(dir, out)) {
+            return Response.err("output_name escapes output_dir: " + name);
+        }
+
+        HeadlessProgramProvider.ExportResult res = programProvider.exportProgramToGzf(programName, out);
+        if (!res.success) {
+            return Response.err(res.error);
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("success", true);
+        body.put("program", res.programName);
+        body.put("path", res.outputPath);
+        body.put("size_bytes", res.sizeBytes);
+        body.put("content_type", "GZF");
+        return Response.ok(body);
+    }
+
+    @McpTool(path = "/import_program", method = "POST",
+            description = "Import a GZF (Ghidra packed-database) file into the open project. The GZF must already "
+                + "exist on disk at `gzf_path` (typically staged on a shared volume by the orchestrator). Lands at "
+                + "`target_folder/target_name` (defaults: `/` and the GZF basename sans `.gzf`). Set `overwrite=true` "
+                + "to replace an existing program at the destination; otherwise the call fails on collision.",
+            category = "headless")
+    public Response importProgram(
+            @Param(value = "gzf_path", source = ParamSource.BODY,
+                description = "Absolute path to the .gzf file on disk.") String gzfPath,
+            @Param(value = "target_folder", source = ParamSource.BODY, defaultValue = "/",
+                description = "Destination folder in the project. Intermediate folders are created.") String targetFolder,
+            @Param(value = "target_name", source = ParamSource.BODY, defaultValue = "",
+                description = "Destination file name in the project. Defaults to the GZF basename sans `.gzf`.") String targetName,
+            @Param(value = "overwrite", source = ParamSource.BODY, defaultValue = "false",
+                description = "When true, delete any existing program at the destination before importing.") boolean overwrite) {
+        if (gzfPath == null || gzfPath.isEmpty()) {
+            return Response.err("gzf_path required");
+        }
+        File gzf = new File(gzfPath);
+
+        HeadlessProgramProvider.ImportResult res =
+            programProvider.importProgramFromGzf(gzf, targetFolder, targetName, overwrite);
+        if (!res.success) {
+            return Response.err(res.error);
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("success", true);
+        body.put("project", programProvider.getProjectName());
+        body.put("folder", res.folderPath);
+        body.put("program", res.programName);
+        body.put("content_type", res.contentType);
+        return Response.ok(body);
+    }
+
+    // ========================================================================
+    // GAR project archive / restore
+    // ========================================================================
+
+    @McpTool(path = "/archive_project", method = "POST",
+            description = "Archive the currently open project to a Ghidra-native .gar file. The result can be "
+                + "restored into any Ghidra GUI via File \u2192 Restore Project, or back into a headless instance "
+                + "via /restore_project. Captures the entire project (all programs, folders, settings, "
+                + "version-control metadata) \u2014 unlike /export_program which ships a single program as .gzf. "
+                + "Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). "
+                + "Refuses to overwrite an existing file. Callers should /save_all_programs first to flush "
+                + "pending in-memory edits.",
+            category = "headless")
+    public Response archiveProject(
+            @Param(value = "output_dir", source = ParamSource.BODY, defaultValue = "/data/exports",
+                description = "Directory the .gar will be written to. Must already exist.") String outputDir,
+            @Param(value = "output_name", source = ParamSource.BODY, defaultValue = "",
+                description = "Output file name. Defaults to `<project>.gar`. `.gar` is appended if missing.") String outputName) {
+        String dirPath = (outputDir == null || outputDir.isEmpty()) ? "/data/exports" : outputDir;
+        File dir = new File(dirPath);
+        if (!dir.isDirectory()) {
+            return Response.err("output_dir not a directory: " + dir.getAbsolutePath());
+        }
+        String projectName = programProvider.getProjectName();
+        String name;
+        if (outputName == null || outputName.isEmpty()) {
+            name = HeadlessPaths.safeBasename(projectName == null ? "project" : projectName) + ".gar";
+        } else {
+            String invalid = HeadlessPaths.validateFilename(outputName);
+            if (invalid != null) {
+                return Response.err("invalid output_name: " + invalid);
+            }
+            name = outputName;
+        }
+        if (!name.toLowerCase().endsWith(".gar")) {
+            name = name + ".gar";
+        }
+        File out = new File(dir, name);
+        if (!HeadlessPaths.isWithin(dir, out)) {
+            return Response.err("output_name escapes output_dir: " + name);
+        }
+
+        HeadlessProgramProvider.ArchiveResult res = programProvider.archiveCurrentProject(out);
+        if (!res.success) {
+            return Response.err(res.error);
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("success", true);
+        body.put("project", res.projectName);
+        body.put("path", res.outputPath);
+        body.put("size_bytes", res.sizeBytes);
+        body.put("content_type", "GAR");
+        return Response.ok(body);
+    }
+
+    @McpTool(path = "/restore_project", method = "POST",
+            description = "Restore a Ghidra .gar archive into a fresh on-disk project at `parent_dir/project_name`. "
+                + "Closes any currently-open project first. The restored project is NOT re-opened automatically; "
+                + "follow up with /open_project so owner reset and project bookkeeping run via the same code path "
+                + "as a user-driven open. Fails loudly if the destination project already exists.",
+            category = "headless")
+    public Response restoreProject(
+            @Param(value = "gar_path", source = ParamSource.BODY,
+                description = "Absolute path to the .gar file on disk.") String garPath,
+            @Param(value = "parent_dir", source = ParamSource.BODY, defaultValue = "/data/ghidra_projects",
+                description = "Directory under which the new project (project_name.gpr + project_name.rep/) will be created.") String parentDir,
+            @Param(value = "project_name", source = ParamSource.BODY,
+                description = "Name of the new project to create from the archive.") String projectName) {
+        if (garPath == null || garPath.isEmpty()) {
+            return Response.err("gar_path required");
+        }
+        File gar = new File(garPath);
+
+        HeadlessProgramProvider.RestoreResult res =
+            programProvider.restoreProject(gar, parentDir, projectName);
+        if (!res.success) {
+            return Response.err(res.error);
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("success", true);
+        body.put("project", res.projectName);
+        body.put("project_dir", res.projectDir);
+        return Response.ok(body);
+    }
+
+    // ========================================================================
     // Server status
     // ========================================================================
 
