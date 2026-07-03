@@ -478,15 +478,29 @@ class DebugEngine:
         self._require_stopped()
         self._state = DebuggerState.RUNNING
         self._executing = True
-        # NOTE: timeout_ms is advisory. In non-standalone mode a FINITE
-        # WaitForEvent timeout faulted here (access violation), while the
-        # infinite wait that stepi() uses is proven-good. So run with an
-        # infinite wait (returns on a breakpoint) and let the caller bound it
-        # by issuing /debugger/interrupt from another connection — interrupt()
-        # is thread-safe and unblocks WaitForEvent.
+        # A FINITE WaitForEvent timeout faults (AV) in non-standalone mode, and
+        # the engine's single worker can't be interrupted from within its own
+        # blocked wait. So run the proven infinite wait and self-bound it with a
+        # timer thread that issues SetInterrupt (thread-safe, unblocks
+        # WaitForEvent) — go_wait always returns within ~timeout_ms.
+        bomb_state = {"timed_out": False}
+
+        def _bomb():
+            bomb_state["timed_out"] = True
+            try:
+                if self._protected_base is not None:
+                    self._protected_base._control.SetInterrupt(
+                        DbgEng.DEBUG_INTERRUPT_ACTIVE)
+            except Exception:
+                pass
+
+        timer = threading.Timer(max(0.05, timeout_ms / 1000.0), _bomb)
+        timer.daemon = True
+        timer.start()
         try:
             self._base.go()   # SetExecutionStatus(GO) + wait(WAIT_INFINITE)
         finally:
+            timer.cancel()
             self._state = DebuggerState.STOPPED
             self._executing = False
         pc = 0
@@ -494,7 +508,8 @@ class DebugEngine:
             pc = self._read_pc_impl()
         except Exception:
             pass
-        return {"state": "stopped", "pc": f"0x{pc:08X}"}
+        return {"state": "stopped", "timeout": bomb_state["timed_out"],
+                "pc": f"0x{pc:08X}"}
 
     def interrupt(self) -> dict:
         """Break into the debugger (interrupt execution)."""
