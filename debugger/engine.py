@@ -709,6 +709,81 @@ class DebugEngine:
 
     # -- Breakpoint management ---------------------------------------------
 
+    def call_function(self, address: int, stack_args=None, registers=None,
+                      ret_catch: Optional[int] = None,
+                      timeout_ms: int = 8000) -> dict:
+        """Call a function IN-PROCESS by hijacking the currently-stopped thread.
+
+        Requires the target STOPPED at a breakpoint (valid thread context). Saves
+        the full context, sets up the calling convention (`stack_args` pushed
+        after a return address; `registers` written for register args like
+        ecx/edx/eax), runs to a return-catch breakpoint, reads the result, then
+        RESTORES the saved context (also the crash safety-net). Proven on WOW64:
+        writing EIP + go_wait commits the context (only single-step is blocked).
+
+        The caller sets up any pointer-arg scratch via write_memory first and
+        passes the address in `registers`/`stack_args`. Returns
+        {eax, edx, returned_to, timeout, ret_catch}. Verify returned_to==ret_catch.
+        """
+        return self._run_on_engine(self._call_function_impl, int(address),
+                                   list(stack_args or []), dict(registers or {}),
+                                   ret_catch, int(timeout_ms))
+
+    def _call_function_impl(self, address, stack_args, registers, ret_catch,
+                            timeout_ms):
+        self._require_stopped()
+        saved = {k.lower(): v for k, v in self._collect_registers_impl().items()}
+        if "eip" not in saved or "esp" not in saved or saved["esp"] == 0:
+            raise RuntimeError("no valid thread context (esp/eip == 0) -- target "
+                               "not stopped at a real debug event")
+        if ret_catch is None:
+            ret_catch = saved["eip"]  # we're stopped here; reuse as the return-catch
+        # ensure a breakpoint exists at ret_catch (add a temp one if not)
+        have = False
+        try:
+            for bp_id in self._base.breakpoints:
+                try:
+                    if self._base._control.GetBreakpointById(bp_id).GetOffset() == ret_catch:
+                        have = True
+                        break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        added_bp = None if have else self._base.breakpoints.set(expr=int(ret_catch))
+        # build the call stack: [new_esp]=ret_catch, [+4]=arg1, [+8]=arg2, ...
+        new_esp = (saved["esp"] - 4 * (len(stack_args) + 1)) & ~0x3
+        self._base.write(new_esp, int(ret_catch).to_bytes(4, "little"))
+        for i, a in enumerate(stack_args):
+            self._base.write(new_esp + 4 + 4 * i,
+                             (int(a) & 0xFFFFFFFF).to_bytes(4, "little"))
+        # set register args + esp + eip, then run to the return-catch
+        with self._wow64_x86_context():
+            for name, val in registers.items():
+                self._base.reg._set_register(name.lower(), int(val) & 0xFFFFFFFF)
+            self._base.reg._set_register("esp", new_esp)
+            self._base.reg._set_register("eip", int(address))
+        res = self._go_wait_impl(timeout_ms)
+        out = {k.lower(): v for k, v in self._collect_registers_impl().items()}
+        # restore the saved context (puts the target back exactly where it was)
+        with self._wow64_x86_context():
+            for name in ("eax", "ebx", "ecx", "edx", "esi", "edi",
+                         "esp", "ebp", "eip", "eflags"):
+                if name in saved:
+                    self._base.reg._set_register(name, int(saved[name]))
+        if added_bp is not None:
+            try:
+                self._base.breakpoints.remove(added_bp)
+            except Exception:
+                pass
+        return {
+            "eax": f"0x{out.get('eax', 0):08X}",
+            "edx": f"0x{out.get('edx', 0):08X}",
+            "returned_to": f"0x{out.get('eip', 0):08X}",
+            "ret_catch": f"0x{int(ret_catch):08X}",
+            "timeout": res.get("timeout"),
+        }
+
     def set_breakpoint(self, address: int,
                        bp_type: BreakpointType = BreakpointType.SOFTWARE,
                        oneshot: bool = False,
