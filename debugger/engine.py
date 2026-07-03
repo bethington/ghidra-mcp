@@ -230,6 +230,12 @@ class DebugEngine:
         self._is_wow64 = False
         self._protected_base: Optional[AllDbg] = None
         self._events = EngineEventHandler()
+        # Anti-anti-debug: when enabled, pass first-chance exceptions (notably
+        # the INT3/STATUS_BREAKPOINT flood PD2 throws) to the TARGET's own SEH
+        # instead of the debugger swallowing them, so the target's handler runs
+        # and it doesn't conclude a debugger is present. Off by default so
+        # attach/normal debugging behave as usual.
+        self._pass_exceptions = False
 
         # Work queue and worker thread
         self._work_queue: queue.SimpleQueue = queue.SimpleQueue()
@@ -311,7 +317,14 @@ class DebugEngine:
 
     def _attach_impl(self, target: str) -> dict:
         if self._state not in (DebuggerState.DETACHED, DebuggerState.EXITED):
-            raise RuntimeError(f"Cannot attach in state {self._state.value}")
+            # Already attached — detach first so re-attach is robust/idempotent
+            # (fixes "Cannot attach in state stopped" and clears stale
+            # breakpoint objects that otherwise E_NOINTERFACE on removal).
+            logger.info(f"Already {self._state.value}; detaching before re-attach")
+            try:
+                self._detach_impl()
+            except Exception as e:
+                logger.warning(f"pre-attach detach failed (continuing): {e}")
 
         base = self._base
         target_name = target
@@ -520,6 +533,38 @@ class DebugEngine:
         self._state = DebuggerState.STOPPED
         self._executing = False
         return {"state": "stopped"}
+
+    # -- Anti-anti-debug: first-chance exception pass-through ----------------
+
+    def set_pass_exceptions(self, enabled: bool) -> dict:
+        """Enable/disable handing first-chance exceptions to the target's own
+        SEH instead of the debugger swallowing them. Defeats INT3-based
+        anti-debug (e.g. PD2's breakpoint-exception flood)."""
+        return self._run_on_engine(self._set_pass_exceptions_impl, bool(enabled))
+
+    def _set_pass_exceptions_impl(self, enabled: bool) -> dict:
+        self._pass_exceptions = enabled
+        try:
+            if enabled:
+                self._base.events.exception(self._on_exception)
+            else:
+                self._base.events.noexception()
+        except Exception as e:
+            logger.warning(f"exception pass-through toggle failed: {e}")
+        logger.info(f"Exception pass-through {'ENABLED' if enabled else 'disabled'}")
+        return {"pass_exceptions": self._pass_exceptions}
+
+    def _on_exception(self, *args):
+        """dbgeng EXCEPTION-event callback. args[0]=ExceptionRecord,
+        args[1]=first-chance flag. When pass-through is on, first-chance
+        exceptions (notably the INT3/STATUS_BREAKPOINT anti-debug flood) are
+        continued as NOT-handled so the target's own handler runs and it can't
+        detect us. Our OWN breakpoints arrive via the separate BREAKPOINT event
+        and are unaffected. Off -> NO_CHANGE (default dbgeng behaviour)."""
+        first_chance = (len(args) < 2) or bool(args[1])
+        if self._pass_exceptions and first_chance:
+            return DbgEng.DEBUG_STATUS_GO_NOT_HANDLED
+        return DbgEng.DEBUG_STATUS_NO_CHANGE
 
     def step_into(self, count: int = 1) -> dict:
         """Single-step into (trace)."""
