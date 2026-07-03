@@ -5,6 +5,7 @@
     "/Mods/PD2-S12/D2Game.dll::6fc31a70": ["ANALYZED_RUNTIME"],
     "/Mods/PD2-S12/D2Game.dll::6fc32380": ["ANALYZED_RUNTIME", "ORACLE"],
     "/Mods/PD2-S12/D2Game.dll::6fcea760": ["ANALYZED_RUNTIME"],
+    "/Mods/PD2-S12/D2Game.dll::6fc970a0": ["ANALYZED_RUNTIME", "ORACLE", "PORTED", "PROVEN"],
     "/Mods/PD2-S12/D2Common.dll::6fd510b0": ["ORACLE", "PORTED", "PROVEN"],
     "/Mods/PD2-S12/D2Common.dll::6fd51100": ["ANALYZED_RUNTIME", "ORACLE", "PORTED", "PROVEN"],
     "/Mods/PD2-S12/D2Common.dll::6fd51180": ["ORACLE", "PORTED", "PROVEN"]
