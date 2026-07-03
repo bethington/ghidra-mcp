@@ -552,6 +552,30 @@ class DebugEngine:
         self._require_stopped()
         return bytes(self._base.read(address, size))
 
+    def write_memory(self, address: int, data: bytes) -> int:
+        """Write bytes to target memory. Returns number of bytes written."""
+        return self._run_on_engine(self._write_memory_impl, address, data)
+
+    def _write_memory_impl(self, address: int, data: bytes) -> int:
+        self._require_stopped()
+        self._base.write(address, bytes(data))
+        return len(data)
+
+    def write_registers(self, values: Dict[str, int]) -> Dict[str, int]:
+        """Set one or more CPU registers. Keys are names (eax, ebp, eip, ...);
+        values are ints. Used to drive controlled execution of a code fragment
+        (set EIP + inputs, then step). Returns the values applied."""
+        return self._run_on_engine(self._write_registers_impl, values)
+
+    def _write_registers_impl(self, values: Dict[str, int]) -> Dict[str, int]:
+        self._require_stopped()
+        applied = {}
+        with self._wow64_x86_context():
+            for name, value in values.items():
+                self._base.reg._set_register(name.lower(), int(value))
+                applied[name.upper()] = int(value)
+        return applied
+
     def read_dword(self, address: int) -> int:
         """Read a 32-bit value from memory."""
         data = self.read_memory(address, 4)

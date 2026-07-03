@@ -9,7 +9,21 @@ For the release preparation runbook, see
 
 ## Current Releases
 
-### v5.14.2 (Latest) — community-driven tools: /get_current_selection + GUI /open_project
+### v5.15.0 (Latest) — headless GZF/GAR round-trip + debugger write primitives
+
+Minor release. Headless program (`.gzf`) and project (`.gar`) archive
+round-trip endpoints — `/export_program`, `/import_program`,
+`/archive_project`, `/restore_project` — with two rounds of path-safety
+hardening (traversal rejection, ambiguous-name resolution, exact-name
+program lookup, non-destructive overwrite, post-restore verification).
+Docker's Jython extension now auto-unpacks for Ghidra 12.1+. The
+standalone debugger server gained `write_memory` / `write_registers`
+primitives for driving controlled execution of inlined code fragments.
+255 tools.
+
+- See [CHANGELOG.md](../../CHANGELOG.md) for full details.
+
+### v5.14.1 — community-driven tools: /get_current_selection + GUI /open_project
 
 Minor release. Two new endpoints filed/scoped by community feedback,
 plus a quiet headless parity fix that surfaced while writing the
