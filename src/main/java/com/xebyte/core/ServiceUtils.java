@@ -610,7 +610,8 @@ public final class ServiceUtils {
 
     /**
      * Parse an address string using the program's AddressFactory.
-     * Accepts both plain hex (e.g., "0x1000") and segment:offset (e.g., "mem:1000", "code:ff00").
+     * Accepts both plain hex (e.g., "0x1000") and segment:offset (e.g., "mem:1000", "code:ff00",
+     * "EXTERNAL:00000012").
      *
      * Returns null on failure and sets the thread-local error message (read via getLastParseError()).
      *
@@ -735,10 +736,11 @@ public final class ServiceUtils {
     public static Map<String, Object> addressToJson(Address address, Program program) {
         String plainHex = address.toString(false);
         boolean isOverlay = address.getAddressSpace().isOverlaySpace();
-        // Overlay addresses must ALWAYS carry the qualifier: their bare hex re-resolves
-        // into the underlying physical space, not the overlay. For non-overlay addresses
+        boolean isExternal = address.getAddressSpace().getType() == AddressSpace.TYPE_EXTERNAL;
+        // Overlay and external addresses must ALWAYS carry the qualifier: their bare hex
+        // can re-resolve to the wrong logical space. For non-overlay, non-external addresses
         // keep the existing rule (qualify only when there is real physical ambiguity).
-        if (!isOverlay && (program == null || getPhysicalSpaceCount(program) <= 1)) {
+        if (!isOverlay && !isExternal && (program == null || getPhysicalSpaceCount(program) <= 1)) {
             return JsonHelper.mapOf("address", plainHex);
         }
         String spaceName = address.getAddressSpace().getName();
@@ -801,7 +803,8 @@ public final class ServiceUtils {
         for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
             boolean eligible = space.isOverlaySpace()
                     || space.getType() == AddressSpace.TYPE_RAM
-                    || space.getType() == AddressSpace.TYPE_CODE;
+                    || space.getType() == AddressSpace.TYPE_CODE
+                    || space.getType() == AddressSpace.TYPE_EXTERNAL;
             if (eligible && space.getName().equalsIgnoreCase(spaceName)) {
                 return space;
             }
@@ -811,6 +814,7 @@ public final class ServiceUtils {
 
     private static String buildAvailableSpacesHint(Program program) {
         StringBuilder physical = new StringBuilder();
+        StringBuilder external = new StringBuilder();
         StringBuilder overlays = new StringBuilder();
         for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
             if (space.isOverlaySpace()) {
@@ -822,10 +826,17 @@ public final class ServiceUtils {
             if (type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE) {
                 if (physical.length() > 0) physical.append(", ");
                 physical.append(space.getName());
+            } else if (type == AddressSpace.TYPE_EXTERNAL) {
+                if (external.length() > 0) external.append(", ");
+                external.append(space.getName());
             }
         }
-        if (physical.length() == 0 && overlays.length() == 0) return "(none)";
+        if (physical.length() == 0 && external.length() == 0 && overlays.length() == 0) return "(none)";
         StringBuilder out = new StringBuilder(physical.length() > 0 ? physical.toString() : "");
+        if (external.length() > 0) {
+            if (out.length() > 0) out.append(", ");
+            out.append("[external] ").append(external);
+        }
         if (overlays.length() > 0) {
             if (out.length() > 0) out.append(", ");
             out.append("[overlays] ").append(overlays);
@@ -841,6 +852,9 @@ public final class ServiceUtils {
             if (space.isOverlaySpace()) continue;
             int type = space.getType();
             if (type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE) {
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(space.getName()).append(":").append(hex);
+            } else if (type == AddressSpace.TYPE_EXTERNAL) {
                 if (sb.length() > 0) sb.append(", ");
                 sb.append(space.getName()).append(":").append(hex);
             }

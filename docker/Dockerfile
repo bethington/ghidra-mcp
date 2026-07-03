@@ -13,8 +13,8 @@ FROM eclipse-temurin:21-jdk AS builder
 # the Ghidra release zip. A mismatch means Maven can't resolve dependencies
 # (see #183). GHIDRA_DATE must match the asset filename of the chosen
 # version on the upstream NSA/ghidra GitHub release.
-ARG GHIDRA_VERSION=12.1
-ARG GHIDRA_DATE=20260513
+ARG GHIDRA_VERSION=12.1.2
+ARG GHIDRA_DATE=20260605
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -93,10 +93,26 @@ FROM eclipse-temurin:21-jdk
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Ghidra from builder
 COPY --from=builder /opt/ghidra /opt/ghidra
+
+# Install the Jython extension shipped in the Ghidra 12.1 distribution:
+# starting with 12.1 it is no longer enabled by default and must be
+# unpacked into Ghidra/Extensions/ to be picked up at startup.
+RUN set -eux; \
+    EXT_DIR="/opt/ghidra/Extensions/Ghidra"; \
+    JYTHON_ZIP="$(ls "$EXT_DIR"/*_Jython.zip 2>/dev/null | head -n1)"; \
+    if [ -z "$JYTHON_ZIP" ]; then \
+        echo "ERROR: Jython extension zip not found in $EXT_DIR" >&2; \
+        ls -la "$EXT_DIR" >&2 || true; \
+        exit 1; \
+    fi; \
+    mkdir -p /opt/ghidra/Ghidra/Extensions; \
+    unzip -q "$JYTHON_ZIP" -d /opt/ghidra/Ghidra/Extensions/; \
+    echo "Installed Jython extension: $(basename "$JYTHON_ZIP")"
 
 # Set environment variables
 ENV GHIDRA_HOME=/opt/ghidra

@@ -323,7 +323,13 @@ def migrate(
     truncate_runs: bool = False,
 ) -> dict:
     """Run the migration end-to-end. Returns a summary dict of counts."""
-    import migrate_state_to_sql as _self_mod  # resolve module-level engine/repo
+    # Resolve module-level engine/repo via sys.modules rather than a fresh
+    # `import migrate_state_to_sql`, which only works when the module happens
+    # to be importable under that exact unqualified name. sys.modules[__name__]
+    # is the same module object regardless of how this file was invoked
+    # (`python -m scripts.migrate_state_to_sql`, `from scripts.migrate_state_to_sql
+    # import migrate`, or direct script execution as __main__).
+    _self_mod = sys.modules[__name__]
 
     if inventory_path is None:
         inventory_path = DEFAULT_INVENTORY
