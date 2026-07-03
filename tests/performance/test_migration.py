@@ -275,7 +275,7 @@ def test_round_trip_synthetic(tmp_path):
 
 
 def test_round_trip_idempotent(tmp_path):
-    """Re-running the migration must be a no-op on the same DB (idempotent)."""
+    """Re-running the migration against a populated DB requires --truncate-runs (H26)."""
     paths = _write_state(tmp_path, n_functions=3)
     db_url = f"sqlite:///{tmp_path / 'out.db'}"
 
@@ -287,17 +287,24 @@ def test_round_trip_idempotent(tmp_path):
         global_inventory_path=paths["global_inventory"],
         backend="sqlite", url=db_url,
     )
-    # Note: rerunning the migration WILL re-insert runs (they're append-only;
-    # the inline attempts and jsonl get re-read each pass). The functions
-    # table stays at the same size because of the upsert. This test
-    # documents the expected behaviour rather than asserting full idempotence
-    # of the runs table — which would require dedup logic we deliberately
-    # didn't add (the migration is a one-shot per the PR1 spec).
+    # The runs table has only an autoincrement PK and no natural unique key,
+    # so a bare re-run would duplicate every row (H26). migrate() refuses
+    # unless truncate_runs=True; without it this second call raises SystemExit.
+    with pytest.raises(SystemExit):
+        migrate(
+            state_path=paths["state"], runs_path=paths["runs"],
+            inventory_path=paths["inventory"],
+            global_inventory_path=paths["global_inventory"],
+            backend="sqlite", url=db_url,
+        )
+    # With truncate_runs=True the runs table is wiped and reloaded from the
+    # same source files, so the reload is idempotent in row count.
     s2 = migrate(
         state_path=paths["state"], runs_path=paths["runs"],
         inventory_path=paths["inventory"],
         global_inventory_path=paths["global_inventory"],
         backend="sqlite", url=db_url,
+        truncate_runs=True,
     )
     assert s1["functions"] == s2["functions"]
     assert s1["inventory"] == s2["inventory"]
