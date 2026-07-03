@@ -761,29 +761,43 @@ class DebugEngine:
 
     def _call_function_impl(self, address, stack_args, registers, ret_catch,
                             timeout_ms):
+        # Mirrors the proven manual sequence exactly (no extra breakpoints, no
+        # eflags write, no in-handler exception juggling) -- those additions
+        # corrupted state and crashed the target. Recovery is the context
+        # restore below; crash *prevention* is the loaded-module EIP check plus
+        # calling only with valid inputs. (Catching a fault in the called code
+        # before it reaches the target's SEH needs the suspend-other-threads
+        # design -- a follow-up; until then, do not pass deliberately-bad args.)
         self._require_stopped()
         saved = {k.lower(): v for k, v in self._collect_registers_impl().items()}
         if "eip" not in saved or "esp" not in saved or saved["esp"] == 0:
             raise RuntimeError("no valid thread context (esp/eip == 0) -- target "
                                "not stopped at a real debug event")
-        if ret_catch is None:
-            ret_catch = saved["eip"]  # we're stopped here; reuse as the return-catch
-        # ensure a breakpoint exists at ret_catch (add a temp one if not)
-        have = False
+        # SAFETY: refuse to set EIP outside a loaded module (executing unmapped
+        # memory = guaranteed access violation). Best-effort; app-agnostic.
         try:
-            for bp_id in self._base.breakpoints:
-                try:
-                    if self._base._control.GetBreakpointById(bp_id).GetOffset() == ret_catch:
-                        have = True
-                        break
-                except Exception:
-                    pass
+            mods = self._get_modules_impl()
+            if mods and not any(
+                    m.runtime_base <= int(address) < m.runtime_base + m.size
+                    for m in mods):
+                raise RuntimeError(
+                    f"target 0x{int(address):08X} is not in any loaded module -- "
+                    f"refusing to call (would execute unmapped memory)")
+        except RuntimeError:
+            raise
         except Exception:
             pass
-        added_bp = None if have else self._base.breakpoints.set(expr=int(ret_catch))
+        # ret_catch defaults to the current stopped EIP, which ALREADY carries
+        # our breakpoint (that is why we are stopped). We deliberately do NOT add
+        # a breakpoint -- a second int3 at the same address can restore a stale
+        # 0xCC over the original byte on removal and crash the target later. A
+        # custom ret_catch must already have a breakpoint (else -> timeout).
+        if ret_catch is None:
+            ret_catch = saved["eip"]
+        ret_catch = int(ret_catch)
         # build the call stack: [new_esp]=ret_catch, [+4]=arg1, [+8]=arg2, ...
-        new_esp = (saved["esp"] - 4 * (len(stack_args) + 1)) & ~0x3
-        self._base.write(new_esp, int(ret_catch).to_bytes(4, "little"))
+        new_esp = saved["esp"] - 4 * (len(stack_args) + 1)
+        self._base.write(new_esp, ret_catch.to_bytes(4, "little"))
         for i, a in enumerate(stack_args):
             self._base.write(new_esp + 4 + 4 * i,
                              (int(a) & 0xFFFFFFFF).to_bytes(4, "little"))
@@ -793,48 +807,24 @@ class DebugEngine:
                 self._base.reg._set_register(name.lower(), int(val) & 0xFFFFFFFF)
             self._base.reg._set_register("esp", new_esp)
             self._base.reg._set_register("eip", int(address))
-        # run under the crash-guard so a fault in the called code is caught and
-        # rolled back (via the context restore below) instead of crashing the
-        # target. Register the exception handler if pass-through isn't already on.
-        exc_was_registered = self._pass_exceptions
-        if not exc_was_registered:
-            try:
-                self._base.events.exception(self._on_exception)
-            except Exception:
-                pass
-        self._call_fault = None
-        self._call_guard = True
-        try:
-            res = self._go_wait_impl(timeout_ms)
-        finally:
-            self._call_guard = False
-            if not exc_was_registered:
-                try:
-                    self._base.events.noexception()
-                except Exception:
-                    pass
+        res = self._go_wait_impl(timeout_ms)
         out = {k.lower(): v for k, v in self._collect_registers_impl().items()}
-        faulted = (self._call_fault is not None) or (out.get("eip", 0) != int(ret_catch))
-        # restore the saved context (puts the target back exactly where it was;
-        # this is also the rollback when the call faulted or timed out)
+        returned_to = out.get("eip", 0)
+        faulted = (returned_to != ret_catch) or bool(res.get("timeout"))
+        # restore the saved context (same register set as the proven spike --
+        # NO eflags), which also rolls the thread back on fault/timeout.
         with self._wow64_x86_context():
             for name in ("eax", "ebx", "ecx", "edx", "esi", "edi",
-                         "esp", "ebp", "eip", "eflags"):
+                         "esp", "ebp", "eip"):
                 if name in saved:
                     self._base.reg._set_register(name, int(saved[name]))
-        if added_bp is not None:
-            try:
-                self._base.breakpoints.remove(added_bp)
-            except Exception:
-                pass
         return {
             "eax": f"0x{out.get('eax', 0):08X}",
             "edx": f"0x{out.get('edx', 0):08X}",
-            "returned_to": f"0x{out.get('eip', 0):08X}",
-            "ret_catch": f"0x{int(ret_catch):08X}",
-            "timeout": res.get("timeout"),
+            "returned_to": f"0x{returned_to:08X}",
+            "ret_catch": f"0x{ret_catch:08X}",
+            "timeout": bool(res.get("timeout")),
             "faulted": bool(faulted),
-            "fault_code": f"0x{(self._call_fault or 0):08X}",
         }
 
     def set_breakpoint(self, address: int,
