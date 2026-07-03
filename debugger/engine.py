@@ -478,21 +478,14 @@ class DebugEngine:
         self._require_stopped()
         self._state = DebuggerState.RUNNING
         self._executing = True
-        timed_out = False
+        # NOTE: timeout_ms is advisory. In non-standalone mode a FINITE
+        # WaitForEvent timeout faulted here (access violation), while the
+        # infinite wait that stepi() uses is proven-good. So run with an
+        # infinite wait (returns on a breakpoint) and let the caller bound it
+        # by issuing /debugger/interrupt from another connection — interrupt()
+        # is thread-safe and unblocks WaitForEvent.
         try:
-            # Use pybag's go(timeout) -> wait(timeout), the SAME worker path
-            # stepi() uses (proven to advance the target). Returns True on a
-            # break event, False on timeout (pybag issues SetInterrupt then);
-            # some paths raise DbgEngTimeout instead — treat that as a timeout.
-            try:
-                hit = self._base.go(int(timeout_ms))
-                timed_out = (hit is False)
-            except exception.DbgEngTimeout:
-                timed_out = True
-                try:
-                    self._base._control.SetInterrupt(DbgEng.DEBUG_INTERRUPT_ACTIVE)
-                except Exception:
-                    pass
+            self._base.go()   # SetExecutionStatus(GO) + wait(WAIT_INFINITE)
         finally:
             self._state = DebuggerState.STOPPED
             self._executing = False
@@ -501,7 +494,7 @@ class DebugEngine:
             pc = self._read_pc_impl()
         except Exception:
             pass
-        return {"state": "stopped", "timeout": timed_out, "pc": f"0x{pc:08X}"}
+        return {"state": "stopped", "pc": f"0x{pc:08X}"}
 
     def interrupt(self) -> dict:
         """Break into the debugger (interrupt execution)."""
