@@ -46,6 +46,20 @@ def get_pyproject_version() -> str:
     return match.group(1) if match else ""
 
 
+def get_bridge_fallback_version() -> str:
+    """Extract the from-source __version__ fallback in the bridge package __init__.
+
+    This is the version reported when the bridge runs from an uninstalled
+    source tree (the importlib.metadata lookup fails). version_bump.py keeps it
+    in sync with pyproject/pom, so it's a real version source and must not drift.
+    """
+    init_py = BRIDGE_PKG / "__init__.py"
+    match = re.search(
+        r'__version__ = "(\d+\.\d+\.\d+)"', init_py.read_text(encoding="utf-8")
+    )
+    return match.group(1) if match else ""
+
+
 class TestVersionConsistency(unittest.TestCase):
     """Verify version strings are consistent across sources."""
 
@@ -60,6 +74,20 @@ class TestVersionConsistency(unittest.TestCase):
             get_pyproject_version(),
             get_pom_version(),
             "pyproject.toml [project] version != pom.xml version",
+        )
+
+    def test_bridge_fallback_version_matches_pom(self):
+        """The bridge package's from-source __version__ fallback must track pom.xml.
+
+        version_bump.py maintains this alongside pyproject.toml; without this
+        guard it can silently drift (a running-from-source bridge would then
+        report a stale version). Regression: it shipped as 5.14.1 while the repo
+        was 5.15.0 until this check was added.
+        """
+        self.assertEqual(
+            get_bridge_fallback_version(),
+            get_pom_version(),
+            "python/bridge_mcp_ghidra/__init__.py __version__ fallback != pom.xml version",
         )
 
     def test_java_version_matches_pom(self):

@@ -146,4 +146,4 @@ try:
 
     __version__ = _pkg_version("ghidra-mcp-bridge")
 except Exception:  # running from source without an installed distribution
-    __version__ = "5.14.1"
+    __version__ = "5.15.0"

@@ -325,7 +325,7 @@ active GUI tab move).
 
 ```bash
 export GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1
-python bridge_mcp_ghidra.py
+uv run bridge-mcp-ghidra
 ```
 
 Without this, a call that leaves `program=` out runs against whichever program

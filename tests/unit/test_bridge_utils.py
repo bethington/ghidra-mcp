@@ -462,13 +462,18 @@ class TestAutoConnectMultiInstance(unittest.TestCase):
             {"project": "ProjB", "socket": "/tmp/b.sock", "pid": 222},
         ]
         fetch_calls = []
-        with patch.object(bridge, "discover_instances", return_value=two), \
-             patch.object(bridge, "_fetch_and_register_schema",
+        # Patch the MODULE-QUALIFIED call sites _auto_connect actually uses
+        # (static_tools calls discovery.discover_instances() and
+        # registry._fetch_and_register_schema(); it reads/writes state._*).
+        # Patching the flat bridge.* re-exports would NOT intercept those, so
+        # the test would pass vacuously regardless of the code under test.
+        with patch.object(bridge.discovery, "discover_instances", return_value=two), \
+             patch.object(bridge.registry, "_fetch_and_register_schema",
                           side_effect=lambda *a, **kw: fetch_calls.append(1) or 0):
             # Reset connection state so the test is hermetic.
-            bridge._active_socket = None
-            bridge._active_tcp = None
-            bridge._transport_mode = "none"
+            bridge.state._active_socket = None
+            bridge.state._active_tcp = None
+            bridge.state._transport_mode = "none"
             bridge._auto_connect()
 
         self.assertEqual(
@@ -476,8 +481,8 @@ class TestAutoConnectMultiInstance(unittest.TestCase):
             "schema fetch was called — _auto_connect fell through to TCP "
             "after the multi-UDS warning"
         )
-        self.assertEqual(bridge._transport_mode, "none")
-        self.assertIsNone(bridge._active_tcp)
+        self.assertEqual(bridge.state._transport_mode, "none")
+        self.assertIsNone(bridge.state._active_tcp)
 
 
 class TestDebuggerAttachAddressSync(unittest.TestCase):

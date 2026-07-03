@@ -1481,8 +1481,9 @@ def run_debugger_live_test(repo_root: Path, mcp_url: str) -> None:
                     f"Debugger backend unavailable on this machine: "
                     f"{launch_err}. Install the Windows Debugger Toolkit "
                     "(WDK) and ensure the matching ghidratrace wheel is "
-                    "installed against the active Python (see "
-                    "requirements-debugger.txt) to enable this test."
+                    "installed against the active Python (see the "
+                    "`debugger` dependency group: `uv sync --group debugger`) "
+                    "to enable this test."
                 ) from launch_err
             raise
 
@@ -2009,8 +2010,8 @@ def install_ghidratrace_for_debugger(
     pip-installed in the launcher's Python, TraceRmi negotiation fails
     with ``VersionMismatchError: Front-end: 12.1, back-end: 12.0`` —
     observed twice in this release cycle. The wheel lives inside the
-    Ghidra install (not on PyPI), so a vanilla ``pip install`` against
-    requirements-debugger.txt can't cover it.
+    Ghidra install (not on PyPI), so a plain ``uv sync --group debugger``
+    can't cover it.
 
     Returns 0 on success / no-op, nonzero on installer failure.
     """
