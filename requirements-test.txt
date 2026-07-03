@@ -2,7 +2,7 @@
 # Install with: pip install -r requirements-test.txt
 
 # Core testing framework
-pytest>=9.1.0
+pytest>=9.1.1
 pytest-cov>=7.1.0
 pytest-xdist>=3.8.0
 pytest-timeout>=2.4.0
@@ -15,7 +15,7 @@ responses>=0.26.1
 requests-mock>=1.12.1
 
 # Test reporting
-coverage>=7.0.0
+coverage>=7.15.0
 pytest-json-report>=1.5.0
 
 # YAML parsing (workflow validation tests)

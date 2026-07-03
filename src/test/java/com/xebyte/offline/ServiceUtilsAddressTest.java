@@ -21,6 +21,7 @@ public class ServiceUtilsAddressTest {
     private AddressSpace ramSpace;
     private AddressSpace codeSpace;
     private AddressSpace memSpace;
+    private AddressSpace externalSpace;
     private Address mockAddr;
 
     @Before
@@ -49,7 +50,12 @@ public class ServiceUtilsAddressTest {
         when(memSpace.isOverlaySpace()).thenReturn(false);
         when(memSpace.getName()).thenReturn("mem");
 
-        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace, codeSpace, memSpace});
+        externalSpace = mock(AddressSpace.class);
+        when(externalSpace.getType()).thenReturn(AddressSpace.TYPE_EXTERNAL);
+        when(externalSpace.isOverlaySpace()).thenReturn(false);
+        when(externalSpace.getName()).thenReturn("EXTERNAL");
+
+        when(factory.getAddressSpaces()).thenReturn(new AddressSpace[]{ramSpace, codeSpace, memSpace, externalSpace});
         when(factory.getDefaultAddressSpace()).thenReturn(ramSpace);
 
         // Mock address behaviour
@@ -76,6 +82,19 @@ public class ServiceUtilsAddressTest {
         Address result = ServiceUtils.parseAddress(program, "code:1000");
         assertNotNull(result);
         assertEquals(codeSpace, result.getAddressSpace());
+    }
+
+    @Test
+    public void parseAddress_externalSpace_resolvesCaseInsensitively() {
+        Address extAddr = mock(Address.class);
+        when(extAddr.getAddressSpace()).thenReturn(externalSpace);
+        when(factory.getAddress("external:00000012")).thenReturn(null);
+        when(factory.getAddress("EXTERNAL:00000012")).thenReturn(extAddr);
+
+        Address result = ServiceUtils.parseAddress(program, "external:00000012");
+
+        assertNotNull(result);
+        assertEquals(externalSpace, result.getAddressSpace());
     }
 
     @Test

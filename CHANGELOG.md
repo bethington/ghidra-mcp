@@ -8,6 +8,75 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## v5.15.0 - 2026-07-02 (minor: headless GZF/GAR round-trip + debugger write primitives)
+
+Minor release adding headless program/project archive endpoints (with two
+rounds of path-safety hardening), Docker Jython support for Ghidra 12.1, and
+live-process memory/register write primitives to the standalone debugger.
+
+### Added
+
+- **Headless GZF program and GAR project round-trip endpoints.** `POST
+  /export_program` and `POST /import_program` pack/unpack a single Ghidra Zip
+  File (`.gzf`) without a full project tarball, for both in-memory and
+  project-based programs. `POST /archive_project` and `POST /restore_project`
+  do the same for a whole Ghidra project as a `.gar` archive. All four accept
+  overwrite protection and work from headless scripts and CI without a GUI.
+- **`saveAllOpenPrograms` reports the total open program count** and surfaces
+  a specific error when a program isn't attached to a writable project (a
+  transient `DomainFileProxy`), instead of a generic save failure.
+- **The `ANALYZED` flag is persisted after `/run_analysis`** via
+  `GhidraProgramUtilities.markProgramAnalyzed(program)` inside the write
+  transaction, so a re-opened program isn't silently re-prompted for analysis
+  in the GUI.
+- **Docker: the Jython extension is auto-unpacked for Ghidra 12.1+** during
+  image build, restoring Jython script support in the containerized runtime.
+- **Debugger: `write_memory` and `write_registers` primitives.** New
+  `POST /debugger/write_memory` and `POST /debugger/write_registers` on the
+  standalone debugger server let a caller drive controlled execution of a
+  code fragment (set EIP + input registers/stack, then step) — enabling
+  emulation-style capture of inlined arithmetic that has no standalone
+  function to emulate statically (e.g. D2's to-hit / damage macros). Both
+  require the target stopped; Ghidra-address translation reuses the existing
+  mapper. Not yet exposed as MCP tools — callable directly against the
+  debugger server's HTTP API.
+
+### Fixed
+
+- **Headless GZF/GAR endpoints reject path traversal.** Caller-supplied
+  names (`output_name` on `/export_program` + `/archive_project`,
+  `project_name` on `/restore_project`) are validated to be plain filenames
+  (no `/`, `\`, or `..`), and the resolved output path is canonicalised and
+  confirmed to stay inside its target directory via `HeadlessPaths`, the
+  single validation choke point (covered offline by `HeadlessPathsTest`).
+- **`/import_program` validates the caller-supplied `target_name`** before
+  the project tree is touched, and the import-folder resolver rejects
+  `.`/`..` path segments.
+- **`/export_program` refuses to guess on an ambiguous bare name**, failing
+  loud with a listed match count instead of silently packing the first hit
+  from a folder walk, and resolves the live program to pack by exact (then
+  case-insensitive) name instead of fuzzy substring match.
+- **`/restore_project` verifies the project actually materialised on disk**
+  after `RestoreTask` returns, instead of trusting headless GUI auto-open to
+  have succeeded silently.
+- **`/import_program` overwrite is no longer destructive on failure.** The
+  existing `DomainFile` is renamed aside to a `.bak-<ts>` backup and only
+  deleted after the new file is created; a failed import restores the
+  original. Overwriting a program currently loaded in memory is rejected up
+  front with a structured error.
+- **File-loaded programs are materialised into the project** so
+  `/save_all_programs` and `/export_program` work on them — `loadProgramFromFile`
+  now passes the active project to `AutoImporter` and saves the result,
+  turning a transient `DomainFileProxy` into a real `DomainFile`. Reloading
+  the same name reopens the existing file instead of throwing
+  `DuplicateNameException`.
+- **`tests/endpoints.json` `total_endpoints` reconciled to 255**, matching
+  the endpoint array length and the offline scanner/parity suite
+  (`EndpointsJsonParityTest`), which had drifted stale after merging catalog
+  changes from multiple branches.
+
+---
+
 ## v5.14.2 - 2026-06-27 (patch: TCP fallback + PIC/GOT fixes)
 
 Patch release fixing Windows UDS/TCP fallback regression and decompiler output accuracy for PIC binaries.
@@ -199,6 +268,29 @@ The following entries were already on `main` since 5.12.0 and ship in this relea
   have the agent read any file on disk. With no root configured the
   behavior is unchanged.
 
+- **Headless GZF/GAR endpoints reject path traversal.** Caller-supplied
+  names (`output_name` on `/export_program` + `/archive_project`,
+  `project_name` on `/restore_project`) are validated to be plain
+  filenames — no `/`, `\`, or `..` — and the resolved output path is
+  canonicalised and confirmed to stay inside its target directory. The
+  default `.gzf` / `.gar` name is derived from the program/project
+  basename so a project path like `/Vanilla/1.13d/D2Common.dll` can no
+  longer leak separators into the written filename. `..` is rejected
+  segment-by-segment (catching leading, middle, and trailing `..`
+  segments such as `a/..`, not only the `../` prefix), and the
+  containment check compares canonical paths element-wise via
+  `java.nio.file.Path.startsWith` instead of a string prefix (so a
+  sibling like `exports-evil` is no longer accepted under `exports`).
+  New helper `HeadlessPaths` is the single validation choke point;
+  covered offline by `HeadlessPathsTest`.
+
+- **`/import_program` validates the caller-supplied `target_name`.** The
+  optional program name is now checked as a plain filename (rejecting
+  `/`, `\`, and `..` segments) before the project tree is touched, and
+  the import-folder resolver rejects `.`/`..` path segments, closing a
+  traversal vector that could place or overwrite a program outside the
+  intended folder. Covered offline by `GzfExportImportTest`.
+
 ### Added
 
 - **`/load_program` accepts optional `language` and `compiler_spec`.**
@@ -212,6 +304,60 @@ The following entries were already on `main` since 5.12.0 and ship in this relea
   success response now also echoes the resolved `language`.
 
 ### Fixed
+
+- **Headless: `/export_program` refuses to guess on an ambiguous bare
+  name.** When a program name is given without a folder and the same
+  filename exists in several project folders, the resolver now fails
+  with an explicit "ambiguous" error listing how many matches were found
+  and asking for a full project path, instead of silently packing the
+  first match found by the folder walk. An exact / leading-slash path
+  still resolves directly.
+
+- **Headless: `/restore_project` verifies the project materialised on
+  disk.** `HeadlessArchiveBridge.restore` no longer relies on Ghidra's
+  headless GUI auto-open step being swallowed; after `RestoreTask`
+  returns it asserts the project marker / directory exists and fails
+  loud with an `IOException` otherwise, so a corrupt or partially
+  extracted archive is reported instead of returning a false success.
+  Offline validation branches covered by `GarArchiveRestoreTest`.
+
+- **`tests/endpoints.json` total reconciled to 252.** Merging the
+  upstream removal of 4 stale catalog entries with the 4 new headless
+  GZF/GAR endpoints left `total_endpoints` at the pre-merge `256` while
+  the array held 252, breaking `EndpointsJsonParityTest`. The field and
+  the tool-count references in the docs are back in sync at 252.
+
+- **Headless: `/export_program` resolves the live program by an exact
+  name.** GZF export now looks the open program up by an exact (then
+  case-insensitive) match instead of the fuzzy substring lookup, so a
+  request for `Common.dll` can no longer pack a different open program
+  such as `D2Common.dll`. Program idempotency on re-open is scoped to
+  the project root rather than a recursive name search, avoiding
+  reopening a same-named file from an unintended folder. Covered offline
+  by `GzfExportImportTest`.
+
+- **Headless: file-loaded programs are materialised into the project so
+  `/save_all_programs` and `/export_program` work.** `loadProgramFromFile`
+  and `loadProgramFromFileWithLanguage` now pass the active project to
+  `AutoImporter` and call `save(monitor)` on the result, turning the
+  transient `DomainFileProxy` into a real `DomainFile`. A same-named
+  re-load reopens the existing file (idempotent) instead of throwing
+  `DuplicateNameException`. With no project open the loader degrades to
+  the previous in-memory behaviour.
+
+- **Headless: the ANALYZED flag is persisted after `/run_analysis`.**
+  `GhidraProgramUtilities.markProgramAnalyzed(program)` is invoked inside
+  the write transaction so a re-opened program is not re-analyzed from
+  scratch.
+
+- **`/import_program` overwrite is no longer destructive on failure.**
+  With `overwrite=true` the existing `DomainFile` is renamed aside to a
+  `.bak-<ts>` backup and only deleted after the new file is created.
+  If the import fails (corrupt `.gzf`, I/O error) the original is renamed
+  back, so a failed overwrite never loses the prior program. An explicit
+  pre-check rejects overwriting a program that is currently loaded in
+  memory with a structured error before the project tree is touched,
+  instead of relying on a `FileInUseException` mid-rename.
 
 - **Headless: `/run_ghidra_script` and `/run_script_inline` crashed
   with `NullPointerException`** at
