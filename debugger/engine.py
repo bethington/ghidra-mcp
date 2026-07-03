@@ -463,6 +463,52 @@ class DebugEngine:
         self._run_on_engine(_impl)
         return {"state": "running"}
 
+    def go_wait(self, timeout_ms: int = 4000) -> dict:
+        """Resume execution and BLOCK until a breakpoint/event or timeout.
+
+        Unlike go_nowait (which only sets DEBUG_STATUS_GO and relies on the
+        idle DispatchCallbacks pump — that does not actually advance the
+        target), this pumps WaitForEvent on the engine thread, which is what
+        makes dbgeng run the debuggee and deliver breakpoint events. On timeout
+        it interrupts so control is regained. Returns {state, pc, timeout?}.
+        """
+        return self._run_on_engine(self._go_wait_impl, timeout_ms)
+
+    def _go_wait_impl(self, timeout_ms: int) -> dict:
+        self._require_stopped()
+        self._state = DebuggerState.RUNNING
+        self._executing = True
+        ctrl = self._base._control
+        ctrl.SetExecutionStatus(DbgEng.DEBUG_STATUS_GO)
+        deadline = time.time() + max(0, timeout_ms) / 1000.0
+        try:
+            while time.time() < deadline:
+                try:
+                    ctrl.WaitForEvent(300)   # advances the target; raises on timeout
+                except exception.DbgEngTimeout:
+                    pass
+                try:
+                    if ctrl.GetExecutionStatus() == DbgEng.DEBUG_STATUS_BREAK:
+                        self._state = DebuggerState.STOPPED
+                        self._executing = False
+                        return {"state": "stopped", "pc": f"0x{self._read_pc_impl():08X}"}
+                except Exception:
+                    pass
+            # timed out while still running -> interrupt to regain control
+            ctrl.SetInterrupt(DbgEng.DEBUG_INTERRUPT_ACTIVE)
+            try:
+                ctrl.WaitForEvent(500)
+            except exception.DbgEngTimeout:
+                pass
+            self._state = DebuggerState.STOPPED
+            self._executing = False
+            return {"state": "stopped", "timeout": True,
+                    "pc": f"0x{self._read_pc_impl():08X}"}
+        except Exception:
+            self._state = DebuggerState.STOPPED
+            self._executing = False
+            raise
+
     def interrupt(self) -> dict:
         """Break into the debugger (interrupt execution)."""
         # interrupt() can be called from any thread

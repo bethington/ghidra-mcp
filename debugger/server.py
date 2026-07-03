@@ -109,6 +109,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             "/debugger/attach": lambda: self._handle_attach(body),
             "/debugger/detach": self._handle_detach,
             "/debugger/go": self._handle_go,
+            "/debugger/go_wait": lambda: self._handle_go_wait(body),
             "/debugger/interrupt": self._handle_interrupt,
             "/debugger/step_into": lambda: self._handle_step_into(body),
             "/debugger/step_over": lambda: self._handle_step_over(body),
@@ -339,6 +340,12 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_go(self):
         ds = self._ds()
         result = ds.engine.go_nowait()
+        self._send_json(result)
+
+    def _handle_go_wait(self, body: dict):
+        ds = self._ds()
+        timeout_ms = int(body.get("timeout_ms", 4000))
+        result = ds.engine.go_wait(timeout_ms)
         self._send_json(result)
 
     def _handle_interrupt(self):
