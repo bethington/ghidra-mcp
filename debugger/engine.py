@@ -478,36 +478,30 @@ class DebugEngine:
         self._require_stopped()
         self._state = DebuggerState.RUNNING
         self._executing = True
-        ctrl = self._base._control
-        ctrl.SetExecutionStatus(DbgEng.DEBUG_STATUS_GO)
-        deadline = time.time() + max(0, timeout_ms) / 1000.0
+        timed_out = False
         try:
-            while time.time() < deadline:
+            # Use pybag's go(timeout) -> wait(timeout), the SAME worker path
+            # stepi() uses (proven to advance the target). Returns True on a
+            # break event, False on timeout (pybag issues SetInterrupt then);
+            # some paths raise DbgEngTimeout instead — treat that as a timeout.
+            try:
+                hit = self._base.go(int(timeout_ms))
+                timed_out = (hit is False)
+            except exception.DbgEngTimeout:
+                timed_out = True
                 try:
-                    ctrl.WaitForEvent(300)   # advances the target; raises on timeout
-                except exception.DbgEngTimeout:
-                    pass
-                try:
-                    if ctrl.GetExecutionStatus() == DbgEng.DEBUG_STATUS_BREAK:
-                        self._state = DebuggerState.STOPPED
-                        self._executing = False
-                        return {"state": "stopped", "pc": f"0x{self._read_pc_impl():08X}"}
+                    self._base._control.SetInterrupt(DbgEng.DEBUG_INTERRUPT_ACTIVE)
                 except Exception:
                     pass
-            # timed out while still running -> interrupt to regain control
-            ctrl.SetInterrupt(DbgEng.DEBUG_INTERRUPT_ACTIVE)
-            try:
-                ctrl.WaitForEvent(500)
-            except exception.DbgEngTimeout:
-                pass
+        finally:
             self._state = DebuggerState.STOPPED
             self._executing = False
-            return {"state": "stopped", "timeout": True,
-                    "pc": f"0x{self._read_pc_impl():08X}"}
+        pc = 0
+        try:
+            pc = self._read_pc_impl()
         except Exception:
-            self._state = DebuggerState.STOPPED
-            self._executing = False
-            raise
+            pass
+        return {"state": "stopped", "timeout": timed_out, "pc": f"0x{pc:08X}"}
 
     def interrupt(self) -> dict:
         """Break into the debugger (interrupt execution)."""
