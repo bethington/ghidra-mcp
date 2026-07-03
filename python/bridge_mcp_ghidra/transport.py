@@ -12,7 +12,12 @@ from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
 from . import state
-from .config import logger
+from .config import AUTH_TOKEN, logger
+
+
+def _auth_headers() -> dict[str, str]:
+    """Authorization header for the Ghidra server, when ``AUTH_TOKEN`` is set."""
+    return {"Authorization": f"Bearer {AUTH_TOKEN}"} if AUTH_TOKEN else {}
 
 
 # ==========================================================================
@@ -133,7 +138,7 @@ def uds_request(
     if params:
         path = f"{path}?{urlencode(params)}"
 
-    headers = {}
+    headers = _auth_headers()
     body = None
     if json_data is not None:
         body = json.dumps(json_data).encode("utf-8")
@@ -174,7 +179,7 @@ def tcp_request(
     if params:
         path = f"{path}?{urlencode(params)}"
 
-    headers = {}
+    headers = _auth_headers()
     body = None
     if json_data is not None:
         body = json.dumps(json_data).encode("utf-8")
