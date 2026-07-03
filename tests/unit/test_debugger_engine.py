@@ -313,3 +313,116 @@ class TestEngineHelpers:
 
         assert engine._protected_base.detached is True
         assert engine._state == engine_module.DebuggerState.DETACHED
+
+
+class TestMemoryAndRegisterWrites:
+    def test_write_memory_calls_base_write_and_returns_length(self):
+        engine_module = import_engine_with_stubs()
+
+        class FakeBase:
+            def __init__(self):
+                self.writes = []
+
+            def write(self, address, data):
+                self.writes.append((address, bytes(data)))
+
+        base = FakeBase()
+        engine = make_engine(engine_module, base, engine_module.DebuggerState.STOPPED)
+
+        n = engine._write_memory_impl(0x401000, b"\x90\x90\xC3")
+
+        assert n == 3
+        assert base.writes == [(0x401000, b"\x90\x90\xC3")]
+
+    def test_write_memory_requires_stopped_state(self):
+        engine_module = import_engine_with_stubs()
+
+        class FakeBase:
+            def write(self, address, data):
+                raise AssertionError("write() should not be called while detached")
+
+        engine = make_engine(engine_module, FakeBase(), engine_module.DebuggerState.DETACHED)
+
+        with pytest.raises(RuntimeError, match="Not attached"):
+            engine._write_memory_impl(0x401000, b"\x90")
+
+    def test_write_memory_rejects_write_while_running(self):
+        engine_module = import_engine_with_stubs()
+
+        class FakeBase:
+            def write(self, address, data):
+                raise AssertionError("write() should not be called while running")
+
+        engine = make_engine(engine_module, FakeBase(), engine_module.DebuggerState.RUNNING)
+
+        with pytest.raises(RuntimeError, match="running"):
+            engine._write_memory_impl(0x401000, b"\x90")
+
+    def test_write_registers_calls_set_register_and_returns_applied_uppercase(self):
+        engine_module = import_engine_with_stubs()
+
+        class FakeReg:
+            def __init__(self):
+                self.set_calls = []
+
+            def _set_register(self, name, value):
+                self.set_calls.append((name, value))
+
+        class FakeBase:
+            def __init__(self):
+                self.reg = FakeReg()
+
+        base = FakeBase()
+        engine = make_engine(engine_module, base, engine_module.DebuggerState.STOPPED)
+
+        applied = engine._write_registers_impl({"eip": 0x401000, "EAX": "5"})
+
+        assert base.reg.set_calls == [("eip", 0x401000), ("eax", 5)]
+        assert applied == {"EIP": 0x401000, "EAX": 5}
+
+    def test_write_registers_requires_stopped_state(self):
+        engine_module = import_engine_with_stubs()
+
+        class FakeReg:
+            def _set_register(self, name, value):
+                raise AssertionError("_set_register() should not be called while detached")
+
+        class FakeBase:
+            def __init__(self):
+                self.reg = FakeReg()
+
+        engine = make_engine(engine_module, FakeBase(), engine_module.DebuggerState.DETACHED)
+
+        with pytest.raises(RuntimeError, match="Not attached"):
+            engine._write_registers_impl({"eip": 0x401000})
+
+    def test_write_registers_uses_wow64_effective_processor_context(self):
+        engine_module = import_engine_with_stubs()
+
+        class FakeControl:
+            def __init__(self):
+                self.effective = 0x8664
+                self.set_calls = []
+
+            def GetEffectiveProcessorType(self):
+                return self.effective
+
+            def SetEffectiveProcessorType(self, processor_type):
+                self.set_calls.append(processor_type)
+                self.effective = processor_type
+
+        class FakeReg:
+            def _set_register(self, name, value):
+                pass
+
+        class FakeBase:
+            def __init__(self):
+                self.reg = FakeReg()
+                self._control = FakeControl()
+
+        engine = make_engine(engine_module, FakeBase(), engine_module.DebuggerState.STOPPED)
+        engine._is_wow64 = True
+
+        engine._write_registers_impl({"eip": 0x401000})
+
+        assert engine._protected_base._control.set_calls == [0x14C, 0x8664]

@@ -113,6 +113,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             "/debugger/step_into": lambda: self._handle_step_into(body),
             "/debugger/step_over": lambda: self._handle_step_over(body),
             "/debugger/breakpoint": lambda: self._handle_set_breakpoint(body),
+            "/debugger/write_memory": lambda: self._handle_write_memory(body),
+            "/debugger/write_registers": lambda: self._handle_write_registers(body),
             "/debugger/sync_modules": lambda: self._handle_sync_modules(body),
             "/debugger/trace/start": lambda: self._handle_trace_start(body),
             "/debugger/trace/stop": lambda: self._handle_trace_stop(body),
@@ -209,6 +211,36 @@ class RequestHandler(BaseHTTPRequestHandler):
         runtime_modules = ds.engine.get_modules()
         result = ds.mapper.update_from_modules(runtime_modules, parsed_bases)
         self._send_json(result)
+
+    def _handle_write_memory(self, body: dict):
+        ds = self._ds()
+        addr_str = str(body.get("address", ""))
+        data_hex = body.get("data", "")
+        addr_type = body.get("address_type", "runtime")
+        if not addr_str or not data_hex:
+            self._send_error(400, "Missing 'address' or 'data' (hex string)")
+            return
+        address = int(addr_str, 16) if addr_str.startswith("0x") else int(addr_str)
+        if addr_type == "ghidra":
+            address = ds.mapper.to_runtime(address, body.get("module") or None)
+        data = bytes.fromhex(str(data_hex).replace(" ", ""))
+        n = ds.engine.write_memory(address, data)
+        self._send_json({"address": f"0x{address:08X}", "bytes_written": n})
+
+    def _handle_write_registers(self, body: dict):
+        ds = self._ds()
+        regs = body.get("registers", {})
+        if not regs:
+            self._send_error(400, "Missing 'registers' dict")
+            return
+        parsed = {}
+        for name, val in regs.items():
+            if isinstance(val, str):
+                parsed[name] = int(val, 16) if val.startswith("0x") else int(val)
+            else:
+                parsed[name] = int(val)
+        applied = ds.engine.write_registers(parsed)
+        self._send_json({"applied": {k: f"0x{v:08X}" for k, v in applied.items()}})
 
     def _handle_address_map(self):
         ds = self._ds()

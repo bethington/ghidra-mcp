@@ -567,17 +567,12 @@ public class XrefCallGraphService {
         Set<Function> callers = new HashSet<>();
         ReferenceManager refManager = program.getReferenceManager();
 
-        // Get all references to this function's entry point
-        ReferenceIterator refIter = refManager.getReferencesTo(targetFunction.getEntryPoint());
-        while (refIter.hasNext()) {
-            Reference ref = refIter.next();
-            if (ref.getReferenceType().isCall()) {
-                Address fromAddr = ref.getFromAddress();
-                Function callerFunc = functionManager.getFunctionContaining(fromAddr);
-                if (callerFunc != null) {
-                    callers.add(callerFunc);
-                }
-            }
+        collectCallersFromAddressRefs(callers, functionManager, refManager, targetFunction.getEntryPoint());
+
+        try {
+            callers.addAll(targetFunction.getCallingFunctions(null));
+        } catch (Exception ignored) {
+            // Fall back to address refs only if Ghidra cannot compute calling functions.
         }
 
         // Convert to sorted list and apply pagination
@@ -752,18 +747,34 @@ public class XrefCallGraphService {
         visited.add(key);
         ReferenceManager refManager = program.getReferenceManager();
 
-        // Find callers of this function
-        ReferenceIterator refIter = refManager.getReferencesTo(function.getEntryPoint());
+        Set<Function> callers = new HashSet<>();
+        collectCallersFromAddressRefs(callers, functionManager, refManager, function.getEntryPoint());
+        try {
+            callers.addAll(function.getCallingFunctions(null));
+        } catch (Exception ignored) {
+            // Keep the reference-only result if Ghidra cannot compute callers here.
+        }
+
+        for (Function callerFunc : callers) {
+            if (callerFunc != null) {
+                callGraph.computeIfAbsent(graphKey(callerFunc), k -> new HashSet<>()).add(key);
+                buildCallGraphCallers(callerFunc, depth - 1, visited, callGraph, functionManager, program);
+            }
+        }
+    }
+
+    private static void collectCallersFromAddressRefs(Set<Function> callers, FunctionManager functionManager,
+                                                      ReferenceManager refManager, Address entryPoint) {
+        ReferenceIterator refIter = refManager.getReferencesTo(entryPoint);
         while (refIter.hasNext()) {
             Reference ref = refIter.next();
-            if (ref.getReferenceType().isCall()) {
-                Address fromAddr = ref.getFromAddress();
-                Function callerFunc = functionManager.getFunctionContaining(fromAddr);
-                if (callerFunc != null) {
-                    callGraph.computeIfAbsent(graphKey(callerFunc), k -> new HashSet<>()).add(key);
-                    // Recursively build graph for callers
-                    buildCallGraphCallers(callerFunc, depth - 1, visited, callGraph, functionManager, program);
-                }
+            if (!ref.getReferenceType().isCall()) {
+                continue;
+            }
+            Address fromAddr = ref.getFromAddress();
+            Function callerFunc = functionManager.getFunctionContaining(fromAddr);
+            if (callerFunc != null) {
+                callers.add(callerFunc);
             }
         }
     }
