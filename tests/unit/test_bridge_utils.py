@@ -181,14 +181,14 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
 
         instances = [{"socket": "/tmp/ghidra-123.sock", "pid": 123}]
 
-        with patch.object(bridge, "discover_instances", return_value=instances), \
-             patch.object(bridge, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090") as scan, \
-             patch.object(bridge, "validate_server_url", return_value=True), \
-             patch.object(bridge, "_fetch_and_register_schema", return_value=0), \
-             patch.object(bridge, "os") as mock_os:
+        with patch.object(bridge.discovery, "discover_instances", return_value=instances), \
+             patch.object(bridge.discovery, "_scan_tcp_for_project", return_value="http://127.0.0.1:8090") as scan, \
+             patch.object(bridge.static_tools, "validate_server_url", return_value=True), \
+             patch.object(bridge.registry, "_fetch_and_register_schema", return_value=0), \
+             patch.object(bridge.static_tools, "os") as mock_os:
             mock_os.getenv.return_value = None
-            bridge._full_schema = []
-            bridge._loaded_groups.clear()
+            bridge.state._full_schema = []
+            bridge.state._loaded_groups.clear()
 
             result = asyncio.run(bridge.connect_instance("wanted"))
 
@@ -206,9 +206,9 @@ class TestConnectInstanceTcpFallback(unittest.TestCase):
             {"socket": "/tmp/ghidra-456.sock", "pid": 456, "project": "also_other"},
         ]
 
-        with patch.object(bridge, "discover_instances", return_value=instances), \
-             patch.object(bridge, "_scan_tcp_for_project") as scan, \
-             patch.object(bridge, "os") as mock_os:
+        with patch.object(bridge.discovery, "discover_instances", return_value=instances), \
+             patch.object(bridge.discovery, "_scan_tcp_for_project") as scan, \
+             patch.object(bridge.static_tools, "os") as mock_os:
             mock_os.getenv.return_value = None
 
             result = asyncio.run(bridge.connect_instance("wanted"))
@@ -507,10 +507,10 @@ class TestDebuggerAttachAddressSync(unittest.TestCase):
                 "/get_metadata or any other endpoint"
             )
 
-        with patch.object(bridge, "_debugger_request",
+        with patch.object(bridge.debugger, "_debugger_request",
                           side_effect=fake_debugger_request), \
-             patch.object(bridge, "dispatch_get", side_effect=fake_dispatch_get), \
-             patch.object(bridge, "_transport_mode", "tcp"):
+             patch.object(bridge.dispatch, "dispatch_get", side_effect=fake_dispatch_get), \
+             patch.object(bridge.state, "_transport_mode", "tcp"):
             bridge.debugger_attach("12345")
 
         sync = [c for c in debugger_calls if c[1] == "/debugger/sync_modules"]

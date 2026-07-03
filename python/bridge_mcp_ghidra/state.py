@@ -6,9 +6,10 @@ Functions in other modules never use ``global`` on these names — they assign
 ``state.<name> = ...`` instead.
 """
 
+import os
 import threading
 
-from .config import CORE_GROUPS
+from .config import CORE_GROUPS, logger
 
 # --------------------------------------------------------------------------
 # Connection state
@@ -22,6 +23,31 @@ _connected_project: str | None = None  # Project name for auto-reconnect
 # Serialization lock for Ghidra HTTP calls — prevents stdout corruption when
 # multiple MCP tool calls arrive concurrently (see GitHub issue #91).
 _ghidra_lock = threading.Lock()
+
+# --------------------------------------------------------------------------
+# Strict program routing
+# --------------------------------------------------------------------------
+
+# When GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1, the bridge refuses any
+# program-scoped call that omits a program selector, so a forgotten one fails
+# loudly instead of silently running against the server's mutable "current
+# program" and hitting the wrong binary. Off by default. (Full rationale in
+# commit 6f85c5e / README.)
+_require_selectors: bool = False
+
+
+def _init_require_selectors() -> None:
+    """Read GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS once, at import. Set it to 1 to enable."""
+    global _require_selectors
+    _require_selectors = (os.getenv("GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS") or "").strip() == "1"
+    if _require_selectors:
+        logger.info(
+            "Strict program routing enabled (GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1); "
+            "program-scoped calls missing a program selector will be refused"
+        )
+
+
+_init_require_selectors()
 
 # --------------------------------------------------------------------------
 # Tool-registration state

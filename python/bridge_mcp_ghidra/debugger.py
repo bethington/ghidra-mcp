@@ -6,12 +6,71 @@ Each tool proxies an HTTP request to ``debugger/server.py`` on
 
 import http.client
 import json
+import os
+import sys
 from urllib.parse import urlencode, urlparse
 
+from . import config
 from . import dispatch
 from . import state
-from .config import DEBUGGER_URL, logger
+from .config import DEBUGGER_URL, DEBUGGER_TOOL_NAMES, logger
 from .server import mcp
+
+# Hosts for which a debugger server is local to this machine. On a non-Windows
+# host a local debugger server can never run (dbgeng/WinDbg is Windows-only), so
+# debugger proxy tools pointing at one of these are not registered.
+_LOCAL_DEBUGGER_HOSTS = {"", "127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
+
+def _debugger_enabled(
+    url: str = DEBUGGER_URL,
+    platform: str = sys.platform,
+    override: str | None = None,
+) -> bool:
+    """Whether to register the WinDbg debugger proxy tools on this host.
+
+    The standalone debugger server (debugger/server.py) wraps dbgeng/WinDbg via
+    pybag and only runs on Windows. Registering ~22 proxy tools that can never
+    work just clutters the tool list, so registration is gated:
+
+      - GHIDRA_DEBUGGER_TOOLS=1/0 (or true/false/yes/no/on/off) forces on/off.
+      - On Windows the server can run locally -> enabled.
+      - On non-Windows a *local* DEBUGGER_URL can never be served -> disabled;
+        a *remote* host (a Windows box running the server) -> enabled.
+
+    The tool *functions* are always defined regardless; only their MCP
+    registration is gated. Call-time failures (server down) are handled
+    separately by _debugger_request().
+    """
+    if override is None:
+        override = os.getenv("GHIDRA_DEBUGGER_TOOLS")
+    if override is not None and override.strip():
+        return override.strip().lower() in {"1", "true", "yes", "on"}
+    if platform.startswith("win"):
+        return True
+    host = (urlparse(url).hostname or "").lower()
+    return host not in _LOCAL_DEBUGGER_HOSTS
+
+
+_DEBUGGER_ACTIVE = _debugger_enabled()
+if _DEBUGGER_ACTIVE:
+    config.STATIC_TOOL_NAMES |= DEBUGGER_TOOL_NAMES
+
+
+def _debugger_tool(*dargs, **dkwargs):
+    """Decorator: register a debugger proxy tool only when the backend is usable.
+
+    When the debugger is inactive on this host the decorated function is left
+    untouched (still importable / directly callable / unit-testable) but is not
+    exposed as an MCP tool, keeping the tool list uncluttered on non-Windows.
+    """
+    if _DEBUGGER_ACTIVE:
+        return mcp.tool(*dargs, **dkwargs)
+
+    def _skip(fn):
+        return fn
+
+    return _skip
 
 
 def _debugger_request(
@@ -54,7 +113,7 @@ def _debugger_request(
         conn.close()
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_attach(target: str) -> str:
     """Attach the debugger to a running process for live dynamic analysis.
 
@@ -79,27 +138,40 @@ def debugger_attach(target: str) -> str:
                     if isinstance(programs_data, list)
                     else programs_data.get("programs", [])
                 )
+                # image_base is already present on each /list_open_programs
+                # entry (ProgramScriptService.listOpenPrograms emits it) —
+                # use it directly. The previous /get_metadata round-trip
+                # was dead: that endpoint returns plain text, so
+                # json.loads() always raised, the bare except swallowed
+                # it, and ghidra_bases stayed empty so auto-sync never
+                # fired.
                 ghidra_bases = {}
                 for prog in programs:
-                    prog_path = (
-                        prog
-                        if isinstance(prog, str)
-                        else prog.get("path", prog.get("name", ""))
-                    )
-                    if prog_path:
-                        try:
-                            meta_text = dispatch.dispatch_get(
-                                "/get_metadata", params={"program": prog_path}
-                            )
-                            meta = json.loads(meta_text)
-                            image_base = meta.get("imageBase", meta.get("image_base"))
-                            if image_base:
-                                ghidra_bases[prog_path] = image_base
-                        except Exception:
-                            pass
+                    if isinstance(prog, str):
+                        # Legacy plain-string list shape — no image_base
+                        # available without a second call. Skip; the
+                        # operator can run debugger_resolve_ordinal /
+                        # sync manually.
+                        continue
+                    prog_path = prog.get("path") or prog.get("name") or ""
+                    image_base = prog.get("image_base") or prog.get("imageBase")
+                    if prog_path and image_base:
+                        ghidra_bases[prog_path] = image_base
                 if ghidra_bases:
                     _debugger_request(
                         "POST", "/debugger/sync_modules", {"ghidra_bases": ghidra_bases}
+                    )
+                    logger.info(
+                        "debugger_attach: auto-synced %d Ghidra image base(s) "
+                        "to the debugger address map",
+                        len(ghidra_bases),
+                    )
+                else:
+                    logger.info(
+                        "debugger_attach: no Ghidra image bases available "
+                        "from /list_open_programs — address-map auto-sync "
+                        "skipped (set up manually via debugger_resolve_ordinal "
+                        "or /debugger/sync_modules)"
                     )
         except Exception as e:
             logger.warning(f"Auto-sync address map failed (non-fatal): {e}")
@@ -107,19 +179,19 @@ def debugger_attach(target: str) -> str:
     return result
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_detach() -> str:
     """Detach from the debugged process. The process continues running."""
     return _debugger_request("POST", "/debugger/detach")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_status() -> str:
     """Get debugger connection status, loaded modules, active traces/watches."""
     return _debugger_request("GET", "/debugger/status")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_modules() -> str:
     """List loaded modules (DLLs) with runtime and Ghidra base addresses.
 
@@ -129,7 +201,7 @@ def debugger_modules() -> str:
     return _debugger_request("GET", "/debugger/modules")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
     """Resolve a DLL ordinal export to its runtime and Ghidra addresses.
 
@@ -145,7 +217,7 @@ def debugger_resolve_ordinal(dll: str, ordinal: int) -> str:
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_set_breakpoint(
     ghidra_address: str,
     module: str = "",
@@ -172,7 +244,7 @@ def debugger_set_breakpoint(
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_remove_breakpoint(bp_id: int) -> str:
     """Remove a breakpoint by its ID.
 
@@ -182,13 +254,13 @@ def debugger_remove_breakpoint(bp_id: int) -> str:
     return _debugger_request("DELETE", f"/debugger/breakpoint/{bp_id}")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_list_breakpoints() -> str:
     """List all active breakpoints with their addresses and status."""
     return _debugger_request("GET", "/debugger/breakpoints")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_continue() -> str:
     """Resume execution of the debugged process.
 
@@ -198,7 +270,7 @@ def debugger_continue() -> str:
     return _debugger_request("POST", "/debugger/go")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_step_into(count: int = 1) -> str:
     """Single-step into the next instruction(s). Follows calls.
 
@@ -208,7 +280,7 @@ def debugger_step_into(count: int = 1) -> str:
     return _debugger_request("POST", "/debugger/step_into", {"count": count})
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_step_over(count: int = 1) -> str:
     """Step over the next instruction(s). Steps over calls.
 
@@ -218,7 +290,7 @@ def debugger_step_over(count: int = 1) -> str:
     return _debugger_request("POST", "/debugger/step_over", {"count": count})
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_registers() -> str:
     """Read all CPU registers. Must be stopped at a breakpoint.
 
@@ -227,7 +299,7 @@ def debugger_registers() -> str:
     return _debugger_request("GET", "/debugger/registers")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_read_memory(
     address: str, size: int = 64, address_type: str = "runtime", module: str = ""
 ) -> str:
@@ -253,7 +325,7 @@ def debugger_read_memory(
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_stack_trace(depth: int = 20) -> str:
     """Get the call stack backtrace with return addresses mapped to Ghidra symbols.
 
@@ -263,7 +335,7 @@ def debugger_stack_trace(depth: int = 20) -> str:
     return _debugger_request("GET", "/debugger/stack", query={"depth": str(depth)})
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_read_args(
     convention: str = "__stdcall", count: int = 4, arg_names: str = ""
 ) -> str:
@@ -284,7 +356,7 @@ def debugger_read_args(
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_trace_function(
     ghidra_address: str,
     module: str = "",
@@ -324,7 +396,7 @@ def debugger_trace_function(
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_trace_stop(trace_id: int = -1) -> str:
     """Stop a function trace. Use trace_id=-1 to stop all traces.
 
@@ -334,7 +406,7 @@ def debugger_trace_stop(trace_id: int = -1) -> str:
     return _debugger_request("POST", "/debugger/trace/stop", {"trace_id": trace_id})
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_trace_log(trace_id: int = -1, last_n: int = 50) -> str:
     """Read the trace log. Shows timestamped function calls with arguments.
 
@@ -349,13 +421,13 @@ def debugger_trace_log(trace_id: int = -1, last_n: int = 50) -> str:
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_trace_list() -> str:
     """List all active and completed traces with hit counts."""
     return _debugger_request("GET", "/debugger/trace/list")
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_watch_memory(
     ghidra_address: str, size: int = 4, access: str = "write", module: str = ""
 ) -> str:
@@ -382,7 +454,7 @@ def debugger_watch_memory(
     )
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_watch_stop(watch_id: int = -1) -> str:
     """Stop a memory watchpoint. Use watch_id=-1 to stop all.
 
@@ -392,7 +464,7 @@ def debugger_watch_stop(watch_id: int = -1) -> str:
     return _debugger_request("POST", "/debugger/watch/stop", {"watch_id": watch_id})
 
 
-@mcp.tool()
+@_debugger_tool()
 def debugger_watch_log(watch_id: int = -1, last_n: int = 50) -> str:
     """Read the watchpoint hit log. Shows memory accesses with values and accessors.
 

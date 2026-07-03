@@ -7,13 +7,15 @@ import sys
 from . import dispatch
 from . import state
 from . import transport
-from .config import STATIC_TOOL_NAMES, logger
+from .config import STATIC_TOOL_NAMES, _ALL_STATIC_TOOL_NAMES, logger
 from .schema import _TYPE_MAP, _normalize_tool_def_names, _parse_schema
 from .server import Context, mcp
 from .validation import sanitize_address, validate_tool_name
 
-# Fail fast at import time if any static tool name is not CAPI-safe.
-for _static_tool_name in STATIC_TOOL_NAMES:
+# Fail fast at import time if any static tool name is not CAPI-safe. Validates
+# every structurally-possible name (including debugger tools), not just the
+# ones active on this platform.
+for _static_tool_name in _ALL_STATIC_TOOL_NAMES:
     validate_tool_name(_static_tool_name)
 
 
@@ -21,6 +23,19 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     """Build a callable that dispatches to the Ghidra HTTP endpoint."""
     properties = params_schema.get("properties", {})
     required = set(params_schema.get("required", []))
+    # Program selectors: params that pick which open program a call operates on.
+    # Most tools use plain `program=`; the cross-program tools (diff_functions,
+    # bulk_fuzzy_match, find_similar_functions_fuzzy) use `source_program`/
+    # `target_program` or `program_a`/`program_b`. All match this name pattern.
+    # We deliberately do NOT filter by the schema's `required` flag: those
+    # selectors are declared required yet the server still falls back to the
+    # *current* program when one arrives empty (getProgramOrError), which is the
+    # wrong-binary hazard strict mode closes. (open_program/close_program use
+    # path/name, so they have no selector here and are unaffected.)
+    program_selectors = [
+        name for name in properties
+        if name == "program" or name.endswith("_program") or name.startswith("program_")
+    ]
     is_post = http_method.upper() == "POST"
     has_schema_dry_run = "dry_run" in properties
     use_synthetic_dry_run = is_post and not has_schema_dry_run
@@ -55,6 +70,21 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
             for k, v in kwargs.items()
             if v is not None and not (isinstance(v, str) and v == "")
         }
+        # Strict mode: refuse if any program selector is missing, so a forgotten
+        # one fails loudly instead of running against the server's current
+        # program. filtered has already dropped None and "", so absence is the
+        # test (an empty selector counts as omitted).
+        if state._require_selectors and program_selectors:
+            missing = [p for p in program_selectors if p not in filtered]
+            if missing:
+                names = ", ".join(f"`{p}=`" for p in missing)
+                return json.dumps({
+                    "error": (
+                        f"Missing required program selector(s): {names} "
+                        "(GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS is set). "
+                        "Pass each explicitly to target the intended open program(s)."
+                    )
+                })
         if http_method == "GET":
             str_params = {k: str(v) for k, v in filtered.items()}
             if use_synthetic_dry_run and is_truthy(dry_run):
@@ -121,7 +151,7 @@ def _register_tool_def(tool_def: dict) -> bool:
     name = tool_def["name"]
     validate_tool_name(name)
     if name in STATIC_TOOL_NAMES:
-        return False  # Don't overwrite static tools
+        return False  # Don't overwrite an *active* static tool of the same name
     description = tool_def.get("description", "")
     endpoint = tool_def["endpoint"]
     http_method = tool_def.get("http_method", "GET")

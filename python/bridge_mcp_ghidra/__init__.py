@@ -36,11 +36,14 @@ from . import cli  # noqa: F401
 from .config import (  # noqa: F401
     CORE_GROUPS,
     DEBUGGER_URL,
+    DEBUGGER_TOOL_NAMES,
     DEFAULT_TCP_PORT,
     DEFAULT_TCP_URL,
     ENDPOINT_TIMEOUTS,
+    MANAGEMENT_TOOL_NAMES,
     STATIC_TOOL_NAMES,
     TCP_PORT_SCAN_RANGE,
+    _ALL_STATIC_TOOL_NAMES,
     logger,
 )
 from .server import Context, mcp  # noqa: F401
@@ -101,7 +104,34 @@ from .static_tools import (  # noqa: F401
     search_tools,
     unload_tool_group,
 )
-from .debugger import _debugger_request  # noqa: F401
+from .debugger import (  # noqa: F401
+    _DEBUGGER_ACTIVE,
+    _debugger_enabled,
+    _debugger_request,
+    _debugger_tool,
+    debugger_attach,
+    debugger_continue,
+    debugger_detach,
+    debugger_list_breakpoints,
+    debugger_modules,
+    debugger_read_args,
+    debugger_read_memory,
+    debugger_registers,
+    debugger_remove_breakpoint,
+    debugger_resolve_ordinal,
+    debugger_set_breakpoint,
+    debugger_stack_trace,
+    debugger_status,
+    debugger_step_into,
+    debugger_step_over,
+    debugger_trace_function,
+    debugger_trace_list,
+    debugger_trace_log,
+    debugger_trace_stop,
+    debugger_watch_log,
+    debugger_watch_memory,
+    debugger_watch_stop,
+)
 
 # These two are only ever mutated in place (clear/append/add/discard), so the
 # re-exported references stay valid. Reassigned state (_transport_mode,

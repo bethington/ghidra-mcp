@@ -61,8 +61,7 @@ logger = logging.getLogger("bridge_mcp_ghidra")
 # Tool-group / static-tool catalog constants
 # ==========================================================================
 
-# Static tool names that should not be overwritten by dynamic registration
-STATIC_TOOL_NAMES = {
+MANAGEMENT_TOOL_NAMES = {
     "list_instances",
     "connect_instance",
     "list_tool_groups",
@@ -71,7 +70,15 @@ STATIC_TOOL_NAMES = {
     "check_tools",
     "search_tools",
     "import_file",
-    # Debugger tools (Phase 1+2+3)
+}
+
+# WinDbg debugger proxy tools (Phase 1+2+3). The standalone debugger server
+# (debugger/server.py) wraps dbgeng via pybag and only runs on Windows, so these
+# are registered conditionally — see debugger._debugger_enabled(). The names stay
+# reserved in _ALL_STATIC_TOOL_NAMES on every platform so dynamic-tool naming is
+# identical everywhere (a Ghidra /debugger/status endpoint -> debugger_status_2
+# regardless of whether our proxy is active on this host).
+DEBUGGER_TOOL_NAMES = {
     "debugger_attach",
     "debugger_detach",
     "debugger_status",
@@ -95,6 +102,17 @@ STATIC_TOOL_NAMES = {
     "debugger_watch_stop",
     "debugger_watch_log",
 }
+
+# Full structural set: every tool name the bridge may define. Used for
+# name-collision detection / reservation so dynamic tool names are platform-stable.
+_ALL_STATIC_TOOL_NAMES = MANAGEMENT_TOOL_NAMES | DEBUGGER_TOOL_NAMES
+
+# Active set: static tools actually registered with this process. Debugger names
+# are added by bridge_mcp_ghidra.debugger (once DEBUGGER_URL is known) only when
+# the debugger backend is usable on this host. Used for runtime availability
+# reporting (check_tools etc.). Mutated in place (|=), never rebound, so modules
+# that imported this name earlier still see the update.
+STATIC_TOOL_NAMES = set(MANAGEMENT_TOOL_NAMES)
 
 # Core groups always loaded on connect (essential for basic RE workflow)
 CORE_GROUPS = {"listing", "function", "program"}
