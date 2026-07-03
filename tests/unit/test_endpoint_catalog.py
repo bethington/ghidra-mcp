@@ -164,16 +164,35 @@ class TestBridgeIsDynamic(unittest.TestCase):
     """Verify the bridge uses dynamic registration, not hardcoded tools."""
 
     def test_bridge_has_few_static_tools(self):
-        """Bridge static tool decorators should match the explicit static tool allowlist."""
+        """Bridge static tool decorators should match the full static tool allowlist.
+
+        Management tools use @mcp.tool(); the WinDbg debugger proxy tools use
+        @_debugger_tool() (registered conditionally — see _debugger_enabled).
+        Every name in _ALL_STATIC_TOOL_NAMES must have exactly one decorator,
+        independent of whether the debugger is active on this host.
+        """
         import bridge_mcp_ghidra as bridge
 
         content = _bridge_source_text()
-        tool_count = len(re.findall(r"@mcp\.tool\(\)", content))
+        mgmt_count = len(re.findall(r"@mcp\.tool\(\)", content))
+        debugger_count = len(re.findall(r"@_debugger_tool\(\)", content))
+        tool_count = mgmt_count + debugger_count
         self.assertEqual(
             tool_count,
-            len(bridge.STATIC_TOOL_NAMES),
-            f"Bridge has {tool_count} @mcp.tool() decorators but "
-            f"{len(bridge.STATIC_TOOL_NAMES)} static tool names",
+            len(bridge._ALL_STATIC_TOOL_NAMES),
+            f"Bridge has {mgmt_count} @mcp.tool() + {debugger_count} "
+            f"@_debugger_tool() decorators ({tool_count}) but "
+            f"{len(bridge._ALL_STATIC_TOOL_NAMES)} static tool names",
+        )
+        self.assertEqual(
+            mgmt_count,
+            len(bridge.MANAGEMENT_TOOL_NAMES),
+            "management @mcp.tool() decorators should match MANAGEMENT_TOOL_NAMES",
+        )
+        self.assertEqual(
+            debugger_count,
+            len(bridge.DEBUGGER_TOOL_NAMES),
+            "@_debugger_tool() decorators should match DEBUGGER_TOOL_NAMES",
         )
 
     def test_bridge_has_schema_registration(self):
@@ -189,9 +208,15 @@ class TestBridgeIsDynamic(unittest.TestCase):
         regression coverage / docstrings tied to a fix). Split the module or
         bump deliberately rather than papering over bloat.
 
-        History (pre-split, single file): 2100 (2026-05-12) -> 2250 -> 2300
-        (2026-06-14, search_tools). Split into the python/bridge_mcp_ghidra
-        package on 2026-06-19; now enforced per-module.
+        History (pre-split, single file): 2100 (2026-05-12) -> 2250 (#170/#175
+        socket-dir scan + TCP port-range discovery) -> 2300 (2026-06-14,
+        search_tools) -> 2350 (2026-06-18, wildcard-bind DNS-rebinding fix) ->
+        2500 (2026-06-26, tier 1+2 security/correctness: CORS header removal,
+        IPv6 support, multi-UDS handling, emulation max_steps bounding, plugin
+        lifecycle handoff) -> 2550 (2026-06-26, GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS
+        strict mode, #339). Split into the python/bridge_mcp_ghidra package on
+        2026-06-19 (carrying the accumulated history above forward into the new
+        module layout); now enforced per-module.
         """
         per_module_cap = 800
         for module in _bridge_sources():

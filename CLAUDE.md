@@ -2,9 +2,9 @@
 
 ## Overview
 
-MCP server bridging Ghidra reverse engineering with AI tools. 251 MCP tools for binary analysis.
+MCP server bridging Ghidra reverse engineering with AI tools. 256 MCP tools for binary analysis.
 
-- **Package**: `com.xebyte` | **Version**: 5.14.1 | **Java**: 21 LTS | **Ghidra**: 12.1.2
+- **Package**: `com.xebyte` | **Version**: 5.15.0 | **Java**: 21 LTS | **Ghidra**: 12.1.2
 
 ## Boil the ocean
 
@@ -160,10 +160,10 @@ Find the file(s) you edited below; run everything in that row. Always include th
 | Add/modify `@McpTool` / `@Param` annotation | Offline (Java) first — `EndpointsJsonParityTest` will fail if `tests/endpoints.json` is stale. Regenerate: `mvn test -Dtest=RegenerateEndpointsJson -Dregenerate=true`. Then Integration (Java). |
 | `src/main/java/com/xebyte/GhidraMCPPlugin.java` (HTTP routes) | Offline (Java) + `EndpointRegistrationTest` (integration) + `tests/performance/test_http_concurrency.py`. For UDS/TCP defaults + TCP port-range fallback (#175): manual verification with port 8089 occupied, expect bind on 8090; `/mcp/instance_info → tcp_port` should report the actual bound port. |
 | `src/main/java/com/xebyte/headless/*` | Offline (Java) + `tests/unit/test_setup_ghidra.py` + Integration (Java) headless run |
-| `python/bridge_mcp_ghidra/*` (bridge package) | `tests/unit/test_bridge_utils.py tests/unit/test_mcp_tools.py tests/unit/test_mcp_tool_functions.py tests/unit/test_response_schemas.py tests/unit/test_endpoint_catalog.py tests/unit/test_project_consistency.py`. For multi-candidate socket dir scan (#170): `TestGetSocketDirCandidates` + `TestDiscoverInstancesMultiDir`. For TCP port-range scanner (#175): `TestTcpPortScan`. Per-module size cap is 800 lines (`test_bridge_modules_stay_focused`). Mock-patch targets are module-qualified (e.g. `bridge_mcp_ghidra.dispatch.dispatch_get`, `bridge_mcp_ghidra.transport.do_request`); mutable globals live in `bridge_mcp_ghidra.state`. |
+| `python/bridge_mcp_ghidra/*` (bridge package) | `tests/unit/test_bridge_utils.py tests/unit/test_mcp_tools.py tests/unit/test_mcp_tool_functions.py tests/unit/test_response_schemas.py tests/unit/test_endpoint_catalog.py tests/unit/test_project_consistency.py`. For multi-candidate socket dir scan (#170): `TestGetSocketDirCandidates` + `TestDiscoverInstancesMultiDir`. For TCP port-range scanner (#175): `TestTcpPortScan`. For debugger-tool platform gating: `TestDebuggerEnabled` + `TestDebuggerToolRegistration`. Per-module size cap is 800 lines (`test_bridge_modules_stay_focused`). Mock-patch targets are module-qualified (e.g. `bridge_mcp_ghidra.dispatch.dispatch_get`, `bridge_mcp_ghidra.transport.do_request`); mutable globals live in `bridge_mcp_ghidra.state`. |
 | `fun-doc/library_code_detector.py` — heuristic library-code classifier | `tests/performance/test_library_code_detector.py` (19-case unit suite) + `tests/performance/test_selector_invariants.py` (3 selector-skip cases). Live spot-check on a binary known to contain CRT/STL (e.g. anything compiled with MSVC `/MT`): confirm functions like `ParseSignedShort` classify but real user code (e.g. exported APIs) does not. |
 | `fun-doc/fun_doc.py` — state, sessions, locking, selector, scoring | `tests/performance/test_state_atomicity.py tests/performance/test_state_lock_reentrant.py tests/performance/test_selector_invariants.py tests/performance/test_event_bus_drain.py` + fun-doc benchmark (`--mock --tier fast --compare`) |
-| `fun-doc/fun_doc.py` — provider routing, prompt construction | `tests/performance/test_provider_selection.py tests/performance/test_ghidra_offline.py` + fun-doc benchmark |
+| `fun-doc/fun_doc.py` — provider routing, prompt construction | `tests/performance/test_provider_selection.py tests/performance/test_ghidra_offline.py tests/performance/test_globals_worker.py` + fun-doc benchmark |
 | `fun-doc/web.py` — worker loop, heartbeats, dashboard | `tests/performance/test_state_atomicity.py tests/performance/test_worker_watchdog.py tests/performance/test_dashboard_single_instance.py tests/performance/test_worker_config_snapshot.py` |
 | `fun-doc/inventory_scorer.py` | `tests/performance/test_inventory_scorer.py` |
 | `fun-doc/provider_pause.py` | `tests/performance/test_provider_pause.py` |

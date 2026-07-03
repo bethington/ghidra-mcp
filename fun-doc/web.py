@@ -102,7 +102,6 @@ class WorkerManager:
                         }
                         kill_requests.append((worker_id, phase, stale_sec))
                         continue
-                    worker["last_heartbeat_at"] = now.isoformat()
                     heartbeats.append({
                         "worker_id": worker_id,
                         "provider": worker.get("provider"),
@@ -607,6 +606,10 @@ class WorkerManager:
                     # external pause-set mutations get picked up promptly.
                     if worker["stop_flag"].wait(timeout=min(remaining, 30.0)):
                         break  # stop requested mid-pause
+                    # Heartbeat during quota pause so the watchdog doesn't
+                    # mistake a deliberate pause for a stall.
+                    with self._lock:
+                        worker["last_heartbeat_at"] = datetime.now().isoformat()
                     paused_until = pm.wait_until(worker["provider"], primary_model)
                     if paused_until is None:
                         break
@@ -625,6 +628,13 @@ class WorkerManager:
             while not worker["stop_flag"].is_set() and (
                 worker["continuous"] or processed < worker["count"]
             ):
+                # Liveness: the worker — not the watchdog — proves it's alive.
+                # Written under the lock so the watchdog reads a consistent
+                # snapshot. (H25: previously the watchdog wrote this itself,
+                # which made the stall-kill threshold unreachable.)
+                with self._lock:
+                    worker["last_heartbeat_at"] = datetime.now().isoformat()
+
                 # Per-iteration pause check (Q1): another worker may have
                 # discovered the wall while we were idle/processing. Yield
                 # before picking the next function.
@@ -961,7 +971,8 @@ class WorkerManager:
                     "skipped" if result == "skipped" else "failed"
                 )
                 worker["progress"][bucket] = worker["progress"].get(bucket, 0) + 1
-                worker["last_heartbeat_at"] = datetime.now().isoformat()
+                with self._lock:
+                    worker["last_heartbeat_at"] = datetime.now().isoformat()
                 self._emit_status()
 
             # Set the worker pane's "current item" title with the real
@@ -978,7 +989,8 @@ class WorkerManager:
                     "address": address.lstrip("0x"),
                     "program": Path(prog_path).name,
                 }
-                worker["last_heartbeat_at"] = datetime.now().isoformat()
+                with self._lock:
+                    worker["last_heartbeat_at"] = datetime.now().isoformat()
                 self._emit_status()
 
             def _exclude_binaries():

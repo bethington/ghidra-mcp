@@ -552,6 +552,30 @@ class DebugEngine:
         self._require_stopped()
         return bytes(self._base.read(address, size))
 
+    def write_memory(self, address: int, data: bytes) -> int:
+        """Write bytes to target memory. Returns number of bytes written."""
+        return self._run_on_engine(self._write_memory_impl, address, data)
+
+    def _write_memory_impl(self, address: int, data: bytes) -> int:
+        self._require_stopped()
+        self._base.write(address, bytes(data))
+        return len(data)
+
+    def write_registers(self, values: Dict[str, int]) -> Dict[str, int]:
+        """Set one or more CPU registers. Keys are names (eax, ebp, eip, ...);
+        values are ints. Used to drive controlled execution of a code fragment
+        (set EIP + inputs, then step). Returns the values applied."""
+        return self._run_on_engine(self._write_registers_impl, values)
+
+    def _write_registers_impl(self, values: Dict[str, int]) -> Dict[str, int]:
+        self._require_stopped()
+        applied = {}
+        with self._wow64_x86_context():
+            for name, value in values.items():
+                self._base.reg._set_register(name.lower(), int(value))
+                applied[name.upper()] = int(value)
+        return applied
+
     def read_dword(self, address: int) -> int:
         """Read a 32-bit value from memory."""
         data = self.read_memory(address, 4)
@@ -605,18 +629,22 @@ class DebugEngine:
                               handler: Optional[Callable]) -> int:
         self._require_attached()
         if bp_type == BreakpointType.HARDWARE:
+            # Hardware *execute* breakpoint: a DATA breakpoint with
+            # DEBUG_BREAK_EXECUTE access — this is what arms a debug
+            # register (DR0-DR3) instead of patching an int3 into the
+            # target. Previously this branch passed DEBUG_BREAKPOINT_CODE
+            # (the *software* int3 type) and only re-enabled it, so
+            # type="hardware" planted an int3 that anti-debug-aware
+            # targets detect and that corrupts checksummed/self-modifying
+            # code regions where a HW bp was specifically requested.
             bp_id = self._base.breakpoints.set(
                 expr=address,
-                type=DbgEng.DEBUG_BREAKPOINT_CODE,
+                type=DbgEng.DEBUG_BREAKPOINT_DATA,
+                size=1,
+                access=DbgEng.DEBUG_BREAK_EXECUTE,
                 oneshot=oneshot,
                 handler=handler,
             )
-            # For HW exec, convert to hardware after creation
-            try:
-                bp_obj = self._base._control.GetBreakpointById(bp_id)
-                bp_obj.AddFlags(DbgEng.DEBUG_BREAKPOINT_ENABLED)
-            except Exception:
-                pass
         else:
             bp_id = self._base.breakpoints.set(
                 expr=address,

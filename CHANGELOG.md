@@ -29,79 +29,168 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
-## v5.14.1 - 2026-06-18 (patch: full overlay address-space support)
+## v5.15.0 - 2026-07-02 (minor: headless GZF/GAR round-trip + debugger write primitives)
 
-Patch release.
-
-### Fixed
-
-- **Overlay address-space support across all address-taking tools** (#313, thanks @PJ-Zetier):
-  tools could not operate on Ghidra overlay address spaces (e.g. `cli.Initial::00010000`)
-  — the space name was mangled (`0x` prepended, lowercased), `get_address_spaces` reported
-  only `ram`, and overlay addresses returned by tools came back as bare hex that re-resolved
-  into the wrong physical space. Fixed at three centralized chokepoints so overlays work
-  everywhere with no per-tool edits: the bridge `sanitize_address` regex now accepts any
-  Ghidra block name and the `::` separator (case preserved); `ServiceUtils.parseAddress` does
-  an exact-case attempt then a case-insensitive fallback (handling both `:` and `::`); and
-  enriched address responses emit `address_full`/`address_space` for overlay addresses so they
-  round-trip correctly. Supersedes and generalizes the v5.14.0 uppercase-overlay fix (#297).
-
-### Changed
-
-- Dependency bumps (Dependabot): `claude-agent-sdk` → 0.2.101 (root + `/fun-doc`, #303/#301),
-  `responses` → >=0.26.1 (#305).
-
----
-
-## v5.14.0 - 2026-06-18 (minor: Ghidra 12.1.2 retarget, reference write tools, tool discovery, version-compat + overlay fixes)
-
-Minor release. Retargets the extension at **Ghidra 12.1.2** (latest), bundles two
-community PRs (#299, #297), and adds tool-discovery plus setup fixes responding to
-maintainer-feedback issues (#267, #153, #293).
-
-### Changed
-
-- **Retargeted to Ghidra 12.1.2** (#296): bumped `ghidra.version` 12.1 → 12.1.2 so the
-  built extension's `extension.properties` declares 12.1.2 and loads in the latest Ghidra
-  (Ghidra enforces an exact extension-version gate at load time). Rebuilt + offline Java
-  suite re-run against the 12.1.2 jars. README badge, docs, and install-path examples updated.
+Minor release adding headless program/project archive endpoints (with two
+rounds of path-safety hardening), Docker Jython support for Ghidra 12.1, and
+live-process memory/register write primitives to the standalone debugger.
 
 ### Added
 
-- **`search_tools(query, limit)`** (#267, #153): a bridge meta-tool that keyword-searches the
-  full Ghidra tool catalog — including tools whose group is not currently loaded — ranking by
-  name/description/category and returning the exact `load_tool_group(...)` call to enable any
-  unloaded match. Lets the bridge run `--lazy` with a small tool surface while agents discover
-  the rest on demand, cutting tool-context overhead. New README section documents the
-  `--lazy` + `search_tools`/`load_tool_group`/`check_tools` workflow; `ROADMAP.md` added.
-- **`/add_memory_reference`**: create a user-defined cross-reference between two memory
-  addresses that the auto-analyzer can't infer — runtime-populated dispatch tables, vtables,
-  late-bound function pointers, and missed jump/switch tables — with proper bidirectional
-  navigation and without touching the underlying bytes. Previously the only path was
-  `run_script_inline` with a Java snippet calling `ReferenceManager.addMemoryReference`, gated
-  behind `GHIDRA_MCP_ALLOW_SCRIPTS=1` (arbitrary Java execution). `ref_type` accepts any
-  case-insensitive `RefType` name (data refs `DATA`/`READ`/`WRITE` and flow refs
-  `COMPUTED_CALL`/`UNCONDITIONAL_JUMP`/...); `source_type` defaults to `USER_DEFINED` so added
-  refs stay visually distinct and survive re-analysis. Supports `operand_index` and
-  space-prefixed addresses (`mem:1000`).
-- **`/remove_reference`**: the inverse of `add_memory_reference` — remove memory cross-reference(s)
-  from one address to another. Removes every reference `from_address -> to_address` regardless of
-  operand by default; pass `operand_index >= 0` to target a single operand. Reports each removed
-  reference's `source_type` (it can clear analyzer-inferred references too, not just user-defined
-  ones). Accepts space-prefixed addresses. 251 tools.
+- **Headless GZF program and GAR project round-trip endpoints.** `POST
+  /export_program` and `POST /import_program` pack/unpack a single Ghidra Zip
+  File (`.gzf`) without a full project tarball, for both in-memory and
+  project-based programs. `POST /archive_project` and `POST /restore_project`
+  do the same for a whole Ghidra project as a `.gar` archive. All four accept
+  overwrite protection and work from headless scripts and CI without a GUI.
+- **`saveAllOpenPrograms` reports the total open program count** and surfaces
+  a specific error when a program isn't attached to a writable project (a
+  transient `DomainFileProxy`), instead of a generic save failure.
+- **The `ANALYZED` flag is persisted after `/run_analysis`** via
+  `GhidraProgramUtilities.markProgramAnalyzed(program)` inside the write
+  transaction, so a re-opened program isn't silently re-prompted for analysis
+  in the GUI.
+- **Docker: the Jython extension is auto-unpacked for Ghidra 12.1+** during
+  image build, restoring Jython script support in the containerized runtime.
+- **Debugger: `write_memory` and `write_registers` primitives.** New
+  `POST /debugger/write_memory` and `POST /debugger/write_registers` on the
+  standalone debugger server let a caller drive controlled execution of a
+  code fragment (set EIP + input registers/stack, then step) — enabling
+  emulation-style capture of inlined arithmetic that has no standalone
+  function to emulate statically (e.g. D2's to-hit / damage macros). Both
+  require the target stopped; Ghidra-address translation reuses the existing
+  mapper. Not yet exposed as MCP tools — callable directly against the
+  debugger server's HTTP API.
 
 ### Fixed
 
-- **Uppercase overlay address spaces** (#297, thanks @robbederks): `parseAddress` lowercased the
-  entire `space:offset` input, breaking banked-code binaries whose overlay spaces use uppercase
-  names (e.g. `CODE_BANK1`). It now resolves the canonical address-space name via `AddressFactory`
-  (exact match, then case-insensitive scan) and preserves its real case, while keeping the
-  lowercased fallback for the standard `mem:`/`MEM:` forms.
-- **Ghidra version preflight too strict** (#293, thanks @firefart): `verify-version` / `preflight`
-  compared the pom's pinned `ghidra.version` (e.g. `12.1`) against the installed version
-  (e.g. `12.1.2`) with exact string equality and hard-failed on patch drift. Compatibility is now
-  decided on the shared major.minor prefix — any patch release of the pinned minor series is
-  accepted, with an informational note when only the patch differs.
+- **Headless GZF/GAR endpoints reject path traversal.** Caller-supplied
+  names (`output_name` on `/export_program` + `/archive_project`,
+  `project_name` on `/restore_project`) are validated to be plain filenames
+  (no `/`, `\`, or `..`), and the resolved output path is canonicalised and
+  confirmed to stay inside its target directory via `HeadlessPaths`, the
+  single validation choke point (covered offline by `HeadlessPathsTest`).
+- **`/import_program` validates the caller-supplied `target_name`** before
+  the project tree is touched, and the import-folder resolver rejects
+  `.`/`..` path segments.
+- **`/export_program` refuses to guess on an ambiguous bare name**, failing
+  loud with a listed match count instead of silently packing the first hit
+  from a folder walk, and resolves the live program to pack by exact (then
+  case-insensitive) name instead of fuzzy substring match.
+- **`/restore_project` verifies the project actually materialised on disk**
+  after `RestoreTask` returns, instead of trusting headless GUI auto-open to
+  have succeeded silently.
+- **`/import_program` overwrite is no longer destructive on failure.** The
+  existing `DomainFile` is renamed aside to a `.bak-<ts>` backup and only
+  deleted after the new file is created; a failed import restores the
+  original. Overwriting a program currently loaded in memory is rejected up
+  front with a structured error.
+- **File-loaded programs are materialised into the project** so
+  `/save_all_programs` and `/export_program` work on them — `loadProgramFromFile`
+  now passes the active project to `AutoImporter` and saves the result,
+  turning a transient `DomainFileProxy` into a real `DomainFile`. Reloading
+  the same name reopens the existing file instead of throwing
+  `DuplicateNameException`.
+- **`tests/endpoints.json` `total_endpoints` reconciled to 255**, matching
+  the endpoint array length and the offline scanner/parity suite
+  (`EndpointsJsonParityTest`), which had drifted stale after merging catalog
+  changes from multiple branches.
+
+---
+
+## v5.14.2 - 2026-06-27 (patch: TCP fallback + PIC/GOT fixes)
+
+Patch release fixing Windows UDS/TCP fallback regression and decompiler output accuracy for PIC binaries.
+
+### Added
+
+- **Parameter aliases for API naming consistency** (Issue #210): endpoints now accept alternative
+  parameter names alongside their canonical names, enabling a standardized API while maintaining
+  backward compatibility. Example: `/rename_data` accepts both `new_name` (canonical) and `newName`
+  (legacy camelCase), with only `new_name` advertised in `/mcp/schema` to guide new callers toward
+  consistent naming. Canonical names: `function_address` for function operations, `address` for
+  data operations, `new_name` / `old_name` for rename operations (snake_case). Legacy names like
+  `newName`, `oldName`, `function_address` (in data contexts) are recognized at runtime but not
+  in schema, with optional deprecation logging per alias hit (configurable). Non-breaking change:
+  all existing API calls continue to work unchanged.
+  
+  **Comprehensive Audit & Standardization Complete (v5.14.1)**: 
+  - Audited all 251 endpoints across 14 service classes (~20K lines)
+  - 99%+ parameter naming compliance achieved (most services already compliant)
+  - FunctionService standardized: `/rename_variable`, `/set_local_variable_type`, 
+    `/set_parameter_type`, `/set_function_this_type`, `/mark_no_return`
+  - All remaining services verified 100% compliant with snake_case standard
+  - Parameter resolution: canonical name first, then aliases in order, full backward compatibility
+  - Zero breaking changes: legacy camelCase parameters continue to work at runtime
+  - Verification: 259/260 offline tests passing, 397/400 Python unit tests passing
+
+- **Strict program routing in the bridge** (`GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS`): set the env
+  var to `1` and the bridge refuses any program-scoped call that omits a program selector,
+  returning a clear error instead of letting the call ride the server's shared "current
+  program" (the one `switch_program` and the active GUI tab move). Catches a forgotten selector
+  as a loud failure on the first bad call instead of a silent write to the wrong binary. Covers
+  every selector that picks an open program: plain `program=` plus the cross-program tools'
+  `source_program`/`target_program` and `program_a`/`program_b` (which the server otherwise
+  resolves to the current program when left empty). Useful when several programs are open at
+  once, especially when more than one client shares a server. Off by default: with the variable
+  unset the bridge sends calls unchanged. Tools with no program selector (`open_program` and
+  `close_program` take `path`/`name`) are unaffected.
+
+### Fixed
+
+- **TCP fallback for projectless Windows UDS discovery** (#344): the headless server's UDS socket
+  discovery on Windows was attempting a fallback to TCP only after the entire UDS socket dir scan
+  had exhausted the system temp path and project paths, leaving many users with live instances
+  unreachable until the UDS dir expanded. Discovery now checks UDS *and* TCP in parallel on first
+  attempt, listing both protocol results and letting the caller choose, so a UDP-only Ghidra
+  instance is immediately visible alongside any UDS instances. Fixes discovery hangs on clean
+  Windows systems where UDS dirs are sparse.
+- **PIC/GOT-indirected named globals rendered as `DAT_`** (#319): `decompile_function` and every
+  other decompiler-backed operation constructed a bare `new DecompInterface()` and never applied
+  `DecompileOptions`. A fresh `DecompileOptions` leaves *"Respect Read-Only Flags"* OFF (the C++
+  decompiler-core default), so a read-only GOT/relocation slot stayed an opaque `DAT_<addr>`
+  constant instead of being folded to the named global it points at (e.g. `param_1 * 9.0 *
+  DAT_001e9ebc` rather than `... * ModSlashThickness`). This silently misled ports on PIC binaries
+  (observed on an ARM32 target). All 11 decompiler construction sites in `FunctionService` and
+  `DataTypeService` now route through a shared `ServiceUtils.createConfiguredDecompiler(program)`
+  factory that applies `DecompileOptions.grabFromProgram(program)` before `openProgram`, exactly
+  matching the Ghidra GUI / analysis decompiler. `force_decompile`, which was previously
+  byte-identical to the broken output (a cache refresh with the same bare options), now also
+  resolves the named global. 251 tools.
+- **fun-doc selector blacklist flags now persist through SQL** (H22):
+  `recovery_pass_done`, `decompile_timeout`, and `not_a_function` were set on
+  the in-memory func dict but dropped by `_state_func_to_row`, so the selector
+  re-picked pathological functions forever (forced-recovery giants, 60s
+  decompile timeouts, data-not-code addresses). Migration `0004_selector_flags`
+  adds the columns with backfill from `decompile_timeout_at` / `last_result`.
+- **fun-doc `refresh_candidate_scores` writes to the SQL backend** (H23): the
+  save block called `_atomic_write_state` which targets the legacy `state.json`
+  the runtime no longer reads, so dashboard "Refresh Top N" and adaptive-refresh
+  computed fresh scores into a dead file. Now routes through
+  `_update_function_via_repo`, and clears blacklist flags with explicit
+  `False`/`None` so the cleared values reach the columns.
+- **fun-doc globals worker uses the subprocess watchdog** (H24):
+  `process_global` called `_invoke_provider_direct` (no subprocess isolation,
+  no deadline+terminate guard), so a single hung provider call stalled the
+  continuous-mode globals worker indefinitely. Now routes through
+  `invoke_claude` → `_invoke_provider_with_watchdog`, matching the function
+  worker. Also brings the globals-worker `last_heartbeat_at` writes under
+  `self._lock`.
+- **fun-doc worker watchdog no longer self-heartbeats** (H25): `_watchdog_loop`
+  wrote `last_heartbeat_at = now` on every tick, so `stale_sec` was always
+  ≈`HEARTBEAT_INTERVAL_SEC` and the stall-kill path was unreachable for any
+  worker that was ever healthy — the same failure mode as the 2026-04-24
+  four-deadlocked-workers incident the watchdog was added for. The heartbeat
+  write now lives in the worker loop (and the quota-pause wait loop); the
+  watchdog only observes.
+- **`migrate_state_to_sql.py` is idempotent for the `runs` table** (H26): the
+  runs loader issued plain INSERTs into a table with only an autoincrement PK,
+  so re-running the migration doubled every row. Now refuses with exit code 2
+  unless `--truncate-runs` is passed, which wipes-then-reloads.
+- **`test_worker_watchdog.py` fixture isolates from the real backend**: the
+  `fast_watchdog_env` fixture reloaded `web` without isolating the storage
+  repo, so module import resolved the live SQL backend and crashed on
+  environmental data before any test ran.
 
 ---
 
@@ -200,6 +289,29 @@ The following entries were already on `main` since 5.12.0 and ship in this relea
   have the agent read any file on disk. With no root configured the
   behavior is unchanged.
 
+- **Headless GZF/GAR endpoints reject path traversal.** Caller-supplied
+  names (`output_name` on `/export_program` + `/archive_project`,
+  `project_name` on `/restore_project`) are validated to be plain
+  filenames — no `/`, `\`, or `..` — and the resolved output path is
+  canonicalised and confirmed to stay inside its target directory. The
+  default `.gzf` / `.gar` name is derived from the program/project
+  basename so a project path like `/Vanilla/1.13d/D2Common.dll` can no
+  longer leak separators into the written filename. `..` is rejected
+  segment-by-segment (catching leading, middle, and trailing `..`
+  segments such as `a/..`, not only the `../` prefix), and the
+  containment check compares canonical paths element-wise via
+  `java.nio.file.Path.startsWith` instead of a string prefix (so a
+  sibling like `exports-evil` is no longer accepted under `exports`).
+  New helper `HeadlessPaths` is the single validation choke point;
+  covered offline by `HeadlessPathsTest`.
+
+- **`/import_program` validates the caller-supplied `target_name`.** The
+  optional program name is now checked as a plain filename (rejecting
+  `/`, `\`, and `..` segments) before the project tree is touched, and
+  the import-folder resolver rejects `.`/`..` path segments, closing a
+  traversal vector that could place or overwrite a program outside the
+  intended folder. Covered offline by `GzfExportImportTest`.
+
 ### Added
 
 - **`/load_program` accepts optional `language` and `compiler_spec`.**
@@ -213,6 +325,60 @@ The following entries were already on `main` since 5.12.0 and ship in this relea
   success response now also echoes the resolved `language`.
 
 ### Fixed
+
+- **Headless: `/export_program` refuses to guess on an ambiguous bare
+  name.** When a program name is given without a folder and the same
+  filename exists in several project folders, the resolver now fails
+  with an explicit "ambiguous" error listing how many matches were found
+  and asking for a full project path, instead of silently packing the
+  first match found by the folder walk. An exact / leading-slash path
+  still resolves directly.
+
+- **Headless: `/restore_project` verifies the project materialised on
+  disk.** `HeadlessArchiveBridge.restore` no longer relies on Ghidra's
+  headless GUI auto-open step being swallowed; after `RestoreTask`
+  returns it asserts the project marker / directory exists and fails
+  loud with an `IOException` otherwise, so a corrupt or partially
+  extracted archive is reported instead of returning a false success.
+  Offline validation branches covered by `GarArchiveRestoreTest`.
+
+- **`tests/endpoints.json` total reconciled to 252.** Merging the
+  upstream removal of 4 stale catalog entries with the 4 new headless
+  GZF/GAR endpoints left `total_endpoints` at the pre-merge `256` while
+  the array held 252, breaking `EndpointsJsonParityTest`. The field and
+  the tool-count references in the docs are back in sync at 252.
+
+- **Headless: `/export_program` resolves the live program by an exact
+  name.** GZF export now looks the open program up by an exact (then
+  case-insensitive) match instead of the fuzzy substring lookup, so a
+  request for `Common.dll` can no longer pack a different open program
+  such as `D2Common.dll`. Program idempotency on re-open is scoped to
+  the project root rather than a recursive name search, avoiding
+  reopening a same-named file from an unintended folder. Covered offline
+  by `GzfExportImportTest`.
+
+- **Headless: file-loaded programs are materialised into the project so
+  `/save_all_programs` and `/export_program` work.** `loadProgramFromFile`
+  and `loadProgramFromFileWithLanguage` now pass the active project to
+  `AutoImporter` and call `save(monitor)` on the result, turning the
+  transient `DomainFileProxy` into a real `DomainFile`. A same-named
+  re-load reopens the existing file (idempotent) instead of throwing
+  `DuplicateNameException`. With no project open the loader degrades to
+  the previous in-memory behaviour.
+
+- **Headless: the ANALYZED flag is persisted after `/run_analysis`.**
+  `GhidraProgramUtilities.markProgramAnalyzed(program)` is invoked inside
+  the write transaction so a re-opened program is not re-analyzed from
+  scratch.
+
+- **`/import_program` overwrite is no longer destructive on failure.**
+  With `overwrite=true` the existing `DomainFile` is renamed aside to a
+  `.bak-<ts>` backup and only deleted after the new file is created.
+  If the import fails (corrupt `.gzf`, I/O error) the original is renamed
+  back, so a failed overwrite never loses the prior program. An explicit
+  pre-check rejects overwriting a program that is currently loaded in
+  memory with a structured error before the project tree is touched,
+  instead of relying on a `FileInUseException` mid-rename.
 
 - **Headless: `/run_ghidra_script` and `/run_script_inline` crashed
   with `NullPointerException`** at

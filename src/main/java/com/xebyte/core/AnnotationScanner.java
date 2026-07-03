@@ -226,7 +226,14 @@ public class AnnotationScanner {
     }
 
     private static Object resolveQueryParam(ParamBinding binding, Map<String, String> query) {
+        // Try canonical name first, then aliases
         String value = query.get(binding.param.value());
+        if (value == null && binding.aliases != null) {
+            for (String alias : binding.aliases) {
+                value = query.get(alias);
+                if (value != null) break;
+            }
+        }
         Class<?> type = binding.javaType;
         String def = binding.param.defaultValue();
         boolean hasDef = !NO_DEFAULT.equals(def);
@@ -241,7 +248,13 @@ public class AnnotationScanner {
             return parseIntSafe(value, defaultVal);
 
         } else if (type == Integer.class) {
-            if (value == null || value.isEmpty()) return null;
+            if (value == null || value.isEmpty()) {
+                if (hasDef) {
+                    try { return Integer.valueOf(def); }
+                    catch (NumberFormatException e) { return null; }
+                }
+                return null;
+            }
             try { return Integer.parseInt(value); } catch (NumberFormatException e) { return null; }
 
         } else if (type == boolean.class) {
@@ -250,7 +263,9 @@ public class AnnotationScanner {
             return "true".equalsIgnoreCase(value);
 
         } else if (type == Boolean.class) {
-            if (value == null || value.isEmpty()) return null;
+            if (value == null || value.isEmpty()) {
+                return hasDef ? Boolean.valueOf(def) : null;
+            }
             return Boolean.parseBoolean(value);
 
         } else if (type == double.class) {
@@ -268,7 +283,14 @@ public class AnnotationScanner {
 
     @SuppressWarnings("unchecked")
     private static Object resolveBodyParam(ParamBinding binding, Map<String, Object> body) {
+        // Try canonical name first, then aliases
         Object raw = body.get(binding.param.value());
+        if (raw == null && binding.aliases != null) {
+            for (String alias : binding.aliases) {
+                raw = body.get(alias);
+                if (raw != null) break;
+            }
+        }
         Class<?> type = binding.javaType;
         String def = binding.param.defaultValue();
         boolean hasDef = !NO_DEFAULT.equals(def);
@@ -287,7 +309,13 @@ public class AnnotationScanner {
             return JsonHelper.getInt(raw, defaultVal);
 
         } else if (type == Integer.class) {
-            if (raw == null) return null;
+            if (raw == null) {
+                if (hasDef) {
+                    try { return Integer.valueOf(def); }
+                    catch (NumberFormatException e) { return null; }
+                }
+                return null;
+            }
             return JsonHelper.getInt(raw, 0);
 
         } else if (type == long.class) {
@@ -304,7 +332,9 @@ public class AnnotationScanner {
             return "true".equalsIgnoreCase(String.valueOf(raw));
 
         } else if (type == Boolean.class) {
-            if (raw == null) return null;
+            if (raw == null) {
+                return hasDef ? Boolean.valueOf(def) : null;
+            }
             if (raw instanceof Boolean b) return b;
             return Boolean.parseBoolean(String.valueOf(raw));
 
@@ -464,5 +494,9 @@ public class AnnotationScanner {
     // Internal binding record
     // ==================================================================
 
-    private record ParamBinding(Param param, Class<?> javaType) {}
+    private record ParamBinding(Param param, Class<?> javaType, String[] aliases) {
+        ParamBinding(Param param, Class<?> javaType) {
+            this(param, javaType, param.aliases());
+        }
+    }
 }

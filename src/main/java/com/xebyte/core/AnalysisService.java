@@ -4,6 +4,7 @@ import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.plugin.core.analysis.AutoAnalysisManager;
 import ghidra.framework.options.Options;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressIterator;
 import ghidra.program.model.address.AddressRange;
 import ghidra.program.model.address.AddressRangeIterator;
 import ghidra.program.model.address.AddressSet;
@@ -239,6 +240,10 @@ public class AnalysisService {
                 mgr.initializeOptions();
                 mgr.reAnalyzeAll(program.getMemory().getLoadedAndInitializedAddressSet());
                 mgr.startAnalysis(TaskMonitor.DUMMY);
+                // Persist the ANALYZED flag so a later /save_all_programs + .gar
+                // export does not produce an archive that re-prompts "binary
+                // has not been analyzed" when restored in the GUI.
+                ghidra.program.util.GhidraProgramUtilities.markProgramAnalyzed(program);
                 return null;
             });
 
@@ -4382,22 +4387,33 @@ public class AnalysisService {
                     }
                     data.put("locals", localList);
 
-                    // DAT global count (unrenamed globals referenced)
+                    // DAT global count (unrenamed globals referenced).
+                    // getReferenceIterator(minAddr) yields ALL outgoing
+                    // references from that address through the end of the
+                    // program — for a function near the start of a large
+                    // binary the old loop walked millions of references per
+                    // call. getReferenceSourceIterator(body, true) is bounded
+                    // to addresses inside the function body (and handles
+                    // non-contiguous bodies correctly).
                     int datGlobalCount = 0;
-                    ReferenceIterator refIter = program.getReferenceManager().getReferenceIterator(func.getBody().getMinAddress());
-                    while (refIter.hasNext()) {
-                        Reference ref = refIter.next();
-                        if (!func.getBody().contains(ref.getFromAddress())) continue;
-                        Address toAddr = ref.getToAddress();
-                        Symbol sym = program.getSymbolTable().getPrimarySymbol(toAddr);
-                        if (sym != null && sym.getName().startsWith("DAT_")) {
-                            datGlobalCount++;
+                    ReferenceManager refMgr = program.getReferenceManager();
+                    AddressIterator srcIter = refMgr.getReferenceSourceIterator(func.getBody(), true);
+                    while (srcIter.hasNext()) {
+                        Address fromAddr = srcIter.next();
+                        for (Reference ref : refMgr.getReferencesFrom(fromAddr)) {
+                            Address toAddr = ref.getToAddress();
+                            Symbol sym = program.getSymbolTable().getPrimarySymbol(toAddr);
+                            if (sym != null && sym.getName().startsWith("DAT_")) {
+                                datGlobalCount++;
+                            }
                         }
                     }
                     data.put("dat_global_count", datGlobalCount);
 
-                    // Compact completeness score
-                    Response completenessResponse = analyzeFunctionCompleteness(func.getEntryPoint().toString(), true);
+                    // Compact completeness score. Forward programName so the
+                    // nested call resolves the same program the caller asked
+                    // for via ?program=, not the active one (matches L2383).
+                    Response completenessResponse = analyzeFunctionCompleteness(func.getEntryPoint().toString(), true, programName);
                     if (completenessResponse instanceof Response.Ok ok) {
                         data.put("completeness", ok.data());
                     }

@@ -250,6 +250,7 @@ public class ProgramScriptService {
             return Response.ok(JsonHelper.mapOf(
                 "success", true,
                 "saved_count", 0,
+                "open_program_count", 0,
                 "programs", List.of(),
                 "errors", List.of(),
                 "message", "No open programs to save"
@@ -276,6 +277,19 @@ public class ProgramScriptService {
                         continue;
                     }
                     info.put("path", df.getPathname());
+                    // A DomainFile that is not in a writable project is a proxy
+                    // (no on-disk location) \u2014 calling save() on it throws the
+                    // cryptic "Location does not exist for a save operation!".
+                    // Surface a specific message so callers know to re-load
+                    // with an active project open.
+                    if (!df.isInWritableProject()) {
+                        info.put("error",
+                            "Program is not attached to a writable project "
+                            + "(transient DomainFileProxy); re-load it with a "
+                            + "project open before saving.");
+                        errors.get().add(info);
+                        continue;
+                    }
                     df.save(new ConsoleTaskMonitor());
                     saved.get().add(info);
                 } catch (Throwable e) {
@@ -300,6 +314,7 @@ public class ProgramScriptService {
         return Response.ok(JsonHelper.mapOf(
             "success", errors.get().isEmpty(),
             "saved_count", saved.get().size(),
+            "open_program_count", programs.length,
             "programs", saved.get(),
             "errors", errors.get()
         ));
@@ -320,6 +335,7 @@ public class ProgramScriptService {
         List<Map<String, Object>> programList = new ArrayList<>();
         for (Program prog : programs) {
             int physicalSpaceCount = ServiceUtils.getPhysicalSpaceCount(prog);
+            int overlaySpaceCount  = ServiceUtils.getOverlaySpaceCount(prog);
             programList.add(JsonHelper.mapOf(
                 "name", prog.getName(),
                 "path", prog.getDomainFile().getPathname(),
@@ -330,7 +346,12 @@ public class ProgramScriptService {
                 "image_base", prog.getImageBase().toString(),
                 "memory_size", prog.getMemory().getSize(),
                 "function_count", prog.getFunctionManager().getFunctionCount(),
-                "has_multiple_address_spaces", physicalSpaceCount > 1
+                // Physical-space ambiguity (true on 8051/AVR with separate
+                // CODE/RAM spaces). Overlays do NOT make plain hex ambiguous,
+                // so this stays false on single-RAM programs with overlays.
+                "has_multiple_address_spaces", physicalSpaceCount > 1,
+                "has_overlay_spaces",          overlaySpaceCount > 0,
+                "overlay_space_count",         overlaySpaceCount
             ));
         }
 
@@ -511,6 +532,11 @@ public class ProgramScriptService {
 
         List<Map<String, Object>> addressSpaces = buildAddressSpacesList(program);
         boolean multiSpace = addressSpaces.size() > 1;
+        List<Map<String, Object>> overlaySpaces = buildOverlaySpacesList(program);
+        // Combine for the address_spaces array so overlays are visible here too
+        // (matches /get_address_spaces). multiSpace is computed BEFORE the
+        // append so it continues to reflect physical ambiguity only.
+        addressSpaces.addAll(overlaySpaces);
 
         Map<String, Object> info = new java.util.LinkedHashMap<>();
         info.put("name", program.getName());
@@ -531,11 +557,18 @@ public class ProgramScriptService {
         info.put("memory_block_count", program.getMemory().getBlocks().length);
         info.put("address_spaces", addressSpaces);
         info.put("has_multiple_address_spaces", multiSpace);
+        info.put("has_overlay_spaces", !overlaySpaces.isEmpty());
+        info.put("overlay_space_count", overlaySpaces.size());
         if (multiSpace) {
             info.put("address_space_warning",
-                "This program has multiple address spaces. Plain hex addresses will resolve to the "
-                + "default space and may be incorrect. Use <space>:<hex> format (e.g., mem:1000) "
+                "This program has multiple physical address spaces. Plain hex addresses will resolve "
+                + "to the default space and may be incorrect. Use <space>:<hex> format (e.g., mem:1000) "
                 + "or call get_address_spaces first.");
+        } else if (!overlaySpaces.isEmpty()) {
+            info.put("address_space_warning",
+                "This program has overlay address spaces. Overlay addresses must be qualified as "
+                + "<overlay>::<hex> (e.g., " + overlaySpaces.get(0).get("name") + "::<hex>) — overlay "
+                + "names are case-sensitive. Plain hex resolves to the default physical space.");
         }
         return Response.ok(info);
     }

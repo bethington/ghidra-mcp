@@ -1,5 +1,7 @@
 package com.xebyte.core;
 
+import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileOptions;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.*;
@@ -504,6 +506,39 @@ public final class ServiceUtils {
     }
 
     // ========================================================================
+    // Decompiler
+    // ========================================================================
+
+    /**
+     * Create a {@link DecompInterface} configured to match the Ghidra GUI /
+     * analysis decompiler. Applies the program's saved {@link DecompileOptions}
+     * via {@link DecompileOptions#grabFromProgram(Program)} — most importantly
+     * the "Respect Read-Only Flags" option — so that PIC/GOT- and
+     * relocation-indirected accesses fold to their named globals instead of
+     * rendering as opaque {@code DAT_} constants.
+     *
+     * <p>A bare {@code new DecompInterface()} leaves "Respect Read-Only Flags"
+     * at the C++ decompiler-core default (OFF), which makes a read-only GOT slot
+     * stay an opaque {@code DAT_} rather than being propagated and folded to the
+     * symbol it points at. {@code grabFromProgram} restores the GUI-faithful
+     * behavior while still respecting any per-program override.
+     *
+     * <p>{@code setOptions} is applied <em>before</em> {@code openProgram}, per
+     * Ghidra's decompiler contract. The returned interface is already opened on
+     * {@code program}; the caller owns its lifecycle and must call
+     * {@link DecompInterface#dispose()} when finished.
+     */
+    public static DecompInterface createConfiguredDecompiler(Program program) {
+        DecompInterface decomp = new DecompInterface();
+        DecompileOptions opts = new DecompileOptions();
+        opts.grabFromProgram(program);              // GUI-faithful; respects per-program setting
+        decomp.setOptions(opts);
+        decomp.setSimplificationStyle("decompile"); // default style; explicit for consistency
+        decomp.openProgram(program);                // openProgram AFTER setOptions
+        return decomp;
+    }
+
+    // ========================================================================
     // Program Resolution
     // ========================================================================
 
@@ -575,7 +610,8 @@ public final class ServiceUtils {
 
     /**
      * Parse an address string using the program's AddressFactory.
-     * Accepts both plain hex (e.g., "0x1000") and segment:offset (e.g., "mem:1000", "code:ff00").
+     * Accepts both plain hex (e.g., "0x1000") and segment:offset (e.g., "mem:1000", "code:ff00",
+     * "EXTERNAL:00000012").
      *
      * Returns null on failure and sets the thread-local error message (read via getLastParseError()).
      *
@@ -700,10 +736,11 @@ public final class ServiceUtils {
     public static Map<String, Object> addressToJson(Address address, Program program) {
         String plainHex = address.toString(false);
         boolean isOverlay = address.getAddressSpace().isOverlaySpace();
-        // Overlay addresses must ALWAYS carry the qualifier: their bare hex re-resolves
-        // into the underlying physical space, not the overlay. For non-overlay addresses
+        boolean isExternal = address.getAddressSpace().getType() == AddressSpace.TYPE_EXTERNAL;
+        // Overlay and external addresses must ALWAYS carry the qualifier: their bare hex
+        // can re-resolve to the wrong logical space. For non-overlay, non-external addresses
         // keep the existing rule (qualify only when there is real physical ambiguity).
-        if (!isOverlay && (program == null || getPhysicalSpaceCount(program) <= 1)) {
+        if (!isOverlay && !isExternal && (program == null || getPhysicalSpaceCount(program) <= 1)) {
             return JsonHelper.mapOf("address", plainHex);
         }
         String spaceName = address.getAddressSpace().getName();
@@ -733,6 +770,20 @@ public final class ServiceUtils {
     }
 
     /**
+     * Count the program's overlay address spaces (regardless of base type).
+     * Overlay addresses must be qualified with their space name; this is
+     * orthogonal to {@link #getPhysicalSpaceCount} (which measures physical
+     * ambiguity for plain hex addresses).
+     */
+    public static int getOverlaySpaceCount(Program program) {
+        int count = 0;
+        for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
+            if (space.isOverlaySpace()) count++;
+        }
+        return count;
+    }
+
+    /**
      * True if {@code spaceName} (case-insensitive) names a known address space in the
      * program — a physical RAM/CODE space OR an overlay space (overlays carry their own
      * types, e.g. TYPE_OTHER for ".shstrtab"). Used to distinguish a genuinely unknown
@@ -752,7 +803,8 @@ public final class ServiceUtils {
         for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
             boolean eligible = space.isOverlaySpace()
                     || space.getType() == AddressSpace.TYPE_RAM
-                    || space.getType() == AddressSpace.TYPE_CODE;
+                    || space.getType() == AddressSpace.TYPE_CODE
+                    || space.getType() == AddressSpace.TYPE_EXTERNAL;
             if (eligible && space.getName().equalsIgnoreCase(spaceName)) {
                 return space;
             }
@@ -762,6 +814,7 @@ public final class ServiceUtils {
 
     private static String buildAvailableSpacesHint(Program program) {
         StringBuilder physical = new StringBuilder();
+        StringBuilder external = new StringBuilder();
         StringBuilder overlays = new StringBuilder();
         for (AddressSpace space : program.getAddressFactory().getAddressSpaces()) {
             if (space.isOverlaySpace()) {
@@ -773,10 +826,17 @@ public final class ServiceUtils {
             if (type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE) {
                 if (physical.length() > 0) physical.append(", ");
                 physical.append(space.getName());
+            } else if (type == AddressSpace.TYPE_EXTERNAL) {
+                if (external.length() > 0) external.append(", ");
+                external.append(space.getName());
             }
         }
-        if (physical.length() == 0 && overlays.length() == 0) return "(none)";
+        if (physical.length() == 0 && external.length() == 0 && overlays.length() == 0) return "(none)";
         StringBuilder out = new StringBuilder(physical.length() > 0 ? physical.toString() : "");
+        if (external.length() > 0) {
+            if (out.length() > 0) out.append(", ");
+            out.append("[external] ").append(external);
+        }
         if (overlays.length() > 0) {
             if (out.length() > 0) out.append(", ");
             out.append("[overlays] ").append(overlays);
@@ -792,6 +852,9 @@ public final class ServiceUtils {
             if (space.isOverlaySpace()) continue;
             int type = space.getType();
             if (type == AddressSpace.TYPE_RAM || type == AddressSpace.TYPE_CODE) {
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(space.getName()).append(":").append(hex);
+            } else if (type == AddressSpace.TYPE_EXTERNAL) {
                 if (sb.length() > 0) sb.append(", ");
                 sb.append(space.getName()).append(":").append(hex);
             }

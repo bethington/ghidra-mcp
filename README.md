@@ -20,13 +20,13 @@
 >
 > If Ghidra MCP saves you time, consider [sponsoring the project](https://github.com/sponsors/bethington). One-time and recurring support both help fund compatibility updates, production hardening, docs, and new tooling.
 
-A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **251 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
+A production-ready Model Context Protocol (MCP) server that bridges Ghidra's powerful reverse engineering capabilities with modern AI tools and automation frameworks. **256 MCP tools**, battle-tested AI workflows, and the most comprehensive Ghidra-MCP integration available — now including P-code emulation, live debugger integration, and PCode-graph data flow analysis.
 
 ## Why Ghidra MCP?
 
 Most Ghidra MCP implementations give you a handful of read-only tools and call it a day. This project is different — it was built by a reverse engineer who uses it daily on real binaries, not as a demo.
 
-- **251 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
+- **256 MCP tools** — 3x more than any competing implementation. Not just read operations — full write access for renaming, typing, commenting, structure creation, script execution, P-code emulation, and live debugging.
 - **Battle-tested AI workflows** — Proven documentation workflows (V5) refined across hundreds of functions. Includes step-by-step prompts, Hungarian notation reference, batch processing guides, and orphaned code discovery.
 - **Production-grade reliability** — Atomic transactions, batch operations (93% API call reduction), configurable timeouts, and graceful error handling. No silent failures.
 - **Cross-binary documentation transfer** — SHA-256 function hash matching propagates documentation across binary versions automatically. Document once, apply everywhere.
@@ -56,7 +56,7 @@ v5.0 moves conventions from "things to remember" into the tool layer, where they
 
 ### Core MCP Integration
 - **Full MCP Compatibility** — Complete implementation of Model Context Protocol
-- **251 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
+- **256 MCP Tools** — Comprehensive API surface covering every aspect of binary analysis
 - **Production-Ready Reliability** — Atomic transactions, batch operations, configurable timeouts
 - **Real-time Analysis** — Live integration with Ghidra's analysis engine
 
@@ -316,6 +316,33 @@ uv run bridge-mcp-ghidra --transport sse --mcp-host 127.0.0.1 --mcp-port 8081
 | `--no-lazy` | (default) | Load all tool groups immediately on connect. Required for most AI clients. |
 | `--default-groups` | `listing,function,program` | Comma-separated groups loaded on connect when `--lazy` is set. |
 
+#### Strict program routing (multi-program safety)
+
+Set `GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1` to make the bridge refuse any program-scoped
+call that omits a program selector, returning a clear error instead of letting the call
+ride the server's shared "current program" (the one `switch_program` and the
+active GUI tab move).
+
+```bash
+export GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS=1
+python bridge_mcp_ghidra.py
+```
+
+Without this, a call that leaves `program=` out runs against whichever program
+is current, which is fine for a single-program workflow but a hazard once
+several programs are open: the call can read or edit the wrong binary with no
+error. The hazard is worse when more than one client shares a server, since
+each one moves that current-program global out from under the others.
+
+With strict mode on, every program-scoped call must name its target. This
+covers every selector that picks an open program: plain `program=` and the
+cross-program tools' `source_program`/`target_program` or `program_a`/`program_b`
+(declared required, but the server still falls back to the current program when
+one arrives empty). A forgotten selector surfaces as a loud error on the first
+bad call instead of a silent write to the wrong binary. Tools with no program
+selector (`open_program` and `close_program` take `path`/`name`) are unaffected.
+Off by default: with the variable unset the bridge sends calls unchanged.
+
 #### Reducing tool-context overhead
 
 The bridge exposes a large catalog. To keep the model's tool surface small, run
@@ -526,7 +553,7 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 
 ## 📊 Production Performance
 
-- **MCP Tools**: 251 tools fully implemented
+- **MCP Tools**: 256 tools fully implemented
 - **Speed**: Sub-second response for most operations
 - **Efficiency**: 93% reduction in API calls via batch operations
 - **Reliability**: Atomic transactions with all-or-nothing semantics
@@ -963,7 +990,7 @@ docker-compose up -d ghidra-mcp
 
 # Test connection
 curl http://localhost:8089/check_connection
-# Connection OK - GhidraMCP Headless Server v5.14.1
+# Connection OK - GhidraMCP Headless Server v5.15.0
 ```
 
 ### Headless API Workflow
@@ -1029,7 +1056,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 | Metric | Value |
 |--------|-------|
-| **Version** | 5.14.1 |
+| **Version** | 5.15.0 |
 | **MCP Tools** | 249 fully implemented |
 | **GUI Endpoints** | 196 (GhidraMCPPlugin) |
 | **Headless Endpoints** | 195 (GhidraMCPHeadlessServer) |

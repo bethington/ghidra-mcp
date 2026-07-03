@@ -106,7 +106,7 @@ import java.util.regex.Pattern;
 
 // Load version from properties file (populated by Maven during build)
 class VersionInfo {
-    private static String VERSION = "5.14.1"; // Default fallback
+    private static String VERSION = "5.15.0"; // Default fallback
     private static String APP_NAME = "GhidraMCP";
     private static String GHIDRA_VERSION = "unknown"; // Loaded from version.properties (Maven-filtered)
     private static String BUILD_TIMESTAMP = "dev"; // Will be replaced by Maven
@@ -199,6 +199,13 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     private static final AtomicInteger activeRequests = new AtomicInteger(0);
     private static final long serverStartMillis = System.currentTimeMillis();
     private static int instanceCount = 0;
+    // Live plugin instances. The TCP server's route lambdas capture the
+    // owning instance's services (programProvider, listingService, …); when
+    // that instance is disposed first while others survive, the routes are
+    // left bound to a dead PluginTool. dispose() consults this list to hand
+    // ownership to a survivor by restarting the server with its services.
+    private static final java.util.List<GhidraMCPPlugin> liveInstances =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
     private boolean ownsServer = false; // true if this instance started the server
     private static final String OPTION_CATEGORY_NAME = "GhidraMCP HTTP Server";
     private static final String PORT_OPTION_NAME = "Server Port";
@@ -278,6 +285,7 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
     public GhidraMCPPlugin(PluginTool tool) {
         super(tool);
         instanceCount++;
+        liveInstances.add(this);
 
         // Initialize service layer — FrontEnd mode: opens programs on-demand from project
         this.programProvider = new FrontEndProgramProvider(tool, this);
@@ -4303,14 +4311,46 @@ public class GhidraMCPPlugin extends Plugin implements ApplicationLevelPlugin {
         // Deregister from UDS ServerManager
         ServerManager.getInstance().deregisterTool(tool);
 
+        liveInstances.remove(this);
         instanceCount--;
-        // Only stop the server when the last plugin instance is disposed
+
+        // This instance's programProvider is dead either way — release the
+        // programs it was holding, regardless of whether other windows
+        // survive. (Previously only the last-disposed instance released.)
+        try {
+            programProvider.releaseAll();
+        } catch (Exception e) {
+            Msg.warn(this, "GhidraMCP: releaseAll on dispose: " + e.getMessage());
+        }
+
         if (instanceCount <= 0) {
             stopServer();
-            programProvider.releaseAll();
             instanceCount = 0;
+        } else if (ownsServer) {
+            // The TCP routes (createContext lambdas) captured THIS
+            // instance's services. With this PluginTool now disposed,
+            // every subsequent HTTP request would execute against stale
+            // services. Hand the server to a surviving instance by
+            // restarting it so the routes re-bind to live services.
+            Msg.info(this, "GhidraMCP: owning tool window closed with "
+                + instanceCount + " other window(s) still active — handing "
+                + "TCP server ownership to a survivor.");
+            stopServer();
+            ownsServer = false;
+            GhidraMCPPlugin survivor = liveInstances.isEmpty() ? null : liveInstances.get(0);
+            if (survivor != null) {
+                try {
+                    survivor.startServer();
+                    survivor.ownsServer = true;
+                } catch (IOException e) {
+                    Msg.error(this, "GhidraMCP: failed to restart TCP server "
+                        + "on surviving tool window: " + e.getMessage()
+                        + " — use Tools > GhidraMCP > Start Server.");
+                }
+            }
         } else {
-            Msg.info(this, "GhidraMCP: " + instanceCount + " tool window(s) still active, keeping server running.");
+            Msg.info(this, "GhidraMCP: " + instanceCount
+                + " tool window(s) still active, keeping server running.");
         }
         if (startServerAction != null) {
             tool.removeAction(startServerAction);
