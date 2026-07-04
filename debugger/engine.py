@@ -570,34 +570,39 @@ class DebugEngine:
 
         With pass-through ON we hand the target's own first-chance exceptions
         (notably PD2's INT3/STATUS_BREAKPOINT anti-debug flood) to its SEH so it
-        can't detect us. But we must NEVER pass the debugger's OWN control
-        exceptions -- the int3 at a breakpoint/ret_catch we planted, or a
-        single-step trap. On a 32-bit (WOW64) target those arrive HERE as
-        first-chance EXCEPTION events (often as the WX86 variants
-        0x4000001F/0x4000001E), not via the BREAKPOINT event; passing them
-        swallows call_function's return and stalls stepi, which then wedges
-        run-control (the next SetExecutionStatus faults 0x80070005) for the
-        process's lifetime. So: let dbgeng own an exception that is ours (matched
-        by address, or because we're mid-call/mid-step); pass everything else."""
+        can't detect us. But during OUR OWN call/step we must not pass the
+        debugger's own control exceptions (a single-step trap, or a fault we want
+        to crash-guard) to the target.
+
+        STABILITY: the anti-debug INT3 flood is a HIGH-RATE stream. Touching the
+        COM exception record (_exc_code/_exc_address) on every one of them churns
+        comtypes interface wrappers whose __del__ Release() can access-violate on
+        the GC thread and corrupt the dbgeng client (observed: a _compointer_base
+        __del__ AV, then SetExecutionStatus -> 0x80070005 and a wedged worker).
+        So we take a FAST PATH that never inspects the record unless we are
+        actually mid-call/mid-step. Breakpoints we plant (incl. call_function's
+        ret_catch) surface via the separate BREAKPOINT event, not here, so the
+        fast path does not miss them."""
         first_chance = (len(args) < 2) or bool(args[1])
         if not first_chance:
             return DbgEng.DEBUG_STATUS_NO_CHANGE
+        # Fast path: not running our own call/step -> nothing of ours to protect
+        # here; pass the flood without touching the COM record.
+        if not (self._call_guard or self._stepping):
+            return (DbgEng.DEBUG_STATUS_GO_NOT_HANDLED
+                    if self._pass_exceptions else DbgEng.DEBUG_STATUS_NO_CHANGE)
+        # Mid call/step only (a bounded window): inspect minimally.
         code = self._exc_code(args)
-        # int3 breakpoint, incl. the WOW64 (WX86) variant.
+        # single-step trap (incl. WOW64 WX86 variant) -> ours.
+        if code in (0x80000004, 0x4000001E):
+            return DbgEng.DEBUG_STATUS_NO_CHANGE
+        # int3 (incl. WX86): ours only if it's the active call's ret_catch or a
+        # breakpoint we planted; otherwise it's the flood -> pass it through.
         if code in (0x80000003, 0x4000001F):
             addr = self._exc_address(args)
-            if addr is not None:
-                if addr in self._our_bp_addrs or addr == self._call_ret_catch:
-                    return DbgEng.DEBUG_STATUS_NO_CHANGE   # ours -> dbgeng handles
-            elif self._call_guard or self._stepping:
-                # couldn't read the fault address, but we're mid-call/step, so the
-                # expected int3 is ours (ret_catch) -- honor it, don't swallow it.
+            if addr is None or addr == self._call_ret_catch \
+                    or addr in self._our_bp_addrs:
                 return DbgEng.DEBUG_STATUS_NO_CHANGE
-            # otherwise: an int3 we didn't plant (anti-debug flood) -> pass below.
-        # single-step trap, incl. the WOW64 (WX86) variant.
-        elif code in (0x80000004, 0x4000001E):
-            if self._stepping or self._call_guard:
-                return DbgEng.DEBUG_STATUS_NO_CHANGE   # our stepi -> dbgeng handles
         # A genuine FAULT (e.g. AV 0xC0000005) inside a guarded call must break
         # into the debugger so call_function can roll back, not reach the SEH.
         elif self._call_guard:
