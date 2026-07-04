@@ -6,6 +6,21 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+### Added
+
+- **Coverage gates and baselines across all test tiers.**
+  - CI unit job now runs with coverage and a `--cov-fail-under=46` ratchet
+    (baseline 53%); the offline fun-doc job adds `--cov=fun-doc` with a floor of
+    26 (baseline 29%). Both upload to Codecov. The floor is a ratchet — it sits
+    a few points below the measured baseline to absorb platform/version skew;
+    raise it as coverage improves, never lower it.
+  - JaCoCo wired into Maven (`jacoco-maven-plugin` 0.8.13, report on every
+    `mvn test`, `-Djacoco.skip=true` to disable) — first-ever Java coverage
+    baseline (6.5% line, offline tier). CI uploads the report artifact.
+  - New `python-tests-windows` CI job runs the unit suite on windows-latest so
+    both halves of every `os.name == "nt"` branch (AF_UNIX gating, drive sweep)
+    execute on each PR; wired into `build-status`.
+
 ### Fixed
 
 - **fun-doc storage bootstrap race.** `_get_storage_repo()` was an unlocked
