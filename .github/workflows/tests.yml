@@ -196,6 +196,15 @@ jobs:
       with:
         enable-cache: true
 
+    - name: Set up JDK 21
+      # A unit test shells out to `gradlew deploy --dry-run`, which needs a Java
+      # 21 toolchain; windows-latest doesn't provide one Gradle can auto-detect
+      # (the ubuntu runner ships JAVA_HOME_21 by default, Windows does not).
+      uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287  # v5.3.0
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+
     - name: Set up Python
       run: uv python install 3.12
 
