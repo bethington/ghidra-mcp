@@ -123,6 +123,16 @@ jobs:
         name: java-test-results
         path: target/surefire-reports/
 
+    - name: Upload JaCoCo coverage report
+      # First-ever Java coverage baseline (offline tier only). Baseline, not a
+      # gate — inspect target/site/jacoco/index.html from the artifact.
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: jacoco-coverage-report
+        path: target/site/jacoco/
+        if-no-files-found: warn
+
     # Absorbs the former build.yml: publish the packaged extension zip so the build
     # artifact stays available without a second workflow re-downloading Ghidra + rebuilding.
     - name: Upload build artifact
@@ -155,8 +165,12 @@ jobs:
       run: |
         # Run only unit tests (integration tests require a running MCP server).
         # uv installs the bridge package (editable) + test group from the lock.
+        # Coverage sources (bridge_mcp_ghidra, tools, debugger) come from the
+        # addopts in pyproject.toml. The fail-under floor is a RATCHET: it sits
+        # a few points below the measured baseline (51% on 2026-07-03) to absorb
+        # platform/version skew — raise it as coverage improves, never lower it.
         uv run --python ${{ matrix.python-version }} --group test \
-          pytest tests/unit/ -v --no-cov --tb=short
+          pytest tests/unit/ -v --tb=short --cov-fail-under=46
 
     - name: Upload coverage
       if: ${{ always() && hashFiles('coverage.xml', 'tests/coverage.xml') != '' }}
@@ -165,6 +179,40 @@ jobs:
         files: ./coverage.xml,./tests/coverage.xml
         flags: unittests
         fail_ci_if_error: false
+
+  python-tests-windows:
+    # The bridge has real platform forks (no AF_UNIX in Windows CPython, the
+    # drive-letter socket sweep, debugger proxy gating). The ubuntu matrix job
+    # only ever executes the POSIX half — this leg executes the Windows half
+    # so both sides of every `os.name == "nt"` branch run on each PR.
+    name: Python Tests (pytest, Windows)
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6.8.0
+      with:
+        enable-cache: true
+
+    - name: Set up JDK 21
+      # A unit test shells out to `gradlew deploy --dry-run`, which needs a Java
+      # 21 toolchain; windows-latest doesn't provide one Gradle can auto-detect
+      # (the ubuntu runner ships JAVA_HOME_21 by default, Windows does not).
+      uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287  # v5.3.0
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+
+    - name: Set up Python
+      run: uv python install 3.12
+
+    - name: Run Python unit tests
+      # No coverage floor here — Windows skips a handful of POSIX-only tests,
+      # so the ubuntu job owns the ratchet; this leg gates on pass/fail only.
+      run: |
+        uv run --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
 
   python-offline-regression:
     name: Python Offline Regression (fun-doc)
@@ -197,7 +245,11 @@ jobs:
         #   * the benchmark tests — "manual only" by design (CLAUDE.md); they depend on local
         #     benchmark assets not tracked in the repo (e.g. fun-doc/benchmark/extract_truth.py),
         #     a live Ghidra (Benchmark.dll), or an LLM judge, none of which exist in CI.
-        $UV_RUN python -m pytest tests/performance/ --no-cov -q \
+        # --cov=fun-doc adds the fun-doc tree to the default coverage sources.
+        # The fail-under floor is a RATCHET: measured baseline was 29% on
+        # 2026-07-03 with these exclusions — raise it as fun_doc.py/web.py
+        # subsystems get extracted and tested, never lower it.
+        $UV_RUN python -m pytest tests/performance/ -q --cov=fun-doc --cov-fail-under=26 \
           --ignore=tests/performance/test_batch_scoring_consistency.py \
           --ignore=tests/performance/test_health_endpoint.py \
           --ignore=tests/performance/test_http_concurrency.py \
@@ -207,6 +259,14 @@ jobs:
           --ignore=tests/performance/test_benchmark_haiku_judge.py \
           --ignore=tests/performance/test_benchmark_scorer.py
         echo "✅ Offline regression suite passed"
+
+    - name: Upload coverage
+      if: ${{ always() && hashFiles('tests/coverage.xml') != '' }}
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v5
+      with:
+        files: ./tests/coverage.xml
+        flags: fundoc
+        fail_ci_if_error: false
 
   code-quality:
     # ADVISORY / non-blocking: every step below ends in `|| true` (or an echo
@@ -267,13 +327,13 @@ jobs:
   build-status:
     name: Build Status
     runs-on: ubuntu-latest
-    needs: [ java-build, python-tests, python-offline-regression, pester-tests ]
+    needs: [ java-build, python-tests, python-tests-windows, python-offline-regression, pester-tests ]
     if: always()
 
     steps:
     - name: Report Status
       run: |
-        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-offline-regression.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
+        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.python-offline-regression.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
           echo "✅ All tests passed"
           exit 0
         else
