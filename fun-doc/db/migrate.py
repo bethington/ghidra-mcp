@@ -27,6 +27,7 @@ import argparse
 import os
 import re
 import sys
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -86,14 +87,23 @@ def _applied_versions(conn, backend: str) -> set[int]:
 
 
 def _record_applied(conn, backend: str, version: int, name: str) -> None:
+    # Conflict-tolerant on purpose: two migrators can race the
+    # read-versions -> apply -> record window (e.g. two threads
+    # bootstrapping the same fresh SQLite). The migration SQL itself is
+    # idempotent by design (CREATE TABLE IF NOT EXISTS + the ALTER ADD
+    # COLUMN rewrite below), so the loser of the race just skips the
+    # duplicate version row instead of blowing up with a UNIQUE failure.
     table = "fun_doc.schema_versions" if backend == "postgres" else "schema_versions"
     if backend == "postgres":
         conn.execute(
-            f"INSERT INTO {table} (version, name) VALUES (%s, %s)", (version, name)
+            f"INSERT INTO {table} (version, name) VALUES (%s, %s) "
+            "ON CONFLICT (version) DO NOTHING",
+            (version, name),
         )
     else:
         conn.execute(
-            f"INSERT INTO {table} (version, name) VALUES (?, ?)", (version, name)
+            f"INSERT OR IGNORE INTO {table} (version, name) VALUES (?, ?)",
+            (version, name),
         )
 
 
@@ -239,27 +249,38 @@ class _PgConnAdapter:
         self._conn.close()
 
 
+# Serializes concurrent migrate() calls within a process. The PRAGMA-based
+# ADD COLUMN skip and INSERT-OR-IGNORE version record make a *retry* idempotent,
+# but they cannot win a cross-connection TOCTOU race: two threads that both read
+# an empty schema race the same `ALTER TABLE ADD COLUMN`, and the loser dies with
+# "duplicate column name". fun-doc migrates in-process (main + worker/watchdog
+# threads), so serializing here lets the second caller observe the first's
+# committed schema and no-op instead of colliding.
+_migrate_lock = threading.Lock()
+
+
 def migrate(backend: str, url: Optional[str] = None) -> int:
     """Apply all unapplied migrations for ``backend``. Returns count applied."""
-    conn, target = _connect(backend, url)
-    applied_count = 0
-    try:
-        _ensure_versions_table(conn, backend)
-        already = _applied_versions(conn, backend)
-        for version, name, path in _migration_files(backend):
-            if version in already:
-                continue
-            sql = path.read_text(encoding="utf-8")
-            conn.executescript(sql)
-            _record_applied(conn, backend, version, name)
-            applied_count += 1
-            print(f"[migrate] applied {version:04d}_{name} ({backend}) at {target}")
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    with _migrate_lock:
+        conn, target = _connect(backend, url)
+        applied_count = 0
+        try:
+            _ensure_versions_table(conn, backend)
+            already = _applied_versions(conn, backend)
+            for version, name, path in _migration_files(backend):
+                if version in already:
+                    continue
+                sql = path.read_text(encoding="utf-8")
+                conn.executescript(sql)
+                _record_applied(conn, backend, version, name)
+                applied_count += 1
+                print(f"[migrate] applied {version:04d}_{name} ({backend}) at {target}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
     if applied_count == 0:
         print(f"[migrate] {backend} schema already up to date at {target}")
     return applied_count
