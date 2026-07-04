@@ -714,6 +714,7 @@
         <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
             <button class="btn active" id="tab-list" onclick="switchView('list')">List View</button>
             <button class="btn" id="tab-graph" onclick="switchView('graph')">Call Graph Layers</button>
+            <button class="btn" id="tab-conformance" onclick="switchView('conformance')">Conformance</button>
         </div>
 
         <!-- Call Graph Layers panel (hidden by default, shown when tab-graph is active) -->
@@ -726,6 +727,39 @@
             </div>
             <div class="panel-content" id="callGraphContent">
                 <div style="text-align: center; color: var(--text-muted); padding: 1rem;">Loading call graph layers...</div>
+            </div>
+        </div>
+
+        <!-- Conformance / implementation workbench (hidden by default) -->
+        <div class="panel" id="conformancePanel" style="display: none;">
+            <div class="panel-header">
+                <h2>Implementation Coverage</h2>
+                <span style="color: var(--text-muted); font-size: 0.65rem;">
+                    PD2-S12 Ghidra functions ported to OpenD2 (via <code>@PD2S12</code> links). PROVEN = conformance-tested. Click a symbol for the side-by-side view.
+                </span>
+            </div>
+            <div class="panel-content" id="conformanceContent">
+                <div style="text-align: center; color: var(--text-muted); padding: 1rem;">Loading coverage...</div>
+            </div>
+            <div class="panel-header" style="margin-top: 0.5rem;">
+                <h2>Side-by-side &mdash; Assembly | Pseudocode | OpenD2</h2>
+                <span id="sbsTitle" style="color: var(--text-muted); font-size: 0.65rem;">Select a function above.</span>
+            </div>
+            <div class="panel-content">
+                <div style="display: flex; gap: 0.5rem; align-items: stretch;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:0.6rem; text-transform:uppercase; letter-spacing:0.5px; color: var(--text-muted); margin-bottom:2px;">PD2-S12 Assembly</div>
+                        <pre id="sbsAsm" style="background: var(--bg-medium); border:1px solid var(--border-dark); padding:0.5rem; font-size:0.62rem; line-height:1.3; max-height:60vh; overflow:auto; white-space:pre; margin:0; font-family: var(--font-mono);"></pre>
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:0.6rem; text-transform:uppercase; letter-spacing:0.5px; color: var(--text-muted); margin-bottom:2px;">Decompiled Pseudocode</div>
+                        <pre id="sbsPseudo" style="background: var(--bg-medium); border:1px solid var(--border-dark); padding:0.5rem; font-size:0.62rem; line-height:1.3; max-height:60vh; overflow:auto; white-space:pre; margin:0; font-family: var(--font-mono);"></pre>
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:0.6rem; text-transform:uppercase; letter-spacing:0.5px; color: var(--color-set); margin-bottom:2px;">OpenD2 (live port)</div>
+                        <pre id="sbsOpenD2" style="background: var(--bg-medium); border:1px solid var(--border-dark); padding:0.5rem; font-size:0.62rem; line-height:1.3; max-height:60vh; overflow:auto; white-space:pre; margin:0; font-family: var(--font-mono);"></pre>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -2478,11 +2512,69 @@
         function switchView(view) {
             document.getElementById('tab-list').classList.toggle('active', view === 'list');
             document.getElementById('tab-graph').classList.toggle('active', view === 'graph');
+            const cTab = document.getElementById('tab-conformance');
+            if (cTab) cTab.classList.toggle('active', view === 'conformance');
             const allFuncsPanel = document.getElementById('allFuncsPanel');
             const graphPanel = document.getElementById('callGraphPanel');
+            const confPanel = document.getElementById('conformancePanel');
             if (allFuncsPanel) allFuncsPanel.style.display = view === 'list' ? '' : 'none';
             if (graphPanel) graphPanel.style.display = view === 'graph' ? '' : 'none';
+            if (confPanel) confPanel.style.display = view === 'conformance' ? '' : 'none';
             if (view === 'graph') loadCallGraphLayers();
+            if (view === 'conformance') loadConformance();
+        }
+
+        async function loadConformance() {
+            const el = document.getElementById('conformanceContent');
+            if (!el) return;
+            try {
+                const data = await (await fetch('/api/conformance/coverage')).json();
+                const progs = data.by_program || {};
+                const names = Object.keys(progs).sort();
+                if (!names.length) {
+                    el.innerHTML = '<div style="text-align:center; color: var(--text-muted); padding:1rem;">No linked implementations yet. Add a <code>@PD2S12 Module!Symbol @ 0xADDR</code> marker in OpenD2 source to link a port.</div>';
+                    return;
+                }
+                let html = `<div style="font-size:0.65rem; color: var(--text-muted); margin-bottom:0.5rem; font-family: var(--font-mono);">${data.total_ported} function(s) ported across ${names.length} binary(ies)</div>`;
+                for (const name of names) {
+                    const p = progs[name];
+                    html += `<div style="margin-bottom:0.5rem;"><div style="font-weight:600; color: var(--accent-gold); font-size:0.7rem;">${escapeHtml(name)} &mdash; ${p.ported} ported, ${p.proven} proven</div>`;
+                    html += '<table class="data-table"><thead><tr><th>OpenD2 symbol</th><th>PD2-S12 name</th><th>Addr</th><th>State</th></tr></thead><tbody>';
+                    for (const s of p.symbols) {
+                        const color = s.state === 'PROVEN' ? 'var(--color-set)' : 'var(--text-muted)';
+                        html += `<tr class="func-row" style="cursor:pointer;" onclick="showSideBySide('${escapeHtml(name)}','${escapeHtml(s.address)}','${escapeHtml(s.symbol)}')">
+                            <td class="mono">${escapeHtml(s.symbol)}</td>
+                            <td class="mono" style="color: var(--text-muted);">${escapeHtml(s.ghidra_name||'')}</td>
+                            <td class="mono">${escapeHtml(s.address)}</td>
+                            <td class="mono" style="color:${color};">${escapeHtml(s.state)}</td>
+                        </tr>`;
+                    }
+                    html += '</tbody></table></div>';
+                }
+                el.innerHTML = html;
+            } catch (e) {
+                el.innerHTML = `<div style="color: var(--accent-red-light); padding:0.5rem;">Error loading coverage: ${e.message}</div>`;
+            }
+        }
+
+        async function showSideBySide(program, address, symbol) {
+            document.getElementById('sbsTitle').textContent = `${program} @ ${address} → ${symbol || ''}`;
+            const asmEl = document.getElementById('sbsAsm');
+            const psEl = document.getElementById('sbsPseudo');
+            const odEl = document.getElementById('sbsOpenD2');
+            asmEl.textContent = psEl.textContent = odEl.textContent = 'Loading…';
+            try {
+                const d = await (await fetch(`/api/conformance/sidebyside?program=${encodeURIComponent(program)}&address=${encodeURIComponent(address)}`)).json();
+                asmEl.textContent = d.assembly || '(none)';
+                psEl.textContent = d.pseudocode || '(none)';
+                if (d.opend2 && d.opend2.code) {
+                    odEl.textContent = `// ${d.opend2.file}:${d.opend2.line} [${d.opend2.state}]\n` + d.opend2.code;
+                } else {
+                    odEl.textContent = d.implemented ? '(linked, but source not found)' : '(not yet ported)';
+                }
+            } catch (e) {
+                asmEl.textContent = psEl.textContent = odEl.textContent = 'Error: ' + e.message;
+            }
         }
 
         async function loadCallGraphLayers() {

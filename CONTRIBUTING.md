@@ -13,6 +13,18 @@ If your team depends on Ghidra MCP in production or client work, please consider
 
 ---
 
+## How this project uses AI
+
+To be upfront: AI tooling assists with code, reviews, and drafting on this project. To keep that from getting in the way of the humans here, the maintainer commits to:
+
+- **A human reviews and posts every maintainer action.** Closing, merging, commenting on, or editing an issue or PR is done by a person, not by automation. Your issue text is never edited by a bot.
+- **Draft / WIP PRs are left alone.** If you mark a PR draft, its work won't be merged or cherry-picked until you mark it ready. To have your work land, it goes through your PR — with your authorship — not by lifting the commit around you.
+- **Claims about your work get checked before they're posted.** If a summary of your PR is wrong, that's a bug — please call it out and it'll be fixed.
+
+If you ever see any of this violated, flag it. It's a standard, not a nicety.
+
+---
+
 ## Types of Contributions
 
 ### 1. Bug Reports

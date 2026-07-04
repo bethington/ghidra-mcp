@@ -2913,6 +2913,29 @@ def save_priority_queue(queue):
         tmp_path.replace(PRIORITY_QUEUE_FILE)
 
 
+_CONFORMANCE_PROTECTED_PATH = Path(__file__).resolve().parent / "conformance_protected.json"
+_conformance_protected_cache = None
+
+
+def load_conformance_protected(force_reload=False):
+    """Set of fun-doc function keys ('<program>::<address>') that carry an
+    OpenD2 conformance tag in Ghidra (ANALYZED_RUNTIME / ORACLE / PORTED /
+    PROVEN). These are hand-verified against the live PD2-S12 process and/or
+    ported to the OpenD2 clone, so the auto-doc selector must NEVER pick them —
+    a cheap worker could overwrite a runtime-verified plate. Loaded from
+    conformance_protected.json (generated from Ghidra tags); cached; empty set
+    when the file is absent so this is a no-op on installs without it."""
+    global _conformance_protected_cache
+    if _conformance_protected_cache is None or force_reload:
+        try:
+            with open(_CONFORMANCE_PROTECTED_PATH, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            _conformance_protected_cache = set((data.get("protected_keys") or {}).keys())
+        except (FileNotFoundError, ValueError, OSError):
+            _conformance_protected_cache = set()
+    return _conformance_protected_cache
+
+
 def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=None):
     """Canonical work-queue selector. Used by both fun_doc CLI and web dashboard.
 
@@ -2936,6 +2959,7 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
         queue = load_priority_queue()
     pinned_list = list(queue.get("pinned", []))
     pinned = set(pinned_list)
+    conformance_protected = load_conformance_protected()
     cfg = queue.get("config") or DEFAULT_QUEUE_CONFIG
     good_enough = cfg.get("good_enough_score", 80)
     require_scored = (
@@ -2951,6 +2975,15 @@ def select_candidates(funcs, queue=None, active_binary=None, with_scoring_lane=N
             continue
         is_pinned = key in pinned
         if active_binary and func.get("program_name") != active_binary:
+            continue
+
+        # Conformance-protected: functions carrying an OpenD2 conformance tag
+        # in Ghidra (ANALYZED_RUNTIME / ORACLE / PORTED / PROVEN) are
+        # hand-verified against the live PD2-S12 process and/or already ported
+        # to the OpenD2 clone. NEVER auto-document them — a cheap worker could
+        # overwrite a runtime-verified plate. Pinning bypasses for a deliberate
+        # re-document. Source: conformance_protected.json (from Ghidra tags).
+        if key in conformance_protected and not is_pinned:
             continue
 
         score = func.get("score", 0)

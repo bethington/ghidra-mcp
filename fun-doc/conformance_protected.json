@@ -1,0 +1,13 @@
+{
+  "generated": "2026-07-03",
+  "note": "Functions carrying an OpenD2 conformance tag in Ghidra (ANALYZED_RUNTIME / ORACLE / PORTED / PROVEN). These are hand-verified against the live PD2-S12 process and/or ported to the OpenD2 clone; they are EXCLUDED from the auto-doc selector so a cheap worker cannot overwrite a runtime-verified plate. Keys are fun-doc function keys: '<program_path>::<address>'. Regenerate from Ghidra tags via scripts/gen_conformance_protected.py (or the in-scan ingest once landed). Pinning a function in the dashboard bypasses this protection for a deliberate re-document.",
+  "protected_keys": {
+    "/Mods/PD2-S12/D2Game.dll::6fc31a70": ["ANALYZED_RUNTIME"],
+    "/Mods/PD2-S12/D2Game.dll::6fc32380": ["ANALYZED_RUNTIME", "ORACLE"],
+    "/Mods/PD2-S12/D2Game.dll::6fcea760": ["ANALYZED_RUNTIME"],
+    "/Mods/PD2-S12/D2Game.dll::6fc970a0": ["ANALYZED_RUNTIME", "ORACLE", "PORTED", "PROVEN"],
+    "/Mods/PD2-S12/D2Common.dll::6fd510b0": ["ORACLE", "PORTED", "PROVEN"],
+    "/Mods/PD2-S12/D2Common.dll::6fd51100": ["ANALYZED_RUNTIME", "ORACLE", "PORTED", "PROVEN"],
+    "/Mods/PD2-S12/D2Common.dll::6fd51180": ["ORACLE", "PORTED", "PROVEN"]
+  }
+}

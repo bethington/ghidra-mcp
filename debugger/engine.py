@@ -230,6 +230,14 @@ class DebugEngine:
         self._is_wow64 = False
         self._protected_base: Optional[AllDbg] = None
         self._events = EngineEventHandler()
+        # Anti-anti-debug: when enabled, pass first-chance exceptions (notably
+        # the INT3/STATUS_BREAKPOINT flood PD2 throws) to the TARGET's own SEH
+        # instead of the debugger swallowing them, so the target's handler runs
+        # and it doesn't conclude a debugger is present. Off by default so
+        # attach/normal debugging behave as usual.
+        self._pass_exceptions = False
+        self._call_guard = False   # True during an in-process call (crash-guard)
+        self._call_fault = None     # exception code caught during a guarded call
 
         # Work queue and worker thread
         self._work_queue: queue.SimpleQueue = queue.SimpleQueue()
@@ -311,7 +319,14 @@ class DebugEngine:
 
     def _attach_impl(self, target: str) -> dict:
         if self._state not in (DebuggerState.DETACHED, DebuggerState.EXITED):
-            raise RuntimeError(f"Cannot attach in state {self._state.value}")
+            # Already attached — detach first so re-attach is robust/idempotent
+            # (fixes "Cannot attach in state stopped" and clears stale
+            # breakpoint objects that otherwise E_NOINTERFACE on removal).
+            logger.info(f"Already {self._state.value}; detaching before re-attach")
+            try:
+                self._detach_impl()
+            except Exception as e:
+                logger.warning(f"pre-attach detach failed (continuing): {e}")
 
         base = self._base
         target_name = target
@@ -463,6 +478,54 @@ class DebugEngine:
         self._run_on_engine(_impl)
         return {"state": "running"}
 
+    def go_wait(self, timeout_ms: int = 4000) -> dict:
+        """Resume execution and BLOCK until a breakpoint/event or timeout.
+
+        Unlike go_nowait (which only sets DEBUG_STATUS_GO and relies on the
+        idle DispatchCallbacks pump — that does not actually advance the
+        target), this pumps WaitForEvent on the engine thread, which is what
+        makes dbgeng run the debuggee and deliver breakpoint events. On timeout
+        it interrupts so control is regained. Returns {state, pc, timeout?}.
+        """
+        return self._run_on_engine(self._go_wait_impl, timeout_ms)
+
+    def _go_wait_impl(self, timeout_ms: int) -> dict:
+        self._require_stopped()
+        self._state = DebuggerState.RUNNING
+        self._executing = True
+        # A FINITE WaitForEvent timeout faults (AV) in non-standalone mode, and
+        # the engine's single worker can't be interrupted from within its own
+        # blocked wait. So run the proven infinite wait and self-bound it with a
+        # timer thread that issues SetInterrupt (thread-safe, unblocks
+        # WaitForEvent) — go_wait always returns within ~timeout_ms.
+        bomb_state = {"timed_out": False}
+
+        def _bomb():
+            bomb_state["timed_out"] = True
+            try:
+                if self._protected_base is not None:
+                    self._protected_base._control.SetInterrupt(
+                        DbgEng.DEBUG_INTERRUPT_ACTIVE)
+            except Exception:
+                pass
+
+        timer = threading.Timer(max(0.05, timeout_ms / 1000.0), _bomb)
+        timer.daemon = True
+        timer.start()
+        try:
+            self._base.go()   # SetExecutionStatus(GO) + wait(WAIT_INFINITE)
+        finally:
+            timer.cancel()
+            self._state = DebuggerState.STOPPED
+            self._executing = False
+        pc = 0
+        try:
+            pc = self._read_pc_impl()
+        except Exception:
+            pass
+        return {"state": "stopped", "timeout": bomb_state["timed_out"],
+                "pc": f"0x{pc:08X}"}
+
     def interrupt(self) -> dict:
         """Break into the debugger (interrupt execution)."""
         # interrupt() can be called from any thread
@@ -472,6 +535,66 @@ class DebugEngine:
         self._state = DebuggerState.STOPPED
         self._executing = False
         return {"state": "stopped"}
+
+    # -- Anti-anti-debug: first-chance exception pass-through ----------------
+
+    def set_pass_exceptions(self, enabled: bool) -> dict:
+        """Enable/disable handing first-chance exceptions to the target's own
+        SEH instead of the debugger swallowing them. Defeats INT3-based
+        anti-debug (e.g. PD2's breakpoint-exception flood)."""
+        return self._run_on_engine(self._set_pass_exceptions_impl, bool(enabled))
+
+    def _set_pass_exceptions_impl(self, enabled: bool) -> dict:
+        self._pass_exceptions = enabled
+        try:
+            if enabled:
+                self._base.events.exception(self._on_exception)
+            else:
+                self._base.events.noexception()
+        except Exception as e:
+            logger.warning(f"exception pass-through toggle failed: {e}")
+        logger.info(f"Exception pass-through {'ENABLED' if enabled else 'disabled'}")
+        return {"pass_exceptions": self._pass_exceptions}
+
+    def _on_exception(self, *args):
+        """dbgeng EXCEPTION-event callback. args[0]=ExceptionRecord,
+        args[1]=first-chance flag. When pass-through is on, first-chance
+        exceptions (notably the INT3/STATUS_BREAKPOINT anti-debug flood) are
+        continued as NOT-handled so the target's own handler runs and it can't
+        detect us. Our OWN breakpoints arrive via the separate BREAKPOINT event
+        and are unaffected. Off -> NO_CHANGE (default dbgeng behaviour)."""
+        first_chance = (len(args) < 2) or bool(args[1])
+        # Crash-guard: during an in-process call_function(), a fault in the called
+        # code (e.g. access violation 0xC0000005) must NOT reach the target's SEH
+        # (could crash the process). Break into the debugger so call_function can
+        # roll back the saved context. Still PASS the anti-debug INT3 flood
+        # (0x80000003) from other threads so it can't detect us.
+        if self._call_guard and first_chance:
+            code = self._exc_code(args)
+            if code == 0x80000003:
+                return DbgEng.DEBUG_STATUS_GO_NOT_HANDLED
+            self._call_fault = code
+            return DbgEng.DEBUG_STATUS_NO_CHANGE
+        if self._pass_exceptions and first_chance:
+            return DbgEng.DEBUG_STATUS_GO_NOT_HANDLED
+        return DbgEng.DEBUG_STATUS_NO_CHANGE
+
+    @staticmethod
+    def _exc_code(args):
+        """Best-effort extract the exception code from an dbgeng exception event's
+        args (structure varies by pybag version). 0 if unknown."""
+        try:
+            rec = args[0]
+            for attr in ("ExceptionCode", "exception_code", "code"):
+                if hasattr(rec, attr):
+                    return int(getattr(rec, attr)) & 0xFFFFFFFF
+            if hasattr(rec, "ExceptionRecord"):
+                return int(rec.ExceptionRecord.ExceptionCode) & 0xFFFFFFFF
+            if isinstance(rec, dict):
+                return int(rec.get("ExceptionCode", rec.get("code", 0))) & 0xFFFFFFFF
+        except Exception:
+            pass
+        return 0
 
     def step_into(self, count: int = 1) -> dict:
         """Single-step into (trace)."""
@@ -615,6 +738,94 @@ class DebugEngine:
         return frames
 
     # -- Breakpoint management ---------------------------------------------
+
+    def call_function(self, address: int, stack_args=None, registers=None,
+                      ret_catch: Optional[int] = None,
+                      timeout_ms: int = 8000) -> dict:
+        """Call a function IN-PROCESS by hijacking the currently-stopped thread.
+
+        Requires the target STOPPED at a breakpoint (valid thread context). Saves
+        the full context, sets up the calling convention (`stack_args` pushed
+        after a return address; `registers` written for register args like
+        ecx/edx/eax), runs to a return-catch breakpoint, reads the result, then
+        RESTORES the saved context (also the crash safety-net). Proven on WOW64:
+        writing EIP + go_wait commits the context (only single-step is blocked).
+
+        The caller sets up any pointer-arg scratch via write_memory first and
+        passes the address in `registers`/`stack_args`. Returns
+        {eax, edx, returned_to, timeout, ret_catch}. Verify returned_to==ret_catch.
+        """
+        return self._run_on_engine(self._call_function_impl, int(address),
+                                   list(stack_args or []), dict(registers or {}),
+                                   ret_catch, int(timeout_ms))
+
+    def _call_function_impl(self, address, stack_args, registers, ret_catch,
+                            timeout_ms):
+        # Mirrors the proven manual sequence exactly (no extra breakpoints, no
+        # eflags write, no in-handler exception juggling) -- those additions
+        # corrupted state and crashed the target. Recovery is the context
+        # restore below; crash *prevention* is the loaded-module EIP check plus
+        # calling only with valid inputs. (Catching a fault in the called code
+        # before it reaches the target's SEH needs the suspend-other-threads
+        # design -- a follow-up; until then, do not pass deliberately-bad args.)
+        self._require_stopped()
+        saved = {k.lower(): v for k, v in self._collect_registers_impl().items()}
+        if "eip" not in saved or "esp" not in saved or saved["esp"] == 0:
+            raise RuntimeError("no valid thread context (esp/eip == 0) -- target "
+                               "not stopped at a real debug event")
+        # SAFETY: refuse to set EIP outside a loaded module (executing unmapped
+        # memory = guaranteed access violation). Best-effort; app-agnostic.
+        try:
+            mods = self._get_modules_impl()
+            if mods and not any(
+                    m.runtime_base <= int(address) < m.runtime_base + m.size
+                    for m in mods):
+                raise RuntimeError(
+                    f"target 0x{int(address):08X} is not in any loaded module -- "
+                    f"refusing to call (would execute unmapped memory)")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+        # ret_catch defaults to the current stopped EIP, which ALREADY carries
+        # our breakpoint (that is why we are stopped). We deliberately do NOT add
+        # a breakpoint -- a second int3 at the same address can restore a stale
+        # 0xCC over the original byte on removal and crash the target later. A
+        # custom ret_catch must already have a breakpoint (else -> timeout).
+        if ret_catch is None:
+            ret_catch = saved["eip"]
+        ret_catch = int(ret_catch)
+        # build the call stack: [new_esp]=ret_catch, [+4]=arg1, [+8]=arg2, ...
+        new_esp = saved["esp"] - 4 * (len(stack_args) + 1)
+        self._base.write(new_esp, ret_catch.to_bytes(4, "little"))
+        for i, a in enumerate(stack_args):
+            self._base.write(new_esp + 4 + 4 * i,
+                             (int(a) & 0xFFFFFFFF).to_bytes(4, "little"))
+        # set register args + esp + eip, then run to the return-catch
+        with self._wow64_x86_context():
+            for name, val in registers.items():
+                self._base.reg._set_register(name.lower(), int(val) & 0xFFFFFFFF)
+            self._base.reg._set_register("esp", new_esp)
+            self._base.reg._set_register("eip", int(address))
+        res = self._go_wait_impl(timeout_ms)
+        out = {k.lower(): v for k, v in self._collect_registers_impl().items()}
+        returned_to = out.get("eip", 0)
+        faulted = (returned_to != ret_catch) or bool(res.get("timeout"))
+        # restore the saved context (same register set as the proven spike --
+        # NO eflags), which also rolls the thread back on fault/timeout.
+        with self._wow64_x86_context():
+            for name in ("eax", "ebx", "ecx", "edx", "esi", "edi",
+                         "esp", "ebp", "eip"):
+                if name in saved:
+                    self._base.reg._set_register(name, int(saved[name]))
+        return {
+            "eax": f"0x{out.get('eax', 0):08X}",
+            "edx": f"0x{out.get('edx', 0):08X}",
+            "returned_to": f"0x{returned_to:08X}",
+            "ret_catch": f"0x{ret_catch:08X}",
+            "timeout": bool(res.get("timeout")),
+            "faulted": bool(faulted),
+        }
 
     def set_breakpoint(self, address: int,
                        bp_type: BreakpointType = BreakpointType.SOFTWARE,
