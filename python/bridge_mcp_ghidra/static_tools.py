@@ -8,6 +8,7 @@ from . import discovery
 from . import dispatch
 from . import registry
 from . import state
+from . import transport
 from .config import DEFAULT_TCP_URL, STATIC_TOOL_NAMES, logger
 from .server import Context, mcp
 from .validation import validate_server_url
@@ -37,7 +38,13 @@ def list_instances() -> str:
                 state._transport_mode == "tcp" and inst.get("url") == state._active_tcp
             )
         else:
-            inst["connected"] = inst["socket"] == state._active_socket
+            # UDS-discovered instances may carry a TCP url too (Windows
+            # enrichment) — either transport counts as connected.
+            inst["connected"] = inst["socket"] == state._active_socket or (
+                state._transport_mode == "tcp"
+                and bool(inst.get("url"))
+                and inst.get("url") == state._active_tcp
+            )
 
     return json.dumps({"instances": instances}, indent=2)
 
@@ -65,8 +72,9 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     instances = discovery.discover_instances()
 
     # Try UDS instances first
+    match = None
+    matched_tcp_url = None
     if instances:
-        match = None
         for inst in instances:
             if inst.get("project", "") == project:
                 match = inst
@@ -76,7 +84,12 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
                 if project.lower() in inst.get("project", "").lower():
                     match = inst
                     break
-        if match:
+        if match and not transport.uds_supported():
+            # Windows CPython can't dial the socket it just matched; the
+            # discovery enrichment recorded the instance's TCP url — route
+            # the connection there instead of failing the UDS handshake.
+            matched_tcp_url = match.get("url")
+        elif match:
             state._active_socket = match["socket"]
             state._active_tcp = None
             state._transport_mode = "uds"
@@ -112,6 +125,8 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     # Try TCP fallback. The behavior depends on what UDS discovery returned:
     #
     #   * If GHIDRA_MCP_URL is set, it always wins (explicit user override).
+    #   * If a UDS instance matched but Python can't dial UDS (Windows), use
+    #     the TCP url discovery recorded for that exact instance.
     #   * If UDS found one or more instances with project metadata and none
     #     matched the project, refuse to fall back to TCP -- that's how we
     #     previously silently connected to the wrong instance (Copilot #196
@@ -123,7 +138,9 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     env_tcp = os.getenv("GHIDRA_MCP_URL")
     if env_tcp:
         tcp_url = env_tcp
-    elif instances and any(inst.get("project") for inst in instances):
+    elif matched_tcp_url:
+        tcp_url = matched_tcp_url
+    elif match is None and instances and any(inst.get("project") for inst in instances):
         # UDS found instances but none matched the requested project. Don't
         # randomly pick another instance's tcp_port — that connects to the
         # wrong project. Return the "no match" error directly.
@@ -155,6 +172,7 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
         state._active_tcp = tcp_url
         state._active_socket = None
         state._transport_mode = "tcp"
+        state._connected_project = match.get("project") if match else None
         count = registry._fetch_and_register_schema()
         total = len(state._full_schema)
         note = (
@@ -484,20 +502,42 @@ def _auto_connect():
     # Try UDS first
     instances = discovery.discover_instances()
     if len(instances) == 1:
-        state._active_socket = instances[0]["socket"]
-        state._transport_mode = "uds"
-        state._connected_project = instances[0].get("project")
-        logger.info(f"Auto-connecting via UDS to {state._connected_project or 'unknown'}")
-        try:
-            count = registry._fetch_and_register_schema()
+        inst = instances[0]
+        if transport.uds_supported():
+            state._active_socket = inst["socket"]
+            state._transport_mode = "uds"
+            state._connected_project = inst.get("project")
+            logger.info(f"Auto-connecting via UDS to {state._connected_project or 'unknown'}")
+            try:
+                count = registry._fetch_and_register_schema()
+                logger.info(
+                    f"Auto-registered {count} tools from {state._connected_project or 'unknown'}"
+                )
+                return
+            except Exception as e:
+                logger.warning(f"UDS auto-connect schema fetch failed: {e}")
+                state._active_socket = None
+                state._transport_mode = "none"
+        elif inst.get("url") and validate_server_url(inst["url"]):
+            # Windows CPython can't dial the discovered socket; discovery
+            # enriched it with the instance's TCP url — connect there.
+            state._active_tcp = inst["url"]
+            state._transport_mode = "tcp"
+            state._connected_project = inst.get("project")
             logger.info(
-                f"Auto-registered {count} tools from {state._connected_project or 'unknown'}"
+                f"Auto-connecting via TCP ({inst['url']}) to "
+                f"{state._connected_project or 'unknown'} (UDS unavailable on this Python)"
             )
-            return
-        except Exception as e:
-            logger.warning(f"UDS auto-connect schema fetch failed: {e}")
-            state._active_socket = None
-            state._transport_mode = "none"
+            try:
+                count = registry._fetch_and_register_schema()
+                logger.info(
+                    f"Auto-registered {count} tools from {state._connected_project or 'unknown'}"
+                )
+                return
+            except Exception as e:
+                logger.warning(f"TCP auto-connect schema fetch failed: {e}")
+                state._active_tcp = None
+                state._transport_mode = "none"
     elif len(instances) > 1:
         names = ", ".join(
             i.get("project") or i.get("socket") or "?" for i in instances

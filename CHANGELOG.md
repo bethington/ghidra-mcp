@@ -13,6 +13,25 @@ Complete version history for the Ghidra MCP Server project.
   `benchmark/extract_truth.py` with `clang_getOffsetOfBase not found`. Both are
   now pinned to LLVM 18.1.x (`clang>=18.1.8,<19`, `libclang>=18.1.1,<19`); the
   3 erroring extract-truth tests pass.
+- **Windows cross-drive UDS discovery + AF_UNIX fallback.** On Windows the
+  plugin's socket-dir fallback (`/tmp`, drive-relative) resolved against the
+  JVM's working drive (e.g. `F:\tmp` when Ghidra runs from F:) while the bridge
+  scanned its own drive's `\tmp`, so `list_instances` always reported "No
+  running Ghidra instances" and the bridge never auto-connected after a Ghidra
+  restart. Three-part fix:
+  - Plugin: `ServerManager.getSocketDir()` now falls back to `java.io.tmpdir`
+    (honors `%TEMP%`) before the literal `/tmp`, giving both sides an absolute,
+    agreed-on location.
+  - Bridge: `get_socket_dir_candidates()` sweeps every mounted drive root for
+    `<drive>:\tmp\ghidra-mcp-<user>` (backward compat with older JARs).
+  - Bridge: on Windows CPython, which doesn't expose `socket.AF_UNIX`
+    (python/cpython#77589), discovery enriches socket-file hits with
+    project/programs/url fetched over the plugin's TCP listener (joined by PID),
+    and `connect_instance` / startup auto-connect / post-restart reconnect all
+    route the connection over that TCP url instead of failing the UDS handshake.
+  - Tests: real-socket transport tests (`test_transport_network.py`) and bridge
+    CLI / DNS-rebinding tests (`test_bridge_cli.py`), plus
+    `ServerManagerSocketDirTest.java` for the plugin fallback.
 
 ### Changed
 

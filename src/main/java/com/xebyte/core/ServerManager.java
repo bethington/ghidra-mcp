@@ -343,11 +343,38 @@ public class ServerManager {
     }
 
     private Path getSocketDir() {
-        String xdg = System.getenv("XDG_RUNTIME_DIR");
-        if (xdg != null && !xdg.isEmpty()) return Path.of(xdg, "ghidra-mcp");
-        String tmpdir = System.getenv("TMPDIR");
-        String user = System.getProperty("user.name", "unknown");
-        if (tmpdir != null && !tmpdir.isEmpty()) return Path.of(tmpdir, "ghidra-mcp-" + user);
+        return resolveSocketDir(
+            System.getenv("XDG_RUNTIME_DIR"),
+            System.getenv("TMPDIR"),
+            System.getProperty("java.io.tmpdir"),
+            System.getProperty("user.name", "unknown"));
+    }
+
+    /**
+     * Resolve the UDS socket directory: XDG_RUNTIME_DIR, then TMPDIR, then
+     * java.io.tmpdir, then literal /tmp.
+     *
+     * The java.io.tmpdir step matters on Windows, where TMPDIR is unset and
+     * the literal "/tmp" is drive-relative: it resolves against the JVM's
+     * working drive (e.g. F:\tmp when Ghidra runs from F:), which a bridge
+     * running from another drive never scans. java.io.tmpdir honors %TEMP%,
+     * giving both sides the same absolute location; the Python side lists
+     * %TEMP%\ghidra-mcp-&lt;user&gt; among its discovery candidates.
+     */
+    public static Path resolveSocketDir(String xdgRuntimeDir, String tmpdirEnv,
+            String javaIoTmpdir, String user) {
+        if (xdgRuntimeDir != null && !xdgRuntimeDir.isEmpty()) {
+            return Path.of(xdgRuntimeDir, "ghidra-mcp");
+        }
+        if (user == null || user.isEmpty()) {
+            user = "unknown";
+        }
+        if (tmpdirEnv != null && !tmpdirEnv.isEmpty()) {
+            return Path.of(tmpdirEnv, "ghidra-mcp-" + user);
+        }
+        if (javaIoTmpdir != null && !javaIoTmpdir.isEmpty()) {
+            return Path.of(javaIoTmpdir, "ghidra-mcp-" + user);
+        }
         return Path.of("/tmp", "ghidra-mcp-" + user);
     }
 

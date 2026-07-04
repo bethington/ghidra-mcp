@@ -64,11 +64,39 @@ def _normalize_post_payload(endpoint: str, data: dict) -> dict:
     return data
 
 
+def _reconnect_via(inst: dict) -> bool:
+    """Point the active transport at `inst` and re-fetch the schema.
+
+    Uses UDS when this Python can dial it; otherwise falls back to the TCP
+    url discovery recorded for the instance (Windows CPython lacks AF_UNIX).
+    Returns True on success.
+    """
+    if transport.uds_supported():
+        state._active_socket = inst["socket"]
+        state._active_tcp = None
+        state._transport_mode = "uds"
+        target = inst["socket"]
+    elif inst.get("url"):
+        state._active_tcp = inst["url"]
+        state._active_socket = None
+        state._transport_mode = "tcp"
+        target = inst["url"]
+    else:
+        return False
+    try:
+        registry._fetch_and_register_schema()
+        logger.info(f"Reconnected to project '{inst.get('project')}' via {target}")
+        return True
+    except Exception as e:
+        logger.warning(f"Reconnect schema fetch failed: {e}")
+        return False
+
+
 def _try_reconnect() -> bool:
     """Try to reconnect to the previously connected project after Ghidra restarts.
 
-    Scans for UDS instances matching _connected_project. If found, updates the
-    active socket and re-fetches the schema. Returns True if reconnected.
+    Scans for instances matching _connected_project. If found, updates the
+    active transport and re-fetches the schema. Returns True if reconnected.
     """
     if not state._connected_project:
         return False
@@ -76,34 +104,12 @@ def _try_reconnect() -> bool:
     instances = discovery.discover_instances()
     for inst in instances:
         if inst.get("project", "") == state._connected_project:
-            state._active_socket = inst["socket"]
-            state._active_tcp = None
-            state._transport_mode = "uds"
-            try:
-                registry._fetch_and_register_schema()
-                logger.info(
-                    f"Reconnected to project '{state._connected_project}' via {inst['socket']}"
-                )
-                return True
-            except Exception as e:
-                logger.warning(f"Reconnect schema fetch failed: {e}")
-                return False
+            return _reconnect_via(inst)
 
     # Exact match failed, try substring
     for inst in instances:
         if state._connected_project.lower() in inst.get("project", "").lower():
-            state._active_socket = inst["socket"]
-            state._active_tcp = None
-            state._transport_mode = "uds"
-            try:
-                registry._fetch_and_register_schema()
-                logger.info(
-                    f"Reconnected to project '{inst.get('project')}' via {inst['socket']}"
-                )
-                return True
-            except Exception as e:
-                logger.warning(f"Reconnect schema fetch failed: {e}")
-                return False
+            return _reconnect_via(inst)
 
     return False
 
