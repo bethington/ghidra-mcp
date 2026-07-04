@@ -628,3 +628,7 @@ fun-doc/audit/queue.jsonl.*-archived
 # fun-doc historical analysis snapshots (large per-project state files)
 fun-doc/state_*.json
 fun-doc/benchmark/bh/source/
+
+# Third-party ScyllaHide (anti-anti-debug) binaries -- obtain per tools/scyllahide/README.md
+/tools/scyllahide/*
+!/tools/scyllahide/README.md
