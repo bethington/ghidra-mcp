@@ -931,6 +931,10 @@ def _default_state():
 
 _storage_repo = None
 _storage_repo_failed = False  # cache import-time failure to avoid retry storm
+# Serializes lazy construction: without it, a worker/watchdog thread and the
+# main thread can both see _storage_repo is None and race bootstrap_schema()
+# against the same SQLite file (UNIQUE failure on schema_versions).
+_storage_repo_lock = threading.Lock()
 
 
 def _get_storage_repo():
@@ -958,6 +962,18 @@ def _get_storage_repo():
         return _storage_repo
     if _storage_repo_failed:
         return None
+    with _storage_repo_lock:
+        # Double-checked: another thread may have built it while we waited.
+        if _storage_repo is not None:
+            return _storage_repo
+        if _storage_repo_failed:
+            return None
+        return _build_storage_repo()
+
+
+def _build_storage_repo():
+    """Build the repository. Caller must hold _storage_repo_lock."""
+    global _storage_repo, _storage_repo_failed
     try:
         # Read storage block from priority_queue.json if present.
         config_block = None

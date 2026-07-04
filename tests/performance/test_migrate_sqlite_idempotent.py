@@ -145,6 +145,107 @@ def test_non_alter_statements_unaffected(migrate_module, tmp_path):
         conn.close()
 
 
+def test_record_applied_duplicate_version_is_tolerant(migrate_module, tmp_path):
+    """Regression: two migrators racing the read-versions -> apply -> record
+    window (e.g. two threads bootstrapping the same fresh SQLite) used to
+    blow up with `UNIQUE constraint failed: schema_versions.version` when
+    the loser recorded a version the winner already inserted. INSERT OR
+    IGNORE makes the loser a no-op."""
+    conn = sqlite3.connect(str(tmp_path / "state.db"))
+    conn.isolation_level = None
+    adapter = migrate_module._SqliteConnAdapter(conn)
+    try:
+        migrate_module._ensure_versions_table(adapter, "sqlite")
+        migrate_module._record_applied(adapter, "sqlite", 1, "initial")
+        migrate_module._record_applied(adapter, "sqlite", 1, "initial")  # loser of the race
+        rows = conn.execute("SELECT version FROM schema_versions").fetchall()
+        assert [r[0] for r in rows] == [1]
+    finally:
+        conn.close()
+
+
+def test_concurrent_migrate_same_db_no_unique_failure(migrate_module, tmp_path):
+    """Full-stack version of the race: two threads run migrate() against the
+    same fresh SQLite simultaneously. Both must finish without raising, and
+    schema_versions must hold each version exactly once."""
+    import threading
+
+    db_path = str(tmp_path / "race.db")
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def run():
+        try:
+            barrier.wait(timeout=10)
+            migrate_module.migrate("sqlite", db_path)
+        except BaseException as e:  # noqa: BLE001 — collect for assertion
+            errors.append(e)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert not errors, f"concurrent migrate raised: {errors!r}"
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT version, COUNT(*) FROM schema_versions GROUP BY version HAVING COUNT(*) > 1"
+        ).fetchall()
+        assert rows == [], f"duplicate schema_versions rows: {rows}"
+    finally:
+        conn.close()
+
+
+def test_get_storage_repo_singleton_is_threadsafe(tmp_path, monkeypatch):
+    """Regression for the in-process half of the race: _get_storage_repo()
+    was an unlocked check-then-build singleton, so a worker/watchdog thread
+    and the main thread could both bootstrap the same SQLite. All concurrent
+    callers must now get the SAME repository instance with no error."""
+    import threading
+
+    fundoc_dir = _REPO_ROOT / "fun-doc"
+    if str(fundoc_dir) not in sys.path:
+        sys.path.insert(0, str(fundoc_dir))
+    import fun_doc as fd
+
+    monkeypatch.setenv("FUN_DOC_DB_URL", f"sqlite:///{tmp_path / 'singleton_race.db'}")
+    fd._storage_repo = None
+    fd._storage_repo_failed = False
+
+    n = 8
+    barrier = threading.Barrier(n)
+    results: list[object] = []
+    errors: list[BaseException] = []
+
+    def grab():
+        try:
+            barrier.wait(timeout=10)
+            results.append(fd._get_storage_repo())
+        except BaseException as e:  # noqa: BLE001 — collect for assertion
+            errors.append(e)
+
+    threads = [threading.Thread(target=grab) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    try:
+        assert not errors, f"_get_storage_repo raised under concurrency: {errors!r}"
+        assert len(results) == n
+        assert len({id(r) for r in results}) == 1, "threads got different repo instances"
+        assert results[0] is not None
+    finally:
+        if fd._storage_repo is not None:
+            try:
+                fd._storage_repo.engine.dispose()
+            except Exception:
+                pass
+            fd._storage_repo = None
+
+
 def test_strip_helper_in_isolation(migrate_module, tmp_path):
     """The regex helper rewrites a duplicate ADD COLUMN to a comment;
     pin that behavior so a future regex tweak can't silently regress."""

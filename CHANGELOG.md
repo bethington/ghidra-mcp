@@ -8,6 +8,13 @@ Complete version history for the Ghidra MCP Server project.
 
 ### Fixed
 
+- **fun-doc storage bootstrap race.** `_get_storage_repo()` was an unlocked
+  check-then-build singleton and `db/migrate.py` recorded schema versions
+  with a bare INSERT, so two threads bootstrapping the same fresh SQLite
+  (worker/watchdog + main) could die with `UNIQUE constraint failed:
+  schema_versions.version`. Now double-check-locked, with
+  `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING` version recording; 3 new
+  race-regression tests in `test_migrate_sqlite_idempotent.py`.
 - **libclang/clang version mismatch.** The `clang` bindings (21.x) had outrun
   the `libclang` DLL wheel (18.1.1, the newest published on PyPI), breaking
   `benchmark/extract_truth.py` with `clang_getOffsetOfBase not found`. Both are

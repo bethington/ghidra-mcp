@@ -86,14 +86,23 @@ def _applied_versions(conn, backend: str) -> set[int]:
 
 
 def _record_applied(conn, backend: str, version: int, name: str) -> None:
+    # Conflict-tolerant on purpose: two migrators can race the
+    # read-versions -> apply -> record window (e.g. two threads
+    # bootstrapping the same fresh SQLite). The migration SQL itself is
+    # idempotent by design (CREATE TABLE IF NOT EXISTS + the ALTER ADD
+    # COLUMN rewrite below), so the loser of the race just skips the
+    # duplicate version row instead of blowing up with a UNIQUE failure.
     table = "fun_doc.schema_versions" if backend == "postgres" else "schema_versions"
     if backend == "postgres":
         conn.execute(
-            f"INSERT INTO {table} (version, name) VALUES (%s, %s)", (version, name)
+            f"INSERT INTO {table} (version, name) VALUES (%s, %s) "
+            "ON CONFLICT (version) DO NOTHING",
+            (version, name),
         )
     else:
         conn.execute(
-            f"INSERT INTO {table} (version, name) VALUES (?, ?)", (version, name)
+            f"INSERT OR IGNORE INTO {table} (version, name) VALUES (?, ?)",
+            (version, name),
         )
 
 
