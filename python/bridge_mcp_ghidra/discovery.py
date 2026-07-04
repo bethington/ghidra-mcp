@@ -30,6 +30,8 @@ def discover_instances() -> list[dict]:
     """
     seen_paths: set[str] = set()
     instances: list[dict] = []
+    uds_ok = transport.uds_supported()
+    tcp_by_pid: dict[int, dict] | None = None
 
     for socket_dir in transport.get_socket_dir_candidates():
         if not socket_dir.exists():
@@ -58,42 +60,43 @@ def discover_instances() -> list[dict]:
                 continue
 
             info: dict = {"socket": str(sock_file), "pid": pid}
-            try:
-                text, status = transport.uds_request(
-                    str(sock_file), "GET", "/mcp/instance_info", timeout=5
-                )
-                if status == 200:
-                    info.update(_unwrap_response_data(text))
-            except Exception as e:
-                logger.debug(f"Could not query {sock_file}: {e}")
+            if uds_ok:
+                try:
+                    text, status = transport.uds_request(
+                        str(sock_file), "GET", "/mcp/instance_info", timeout=5
+                    )
+                    if status == 200:
+                        info.update(_unwrap_response_data(text))
+                except Exception as e:
+                    logger.debug(f"Could not query {sock_file}: {e}")
+            else:
+                # CPython on Windows can't dial UDS (see
+                # transport.uds_supported), so the socket file only proves
+                # the instance is alive. Fetch its metadata — project name,
+                # programs, tcp_port — over the plugin's TCP listener
+                # instead, matched by PID.
+                if tcp_by_pid is None:
+                    tcp_by_pid = _tcp_instances_by_pid()
+                if pid in tcp_by_pid:
+                    info.update(tcp_by_pid[pid])
 
             instances.append(info)
 
     return instances
 
 
-def _scan_tcp_for_project(project: str, start_port: int = DEFAULT_TCP_PORT,
-                          range_size: int = TCP_PORT_SCAN_RANGE,
-                          timeout: float = 1.0) -> str | None:
-    """Scan a small TCP port range for a Ghidra plugin matching `project`.
+def _iter_tcp_instances(start_port: int = DEFAULT_TCP_PORT,
+                        range_size: int = TCP_PORT_SCAN_RANGE,
+                        timeout: float = 1.0):
+    """Yield (url, instance_info) for every Ghidra plugin in the TCP scan range.
 
-    Used when UDS discovery returns nothing (e.g., TCP-only multi-instance
-    setups on Windows pre-1803). For each port in [start_port, start_port +
-    range_size), issues `GET /mcp/instance_info` with a short timeout. The
-    first one whose `project` field matches (exact wins; substring used as
-    fallback) returns its URL. Returns None if no match found.
-
-    Project matching mirrors connect_instance's UDS match order so the same
-    `connect_instance("D2Common")` call selects the same instance regardless
-    of which transport found it.
+    For each port in [start_port, start_port + range_size), issues
+    `GET /mcp/instance_info` with a short timeout; unreachable ports and
+    non-JSON responders are skipped silently.
 
     Uses http.client (stdlib) rather than `requests` to keep the bridge's
     dependency footprint minimal -- see test_project_consistency.
     """
-    if not project:
-        return None
-    project_lower = project.lower()
-    substring_url: str | None = None
     for port in range(start_port, start_port + range_size):
         url = f"http://127.0.0.1:{port}"
         try:
@@ -107,17 +110,56 @@ def _scan_tcp_for_project(project: str, start_port: int = DEFAULT_TCP_PORT,
             finally:
                 conn.close()
             info = _unwrap_response_data(body)
-            if not isinstance(info, dict):
-                continue
-            inst_project = info.get("project", "")
-            if inst_project == project:
-                # Exact match — return immediately.
-                return url
-            if not substring_url and project_lower in inst_project.lower():
-                substring_url = url
+            if isinstance(info, dict):
+                yield url, info
         except Exception:
             # Connection refused / timeout / non-JSON response — try next port.
             continue
+
+
+def _tcp_instances_by_pid(start_port: int = DEFAULT_TCP_PORT,
+                          range_size: int = TCP_PORT_SCAN_RANGE,
+                          timeout: float = 1.0) -> dict[int, dict]:
+    """Map pid -> {"url": ..., **instance_info} for TCP-reachable instances.
+
+    Used to enrich UDS socket-file discovery on hosts where Python can't
+    dial UDS (Windows CPython): the socket filename carries the plugin's
+    PID, and /mcp/instance_info reports its own pid, so the two can be
+    joined without guessing.
+    """
+    by_pid: dict[int, dict] = {}
+    for url, info in _iter_tcp_instances(start_port, range_size, timeout):
+        pid = info.get("pid")
+        if isinstance(pid, int) and pid not in by_pid:
+            by_pid[pid] = {"url": url, **info}
+    return by_pid
+
+
+def _scan_tcp_for_project(project: str, start_port: int = DEFAULT_TCP_PORT,
+                          range_size: int = TCP_PORT_SCAN_RANGE,
+                          timeout: float = 1.0) -> str | None:
+    """Scan a small TCP port range for a Ghidra plugin matching `project`.
+
+    Used when UDS discovery returns nothing (e.g., TCP-only multi-instance
+    setups on Windows pre-1803). The first instance whose `project` field
+    matches exactly wins; a substring match is used as fallback. Returns
+    None if no match found.
+
+    Project matching mirrors connect_instance's UDS match order so the same
+    `connect_instance("D2Common")` call selects the same instance regardless
+    of which transport found it.
+    """
+    if not project:
+        return None
+    project_lower = project.lower()
+    substring_url: str | None = None
+    for url, info in _iter_tcp_instances(start_port, range_size, timeout):
+        inst_project = info.get("project", "")
+        if inst_project == project:
+            # Exact match — return immediately.
+            return url
+        if not substring_url and project_lower in inst_project.lower():
+            substring_url = url
     return substring_url
 
 

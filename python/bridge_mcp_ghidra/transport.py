@@ -33,6 +33,17 @@ class UnixHTTPConnection(http.client.HTTPConnection):
         self.sock.connect(self.socket_path)
 
 
+def uds_supported() -> bool:
+    """Whether this Python can dial Unix domain sockets.
+
+    CPython on Windows doesn't expose socket.AF_UNIX (python/cpython#77589)
+    even though the OS and the Java plugin support them. On such hosts the
+    socket file still marks a live instance, but all traffic must go over
+    the plugin's TCP listener.
+    """
+    return hasattr(socket, "AF_UNIX")
+
+
 def get_socket_dir() -> Path:
     """Get the primary GhidraMCP socket runtime directory.
 
@@ -116,7 +127,41 @@ def get_socket_dir_candidates() -> list[Path]:
     if win_temp:
         _add(Path(win_temp) / f"ghidra-mcp-{user}")
 
+    if os.name == "nt":
+        for candidate in _windows_drive_tmp_candidates(user):
+            _add(candidate)
+
     return candidates
+
+
+def _windows_drive_tmp_candidates(user: str) -> list[Path]:
+    """Backward-compat sweep of every mounted drive for <drive>:\\tmp\\ghidra-mcp-<user>.
+
+    Plugin JARs before the java.io.tmpdir fallback resolved the literal
+    "/tmp" against the JVM's working drive (e.g. F:\\tmp when Ghidra runs
+    from F:), while the bare /tmp candidate resolves against the *bridge's*
+    working drive. Scanning every drive root finds sockets on other drives.
+    Only existing directories are returned so the candidate list isn't
+    flooded with junk paths for every drive letter.
+    """
+    listdrives = getattr(os, "listdrives", None)  # Python 3.12+
+    if callable(listdrives):
+        try:
+            drives = listdrives()
+        except OSError:
+            drives = []
+    else:
+        drives = [f"{letter}:\\" for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"]
+
+    hits: list[Path] = []
+    for drive in drives:
+        candidate = Path(drive) / "tmp" / f"ghidra-mcp-{user}"
+        try:
+            if candidate.exists():
+                hits.append(candidate)
+        except OSError:
+            pass
+    return hits
 
 
 def uds_request(
