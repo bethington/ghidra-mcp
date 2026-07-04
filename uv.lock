@@ -320,11 +320,11 @@ wheels = [
 
 [[package]]
 name = "clang"
-version = "21.1.7"
+version = "18.1.8"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/50/9b/956a03195656847c4e3620dab9c36c9e53aecf685a6c3f0bc1ce025d7ec3/clang-21.1.7.tar.gz", hash = "sha256:01d5602b3fff77fef6d691a193d7aead4766b0f11d789d596200f3334a88f4b8", size = 8600, upload-time = "2025-12-18T22:04:51.886Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/6d/202fe248475f92ab9057a4066d50fe8aaa2def62493894dc9a9814ce8d3b/clang-18.1.8.tar.gz", hash = "sha256:26d11859bab6da8d1fcdb85a244957f6c129a0cd15da2abca3059b054b87635f", size = 3101, upload-time = "2025-02-17T21:49:01.037Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/50/a4/608c542925949b300a295baa422b568f835044c5e3ad20820676b840228a/clang-21.1.7-py3-none-any.whl", hash = "sha256:23ee8f7b62af648009aee5139516b2a2a9320680dbce6e42a53e48bd5e8983ea", size = 40240, upload-time = "2025-12-18T22:04:50.636Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/3c/1bebce0b2588b913b48baea6eac5091c023f03cc0c8ab4b015a8315d0d09/clang-18.1.8-py3-none-any.whl", hash = "sha256:2f6a00126743ee23d8fcd2a2338b42ef4d29897f293ee3a1bc4d5925d8ee875c", size = 31627, upload-time = "2025-02-17T21:48:59.215Z" },
 ]
 
 [[package]]
@@ -685,10 +685,10 @@ debugger = [
 ]
 dev = [
     { name = "black", specifier = ">=24.0.0" },
-    { name = "clang", specifier = ">=21.1.7" },
+    { name = "clang", specifier = ">=18.1.8,<19" },
     { name = "coverage", specifier = ">=7.15.0" },
     { name = "flake8", specifier = ">=6.0.0" },
-    { name = "libclang", specifier = ">=18.1.1" },
+    { name = "libclang", specifier = ">=18.1.1,<19" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
@@ -713,9 +713,9 @@ fun-doc = [
     { name = "sqlalchemy", specifier = ">=2.0.50,<3.0" },
 ]
 test = [
-    { name = "clang", specifier = ">=21.1.7" },
+    { name = "clang", specifier = ">=18.1.8,<19" },
     { name = "coverage", specifier = ">=7.15.0" },
-    { name = "libclang", specifier = ">=18.1.1" },
+    { name = "libclang", specifier = ">=18.1.1,<19" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },

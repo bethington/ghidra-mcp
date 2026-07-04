@@ -6,6 +6,14 @@ Complete version history for the Ghidra MCP Server project.
 
 ## Unreleased
 
+### Fixed
+
+- **libclang/clang version mismatch.** The `clang` bindings (21.x) had outrun
+  the `libclang` DLL wheel (18.1.1, the newest published on PyPI), breaking
+  `benchmark/extract_truth.py` with `clang_getOffsetOfBase not found`. Both are
+  now pinned to LLVM 18.1.x (`clang>=18.1.8,<19`, `libclang>=18.1.1,<19`); the
+  3 erroring extract-truth tests pass.
+
 ### Changed
 
 - **Bridge restructured into a package + uv-native packaging.** The historical

@@ -69,8 +69,11 @@ test = [
     "coverage>=7.15.0",
     "pytest-json-report>=1.5.0",
     "pyyaml>=6.0.0",
-    "clang>=21.1.7",
-    "libclang>=18.1.1",
+    # clang (bindings) and libclang (bundled DLL) must track the same LLVM
+    # major: the libclang wheel tops out at 18.1.1 on PyPI, and 19+ bindings
+    # call symbols (e.g. clang_getOffsetOfBase) the 18.x DLL doesn't export.
+    "clang>=18.1.8,<19",
+    "libclang>=18.1.1,<19",
 ]
 # Standalone debugger server + Ghidra TraceRmi backend (Windows-only bits).
 debugger = [
