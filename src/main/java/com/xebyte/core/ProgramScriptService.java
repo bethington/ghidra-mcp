@@ -32,6 +32,7 @@ public class ProgramScriptService {
     private final ProgramProvider programProvider;
     private final ThreadingStrategy threadingStrategy;
     private static final String AUTO_ANALYSIS_COMPLETION_MESSAGE = "Auto-analysis completed";
+    private static final Object SCRIPT_BUNDLE_HOST_LOCK = new Object();
 
     /**
      * Upper bound on the OSGi build/activate output echoed back in an error
@@ -58,6 +59,20 @@ public class ProgramScriptService {
     public ProgramScriptService(ProgramProvider programProvider, ThreadingStrategy threadingStrategy) {
         this.programProvider = programProvider;
         this.threadingStrategy = threadingStrategy;
+    }
+
+    private static void ensureScriptBundleHostInitialized(File scriptDirectory) {
+        synchronized (SCRIPT_BUNDLE_HOST_LOCK) {
+            if (ghidra.app.script.GhidraScriptUtil.getBundleHost() == null) {
+                // In GUI mode GhidraScriptMgrPlugin owns this lifecycle. The
+                // headless MCP server has no script-manager plugin, but Java
+                // scripts still need the OSGi bundle host before
+                // JavaScriptProvider can compile/load script classes.
+                ghidra.app.script.GhidraScriptUtil.acquireBundleHostReference();
+            }
+            ghidra.app.script.GhidraScriptUtil.getBundleHost()
+                    .enable(new generic.jar.ResourceFile(scriptDirectory));
+        }
     }
 
     /**
@@ -1259,6 +1274,7 @@ public class ProgramScriptService {
 
         try {
             SwingUtilities.invokeAndWait(() -> {
+                StringWriter scriptWriter = new StringWriter();
                 try {
                     // Capture console output
                     PrintStream captureStream = new PrintStream(outputCapture);
@@ -1321,6 +1337,19 @@ public class ProgramScriptService {
                         resultMsg.append("Warning: Could not copy script to ~/ghidra_scripts/: ").append(e.getMessage()).append("\n");
                     }
 
+                    try {
+                        ensureScriptBundleHostInitialized(scriptFileForExecution.getParentFile());
+                    } catch (Exception e) {
+                        resultMsg.append("ERROR: Could not initialize Ghidra script bundle host for: ")
+                                .append(scriptFileForExecution.getParentFile().getAbsolutePath())
+                                .append("\n")
+                                .append(e.getClass().getSimpleName())
+                                .append(": ")
+                                .append(e.getMessage())
+                                .append("\n");
+                        return;
+                    }
+
                     generic.jar.ResourceFile scriptFile = new generic.jar.ResourceFile(scriptFileForExecution);
 
                     resultMsg.append("Found script: ").append(scriptFile.getAbsolutePath()).append("\n");
@@ -1341,7 +1370,6 @@ public class ProgramScriptService {
                     resultMsg.append("Script provider: ").append(provider.getClass().getSimpleName()).append("\n");
 
                     // Create script instance
-                    StringWriter scriptWriter = new StringWriter();
                     PrintWriter scriptPrintWriter = new PrintWriter(scriptWriter);
                     scriptWriterHolder[0] = scriptWriter;
                     scriptPrintWriterHolder[0] = scriptPrintWriter;
@@ -1389,6 +1417,11 @@ public class ProgramScriptService {
                     resultMsg.append("\n=== SCRIPT COMPLETED SUCCESSFULLY ===\n");
 
                 } catch (Exception e) {
+                    String scriptOutput = scriptWriter.toString();
+                    if (!scriptOutput.isEmpty()) {
+                        resultMsg.append("\n--- SCRIPT BUILD OUTPUT ---\n");
+                        resultMsg.append(scriptOutput).append("\n");
+                    }
                     resultMsg.append("\n=== SCRIPT EXECUTION ERROR ===\n");
                     resultMsg.append("Error: ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append("\n");
 
