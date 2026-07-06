@@ -23,6 +23,36 @@ Complete version history for the Ghidra MCP Server project.
 
 ### Fixed
 
+- **WOW64 exception-filter gaps found in review of #366/#367.** #366 and #367
+  shipped with no test coverage of `_on_exception`, `_our_bp_addrs`, or the
+  fast path, and their design docs assumed contradictory models of how a
+  planted breakpoint's INT3 is delivered on WOW64 (first-chance EXCEPTION vs.
+  the separate BREAKPOINT event) with no live run confirming either. Added
+  `TestOnExceptionFilter`/`TestDetachClearsBreakpointBookkeeping` in
+  `tests/unit/test_debugger_engine.py` pinning the fast path, WX86 code
+  handling, ret_catch recognition, and fault capture, so a future change
+  can't silently regress either PR's fix. Also fixed two real bugs the
+  contradiction surfaced: (1) `_on_exception`'s address match now queries
+  dbgeng's *live* breakpoint list (`_live_bp_addrs()`) instead of the
+  `_our_bp_addrs` shadow set, which went stale the moment a oneshot
+  breakpoint fired (dbgeng auto-drops the object with no
+  `remove_breakpoint()` call to clean up the shadow entry) — a later real
+  exception at the reused address would otherwise be misclassified as ours
+  and hidden from the target; (2) `detach()` now clears
+  `_our_bp_addrs`/`_bp_id_to_addr`/`_call_guard`/`_stepping`, which
+  previously survived a detach and could misclassify the next attached
+  process's exceptions. **Live-verified end to end on genuine WOW64
+  (2026-07-05)**: compiled a synthetic, disposable x86 process (confirmed
+  PE machine type 0x14C) looping on `kernel32!SleepEx`. Passive path:
+  `go_wait` reported repeated genuine hits under the merged filter even
+  without registering `events.breakpoint()` — dbgeng halts execution at a
+  recognized breakpoint independent of the interest mask, so the fast path
+  does not swallow ordinary passive-capture breakpoints. Guarded-call path:
+  with the thread stopped at that hit, `call_function` (defaulted
+  `ret_catch`) returned cleanly (`returned_to == ret_catch`, not faulted),
+  and passive capture kept working afterward with no run-control poisoning.
+  See the docstring on `_on_exception` and the `reference-debugger-sim-runs`
+  memory.
 - **fun-doc storage bootstrap race.** `_get_storage_repo()` was an unlocked
   check-then-build singleton and `db/migrate.py` recorded schema versions
   with a bare INSERT, so two threads bootstrapping the same fresh SQLite

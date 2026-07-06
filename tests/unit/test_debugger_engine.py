@@ -69,6 +69,7 @@ def import_engine_with_stubs():
     fake_core.DEBUG_BREAKPOINT_ONE_SHOT = 8
     fake_core.DEBUG_BREAKPOINT_DATA = 16
     fake_core.DEBUG_STATUS_NO_CHANGE = 0
+    fake_core.DEBUG_STATUS_GO_NOT_HANDLED = 2
 
     fake_exception = types.ModuleType("pybag.dbgeng.exception")
 
@@ -102,6 +103,13 @@ def make_engine(engine_module, base, state):
     engine._is_wow64 = False
     engine._protected_base = base
     engine._thread = threading.current_thread()
+    engine._pass_exceptions = False
+    engine._call_guard = False
+    engine._stepping = False
+    engine._call_ret_catch = None
+    engine._call_fault = None
+    engine._our_bp_addrs = set()
+    engine._bp_id_to_addr = {}
     return engine
 
 
@@ -426,3 +434,170 @@ class TestMemoryAndRegisterWrites:
         engine._write_registers_impl({"eip": 0x401000})
 
         assert engine._protected_base._control.set_calls == [0x14C, 0x8664]
+
+
+class TestOnExceptionFilter:
+    """Regression tests for the WOW64 exception-filter contradiction found in
+    review: PR #366's design assumed our own breakpoints could arrive as
+    first-chance EXCEPTION events (needing _our_bp_addrs matching here), while
+    PR #367's fast path assumes they never reach here (breakpoints surface via
+    the separate BREAKPOINT event) and skips inspection entirely outside a
+    call/step window. These tests pin down the currently-intended behavior of
+    _on_exception so a future change can't silently reintroduce either the
+    COM-record-touching-on-every-flood-event bug (#367's fix) or a swallowed
+    ret_catch/guarded-fault (#366's fix) without a test failing.
+    """
+
+    CODE_INT3 = 0x80000003
+    CODE_WX86_INT3 = 0x4000001F
+    CODE_STEP = 0x80000004
+    CODE_WX86_STEP = 0x4000001E
+    CODE_AV = 0xC0000005
+
+    @staticmethod
+    def exc(code, address=0x401000):
+        return {"ExceptionCode": code, "ExceptionAddress": address}
+
+    def test_fast_path_never_touches_record_when_not_guarding(self):
+        engine_module = import_engine_with_stubs()
+        engine = make_engine(engine_module, object(), engine_module.DebuggerState.STOPPED)
+        engine._pass_exceptions = True
+
+        # If the fast path regresses into inspecting the record on the flood
+        # path, this raises instead of silently passing. Plain functions
+        # assigned on the instance (not via the class) shadow the
+        # @staticmethod without descriptor binding, so no self is passed.
+        def _boom(args):
+            raise AssertionError("must not inspect record outside call/step")
+
+        engine._exc_code = _boom
+        engine._exc_address = _boom
+
+        result = engine._on_exception(self.exc(self.CODE_WX86_INT3), True)
+
+        assert result == engine_module.DbgEng.DEBUG_STATUS_GO_NOT_HANDLED
+
+    def test_fast_path_passes_through_when_pass_exceptions_disabled(self):
+        engine_module = import_engine_with_stubs()
+        engine = make_engine(engine_module, object(), engine_module.DebuggerState.STOPPED)
+        engine._pass_exceptions = False
+
+        result = engine._on_exception(self.exc(self.CODE_INT3), True)
+
+        assert result == engine_module.DbgEng.DEBUG_STATUS_NO_CHANGE
+
+    def test_guarded_call_recognizes_ret_catch_breakpoint(self):
+        engine_module = import_engine_with_stubs()
+        engine = make_engine(engine_module, object(), engine_module.DebuggerState.STOPPED)
+        engine._call_guard = True
+        engine._call_ret_catch = 0x501000
+        engine._pass_exceptions = True
+
+        result = engine._on_exception(self.exc(self.CODE_WX86_INT3, 0x501000), True)
+
+        assert result == engine_module.DbgEng.DEBUG_STATUS_NO_CHANGE
+
+    def test_guarded_call_still_passes_through_unrelated_flood_int3(self):
+        engine_module = import_engine_with_stubs()
+
+        class FakeBase:
+            breakpoints = []  # no live breakpoints -> not "ours"
+
+        engine = make_engine(engine_module, FakeBase(), engine_module.DebuggerState.STOPPED)
+        engine._call_guard = True
+        engine._call_ret_catch = 0x501000
+        engine._pass_exceptions = True
+
+        # An anti-debug INT3 at an unrelated address during the call window
+        # must still reach the target's SEH, not be swallowed as "ours".
+        result = engine._on_exception(self.exc(self.CODE_INT3, 0x999999), True)
+
+        assert result == engine_module.DbgEng.DEBUG_STATUS_GO_NOT_HANDLED
+
+    def test_guarded_call_catches_genuine_fault(self):
+        engine_module = import_engine_with_stubs()
+        engine = make_engine(engine_module, object(), engine_module.DebuggerState.STOPPED)
+        engine._call_guard = True
+        engine._call_ret_catch = 0x501000
+        engine._pass_exceptions = True
+
+        result = engine._on_exception(self.exc(self.CODE_AV, 0x401000), True)
+
+        assert result == engine_module.DbgEng.DEBUG_STATUS_NO_CHANGE
+        assert engine._call_fault == self.CODE_AV
+
+    def test_stale_shadow_set_no_longer_misclassifies_removed_oneshot_bp(self):
+        """Regression: dbgeng auto-drops a fired oneshot breakpoint's object
+        with no remove_breakpoint() call, so _our_bp_addrs alone can go stale.
+        _on_exception must reconcile against dbgeng's live breakpoint list
+        (_live_bp_addrs) rather than trust the shadow set, so a later real
+        exception at the reused address isn't wrongly swallowed as ours."""
+        engine_module = import_engine_with_stubs()
+
+        class FakeBase:
+            breakpoints = []  # dbgeng no longer has anything planted
+
+        engine = make_engine(engine_module, FakeBase(), engine_module.DebuggerState.STOPPED)
+        engine._call_guard = True
+        engine._call_ret_catch = 0x501000
+        engine._pass_exceptions = True
+        # Stale bookkeeping: our oneshot bp fired and dbgeng dropped it, but
+        # nothing called remove_breakpoint() to clear this shadow entry.
+        engine._our_bp_addrs = {0x401000}
+
+        result = engine._on_exception(self.exc(self.CODE_INT3, 0x401000), True)
+
+        # Must be treated as a genuine target exception (passed through),
+        # not silently absorbed because of the stale shadow-set entry.
+        assert result == engine_module.DbgEng.DEBUG_STATUS_GO_NOT_HANDLED
+
+    def test_live_bp_addrs_reconciles_against_dbgeng_not_shadow_set(self):
+        engine_module = import_engine_with_stubs()
+
+        class FakeBpObj:
+            def GetOffset(self):
+                return 0x601000
+
+        class FakeControl:
+            def GetBreakpointById(self, bp_id):
+                return FakeBpObj()
+
+        class FakeBase:
+            breakpoints = [7]
+            _control = FakeControl()
+
+        engine = make_engine(engine_module, FakeBase(), engine_module.DebuggerState.STOPPED)
+
+        assert engine._live_bp_addrs() == {0x601000}
+
+    def test_second_chance_exception_lets_dbgeng_handle_it(self):
+        engine_module = import_engine_with_stubs()
+        engine = make_engine(engine_module, object(), engine_module.DebuggerState.STOPPED)
+        engine._pass_exceptions = True
+
+        result = engine._on_exception(self.exc(self.CODE_INT3), False)
+
+        assert result == engine_module.DbgEng.DEBUG_STATUS_NO_CHANGE
+
+
+class TestDetachClearsBreakpointBookkeeping:
+    def test_detach_clears_shadow_bp_state_and_call_flags(self):
+        engine_module = import_engine_with_stubs()
+
+        class FakeBase:
+            def detach_proc(self):
+                pass
+
+        engine = make_engine(engine_module, FakeBase(), engine_module.DebuggerState.STOPPED)
+        engine._target_pid = 4321
+        engine._our_bp_addrs = {0x401000, 0x402000}
+        engine._bp_id_to_addr = {1: 0x401000, 2: 0x402000}
+        engine._call_guard = True
+        engine._stepping = True
+
+        engine._detach_impl()
+
+        assert engine._our_bp_addrs == set()
+        assert engine._bp_id_to_addr == {}
+        assert engine._call_guard is False
+        assert engine._stepping is False
