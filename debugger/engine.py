@@ -448,6 +448,13 @@ class DebugEngine:
         self._is_wow64 = False
         self._state = DebuggerState.DETACHED
         self._executing = False
+        # A detached process's breakpoint objects are gone; stale addresses
+        # here would misclassify a future (re-attached) process's real
+        # exceptions at a reused address as "ours" in _on_exception.
+        self._our_bp_addrs.clear()
+        self._bp_id_to_addr.clear()
+        self._call_guard = False
+        self._stepping = False
         logger.info(f"Detached from PID {pid}")
         return {"state": "detached", "pid": pid}
 
@@ -580,9 +587,37 @@ class DebugEngine:
         the GC thread and corrupt the dbgeng client (observed: a _compointer_base
         __del__ AV, then SetExecutionStatus -> 0x80070005 and a wedged worker).
         So we take a FAST PATH that never inspects the record unless we are
-        actually mid-call/mid-step. Breakpoints we plant (incl. call_function's
-        ret_catch) surface via the separate BREAKPOINT event, not here, so the
-        fast path does not miss them."""
+        actually mid-call/mid-step. Breakpoints we plant via set_breakpoint()
+        (used for passive capture) are recognized dbgeng breakpoint objects,
+        so a hit calls the separate BREAKPOINT event/handler, not this one —
+        this fast path never needs to protect them. That specifically matches
+        prior empirical behavior (passive breakpoint capture already worked
+        against this WOW64 target before this filter existed, when ALL
+        first-chance exceptions were passed through unconditionally), which
+        is only explainable if ordinary planted breakpoints don't route
+        through here. The ONE breakpoint this filter must protect is
+        call_function's ret_catch, planted via an artificial EIP-hijack
+        rather than normal execution — and that is covered because
+        _call_guard is True for the call's entire duration, so the mid-
+        call/mid-step branch below (not this fast path) always runs for it.
+        CONFIRMED (2026-07-05): live-verified end to end against a genuine
+        WOW64 target — a synthetic disposable process (PE machine type
+        0x14C, unrelated to any specific target application) built to loop
+        on kernel32!SleepEx. (1) Passive path:
+        attach + pass_exceptions + set_breakpoint + go_wait reported repeated
+        real hits (timeout=False, pc at the breakpoint, real WX86 exception
+        codes) even though this code never calls events.breakpoint() (so
+        DEBUG_EVENT_BREAKPOINT is absent from GetInterestMask) — dbgeng's own
+        execution-halt-at-breakpoint is independent of whether our callback
+        is subscribed to be notified; the interest mask only gates the
+        notification, not the underlying stop. (2) Guarded-call path: with
+        the thread stopped at that same hit breakpoint, call_function (no
+        explicit ret_catch, so it defaults to the current EIP — the proven
+        manual flow) returned cleanly (returned_to == ret_catch, faulted =
+        False) and passive go_wait capture continued to hit afterward with
+        no run-control poisoning. Both halves of this filter are now
+        live-confirmed on real WOW64 exception delivery, not just reasoned
+        about or tested against a native target."""
         first_chance = (len(args) < 2) or bool(args[1])
         if not first_chance:
             return DbgEng.DEBUG_STATUS_NO_CHANGE
@@ -601,7 +636,7 @@ class DebugEngine:
         if code in (0x80000003, 0x4000001F):
             addr = self._exc_address(args)
             if addr is None or addr == self._call_ret_catch \
-                    or addr in self._our_bp_addrs:
+                    or addr in self._live_bp_addrs():
                 return DbgEng.DEBUG_STATUS_NO_CHANGE
         # A genuine FAULT (e.g. AV 0xC0000005) inside a guarded call must break
         # into the debugger so call_function can roll back, not reach the SEH.
@@ -908,7 +943,7 @@ class DebugEngine:
             "ret_catch": f"0x{ret_catch:08X}",
             "timeout": bool(res.get("timeout")),
             "faulted": bool(faulted),
-            "fault_code": (f"0x{fault:08X}" if fault else None),
+            "fault_code": (f"0x{fault:08X}" if fault is not None else None),
         }
 
     def set_breakpoint(self, address: int,
@@ -953,6 +988,30 @@ class DebugEngine:
         logger.info(f"Breakpoint #{bp_id} set at 0x{address:08X} "
                     f"(type={bp_type.value}, oneshot={oneshot})")
         return bp_id
+
+    def _live_bp_addrs(self) -> set:
+        """Addresses of breakpoints dbgeng still actually has planted.
+
+        `_our_bp_addrs` is a shadow set updated on set/remove, but dbgeng
+        auto-drops a oneshot breakpoint's object the moment it fires — with
+        no corresponding remove_breakpoint() call, so the shadow set can go
+        stale and keep an address "ours" long after dbgeng forgot it. Query
+        dbgeng directly here instead of trusting the shadow set; this only
+        runs inside the already-narrow call/step-guarded window in
+        _on_exception, not the high-rate flood path, so the extra round trip
+        is cheap and safe.
+        """
+        addrs = set()
+        try:
+            for bp_id in self._base.breakpoints:
+                try:
+                    bp_obj = self._base._control.GetBreakpointById(bp_id)
+                    addrs.add(int(bp_obj.GetOffset()) & 0xFFFFFFFF)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return addrs
 
     def remove_breakpoint(self, bp_id: int) -> None:
         """Remove a breakpoint by ID."""
